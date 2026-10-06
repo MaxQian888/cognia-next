@@ -184,6 +184,18 @@ export interface TelemetryEventCatalog {
    * pattern and never an id. Anything unexpected reports `other`.
    */
   "app.screen.viewed": { route: string }
+  /** Scalar Web Vitals only; no browser entries, DOM attribution, or URLs. */
+  "app.web_vital": {
+    name: string
+    id: string
+    value: number
+    delta: number
+    rating: string
+    navigationType: string
+    route: string
+    runtime: string
+    appVersion: string
+  }
   /** A slash command ran from the composer. `command` is a registered name, never user text. */
   "app.command.executed": {
     command: string
@@ -282,6 +294,7 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "agent.teammate.failed": { category: "agentTeam" },
   "app.launched": { category: "app" },
   "app.screen.viewed": { category: "app" },
+  "app.web_vital": { category: "app" },
   "app.command.executed": { category: "app" },
   "app.search.opened": { category: "app" },
   "app.search.activated": { category: "app" },

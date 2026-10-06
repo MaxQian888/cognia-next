@@ -16,6 +16,7 @@ it("registers every supported behavior event name", () => {
     "app.screen.viewed",
     "app.search.activated",
     "app.search.opened",
+    "app.web_vital",
     "chat.list.created",
     "chat.list.filtered",
     "chat.list.layout.changed",

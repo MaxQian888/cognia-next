@@ -13,6 +13,7 @@ import Script from "next/script"
 import { getLocale } from "next-intl/server"
 import { BOOT_SCRIPT } from "@/lib/appearance/boot-script"
 import { AppRuntime } from "@/components/runtime/app-runtime"
+import { WebVitalsReporter } from "@/components/providers/initializers/web-vitals-reporter"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -75,6 +76,7 @@ export default async function RootLayout({
         />
       </head>
       <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}>
+        <WebVitalsReporter />
         <AppRuntime>{children}</AppRuntime>
       </body>
     </html>

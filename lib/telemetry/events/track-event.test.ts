@@ -392,3 +392,25 @@ it("exposes health for configured behavior exporters", () => {
     "posthog-managed": expect.objectContaining({ transport: "posthog-managed", retryCount: 2 }),
   })
 })
+
+it("does not persist or export an event canceled before delivery", async () => {
+  localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
+  const exportBody = jest.fn().mockResolvedValue(undefined)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
+  const controller = new AbortController()
+  controller.abort()
+  await expect(
+    trackEvent("app.screen.viewed", { route: "/" }, { signal: controller.signal })
+  ).resolves.toBe(false)
+  expect(appendBehaviorEvent).not.toHaveBeenCalled()
+  expect(exportBody).not.toHaveBeenCalled()
+})
+
+it("propagates event cancellation to the OTLP sender", async () => {
+  localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
+  const exportBody = jest.fn().mockResolvedValue(undefined)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
+  const controller = new AbortController()
+  await trackEvent("app.screen.viewed", { route: "/" }, { signal: controller.signal })
+  expect(exportBody).toHaveBeenCalledWith(expect.any(String), controller.signal)
+})

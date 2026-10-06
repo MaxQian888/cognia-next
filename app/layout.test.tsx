@@ -73,6 +73,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { AppRuntime } from "@/components/runtime/app-runtime"
+import { WebVitalsReporter } from "@/components/providers/initializers/web-vitals-reporter"
 import RootLayout, { metadata } from "./layout"
 
 describe("RootLayout", () => {
@@ -102,8 +103,9 @@ describe("RootLayout", () => {
     const tree = await RootLayout({ children: page })
     const body = tree.props.children[1]
     expect(body.type).toBe("body")
-    expect(body.props.children.type).toBe(AppRuntime)
-    expect(body.props.children.props.children).toBe(page)
+    expect(body.props.children[0].type).toBe(WebVitalsReporter)
+    expect(body.props.children[1].type).toBe(AppRuntime)
+    expect(body.props.children[1].props.children).toBe(page)
   })
 
   it("renders html/body with font variables and children", async () => {

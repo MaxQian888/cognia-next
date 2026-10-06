@@ -5,8 +5,20 @@ import {
   type PerfSourceDescriptor,
 } from "./backend/types"
 import { PERF_NAMESPACE } from "./perf-marker"
+import { type7Percentile } from "./comparison"
+import {
+  createRendererDiagnostics,
+  getRendererDiagnostics,
+  type RendererDiagnostics,
+} from "./renderer-diagnostics"
+
+import {
+  getOperationPerformanceRecorder,
+  type OperationPerformanceRecorder,
+} from "./operation-performance"
 
 const MAX_ENTRIES_PER_NAME = 60
+const MAX_FRAME_GAPS = 500
 
 /**
  * The fields {@link RendererPerformanceCollector.ingestPerformanceEntries}
@@ -68,6 +80,10 @@ interface RendererCollectorDependencies {
   bufferedMeasures?: () => ArrayLike<PerformanceEntryLike>
   /** A hidden document gets no frame callbacks, so its FPS is unmeasured, not 0. */
   isHidden?: () => boolean
+  subscribeVisibility?: (listener: () => void) => () => void
+  diagnostics?: RendererDiagnostics
+  /** Explicit injection keeps isolated collectors from draining the shared recorder. */
+  operations?: Pick<OperationPerformanceRecorder, "collectInterval" | "resetInterval">
 }
 
 function defaultRequestAnimationFrame(): ((callback: () => void) => number) | null {
@@ -118,7 +134,8 @@ function defaultDocumentId(): string {
 export class RendererPerformanceCollector {
   readonly source: PerfSourceDescriptor
   private readonly measurements = new Map<string, RendererMeasurementEntry[]>()
-  private readonly pendingMeasurements = new Map<string, RendererMeasurementEntry[]>()
+  private pendingLongTasks = { count: 0, totalMs: 0, maxMs: 0, blockingMs: 0 }
+  private pendingUserTimingCount = 0
   private readonly demands = new Map<string, Demand>()
   private readonly listeners = new Set<(frame: PerfFrame) => void>()
   private readonly now: () => number
@@ -138,7 +155,19 @@ export class RendererPerformanceCollector {
   private readonly readHeap: (() => RendererHeapReading | null) | null
   private readonly bufferedMeasures: () => ArrayLike<PerformanceEntryLike>
   private readonly isHidden: () => boolean
+  private readonly subscribeVisibility: (listener: () => void) => () => void
+  private readonly diagnostics: RendererDiagnostics
+  private readonly operations: RendererCollectorDependencies["operations"]
+  private releaseDiagnostics: (() => void) | null = null
+  private unsubscribeDiagnostics: (() => void) | null = null
+  private unsubscribeVisibility: (() => void) | null = null
+  private previousFrameMs: number | null = null
+  private frameGaps: number[] = []
+  private frameGapCount = 0
+  private slowFrames = 0
+  private intervalHadHidden = false
   private frameHandle: number | null = null
+  private frameGeneration = 0
   private framesInInterval = 0
   /** Entries older than the last explicit clear stay cleared, even when re-seeded. */
   private clearedBeforeMs = Number.NEGATIVE_INFINITY
@@ -167,6 +196,20 @@ export class RendererPerformanceCollector {
     this.isHidden =
       dependencies.isHidden ??
       (() => typeof document !== "undefined" && document.visibilityState === "hidden")
+    this.subscribeVisibility =
+      dependencies.subscribeVisibility ??
+      ((listener) => {
+        if (typeof document === "undefined") return () => {}
+        document.addEventListener("visibilitychange", listener)
+        return () => document.removeEventListener("visibilitychange", listener)
+      })
+    this.diagnostics =
+      dependencies.diagnostics ??
+      createRendererDiagnostics({
+        supportedEntryTypes: dependencies.supportedEntryTypes,
+        supportsFrames: Boolean(this.requestFrame),
+      })
+    this.operations = typeof window !== "undefined" ? dependencies.operations : undefined
     const supportedEntryTypes = dependencies.supportedEntryTypes ?? defaultSupportedEntryTypes()
     // Advertise only what this engine can measure. The list used to be fixed,
     // so WebKit (no long tasks, no heap) claimed metrics it always reported
@@ -177,6 +220,8 @@ export class RendererPerformanceCollector {
       "renderer.user-timing",
       "renderer.chat-latency",
       ...(this.readHeap ? ["renderer.js-heap"] : []),
+      ...this.diagnostics.capabilities,
+      ...(this.operations ? ["renderer.app-operations"] : []),
     ]
     this.source = {
       wireVersion: PERF_WIRE_VERSION,
@@ -209,11 +254,17 @@ export class RendererPerformanceCollector {
     this.samplingSessionId = randomId()
     this.sequence = 0
     this.lastMonotonicMs = this.now()
-    this.pendingMeasurements.clear()
+    this.resetIntervalTotals()
+    this.resetFrameGaps()
+    this.diagnostics.resetInterval()
+    this.operations?.resetInterval()
   }
 
   openDemand(input: { purpose: PerfLeasePurpose; cadenceMs: number }): string {
     const id = randomId()
+    // Local cumulative operation history survives panel demand. Its idle
+    // completions must not be attributed to a new live/capture interval.
+    if (this.demands.size === 0) this.operations?.resetInterval()
     this.demands.set(id, { id, purpose: input.purpose, cadenceMs: Math.max(250, input.cadenceMs) })
     this.reconcileSampling()
     return id
@@ -251,10 +302,24 @@ export class RendererPerformanceCollector {
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index]
       if (!entry.name.startsWith(PERF_NAMESPACE) && entry.entryType !== "longtask") continue
+      if (
+        !Number.isFinite(entry.duration) ||
+        entry.duration < 0 ||
+        !Number.isFinite(entry.startTime) ||
+        entry.startTime < 0
+      )
+        continue
       const name = entry.entryType === "longtask" ? "renderer:long-task" : entry.name
+      if (entry.entryType === "longtask") {
+        this.pendingLongTasks.count++
+        this.pendingLongTasks.totalMs += entry.duration
+        this.pendingLongTasks.maxMs = Math.max(this.pendingLongTasks.maxMs, entry.duration)
+        this.pendingLongTasks.blockingMs += Math.max(0, entry.duration - 50)
+      } else {
+        this.pendingUserTimingCount++
+      }
       const measurement = { name, duration: entry.duration, startTime: entry.startTime }
       this.appendMeasurement(this.measurements, measurement)
-      this.appendMeasurement(this.pendingMeasurements, measurement)
       changed = true
     }
     return changed
@@ -266,34 +331,60 @@ export class RendererPerformanceCollector {
     const actualIntervalMs = Math.max(0, started - this.lastMonotonicMs)
     this.lastMonotonicMs = started
     const wallEndMs = this.wallNow()
-    const intervalMeasurements = [...this.pendingMeasurements.values()].flat()
-    this.pendingMeasurements.clear()
-    const longTasks = intervalMeasurements.filter((entry) => entry.name === "renderer:long-task")
-    const userTimings = intervalMeasurements.filter((entry) => entry.name !== "renderer:long-task")
-    const longTaskTotalMs = longTasks.reduce((sum, entry) => sum + entry.duration, 0)
+    const longTasks = this.pendingLongTasks
+    const userTimingCount = this.pendingUserTimingCount
+    this.resetIntervalTotals()
+    const longTaskTotalMs = longTasks.totalMs
     const measuresLongTasks = this.source.capabilities.includes("renderer.long-task")
     const frames = this.framesInInterval
     this.framesInInterval = 0
     const heap = this.readHeap?.() ?? null
+    const frameTiming =
+      this.diagnostics.isEnabled("frames") &&
+      this.demands.size > 0 &&
+      !this.isHidden() &&
+      !this.intervalHadHidden
     const observations: Record<string, number | null> = {
-      "renderer.long-task.count": measuresLongTasks ? longTasks.length : null,
+      ...this.diagnostics.collectInterval(),
+      ...this.operations?.collectInterval(),
+      "renderer.long-task.count": measuresLongTasks ? longTasks.count : null,
       "renderer.long-task.total-ms": measuresLongTasks ? longTaskTotalMs : null,
+      "renderer.long-task.max.ms":
+        measuresLongTasks && longTasks.count > 0 ? longTasks.maxMs : null,
+      "renderer.long-task.blocking.ms": measuresLongTasks ? longTasks.blockingMs : null,
       // Share of the interval the main thread spent inside long tasks (>50 ms
       // each). A long task can straddle the boundary, so it is clamped.
       "renderer.main-thread-blocked.pct":
         measuresLongTasks && actualIntervalMs > 0
           ? Math.min(100, (longTaskTotalMs / actualIntervalMs) * 100)
           : null,
-      "renderer.user-timing.count": userTimings.length,
+      "renderer.user-timing.count": userTimingCount,
       // Frame callbacks stop while the document is hidden; that interval did
       // not measure FPS, it did not render at 0 FPS.
       "renderer.fps":
-        this.requestFrame && actualIntervalMs > 0 && !this.isHidden()
+        this.requestFrame && actualIntervalMs > 0 && !this.isHidden() && !this.intervalHadHidden
           ? (frames * 1000) / actualIntervalMs
           : null,
       "renderer.js-heap.used.bytes": heap ? heap.usedJSHeapSize : null,
       "renderer.js-heap.limit.bytes": heap ? heap.jsHeapSizeLimit : null,
+      "renderer.js-heap.utilization.pct":
+        heap &&
+        Number.isFinite(heap.usedJSHeapSize) &&
+        heap.usedJSHeapSize >= 0 &&
+        Number.isFinite(heap.jsHeapSizeLimit) &&
+        heap.jsHeapSizeLimit > 0
+          ? Math.min(100, (heap.usedJSHeapSize / heap.jsHeapSizeLimit) * 100)
+          : null,
+      "renderer.frame-gap.p95.ms":
+        frameTiming && this.frameGapCount <= MAX_FRAME_GAPS
+          ? type7Percentile(this.frameGaps, 0.95)
+          : null,
+      "renderer.slow-frame.count": frameTiming && this.frameGapCount > 0 ? this.slowFrames : null,
     }
+    this.frameGaps = []
+    this.frameGapCount = 0
+    this.slowFrames = 0
+    this.intervalHadHidden = this.isHidden()
     const collectionDurationMs = Math.max(0, this.now() - started)
     const missedTicks =
       requestedIntervalMs > 0
@@ -349,6 +440,11 @@ export class RendererPerformanceCollector {
     return Math.min(...[...this.demands.values()].map((demand) => demand.cadenceMs), 1000)
   }
 
+  private resetIntervalTotals(): void {
+    this.pendingLongTasks = { count: 0, totalMs: 0, maxMs: 0, blockingMs: 0 }
+    this.pendingUserTimingCount = 0
+  }
+
   private appendMeasurement(
     target: Map<string, RendererMeasurementEntry[]>,
     measurement: RendererMeasurementEntry
@@ -370,7 +466,28 @@ export class RendererPerformanceCollector {
       this.observer?.disconnect()
       this.observer = null
       this.stopFrameLoop()
+      this.resetIntervalTotals()
+      this.releaseDiagnostics?.()
+      this.releaseDiagnostics = null
+      this.unsubscribeDiagnostics?.()
+      this.unsubscribeDiagnostics = null
+      this.unsubscribeVisibility?.()
+      this.unsubscribeVisibility = null
       return
+    }
+    if (!this.releaseDiagnostics) {
+      this.releaseDiagnostics = this.diagnostics.acquire()
+      let enabled = this.diagnostics.isEnabled("frames")
+      this.unsubscribeDiagnostics = this.diagnostics.subscribe(() => {
+        const next = this.diagnostics.isEnabled("frames")
+        if (next !== enabled) this.resetFrameGaps()
+        enabled = next
+      })
+      this.intervalHadHidden = this.isHidden()
+      this.unsubscribeVisibility = this.subscribeVisibility(() => {
+        this.resetFrameGaps()
+        this.intervalHadHidden = true
+      })
     }
     this.ensureObserver()
     this.startFrameLoop()
@@ -389,17 +506,42 @@ export class RendererPerformanceCollector {
     const request = this.requestFrame
     if (!request || this.frameHandle !== null) return
     this.framesInInterval = 0
+    const generation = ++this.frameGeneration
     const tick = () => {
+      if (generation !== this.frameGeneration || this.demands.size === 0) return
       this.framesInInterval += 1
+      if (this.diagnostics.isEnabled("frames") && !this.isHidden()) {
+        const now = this.now()
+        if (this.previousFrameMs !== null) {
+          const gap = now - this.previousFrameMs
+          if (Number.isFinite(gap) && gap >= 0) {
+            this.frameGapCount++
+            if (this.frameGaps.length < MAX_FRAME_GAPS) this.frameGaps.push(gap)
+            if (gap > 50) this.slowFrames++
+          }
+        }
+        this.previousFrameMs = now
+      } else {
+        this.resetFrameGaps()
+      }
       this.frameHandle = request(tick)
     }
     this.frameHandle = request(tick)
   }
 
   private stopFrameLoop(): void {
+    this.frameGeneration++
     if (this.frameHandle !== null) this.cancelFrame(this.frameHandle)
     this.frameHandle = null
     this.framesInInterval = 0
+    this.resetFrameGaps()
+  }
+
+  private resetFrameGaps(): void {
+    this.previousFrameMs = null
+    this.frameGaps = []
+    this.frameGapCount = 0
+    this.slowFrames = 0
   }
 
   /**
@@ -476,7 +618,10 @@ export function createRendererCollector(
 let sharedCollector: RendererPerformanceCollector | null = null
 
 export function getRendererPerformanceCollector(): RendererPerformanceCollector {
-  sharedCollector ??= createRendererCollector()
+  sharedCollector ??= createRendererCollector({
+    diagnostics: getRendererDiagnostics(),
+    operations: typeof window !== "undefined" ? getOperationPerformanceRecorder() : undefined,
+  })
   return sharedCollector
 }
 

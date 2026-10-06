@@ -1,3 +1,4 @@
+import { measureOperation } from "@/lib/perf/operation-performance"
 import type { CogniaDB } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
 import type { BootCapability } from "./capabilities"
@@ -29,8 +30,14 @@ const defaultDependencies: StartupProbeDependencies = {
  * have no work, while configured connectors, schedules, memory jobs, and
  * enabled startup plugins retain their background semantics.
  */
-export async function probeConfiguredBootCapabilities(
+export function probeConfiguredBootCapabilities(
   dependencies: StartupProbeDependencies = defaultDependencies
+): Promise<BootCapability[]> {
+  return measureOperation("startup.capability-probe", () => probeCapabilities(dependencies))
+}
+
+async function probeCapabilities(
+  dependencies: StartupProbeDependencies
 ): Promise<BootCapability[]> {
   const database = dependencies.getDatabase()
   const [

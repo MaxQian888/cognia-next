@@ -282,7 +282,23 @@
     "fps": "帧率",
     "mainThreadBlocked": "主线程阻塞",
     "longTasks": "长任务",
-    "jsHeap": "JS 堆内存"
+    "jsHeap": "JS 堆内存",
+    "longTaskMax": "最长任务",
+    "longTaskBlocking": "长任务阻塞时长",
+    "heapUtilization": "堆内存使用率",
+    "frameGapP95": "帧间隔 p95",
+    "slowFrames": "慢帧",
+    "resourceCount": "资源数量",
+    "resourceDurationP95": "资源耗时 p95",
+    "resourceTransfer": "可见资源传输量",
+    "eventCount": "事件样本数",
+    "inputDelayP95": "输入延迟样本 p95",
+    "eventProcessingP95": "事件处理耗时 p95",
+    "operationCount": "已完成操作",
+    "operationDurationP95": "操作耗时（p95）",
+    "operationErrors": "操作错误",
+    "operationCancelled": "已取消操作",
+    "operationInFlight": "进行中的操作"
   },
   "overview": {
     "selectMetric": "选择指标",
@@ -483,7 +499,23 @@
     "fps": "本窗口每秒绘制的帧数。窗口隐藏时不计量。",
     "mainThreadBlocked": "每个区间中耗在长任务（超过 50 毫秒）上的时间占比，长任务会阻塞输入和渲染。",
     "longTasks": "每个区间中超过 50 毫秒的主线程任务数。",
-    "jsHeap": "本窗口正在使用的 JavaScript 堆内存。"
+    "jsHeap": "本窗口正在使用的 JavaScript 堆内存。",
+    "longTaskMax": "本采样区间内观察到的最长主线程任务。",
+    "longTaskBlocking": "本区间每个已观察长任务超出 50 ms 部分的时长之和，不等同于 Lighthouse 总阻塞时间。",
+    "heapUtilization": "已用 JavaScript 堆内存占浏览器报告的堆上限的比例，仅在支持的环境可用。",
+    "frameGapP95": "本区间可见状态下动画帧间隔的第 95 百分位值，排除窗口隐藏时间。",
+    "slowFrames": "本区间观察到的可见帧间隔超过 50 ms 的次数。",
+    "resourceCount": "本区间观察到的资源计时条目数，不代表所有网络请求次数。",
+    "resourceDurationP95": "本区间观察到的资源计时条目耗时的第 95 百分位值。",
+    "resourceTransfer": "本区间浏览器可见的资源传输字节数之和。跨域大小可能隐藏，不代表网络总用量。",
+    "eventCount": "本区间观察到的耗时至少 16 ms 的 Event Timing 条目数，并非每次交互都会产生条目。",
+    "inputDelayP95": "Event Timing 样本（至少 16 ms）输入延迟的第 95 百分位值，不等同于 INP。",
+    "eventProcessingP95": "Event Timing 样本（至少 16 ms）处理耗时的第 95 百分位值。",
+    "operationCount": "此区间内完成的已埋点操作数，包含失败和取消。嵌套操作分别计数。",
+    "operationDurationP95": "此区间内已完成操作耗时的第 95 百分位。不同分组可能重叠且测量边界不同；可在诊断中查看各操作详情。",
+    "operationErrors": "此区间内失败的已埋点操作数，包含非成功 HTTP 响应。",
+    "operationCancelled": "此区间内以 AbortError 结束的已埋点操作数。",
+    "operationInFlight": "当前帧采样时仍在进行中的已埋点操作数。"
   },
   "hostUnavailable": {
     "title": {
@@ -630,6 +662,192 @@
       },
       "cancel": "取消",
       "save": "保存预算"
+    }
+  },
+  "webVitals": {
+    "title": "Web Vitals",
+    "description": "衡量当前窗口的页面加载、交互响应和视觉稳定性。这些是文档级指标，并非每秒采样或模型响应耗时。数值仅保存在当前会话内存中。",
+    "clear": "清除 Web Vitals",
+    "collection": {
+      "label": "采集 Web Vitals",
+      "description": "在当前窗口本地保存所选指标的最新值。采集和上报默认关闭。"
+    },
+    "reporting": {
+      "label": "通过遥测上报",
+      "description": "允许新指标通过现有遥测管线上报。还需行为遥测授权、应用类别、采样和目标配置允许投递。不会补报之前采集的数值。",
+      "settings": "遥测设置"
+    },
+    "metricToggle": "采集 {metric}",
+    "milliseconds": "{value} 毫秒",
+    "loadError": "无法启动 Web Vitals 采集，请重新加载当前窗口后重试。",
+    "persistenceError": "当前选择已在本页面生效，但未能保存供下次访问使用。关闭采集仍会立即生效。",
+    "status": {
+      "disabled": "已关闭",
+      "pending": "等待测量结果",
+      "unsupported": "当前运行环境不支持",
+      "error": "采集不可用"
+    },
+    "ratings": {
+      "good": "良好",
+      "needs-improvement": "需要改进",
+      "poor": "较差"
+    },
+    "lifecycleHint": "选择适用于此设备或浏览器。指标覆盖整个文档，而非单独路由，可能在交互后或页面隐藏时产生。关闭采集会立即停止记录和上报；Next.js 观察器会保留至重新加载。更改开关或清除数值后，可重新加载以开始新的测量会话。",
+    "metrics": {
+      "LCP": {
+        "label": "LCP",
+        "description": "最大内容绘制 · 主要内容加载"
+      },
+      "INP": {
+        "label": "INP",
+        "description": "交互到下一次绘制 · 交互响应"
+      },
+      "CLS": {
+        "label": "CLS",
+        "description": "累积布局偏移 · 无单位稳定性分数"
+      },
+      "FCP": {
+        "label": "FCP",
+        "description": "首次内容绘制 · 首次可见内容"
+      },
+      "TTFB": {
+        "label": "TTFB",
+        "description": "首字节时间 · 页面文档响应"
+      },
+      "FID": {
+        "label": "FID",
+        "description": "首次输入延迟 · 旧指标，默认关闭"
+      }
+    }
+  },
+  "browserDiagnostics": {
+    "title": "浏览器诊断",
+    "description": "可选采集资源加载、输入延迟样本、帧间隔和文档导航。按采样区间汇总的数据会显示在现有图表与录制中。",
+    "collection": {
+      "label": "采集浏览器诊断",
+      "description": "默认关闭。启用的分组仅在性能面板、录制或 HUD 请求采样时采集。数据保留在本地，此开关不会开启远程上报。"
+    },
+    "persistenceError": "设置已在当前页面生效，但无法保存到下次访问。关闭采集仍会立即生效。",
+    "groups": {
+      "resources": {
+        "label": "资源",
+        "description": "资源数量、耗时 p95 与浏览器可见的传输字节数。跨域传输大小可能不完整，不代表网络总用量。"
+      },
+      "interactions": {
+        "label": "交互",
+        "description": "采集耗时至少 16 ms 的 Event Timing 条目：数量、输入延迟 p95 和处理耗时 p95。这些样本不等同于 INP，也不代表全部交互次数。"
+      },
+      "frames": {
+        "label": "帧间隔",
+        "description": "帧间隔 p95 与可见状态下超过 50 ms 的帧间隔数。排除窗口隐藏期间的间隔，慢帧按此 50 ms 阈值定义。"
+      },
+      "navigation": {
+        "label": "导航",
+        "description": "当前文档的加载阶段。客户端路由切换不会产生新的文档导航。"
+      }
+    },
+    "status": {
+      "off": "已关闭",
+      "error": "采集不可用",
+      "unsupported": "当前运行环境不支持",
+      "ready": "采样时启用"
+    },
+    "navigation": {
+      "title": "文档导航",
+      "clear": "清除导航摘要",
+      "description": "DNS、连接、TLS、请求和响应为各阶段耗时；DOM 和加载里程碑为导航开始后的累计时间。缺失值可能尚未产生，或被浏览器隐藏。",
+      "pending": "尚未测得或不可用",
+      "phases": {
+        "dnsMs": "DNS",
+        "connectMs": "连接",
+        "tlsMs": "TLS",
+        "requestMs": "请求至首字节",
+        "responseMs": "响应下载",
+        "domInteractiveMs": "DOM 可交互",
+        "domContentLoadedMs": "DOMContentLoaded",
+        "loadMs": "加载完成"
+      }
+    },
+    "milliseconds": "{value} ms",
+    "lifecycleHint": "设置适用于此设备或浏览器。关闭采集或分组后，会停止对应观察器，并清除待处理样本及当前摘要。已有录制会保留。不采集资源 URL、元素详情或输入文本。单个区间超过 500 个有效资源、事件或帧间隔样本时，不显示对应 p95；仍记录数量和可见字节总量。"
+  },
+  "operations": {
+    "title": "应用操作",
+    "description": "定位启动、存储、主机调用和 HTTP 请求中的耗时。固定操作类型的统计仅保存在当前窗口内存中。",
+    "clear": "清空操作统计",
+    "collection": {
+      "label": "采集应用操作",
+      "description": "默认关闭。开启后，即使关闭性能面板，所选分组也会在使用应用时持续记录。不会开启远程上报。"
+    },
+    "groups": {
+      "startup": {
+        "label": "启动",
+        "description": "启动能力探测。开启后重新加载，可测量下一次启动。"
+      },
+      "storage": {
+        "label": "存储",
+        "description": "聊天记录读写和会话列表读取。写入耗时包含队列等待和写入调用，不包含外层事务提交。"
+      },
+      "transport": {
+        "label": "主机调用",
+        "description": "经路由层发起的本地和远程主机调用，不包含性能采样及遥测调用。"
+      },
+      "network": {
+        "label": "网络",
+        "description": "经应用平台请求层发起的请求。浏览器耗时截止响应头到达；原生端包含响应数据缓冲。HTTP 失败计入错误。"
+      }
+    },
+    "persistenceError": "选择已立即生效，但无法保存到下次访问。关闭采集仍会立即生效。",
+    "lifecycleHint": "开关适用于当前设备或浏览器。关闭分组会清空该分组数据并立即停止记录；切换账号或主机会清空统计。仅记录固定操作名称、耗时与结果，不采集内容、标识符、URL 或参数。",
+    "statisticsHint": "完成、错误和取消次数自清空后累计。耗时统计使用每种操作最近 120 次有效完成记录，包含失败和取消。图表次数按采样区间统计，区间超过 500 个有效样本时不提供 p95。嵌套操作可能重叠，耗时不可相加。",
+    "dropped": "由于达到 256 个并发操作的上限，{count} 次操作未被记录。",
+    "empty": "尚未记录所选操作。使用应用后可返回查看。",
+    "off": "采集已关闭。",
+    "unavailable": "不可用",
+    "columns": {
+      "name": "操作",
+      "count": "已完成",
+      "errors": "错误",
+      "cancelled": "已取消",
+      "inFlight": "进行中",
+      "samples": "样本数",
+      "lastMs": "最近",
+      "p50Ms": "p50",
+      "p95Ms": "p95",
+      "maxMs": "最大"
+    },
+    "names": {
+      "startup": {
+        "capability-probe": "启动能力探测"
+      },
+      "storage": {
+        "messages": {
+          "load": "读取聊天记录",
+          "write": "写入聊天记录"
+        },
+        "sessions": {
+          "list": "读取会话列表"
+        }
+      },
+      "transport": {
+        "local": {
+          "call": "本地主机调用"
+        },
+        "remote": {
+          "call": "远程主机调用"
+        }
+      },
+      "network": {
+        "browser": {
+          "fetch": "浏览器 HTTP 请求"
+        },
+        "tauri": {
+          "fetch": "桌面 HTTP 请求"
+        },
+        "capacitor": {
+          "fetch": "移动端 HTTP 请求"
+        }
+      }
     }
   }
 }

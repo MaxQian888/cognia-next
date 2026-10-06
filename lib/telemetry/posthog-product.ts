@@ -19,6 +19,7 @@
  */
 
 import type {
+  BehaviorEventDeliveryOptions,
   BehaviorEventEnvelope,
   BehaviorEventExporter,
 } from "@/lib/telemetry/events/track-event"
@@ -104,6 +105,7 @@ interface PostHogWireEvent {
 }
 
 interface QueuedEvent {
+  signal?: AbortSignal
   wire: PostHogWireEvent
   resolve: () => void
   reject: (error: Error) => void
@@ -278,10 +280,21 @@ class PostHogBatchExporter implements BehaviorEventExporter {
     if (this.flushOnPageHide) window.addEventListener("pagehide", this.flushOnPageHide)
   }
 
-  export(event: BehaviorEventEnvelope): Promise<void> {
+  export(event: BehaviorEventEnvelope, options?: BehaviorEventDeliveryOptions): Promise<void> {
+    const signal = options?.signal
+    if (signal?.aborted) return Promise.reject(signal.reason)
     if (this.closed) return Promise.reject(new Error("PostHog destination is closed"))
     return new Promise<void>((resolve, reject) => {
-      this.queue.push({
+      const onAbort = () => {
+        const index = this.queue.indexOf(item)
+        if (index < 0) return
+        this.queue.splice(index, 1)
+        this.recordDropped("shutdown-discarded", 1)
+        item.reject(signal?.reason)
+      }
+      const cleanup = () => signal?.removeEventListener("abort", onAbort)
+      const item: QueuedEvent = {
+        signal,
         wire: {
           event: event.name,
           distinct_id: this.options.installationId,
@@ -289,9 +302,17 @@ class PostHogBatchExporter implements BehaviorEventExporter {
           uuid: randomEventId(),
           properties: buildPostHogEventProperties(event, this.options),
         },
-        resolve,
-        reject,
-      })
+        resolve: () => {
+          cleanup()
+          resolve()
+        },
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
+      }
+      this.queue.push(item)
+      signal?.addEventListener("abort", onAbort, { once: true })
       while (this.queue.length > this.options.maxQueuedEvents) {
         const dropped = this.queue.shift()
         if (dropped) {
@@ -301,7 +322,11 @@ class PostHogBatchExporter implements BehaviorEventExporter {
           dropped.reject(new Error(this.lastError))
         }
       }
-      if (this.queue.length >= this.options.batchSize || this.options.flushIntervalMs <= 0) {
+      if (
+        options?.flushImmediately ||
+        this.queue.length >= this.options.batchSize ||
+        this.options.flushIntervalMs <= 0
+      ) {
         void this.flush()
         return
       }
@@ -327,7 +352,12 @@ class PostHogBatchExporter implements BehaviorEventExporter {
   }
 
   private async flushNextBatch(): Promise<void> {
-    const batch = this.queue.splice(0, this.options.batchSize)
+    // Never share a request with another cancellation scope: revoking one
+    // metric must not abort an unrelated analytics event in the same queue.
+    const signal = this.queue[0]?.signal
+    const boundary = this.queue.findIndex((item) => item.signal !== signal)
+    const count = boundary < 0 ? this.options.batchSize : Math.min(boundary, this.options.batchSize)
+    const batch = this.queue.splice(0, count)
     if (batch.length === 0) return
     this.inFlightCount = batch.length
     const batchEpoch = this.discardEpoch
@@ -341,6 +371,11 @@ class PostHogBatchExporter implements BehaviorEventExporter {
   private async deliverBatch(batch: QueuedEvent[], batchEpoch: number): Promise<void> {
     if (batchEpoch !== this.discardEpoch) {
       for (const item of batch) item.reject(this.discardReason)
+      return
+    }
+    const signal = batch[0]?.signal
+    if (signal?.aborted) {
+      this.rejectBatch(batch, signal.reason, batchEpoch)
       return
     }
     const body = JSON.stringify({
@@ -375,10 +410,18 @@ class PostHogBatchExporter implements BehaviorEventExporter {
       }
       const controller = new AbortController()
       this.activeControllers.add(controller)
+      const onAbort = () => controller.abort(signal?.reason)
+      signal?.addEventListener("abort", onAbort, { once: true })
+      if (signal?.aborted) onAbort()
       try {
+        if (controller.signal.aborted) throw controller.signal.reason
         await abortable(this.postJson(this.endpoint, body, controller.signal), controller.signal)
         if (batchEpoch !== this.discardEpoch) {
           failure = this.discardReason
+          break
+        }
+        if (signal?.aborted) {
+          failure = signal.reason
           break
         }
         this.lastSuccessAt = new Date().toISOString()
@@ -392,6 +435,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
           failure = this.discardReason
           break
         }
+        if (signal?.aborted) break
         if (postHogFailureStatus(failure) === 413 && batch.length > 1) {
           shouldSplit = true
           break
@@ -415,6 +459,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
           break
         }
       } finally {
+        signal?.removeEventListener("abort", onAbort)
         this.activeControllers.delete(controller)
       }
     }

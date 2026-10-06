@@ -125,6 +125,15 @@ jest.mock("./perf-captures-tab", () => ({ PerfCapturesTab: () => <div data-testi
 jest.mock("./perf-renderer-timings-table", () => ({
   PerfRendererTimingsTable: () => <div data-testid="renderer-timings" />,
 }))
+jest.mock("./perf-web-vitals-panel", () => ({
+  PerfWebVitalsPanel: () => <section aria-label="Web Vitals" />,
+}))
+jest.mock("./perf-browser-diagnostics", () => ({
+  PerfBrowserDiagnostics: () => <section aria-label="Browser diagnostics" />,
+}))
+jest.mock("./perf-operation-timings", () => ({
+  PerfOperationTimings: () => <section aria-label="Application operations" />,
+}))
 jest.mock("./perf-host-unavailable", () => ({
   PerfHostUnavailable: ({ section, notReported }: { section: string; notReported?: boolean }) => (
     <div data-testid={`host-unavailable-${section}`} data-not-reported={Boolean(notReported)} />
@@ -182,6 +191,8 @@ describe("PerformanceDashboard", () => {
     expect(screen.getByTestId("performance-dashboard")).toBeInTheDocument()
     expect(screen.getByTestId("source-notice")).toBeInTheDocument()
     expect(screen.getByTestId("overview")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Web Vitals" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Browser diagnostics" })).toBeInTheDocument()
     // The full source card moved to Diagnose.
     expect(screen.queryByTestId("source-health")).not.toBeInTheDocument()
   })
@@ -219,6 +230,7 @@ describe("PerformanceDashboard", () => {
     })
     render(<PerformanceDashboard />)
     fireEvent.click(screen.getByTestId("open-diagnose"))
+    expect(screen.getByRole("region", { name: "Application operations" })).toBeInTheDocument()
     expect(screen.getByTestId("source-health")).toHaveAttribute("data-issue", "contended")
     expect(screen.getByTestId("renderer-timings")).toBeInTheDocument()
     expect(screen.getByTestId("perf-diagnose-traces")).toHaveAttribute(

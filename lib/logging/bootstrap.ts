@@ -1176,8 +1176,10 @@ function applyTransportSettings(
   const behaviorEndpoint = otlpLogsEndpoint(genericTraceEndpoint)
   if (behaviorEndpoint) {
     behaviorExporters.push(
-      createOtlpBehaviorEventExporter(async (body) => {
+      createOtlpBehaviorEventExporter(async (body, signal) => {
         const response = await genericOtlpFetch(behaviorEndpoint, {
+          signal,
+          keepalive: true,
           method: "POST",
           headers: { "content-type": "application/json" },
           body,

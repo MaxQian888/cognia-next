@@ -699,3 +699,132 @@ it("works where `window` is the bare Node global with no event target", async ()
     window.removeEventListener = realRemoveEventListener
   }
 })
+
+it("cancels one queued event without discarding unrelated analytics", async () => {
+  const postJson = jest
+    .fn<Promise<void>, [string, string, AbortSignal?]>()
+    .mockResolvedValue(undefined)
+  const [exporter] = buildPostHogProductExporters({
+    ...BASE,
+    flushIntervalMs: 60_000,
+    managed: { enabled: true, host: "https://us.i.posthog.com", projectToken: "phc_managed" },
+    byo: { enabled: false, host: "", projectToken: "" },
+    postJson,
+  })
+  const controller = new AbortController()
+  const canceled = exporter.export(EVENT, { signal: controller.signal })
+  const rejection = expect(canceled).rejects.toThrow()
+  const retained = exporter.export({
+    ...EVENT,
+    name: "app.screen.viewed",
+    attributes: { route: "/" },
+  })
+  controller.abort()
+  await rejection
+  window.dispatchEvent(new Event("pagehide"))
+  await retained
+  expect(postJson).toHaveBeenCalledTimes(1)
+  expect(
+    JSON.parse(postJson.mock.calls[0][1]).batch.map((item: { event: string }) => item.event)
+  ).toEqual(["app.screen.viewed"])
+  expect(exporter.getHealth?.()).toMatchObject({ queueDepth: 0, droppedEntries: 1 })
+})
+
+it("flushes a late Web Vital immediately after pagehide", async () => {
+  const postJson = jest
+    .fn<Promise<void>, [string, string, AbortSignal?]>()
+    .mockResolvedValue(undefined)
+  const [exporter] = buildPostHogProductExporters({
+    ...BASE,
+    flushIntervalMs: 60_000,
+    managed: { enabled: true, host: "https://us.i.posthog.com", projectToken: "phc_managed" },
+    byo: { enabled: false, host: "", projectToken: "" },
+    postJson,
+  })
+  window.dispatchEvent(new Event("pagehide"))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await exporter.export(EVENT, { flushImmediately: true })
+  expect(postJson).toHaveBeenCalledTimes(1)
+})
+
+it("aborts a scoped retry and continues delivering unrelated analytics", async () => {
+  const postJson = jest
+    .fn<Promise<void>, [string, string, AbortSignal?]>()
+    .mockRejectedValueOnce(new Error("PostHog capture failed with 503"))
+    .mockResolvedValue(undefined)
+  let startBackoff!: () => void
+  const backoffStarted = new Promise<void>((resolve) => {
+    startBackoff = resolve
+  })
+  const [exporter] = buildPostHogProductExporters({
+    ...BASE,
+    managed: { enabled: true, host: "https://us.i.posthog.com", projectToken: "phc_managed" },
+    byo: { enabled: false, host: "", projectToken: "" },
+    postJson,
+    sleepImpl: () => {
+      startBackoff()
+      return new Promise(() => {})
+    },
+  })
+  const controller = new AbortController()
+  const canceled = exporter.export(EVENT, { signal: controller.signal })
+  const rejection = expect(canceled).rejects.toThrow()
+  const retained = exporter.export({
+    ...EVENT,
+    name: "app.screen.viewed",
+    attributes: { route: "/" },
+  })
+  await backoffStarted
+  controller.abort()
+  await rejection
+  await retained
+  expect(postJson).toHaveBeenCalledTimes(2)
+  expect(postJson.mock.calls[0][2]?.aborted).toBe(true)
+  expect(
+    JSON.parse(postJson.mock.calls[1][1]).batch.map((item: { event: string }) => item.event)
+  ).toEqual(["app.screen.viewed"])
+})
+
+it("does not enqueue an already canceled event", async () => {
+  const postJson = jest.fn().mockResolvedValue(undefined)
+  const [exporter] = buildPostHogProductExporters({
+    ...BASE,
+    managed: { enabled: true, host: "https://us.i.posthog.com", projectToken: "phc_managed" },
+    byo: { enabled: false, host: "", projectToken: "" },
+    postJson,
+  })
+  const controller = new AbortController()
+  controller.abort()
+  await expect(exporter.export(EVENT, { signal: controller.signal })).rejects.toThrow()
+  expect(postJson).not.toHaveBeenCalled()
+  expect(exporter.getHealth?.().queueDepth).toBe(0)
+})
+
+it("aborts a scoped in-flight request even when its transport ignores cancellation", async () => {
+  const postJson = jest
+    .fn<Promise<void>, [string, string, AbortSignal?]>()
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockResolvedValue(undefined)
+  const [exporter] = buildPostHogProductExporters({
+    ...BASE,
+    managed: { enabled: true, host: "https://us.i.posthog.com", projectToken: "phc_managed" },
+    byo: { enabled: false, host: "", projectToken: "" },
+    postJson,
+  })
+  const controller = new AbortController()
+  const canceled = exporter.export(EVENT, { signal: controller.signal })
+  const rejection = expect(canceled).rejects.toThrow()
+  const retained = exporter.export({
+    ...EVENT,
+    name: "app.screen.viewed",
+    attributes: { route: "/" },
+  })
+  await Promise.resolve()
+  expect(postJson).toHaveBeenCalledTimes(1)
+  controller.abort()
+  await rejection
+  await retained
+  expect(postJson).toHaveBeenCalledTimes(2)
+  expect(postJson.mock.calls[0][2]?.aborted).toBe(true)
+  expect(exporter.getHealth?.()).toMatchObject({ queueDepth: 0, droppedEntries: 1 })
+})

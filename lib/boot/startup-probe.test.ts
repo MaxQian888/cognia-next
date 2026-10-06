@@ -1,6 +1,11 @@
+import {
+  createOperationPerformanceRecorder,
+  getOperationPerformanceRecorder,
+} from "@/lib/perf/operation-performance"
 import { probeConfiguredBootCapabilities } from "./startup-probe"
 
 it("requests runtimes only for configured background work", async () => {
+  const recorder = enableOperationRecording()
   const capabilities = await probeConfiguredBootCapabilities({
     getDatabase: () =>
       ({
@@ -27,6 +32,9 @@ it("requests runtimes only for configured background work", async () => {
     getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
   })
 
+  expect(
+    recorder.getSnapshot().rows.find((row) => row.name === "startup.capability-probe")
+  ).toMatchObject({ count: 1, errors: 0 })
   expect(capabilities).toEqual([
     "plugin-runtime",
     "workflow-automation",
@@ -158,4 +166,52 @@ it("boots workflow automation to reconcile an admitted Goal verifier", async () 
   })
 
   expect(capabilities).toEqual(["workflow-automation"])
+})
+
+it("records the complete capability probe without storing its result or failure details", async () => {
+  const recorder = enableOperationRecording()
+  const failure = new Error("private database details")
+  try {
+    await expect(
+      probeConfiguredBootCapabilities({
+        getDatabase: () => {
+          throw failure
+        },
+        listScheduledTasks: async () => [],
+        getTwinRuntimeSettings: async () => ({}),
+      })
+    ).rejects.toBe(failure)
+    expect(
+      recorder.getSnapshot().rows.find((row) => row.name === "startup.capability-probe")
+    ).toMatchObject({ count: 1, errors: 1 })
+    expect(JSON.stringify(recorder.getSnapshot())).not.toContain(failure.message)
+  } finally {
+    recorder.updateSettings({ enabled: false })
+    recorder.clear()
+  }
+})
+
+// Use the actual recorder/helper with a browser-capable memory store while
+// keeping Dexie tests in their native Node environment.
+let operationRecordingSpy: jest.SpyInstance | undefined
+function enableOperationRecording() {
+  const storage = new Map<string, string>()
+  const recorder = createOperationPerformanceRecorder({
+    isBrowser: () => true,
+    storage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => {
+        storage.set(key, value)
+      },
+    },
+  })
+  recorder.updateSettings({ enabled: true })
+  operationRecordingSpy = jest
+    .spyOn(getOperationPerformanceRecorder(), "begin")
+    .mockImplementation(recorder.begin)
+  return recorder
+}
+afterEach(() => {
+  operationRecordingSpy?.mockRestore()
+  operationRecordingSpy = undefined
 })

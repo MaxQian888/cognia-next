@@ -10,31 +10,8 @@ import { trackEvent } from "@/lib/telemetry/events/track-event"
 
 export const APP_LAUNCH_STORAGE_KEY = "cognia-telemetry-first-launch-at"
 
-/**
- * Route names the shell may report. The app is a fully static export with no
- * dynamic segments (`app/**` contains no `[param]` directory), so a pathname is
- * already a route pattern — but the allowlist shape is enforced anyway so a
- * future dynamic route, a deep link, or a stray query fragment can never turn a
- * screen view into an identifier.
- */
-const ROUTE_SEGMENT = /^[a-z][a-z0-9-]{0,31}$/
-
-/**
- * Reduce a pathname to a reportable route.
- *
- * Only the first two segments are kept: that is enough to tell `/settings` from
- * `/settings/appearance` while bounding cardinality, and any segment that does
- * not look like a static route name collapses the whole thing to `other`.
- */
-export function toReportableRoute(pathname: string | null | undefined): string {
-  if (!pathname) return "other"
-  const [path] = pathname.split(/[?#]/)
-  const segments = path.split("/").filter(Boolean)
-  if (segments.length === 0) return "/"
-  const kept = segments.slice(0, 2)
-  if (!kept.every((segment) => ROUTE_SEGMENT.test(segment))) return "other"
-  return `/${kept.join("/")}`
-}
+import { toReportableRoute } from "./reportable-route"
+export { toReportableRoute } from "./reportable-route"
 
 interface LaunchStorage {
   getItem(key: string): string | null

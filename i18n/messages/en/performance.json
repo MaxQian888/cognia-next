@@ -282,7 +282,23 @@
     "fps": "Frame rate",
     "mainThreadBlocked": "Main thread blocked",
     "longTasks": "Long tasks",
-    "jsHeap": "JS heap"
+    "jsHeap": "JS heap",
+    "longTaskMax": "Longest task",
+    "longTaskBlocking": "Long-task blocking time",
+    "heapUtilization": "Heap utilization",
+    "frameGapP95": "Frame gap p95",
+    "slowFrames": "Slow frames",
+    "resourceCount": "Resource count",
+    "resourceDurationP95": "Resource duration p95",
+    "resourceTransfer": "Visible resource transfer",
+    "eventCount": "Sampled event count",
+    "inputDelayP95": "Sampled input delay p95",
+    "eventProcessingP95": "Event processing p95",
+    "operationCount": "Completed operations",
+    "operationDurationP95": "Operation duration (p95)",
+    "operationErrors": "Operation errors",
+    "operationCancelled": "Cancelled operations",
+    "operationInFlight": "Operations in progress"
   },
   "overview": {
     "selectMetric": "Select a metric",
@@ -483,7 +499,23 @@
     "fps": "Frames this window painted per second. Unmeasured while the window is hidden.",
     "mainThreadBlocked": "Share of each interval spent in long tasks (over 50 ms) that block input and rendering.",
     "longTasks": "Main-thread tasks longer than 50 ms in each interval.",
-    "jsHeap": "JavaScript heap in use by this window."
+    "jsHeap": "JavaScript heap in use by this window.",
+    "longTaskMax": "Longest main-thread task observed in this sampling interval.",
+    "longTaskBlocking": "Sum of each observed long task’s duration beyond 50 ms in this interval. This is not Lighthouse Total Blocking Time.",
+    "heapUtilization": "Used JavaScript heap divided by the browser-reported heap limit. Available only in supporting runtimes.",
+    "frameGapP95": "95th percentile of visible animation-frame gaps in this interval. Hidden-window time is excluded.",
+    "slowFrames": "Number of observed visible frame gaps over 50 ms in this interval.",
+    "resourceCount": "Number of resource timing entries observed in this interval; not a count of all network requests.",
+    "resourceDurationP95": "95th percentile of durations of resource timing entries observed in this interval.",
+    "resourceTransfer": "Sum of browser-visible resource transfer bytes this interval. Cross-origin sizes may be hidden; this is not total network usage.",
+    "eventCount": "Event Timing entries lasting at least 16 ms observed this interval. Not every interaction produces an entry.",
+    "inputDelayP95": "95th percentile of input delay among sampled Event Timing entries (at least 16 ms). This is not INP.",
+    "eventProcessingP95": "95th percentile of processing duration among sampled Event Timing entries (at least 16 ms).",
+    "operationCount": "Instrumented operations completed in this interval, including failures and cancellations. Nested operations are counted separately.",
+    "operationDurationP95": "95th percentile of completed operation durations in this interval. Groups may overlap and have different timing boundaries; use Diagnose for per-operation details.",
+    "operationErrors": "Instrumented operations that failed in this interval, including non-successful HTTP responses.",
+    "operationCancelled": "Instrumented operations rejected with AbortError in this interval.",
+    "operationInFlight": "Instrumented operations still in progress when this frame was sampled."
   },
   "hostUnavailable": {
     "title": {
@@ -630,6 +662,192 @@
       },
       "cancel": "Cancel",
       "save": "Save budget"
+    }
+  },
+  "webVitals": {
+    "title": "Web Vitals",
+    "description": "Page loading, responsiveness and visual stability for this window. These are document-level measurements, not per-second samples or model response times. Values stay in memory for the current session.",
+    "clear": "Clear Web Vitals",
+    "collection": {
+      "label": "Collect Web Vitals",
+      "description": "Save the latest selected measurements locally in this window. Collection and reporting are off by default."
+    },
+    "reporting": {
+      "label": "Report through telemetry",
+      "description": "Allow new measurements through the existing telemetry pipeline. Behavior telemetry consent, the app category, sampling and destination settings must also allow delivery. Previously collected values are not replayed.",
+      "settings": "Telemetry settings"
+    },
+    "metricToggle": "Collect {metric}",
+    "milliseconds": "{value} ms",
+    "loadError": "Could not start Web Vitals collection. Reload this window to try again.",
+    "persistenceError": "Your choices apply to this page but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+    "status": {
+      "disabled": "Off",
+      "pending": "Waiting for a measurement",
+      "unsupported": "Unsupported in this runtime",
+      "error": "Collection unavailable"
+    },
+    "ratings": {
+      "good": "Good",
+      "needs-improvement": "Needs improvement",
+      "poor": "Poor"
+    },
+    "lifecycleHint": "Choices apply to this device or browser. Metrics cover the whole document, not individual routes, and may arrive after interaction or when hidden. Turning collection off stops recording and reporting immediately; Next.js observers remain until reload. Reload to begin a fresh measurement session after changing switches or clearing values.",
+    "metrics": {
+      "LCP": {
+        "label": "LCP",
+        "description": "Largest Contentful Paint · main content loading"
+      },
+      "INP": {
+        "label": "INP",
+        "description": "Interaction to Next Paint · responsiveness"
+      },
+      "CLS": {
+        "label": "CLS",
+        "description": "Cumulative Layout Shift · unitless stability score"
+      },
+      "FCP": {
+        "label": "FCP",
+        "description": "First Contentful Paint · first visible content"
+      },
+      "TTFB": {
+        "label": "TTFB",
+        "description": "Time to First Byte · document response"
+      },
+      "FID": {
+        "label": "FID",
+        "description": "First Input Delay · legacy metric, off by default"
+      }
+    }
+  },
+  "browserDiagnostics": {
+    "title": "Browser diagnostics",
+    "description": "Optional measurements for resource loading, sampled input latency, frame gaps and document navigation. Interval aggregates appear in the existing charts and captures.",
+    "collection": {
+      "label": "Collect browser diagnostics",
+      "description": "Off by default. Enabled groups collect only while the performance panel, capture or HUD requests sampling. Values stay local; this does not enable remote reporting."
+    },
+    "persistenceError": "Your choices apply now but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+    "groups": {
+      "resources": {
+        "label": "Resources",
+        "description": "Resource count, duration p95 and browser-visible transfer bytes. Transfer sizes are incomplete across origins and are not total network usage."
+      },
+      "interactions": {
+        "label": "Interactions",
+        "description": "Event Timing entries of at least 16 ms: count, input delay p95 and processing p95. This sample is not INP or a count of all interactions."
+      },
+      "frames": {
+        "label": "Frame gaps",
+        "description": "Frame gap p95 and visible frame gaps over 50 ms. Hidden-window gaps are excluded; slow frames use this 50 ms threshold."
+      },
+      "navigation": {
+        "label": "Navigation",
+        "description": "Loading phases for the current document. Client-side route changes do not create a new document navigation."
+      }
+    },
+    "status": {
+      "off": "Off",
+      "error": "Collection unavailable",
+      "unsupported": "Unsupported in this runtime",
+      "ready": "Enabled when sampling"
+    },
+    "navigation": {
+      "title": "Document navigation",
+      "clear": "Clear navigation summary",
+      "description": "DNS, connection, TLS, request and response are phase durations. DOM and load milestones are elapsed time from navigation start. A missing value may be pending or hidden by the browser.",
+      "pending": "Not yet measured or unavailable",
+      "phases": {
+        "dnsMs": "DNS",
+        "connectMs": "Connection",
+        "tlsMs": "TLS",
+        "requestMs": "Request → first byte",
+        "responseMs": "Response download",
+        "domInteractiveMs": "DOM interactive",
+        "domContentLoadedMs": "DOMContentLoaded",
+        "loadMs": "Load complete"
+      }
+    },
+    "milliseconds": "{value} ms",
+    "lifecycleHint": "Settings apply to this device or browser. Disabling collection or a group stops its observers and clears pending samples and its current summary. Existing captures remain. No resource URLs, element details or input text are collected. Resource, event and frame-gap p95 values are unavailable when an interval exceeds 500 valid samples; counts and visible byte totals are still recorded."
+  },
+  "operations": {
+    "title": "Application operations",
+    "description": "Find slow startup, storage, host calls and HTTP requests. These fixed operation summaries stay in this window’s memory.",
+    "clear": "Clear operation statistics",
+    "collection": {
+      "label": "Collect application operations",
+      "description": "Off by default. Once enabled, selected groups record while you use the app, even with this panel closed. No remote reporting is enabled."
+    },
+    "groups": {
+      "startup": {
+        "label": "Startup",
+        "description": "Startup capability probe. Enable and reload to measure the next startup."
+      },
+      "storage": {
+        "label": "Storage",
+        "description": "Chat history reads and writes, and session lists. Write duration includes queue waiting and the write call, not outer transaction commit."
+      },
+      "transport": {
+        "label": "Host calls",
+        "description": "Local and remote routed host calls. Performance sampling and telemetry calls are excluded."
+      },
+      "network": {
+        "label": "Network",
+        "description": "Requests through the app’s platform fetch. Browser duration ends when headers arrive; native duration includes buffered response data. HTTP failures count as errors."
+      }
+    },
+    "persistenceError": "Your choices apply now but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+    "lifecycleHint": "Switches apply to this device or browser. Turning a group off clears its data and stops recording immediately. Account or host changes clear statistics. Only fixed operation names, durations and outcomes are recorded; no content, identifiers, URLs or arguments.",
+    "statisticsHint": "Completed, error and cancellation counts are cumulative since clear. Duration statistics use the latest 120 valid completions per operation, including failures and cancellations. Chart counts cover each sampling interval; interval p95 is unavailable above 500 valid samples. Nested operations may overlap, so durations must not be added.",
+    "dropped": "{count} operations were not recorded because the 256 concurrent-operation limit was reached.",
+    "empty": "No selected operations recorded yet. Use the app, then return to this panel.",
+    "off": "Collection is off.",
+    "unavailable": "Unavailable",
+    "columns": {
+      "name": "Operation",
+      "count": "Completed",
+      "errors": "Errors",
+      "cancelled": "Cancelled",
+      "inFlight": "In progress",
+      "samples": "Samples",
+      "lastMs": "Last",
+      "p50Ms": "p50",
+      "p95Ms": "p95",
+      "maxMs": "Max"
+    },
+    "names": {
+      "startup": {
+        "capability-probe": "Startup capability probe"
+      },
+      "storage": {
+        "messages": {
+          "load": "Load chat history",
+          "write": "Write chat history"
+        },
+        "sessions": {
+          "list": "List sessions"
+        }
+      },
+      "transport": {
+        "local": {
+          "call": "Local host call"
+        },
+        "remote": {
+          "call": "Remote host call"
+        }
+      },
+      "network": {
+        "browser": {
+          "fetch": "Browser HTTP request"
+        },
+        "tauri": {
+          "fetch": "Desktop HTTP request"
+        },
+        "capacitor": {
+          "fetch": "Mobile HTTP request"
+        }
+      }
     }
   }
 }

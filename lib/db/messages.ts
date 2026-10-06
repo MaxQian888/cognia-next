@@ -1,3 +1,4 @@
+import { measureOperation } from "@/lib/perf/operation-performance"
 import type { UIMessage } from "ai"
 import Dexie from "dexie"
 import { loggers } from "@cognia/logging"
@@ -152,6 +153,16 @@ function enqueueTranscriptWrite<T>(
   write: () => Promise<T>,
   stream?: PendingStream
 ): Promise<T> {
+  return measureOperation("storage.messages.write", () =>
+    enqueueTranscriptWriteNow(sessionId, write, stream)
+  )
+}
+
+function enqueueTranscriptWriteNow<T>(
+  sessionId: string,
+  write: () => Promise<T>,
+  stream?: PendingStream
+): Promise<T> {
   // An enclosing acceptance/settlement transaction already serializes these
   // stores. Chaining onto a promise created by an earlier write leaves its
   // Dexie zone and lets the transcript commit independently of its receipt.
@@ -300,7 +311,11 @@ export function rowToUIMessage(r: StoredMessage): UIMessage {
   } as UIMessage
 }
 
-export async function listMessages(sessionId: string): Promise<UIMessage[]> {
+export function listMessages(sessionId: string): Promise<UIMessage[]> {
+  return measureOperation("storage.messages.load", () => listMessagesNow(sessionId))
+}
+
+async function listMessagesNow(sessionId: string): Promise<UIMessage[]> {
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")
     .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
@@ -321,7 +336,11 @@ export async function listMessages(sessionId: string): Promise<UIMessage[]> {
  * stops, then the slice is re-sorted ascending so callers see the same order
  * `listMessages` gives them.
  */
-export async function listRecentMessages(sessionId: string, limit: number): Promise<UIMessage[]> {
+export function listRecentMessages(sessionId: string, limit: number): Promise<UIMessage[]> {
+  return measureOperation("storage.messages.load", () => listRecentMessagesNow(sessionId, limit))
+}
+
+async function listRecentMessagesNow(sessionId: string, limit: number): Promise<UIMessage[]> {
   if (limit <= 0) return []
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")

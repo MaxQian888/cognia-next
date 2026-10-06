@@ -360,6 +360,47 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     )
   })
 
+  it("forwards a behavior-event cancellation signal to the OTLP egress", async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 200 }))
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        console: false,
+        indexedDB: false,
+        native: false,
+        remote: false,
+        langfuse: false,
+        agentTrace: false,
+        agentTraceOtlp: false,
+        otlpLogs: false,
+        agentTraceOtlpConfig: { preset: "custom", endpoint: "https://collector.example/v1/traces" },
+      })
+    )
+    localStorage.setItem(
+      "cognia-behavior-telemetry-enabled",
+      JSON.stringify({
+        enabled: true,
+        destinations: { local: false, remote: true },
+      })
+    )
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { trackEvent } = await import("@/lib/telemetry/events/track-event")
+    const controller = new AbortController()
+    await trackEvent("app.screen.viewed", { route: "/performance" }, { signal: controller.signal })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://collector.example/v1/logs",
+      expect.objectContaining({
+        signal: controller.signal,
+        keepalive: true,
+        method: "POST",
+      })
+    )
+    fetchSpy.mockRestore()
+  })
+
   it("wires PostHog AI with its separate identity and 4 MB request limit", async () => {
     localStorage.setItem(
       "cognia-logging-transports",

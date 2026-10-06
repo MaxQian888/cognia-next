@@ -40,6 +40,22 @@ export type PerfMetricId =
   | "renderer.main-thread-blocked-pct"
   | "renderer.long-task.count"
   | "renderer.js-heap.used-bytes"
+  | "renderer.long-task.max-ms"
+  | "renderer.long-task.blocking-ms"
+  | "renderer.js-heap.utilization-pct"
+  | "renderer.frame-gap-p95-ms"
+  | "renderer.slow-frame.count"
+  | "renderer.resource.count"
+  | "renderer.resource.duration-p95-ms"
+  | "renderer.resource.transfer-bytes"
+  | "renderer.event.count"
+  | "renderer.event.input-delay-p95-ms"
+  | "renderer.event.processing-p95-ms"
+  | "renderer.operation.count"
+  | "renderer.operation.duration-p95-ms"
+  | "renderer.operation.error.count"
+  | "renderer.operation.cancelled.count"
+  | "renderer.operation.inflight.count"
 
 export interface PerfMetricDefinition {
   id: PerfMetricId
@@ -207,6 +223,167 @@ export const PERF_METRICS: readonly PerfMetricDefinition[] = [
     requires: ["renderer.js-heap"],
     extract: (frame) => observation(frame, "renderer.js-heap.used.bytes"),
   },
+  {
+    id: "renderer.long-task.max-ms",
+    labelKey: "longTaskMax",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.long-task"],
+    extract: (frame) => observation(frame, "renderer.long-task.max.ms"),
+  },
+  {
+    id: "renderer.long-task.blocking-ms",
+    labelKey: "longTaskBlocking",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.long-task"],
+    extract: (frame) => observation(frame, "renderer.long-task.blocking.ms"),
+  },
+  {
+    id: "renderer.js-heap.utilization-pct",
+    labelKey: "heapUtilization",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "percent",
+    direction: "lower",
+    max: 100,
+    requires: ["renderer.js-heap"],
+    extract: (frame) => observation(frame, "renderer.js-heap.utilization.pct"),
+  },
+  {
+    id: "renderer.frame-gap-p95-ms",
+    labelKey: "frameGapP95",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.frame-timing"],
+    extract: (frame) => observation(frame, "renderer.frame-gap.p95.ms"),
+  },
+  {
+    id: "renderer.slow-frame.count",
+    labelKey: "slowFrames",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.frame-timing"],
+    extract: (frame) => observation(frame, "renderer.slow-frame.count"),
+  },
+  {
+    id: "renderer.resource.count",
+    labelKey: "resourceCount",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.resource"],
+    extract: (frame) => observation(frame, "renderer.resource.count"),
+  },
+  {
+    id: "renderer.resource.duration-p95-ms",
+    labelKey: "resourceDurationP95",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.resource"],
+    extract: (frame) => observation(frame, "renderer.resource.duration.p95.ms"),
+  },
+  {
+    id: "renderer.resource.transfer-bytes",
+    labelKey: "resourceTransfer",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "bytes",
+    direction: "lower",
+    requires: ["renderer.resource"],
+    extract: (frame) => observation(frame, "renderer.resource.transfer.bytes"),
+  },
+  {
+    id: "renderer.event.count",
+    labelKey: "eventCount",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.event-timing"],
+    extract: (frame) => observation(frame, "renderer.event.count"),
+  },
+  {
+    id: "renderer.event.input-delay-p95-ms",
+    labelKey: "inputDelayP95",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.event-timing"],
+    extract: (frame) => observation(frame, "renderer.event.input-delay.p95.ms"),
+  },
+  {
+    id: "renderer.event.processing-p95-ms",
+    labelKey: "eventProcessingP95",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.event-timing"],
+    extract: (frame) => observation(frame, "renderer.event.processing.p95.ms"),
+  },
+  {
+    id: "renderer.operation.count",
+    labelKey: "operationCount",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.app-operations"],
+    extract: (frame) => observation(frame, "renderer.operation.count"),
+  },
+  {
+    id: "renderer.operation.duration-p95-ms",
+    labelKey: "operationDurationP95",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "ms",
+    direction: "lower",
+    requires: ["renderer.app-operations"],
+    extract: (frame) => observation(frame, "renderer.operation.duration.p95.ms"),
+  },
+  {
+    id: "renderer.operation.error.count",
+    labelKey: "operationErrors",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.app-operations"],
+    extract: (frame) => observation(frame, "renderer.operation.error.count"),
+  },
+  {
+    id: "renderer.operation.cancelled.count",
+    labelKey: "operationCancelled",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.app-operations"],
+    extract: (frame) => observation(frame, "renderer.operation.cancelled.count"),
+  },
+  {
+    id: "renderer.operation.inflight.count",
+    labelKey: "operationInFlight",
+    definitionVersion: 1,
+    sourceKind: "renderer",
+    unit: "count",
+    direction: "lower",
+    requires: ["renderer.app-operations"],
+    extract: (frame) => observation(frame, "renderer.operation.inflight.count"),
+  },
 ]
 
 const BY_ID = new Map(PERF_METRICS.map((metric) => [metric.id, metric]))
@@ -280,13 +457,13 @@ export interface MetricSeriesSummary {
 }
 
 export function summarizeSeries(points: readonly (number | null)[]): MetricSeriesSummary {
-  let latest: number | null = null
+  const last = points.at(-1)
+  const latest = typeof last === "number" && Number.isFinite(last) ? last : null
   let peak: number | null = null
   let sum = 0
   let samples = 0
   for (const point of points) {
     if (point === null || !Number.isFinite(point)) continue
-    latest = point
     peak = peak === null ? point : Math.max(peak, point)
     sum += point
     samples += 1

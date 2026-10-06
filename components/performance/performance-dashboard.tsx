@@ -64,6 +64,9 @@ import { PerfSourceHealth, PerfSourceNotice } from "./perf-source-health"
 import { PerfCapturesTab } from "./perf-captures-tab"
 import { PerfHostUnavailable } from "./perf-host-unavailable"
 import { PerfRendererTimingsTable } from "./perf-renderer-timings-table"
+import { PerfWebVitalsPanel } from "./perf-web-vitals-panel"
+import { PerfBrowserDiagnostics } from "./perf-browser-diagnostics"
+import { PerfOperationTimings } from "./perf-operation-timings"
 
 /** Where the trace dashboard lives (`/logs` → Traces → Dashboard). */
 export const PERF_TRACE_DASHBOARD_HREF = "/logs?channel=traces&tview=dashboard"
@@ -256,6 +259,8 @@ export function PerformanceDashboard() {
                 intervalMs={intervalMs}
                 onOpenDiagnose={openDiagnose}
               />
+              <PerfWebVitalsPanel />
+              <PerfBrowserDiagnostics />
               {/* Plugin-contributed performance panels (custom metrics, etc.). */}
               <PluginExtensionSlot point="perf.panel" className="space-y-4 empty:hidden" />
             </TabsContent>
@@ -280,6 +285,7 @@ export function PerformanceDashboard() {
                   </Button>
                 </div>
               </div>
+              <PerfOperationTimings />
               {/* What this runtime can measure comes first: with no host, the
                   hotspot placeholder used to fill the first screen and push the
                   Renderer timings below the fold. */}

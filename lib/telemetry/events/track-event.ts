@@ -10,7 +10,13 @@ import {
 
 type EventAttributes = Record<string, string | number | boolean>
 /** Posts one serialized OTLP `resourceLogs` payload; rejects when refused. */
-type OtlpBodySender = (body: string) => Promise<void>
+type OtlpBodySender = (body: string, signal?: AbortSignal) => Promise<void>
+
+export interface BehaviorEventDeliveryOptions {
+  signal?: AbortSignal
+  /** Flush final metrics without waiting for the destination batch timer. */
+  flushImmediately?: boolean
+}
 
 export interface BehaviorEventEnvelope {
   name: TelemetryEventName
@@ -21,7 +27,7 @@ export interface BehaviorEventEnvelope {
 
 export interface BehaviorEventExporter {
   id: string
-  export: (event: BehaviorEventEnvelope) => Promise<void>
+  export: (event: BehaviorEventEnvelope, options?: BehaviorEventDeliveryOptions) => Promise<void>
   /**
    * Require the account's remote-destination consent on top of the master
    * switch. Set by the generic OTLP sink, and by any destination whose host
@@ -92,7 +98,11 @@ export function createOtlpBehaviorEventExporter(exportBody: OtlpBodySender): Beh
   return {
     id: "otlp",
     requiresRemoteConsent: true,
-    export: (event) => exportBody(toOtlpLogBody(event.name, event.attributes, event.at)),
+    export: (event, options) => {
+      if (options?.signal?.aborted) return Promise.reject(options.signal.reason)
+      const body = toOtlpLogBody(event.name, event.attributes, event.at)
+      return options?.signal ? exportBody(body, options.signal) : exportBody(body)
+    },
   }
 }
 
@@ -158,11 +168,12 @@ function toOtlpLogBody(name: TelemetryEventName, attributes: EventAttributes, at
 
 export async function trackEventDelivery<Name extends TelemetryEventName>(
   name: Name,
-  attributes: TelemetryEventCatalog[Name]
+  attributes: TelemetryEventCatalog[Name],
+  options?: BehaviorEventDeliveryOptions
 ): Promise<BehaviorEventDeliveryResult> {
   const empty = (): BehaviorEventDeliveryResult => ({ delivered: [], failed: [] })
   const settings = getBehaviorTelemetrySettings()
-  if (!settings.enabled) return empty()
+  if (options?.signal?.aborted || !settings.enabled) return empty()
   const definition = TELEMETRY_EVENT_CATALOG[name]
   if (!definition || !settings.categories[definition.category]) return empty()
   // A user-triggered delivery probe must be deterministic: it still requires
@@ -199,7 +210,10 @@ export async function trackEventDelivery<Name extends TelemetryEventName>(
   }
   for (const eventExporter of exporters) {
     if (eventExporter.requiresRemoteConsent && !settings.destinations.remote) continue
-    writes.push({ id: eventExporter.id, promise: eventExporter.export(envelope) })
+    writes.push({
+      id: eventExporter.id,
+      promise: options ? eventExporter.export(envelope, options) : eventExporter.export(envelope),
+    })
   }
   const results = await Promise.allSettled(writes.map((write) => write.promise))
   return results.reduce<BehaviorEventDeliveryResult>((delivery, result, index) => {
@@ -210,9 +224,10 @@ export async function trackEventDelivery<Name extends TelemetryEventName>(
 
 export async function trackEvent<Name extends TelemetryEventName>(
   name: Name,
-  attributes: TelemetryEventCatalog[Name]
+  attributes: TelemetryEventCatalog[Name],
+  options?: BehaviorEventDeliveryOptions
 ): Promise<boolean> {
-  const delivery = await trackEventDelivery(name, attributes)
+  const delivery = await trackEventDelivery(name, attributes, options)
   return delivery.delivered.length > 0
 }
 

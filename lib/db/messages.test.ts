@@ -1,3 +1,7 @@
+import {
+  createOperationPerformanceRecorder,
+  getOperationPerformanceRecorder,
+} from "@/lib/perf/operation-performance"
 // Coverage for the messages CRUD layer — list/persist/clear/truncateAfter.
 // Persistence is diff-based so we exercise the upsert-vs-delete branches
 // directly, plus the metadata hoisting (senderId/senderKind) round-trip.
@@ -272,6 +276,7 @@ describe("persistMessages + listMessages", () => {
   })
 
   it("keeps a delta in its caller's transaction after a prior queued write", async () => {
+    enableOperationRecording()
     const db = getDb()
     await putSession("atomic-delta")
     await commitMessageDelta("atomic-delta", { upserts: [msg("prior", "assistant", "kept")] })
@@ -1433,4 +1438,61 @@ describe("appendImageEditVersion", () => {
       })
     ).rejects.toThrow()
   })
+})
+
+it("measures message reads and queued writes with only fixed operation names", async () => {
+  const recorder = enableOperationRecording()
+  const sessionId = "private-performance-session"
+  try {
+    await putSession(sessionId)
+    await persistMessages(sessionId, [
+      {
+        id: "private-performance-message",
+        role: "user",
+        parts: [{ type: "text", text: "private performance contents" }],
+      },
+    ])
+    expect(await listMessages(sessionId)).toHaveLength(1)
+    expect(await listRecentMessages(sessionId, 1)).toHaveLength(1)
+    const duplicate: UIMessage = { id: "private-duplicate", role: "user", parts: [] }
+    await expect(
+      commitMessageDelta(sessionId, { upserts: [duplicate, duplicate] })
+    ).rejects.toThrow("duplicate upsert ids")
+    const rows = recorder.getSnapshot().rows
+    expect(rows.find((row) => row.name === "storage.messages.write")).toMatchObject({
+      count: 2,
+      errors: 1,
+    })
+    expect(rows.find((row) => row.name === "storage.messages.load")).toMatchObject({ count: 2 })
+    expect(JSON.stringify(rows)).not.toContain("private-performance")
+    expect(JSON.stringify(rows)).not.toContain("private performance contents")
+  } finally {
+    recorder.updateSettings({ enabled: false })
+    recorder.clear()
+  }
+})
+
+// Use the actual recorder/helper with a browser-capable memory store while
+// keeping Dexie tests in their native Node environment.
+let operationRecordingSpy: jest.SpyInstance | undefined
+function enableOperationRecording() {
+  const storage = new Map<string, string>()
+  const recorder = createOperationPerformanceRecorder({
+    isBrowser: () => true,
+    storage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => {
+        storage.set(key, value)
+      },
+    },
+  })
+  recorder.updateSettings({ enabled: true })
+  operationRecordingSpy = jest
+    .spyOn(getOperationPerformanceRecorder(), "begin")
+    .mockImplementation(recorder.begin)
+  return recorder
+}
+afterEach(() => {
+  operationRecordingSpy?.mockRestore()
+  operationRecordingSpy = undefined
 })
