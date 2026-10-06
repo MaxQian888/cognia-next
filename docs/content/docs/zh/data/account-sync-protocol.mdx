@@ -5,11 +5,11 @@ description: 官方账号端到端加密同步（ADR-0215）的线格式：P-256
 
 # 账号同步协议 v1
 
-<Status variant="planned" />
+<Status variant="beta">§2–7 与 §9 已实现，受构建开关控制 · §8、§10–13 计划中</Status>
 
 [ADR-0215](../adr/0215-one-person-one-encrypted-sync-space-many-writable-hosts) 的规范性配套文档。
 ADR 记录"为什么"，本页记录"具体字节"。只要 §0 的不变量成立，本页可以细化而无需修订 ADR。
-每次变更都要提升 `protocolVersion` 或只新增可选字段。本页内容尚未实现。
+每次变更都要提升 `protocolVersion` 或只新增可选字段。第 2 阶段实现了 §2–5（密钥与设备登记），第 3a 阶段实现了 §6、§7 和 §9（操作日志、实时更新与合并）；快照（§8）、大文件、租约、计数器和账号生命周期尚未实现。
 
 ## 0. 不变量（由 ADR 固定）
 
@@ -77,7 +77,8 @@ ADR 记录"为什么"，本页记录"具体字节"。只要 §0 的不变量成�
   - `commit` → `keyCommit_e = HMAC-SHA256(commitKey, JCS({spaceId, epoch: e}))`，写在开启该纪元的签名条目里；
   - `chain` → `prevWrap_e = AES-256-GCM(chainKey, nonce, SK_{e-1}, AAD = label(chain) ‖ 0x00 ‖ JCS({spaceId, epoch: e-1}))`，写在同一条目里，所以当前密钥能打开全部历史；
   - `name` → 设备显示名（`nameCt`，见 §4）；
-  - 第 3 阶段再加 `op`、`snap`、`blob-id`、`res-id`。
+  - `op` → 操作加密（§7.1，第 3a 阶段）；
+  - 之后的阶段再加 `snap`、`blob-id`、`res-id`。
 - 服务器上只存密封后的形式：每台活跃设备一个 HPKE base 模式信封，再加一个给 `recoveryEncPub` 的，`info = label(epoch-envelope)`，`AAD = JCS({v: 1, spaceId, epoch, recipient, recipientEncPub})`。
 - 设备只对登记表**当前**纪元使用信封，而且打开后的密钥必须与该纪元已签名的 `keyCommit` 一致。base 模式 HPKE 不认证封装者，认证靠这个承诺。
 - 在本地，设备把密钥链作为保险库机密保存。
@@ -127,7 +128,7 @@ RecoveryKeys     = { signPub, encPub }
 
 ### 4.2 剩余风险
 
-服务器可能向不同设备展示不同但各自有效的链（分裂视图）。设备列表显示“设备列表指纹”（头部哈希），用户可在设备之间比对；第 3 阶段的操作会携带签名者的头部。
+服务器可能向不同设备展示不同但各自有效的链（分裂视图）。设备列表显示“设备列表指纹”（头部哈希），用户可在设备之间比对。第 3a 阶段的操作还不携带签名者的头部；把它作为信封的可选字段加入，留给第 3b 阶段。
 
 ## 5. 加入
 
@@ -192,18 +193,25 @@ RecoveryKeys     = { signPub, encPub }
 
 ### 5.4 带着本地数据加入（ADR Q5）
 
-加入后，客户端先算出预览（双方每张表的行数、有差异的设置键），生成一个 ADR-0001 备份包，然后执行用户的选择：
+第 3a 阶段。登记完成后，负责某个数据库的设备（每个数据库一个窗口，或无界面主机的 brain）启用变更捕获，并决定如何处理它已有的同步行：
 
-- **合并**：本地行转为操作；缺少的字段时钟合成为 `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)`；
-- **丢弃**：用最新快照加后续操作替换本地数据库。
+- **播种**，自动进行：本设备没有同步行，或账号的操作日志为空（第一台设备）时。每个同步行按 `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)` 合成字段时钟，整行放入待发送队列。
+- **询问**，双方都有数据时，并先给出预览（本机每张表的行数、账号日志中的操作数）：
+  - **合并**（默认）：按上面的方式播种，之后账号的操作逐字段合并（§9）；
+  - **替换**：在捕获忽略的事务中删除本设备的同步行，然后从 0 开始拉取账号的日志。
 
-## 6. 会话
+两种选择都会改动本地数据，所以先写入一份加密的 ADR-0001 备份并记入备份历史；备份失败则什么都不改。无界面主机使用事先用 `cognia-agent account-sync data --merge|--replace` 给出的答案。被移除后重新加入的设备保留字段时钟（它们在同一空间里仍是真实的先后顺序），但游标和序号从头开始。第 3b 阶段会把“从 0 拉取”换成最新快照加其后的操作。
 
-第 3 阶段。第 2 阶段改用 §5 的设备证明逐个认证请求。
+## 6. 会话与实时更新
 
-1. `POST /v1/session`，带 `Authorization: Bearer <OIDC access token>`（aud = 同步 API）→ `{challenge}`。
-2. `POST /v1/session` `{deviceId, challenge, sig}` → `{sessionToken, expiresIn: 900}`。已吊销设备 → `403 {code: "device_revoked", wipe}`。
-3. WebSocket `GET /v1/socket?ticket=…`（会话签发的一次性票据），可休眠。WebSocket 失败时退回长轮询 `GET /v1/ops?after=<serverSeq>&wait=25`（中国大陆风险，见 ADR 风险部分）。
+第 3a 阶段。没有单独的会话令牌：和第 2 阶段一样，每个请求都带 bearer 令牌和 §5 的设备证明。
+
+1. `POST /v1/socket/ticket`（活跃设备证明）→ `201 {ticket, expiresAt}`：32 个随机字节，一次性，有效期 60 秒，绑定到空间和设备。
+2. WebSocket `GET /v1/socket?space=<spaceId>&ticket=<ticket>`。浏览器无法给 WebSocket 设置请求头，所以这个路由跳过 bearer 检查：Worker 把它转发给空间，由空间消费票据，拒绝未知、已用或过期的票据（`401 bad_ticket`）以及已吊销的设备（`403 device_revoked`）。Durable Object 用休眠 API 接受连接，并发送 `{type: "hello", lastSeq, registryHead}`。
+3. 每次存入推送后，服务器发送 `{type: "ops", lastSeq}`；每次登记表追加后发送 `{type: "registry", head}`，因此已连接的设备会立刻看到等待中的加入请求，而不用等下一次 20 秒轮询。客户端每 30 秒发送 `ping`，服务器回 `pong`，不会唤醒对象。被吊销设备的连接以代码 `4403` 关闭。
+4. 退路：连接被拒、断开或不可用时，改用长轮询 `GET /v1/ops?after=<serverSeq>&wait=25`（中国大陆风险，见 ADR 风险部分），同时按退避重试 WebSocket。
+
+WebSocket 只负责通知，操作总是通过 §7.5 的拉取获得。
 
 ## 7. 操作
 
@@ -211,47 +219,56 @@ RecoveryKeys     = { signPub, encPub }
 
 ```
 Op {
-  deviceId, deviceSeq,
-  hlc: { ms, c },            // ms: 48-bit wall clock, c: 16-bit counter
-  epoch, schemaVer,
-  cls: "c"|"s"|"k"|"x"|"a",  // content, settings, secrets, crdt, append-only
-  nonce, ct,                 // ct padded to the next bucket (§7.4)
-  sig
+  deviceId, deviceSeq,         // deviceSeq: gapless per device, from 1
+  hlc: { ms, c },              // the latest clock among the fields it carries
+  epoch, schemaVer,            // schemaVer: the writer's sync schema version (§9)
+  cls: "c"|"s"|"k"|"x"|"a",    // content, settings, secrets, crdt, append-only
+  nonce, ct,                   // ct padded to the next bucket (§7.4)
+  sig                          // ECDSA P-256 (P1363) by the device's signKey
 }
-AAD    = label(op) ‖ spaceId ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
-sigIn  = canonical(Op minus sig)
+opKey = HKDF(SK_epoch, salt = utf8(spaceId), info = label(op))
+ct    = AES-256-GCM(opKey, nonce, pad(utf8(JSON(payload))), AAD)
+AAD   = label(op)     ‖ 0x00 ‖ canonical(spaceId, cls, schemaVer, epoch, deviceId, deviceSeq)
+sigIn = label(op-sig) ‖ 0x00 ‖ canonical(spaceId, deviceId, deviceSeq, hlc.ms, hlc.c,
+                                          epoch, schemaVer, cls, nonce, ct)
 ```
 
-`canonical(...)` 按声明顺序拼接各字段，每个字段编码为 `u32-be 长度 ‖ 字节`（整数用十进制 ASCII）。表名在 `ct` 内传输，只有粗粒度类别是可见的。
+`canonical(...)` 按给出的顺序拼接各字段，每个字段编码为 `u32-be 长度 ‖ 字节`（整数用十进制 ASCII，`nonce` 和 `ct` 用其 base64url 文本）。表名在 `ct` 内传输，只有粗粒度类别是可见的。第 3a 阶段只写 `c`（内容）和 `s`（设置），其余类别保留。填充前超过 512 KiB 的载荷不会发送：该行留在本地，设备会说明原因。
 
 ### 7.2 明文载荷
 
 ```
-{ t: <table>, id: <rowId>,
-  k: "upsert" | "delete" | "append" | "crdt",
-  f?: { <field>: <value> },     // upsert: fields written by this op
-  y?: <Yjs update bytes>,       // crdt
-  u?: { <field>: <value> }      // unknown fields preserved from newer schema (§9)
-}
+{ t: <table>, id: <rowId>, k: "upsert",
+  f: { <field>: [<value>, <hlc>] },   // the fields this op writes, each with its clock
+  u?: { <field>: [<value>, <hlc>] } } // fields from a newer schema, kept untouched (§9)
+
+{ t: <table>, id: <rowId>, k: "delete", at: <hlc> }
 ```
+
+时钟是编码后的 HLC（§9）。每个字段带着自己的时钟，所以一个操作可以携带不同时间写入的字段：待发送队列只记录*哪些*字段变了，操作在推送时由行的当前值构造，一连串写入（例如正在生成的回复）因此合并成一个操作。设置以虚拟行 `t: "settings", id: <key>` 传输，值放在字段 `value` 中。`k: "append"` 和 `k: "crdt"`（Yjs 更新）保留。
 
 ### 7.3 推送
 
-`POST /v1/ops` `{ops: Op[]}`（≤ 256 个操作，≤ 1 MiB）。DO 依次：
+`POST /v1/ops` `{ops: Op[]}`（1–256 个操作，请求体 ≤ 1 MiB），活跃设备证明。DO 依次：
 
-1. 检查会话设备处于活跃状态，且 `deviceSeq` 紧接其上一个序号（重复 → 确认但不存储；有间断 → `409 seq_gap {expected}`）；
-2. 用登记表中的 `signPub` 校验每个 `sig`；
-3. 分配一段连续的 `serverSeq`；
-4. 把这一批存为**一行 SQL** `{firstSeq, lastSeq, deviceId, bytes}`；
-5. 返回 `{firstSeq, lastSeq}`，并向各连接推送 `{type: "ops", lastSeq}`。
+1. 操作日志超过只读配额（§14）时拒绝推送；
+2. 检查每个操作都来自推送设备且 `deviceSeq` 连续；不大于该设备已存最大序号的操作只确认不存储（丢失应答后的重发），之后若有间断返回 `409 seq_gap {expected}`；
+3. 检查每个新操作都在登记表的当前纪元下，否则返回 `409 epoch_stale {epoch}`（客户端获取新密钥后重新封装）；
+4. 用该设备在登记表中的 `signPub` 校验每个 `sig`；
+5. 把新操作存为**一行 SQL** `{firstSeq, lastSeq, deviceId, at, bytes}`，分配一段连续的 `serverSeq`；
+6. 返回 `{deviceSeq, firstSeq, lastSeq}`（没有新操作时 `firstSeq`/`lastSeq` 为 `null`），并发出 `{type: "ops", lastSeq}`（§6）。
+
+客户端只结清应答中确认存储的那部分操作，因此应答丢失后带着更新操作重发的推送不会丢失任何操作。
 
 ### 7.4 填充
 
-加密前，明文以 `0x80 0x00…` 后缀填充到下一个 PADMÉ 桶，隐藏确切大小。
+加密前，明文以 `0x80 0x00…` 后缀填充到下一个 PADMÉ 桶，密文长度最多泄露 O(log log n) 位。
 
 ### 7.5 拉取
 
-`GET /v1/ops?after=<serverSeq>&limit=…` → 按顺序返回批次。如果 `after` 早于压缩下限 → `410 {snapshot: <manifestId>}`。
+`GET /v1/ops?after=<serverSeq>[&wait=<0–25>]`，活跃设备证明 → `{batches: [{firstSeq, lastSeq, deviceId, ops}], more, lastSeq, registryHead}`：按顺序返回完整批次，最多约 1 MiB 或 64 批（至少一批）。带 `wait` 且没有新操作时，应答会挂起，直到有推送到达或等待超时。`after` 记为该设备确认到的序号（供第 3b 阶段回收墓碑使用）。第 3b 阶段会在 `after` 早于压缩下限时返回 `410 {snapshot: <manifestId>}`。
+
+客户端只信任服务器给出的顺序。它对照已验证的设备列表检查每个操作的签名者（被移除设备的操作只有在移除前的纪元下封装才算数，且同一设备的纪元不会倒退），校验签名，用该纪元的密钥解开，然后在每批一个本地事务中合并（§9）并移动游标。它跳过自己的操作（写入时已应用），把暂时无法应用的操作（§9 的模式版本差异，或尚未持有的纪元密钥）原样暂存在本地收件箱，等能应用时再重放。
 
 ## 8. 快照
 
@@ -263,12 +280,14 @@ sigIn  = canonical(Op minus sig)
 
 ## 9. 合并规则（客户端）
 
-- `upsert`：逐字段保留 `(hlc.ms, hlc.c, deviceId)` 更大的值。时钟按行保存在本地附表 `syncFieldClocks`（`[table+rowId] → {field: hlc}`）中，从不写入用户的行。
-- `delete`：以该操作的时钟设置 `isDeleted`；更旧的 upsert 不会让它复活，更新的 upsert 会（显式恢复）。
-- `append`：不存在则插入，从不覆盖（消息）。
-- `crdt`：应用到该行的 Yjs 文档。
-- HLC：发送时 `send = max(local, now)`；接收时最多只采纳到 `now + 5 min`；超出的远端时钟会被存储和应用，但不推进本地时钟（防止时钟偏快的设备永远获胜）。
-- 模式版本差异：客户端遇到 `schemaVer` 大于自身的操作时只存不应用，并提示"更新以查看来自其他设备的修改"。它不认识的字段保存在 `u` 中，下次写该行时原样回写。
+- HLC：`{ms, c}`（48 位墙钟、16 位计数器），编码为 12 位十六进制的 `ms`、4 位的 `c`，再接 `deviceId`，所以字符串顺序就是时钟顺序。发送时 `send = max(local, now)`，同一毫秒内由计数器区分先后；接收时最多只采纳到 `now + 5 min`。超出的远端时钟会被应用，但不推进本地时钟（时钟偏快的设备无法永远获胜）。
+- 时钟按行保存在本地附表 `syncFieldClocks`（`[table+rowId] → {fields: {field: hlc}, tombstone?}`）中，从不写入用户的行。
+- `upsert`：逐字段比较，时钟更大的获胜。
+- `delete`：按行处理。记录墓碑时钟并删除该行；但如果该行有字段是在删除之后写入的，该行保留，保留它的设备会重发整行，让已经删除它的设备重建。比墓碑旧的 upsert 不会让该行复活；更新的 upsert 会带着它携带的所有字段重新创建该行。
+- 消息和其他行一样逐字段合并，而不是只追加：应用在回复流式生成时以及在图片工作台中会原地修改消息。
+- `local` 字段（路径、运行时 id、向量索引、对尚未同步的表的引用）从不发送，也从不应用。
+- 模式版本差异：客户端遇到 `schemaVer` 大于自身的操作时暂存不应用，并提示“更新 Cognia 以查看来自其他设备的修改”。它不认识的字段连同时钟保存在 `u` 中，下次写该行时原样回写。
+- 设备关闭的类别的操作会被跳过；重新打开该类别时会重新播种并从 0 拉取。
 
 ## 10. 大文件
 
@@ -307,14 +326,16 @@ POST /v1/leases/{resId}/release  {generation}
 
 服务端可调。默认：操作日志加快照软上限 2 GB，大文件软上限 10 GB。超过软上限：大文件上传返回 `413 {code: "quota_blob"}`，操作仍被接受。超过软上限 × 1.25：除删除外一律拒绝（`413 quota_readonly`）。客户端显示用量并提供清理入口。
 
+第 3a 阶段只强制操作日志的上限：已存操作超过 2.5 GB 后，每次推送都返回 `413 quota_readonly`。服务器无法从 `ct` 中分辨删除操作，所以在第 3b 阶段的压缩释放空间之前，删除也会被拒绝。
+
 ## 15. 自托管
 
 同一套 Worker 运行在 `workerd` 下，Durable Object 的 SQLite 存在本地磁盘，大文件使用 S3 兼容存储（诊断服务器的技术栈已带有 MinIO）。作为 `deploy/compose` 的一个 profile 打包。在依赖这两点之前，先在第 3 阶段的 spike 中验证。
 
 ## 16. 错误码
 
-`device_revoked`、`device_pending`、`space_exists`、`space_empty`、`head_moved`、`invalid_entry`、`envelopes_incomplete`、`request_state`、`request_expired`、`too_many_requests`、`clock_skew`、`seq_gap`、`epoch_stale`（客户端需获取新纪元信封）、`client_too_old`、`snapshot_required`、`quota_blob`、`quota_readonly`、`lease_held`、`lease_lost`、`account_pending_deletion`。
+`device_revoked`、`device_pending`、`space_exists`、`space_empty`、`head_moved`、`invalid_entry`、`envelopes_incomplete`、`request_state`、`bad_ticket`、`request_expired`、`too_many_requests`、`clock_skew`、`seq_gap`、`epoch_stale`（客户端需获取新纪元信封）、`client_too_old`、`snapshot_required`、`quota_blob`、`quota_readonly`、`lease_held`、`lease_lost`、`account_pending_deletion`。
 
 ## 17. 测试向量
 
-`packages/sync-protocol/fixtures/`（客户端和 Worker 共用的、不依赖 `@/` 的包）将存放规范编码、签名、HPKE 密封、填充和 HLC 合并的向量。客户端、Worker 以及任何 Rust 使用方都必须通过这些向量。这是防止格式漂移的唯一手段（对照今天三份授权格式实现的情况）。
+`packages/sync-protocol/fixtures/`（客户端和 Worker 共用的、不依赖 `@/` 的包）存放冻结的向量：`v1.json`（规范编码、签名、HPKE 密封、登记表）和 `v1-ops.json`（HLC 顺序、填充、规范操作与 AAD、一个封装好的操作、合并）。客户端、Worker 以及任何 Rust 使用方都必须通过这些向量。这是防止格式漂移的唯一手段（对照今天三份授权格式实现的情况）。

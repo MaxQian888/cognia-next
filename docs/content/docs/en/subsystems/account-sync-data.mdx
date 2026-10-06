@@ -1,0 +1,143 @@
+---
+title: Account Sync Data
+description: Phase 3a of account sync — chats, messages, characters, skills, memories and shared settings replicate between enrolled devices through an end-to-end encrypted op log, captured from Dexie, merged per field by clock, announced over a live socket with a long-poll fallback, on desktops, browsers and headless hosts.
+---
+
+# Account Sync Data
+
+<Status variant="beta">Phase 3a · the op log and the first six tables · ADR-0215 · behind a build flag</Status>
+
+<TLDR>
+  Every enrolled device is a writable replica. A write to a synced table records which fields
+  changed, in the same transaction. The device later sends the row's current values as an op,
+  encrypted under the epoch key and signed by the device, to the space's Durable Object. Other
+  devices hear of it over a socket, pull it, check who signed it, and merge it field by field:
+  the later write wins. The server stores ciphertext in order and never reads a row.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Push" value="1.5 s" hint="after the last write, at most 10 s after the first" />
+  <Stat label="Live" value="socket" hint="25 s long-poll when the socket is unavailable" />
+  <Stat label="Push size" value="≤ 256 ops" hint="≤ 1 MiB per push, ≤ 512 KiB per op" />
+  <Stat label="Tables" value="6" hint="sessions, messages, characters, skills, memories, settings" />
+</StatGrid>
+
+## Where each part lives
+
+| Part | Lives in |
+| --- | --- |
+| Wire format | [Account Sync Protocol v1](../data/account-sync-protocol) §5.4, §6, §7, §9 |
+| Shared rules and vectors | `packages/sync-protocol/` (`hlc.ts`, `padding.ts`, `ops.ts`, `merge.ts`, `fixtures/v1-ops.json`) |
+| Server (op log, long-poll, socket) | `services/sync-server/` (`src/ops.ts`, `src/store.ts`, `src/space.ts`) |
+| What syncs, field by field | `lib/account-sync/data/tables.ts` |
+| Capture | `lib/account-sync/data/capture-middleware.ts` (Dexie middleware, level 3) |
+| Push, pull, apply | `lib/account-sync/data/{pusher,applier,op-origin,sync-round}.ts` |
+| Join and the engine | `lib/account-sync/data/{join,engine,own-database}.ts` |
+| Local tables | `accountSyncOutbox`, `syncFieldClocks`, `accountSyncState`, `accountSyncInbox` in `lib/db/schema.ts` |
+| App | `hooks/account-sync/use-account-sync-engine.ts`, `components/account/sync/{account-sync-data-panel,join-choice-dialog}.tsx` |
+| Headless host | `cli/src/cli/account-sync-command.ts`, `cli/src/account-sync/`, `lib/account-sync/data/headless-host.ts`, `lib/headless/runtimes/account-sync.ts` |
+| Enrollment (phase 2) | [Account sync enrollment](./account-sync-enrollment) |
+
+## What syncs
+
+| Table | Syncs | Stays on the device |
+| --- | --- | --- |
+| Chats (`sessions`) | title, character, model and agent settings, skill and memory choices, pins and order, branches, archive state | paths, sandboxes, runtime and SDK ids, connector bindings, references to projects, folders and other tables that do not sync yet |
+| Messages | role, parts (content, edits), sender, metadata | the working-set snapshot, collaboration state, IM platform ids, the project reference |
+| Characters, skills | user-made ones | built-ins (every device seeds its own) |
+| Memories | memories not bound to a project | the vector index and access counters (each device rebuilds its own) |
+| Settings | keys classified `shared` in `SETTINGS_SYNC` | `desktop-only` and `device-local` keys, API keys |
+
+Every field of every synced row type is classified `sync` or `local` in `tables.ts`, typed
+against the row type, so a new field fails the typecheck until someone decides. Settings travel
+as one virtual row per key. Two switches under **What syncs** turn content and shared settings
+off. A class that is off neither sends nor applies. Turning it back on seeds it again and pulls
+from the start of the log.
+
+## How a change travels
+
+<Steps>
+  <Step>**Capture.** A Dexie middleware, above content encryption, widens every write transaction on a synced table to the outbox and clock tables. It diffs the row against the previous one (messages are sent whole, since one device writes them while a reply streams), stamps each changed field with a hybrid logical clock and records the field names in the outbox. Nothing is captured until the database is armed for a space and device, and the applier's own writes are never captured.</Step>
+  <Step>**Push.** 1.5 s after the last write, the leader builds one op per outbox row from the row's current values, so a stream of writes becomes one op. It pads the op, encrypts it under the epoch's `op` key, signs it and sends up to 256 at a time. It settles only the ops the server says it stored, so a lost answer never drops an op.</Step>
+  <Step>**Announce.** The space stores the push as one row, gives it a server sequence range and tells every socket `{type: "ops"}`. Without a socket, a long-poll waiting up to 25 s gets the same news.</Step>
+  <Step>**Apply.** The other device pulls the batches in order. It checks each signer against its verified device list, opens the op with the epoch key and merges it per field against its clocks. The winning fields, the clocks and the cursor are written in one transaction.</Step>
+</Steps>
+
+**Deletes** are row-level tombstones. An older edit never revives a deleted row. An edit made
+after the delete keeps the row, and the device that kept it sends it whole so the others
+rebuild it.
+
+**Clocks** are `(ms, counter, deviceId)` and are monotonic per device, even if the wall clock
+steps back. A clock more than 5 minutes ahead of the receiver is applied but never adopted, so a
+device with a fast clock cannot win forever.
+
+**Ops a device cannot apply yet** are parked locally as received, then replayed when it can.
+That covers ops from a newer sync schema ("Update Cognia to see them") and ops under an epoch key
+it does not hold yet (applied after the next device list update). Fields a device does not know
+are kept with their clocks and sent back untouched on its next write.
+
+## Joining with data already on the device
+
+When a device enrolls, it seeds on its own if either side is empty. Its rows get clocks from
+their own `updatedAt` or `createdAt` and go into the outbox. When both sides hold data, the
+account page asks once:
+
+- **Merge** keeps both, and the newer change wins per field.
+- **Use the account's data** removes this device's synced rows (built-ins stay), then downloads
+  the account's.
+
+Either way an encrypted backup is saved first and listed in backup history; if it fails or is
+canceled, nothing changes.
+
+## One window, one database
+
+Only one window per database syncs. The engine takes a Web Lock named after the database and
+leads while it holds it. Other windows are followers: their writes are still captured into the
+shared outbox, which the leader pushes. The engine runs only against the profile's own database.
+A window showing a companion host's mirror does not sync from there, and says so.
+
+## Headless hosts
+
+A headless host (`cognia-agent serve`) is enrolled from its own terminal. The browser tab
+connected to it shows a hint with the command.
+
+```bash
+export COGNIA_ACCOUNT_SYNC=1            # here and for `cognia-agent serve`
+cognia-agent logto login                # the official account
+cognia-agent account-sync status        # what to run next
+cognia-agent account-sync join          # or `setup` on the first device, `recover` with the key
+```
+
+`join` prints the six-digit code; compare it with the approving device. The other subcommands
+are `approve`, `deny`, `devices`, `revoke`, `rotate`, `recovery-key` and `data`.
+
+- **Keys** live in `~/.cognia/account-sync/`, one 0600 file per secret in a 0700 directory. The
+  commands and the brain share them.
+- **Sign-in** is the CLI's Logto session (`~/.cognia/logto.json`), refreshed as needed. Only a
+  session of the official issuer counts, and a sign-in as someone else stops this space's
+  tokens.
+- **The brain** checks every 20 s. Once the host is enrolled, it runs the same engine on its own
+  database, keeps the socket open and logs where it stands.
+- **Merge or replace** has no window to ask in, so the brain waits and logs the command. Answer
+  ahead of time with `cognia-agent account-sync data --merge` (or `--replace`). The brain backs
+  up into the scheduled-backup folder (or `<serve home>/backups`), then joins.
+
+## Build flag
+
+Everything here sits behind phase 2's flag (`NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC`; on a headless
+host, `COGNIA_ACCOUNT_SYNC`). With it off, no database is armed, nothing is captured and no
+sync host is contacted; the CLI commands refuse and the brain starts no engine. The sync section
+is labelled **Preview**.
+
+## Known limits
+
+- **No snapshots yet (3b).** A new device replays the whole op log, and the log grows until 3b
+  compacts it. Above 2.5 GB of stored ops, the space accepts no more pushes.
+- **Attachments and images are blobs (phase 6).** On other devices, a synced message that
+  references one shows it as unavailable.
+- **Settings and secrets.** Only `shared` settings sync. API keys wait for the secrets class
+  (phase 5).
+- **Other tables.** Tables beyond these six, execution leases, and phones and pure web as full
+  replicas come in later phases.
+- **Equivocation.** Ops do not carry the signer's device-list head yet, so a server showing
+  devices different lists is still caught only by comparing fingerprints.

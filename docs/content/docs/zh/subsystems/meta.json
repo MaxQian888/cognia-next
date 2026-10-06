@@ -34,6 +34,7 @@
     "companion-api",
     "official-account",
     "account-sync-enrollment",
+    "account-sync-data",
     "observability",
     "performance",
     "misc-subsystems",

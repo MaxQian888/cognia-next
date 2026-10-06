@@ -1,11 +1,12 @@
-# Sync Worker — account sync's device registry and enrollment
+# Sync Worker — account sync's device registry, enrollment and op log
 
-The server half of account sync phase 2 (ADR-0215, protocol
-[`account-sync-protocol.mdx`](../../docs/content/docs/en/data/account-sync-protocol.mdx) §2–5):
+The server half of account sync phases 2 and 3a (ADR-0215, protocol
+[`account-sync-protocol.mdx`](../../docs/content/docs/en/data/account-sync-protocol.mdx) §2–7):
 a Cloudflare Worker with one SQLite Durable Object (`SyncSpace`) per account
-space. It stores the signed device registry, the current epoch's sealed keys
-and enrollment requests. It never sees a key or a device name in the clear,
-and syncs no data yet (phase 3).
+space. It stores the signed device registry, the current epoch's sealed keys,
+enrollment requests and the encrypted op log, and announces changes over a
+hibernating WebSocket. It never sees a key, a device name or a row in the
+clear. Snapshots and compaction are phase 3b.
 
 | Environment | Host                     | Accepts tokens from (`iss`)             | Web origins                                       |
 | ----------- | ------------------------ | --------------------------------------- | ------------------------------------------------- |
@@ -17,7 +18,7 @@ and syncs no data yet (phase 3).
 
 **Who is calling.**
 
-- Every route but `GET /v1/health` needs the identity Worker's access token: this environment's `iss`, `aud` `https://sync.cognia.cn`, `typ` `at+jwt`, ES256, a first-party client (`cognia-app`, `cognia-web`) and a `usr_` subject.
+- Every route but `GET /v1/health` and the socket needs the identity Worker's access token: this environment's `iss`, `aud` `https://sync.cognia.cn`, `typ` `at+jwt`, ES256, a first-party client (`cognia-app`, `cognia-web`) and a `usr_` subject.
 - The JWKS comes through the `IDENTITY` service binding, cached 10 minutes and refetched on an unknown `kid` (at most once a minute).
 - The space is `spaceId = SHA-256(label(space) ‖ iss ‖ sub)`, so staging, production and a self-hosted issuer never share one.
 - Routes that act as a device also need `Cognia-Device-Proof`, a signature by that device's registry key over the method, path, body hash and time (±120 s). Every answer carries `Cognia-Server-Time`.
@@ -34,9 +35,16 @@ and syncs no data yet (phase 3).
   - The appended device and `transcriptHash` must match the request.
 - At most 3 waiting devices and 10 requests an hour per space. Requests expire after 15 minutes; finished ones are deleted an hour later (Durable Object alarm).
 
-**Routes** (`/v1/`): `health`, `space`, `space/genesis`, `registry` (GET `?after=`, POST), `envelopes/self`, `envelopes/recovery`, `enroll/requests` (POST, GET), `enroll/requests/:id` (GET, DELETE) and its `nonce`, `reveal`, `deny`. `src/routes.ts` is the list; anything else is a 404 before authentication.
+**The op log** (protocol §6, §7):
 
-**Account deletion.** `SyncAdmin` (a named entrypoint, never routed over HTTP) has `purgeSpace(userId)`. The identity Worker calls it through its `SYNC_ADMIN` binding when an account's cooling-off ends, and it deletes the whole space.
+- A push (`POST /v1/ops`) carries 1–256 ops in at most 1 MiB, all from the pushing device. Its `deviceSeq`s must continue the device's last one: a resent prefix is acknowledged without storing, a gap answers `409 seq_gap {expected}`. Every new op must be under the registry's current epoch (`409 epoch_stale`) and carry a valid signature by the device. The new ops are stored as one row with a contiguous server sequence range.
+- A pull (`GET /v1/ops?after=&wait=`) returns whole batches in order, up to about 1 MiB or 64 batches. With `wait` (at most 25 s) and nothing new, it waits for the next push outside the Durable Object's queue.
+- The socket: `POST /v1/socket/ticket` (device proof) gives a single-use ticket valid 60 s, and `GET /v1/socket?space=&ticket=` opens a hibernating WebSocket without a bearer token. The space announces `{type: "ops", lastSeq}` on every push and `{type: "registry", head}` on every registry append, answers `ping` with `pong` without waking, and closes a removed device's sockets with code 4403.
+- Above 2.5 GB of stored ops the space is read-only (`413 quota_readonly`) until 3b compaction.
+
+**Routes** (`/v1/`): `health`, `space`, `space/genesis`, `registry` (GET `?after=`, POST), `envelopes/self`, `envelopes/recovery`, `enroll/requests` (POST, GET), `enroll/requests/:id` (GET, DELETE) and its `nonce`, `reveal`, `deny`, `ops` (POST, GET), `socket/ticket`, and `socket` (ticket only). `src/routes.ts` is the list; anything else is a 404 before authentication.
+
+**Account deletion.** `SyncAdmin` (a named entrypoint, never routed over HTTP) has `purgeSpace(userId)`. The identity Worker calls it through its `SYNC_ADMIN` binding when an account's cooling-off ends, and it deletes the whole space, op log included.
 
 ## Develop
 
@@ -44,7 +52,7 @@ and syncs no data yet (phase 3).
 cd services/sync-server
 pnpm install
 pnpm dev          # http://localhost:8788; reads the dev identity Worker's JWKS at localhost:8787
-pnpm test         # vitest in workerd: flows, refusals, alarms, purge, frozen protocol vectors
+pnpm test         # vitest in workerd: flows, refusals, alarms, op log, long-poll, socket, purge, frozen protocol vectors
 pnpm typecheck
 pnpm build        # dry-run bundle into dist/
 ```

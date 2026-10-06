@@ -1,0 +1,105 @@
+---
+title: 账号同步数据
+description: 账号同步的第 3a 阶段——会话、消息、角色、技能、记忆和共享设置通过端到端加密的操作日志在已登记设备之间复制：从 Dexie 捕获变更，按时钟逐字段合并，通过实时连接通知、长轮询兜底，覆盖桌面、浏览器和无界面主机。
+---
+
+# 账号同步数据
+
+<Status variant="beta">第 3a 阶段 · 操作日志与首批六张表 · ADR-0215 · 受构建开关控制</Status>
+
+<TLDR>
+  每台已登记的设备都是可写副本。写入同步表时，会在同一个事务里记下哪些字段变了。稍后，设备把该行的当前值作为一个操作，用纪元密钥加密、用设备密钥签名，发送到空间的 Durable Object。其他设备通过实时连接得知后拉取它，检查签名者，再逐字段合并：较晚的写入获胜。服务端按顺序保存密文，从不读取任何一行。
+</TLDR>
+
+<StatGrid>
+  <Stat label="推送" value="1.5 秒" hint="最后一次写入之后，最多在第一次写入后 10 秒" />
+  <Stat label="实时" value="WebSocket" hint="连接不可用时改用 25 秒长轮询" />
+  <Stat label="推送大小" value="≤ 256 个操作" hint="每次推送 ≤ 1 MiB，每个操作 ≤ 512 KiB" />
+  <Stat label="表" value="6" hint="会话、消息、角色、技能、记忆、设置" />
+</StatGrid>
+
+## 各部分所在位置
+
+| 部分 | 位置 |
+| --- | --- |
+| 线上格式 | [账号同步协议 v1](../data/account-sync-protocol) §5.4、§6、§7、§9 |
+| 共享规则与向量 | `packages/sync-protocol/`（`hlc.ts`、`padding.ts`、`ops.ts`、`merge.ts`、`fixtures/v1-ops.json`） |
+| 服务端（操作日志、长轮询、WebSocket） | `services/sync-server/`（`src/ops.ts`、`src/store.ts`、`src/space.ts`） |
+| 逐字段决定同步什么 | `lib/account-sync/data/tables.ts` |
+| 捕获 | `lib/account-sync/data/capture-middleware.ts`（Dexie 中间件，第 3 层） |
+| 推送、拉取、应用 | `lib/account-sync/data/{pusher,applier,op-origin,sync-round}.ts` |
+| 加入与引擎 | `lib/account-sync/data/{join,engine,own-database}.ts` |
+| 本地表 | `lib/db/schema.ts` 中的 `accountSyncOutbox`、`syncFieldClocks`、`accountSyncState`、`accountSyncInbox` |
+| 应用 | `hooks/account-sync/use-account-sync-engine.ts`、`components/account/sync/{account-sync-data-panel,join-choice-dialog}.tsx` |
+| 无界面主机 | `cli/src/cli/account-sync-command.ts`、`cli/src/account-sync/`、`lib/account-sync/data/headless-host.ts`、`lib/headless/runtimes/account-sync.ts` |
+| 设备登记（第 2 阶段） | [账号同步设备登记](./account-sync-enrollment) |
+
+## 同步什么
+
+| 表 | 同步 | 留在本设备 |
+| --- | --- | --- |
+| 会话（`sessions`） | 标题、角色、模型与智能体设置、技能与记忆选项、置顶与排序、分支、归档状态 | 路径、沙箱、运行时与 SDK id、连接器绑定、对项目、文件夹等尚未同步的表的引用 |
+| 消息 | 角色、parts（内容与编辑）、发送者、元数据 | 工作集快照、协作状态、IM 平台 id、项目引用 |
+| 角色、技能 | 用户自己创建的 | 内置项（每台设备各自生成） |
+| 记忆 | 不属于某个项目的记忆 | 向量索引与访问计数（每台设备各自重建） |
+| 设置 | `SETTINGS_SYNC` 中归为 `shared` 的键 | `desktop-only` 和 `device-local` 的键、API 密钥 |
+
+`tables.ts` 把每种同步行的每个字段都归为 `sync` 或 `local`，并按行类型做类型约束，所以新增字段在有人做出决定之前无法通过类型检查。设置按键拆成虚拟行传输。**同步内容**下的两个开关可以分别关闭内容和共享设置。关闭的类别既不发送也不应用。重新打开时会再次播种，并从日志开头重新拉取。
+
+## 一次修改怎样传递
+
+<Steps>
+  <Step>**捕获。** 一个位于内容加密之上的 Dexie 中间件，把同步表上的每个写事务扩展到待发送表和时钟表。它把新行与旧行比较（消息整条发送，因为回复流式生成时只有一台设备在写它），给每个变化的字段盖上混合逻辑时钟，并把字段名记入待发送队列。数据库为某个空间和设备启用之前不会捕获任何内容，应用远端操作时的写入也从不被捕获。</Step>
+  <Step>**推送。** 最后一次写入 1.5 秒后，主导窗口为每个待发送行用该行的当前值构造一个操作，一连串写入因此只产生一个操作。它填充操作，用纪元的 `op` 密钥加密并签名，每次最多发送 256 个。它只结清服务器确认已存储的操作，所以应答丢失也不会丢失操作。</Step>
+  <Step>**通知。** 空间把这次推送存为一行，分配一段服务器序号，并通知每个连接 `{type: "ops"}`。没有连接时，最多等待 25 秒的长轮询会得到同样的消息。</Step>
+  <Step>**应用。** 另一台设备按顺序拉取批次。它对照已验证的设备列表检查每个签名者，用纪元密钥解开操作，再按字段与本地时钟合并。获胜的字段、时钟和游标在同一个事务中写入。</Step>
+</Steps>
+
+**删除**是行级墓碑。更早的编辑不会让已删除的行复活。删除之后才做的编辑会保住该行，保住它的设备会整行发送，让其他设备重建。
+
+**时钟**是 `(ms, counter, deviceId)`，在每台设备上单调递增，即使墙钟往回调也是如此。比接收方快 5 分钟以上的时钟会被应用，但不会被采纳，所以时钟偏快的设备无法永远获胜。
+
+**暂时无法应用的操作**会原样暂存在本地，能应用时再重放。这包括来自更新同步模式版本的操作（“更新 Cognia 以查看”），以及本设备尚未持有其纪元密钥的操作（下次设备列表更新后应用）。设备不认识的字段连同时钟保留下来，下次写该行时原样发回。
+
+## 带着已有数据加入
+
+设备登记后，只要任一方为空，就自动播种。它的行根据各自的 `updatedAt` 或 `createdAt` 得到时钟，放入待发送队列。双方都有数据时，账号页面会询问一次：
+
+- **合并**：两边都保留，逐字段由较新的修改获胜。
+- **使用账号中的数据**：删除本设备的同步行（内置项保留），然后下载账号的数据。
+
+无论哪种，都会先保存一份加密备份并列入备份历史；备份失败或被取消时，什么都不改。
+
+## 一个窗口，一个数据库
+
+每个数据库只有一个窗口在同步。引擎获取以数据库命名的 Web Lock，持有期间负责同步。其他窗口是跟随者：它们的写入仍会被捕获到共享的待发送队列，由主导窗口推送。引擎只在当前档案自己的数据库上运行。显示伴侣主机镜像的窗口不会从那里同步，并会说明原因。
+
+## 无界面主机
+
+无界面主机（`cognia-agent serve`）在它自己的终端里登记。连接到它的浏览器标签页会显示一条提示，给出命令。
+
+```bash
+export COGNIA_ACCOUNT_SYNC=1            # here and for `cognia-agent serve`
+cognia-agent logto login                # the official account
+cognia-agent account-sync status        # what to run next
+cognia-agent account-sync join          # or `setup` on the first device, `recover` with the key
+```
+
+`join` 会打印六位代码，与批准设备上显示的代码比对。其他子命令有 `approve`、`deny`、`devices`、`revoke`、`rotate`、`recovery-key` 和 `data`。
+
+- **密钥**存放在 `~/.cognia/account-sync/`：目录权限 0700，每个密钥一个 0600 文件。命令和 brain 共用它们。
+- **登录**使用 CLI 的 Logto 会话（`~/.cognia/logto.json`），按需刷新。只有官方签发方的会话有效；改用别人的身份登录后，这个空间的令牌立即失效。
+- **brain** 每 20 秒检查一次。主机登记后，它在自己的数据库上运行同一个引擎，保持 WebSocket 连接，并在日志中说明当前状态。
+- **合并还是替换**：没有窗口可以询问，所以 brain 会等待，并在日志里给出命令。可以事先用 `cognia-agent account-sync data --merge`（或 `--replace`）回答。brain 先备份到定时备份目录（或 `<serve home>/backups`），然后加入。
+
+## 构建开关
+
+这里的一切都受第 2 阶段的开关控制（`NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC`；无界面主机上是 `COGNIA_ACCOUNT_SYNC`）。开关关闭时，不启用任何数据库、不捕获任何内容、不连接同步服务；CLI 命令拒绝执行，brain 不启动引擎。同步区域标注为**预览**。
+
+## 已知限制
+
+- **还没有快照（3b）。** 新设备要重放整个操作日志，日志会一直增长，直到 3b 压缩它。已存操作超过 2.5 GB 后，空间不再接受推送。
+- **附件和图片属于大文件（第 6 阶段）。** 在其他设备上，引用它们的同步消息会显示为不可用。
+- **设置与密钥。** 只同步 `shared` 设置。API 密钥要等密钥类别（第 5 阶段）。
+- **其他表。** 这六张表之外的表、执行租约，以及手机和纯网页作为完整副本，留给后续阶段。
+- **分裂视图。** 操作还不携带签名者的设备列表头部，所以服务器向不同设备展示不同列表的情况，仍只能通过比对指纹发现。

@@ -5,7 +5,7 @@ description: "Cognia operates an official, optional account on Cloudflare Worker
 
 # ADR 0215 — One person, one encrypted sync space, many writable hosts
 
-**Status:** Accepted (phase 1, identity, implemented; phase 2, keys and enrollment, implemented behind a build flag; phases 3–7 not started)
+**Status:** Accepted (phase 1, identity, implemented; phase 2, keys and enrollment, and phase 3a, the sync core for the first six tables, implemented behind a build flag; phase 3b and phases 4–7 not started)
 **Date:** 2026-10-04
 **Amends:** [ADR-0054](./0054-local-multi-account-isolation) (account sync in scope; at-rest encryption exists), [ADR-0097](./0097-cross-device-settings-contract-and-companion-reach) D5 (per-field clocks adopted for synced tables), [ADR-0103](./0103-cross-host-session-handoff) (single writable copy applies to a live turn, not to data), [ADR-0116](./0116-host-authoritative-session-state) (authority is the lease holder), [ADR-0136](./0136-cross-device-placement) (inter-host leases now exist), [ADR-0149](./0149-a-person-is-not-a-device) §6 (its premise for rejecting E2E is stale; personal sync is E2E)
 **Related:** [ADR-0001](./0001-backup-schema-v3) (backup package), [ADR-0021](./0021-webrtc-datachannel-wan-transport) and [ADR-0170](./0170-cognia-relay-and-connectivity-center) (pairing stays), [ADR-0027](./0027-mobile-offline-and-discovery) (companion sync stays for unsigned pairs), [ADR-0059](./0059-cloud-deployment-headless-brain) (headless host), [ADR-0091](./0091-lark-unified-identity-dual-entry) (Feishu principals), [ADR-0167](./0167-the-schedule-belongs-to-the-account) (schedules), [ADR-0209](./0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs) (plugin intent)
@@ -263,7 +263,7 @@ A device trusts an epoch key only when the verified list commits to it. It delet
 
 **The UI.**
 
-- *Settings → Account → Sync devices* has setup, join, recovery and the device list, labelled "nothing syncs yet".
+- *Settings → Account → Sync devices* has setup, join, recovery and the device list, labelled "nothing syncs yet" (phase 3a relabels it "Preview").
 - An app-root host polls every 20 s while the app is visible. It announces waiting devices through local-only notifications (center, toast, OS), whose action opens the approval dialog. The devices console shows the same notice.
 
 **Dormant by build flag.** The feature is off unless `NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC` is on: staging builds set it, `next dev` defaults it on.
@@ -274,16 +274,74 @@ A device trusts an epoch key only when the verified list commits to it. It delet
 
 **Still open from phase 2.**
 
-- Headless hosts cannot enroll: they have no profile vault yet (phase 3).
-- Merging a device's existing local data on join (protocol §5.4) comes with the first synced tables (phase 3).
+- Headless hosts cannot enroll: they have no profile vault yet (resolved in phase 3a: they enroll from their own terminal).
+- Merging a device's existing local data on join (protocol §5.4) comes with the first synced tables (resolved in phase 3a).
 - A server showing different devices different lists is detected by comparing the list fingerprint, not prevented (protocol §4.2).
 - The WebView crypto spikes on the Android and iOS shells, and the staging end-to-end run, are pending.
+
+## Implementation (phase 3a)
+
+Phase 3a ships the sync core for the first six tables: sessions, messages, characters, skills, memories, and settings split per key. It covers the op log, live updates, change capture, per-field merge, schema skew, and joining with local data. Desktops, browsers and headless hosts take part. Snapshots, compaction, blobs and the stale-device restart are phase 3b. The wire format is the [protocol](../data/account-sync-protocol) §5.4, §6, §7 and §9, refined from the first draft as follows.
+
+- **No session tokens.** §6's challenge-and-token step is gone: the phase-2 device proof already authenticates every call. The socket uses a single-use ticket (32 bytes, 60 s) fetched with that proof, because a browser cannot put headers on a WebSocket.
+- **Each field carries its own clock** (`f: {name: [value, hlc]}`). The outbox keeps only which fields changed, and ops are built at push time from current values. That coalesces a streaming reply into one op without losing per-field order.
+- **Deletes are row-level tombstones with survival.** A row edited after its delete survives, and the device holding it re-sends it whole. `isDeleted` is not a field.
+- **Messages merge per field, not append-only.** The app edits messages in place while streaming and in the image workbench. `append` and `crdt` stay reserved.
+- **The push answer says what was stored** (`{deviceSeq, firstSeq, lastSeq}`). The client settles only the stored tail, so a resend after a lost answer never drops an op.
+- **The server announces registry changes on the socket too**, so a connected device sees a waiting enrollment at once.
+
+**Shared rules.** `packages/sync-protocol` gains:
+
+- `hlc.ts`: 48-bit ms, 16-bit counter and device id, encoded so that string order is clock order. The send side is monotonic, and a remote clock is adopted only up to now + 5 min.
+- `padding.ts` (PADMÉ).
+- `ops.ts`: canonical AAD and signing bytes, the `op` subkey, and payload validation.
+- `merge.ts`: pure per-field last-writer-wins with tombstones.
+
+Frozen vectors live in `fixtures/v1-ops.json`.
+
+**The server** stores each push as one SQLite row with a contiguous server sequence range and enforces:
+
+- per-device sequence continuity: a resent prefix is acknowledged, and a gap answers `409 seq_gap`;
+- the current epoch (`409 epoch_stale`) and every signature;
+- 256 ops and 1 MiB per push, with a read-only cap at 2.5 GB of op log.
+
+A pull waits up to 25 s for new ops. A hibernating WebSocket announces ops and registry appends, and a revoked device's sockets close with code 4403. `SyncAdmin.purgeSpace` deletes the op log with the rest of the space's storage.
+
+**The client** is `lib/account-sync/data/`. It is framework-free, so the app and the headless brain share it.
+
+- **Policy.** `tables.ts` classifies every field of every synced row type as `sync` or `local`, typed against the row types. Built-in characters and skills, project-bound memories, the vector index, device facts, and references to tables that do not sync yet stay local. Only `shared` settings keys sync.
+- **Capture.** `capture-middleware.ts` is a level-3 Dexie middleware, above content encryption, that records changed fields and their clocks in `accountSyncOutbox` and `syncFieldClocks` within the write's own transaction. It is armed by a row in `accountSyncState`, and the applier's transactions are exempt.
+- **Push, origin and apply.** `pusher.ts` builds, seals, signs and pushes. `op-origin.ts` re-checks every pulled op's signer against the verified registry. `applier.ts` merges and writes the fields, the clocks and the cursor in one transaction, and parks ops from a newer schema or an unknown epoch in `accountSyncInbox`.
+- **Join.** `join.ts` seeds on its own when either side is empty, and otherwise asks merge or replace after an encrypted ADR-0001 backup.
+- **Engine.** `engine.ts` holds one Web Lock per database. It runs a debounced push lane, and a pull lane over the socket that falls back to long-poll. It runs only on the profile's own database, never on a companion mirror.
+
+The schema is v236. The two-and-three-client convergence suite (`sync.integration.test.ts`) runs the real client against an extended fake server.
+
+**The app.** The account page's sync section shows a status line and the per-class switches (content, shared settings). It also shows parked and too-large notices and **Sync now**. A merge-or-replace dialog shows counts per table. The section is labelled **Preview** instead of "nothing syncs yet".
+
+**Headless hosts** enroll from their own terminal. They do not take the companion RPCs the plan first proposed, which would have had a browser tab drive another host's keys.
+
+- `cognia-agent account-sync status|setup|join|recover|approve|deny|devices|revoke|rotate|recovery-key|data` wraps the same enrollment flows.
+- The host signs in with `cognia-agent logto login`; only an official-issuer session counts.
+- Keys live in 0600 files under `~/.cognia/account-sync/`, shared with the brain.
+- The brain's `account-sync` runtime starts the engine once the host is enrolled. It takes the merge-or-replace answer given with `account-sync data --merge|--replace`, and backs up first.
+- The tab connected to a headless host shows the command.
+- Subsystem guide: [Account sync data](../subsystems/account-sync-data).
+
+**Dormant by build flag.** Everything sits behind `NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC`, or `COGNIA_ACCOUNT_SYNC` on a headless host. With it off, nothing is armed, captured or contacted, the CLI commands refuse, and the brain starts no engine. Tests pin this.
+
+**Still open from phase 3a.**
+
+- No snapshots or compaction (3b): a new device replays the whole log, and the log grows until 3b. Above the read-only cap, deletes are refused too, because the server cannot tell them apart.
+- Ops do not carry the signer's registry head yet (protocol §4.2), so equivocation is still detected only by fingerprint.
+- A message referencing an attachment or image shows it as unavailable on other devices until blobs arrive (phase 6).
+- The staging end-to-end run, the production deploy of `cognia-sync`, and the WebView spikes on the phone shells are pending.
 
 ## Roadmap
 
 1. **Identity.** Better Auth Worker and D1; Feishu (self-built), GitHub, Google, Apple; issuer-agnostic client with the official default; profile-to-Person binding; the Feishu defects above.
 2. **Keys and enrollment** (implemented, behind a build flag). Device keys, recovery key and confirmation, approval with the six-digit code, recovery, revocation, epoch rotation.
-3. **Sync core.** Account object, op log, HLC, outbox middleware, snapshots, schema-skew handling, ids and counters. First tables: sessions, messages, characters, skills, memories, settings (split).
+3. **Sync core.** Account object, op log, HLC, outbox middleware, snapshots, schema-skew handling, ids and counters. First tables: sessions, messages, characters, skills, memories, settings (split). **3a** (implemented, behind a build flag): the op log, live updates, capture, merge, schema skew, join, headless hosts. **3b**: snapshots, compaction, the stale-device restart, ids and counters.
 4. **Execution leases.** Connectors, scheduler, live turns; the amendments to 0103, 0116 and 0136 take effect.
 5. **Secrets and Feishu user authorization.** Secrets class, refresh leases, BYOK keys out of `settings`.
 6. **Remaining tables and blobs**, phone as a full replica, pure web as a full replica.

@@ -1,6 +1,6 @@
 ---
 title: Account Sync Enrollment
-description: Phase 2 of account sync — device keys, the sync recovery key, approving a new device with a six-digit code, recovery, revocation and key rotation, verified on every device against a signed device list. No data syncs yet.
+description: Phase 2 of account sync — device keys, the sync recovery key, approving a new device with a six-digit code, recovery, revocation and key rotation, verified on every device against a signed device list. What syncs once enrolled is in Account Sync Data.
 ---
 
 # Account Sync Enrollment
@@ -12,7 +12,8 @@ description: Phase 2 of account sync — device keys, the sync recovery key, app
   its own keys, and the space's key for the current epoch is sealed to every device and to the
   sync recovery key. The server stores a signed, append-only device list and sealed keys; it can
   refuse service but cannot add a device, read a key or hide a removal without the devices
-  noticing. This phase enrolls devices only: nothing syncs until phase 3.
+  noticing. What an enrolled device then syncs is in [Account sync data](./account-sync-data)
+  (phase 3a).
 </TLDR>
 
 <StatGrid>
@@ -94,6 +95,7 @@ the sync host, and the account overview says "Account sync: not in this build". 
 
 ## Known limits
 
-- Headless hosts cannot enroll yet: they have no profile vault (phase 3).
 - A request lives in memory on the new device; reloading abandons it until it expires.
-- Merging a device's existing local data on join comes with the first synced tables (phase 3).
+- Headless hosts enroll from their own terminal (`cognia-agent account-sync`), and joining
+  with data already on a device asks merge or replace: both in
+  [Account sync data](./account-sync-data).

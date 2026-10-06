@@ -5,13 +5,15 @@ description: Wire format of the official account's end-to-end encrypted sync (AD
 
 # Account Sync Protocol v1
 
-<Status variant="planned" />
+<Status variant="beta">§2–7 and §9 implemented behind a build flag · §8, §10–13 planned</Status>
 
 Normative companion to [ADR-0215](../adr/0215-one-person-one-encrypted-sync-space-many-writable-hosts).
 The ADR records *why*; this page records *the bytes*. It may be refined
 without amending the ADR as long as the invariants in §0 hold. Every change
-bumps `protocolVersion` or adds an optional field. Nothing here is implemented
-yet.
+bumps `protocolVersion` or adds an optional field. Phase 2 implements §2–5
+(keys and enrollment), phase 3a §6, §7 and §9 (the op log, live updates and
+merge); snapshots (§8), blobs, leases, counters and the account lifecycle are
+not implemented yet.
 
 ## 0. Invariants (fixed by the ADR)
 
@@ -103,7 +105,8 @@ re-imports.
   - `chain` → `prevWrap_e = AES-256-GCM(chainKey, nonce, SK_{e-1}, AAD = label(chain) ‖ 0x00 ‖ JCS({spaceId, epoch: e-1}))`,
     published in the same entry, so the current key opens all history;
   - `name` → device display names (`nameCt`, §4);
-  - phase 3 adds `op`, `snap`, `blob-id`, `res-id`.
+  - `op` → op encryption (§7.1, phase 3a);
+  - later phases add `snap`, `blob-id`, `res-id`.
 - Stored on the server only sealed: one HPKE base-mode envelope per active
   device and one for `recoveryEncPub`, `info = label(epoch-envelope)`,
   `AAD = JCS({v: 1, spaceId, epoch, recipient, recipientEncPub})`.
@@ -178,8 +181,9 @@ devices; an entry is at most 8 KiB; an epoch block's `epoch` = current + 1.
 
 The server could show different, individually valid chains to different
 devices (equivocation). The device list shows a "device list fingerprint"
-(the head hash) that a person can compare across devices; phase 3 ops carry
-the signer's head.
+(the head hash) that a person can compare across devices. Phase 3a ops do not
+carry the signer's head yet; adding it as an optional envelope field is left
+to phase 3b.
 
 ## 5. Enrollment
 
@@ -287,26 +291,52 @@ every proof route before reading anything. Bearer = the issuer's access token
 
 ### 5.4 Joining with existing local data (ADR Q5)
 
-After enrollment the client computes a preview (rows per table on each side,
-settings keys that differ), makes an ADR-0001 backup package, and applies the
-user's choice:
+Phase 3a. Once enrolled, the device that leads for a database (one window per
+database, or the headless brain) arms change capture and decides what to do
+with the synced rows it already holds:
 
-- **merge**: local rows become ops; missing field clocks are synthesized as
-  `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)`;
-- **discard**: the local database is replaced from the latest snapshot + ops.
+- **Seed**, on its own, when this device holds no synced rows or the account's
+  op log is empty (the first device): every synced row gets field clocks
+  synthesized as `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)`
+  and goes into the outbox whole.
+- **Ask**, when both hold data, with a preview (rows per table here, ops in
+  the account's log):
+  - **merge** (the default): seed as above; the account's ops then merge
+    field by field (§9);
+  - **replace**: delete this device's synced rows in a transaction capture
+    ignores, then pull the account's log from 0.
 
-## 6. Sessions
+Both change local data, so an encrypted ADR-0001 backup is written first and
+recorded in backup history; a failed backup changes nothing. A headless host
+takes the answer given ahead of time with
+`cognia-agent account-sync data --merge|--replace`. A device removed and
+joined again keeps its field clocks (still true orderings in the space) but
+starts its cursor and sequence over. Phase 3b replaces "pull from 0" with the
+latest snapshot plus the ops after it.
 
-Phase 3. Phase 2 authenticates each request with the device proof of §5
-instead.
+## 6. Sessions and live updates
 
-1. `POST /v1/session` with `Authorization: Bearer <OIDC access token>` (aud =
-   sync API) → `{challenge}`.
-2. `POST /v1/session` `{deviceId, challenge, sig}` → `{sessionToken, expiresIn: 900}`.
-   Revoked device → `403 {code: "device_revoked", wipe}`.
-3. WebSocket `GET /v1/socket?ticket=…` (single-use ticket from the session),
-   hibernatable. Fallback: long-poll `GET /v1/ops?after=<serverSeq>&wait=25`
-   when the socket fails (mainland China risk, ADR §Risks).
+Phase 3a. There is no separate session token: every call carries the bearer
+token and the device proof of §5, as in phase 2.
+
+1. `POST /v1/socket/ticket` (active-device proof) → `201 {ticket, expiresAt}`:
+   32 random bytes, single-use, valid 60 s, bound to the space and the device.
+2. WebSocket `GET /v1/socket?space=<spaceId>&ticket=<ticket>`. A browser cannot
+   set headers on a WebSocket, so this route skips the bearer check: the
+   Worker forwards it to the space, which consumes the ticket and refuses an
+   unknown, used or expired one (`401 bad_ticket`) or a revoked device
+   (`403 device_revoked`). The Durable Object accepts it with the hibernation
+   API and sends `{type: "hello", lastSeq, registryHead}`.
+3. The server sends `{type: "ops", lastSeq}` after every stored push and
+   `{type: "registry", head}` after every registry append, so a connected
+   device sees a waiting enrollment at once instead of on its next 20 s poll.
+   The client sends `ping` every 30 s, answered `pong` without waking the
+   object. A revoked device's sockets are closed with code `4403`.
+4. Fallback: long-poll `GET /v1/ops?after=<serverSeq>&wait=25` while the
+   socket is refused, drops or is unavailable (mainland China risk, ADR
+   §Risks); the socket is retried with backoff meanwhile.
+
+The socket only announces. Ops always arrive through the pull of §7.5.
 
 ## 7. Ops
 
@@ -314,52 +344,88 @@ instead.
 
 ```
 Op {
-  deviceId, deviceSeq,
-  hlc: { ms, c },            // ms: 48-bit wall clock, c: 16-bit counter
-  epoch, schemaVer,
-  cls: "c"|"s"|"k"|"x"|"a",  // content, settings, secrets, crdt, append-only
-  nonce, ct,                 // ct padded to the next bucket (§7.4)
-  sig
+  deviceId, deviceSeq,         // deviceSeq: gapless per device, from 1
+  hlc: { ms, c },              // the latest clock among the fields it carries
+  epoch, schemaVer,            // schemaVer: the writer's sync schema version (§9)
+  cls: "c"|"s"|"k"|"x"|"a",    // content, settings, secrets, crdt, append-only
+  nonce, ct,                   // ct padded to the next bucket (§7.4)
+  sig                          // ECDSA P-256 (P1363) by the device's signKey
 }
-AAD    = label(op) ‖ spaceId ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
-sigIn  = canonical(Op minus sig)
+opKey = HKDF(SK_epoch, salt = utf8(spaceId), info = label(op))
+ct    = AES-256-GCM(opKey, nonce, pad(utf8(JSON(payload))), AAD)
+AAD   = label(op)     ‖ 0x00 ‖ canonical(spaceId, cls, schemaVer, epoch, deviceId, deviceSeq)
+sigIn = label(op-sig) ‖ 0x00 ‖ canonical(spaceId, deviceId, deviceSeq, hlc.ms, hlc.c,
+                                          epoch, schemaVer, cls, nonce, ct)
 ```
 
-`canonical(...)` is the concatenation, in declaration order, of each field as
-`u32-be length ‖ bytes` (integers as decimal ASCII). Table names travel inside
-`ct`; only the coarse class is visible.
+`canonical(...)` is the concatenation, in the order given, of each field as
+`u32-be length ‖ bytes` (integers as decimal ASCII, `nonce` and `ct` as their
+base64url text). Table names travel inside `ct`; only the coarse class is
+visible. Phase 3a writes `c` (content) and `s` (settings); the other classes
+are reserved. A payload larger than 512 KiB before padding is not sent: the
+row stays local and the device says so.
 
 ### 7.2 Plaintext payload
 
 ```
-{ t: <table>, id: <rowId>,
-  k: "upsert" | "delete" | "append" | "crdt",
-  f?: { <field>: <value> },     // upsert: fields written by this op
-  y?: <Yjs update bytes>,       // crdt
-  u?: { <field>: <value> }      // unknown fields preserved from newer schema (§9)
-}
+{ t: <table>, id: <rowId>, k: "upsert",
+  f: { <field>: [<value>, <hlc>] },   // the fields this op writes, each with its clock
+  u?: { <field>: [<value>, <hlc>] } } // fields from a newer schema, kept untouched (§9)
+
+{ t: <table>, id: <rowId>, k: "delete", at: <hlc> }
 ```
+
+Clocks are encoded HLCs (§9). Each field carries its own clock, so one op can
+carry fields written at different times: the outbox keeps only *which* fields
+changed, and the op is built at push time from the row's current values, which
+coalesces a stream of writes (a reply being generated) into one op. Settings
+travel as virtual rows `t: "settings", id: <key>` with the value in field `value`.
+`k: "append"` and `k: "crdt"` (Yjs updates) are reserved.
 
 ### 7.3 Push
 
-`POST /v1/ops` `{ops: Op[]}` (≤ 256 ops, ≤ 1 MiB). The DO:
+`POST /v1/ops` `{ops: Op[]}` (1–256 ops, ≤ 1 MiB body), active-device proof.
+The DO:
 
-1. checks the session device is active and `deviceSeq` continues its last seq
-   (dupes → acknowledged without storing; gaps → `409 seq_gap {expected}`);
-2. verifies each `sig` against the registry `signPub`;
-3. assigns a contiguous `serverSeq` range;
-4. stores the batch as **one SQL row** `{firstSeq, lastSeq, deviceId, bytes}`;
-5. acks `{firstSeq, lastSeq}` and pushes `{type: "ops", lastSeq}` to sockets.
+1. refuses the push when the op log is over the read-only quota (§14);
+2. checks every op comes from the pushing device with consecutive
+   `deviceSeq`; ops at or below the device's last stored seq are acknowledged
+   without storing (a resend after a lost answer), and a gap after it answers
+   `409 seq_gap {expected}`;
+3. checks every new op is under the registry's current epoch, else
+   `409 epoch_stale {epoch}` (the client fetches the new key and re-seals);
+4. verifies each `sig` against the device's registry `signPub`;
+5. stores the new ops as **one SQL row** `{firstSeq, lastSeq, deviceId, at, bytes}`
+   with a contiguous `serverSeq` range;
+6. answers `{deviceSeq, firstSeq, lastSeq}` (`firstSeq`/`lastSeq` are `null`
+   when nothing was new) and announces `{type: "ops", lastSeq}` (§6).
+
+The client settles only the ops the answer says were stored, so a push whose
+answer was lost and that is resent with newer ops never drops an op.
 
 ### 7.4 Padding
 
 Plaintext is padded with a `0x80 0x00…` suffix to the next PADMÉ bucket
-before encryption, hiding exact sizes.
+before encryption, so ciphertext lengths leak at most O(log log n) bits.
 
 ### 7.5 Pull
 
-`GET /v1/ops?after=<serverSeq>&limit=…` → batches in order. If `after` is older
-than the compaction floor → `410 {snapshot: <manifestId>}`.
+`GET /v1/ops?after=<serverSeq>[&wait=<0–25>]`, active-device proof →
+`{batches: [{firstSeq, lastSeq, deviceId, ops}], more, lastSeq, registryHead}`:
+whole batches in order, up to about 1 MiB or 64 batches (at least one). With
+`wait` and nothing new, the answer is held until a push arrives or the wait
+runs out. `after` is recorded as the device's acknowledged seq (used by 3b's
+tombstone collection). Phase 3b adds `410 {snapshot: <manifestId>}` when
+`after` is older than the compaction floor.
+
+The client trusts the server for ordering only. It checks each op's signer
+against its verified device list (a removed device's op counts only if sealed
+under an epoch before its removal, and a device's epochs never go backwards),
+verifies the signature, opens it with the epoch's key, then merges (§9) and
+moves its cursor in one local transaction per batch.
+It skips its own ops (already applied when written), and parks an op it
+cannot apply yet (§9 schema skew, or an epoch key it does not hold) in a local
+inbox as received, replaying it when it can.
 
 ## 8. Snapshots
 
@@ -378,20 +444,31 @@ than the compaction floor → `410 {snapshot: <manifestId>}`.
 
 ## 9. Merge rules (client)
 
-- `upsert`: per field, keep the value with the greater `(hlc.ms, hlc.c, deviceId)`.
-  Clocks are kept per row in the local side table `syncFieldClocks`
-  (`[table+rowId] → {field: hlc}`), never in the user's row.
-- `delete`: sets `isDeleted` with the op's clock; an older upsert never revives
-  it; a newer upsert does (explicit restore).
-- `append`: insert if absent; never overwritten (messages).
-- `crdt`: applied to the row's Yjs document.
-- HLC: `send = max(local, now)`; on receive, adopt `remote` only up to
-  `now + 5 min`; a remote clock beyond that is stored and applied but does
-  not advance the local clock (prevents a skewed device winning forever).
-- Schema skew: a client stores but does not apply ops with `schemaVer >` its
-  own and shows "update to see changes from your other devices". Fields it
-  does not know are kept in `u` and re-emitted untouched on its next write of
-  that row.
+- HLC: `{ms, c}` (48-bit wall clock, 16-bit counter), encoded as `ms` in 12
+  hex digits, `c` in 4, then the `deviceId`, so string order is clock order.
+  `send = max(local, now)`, with the counter breaking ties within a
+  millisecond; on receive, adopt `remote` only up to `now + 5 min`. A remote
+  clock beyond that is applied but does not advance the local clock (a skewed
+  device cannot win forever).
+- Clocks are kept per row in the local side table `syncFieldClocks`
+  (`[table+rowId] → {fields: {field: hlc}, tombstone?}`), never in the user's
+  row.
+- `upsert`: per field, the greater clock wins.
+- `delete`: row-level. It records the tombstone clock and removes the row,
+  unless the row holds a field written after it; then the row survives and
+  the device that kept it re-sends the whole row, so a device that already
+  removed it rebuilds it. An upsert older than the tombstone never revives
+  the row; a newer one recreates it with every field it carries.
+- Messages merge per field like other rows, not append-only: the app edits
+  messages in place while a reply streams and in the image workbench.
+- `local` fields (paths, runtime ids, the vector index, references to tables
+  that do not sync yet) are never sent and never applied.
+- Schema skew: a client parks, without applying, ops with a `schemaVer`
+  greater than its own and shows "update Cognia to see changes from your other
+  devices". Fields it does not know are kept in `u` with their clocks and
+  re-emitted untouched on its next write of that row.
+- Ops of a class the device switched off are passed over; switching the class
+  back on re-seeds it and pulls from 0.
 
 ## 10. Blobs
 
@@ -444,6 +521,10 @@ Server-side, tunable. Defaults: op log + snapshots soft 2 GB, blobs soft
 Above soft × 1.25: everything but deletes refused (`413 quota_readonly`). The
 client shows usage and a cleanup entry.
 
+Phase 3a enforces only the op-log cap: above 2.5 GB of stored op bytes every
+push answers `413 quota_readonly`. The server cannot tell a delete from other
+ops inside `ct`, so deletes are refused too until 3b's compaction frees space.
+
 ## 15. Self-host
 
 The same Worker runs under `workerd` with Durable Object SQLite on local disk
@@ -454,14 +535,15 @@ the Phase 3 spike before relying on them.
 ## 16. Error codes
 
 `device_revoked`, `device_pending`, `space_exists`, `space_empty`,
-`head_moved`, `invalid_entry`, `envelopes_incomplete`, `request_state`,
+`head_moved`, `invalid_entry`, `envelopes_incomplete`, `request_state`, `bad_ticket`,
 `request_expired`, `too_many_requests`, `clock_skew`, `seq_gap`, `epoch_stale` (client must fetch
 the new epoch envelope), `client_too_old`, `snapshot_required`, `quota_blob`,
 `quota_readonly`, `lease_held`, `lease_lost`, `account_pending_deletion`.
 
 ## 17. Test vectors
 
-`packages/sync-protocol/fixtures/` (a zero-`@/` package shared by the client and the Worker) will hold canonical-encoding,
-signature, HPKE-seal, padding and HLC-merge vectors. The client, the
+`packages/sync-protocol/fixtures/` (a zero-`@/` package shared by the client and the Worker) holds the frozen
+vectors: `v1.json` (canonical encoding, signatures, HPKE seals, the registry)
+and `v1-ops.json` (HLC order, padding, canonical ops and AAD, a sealed op, merge). The client, the
 Worker and any Rust consumer must all pass them. That is the only defense
 against format drift (cf. the three grant-format copies today).

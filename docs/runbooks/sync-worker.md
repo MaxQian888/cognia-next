@@ -1,11 +1,11 @@
-# Runbook — Account sync Worker (ADR-0215 phase 2)
+# Runbook — Account sync Worker (ADR-0215 phases 2 and 3a)
 
 Incident and maintenance steps for `cognia-sync` (`sync.cognia.cn`), which
-holds each account's device registry, sealed epoch keys and enrollment
-requests. Provisioning and deployment live in
+holds each account's device registry, sealed epoch keys, enrollment
+requests and encrypted op log. Provisioning and deployment live in
 [`services/sync-server/README.md`](../../services/sync-server/README.md).
 
-The server holds no key and no name in the clear. Nothing here can recover a
+The server holds no key, no name and no row in the clear. Nothing here can recover a
 person's data or enroll a device for them, by design.
 
 ## Every request answers 401 `unauthorized`
@@ -36,6 +36,15 @@ There is no HTTP route for this, on purpose. A space is deleted with its account
 The identity Worker logs `[identity] purged N account(s); M failed` with the reason. A failed purge stays pending and retries hourly.
 
 - `SYNC_ADMIN` errors mean the sync Worker is unreachable or was deployed without the `SyncAdmin` entrypoint. Redeploy `cognia-sync`, then wait for the next run.
+
+## Changes stop arriving on other devices
+
+1. In the app's sync section, read the status line. "Checking for changes every few seconds" means the socket is down and the device fell back to long-poll: changes still arrive within 25 s. Persistent socket failures in one region point at the network (ADR §Risks), not the Worker.
+2. "Waiting to upload" that never drains means pushes fail. `wrangler tail` while the device retries:
+   - **`409 seq_gap`** repeating: the device resynced its sequence and should recover on the next push. If it does not, its local state is broken; it can leave sync and join again.
+   - **`409 epoch_stale`** repeating: the device cannot read the new epoch key. Check that `GET /v1/envelopes/self` answers for it; a `404 envelopes_incomplete` means the last rotation left it out, and another device must remove and re-approve it.
+   - **`413 quota_readonly`**: the space has more than 2.5 GB of ops. Nothing can be pushed, deletes included, until phase 3b compaction. Do not delete op rows by hand: every device's cursor depends on them.
+3. Changes listed as "need a newer version of Cognia" are parked on that device by design. Updating the app applies them.
 
 ## A space reports `500 internal_error`
 
