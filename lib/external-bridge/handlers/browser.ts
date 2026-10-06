@@ -103,7 +103,7 @@ export function __resetBrowserBridgeForTests(): void {
 }
 
 export interface BrowserBridgeDeps {
-  invoke(
+  invokeTool(
     toolName: BrowserToolName,
     args: Record<string, unknown>,
     options: { sessionId: string; reason?: string }
@@ -145,7 +145,7 @@ async function defaultDeps(): Promise<BrowserBridgeDeps> {
     import("@cognia/redact"),
   ])
   return {
-    invoke: async (toolName, args, options) =>
+    invokeTool: async (toolName, args, options) =>
       (await invokePluginTool(BROWSER_TOOLS_PLUGIN_ID, toolName, args, options)).result,
     requestConsent: async ({ consentId, reason, perCall }) => {
       const broker = getPluginConsentBroker()
@@ -261,7 +261,7 @@ async function prepareSurface(
     return
   }
   if (await deps.localChromiumInstalled()) {
-    await deps.invoke("browser_open", { backend: "local-chromium" }, { sessionId })
+    await deps.invokeTool("browser_open", { backend: "local-chromium" }, { sessionId })
   }
 }
 
@@ -320,7 +320,7 @@ export async function browserToolCore(input: BrowserToolInput): Promise<BrowserT
       }
     }
 
-    const result = await deps.invoke(tool, args, {
+    const result = await deps.invokeTool(tool, args, {
       sessionId,
       ...(reason ? { reason } : {}),
     })
