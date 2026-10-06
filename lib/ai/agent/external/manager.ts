@@ -78,13 +78,11 @@ import {
   type SessionCreateOptions,
   type SessionListOptions,
 } from "./protocol-adapter"
-import { AcpClientAdapter } from "@cognia/agent-acp/client"
-import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
-import { createAcpAdapterFactory, createDevinAcpAdapter } from "./integrations/acp"
+import { acpClientExtension } from "@cognia/agent-acp/client"
+import { devinAcpExtension } from "@cognia/agent-acp/devin-adapter"
+import { createAcpAdapterFactory, isolateNativeDevin } from "./integrations/acp"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
-import { OpenCodeClientAdapter } from "@cognia/agent-opencode/client"
-import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
 import {
   canProjectOpenCodeV2McpOnThisHost,
   createOpenCodeV2AdapterFactory,
@@ -93,7 +91,7 @@ import { createA2aAdapterFactory } from "./integrations/a2a"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
 import { createDshSdkAdapterFactory, dshManagedLaunchHost } from "./integrations/dsh"
-import { clampThinkingLevel, PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
+import { clampThinkingLevel, piRpcExtension } from "@cognia/agent-pi/rpc-client"
 import { createPiRpcAdapterFactory } from "./integrations/pi"
 import {
   catalogModelSurface,
@@ -152,7 +150,7 @@ import {
   withRegisteredPluginDeclaration,
 } from "./capability/capability-profile"
 import { liveCapabilityFacts } from "./capability/capability-live-facts"
-import { externalAgentPresetIdOf, isDevinAgentConfig } from "./config/preset-identity"
+import { externalAgentPresetIdOf } from "./config/preset-identity"
 import { externalAgentSandboxSupportsPlatform } from "./policy/security-policy"
 import type {
   ExternalAgentCapabilityProfileV1,
@@ -361,11 +359,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
 export function createConfiguredProtocolAdapter(
   config: ExternalAgentConfig
 ): ProtocolAdapter | undefined {
-  const adapter = protocolAdapterRegistry.create(config.protocol)
-  const isDevin = isDevinAgentConfig(config)
-  return config.transport === "stdio" && isDevin && adapter?.constructor === AcpClientAdapter
-    ? createDevinAcpAdapter(adapter as AcpClientAdapter)
-    : adapter
+  return isolateNativeDevin(config, protocolAdapterRegistry.create(config.protocol))
 }
 
 function placementWithToolHostLeases(
@@ -866,8 +860,9 @@ export class ExternalAgentManager {
     const adapter = this.adapters.get(agentId)
     if (!instance || !adapter) {
       for (const [parentId, candidate] of this.adapters) {
-        if (!(candidate instanceof DevinAcpAdapter)) continue
-        const retired = await candidate.handleProcessExit(agentId)
+        const devin = devinAcpExtension.resolve(candidate)
+        if (!devin) continue
+        const retired = await devin.handleProcessExit(agentId)
         if (!retired) continue
         const parent = this.instances.get(parentId)
         for (const sessionId of retired) parent?.sessions.delete(sessionId)
@@ -1016,45 +1011,13 @@ export class ExternalAgentManager {
    * Resolve a typed vendor extension (ADR-0217) on an agent's live adapter, or
    * null when the agent has no adapter or its adapter does not answer it. The
    * integration package defines what the extension is (for example
-   * `codexAppServerExtension` for Codex's MCP / skills / account status), so
+   * `codexAppServerExtension` for Codex's MCP / skills / account status,
+   * `openCodeServerExtension`, `openCodeV2Extension`, `piRpcExtension`), so
    * the manager never imports a vendor class to reach vendor controls.
    */
   getAdapterExtension<T>(agentId: string, extension: AdapterExtension<T>): T | null {
     const adapter = this.adapters.get(agentId)
     return adapter ? (extension.resolve(adapter) ?? null) : null
-  }
-
-  /**
-   * Return the live OpenCode adapter for an agent, or null when the agent isn't
-   * connected through the `opencode` protocol. The OpenCode-specific surfaces
-   * (share links, session diff/todos, PTY, TUI driving, dynamic MCP, workspace
-   * find/*, VCS/project info) live on the adapter rather than the generic
-   * {@link ProtocolAdapter} contract — this is the sanctioned way for UI code
-   * to reach them (mirrors {@link getAdapterExtension}).
-   */
-  getOpenCodeAdapter(agentId: string): OpenCodeClientAdapter | null {
-    const adapter = this.adapters.get(agentId)
-    return adapter instanceof OpenCodeClientAdapter ? adapter : null
-  }
-
-  /** Access the current OpenCode service client and its full native API. */
-  getOpenCodeV2Adapter(agentId: string): OpenCodeV2ClientAdapter | null {
-    const adapter = this.adapters.get(agentId)
-    return adapter instanceof OpenCodeV2ClientAdapter ? adapter : null
-  }
-
-  /**
-   * Return the live Pi RPC adapter for an agent, or null when the agent isn't
-   * connected through the native `pi-rpc` protocol.
-   *
-   * Pi's credential diagnostic lives on the adapter rather than the generic
-   * {@link ProtocolAdapter} contract because it is not a protocol call at all —
-   * it shells `pi auth check`, which only Pi has. Mirrors
-   * {@link getAdapterExtension} and {@link getOpenCodeAdapter}.
-   */
-  getPiRpcAdapter(agentId: string): PiRpcClientAdapter | null {
-    const adapter = this.adapters.get(agentId)
-    return adapter instanceof PiRpcClientAdapter ? adapter : null
   }
 
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
@@ -1185,7 +1148,7 @@ export class ExternalAgentManager {
     const instance = this.instances.get(agentId)
     if (!adapter || !instance || !adapter.isConnected()) return { status: "unsupported" }
     try {
-      const pi = this.getPiRpcAdapter(agentId)
+      const pi = this.getAdapterExtension(agentId, piRpcExtension)
       if (pi) {
         // The RPC first, because it is the one a live session will use. Both
         // sources enumerate the same models, but only this one carries Pi's
@@ -2955,9 +2918,10 @@ export class ExternalAgentManager {
         : undefined
     const sessionOptions = this.buildSessionOptions(instance, options)
 
+    const devin = devinAcpExtension.resolve(adapter)
     let session = preferredSessionId
-      ? adapter instanceof DevinAcpAdapter
-        ? adapter.getSession(preferredSessionId)
+      ? devin
+        ? devin.getSession(preferredSessionId)
         : (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
       : chatSessionId && !reset
         ? latestSession(
@@ -2966,12 +2930,12 @@ export class ExternalAgentManager {
               .filter((candidate) => candidate.metadata?.cogniaSessionId === chatSessionId)
           )
         : undefined
-    if (session && adapter instanceof AcpClientAdapter) {
+    const acp = acpClientExtension.resolve(adapter)
+    if (session && acp) {
       try {
-        session =
-          (await adapter.prepareForkSessionForExecution(session.id, sessionOptions)) ?? session
+        session = (await acp.prepareForkSessionForExecution(session.id, sessionOptions)) ?? session
       } catch (error) {
-        if (!adapter.getSession(session.id)) instance.sessions.delete(session.id)
+        if (!acp.getSession(session.id)) instance.sessions.delete(session.id)
         throw error
       }
     }
@@ -4865,9 +4829,10 @@ export class ExternalAgentManager {
       let attemptedReconnect = false
       try {
         const healthy = await adapter.healthCheck()
-        if (adapter instanceof DevinAcpAdapter) {
+        const devin = devinAcpExtension.resolve(adapter)
+        if (devin) {
           for (const sessionId of instance.sessions.keys()) {
-            if (!adapter.getSession(sessionId)) instance.sessions.delete(sessionId)
+            if (!devin.getSession(sessionId)) instance.sessions.delete(sessionId)
           }
         }
         this.updateInstanceState(agentId, instance, {

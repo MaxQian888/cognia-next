@@ -21,6 +21,7 @@
  *   frames the bytes itself (see `pi-rpc-peer.ts`).
  */
 
+import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
 import type { ExternalAgentCompactionCapability } from "@cognia/agent-contracts/session-operations"
 import type {
   AcpConfigOption,
@@ -2427,3 +2428,12 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
     if (timer) clearTimeout(timer)
   }
 }
+
+/**
+ * Pi's own controls (the `pi auth check` credential diagnostic, which is not
+ * a protocol call), for the UI. Hosts resolve it through the manager's
+ * extension lookup instead of importing this class.
+ */
+export const piRpcExtension = defineAdapterExtension<PiRpcClientAdapter>("pi.rpc", (adapter) =>
+  adapter instanceof PiRpcClientAdapter ? adapter : undefined
+)

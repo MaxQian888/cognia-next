@@ -1,6 +1,10 @@
 import type { AgentProcessHost } from "@cognia/agent-contracts/host"
 import { PI_RPC_EXECUTION_SEMANTICS } from "@cognia/agent-pi/manifest"
-import { PiRpcClientAdapter, type PiHostServices } from "@cognia/agent-pi/rpc-client"
+import {
+  PiRpcClientAdapter,
+  piRpcExtension,
+  type PiHostServices,
+} from "@cognia/agent-pi/rpc-client"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { matchGlob } from "@/lib/claude/permissions/ruleset"
 import { LeaseConflictError } from "@/lib/execution/lease-conflict"
@@ -89,6 +93,12 @@ describe("Pi host wiring", () => {
     expect(adapter.outboundGate).toBe(hasNoLeakingPiiDeep)
     expect(adapter.approvalPolicy).toBe(configuredApprovalPolicy)
     expect(adapter.matchToolPattern).toBe(matchGlob)
+  })
+
+  it("answers the Pi extension for its own adapter only", () => {
+    const adapter = createPiRpcAdapterFactory(processHost(), services)()
+    expect(piRpcExtension.resolve(adapter)).toBe(adapter)
+    expect(piRpcExtension.resolve({ protocol: "pi-rpc" } as never)).toBeUndefined()
   })
 
   it("creates an independent adapter per configuration", () => {

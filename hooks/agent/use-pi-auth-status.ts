@@ -109,8 +109,11 @@ async function runProbe(agentId: string, connected: boolean, force: boolean): Pr
   }
 
   const run = (async () => {
-    const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-    const adapter = getExternalAgentManager().getPiRpcAdapter(agentId)
+    const [{ getExternalAgentManager }, { piRpcExtension }] = await Promise.all([
+      import("@/lib/ai/agent/external/manager"),
+      import("@cognia/agent-pi/rpc-client"),
+    ])
+    const adapter = getExternalAgentManager().getAdapterExtension(agentId, piRpcExtension)
     if (!adapter) {
       // Every agent except Pi. Settled, so the next mount does not look again.
       publishCurrent({ ...IDLE, settled: true })

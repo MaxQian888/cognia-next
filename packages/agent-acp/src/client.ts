@@ -8,6 +8,7 @@
  * @see https://github.com/zed-industries/claude-code-acp
  */
 
+import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
 import { readServerSentEvents } from "@cognia/agent-runtime-kit/sse"
 import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
 import type {
@@ -5176,3 +5177,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 export function createAcpClient(deps: AcpClientDeps): AcpClientAdapter {
   return new AcpClientAdapter(deps)
 }
+
+/**
+ * The ACP client's host-facing controls beyond the adapter core: binding a
+ * fork's MCP servers before it first executes, dynamic-MCP connection state
+ * and terminal authentication.
+ */
+export const acpClientExtension = defineAdapterExtension<AcpClientAdapter>(
+  "acp.client",
+  (adapter) => (adapter instanceof AcpClientAdapter ? adapter : undefined)
+)

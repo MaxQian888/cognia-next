@@ -11,9 +11,12 @@
  * gate, the bounded logger and the dynamic-MCP gateway.
  */
 
-import type { ProtocolAdapterFactory } from "@cognia/agent-contracts/adapter"
-import type { AcpDynamicMcpHostController } from "@cognia/agent-contracts/external-agent"
-import { AcpClientAdapter, type AcpClientDeps } from "@cognia/agent-acp/client"
+import type { ProtocolAdapter, ProtocolAdapterFactory } from "@cognia/agent-contracts/adapter"
+import type {
+  AcpDynamicMcpHostController,
+  ExternalAgentConfig,
+} from "@cognia/agent-contracts/external-agent"
+import { AcpClientAdapter, acpClientExtension, type AcpClientDeps } from "@cognia/agent-acp/client"
 import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
 import { loggers } from "@cognia/logging"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -22,6 +25,7 @@ import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { getAcpHostCapabilities } from "../agent-transport"
 import { buildAgentEnv } from "../config/env-builder"
+import { isDevinAgentConfig } from "../config/preset-identity"
 import { createAgentLogger } from "../host/agent-logger"
 import { createAgentTransportFileHost } from "../host/file-host"
 import { createAgentTransportProcessHost } from "../host/process-host"
@@ -82,4 +86,21 @@ export function createDevinAcpAdapter(discovery: AcpClientAdapter): DevinAcpAdap
     () => createAcpClientAdapter(),
     createAgentLogger(loggers.agent)
   )
+}
+
+/**
+ * Give native Devin one ACP process per conversation. Applies only when the
+ * factory registered for `acp` still produced the built-in client: a custom
+ * factory a host or plugin registered stays authoritative.
+ */
+export function isolateNativeDevin(
+  config: ExternalAgentConfig,
+  adapter: ProtocolAdapter | undefined
+): ProtocolAdapter | undefined {
+  const acp = adapter ? acpClientExtension.resolve(adapter) : undefined
+  return config.transport === "stdio" &&
+    isDevinAgentConfig(config) &&
+    acp?.constructor === AcpClientAdapter
+    ? createDevinAcpAdapter(acp)
+    : adapter
 }

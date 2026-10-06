@@ -3,6 +3,7 @@
  * therefore owns an ACP transport and an immutable host-prepared configuration.
  * The discovery transport carries no conversation credentials.
  */
+import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -500,3 +501,11 @@ export class DevinAcpAdapter extends BaseProtocolAdapter {
     return this.discovery.getDynamicMcpConnections(...args)
   }
 }
+
+/**
+ * Devin's per-conversation processes: the host routes a child process exit
+ * here and reconciles the sessions it retired.
+ */
+export const devinAcpExtension = defineAdapterExtension<DevinAcpAdapter>("acp.devin", (adapter) =>
+  adapter instanceof DevinAcpAdapter ? adapter : undefined
+)

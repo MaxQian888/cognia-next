@@ -138,7 +138,8 @@ Rules every package holds:
 | A2A | Done: `@cognia/agent-a2a` over `AgentFetch`; remote, task-scoped cancel. Cognia's own remote-host run plane stays in the app (scope decision in ADR-0217) |
 | ACP and Devin | Done: `@cognia/agent-acp` (client, wire codec, feature profile, permission input, ACP Registry v1, the per-conversation Devin adapter) over the process, file, terminal, fetch and WebSocket ports; a turn-scoped `session/cancel` is declared, so a cancelled ACP session is kept. Vendor quirks (Kimi, Cline, Qoder, Goose, Devin, OpenCode over ACP) are `AcpVendorProfile` data the client applies; a host can supply its own profiles |
 | Claude Code and session readers for the other runtimes | Not done yet (Phase 3 in progress) |
-| Catalog rows generated from manifests, CLI port injection, manager `instanceof` removal | Not done yet (Phase 3) |
+| Manager vendor branches | Done: the manager imports no vendor class; vendor controls are typed extensions (`codexAppServerExtension`, `openCodeServerExtension`, `openCodeV2Extension`, `piRpcExtension`, `acpClientExtension`, `devinAcpExtension`) and native Devin isolation lives in `integrations/acp.ts` |
+| Catalog rows generated from manifests, CLI port injection | Not done yet (Phase 3) |
 | Engines and tools | Done: the AI SDK engine and the host run without the Claude Agent SDK; the wire and shared runtime modules do not reference it, even for types |
 | Orchestration | Done for run state, ledgers, coordinator, scheduling and recovery; team gates, teammate pool, wave runner and the synthesized workflow stay in the app (they are typed against the app's `AgentTeam` model) |
 

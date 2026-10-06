@@ -1,6 +1,7 @@
 import type { AgentProcessHost } from "@cognia/agent-contracts/host"
 import { OPENCODE_V2_EXECUTION_SEMANTICS } from "@cognia/agent-opencode/manifest"
-import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
+import { openCodeServerExtension } from "@cognia/agent-opencode/client"
+import { OpenCodeV2ClientAdapter, openCodeV2Extension } from "@cognia/agent-opencode/v2-client"
 
 const mockSidecarDiscover = jest.fn()
 jest.mock("@/lib/claude/feature-call", () => ({
@@ -77,6 +78,13 @@ describe("OpenCode host wiring", () => {
     mockInProcess.mockResolvedValueOnce({ endpoint: "http://b", version: "2.0.0", headers: {} })
     await discoverOpenCodeV2Service(signal)
     expect(mockInProcess).toHaveBeenCalledWith(expect.any(Function), signal)
+  })
+
+  it("answers the V2 service extension and not the legacy server one", () => {
+    const adapter = createOpenCodeV2AdapterFactory(processHost)()
+    expect(openCodeV2Extension.resolve(adapter)).toBe(adapter)
+    expect(openCodeServerExtension.resolve(adapter)).toBeUndefined()
+    expect(openCodeV2Extension.resolve({ protocol: "opencode-v2" } as never)).toBeUndefined()
   })
 
   it("creates an independent adapter per configuration", () => {

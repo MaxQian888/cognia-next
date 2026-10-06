@@ -1,5 +1,5 @@
-import { AcpClientAdapter } from "@cognia/agent-acp/client"
-import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
+import { AcpClientAdapter, acpClientExtension } from "@cognia/agent-acp/client"
+import { DevinAcpAdapter, devinAcpExtension } from "@cognia/agent-acp/devin-adapter"
 import {
   ACP_EXECUTION_SEMANTICS,
   ACP_REMOTE_EXECUTION_SEMANTICS,
@@ -17,6 +17,7 @@ import {
   createAcpClientAdapter,
   createAcpClientDeps,
   createDevinAcpAdapter,
+  isolateNativeDevin,
   setAcpDynamicMcpHostController,
 } from "./acp"
 
@@ -85,5 +86,31 @@ describe("ACP host wiring", () => {
     const devin = createDevinAcpAdapter(createAcpClientAdapter())
     expect(devin).toBeInstanceOf(DevinAcpAdapter)
     expect(devin.semantics).toBe(DEVIN_ACP_EXECUTION_SEMANTICS)
+    expect(devinAcpExtension.resolve(devin)).toBe(devin)
+    expect(acpClientExtension.resolve(devin)).toBeUndefined()
+    const client = createAcpClientAdapter()
+    expect(acpClientExtension.resolve(client)).toBe(client)
+    expect(devinAcpExtension.resolve(client)).toBeUndefined()
+  })
+
+  it("isolates native Devin only when the built-in client was registered", () => {
+    const devinConfig = {
+      id: "d",
+      name: "Devin",
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "/usr/local/bin/devin", args: ["acp"] },
+    } as never
+    const builtIn = createAcpClientAdapter()
+    expect(isolateNativeDevin(devinConfig, builtIn)).toBeInstanceOf(DevinAcpAdapter)
+    expect(
+      isolateNativeDevin({ ...(devinConfig as object), transport: "http" } as never, builtIn)
+    ).toBe(builtIn)
+    const custom = { protocol: "acp" } as never
+    expect(isolateNativeDevin(devinConfig, custom)).toBe(custom)
+    class Subclassed extends AcpClientAdapter {}
+    const subclassed = new Subclassed(createAcpClientDeps())
+    expect(isolateNativeDevin(devinConfig, subclassed)).toBe(subclassed)
+    expect(isolateNativeDevin(devinConfig, undefined)).toBeUndefined()
   })
 })

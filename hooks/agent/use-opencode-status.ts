@@ -51,7 +51,7 @@ function statusEntries(value: unknown): Array<{ name: string; status?: string }>
 /**
  * Pull the status surfaces of a connected OpenCode agent (providers, agents,
  * commands, MCP/LSP servers, project) through the manager's
- * `getOpenCodeAdapter` escape hatch. Read-only with a manual refresh —
+ * `openCodeServerExtension` lookup. Read-only with a manual refresh —
  * the OpenCode analog of {@link useCodexAppServerStatus}.
  */
 export function useOpencodeStatus(
@@ -69,8 +69,11 @@ export function useOpencodeStatus(
 
   const refresh = useCallback(async () => {
     if (!connected) return
-    const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-    const adapter = getExternalAgentManager().getOpenCodeAdapter(agentId)
+    const [{ getExternalAgentManager }, { openCodeServerExtension }] = await Promise.all([
+      import("@/lib/ai/agent/external/manager"),
+      import("@cognia/agent-opencode/client"),
+    ])
+    const adapter = getExternalAgentManager().getAdapterExtension(agentId, openCodeServerExtension)
     if (!adapter) return
     setLoading(true)
     try {
@@ -124,8 +127,14 @@ export function useOpencodeStatus(
         }
         return
       }
-      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-      const adapter = getExternalAgentManager().getOpenCodeAdapter(agentId)
+      const [{ getExternalAgentManager }, { openCodeServerExtension }] = await Promise.all([
+        import("@/lib/ai/agent/external/manager"),
+        import("@cognia/agent-opencode/client"),
+      ])
+      const adapter = getExternalAgentManager().getAdapterExtension(
+        agentId,
+        openCodeServerExtension
+      )
       if (!adapter || !active) return
       setAvailable(true)
       void refresh()

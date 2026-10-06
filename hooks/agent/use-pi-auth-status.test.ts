@@ -29,7 +29,7 @@ let adapterForAgent: typeof fakeAdapter | null = fakeAdapter
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
-    getPiRpcAdapter: () => adapterForAgent,
+    getAdapterExtension: () => adapterForAgent,
   }),
 }))
 

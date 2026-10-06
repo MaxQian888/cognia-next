@@ -27,24 +27,39 @@ jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
     appendCanonicalEnvelopesMock(...(args as [string, Array<{ event: { kind: string } }>])),
 }))
 
-jest.mock("@cognia/agent-acp/client", () => ({
-  AcpClientAdapter: class {
+jest.mock("@cognia/agent-acp/client", () => {
+  class AcpClientAdapter {
     readonly protocol = "acp"
     async prepareForkSessionForExecution() {
       return undefined
     }
-  },
-}))
+  }
+  return {
+    AcpClientAdapter,
+    acpClientExtension: {
+      id: "acp.client",
+      resolve: (adapter: unknown) => (adapter instanceof AcpClientAdapter ? adapter : undefined),
+    },
+  }
+})
 jest.mock("@cognia/agent-opencode/client", () => ({
   OpenCodeClientAdapter: class {
     readonly protocol = "opencode"
   },
 }))
-jest.mock("@cognia/agent-opencode/v2-client", () => ({
-  OpenCodeV2ClientAdapter: class {
+jest.mock("@cognia/agent-opencode/v2-client", () => {
+  class OpenCodeV2ClientAdapter {
     readonly protocol = "opencode-v2"
-  },
-}))
+  }
+  return {
+    OpenCodeV2ClientAdapter,
+    openCodeV2Extension: {
+      id: "opencode.v2-service",
+      resolve: (adapter: unknown) =>
+        adapter instanceof OpenCodeV2ClientAdapter ? adapter : undefined,
+    },
+  }
+})
 jest.mock("@/lib/native/external-agent", () => ({
   checkExternalAgentCommandExists: jest.fn().mockResolvedValue(true),
   onExternalAgentExit: jest.fn(async (cb: (event: { agentId: string; code: number }) => void) => {
@@ -4204,15 +4219,17 @@ it("retires only the exited Devin process and resumes stale preferred sessions i
 
 describe("current OpenCode native client access", () => {
   it("returns only the connected current OpenCode adapter", () => {
-    const { OpenCodeV2ClientAdapter } = jest.requireMock("@cognia/agent-opencode/v2-client")
+    const { OpenCodeV2ClientAdapter, openCodeV2Extension } = jest.requireMock(
+      "@cognia/agent-opencode/v2-client"
+    )
     const manager = freshManager()
     const adapter = new OpenCodeV2ClientAdapter()
     const adapters = (manager as unknown as { adapters: Map<string, unknown> }).adapters
     adapters.set("current", adapter)
     adapters.set("other", { protocol: "opencode-v2" })
-    expect(manager.getOpenCodeV2Adapter("current")).toBe(adapter)
-    expect(manager.getOpenCodeV2Adapter("other")).toBeNull()
-    expect(manager.getOpenCodeV2Adapter("missing")).toBeNull()
+    expect(manager.getAdapterExtension("current", openCodeV2Extension)).toBe(adapter)
+    expect(manager.getAdapterExtension("other", openCodeV2Extension)).toBeNull()
+    expect(manager.getAdapterExtension("missing", openCodeV2Extension)).toBeNull()
   })
 })
 

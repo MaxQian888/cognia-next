@@ -6,6 +6,7 @@ import type {
   SessionMessageInfo,
   PermissionRuleset,
 } from "@opencode/client"
+import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
 import type { SessionCreateOptions, SessionListOptions } from "@cognia/agent-contracts/adapter"
 import type { AgentFetch, AgentOutboundGate } from "@cognia/agent-contracts/host"
 import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
@@ -1139,3 +1140,9 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     return this.undoWithAdvertisedCommand(sessionId)
   }
 }
+
+/** The OpenCode V2 service client and its full native API, for the UI. */
+export const openCodeV2Extension = defineAdapterExtension<OpenCodeV2ClientAdapter>(
+  "opencode.v2-service",
+  (adapter) => (adapter instanceof OpenCodeV2ClientAdapter ? adapter : undefined)
+)

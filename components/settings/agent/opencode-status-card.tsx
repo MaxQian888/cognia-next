@@ -17,7 +17,7 @@ interface OpencodeStatusCardProps {
  * MCP/LSP server state. Rendered inside an agent's detail panel only for
  * connected `opencode` agents — the OpenCode analog of
  * {@link CodexAppServerStatusCard}, and the first UI consumer of
- * `getOpenCodeAdapter()`.
+ * `openCodeServerExtension`.
  */
 export function OpencodeStatusCard({ agentId, connected }: OpencodeStatusCardProps) {
   const t = useTranslations("externalAgent.settings.opencode")

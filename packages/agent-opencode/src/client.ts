@@ -10,6 +10,7 @@
  * @see https://opencode.ai/docs/server/
  */
 
+import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
 import type { OpencodeClient } from "@opencode-ai/sdk/client"
 import type {
   Session as OcSession,
@@ -2623,3 +2624,14 @@ function asOpenCodeStringArray(value: unknown): string[] {
     ? value.filter((entry): entry is string => typeof entry === "string")
     : []
 }
+
+/**
+ * The legacy OpenCode server's own surfaces (share links, session diff and
+ * todos, PTY, TUI driving, dynamic MCP, workspace find, VCS and project
+ * info), for the UI. Hosts resolve it through the manager's extension lookup
+ * instead of importing this class.
+ */
+export const openCodeServerExtension = defineAdapterExtension<OpenCodeClientAdapter>(
+  "opencode.server",
+  (adapter) => (adapter instanceof OpenCodeClientAdapter ? adapter : undefined)
+)
