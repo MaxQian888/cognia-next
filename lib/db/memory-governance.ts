@@ -8,6 +8,11 @@ import type {
 import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 import { getDb } from "./schema"
 
+export interface MemoryPersistenceScope {
+  db: ReturnType<typeof getDb>
+  assertActive(): void
+}
+
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`
 }
@@ -39,13 +44,18 @@ export type MemoryEvidenceDraft = Omit<MemoryEvidence, "id" | "createdAt"> &
  * content did not change) and a failure is swallowed — the next evidence
  * change recomputes from scratch.
  */
-export async function refreshMemoryBeliefInputs(memoryIds: readonly string[]): Promise<void> {
+export async function refreshMemoryBeliefInputs(
+  memoryIds: readonly string[],
+  scope?: MemoryPersistenceScope
+): Promise<void> {
   const ids = [...new Set(memoryIds.filter(Boolean))]
   if (ids.length === 0) return
-  const db = getDb()
+  const db = scope?.db ?? getDb()
   for (const memoryId of ids) {
     try {
+      scope?.assertActive()
       const evidence = await db.memoryEvidence.where("memoryId").equals(memoryId).toArray()
+      scope?.assertActive()
       await db.memories.update(memoryId, { beliefInputs: computeBeliefInputs(evidence) })
     } catch {
       // Derived counters; recomputed on the next evidence change.
@@ -59,17 +69,20 @@ export async function refreshMemoryBeliefInputs(memoryIds: readonly string[]): P
  * `memories` (or has not committed yet), so the refresh is deferred to that
  * transaction's completion instead of running inside it.
  */
-function scheduleBeliefRefresh(memoryIds: readonly string[]): Promise<void> | void {
+function scheduleBeliefRefresh(
+  memoryIds: readonly string[],
+  scope?: MemoryPersistenceScope
+): Promise<void> | void {
   const ids = memoryIds.filter(Boolean)
   if (ids.length === 0) return
   const transaction = Dexie.currentTransaction
   if (transaction) {
     transaction.on("complete", () => {
-      void Dexie.ignoreTransaction(() => refreshMemoryBeliefInputs(ids))
+      void Dexie.ignoreTransaction(() => refreshMemoryBeliefInputs(ids, scope))
     })
     return
   }
-  return refreshMemoryBeliefInputs(ids)
+  return refreshMemoryBeliefInputs(ids, scope)
 }
 
 export async function createMemoryEvidence(draft: MemoryEvidenceDraft): Promise<MemoryEvidence> {
@@ -151,11 +164,14 @@ export async function revokeMemoryEvidenceForMessages(
  */
 export async function revokeMemoryEvidenceForSession(
   sessionId: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  scope?: MemoryPersistenceScope
 ): Promise<string[]> {
   if (!sessionId) return []
-  const db = getDb()
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   const rows = await db.memoryEvidence.where("sessionId").equals(sessionId).toArray()
+  scope?.assertActive()
   if (rows.length === 0) return []
   await db.memoryEvidence.bulkPut(
     rows.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
@@ -163,7 +179,9 @@ export async function revokeMemoryEvidenceForSession(
   const memoryIds = [
     ...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id))),
   ]
-  await scheduleBeliefRefresh(memoryIds)
+  scope?.assertActive()
+  await scheduleBeliefRefresh(memoryIds, scope)
+  scope?.assertActive()
   return memoryIds
 }
 
@@ -175,14 +193,20 @@ export async function revokeMemoryEvidenceForSession(
  * correctness: without it, deleting a busy conversation leaves a row of jobs
  * that look like real pending work and then die one by one.
  */
-export async function cancelMemoryJobsForSession(sessionId: string): Promise<number> {
+export async function cancelMemoryJobsForSession(
+  sessionId: string,
+  scope?: MemoryPersistenceScope
+): Promise<number> {
   if (!sessionId) return 0
-  const db = getDb()
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   const pending = await db.memoryJobs.where("sessionId").equals(sessionId).toArray()
+  scope?.assertActive()
   let cancelled = 0
   for (const job of pending) {
     if (job.status !== "queued" && job.status !== "running" && job.status !== "retry_wait") continue
-    await cancelMemoryJob(job.id)
+    await cancelMemoryJob(job.id, undefined, scope)
+    scope?.assertActive()
     cancelled += 1
   }
   return cancelled
@@ -334,11 +358,15 @@ export type MemoryJobDraft = Omit<MemoryJob, "id" | "status" | "queuedAt" | "ret
 
 export async function enqueueMemoryJob(
   draft: MemoryJobDraft,
-  options: { reuseCompleted?: boolean } = {}
+  options: { reuseCompleted?: boolean; scope?: MemoryPersistenceScope } = {}
 ): Promise<MemoryJob> {
-  const db = getDb()
+  const { scope } = options
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
+    scope?.assertActive()
     const sameKey = await db.memoryJobs.where("dedupeKey").equals(draft.dedupeKey).toArray()
+    scope?.assertActive()
     const active = sameKey.find((job) => job.status === "queued" || job.status === "running")
     if (active) return active
     if (options.reuseCompleted) {
@@ -358,6 +386,7 @@ export async function enqueueMemoryJob(
       maxAttempts: draft.maxAttempts ?? 4,
     }
     await db.memoryJobs.add(row)
+    scope?.assertActive()
     return row
   })
 }
@@ -551,11 +580,15 @@ export async function heartbeatMemoryJob(
 
 export async function cancelMemoryJob(
   id: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  scope?: MemoryPersistenceScope
 ): Promise<MemoryJob | undefined> {
-  const db = getDb()
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
+    scope?.assertActive()
     const job = await db.memoryJobs.get(id)
+    scope?.assertActive()
     if (!job || TERMINAL_MEMORY_JOB_STATUSES.includes(job.status)) return job
     const cancelled: MemoryJob = {
       ...job,
@@ -568,6 +601,7 @@ export async function cancelMemoryJob(
       resultCode: "cancelled_by_user",
     }
     await db.memoryJobs.put(cancelled)
+    scope?.assertActive()
     return cancelled
   })
 }

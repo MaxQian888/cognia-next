@@ -312,3 +312,52 @@ describe("classifyEvalRetry", () => {
     expect(classifyEvalRetry("broken")).toEqual({ retryable: false, reason: "broken" })
   })
 })
+
+describe("execution owner races", () => {
+  it("shares concurrent run calls and discards a late success after cancel", async () => {
+    const harness = repository([task()], 1)
+    let resolve!: (value: { actualCost: number; value: string }) => void
+    let started!: () => void
+    const dispatched = new Promise<void>((done) => {
+      started = done
+    })
+    const execute = jest.fn(() => {
+      started()
+      return new Promise<{ actualCost: number; value: string }>((done) => {
+        resolve = done
+      })
+    })
+    const orchestrator = new DurableEvalOrchestrator(harness.repo, execute)
+    const first = orchestrator.run("experiment-1")
+    const second = orchestrator.run("experiment-1")
+    await dispatched
+    await orchestrator.cancel("experiment-1")
+    resolve({ actualCost: 0.2, value: "late result" })
+    await Promise.all([first, second])
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(harness.spent()).toBe(0)
+    expect(harness.states.at(-1)).toBe("cancelled")
+  })
+
+  it("interrupts without persisting a late provider success or retry", async () => {
+    const harness = repository([task()], 1)
+    let reject!: (error: Error) => void
+    let started!: () => void
+    const dispatched = new Promise<void>((done) => {
+      started = done
+    })
+    const orchestrator = new DurableEvalOrchestrator(harness.repo, () => {
+      started()
+      return new Promise((_resolve, fail) => {
+        reject = fail
+      })
+    })
+    const running = orchestrator.run("experiment-1")
+    await dispatched
+    orchestrator.interrupt()
+    reject(Object.assign(new Error("late rate limit"), { status: 429 }))
+    await running
+    expect((await harness.repo.listTasks("experiment-1"))[0].state).toBe("running")
+    expect(harness.spent()).toBe(0)
+  })
+})

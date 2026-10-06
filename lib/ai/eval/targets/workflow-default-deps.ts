@@ -7,22 +7,39 @@
 
 import { queryByTrace } from "@/lib/db/agent-traces"
 import type { WorkflowTargetDeps } from "./workflow"
+import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
+import Dexie from "dexie"
 
-export function defaultWorkflowTargetDeps(): WorkflowTargetDeps {
+export function defaultWorkflowTargetDeps(scope?: EvalPersistenceScope): WorkflowTargetDeps {
   return {
     async runWorkflow({ workflowId, versionId, payload, traceId, signal }) {
-      const [{ getWorkflow }, { getWorkflowVersion }, { runWorkflow }] = await Promise.all([
-        import("@/lib/db/workflows"),
-        import("@/lib/db/workflow-deployments"),
-        import("@/lib/workflow/runtime/orchestrator"),
-      ])
-      const version = versionId ? await getWorkflowVersion(versionId) : undefined
+      const assertActive = () => {
+        scope?.assertActive()
+        signal?.throwIfAborted()
+      }
+      assertActive()
+      const [{ getWorkflow }, { getWorkflowVersion }, { runWorkflow }, { migrateWorkflow }] =
+        await Promise.all([
+          import("@/lib/db/workflows"),
+          import("@/lib/db/workflow-deployments"),
+          import("@/lib/workflow/runtime/orchestrator"),
+          import("@/lib/workflow/definition/migrate"),
+        ])
+      assertActive()
+      const version = versionId
+        ? await (scope ? scope.db.workflowVersions.get(versionId) : getWorkflowVersion(versionId))
+        : undefined
+      assertActive()
       if (versionId && (!version || version.workflowId !== workflowId)) {
         throw new Error(
           `eval workflow target: version "${versionId}" does not belong to workflow "${workflowId}"`
         )
       }
-      const workflow = version?.definition ?? (await getWorkflow(workflowId))
+      const definition =
+        version?.definition ??
+        (await (scope ? scope.db.workflows.get(workflowId) : getWorkflow(workflowId)))
+      assertActive()
+      const workflow = definition && scope && !version ? migrateWorkflow(definition) : definition
       if (!workflow) throw new Error(`eval workflow target: workflow "${workflowId}" not found`)
       const result = await runWorkflow({
         workflow,
@@ -35,6 +52,7 @@ export function defaultWorkflowTargetDeps(): WorkflowTargetDeps {
         traceId,
         ...(signal ? { signal } : {}),
       })
+      assertActive()
       return {
         runId: result.runId,
         status: result.status,
@@ -42,6 +60,16 @@ export function defaultWorkflowTargetDeps(): WorkflowTargetDeps {
         traceId,
       }
     },
-    fetchSpansByTrace: (traceId: string) => queryByTrace(traceId),
+    async fetchSpansByTrace(traceId: string) {
+      scope?.assertActive()
+      const spans = await (scope
+        ? scope.db.agentTraces
+            .where("[traceId+startTime]")
+            .between([traceId, Dexie.minKey], [traceId, Dexie.maxKey])
+            .toArray()
+        : queryByTrace(traceId))
+      scope?.assertActive()
+      return spans
+    },
   }
 }

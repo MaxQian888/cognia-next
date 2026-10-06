@@ -72,6 +72,22 @@ describe("noteMemoryVectorFailure", () => {
 })
 
 describe("claim revalidation triggers", () => {
+  it("passes a captured scope to the existing queue and stops when it is expired", async () => {
+    let active = true
+    const scope = {
+      db: {} as never,
+      assertActive: () => {
+        if (!active) throw new Error("scope expired")
+      },
+    }
+    await enqueueClaimRevalidation("claim", scope)
+    expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ memoryId: "claim" }), {
+      scope,
+    })
+    active = false
+    await enqueueClaimRevalidation("claim", scope)
+    expect(mockEnqueue).toHaveBeenCalledTimes(1)
+  })
   it("targets one claim and does NOT reuse a completed job", async () => {
     // A transcript window is mined once; a claim can need re-checking many
     // times over its life. Reusing yesterday's completed row would make every

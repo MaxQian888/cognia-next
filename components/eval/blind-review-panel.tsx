@@ -1,8 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import type { BlindPairInput, BlindPublicAssignment } from "@cognia/eval-core"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,156 +10,166 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  adjudicateEvalReview,
-  createBlindReviewBatch,
-  createEvalReviewBundle,
-  importEvalReviewBundle,
-  openBlindReviewBatch,
-  reviewAgreement,
-  type EvalReviewBundle,
+  buildBlindReviewPairs,
+  type EvalReviewService,
+  type EvalReviewSnapshot,
+  type EvalReviewMutationResult,
 } from "@/lib/ai/eval/review-service"
-import type { EvalReportCaseEvidence } from "@/lib/ai/eval/report-view"
-import { refreshEvalRecommendationAfterReview } from "@/lib/ai/eval/finalization"
-import { mergeEvalReviewVotes, type EvalReviewVoteRow } from "@/lib/db/eval-lab"
-import { getDb } from "@/lib/db/schema"
+import type { EvalReportCaseEvidence } from "@cognia/eval-core"
 
-export function buildBlindReviewPairs(cases: EvalReportCaseEvidence[]): BlindPairInput[] {
-  const groups = new Map<string, EvalReportCaseEvidence[]>()
-  for (const item of cases) {
-    const key = `${item.case.id}:${item.repetition}`
-    const rows = groups.get(key) ?? []
-    rows.push(item)
-    groups.set(key, rows)
-  }
-  const pairs: BlindPairInput[] = []
-  for (const [key, rows] of groups) {
-    const sorted = [...rows].sort((left, right) => left.variantId.localeCompare(right.variantId))
-    for (let leftIndex = 0; leftIndex < sorted.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < sorted.length; rightIndex += 1) {
-        const left = sorted[leftIndex]
-        const right = sorted[rightIndex]
-        pairs.push({
-          pairId: `${key}:${left.variantId}:${right.variantId}`,
-          first: {
-            variantId: left.variantId,
-            sampleId: left.sampleId,
-            output: left.sample.output,
-          },
-          second: {
-            variantId: right.variantId,
-            sampleId: right.sampleId,
-            output: right.sample.output,
-          },
-        })
-      }
-    }
-  }
-  return pairs
-}
-
-export function BlindReviewPanel({
-  experimentId,
-  cases,
-  artifactKey,
-  seed,
-  onRecommendationChanged,
-}: {
+interface BlindReviewPanelProps {
   experimentId: string
   cases: EvalReportCaseEvidence[]
-  artifactKey: Uint8Array | null
+  service: EvalReviewService | null
   seed: number
   onRecommendationChanged?: () => void | Promise<void>
-}) {
+}
+
+/** Remount sensitive review state whenever the experiment or host scope changes. */
+export function BlindReviewPanel(props: BlindReviewPanelProps) {
+  return (
+    <BlindReviewSession
+      key={`${props.service?.scopeId ?? "locked"}:${props.experimentId}`}
+      {...props}
+    />
+  )
+}
+
+function BlindReviewSession({
+  experimentId,
+  cases,
+  service,
+  seed,
+  onRecommendationChanged,
+}: BlindReviewPanelProps) {
   const t = useTranslations("eval")
   const pairs = useMemo(() => buildBlindReviewPairs(cases), [cases])
-  const [batchId, setBatchId] = useState("")
-  const [assignments, setAssignments] = useState<BlindPublicAssignment[]>([])
+  const [snapshot, setSnapshot] = useState<EvalReviewSnapshot | null>(null)
+  const batchId = snapshot?.batchId ?? ""
+  const assignments = snapshot?.assignments ?? []
   const [assignmentIndex, setAssignmentIndex] = useState(0)
   const [reviewerId, setReviewerId] = useState("")
-  const [votes, setVotes] = useState<EvalReviewVoteRow[]>([])
   const [password, setPassword] = useState("")
   const [bundleText, setBundleText] = useState("")
   const [adjudicatorId, setAdjudicatorId] = useState("")
   const [reasoning, setReasoning] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(Boolean(service))
+  const [pendingRecommendation, setPendingRecommendation] = useState(false)
+  const busyRef = useRef(Boolean(service))
+  const active = useRef(true)
   const assignment = assignments[assignmentIndex]
-  const agreement = reviewAgreement(votes)
+  const agreement = snapshot?.agreement ?? { eligiblePairs: 0, agreedPairs: 0, agreementRate: 0 }
 
-  const refreshVotes = async (id: string) => {
-    setVotes(await getDb().evalReviewVotes.where("batchId").equals(id).toArray())
-  }
+  useEffect(() => {
+    let current = true
+    active.current = true
+    if (service) {
+      void service
+        .load({ experimentId })
+        .then((loaded) => {
+          if (current && active.current) {
+            setSnapshot(loaded)
+            setPendingRecommendation(loaded?.recommendationPending ?? false)
+          }
+        })
+        .catch((cause: unknown) => {
+          if (current && active.current)
+            setError(cause instanceof Error ? cause.message : String(cause))
+        })
+        .finally(() => {
+          if (current && active.current) {
+            busyRef.current = false
+            setBusy(false)
+          }
+        })
+    }
+    return () => {
+      current = false
+      active.current = false
+    }
+  }, [service, experimentId])
 
-  const createBatch = async () => {
-    if (!artifactKey || !pairs.length) return
+  const perform = async (operation: () => Promise<void>) => {
+    if (!service || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
     setError(null)
     try {
-      const batch = await createBlindReviewBatch({ experimentId, pairs, seed, artifactKey })
-      const opened = await openBlindReviewBatch(batch.id, artifactKey)
-      setBatchId(batch.id)
-      setAssignments(opened.assignments)
-      setAssignmentIndex(0)
-      await refreshVotes(batch.id)
+      await operation()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }
-
-  const vote = async (preference: EvalReviewVoteRow["preference"]) => {
-    if (!assignment || !batchId || !reviewerId.trim()) return
-    const row: EvalReviewVoteRow = {
-      id: crypto.randomUUID(),
-      batchId,
-      experimentId,
-      pairId: assignment.pairId,
-      reviewerId: reviewerId.trim(),
-      preference,
-      rubric: {},
-      createdAt: Date.now(),
-    }
-    await mergeEvalReviewVotes([row])
-    await refreshVotes(batchId)
-    if (artifactKey) {
-      await refreshEvalRecommendationAfterReview(experimentId, artifactKey)
-      await onRecommendationChanged?.()
-    }
-    setAssignmentIndex((current) => Math.min(assignments.length - 1, current + 1))
-  }
-
-  const exportBundle = async () => {
-    if (!artifactKey || !batchId || !password) return
-    setBundleText(
-      JSON.stringify(await createEvalReviewBundle(batchId, artifactKey, votes, password), null, 2)
-    )
-  }
-
-  const importBundle = async () => {
-    if (!password || !bundleText) return
-    setError(null)
-    try {
-      await importEvalReviewBundle(JSON.parse(bundleText) as EvalReviewBundle, password)
-      if (batchId) await refreshVotes(batchId)
-      if (artifactKey) {
-        await refreshEvalRecommendationAfterReview(experimentId, artifactKey)
-        await onRecommendationChanged?.()
+      if (active.current) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (active.current) {
+        busyRef.current = false
+        setBusy(false)
       }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
 
-  const adjudicate = async (decision: "a" | "b" | "tie" | "exclude") => {
-    if (!artifactKey || !batchId || !assignment || !adjudicatorId.trim()) return
-    await adjudicateEvalReview({
-      batchId,
-      pairId: assignment.pairId,
-      adjudicatorId: adjudicatorId.trim(),
-      decision,
-      reasoning: reasoning.trim() || undefined,
-      artifactKey,
-    })
-    await refreshEvalRecommendationAfterReview(experimentId, artifactKey)
-    await onRecommendationChanged?.()
+  const applyMutation = async (result: EvalReviewMutationResult) => {
+    if (!active.current) return
+    setSnapshot(result.snapshot)
+    setPendingRecommendation(result.recommendation.status === "pending")
+    if (result.recommendation.status === "pending") setError(result.recommendation.message)
+    else await onRecommendationChanged?.()
   }
+
+  const createBatch = () =>
+    perform(async () => {
+      const opened = await service!.open({ experimentId, cases, seed })
+      if (!active.current) return
+      setSnapshot(opened)
+      setAssignmentIndex(0)
+    })
+
+  const vote = (preference: "a" | "b" | "tie" | "abstain") =>
+    perform(async () => {
+      if (!assignment || !batchId || !reviewerId.trim()) return
+      const result = await service!.vote({
+        experimentId,
+        batchId,
+        pairId: assignment.pairId,
+        reviewerId,
+        preference,
+      })
+      if (!active.current) return
+      setAssignmentIndex((current) => Math.min(result.snapshot.assignments.length - 1, current + 1))
+      await applyMutation(result)
+    })
+
+  const exportBundle = () =>
+    perform(async () => {
+      const text = await service!.exportBundle({ experimentId, batchId, password })
+      if (active.current) setBundleText(text)
+    })
+
+  const importBundle = () =>
+    perform(async () => {
+      await applyMutation(
+        await service!.importBundle({ experimentId, batchId, text: bundleText, password })
+      )
+    })
+
+  const adjudicate = (decision: "a" | "b" | "tie" | "exclude") =>
+    perform(async () => {
+      if (!assignment || !batchId || !adjudicatorId.trim()) return
+      await applyMutation(
+        await service!.adjudicate({
+          experimentId,
+          batchId,
+          pairId: assignment.pairId,
+          adjudicatorId,
+          decision,
+          reasoning,
+        })
+      )
+    })
+
+  const retryRecommendation = () =>
+    perform(async () => {
+      await applyMutation(await service!.refreshRecommendation({ experimentId, batchId }))
+    })
 
   return (
     <Card>
@@ -182,10 +191,20 @@ export function BlindReviewPanel({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
+        {pendingRecommendation ? (
+          <Alert>
+            <AlertTitle>{t("lab.review.blind.refreshPending")}</AlertTitle>
+            <AlertDescription>
+              <Button variant="outline" disabled={busy} onClick={() => void retryRecommendation()}>
+                {t("lab.review.blind.retryRefresh")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {!pairs.length ? (
           <p className="text-sm text-muted-foreground">{t("lab.review.blind.noPairs")}</p>
         ) : null}
-        <Button disabled={!artifactKey || !pairs.length} onClick={() => void createBatch()}>
+        <Button disabled={busy || !service || !pairs.length} onClick={() => void createBatch()}>
           {t("lab.review.blind.create")}
         </Button>
         {assignment ? (
@@ -209,22 +228,22 @@ export function BlindReviewPanel({
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button disabled={!reviewerId.trim()} onClick={() => void vote("a")}>
+              <Button disabled={busy || !reviewerId.trim()} onClick={() => void vote("a")}>
                 {t("lab.review.blind.preferLeft")}
               </Button>
-              <Button disabled={!reviewerId.trim()} onClick={() => void vote("b")}>
+              <Button disabled={busy || !reviewerId.trim()} onClick={() => void vote("b")}>
                 {t("lab.review.blind.preferRight")}
               </Button>
               <Button
                 variant="outline"
-                disabled={!reviewerId.trim()}
+                disabled={busy || !reviewerId.trim()}
                 onClick={() => void vote("tie")}
               >
                 {t("lab.review.blind.tie")}
               </Button>
               <Button
                 variant="ghost"
-                disabled={!reviewerId.trim()}
+                disabled={busy || !reviewerId.trim()}
                 onClick={() => void vote("abstain")}
               >
                 {t("lab.review.blind.abstain")}
@@ -264,12 +283,16 @@ export function BlindReviewPanel({
                 className="min-h-28 font-mono text-xs"
               />
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" disabled={!password} onClick={() => void exportBundle()}>
+                <Button
+                  variant="outline"
+                  disabled={busy || !password}
+                  onClick={() => void exportBundle()}
+                >
                   {t("lab.review.blind.export")}
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={!password || !bundleText}
+                  disabled={busy || !password || !bundleText}
                   onClick={() => void importBundle()}
                 >
                   {t("lab.review.blind.import")}
@@ -302,7 +325,7 @@ export function BlindReviewPanel({
                   <Button
                     key={decision}
                     variant="outline"
-                    disabled={!adjudicatorId.trim()}
+                    disabled={busy || !adjudicatorId.trim()}
                     onClick={() => void adjudicate(decision)}
                   >
                     {t(`lab.review.blind.decisions.${decision}`)}

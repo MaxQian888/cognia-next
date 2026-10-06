@@ -69,6 +69,33 @@ describe("project-scope helper", () => {
   })
 
   describe("ensureDefaultProject", () => {
+    it("does not create or activate a default workspace after its scope expires", async () => {
+      const db = getDb()
+      let active = true
+      const read = jest.spyOn(db.projects, "get").mockImplementationOnce(() => {
+        active = false
+        return Dexie.Promise.resolve(undefined)
+      })
+      const projectWrite = jest.spyOn(db.projects, "put")
+      const settingsWrite = jest.spyOn(db.settings, "put")
+      try {
+        await expect(
+          ensureDefaultProject({
+            db,
+            assertActive: () => {
+              if (!active) throw new Error("Scope changed")
+            },
+          })
+        ).rejects.toThrow("Scope changed")
+        expect(projectWrite).not.toHaveBeenCalled()
+        expect(settingsWrite).not.toHaveBeenCalled()
+      } finally {
+        read.mockRestore()
+        projectWrite.mockRestore()
+        settingsWrite.mockRestore()
+      }
+    })
+
     it("is idempotent — a second call returns the same row, no duplicate", async () => {
       const a = await ensureDefaultProject()
       const b = await ensureDefaultProject()

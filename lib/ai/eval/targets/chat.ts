@@ -14,6 +14,8 @@ import type { Character, SendContent, SendContentBlock } from "@cognia/agent-con
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase, EvalSample, EvalToolCall, EvalRetrievedChunk } from "@/types/eval/eval"
 import type { EvalTarget } from "@cognia/eval-core"
+import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
+import Dexie from "dexie"
 
 function parseArgs(span: AgentTraceSpan): Record<string, unknown> {
   // Prefer structured metadata, fall back to the (PII-gated) inputPreview JSON.
@@ -206,7 +208,13 @@ export function createChatTarget(config: ChatTargetConfig, deps: ChatTargetDeps)
  * run still works but degrades to text-only (no tool spans), which
  * {@link createChatTarget} flags via `degraded`.
  */
-export function defaultChatTargetDeps(): ChatTargetDeps {
+export function defaultChatTargetDeps(scope?: EvalPersistenceScope): ChatTargetDeps {
+  const cleanupSession = async (sessionId: string): Promise<void> => {
+    scope?.assertActive()
+    const { deleteSession } = await import("@/lib/db/sessions")
+    scope?.assertActive()
+    await deleteSession(sessionId, ...(scope ? ([scope] as const) : []))
+  }
   return {
     async runTurn({
       prompt,
@@ -218,6 +226,11 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
       timeoutMs,
       signal,
     }) {
+      const assertActive = () => {
+        scope?.assertActive()
+        signal?.throwIfAborted()
+      }
+      assertActive()
       const [{ resolveCharacterById }, sessionsDb, settingsDb, buildOpts, runner] =
         await Promise.all([
           import("@/lib/db/characters"),
@@ -226,6 +239,7 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
           import("@/lib/claude/build-options"),
           import("@/lib/claude/run-and-capture"),
         ])
+      assertActive()
       const ts = Date.now()
       const character =
         providedCharacter ??
@@ -241,51 +255,77 @@ export function defaultChatTargetDeps(): ChatTargetDeps {
               model,
               ...(cwd ? { workingDir: cwd } : {}),
             })
+      assertActive()
       if (!character) throw new Error(`eval target: character "${characterId}" not found`)
-      const session = await sessionsDb.createSession({
-        title: "Eval Run",
-        characterId: character.id,
-        memoryLearn: false,
-        ...(cwd ? { workingDir: cwd } : {}),
-      })
-      const appSettings = await settingsDb.getSettings().catch(() => undefined)
-      const sessionRow = {
-        ...((await sessionsDb.getSession(session.id)) ?? session),
-        ...(providerId ? { providerOverride: providerId } : {}),
-        model,
+      const session = await sessionsDb.createSession(
+        {
+          title: "Eval Run",
+          characterId: character.id,
+          memoryLearn: false,
+          ...(cwd ? { workingDir: cwd } : {}),
+        },
+        ...(scope ? ([scope] as const) : [])
+      )
+      try {
+        assertActive()
+        const appSettings = await settingsDb.getSettings(scope).catch(() => undefined)
+        assertActive()
+        const sessionRow = {
+          ...((await (scope
+            ? scope.db.sessions.get(session.id)
+            : sessionsDb.getSession(session.id))) ?? session),
+          ...(providerId ? { providerOverride: providerId } : {}),
+          model,
+        }
+        assertActive()
+        const twinDeps = character.twinId
+          ? await import("@/lib/twin/runtime/build-deps").then(({ tryBuildTwinDeps }) => {
+              assertActive()
+              return tryBuildTwinDeps()
+            })
+          : undefined
+        assertActive()
+        const promptText =
+          typeof prompt === "string"
+            ? prompt
+            : prompt
+                .filter((block) => block.type === "text")
+                .map((block) => block.text)
+                .join("\n")
+        const sendOptions = await buildOpts.resolveSendOptions({
+          session: sessionRow,
+          character,
+          appSettings: appSettings ?? null,
+          ...(twinDeps ? { twinDeps, twinUserMessage: promptText } : {}),
+        })
+        assertActive()
+        const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
+          ...(signal ? { signal } : {}),
+          ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+        })
+        assertActive()
+        return { text: result.text ?? "", sessionId: session.id }
+      } catch (error) {
+        await cleanupSession(session.id)
+        throw error
       }
-      const twinDeps = character.twinId
-        ? await import("@/lib/twin/runtime/build-deps").then(({ tryBuildTwinDeps }) =>
-            tryBuildTwinDeps()
-          )
-        : undefined
-      const promptText =
-        typeof prompt === "string"
-          ? prompt
-          : prompt
-              .filter((block) => block.type === "text")
-              .map((block) => block.text)
-              .join("\n")
-      const sendOptions = await buildOpts.resolveSendOptions({
-        session: sessionRow,
-        character,
-        appSettings: appSettings ?? null,
-        ...(twinDeps ? { twinDeps, twinUserMessage: promptText } : {}),
-      })
-      const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
-        ...(signal ? { signal } : {}),
-        ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
-      })
-      return { text: result.text ?? "", sessionId: session.id }
     },
     async fetchSpans(sessionId: string) {
+      scope?.assertActive()
       const { queryBySession } = await import("@/lib/db/agent-traces")
-      return queryBySession(sessionId)
+      scope?.assertActive()
+      const spans = await (scope
+        ? scope.db.agentTraces
+            .where("[sessionId+startTime]")
+            .between([sessionId, Dexie.minKey], [sessionId, Dexie.maxKey])
+            .reverse()
+            .limit(500)
+            .toArray()
+        : queryBySession(sessionId))
+      scope?.assertActive()
+      return spans
     },
-    async cleanupSession(sessionId: string) {
-      const { deleteSession } = await import("@/lib/db/sessions")
-      await deleteSession(sessionId)
-    },
+    cleanupSession,
     isToolCapable() {
       // Set lazily; importing tauri synchronously is fine in the renderer.
       try {

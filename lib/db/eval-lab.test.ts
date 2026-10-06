@@ -248,6 +248,61 @@ describe("evaluation lab persistence", () => {
     })
   })
 
+  it.each(["cancelled", "completed"] as const)(
+    "discards a late result after %s without persisting artifacts or spend",
+    async (state) => {
+      await createEvalExperiment(manifest)
+      const task: EvalTask = {
+        id: "late-task",
+        experimentId: manifest.id,
+        variantId: "v1",
+        caseId: "c1",
+        repetition: 1,
+        state: "running",
+        attempt: 1,
+        reservedCost: 0.2,
+        updatedAt: 1,
+      }
+      await getDb().evalTasks.add({ ...task, state })
+      await getDb().evalExperiments.update(manifest.id, { state })
+      await completeEvalTask({
+        task,
+        sample: {
+          id: "late-sample",
+          taskId: task.id,
+          experimentId: manifest.id,
+          variantId: "v1",
+          caseId: "c1",
+          repetition: 1,
+          encryptedArtifact: {
+            version: "cognia-eval-encrypted/v1",
+            algorithm: "AES-GCM",
+            iv: "iv",
+            ciphertext: "ciphertext",
+          },
+          latencyMs: 1,
+          actualCost: 0.1,
+          createdAt: 1,
+          expiresAt: 2,
+        },
+        scores: [],
+      })
+      expect(await getDb().evalSamples.count()).toBe(0)
+      expect((await getEvalExperiment(manifest.id))?.spentCost).toBe(0)
+      expect((await getDb().evalTasks.get(task.id))?.state).toBe(state)
+    }
+  )
+
+  it("does not resurrect an experiment that completed before recovery obtained ownership", async () => {
+    await createEvalExperiment(manifest)
+    await getDb().evalExperiments.update(manifest.id, { state: "completed" })
+    await expect(recoverInterruptedEvalWork(manifest.id)).resolves.toEqual({
+      interruptedTaskIds: [],
+      requeuedTaskIds: [],
+    })
+    expect((await getEvalExperiment(manifest.id))?.state).toBe("completed")
+  })
+
   it("lists project experiments and restores the latest apply record", async () => {
     await createEvalExperiment(manifest)
     await getDb().evalConfigurationApplies.bulkAdd([

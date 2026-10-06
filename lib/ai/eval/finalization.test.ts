@@ -1,7 +1,11 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
-import type { EvalExperimentManifest } from "@cognia/eval-core"
+import {
+  buildEvalCandidateEvidence as pureCandidateEvidence,
+  buildPairedQualityComparisons as purePairedComparisons,
+  type EvalExperimentManifest,
+} from "@cognia/eval-core"
 import type { EvalSampleRow, EvalScoreRow } from "@/lib/db/eval-lab"
 import { createEvalExperiment } from "@/lib/db/eval-lab"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -113,6 +117,11 @@ function rows(qualityA: number, qualityB: number) {
 }
 
 describe("evaluation experiment finalization", () => {
+  it("keeps legacy metric exports bound to the pure package implementation", () => {
+    expect(buildEvalCandidateEvidence).toBe(pureCandidateEvidence)
+    expect(buildPairedQualityComparisons).toBe(purePairedComparisons)
+  })
+
   it("builds normalized quality/reliability/cost/latency evidence with seeded intervals", () => {
     const evidence = buildEvalCandidateEvidence(manifest, rows(1, 0.5))
 
@@ -202,6 +211,16 @@ describe("evaluation experiment finalization", () => {
       expect(await getDb().evalExperiments.get(manifest.id)).toMatchObject({ state: "queued" })
     })
 
+    it("refreshes a review recommendation without scheduling another execution stage", async () => {
+      await persistStage(0.8, 0.8)
+
+      await expect(prepareNextEvalStage(manifest.id, { forceRecommendation: true })).resolves.toBe(
+        false
+      )
+      expect(await getDb().evalTasks.count()).toBe(60)
+      expect(await getDb().evalRecommendations.count()).toBe(1)
+    })
+
     it("persists the recommendation and paired comparisons when evidence is separated", async () => {
       await persistStage(1, 0.5)
 
@@ -245,6 +264,52 @@ describe("evaluation experiment finalization", () => {
       ).resolves.toMatchObject({
         result: { status: "no_conclusion", reason: "review_pending" },
       })
+    })
+
+    it("does not write a recommendation when its host scope expires during hashing", async () => {
+      await persistStage(1, 0.5)
+      const db = getDb()
+      let active = true
+      const originalDigest = crypto.subtle.digest.bind(crypto.subtle)
+      const hashing = jest.spyOn(crypto.subtle, "digest").mockImplementation(async (...args) => {
+        const result = await originalDigest(...args)
+        active = false
+        return result
+      })
+      try {
+        await expect(
+          prepareNextEvalStage(manifest.id, {
+            scope: {
+              db,
+              assertActive: () => {
+                if (!active) throw new Error("scope expired")
+              },
+            },
+          })
+        ).rejects.toThrow("scope expired")
+        expect(await db.evalRecommendations.count()).toBe(0)
+      } finally {
+        hashing.mockRestore()
+      }
+    })
+
+    it("rejects recommendation writes computed before a newer review revision", async () => {
+      await persistStage(1, 0.5)
+      await getDb().evalReviewBatches.add({
+        id: "batch",
+        experimentId: manifest.id,
+        status: "open",
+        blindedAssignmentDigest: "digest",
+        createdAt: 1,
+        updatedAt: 1,
+        reviewRevision: 2,
+      })
+      await expect(
+        prepareNextEvalStage(manifest.id, {
+          reviewRevision: { batchId: "batch", revision: 1 },
+        })
+      ).rejects.toThrow("Review changed")
+      expect(await getDb().evalRecommendations.count()).toBe(0)
     })
 
     it("rejects finalization for an unknown experiment", async () => {

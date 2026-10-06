@@ -28,12 +28,25 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 }))
 jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({ runTeamLifecycle }))
 jest.mock("@/lib/ai/agent/team/agent-team-runtime-deps", () => ({
-  buildAgentTeamRuntimeDeps: () => ({ runLeadPlanning: undefined, notifierDeps: undefined }),
+  buildAgentTeamRuntimeDeps: jest.fn(() => ({
+    runLeadPlanning: undefined,
+    notifierDeps: undefined,
+  })),
 }))
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(async () => ({ text: "done" })),
+}))
+jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({})) }))
 jest.mock("@/lib/db/agent-traces", () => ({ queryByTrace: jest.fn(async () => []) }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 
 import { defaultTeamTargetDeps, extractTeamText } from "./team-default-deps"
+import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
+import {
+  buildAgentTeamRuntimeDeps,
+  type BuildAgentTeamRuntimeDepsOptions,
+} from "@/lib/ai/agent/team/agent-team-runtime-deps"
+import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
 describe("extractTeamText", () => {
   it("prefers an ultracode report, then string, then JSON", () => {
@@ -45,6 +58,78 @@ describe("extractTeamText", () => {
 })
 
 describe("defaultTeamTargetDeps.runTeam", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("fences every live-store callback after its account becomes inactive", async () => {
+    let active = true
+    const scope = {
+      db: {},
+      assertActive: () => {
+        if (!active) throw new Error("Evaluation scope changed")
+      },
+    } as EvalPersistenceScope
+    await defaultTeamTargetDeps(scope).runTeam({ teamId: "tm1", prompt: "private", traceId: "tr" })
+    const passed = runTeamLifecycle.mock.calls[0][1] as {
+      storeReader: {
+        getTeam(id: string): unknown
+        getTeammates(id: string): unknown
+        getTeamTasks(id: string): unknown
+      }
+      storeWriter: {
+        addMessage(input: unknown): unknown
+        setTaskStatus(id: string, status: string): unknown
+        updateTeammate(id: string, input: unknown): unknown
+      }
+    }
+    active = false
+    for (const read of Object.values(passed.storeReader)) {
+      expect(() => read("tm1")).toThrow("Evaluation scope changed")
+    }
+    expect(() => passed.storeWriter.addMessage({ teamId: "tm1" })).toThrow(
+      "Evaluation scope changed"
+    )
+    expect(() => passed.storeWriter.setTaskStatus("task1", "completed")).toThrow(
+      "Evaluation scope changed"
+    )
+    expect(() => passed.storeWriter.updateTeammate("mate1", {})).toThrow("Evaluation scope changed")
+    expect(getTeam).not.toHaveBeenCalled()
+    expect(getTeammates).not.toHaveBeenCalled()
+    expect(getTeamTasks).not.toHaveBeenCalled()
+    expect(addMessage).not.toHaveBeenCalled()
+    expect(setTaskStatus).not.toHaveBeenCalled()
+    expect(updateTeammate).not.toHaveBeenCalled()
+  })
+
+  it("does not dispatch a team when imports finish after cancellation", async () => {
+    const controller = new AbortController()
+    const run = defaultTeamTargetDeps().runTeam({
+      teamId: "tm1",
+      prompt: "private",
+      traceId: "tr",
+      signal: controller.signal,
+    })
+    controller.abort()
+    await expect(run).rejects.toThrow()
+    expect(runTeamLifecycle).not.toHaveBeenCalled()
+  })
+
+  it("fences the lead provider dispatch after its async planning work", async () => {
+    let active = true
+    const scope = {
+      db: {},
+      assertActive: () => {
+        if (!active) throw new Error("Evaluation scope changed")
+      },
+    } as EvalPersistenceScope
+    await defaultTeamTargetDeps(scope).runTeam({ teamId: "tm1", prompt: "private", traceId: "tr" })
+    const options = jest.mocked(buildAgentTeamRuntimeDeps).mock
+      .calls[0][0] as BuildAgentTeamRuntimeDepsOptions
+    await Promise.resolve()
+    active = false
+    expect(() => options.executeAgent!("private", {} as never)).toThrow("Evaluation scope changed")
+    expect(executeAgent).not.toHaveBeenCalled()
+  })
+
   it("overrides the team objective with the eval prompt and threads the trace id", async () => {
     const deps = defaultTeamTargetDeps()
     const out = await deps.runTeam({ teamId: "tm1", prompt: "eval prompt", traceId: "tr" })

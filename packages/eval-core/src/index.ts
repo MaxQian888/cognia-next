@@ -42,3 +42,6 @@ export * from "./routing/platt"
 export * from "./routing/grouped-split"
 export * from "./routing/grouped-bootstrap"
 export * from "./routing/manifest"
+
+export * from "./candidate-evidence"
+export * from "./report-view"

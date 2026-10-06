@@ -106,19 +106,19 @@ beforeEach(() => {
 
 describe("DatasetDetail", () => {
   it("renders header + the cases segment by default", () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     expect(screen.getByText("My Set")).toBeInTheDocument()
     expect(screen.getByTestId("case-list")).toBeInTheDocument()
     expect(screen.queryByText("detail.gateConfigured")).not.toBeInTheDocument()
   })
 
   it("shows a gate badge when the dataset has thresholds", () => {
-    render(<DatasetDetail dataset={{ ...dataset, gate: { minPassAt1: 0.9 } }} appSettings={null} />)
+    render(<DatasetDetail dataset={{ ...dataset, gate: { minPassAt1: 0.9 } }} />)
     expect(screen.getByText("detail.gateConfigured")).toBeInTheDocument()
   })
 
   it("switches between cases, runs and versions segments", () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.segments.runs"))
     expect(screen.getByTestId("runs-list")).toBeInTheDocument()
     fireEvent.click(screen.getByText("detail.segments.versions"))
@@ -128,7 +128,7 @@ describe("DatasetDetail", () => {
   })
 
   it("drills into a run from the runs segment and backs out", () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.segments.runs"))
     fireEvent.click(screen.getByTestId("runs-list")) // stub calls onOpenRun("r1")
     expect(screen.getByTestId("run-detail-r1")).toBeInTheDocument()
@@ -140,7 +140,7 @@ describe("DatasetDetail", () => {
     render(
       <DatasetDetail
         dataset={dataset}
-        appSettings={null}
+
         runOptions={{ models: ["m1"], teams: [{ id: "t", name: "T" }] }}
       />
     )
@@ -154,7 +154,7 @@ describe("DatasetDetail", () => {
   })
 
   it("closes a dialog via Escape (onOpenChange)", async () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.import"))
     expect(screen.getByTestId("import-dialog")).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: "Escape" })
@@ -166,7 +166,7 @@ describe("DatasetDetail", () => {
     const revokeObjectURL = jest.fn()
     Object.assign(URL, { createObjectURL, revokeObjectURL })
     HTMLAnchorElement.prototype.click = jest.fn()
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.exportJsonl"))
     expect(toJsonl).toHaveBeenCalled()
     fireEvent.click(screen.getByText("detail.exportCsv"))
@@ -178,7 +178,7 @@ describe("DatasetDetail", () => {
     // The panel no longer draws its own chrome, so this is the Dialog's close
     // callback rather than a duplicate button inside the panel.
     importProps.mockClear()
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.import"))
     const { onClose } = importProps.mock.calls[0][0] as { onClose: () => void }
     act(() => onClose())
@@ -186,14 +186,14 @@ describe("DatasetDetail", () => {
   })
 
   it("closes the run dialog from its own close callback", () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.run"))
     act(() => runDialogClose?.())
     expect(screen.queryByTestId("run-config-dialog")).not.toBeInTheDocument()
   })
 
   it("closes the run and gate dialogs via Escape too", async () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.run"))
     expect(screen.getByTestId("run-config-dialog")).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: "Escape" })
@@ -205,7 +205,7 @@ describe("DatasetDetail", () => {
   })
 
   it("jumps to the runs segment when a run finishes", () => {
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     fireEvent.click(screen.getByText("detail.run"))
     act(() => runDialogComplete?.())
     expect(screen.getByTestId("runs-list")).toBeInTheDocument()
@@ -214,12 +214,7 @@ describe("DatasetDetail", () => {
   it("passes the dataset's remembered grading rule to the import wizard", () => {
     // So the second import into a benchmark starts from the rule that worked.
     importProps.mockClear()
-    render(
-      <DatasetDetail
-        dataset={{ ...dataset, defaultGrading: { mode: "numeric" } }}
-        appSettings={null}
-      />
-    )
+    render(<DatasetDetail dataset={{ ...dataset, defaultGrading: { mode: "numeric" } }} />)
     fireEvent.click(screen.getByText("detail.import"))
     expect(importProps).toHaveBeenCalledWith(
       expect.objectContaining({ defaultGrading: { mode: "numeric" } })
@@ -229,7 +224,7 @@ describe("DatasetDetail", () => {
   it("keeps Run primary and collapses the rest into an overflow menu", () => {
     // Five side-by-side buttons plus three badges wrapped onto three rows in
     // the 320px detail pane.
-    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    render(<DatasetDetail dataset={dataset} />)
     expect(screen.getByLabelText("detail.moreActions")).toBeInTheDocument()
     // Run stays a first-class button, the rest live behind the menu.
     expect(screen.getByText("detail.run").closest("button")).toBeInTheDocument()

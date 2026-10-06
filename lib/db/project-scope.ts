@@ -22,17 +22,31 @@ export { DEFAULT_PROJECT_ID } from "./project-defaults"
  * is set: adopts the Default workspace (creating + activating it on first run).
  * Idempotent — a second call returns the same row without re-creating it.
  */
-export async function ensureDefaultProject(): Promise<Project> {
-  const db = getDb()
+export async function ensureDefaultProject(scope?: {
+  db: ReturnType<typeof getDb>
+  assertActive(): void
+}): Promise<Project> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   const existing = await db.projects.get(DEFAULT_PROJECT_ID)
+  scope?.assertActive()
   if (existing) {
-    const active = (await getSettings()).activeProjectId
-    if (!active) await saveSettings({ activeProjectId: existing.id })
+    const active = (await getSettings(scope)).activeProjectId
+    scope?.assertActive()
+    if (!active)
+      await saveSettings(
+        { activeProjectId: existing.id },
+        scope ? { scope, mirrorToHost: false } : undefined
+      )
     return existing
   }
   const def = buildDefaultProject()
   await db.projects.put(def)
-  await saveSettings({ activeProjectId: def.id })
+  scope?.assertActive()
+  await saveSettings(
+    { activeProjectId: def.id },
+    scope ? { scope, mirrorToHost: false } : undefined
+  )
   return def
 }
 
@@ -45,11 +59,16 @@ export async function ensureDefaultProject(): Promise<Project> {
  * a connector inbound that resolves the conversation's owning workspace) so the
  * write isn't mis-attributed to whatever happens to be active in the UI.
  */
-export async function resolveScopeProjectId(explicit?: string | null): Promise<string> {
+export async function resolveScopeProjectId(
+  explicit?: string | null,
+  scope?: { db: ReturnType<typeof getDb>; assertActive(): void }
+): Promise<string> {
+  scope?.assertActive()
   if (explicit) return explicit
-  const active = (await getSettings()).activeProjectId
+  const active = (await getSettings(scope)).activeProjectId
+  scope?.assertActive()
   if (active) return active
-  return (await ensureDefaultProject()).id
+  return (await ensureDefaultProject(scope)).id
 }
 
 /**

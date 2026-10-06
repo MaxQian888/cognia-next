@@ -100,6 +100,9 @@ const TERMINAL_TASK_STATES = new Set<EvalTaskState>([
 
 export class DurableEvalOrchestrator<T = unknown> {
   private readonly activeControllers = new Map<string, AbortController>()
+  private readonly runs = new Map<string, Promise<void>>()
+  private readonly cancelled = new Set<string>()
+  private interrupted = false
 
   /** Which kind of experiment this instance drives (`model`, `agent` or `routing`). */
   readonly mode: DurableEvalMode
@@ -144,6 +147,7 @@ export class DurableEvalOrchestrator<T = unknown> {
   }
 
   async cancel(experimentId: string): Promise<void> {
+    this.cancelled.add(experimentId)
     const tasks = await this.repository.listTasks(experimentId)
     for (const task of tasks) this.activeControllers.get(task.id)?.abort()
     for (const task of tasks.filter((item) => !TERMINAL_TASK_STATES.has(item.state))) {
@@ -156,18 +160,43 @@ export class DurableEvalOrchestrator<T = unknown> {
     await this.repository.setExperimentState(experimentId, "cancelled")
   }
 
-  async run(experimentId: string): Promise<void> {
+  /** Stop this owner without rewriting ambiguous in-flight spend; startup recovery owns it. */
+  interrupt(): void {
+    this.interrupted = true
+    for (const controller of this.activeControllers.values()) controller.abort()
+  }
+
+  run(experimentId: string): Promise<void> {
+    const existing = this.runs.get(experimentId)
+    if (existing) return existing
+    const running = this.runOnce(experimentId).finally(() => {
+      if (this.runs.get(experimentId) === running) this.runs.delete(experimentId)
+    })
+    this.runs.set(experimentId, running)
+    return running
+  }
+
+  private async runOnce(experimentId: string): Promise<void> {
+    if (this.interrupted || this.cancelled.has(experimentId)) return
     const initial = await this.repository.getExperiment(experimentId)
     if (!initial) throw new Error(`Evaluation experiment ${experimentId} not found`)
-    if (["completed", "cancelled", "failed"].includes(initial.state)) return
+    if (this.interrupted || this.cancelled.has(experimentId)) return
+    if (["completed", "cancelled", "failed", "paused"].includes(initial.state)) return
     await this.repository.setExperimentState(experimentId, "running")
 
-    while (true) {
+    while (!this.interrupted && !this.cancelled.has(experimentId)) {
       const experiment = await this.repository.getExperiment(experimentId)
       if (!experiment) throw new Error(`Evaluation experiment ${experimentId} not found`)
-      if (experiment.state === "paused" || experiment.state === "cancelled") return
+      if (
+        this.interrupted ||
+        this.cancelled.has(experimentId) ||
+        experiment.state === "paused" ||
+        experiment.state === "cancelled"
+      )
+        return
 
       const tasks = await this.repository.listTasks(experimentId)
+      if (this.interrupted || this.cancelled.has(experimentId)) return
       const unfinished = tasks.filter((task) => !TERMINAL_TASK_STATES.has(task.state))
       if (!unfinished.length) {
         if (
@@ -184,6 +213,7 @@ export class DurableEvalOrchestrator<T = unknown> {
             : tasks.some((task) => task.state === "cancelled")
               ? "cancelled"
               : "completed"
+        if (this.interrupted || this.cancelled.has(experimentId)) return
         await this.repository.setExperimentState(experimentId, terminalState)
         return
       }
@@ -225,6 +255,7 @@ export class DurableEvalOrchestrator<T = unknown> {
         providerCounts.set(providerId, count + 1)
       }
 
+      if (this.interrupted || this.cancelled.has(experimentId)) return
       if (!batch.length) {
         await this.repository.setExperimentState(experimentId, "paused", { pauseReason: "budget" })
         return
@@ -234,6 +265,7 @@ export class DurableEvalOrchestrator<T = unknown> {
   }
 
   private async dispatch(task: EvalTask & { providerId?: string }): Promise<void> {
+    if (this.interrupted || this.cancelled.has(task.experimentId)) return
     const controller = new AbortController()
     this.activeControllers.set(task.id, controller)
     const attempt = task.attempt + 1
@@ -244,9 +276,13 @@ export class DurableEvalOrchestrator<T = unknown> {
       updatedAt: this.options.now(),
     })
     try {
+      if (this.interrupted || this.cancelled.has(task.experimentId)) return
       const result = await this.execute({ ...task, attempt, state: "running" }, controller.signal)
+      if (this.interrupted || this.cancelled.has(task.experimentId) || controller.signal.aborted)
+        return
       await this.repository.completeTask({ ...task, attempt, state: "running" }, result)
     } catch (error) {
+      if (this.interrupted || this.cancelled.has(task.experimentId)) return
       if (error instanceof DOMException && error.name === "AbortError") {
         const experiment = await this.repository.getExperiment(task.experimentId)
         if (experiment?.state === "cancelled") {

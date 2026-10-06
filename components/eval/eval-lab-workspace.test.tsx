@@ -20,8 +20,6 @@ const mockListProjects = jest.fn<Promise<unknown>, unknown[]>(() => new Promise<
 const mockListExperiments = jest.fn(async (..._args: unknown[]): Promise<unknown[]> => [])
 const mockLatestApplication = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const mockDeleteExpiredArtifacts = jest.fn(async () => ({ samplesDeleted: 0, assetsDeleted: 0 }))
-const mockLoadArtifactKey = jest.fn(async (..._args: unknown[]) => new Uint8Array(32))
-const mockOrchestratorRun = jest.fn(async (..._args: unknown[]) => {})
 const mockLoadReport = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const mockServiceStart = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const mockServiceStatus = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
@@ -61,9 +59,6 @@ jest.mock("@/lib/ai/eval/service", () => ({
 jest.mock("@/lib/db/calibration-runs", () => ({
   listRecentCalibrationRuns: () => mockListCalibrationRuns(),
 }))
-jest.mock("@/lib/ai/eval/recovery", () => ({
-  recoverEvalQueueOnStartup: () => mockRecoverQueue(),
-}))
 jest.mock("@/lib/ai/eval/environment-preflight", () => ({
   checkEvalEnvironmentCompatibility: () => mockCheckEnvironment(),
   applyEnvironmentReadiness: (project: { variants: Array<Record<string, unknown>> }) => ({
@@ -92,18 +87,6 @@ jest.mock("@/lib/db/eval-lab", () => ({
   getLatestEvalConfigurationApply: (...args: unknown[]) => mockLatestApplication(...args),
   deleteExpiredEvalArtifacts: () => mockDeleteExpiredArtifacts(),
 }))
-jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
-  loadOrCreateEvalArtifactKey: (...args: unknown[]) => mockLoadArtifactKey(...args),
-}))
-jest.mock("@/lib/ai/eval/browser-execution", () => ({
-  createBrowserEvalOrchestrator: () => ({
-    run: (...args: unknown[]) => mockOrchestratorRun(...args),
-  }),
-}))
-jest.mock("@/lib/ai/eval/report-view", () => ({
-  filterEvalReportCases: (cases: unknown[]) => cases,
-  loadEvalReportView: (...args: unknown[]) => mockLoadReport(...args),
-}))
 jest.mock("@/lib/ai/eval/configuration-targets", () => ({
   browserEvalConfigurationApplicationDeps: async () => ({
     read: (...args: unknown[]) => mockApplicationRead(...args),
@@ -119,35 +102,64 @@ jest.mock("@/lib/ai/eval/configuration-targets", () => ({
     newId: () => "application-1",
   }),
 }))
-jest.mock("@/lib/ai/eval/project-service", () => ({
-  EvalProjectService: class {
-    start(...args: unknown[]) {
-      return mockServiceStart(...args)
-    }
-    status(...args: unknown[]) {
-      return mockServiceStatus(...args)
-    }
-    pause(...args: unknown[]) {
-      return mockServicePause(...args)
-    }
-    resume(...args: unknown[]) {
-      return mockServiceResume(...args)
-    }
-    cancel(...args: unknown[]) {
-      return mockServiceCancel(...args)
-    }
-    extendBudget(...args: unknown[]) {
-      return mockServiceExtendBudget(...args)
-    }
-  },
+jest.mock("@/lib/ai/eval/execution-runtime", () => ({
+  getEvalExecutionRuntime: () => ({
+    recover: () => mockRecoverQueue(),
+    start: async (...args: unknown[]) => ((await mockServiceStart(...args)) as { id: string }).id,
+    status: async (id: string) => {
+      const result = (await mockServiceStatus(id)) as {
+        experiment: {
+          state: string
+          spentCost: number
+          reservedCost: number
+          budgetCap?: number
+          manifest: { budget: { hardCap: number } }
+        }
+        tasks: Record<string, number>
+      }
+      return {
+        experimentId: id,
+        state: result.experiment.state,
+        total: Object.values(result.tasks).reduce((a, b) => a + b, 0),
+        completed: result.tasks.completed ?? 0,
+        spentCost: result.experiment.spentCost,
+        reservedCost: result.experiment.reservedCost,
+        budgetCap: result.experiment.budgetCap ?? result.experiment.manifest.budget.hardCap,
+      }
+    },
+    report: (id: string) => mockLoadReport(id),
+    subscribe: () => () => {},
+    getReviewService: async () => null,
+    pause: (...args: unknown[]) => mockServicePause(...args),
+    resume: (...args: unknown[]) => mockServiceResume(...args),
+    cancel: (...args: unknown[]) => mockServiceCancel(...args),
+    extendBudget: (...args: unknown[]) => mockServiceExtendBudget(...args),
+  }),
+}))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: () =>
+    mockAccountId
+      ? { accountId: mockAccountId, targetId: "desktop-test", routingGeneration: 1 }
+      : null,
+  subscribeRuntimeTargetContext: () => () => {},
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: { settings: Record<string, unknown> | null }) => unknown) =>
     selector({ settings: mockSettings }),
 }))
 jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: (selector: (state: { unlockedAccountId: string | null }) => unknown) =>
-    selector({ unlockedAccountId: mockAccountId }),
+  useAccountStore: Object.assign(
+    (
+      selector: (state: {
+        unlockedAccountId: string | null
+        accountRevision: number
+        locked: boolean
+      }) => unknown
+    ) => selector({ unlockedAccountId: mockAccountId, accountRevision: 1, locked: false }),
+    {
+      getState: () => ({ unlockedAccountId: mockAccountId, accountRevision: 1, locked: false }),
+    }
+  ),
 }))
 jest.mock("@/hooks/eval/use-run-config-options", () => ({
   useRunConfigOptions: () => mockRunOptions,
@@ -192,6 +204,22 @@ describe("EvalLabWorkspace", () => {
     mockListExperiments.mockResolvedValue([])
     mockLatestApplication.mockResolvedValue(undefined)
     mockDeleteExpiredArtifacts.mockResolvedValue({ samplesDeleted: 0, assetsDeleted: 0 })
+  })
+  it("allows a recovered queued experiment to resume without starting a second run", async () => {
+    mockAccountId = "account-1"
+    mockRecoverQueue.mockResolvedValue([{ experimentId: "queued-run", state: "queued" }])
+    mockServiceStatus.mockResolvedValue({
+      experiment: { state: "queued", spentCost: 0, reservedCost: 0, budgetCap: 10 },
+      tasks: { queued: 2 },
+    })
+    mockLoadReport.mockResolvedValue(null)
+    render(<EvalLabWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: "lab.steps.run" }))
+    const resume = screen.getByRole("button", { name: "lab.run.resume" })
+    await waitFor(() => expect(resume).toBeEnabled())
+    fireEvent.click(resume)
+    await waitFor(() => expect(mockServiceResume).toHaveBeenCalledWith("queued-run"))
+    expect(mockServiceStart).not.toHaveBeenCalled()
   })
   it("renders the complete guided project flow and switches modes", () => {
     render(<EvalLabWorkspace />)
@@ -649,9 +677,7 @@ describe("EvalLabWorkspace", () => {
     const start = screen.getByRole("button", { name: "lab.run.start" })
     await waitFor(() => expect(start).toBeEnabled())
     await user.click(start)
-    await waitFor(() =>
-      expect(mockLoadReport).toHaveBeenCalledWith("experiment-1", expect.any(Uint8Array))
-    )
+    await waitFor(() => expect(mockLoadReport).toHaveBeenCalledWith("experiment-1"))
 
     await user.click(screen.getByRole("button", { name: "lab.steps.review" }))
     expect(screen.getByText("lab.review.recommended")).toBeInTheDocument()
@@ -666,6 +692,8 @@ describe("EvalLabWorkspace", () => {
   }, 20_000)
 
   it("saves and restores long-lived project definitions before any experiment runs", async () => {
+    mockAccountId = "account-1"
+    mockLoadReport.mockResolvedValue(null)
     const user = userEvent.setup()
     const saved = {
       id: "saved-project",

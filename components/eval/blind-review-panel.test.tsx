@@ -1,11 +1,24 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { StrictMode } from "react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { EvalReportCaseEvidence } from "@/lib/ai/eval/report-view"
+import type {
+  EvalReviewService,
+  EvalReviewSnapshot,
+  EvalReviewMutationResult,
+} from "@/lib/ai/eval/review-service"
+import { BlindReviewPanel } from "./blind-review-panel"
 
-const createBatch = jest.fn(async (..._args: unknown[]) => ({ id: "batch-1" }))
-const openBatch = jest.fn(async (..._args: unknown[]) => ({
+jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("@/lib/ai/eval/review-service", () => ({
+  buildBlindReviewPairs: (cases: unknown[]) => (cases.length ? [{}] : []),
+}))
+
+const snapshot: EvalReviewSnapshot = {
+  batchId: "batch-1",
+  recommendationPending: false,
   assignments: [
     {
       assignmentId: "assignment-1",
@@ -14,40 +27,23 @@ const openBatch = jest.fn(async (..._args: unknown[]) => ({
       right: { sampleId: "sample-b", output: "Right output" },
     },
   ],
-  privateMapping: {},
-}))
-const mergeVotes = jest.fn(async (..._args: unknown[]) => 1)
-const mockCreateBundle = jest.fn(async (..._args: unknown[]) => ({
-  schema: "cognia-eval-review/v1",
-}))
-const mockImportBundle = jest.fn(async (..._args: unknown[]) => 1)
-const mockAdjudicate = jest.fn(async (..._args: unknown[]) => ({ id: "adjudication" }))
-const mockRefreshRecommendation = jest.fn(async (..._args: unknown[]) => undefined)
+  votes: [],
+  agreement: { eligiblePairs: 0, agreedPairs: 0, agreementRate: 0 },
+}
+const updated: EvalReviewMutationResult = { snapshot, recommendation: { status: "updated" } }
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-jest.mock("@/lib/ai/eval/review-service", () => ({
-  createBlindReviewBatch: (...args: unknown[]) => createBatch(...args),
-  openBlindReviewBatch: (...args: unknown[]) => openBatch(...args),
-  createEvalReviewBundle: (...args: unknown[]) => mockCreateBundle(...args),
-  importEvalReviewBundle: (...args: unknown[]) => mockImportBundle(...args),
-  adjudicateEvalReview: (...args: unknown[]) => mockAdjudicate(...args),
-  reviewAgreement: () => ({ eligiblePairs: 1, agreedPairs: 1, agreementRate: 1 }),
-}))
-jest.mock("@/lib/db/eval-lab", () => ({
-  mergeEvalReviewVotes: (...args: unknown[]) => mergeVotes(...args),
-}))
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    evalReviewVotes: {
-      where: () => ({ equals: () => ({ toArray: async () => [] }) }),
-    },
-  }),
-}))
-jest.mock("@/lib/ai/eval/finalization", () => ({
-  refreshEvalRecommendationAfterReview: (...args: unknown[]) => mockRefreshRecommendation(...args),
-}))
-
-import { BlindReviewPanel, buildBlindReviewPairs } from "./blind-review-panel"
+function service(): jest.Mocked<EvalReviewService> {
+  return {
+    scopeId: "scope-1",
+    load: jest.fn().mockResolvedValue(null),
+    open: jest.fn().mockResolvedValue(snapshot),
+    vote: jest.fn().mockResolvedValue(updated),
+    exportBundle: jest.fn().mockResolvedValue('{"schema":"cognia-eval-review/v1"}'),
+    importBundle: jest.fn().mockResolvedValue(updated),
+    adjudicate: jest.fn().mockResolvedValue(updated),
+    refreshRecommendation: jest.fn().mockResolvedValue(updated),
+  }
+}
 
 function evidence(variantId: string, sampleId: string, output: string): EvalReportCaseEvidence {
   return {
@@ -80,109 +76,232 @@ function evidence(variantId: string, sampleId: string, output: string): EvalRepo
   }
 }
 
+const cases = [evidence("a", "sample-a", "A"), evidence("b", "sample-b", "B")]
+const props = { experimentId: "experiment", cases, seed: 42 }
+
+async function openPanel(
+  runtime: EvalReviewService,
+  onRecommendationChanged?: () => void | Promise<void>
+) {
+  const rendered = render(
+    <BlindReviewPanel
+      {...props}
+      service={runtime}
+      onRecommendationChanged={onRecommendationChanged}
+    />
+  )
+  const create = screen.getByRole("button", { name: "lab.review.blind.create" })
+  await waitFor(() => expect(create).toBeEnabled())
+  fireEvent.click(create)
+  await screen.findByText("Left output")
+  return rendered
+}
+
 describe("BlindReviewPanel", () => {
-  beforeEach(() => {
-    jest.clearAllMocks()
-    createBatch.mockResolvedValue({ id: "batch-1" })
+  it("opens a service batch and sends only review intent", async () => {
+    const runtime = service()
+    const changed = jest.fn()
+    await openPanel(runtime, changed)
+    expect(runtime.open).toHaveBeenCalledWith(props)
+    fireEvent.change(screen.getByLabelText("lab.review.blind.reviewer"), {
+      target: { value: "reviewer-1" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "lab.review.blind.preferLeft" }))
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+    expect(runtime.vote).toHaveBeenCalledWith({
+      experimentId: "experiment",
+      batchId: "batch-1",
+      pairId: "case-1:1:a:b",
+      reviewerId: "reviewer-1",
+      preference: "a",
+    })
   })
 
-  it("builds every pairwise blinded comparison for a case/repetition group", () => {
-    const pairs = buildBlindReviewPairs([
-      evidence("a", "sample-a", "A"),
-      evidence("b", "sample-b", "B"),
-      evidence("c", "sample-c", "C"),
-    ])
-
-    expect(pairs).toHaveLength(3)
-    expect(pairs.map((pair) => pair.pairId)).toEqual([
-      "case-1:1:a:b",
-      "case-1:1:a:c",
-      "case-1:1:b:c",
-    ])
+  it("restores an existing batch when the panel opens", async () => {
+    const runtime = service()
+    runtime.load.mockResolvedValue(snapshot)
+    render(<BlindReviewPanel {...props} service={runtime} />)
+    await screen.findByText("Left output")
+    expect(runtime.open).not.toHaveBeenCalled()
   })
 
-  it("creates a blind batch and persists reviewer identity with the vote", async () => {
-    const user = userEvent.setup()
-    const onRecommendationChanged = jest.fn(async () => undefined)
-    render(
-      <BlindReviewPanel
-        experimentId="experiment"
-        cases={[evidence("a", "sample-a", "A"), evidence("b", "sample-b", "B")]}
-        artifactKey={new Uint8Array(32)}
-        seed={42}
-        onRecommendationChanged={onRecommendationChanged}
-      />
+  it("restores pending recommendation retry after remount", async () => {
+    const runtime = service()
+    runtime.load.mockResolvedValue({ ...snapshot, recommendationPending: true })
+    render(<BlindReviewPanel {...props} service={runtime} />)
+    await screen.findByText("lab.review.blind.refreshPending")
+    fireEvent.click(screen.getByRole("button", { name: "lab.review.blind.retryRefresh" }))
+    await waitFor(() => expect(runtime.refreshRecommendation).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(screen.queryByText("lab.review.blind.refreshPending")).not.toBeInTheDocument()
     )
-
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.create" }))
-    expect(createBatch).toHaveBeenCalledWith(expect.objectContaining({ seed: 42 }))
-    expect(screen.getByText("Left output")).toBeInTheDocument()
-
-    await user.type(screen.getByLabelText("lab.review.blind.reviewer"), "reviewer-1")
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.preferLeft" }))
-    expect(mergeVotes).toHaveBeenCalledWith([
-      expect.objectContaining({ reviewerId: "reviewer-1", preference: "a" }),
-    ])
-    expect(mockRefreshRecommendation).toHaveBeenCalledWith("experiment", expect.any(Uint8Array))
-    expect(onRecommendationChanged).toHaveBeenCalledTimes(1)
+    expect(runtime.vote).not.toHaveBeenCalled()
   })
 
-  it("does not expose assignment controls until an artifact key and pair exist", () => {
-    render(<BlindReviewPanel experimentId="experiment" cases={[]} artifactKey={null} seed={1} />)
+  it("disables review creation without an active service or comparison pairs", () => {
+    render(<BlindReviewPanel {...props} cases={[]} service={null} />)
     expect(screen.getByRole("button", { name: "lab.review.blind.create" })).toBeDisabled()
     expect(screen.getByText("lab.review.blind.noPairs")).toBeInTheDocument()
   })
 
-  it("exports, merges, and adjudicates portable review work", async () => {
-    const user = userEvent.setup()
-    const onRecommendationChanged = jest.fn(async () => undefined)
-    render(
-      <BlindReviewPanel
-        experimentId="experiment"
-        cases={[evidence("a", "sample-a", "A"), evidence("b", "sample-b", "B")]}
-        artifactKey={new Uint8Array(32)}
-        seed={42}
-        onRecommendationChanged={onRecommendationChanged}
-      />
+  it("blocks duplicate clicks and retries recommendation refresh without another vote", async () => {
+    const runtime = service()
+    let release!: (result: EvalReviewMutationResult) => void
+    runtime.vote.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
     )
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.create" }))
-    await user.type(screen.getByLabelText("lab.review.blind.password"), "password")
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.export" }))
-    const bundle = screen.getByLabelText("lab.review.blind.bundle")
-    expect((bundle as HTMLTextAreaElement).value).toContain("cognia-eval-review/v1")
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.import" }))
-    expect(mockImportBundle).toHaveBeenCalledWith(
-      expect.objectContaining({ schema: "cognia-eval-review/v1" }),
-      "password"
+    const changed = jest.fn()
+    await openPanel(runtime, changed)
+    fireEvent.change(screen.getByLabelText("lab.review.blind.reviewer"), {
+      target: { value: "reviewer" },
+    })
+    const vote = screen.getByRole("button", { name: "lab.review.blind.preferLeft" })
+    fireEvent.click(vote)
+    fireEvent.click(vote)
+    expect(runtime.vote).toHaveBeenCalledTimes(1)
+    await act(async () =>
+      release({ snapshot, recommendation: { status: "pending", message: "refresh offline" } })
     )
-    expect(onRecommendationChanged).toHaveBeenCalledTimes(1)
-
-    await user.type(screen.getByLabelText("lab.review.blind.adjudicator"), "lead-reviewer")
-    await user.type(screen.getByLabelText("lab.review.blind.reasoning"), "Resolved conflict")
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.decisions.a" }))
-    expect(mockAdjudicate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adjudicatorId: "lead-reviewer",
-        decision: "a",
-        reasoning: "Resolved conflict",
-      })
-    )
-    expect(mockRefreshRecommendation).toHaveBeenCalled()
-    expect(onRecommendationChanged).toHaveBeenCalledTimes(2)
+    expect(screen.getByText("lab.review.blind.refreshPending")).toBeInTheDocument()
+    expect(screen.getByText("refresh offline")).toBeInTheDocument()
+    expect(changed).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "lab.review.blind.retryRefresh" }))
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1))
+    expect(runtime.refreshRecommendation).toHaveBeenCalledWith({
+      experimentId: "experiment",
+      batchId: "batch-1",
+    })
+    expect(runtime.vote).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("lab.review.blind.refreshPending")).not.toBeInTheDocument()
   })
 
-  it("surfaces batch and malformed import failures in the panel", async () => {
+  it("exports, imports and adjudicates through complete service operations", async () => {
+    const runtime = service()
+    const changed = jest.fn()
     const user = userEvent.setup()
-    createBatch.mockRejectedValueOnce(new Error("batch unavailable"))
-    render(
-      <BlindReviewPanel
-        experimentId="experiment"
-        cases={[evidence("a", "sample-a", "A"), evidence("b", "sample-b", "B")]}
-        artifactKey={new Uint8Array(32)}
-        seed={42}
-      />
+    await openPanel(runtime, changed)
+    await user.type(screen.getByLabelText("lab.review.blind.password"), "password")
+    await user.click(screen.getByRole("button", { name: "lab.review.blind.export" }))
+    expect(runtime.exportBundle).toHaveBeenCalledWith({
+      experimentId: "experiment",
+      batchId: "batch-1",
+      password: "password",
+    })
+    await user.click(screen.getByRole("button", { name: "lab.review.blind.import" }))
+    expect(runtime.importBundle).toHaveBeenCalledWith({
+      experimentId: "experiment",
+      batchId: "batch-1",
+      password: "password",
+      text: '{"schema":"cognia-eval-review/v1"}',
+    })
+    await user.type(screen.getByLabelText("lab.review.blind.adjudicator"), "lead")
+    await user.type(screen.getByLabelText("lab.review.blind.reasoning"), "reference-aligned")
+    await user.click(screen.getByRole("button", { name: "lab.review.blind.decisions.a" }))
+    expect(runtime.adjudicate).toHaveBeenCalledWith({
+      experimentId: "experiment",
+      batchId: "batch-1",
+      pairId: "case-1:1:a:b",
+      adjudicatorId: "lead",
+      decision: "a",
+      reasoning: "reference-aligned",
+    })
+    expect(changed).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["vote", "exportBundle", "importBundle", "adjudicate"] as const)(
+    "surfaces %s failures without unhandled event promises",
+    async (operation) => {
+      const runtime = service()
+      runtime[operation].mockRejectedValueOnce(new Error("operation failed"))
+      await openPanel(runtime)
+      fireEvent.change(screen.getByLabelText("lab.review.blind.reviewer"), {
+        target: { value: "reviewer" },
+      })
+      fireEvent.change(screen.getByLabelText("lab.review.blind.password"), {
+        target: { value: "password" },
+      })
+      fireEvent.change(screen.getByLabelText("lab.review.blind.bundle"), {
+        target: { value: "{}" },
+      })
+      fireEvent.change(screen.getByLabelText("lab.review.blind.adjudicator"), {
+        target: { value: "lead" },
+      })
+      const names = {
+        vote: "preferLeft",
+        exportBundle: "export",
+        importBundle: "import",
+        adjudicate: "decisions.a",
+      }
+      fireEvent.click(screen.getByRole("button", { name: `lab.review.blind.${names[operation]}` }))
+      expect(await screen.findByText("operation failed")).toBeInTheDocument()
+    }
+  )
+
+  it("discards old asynchronous results after experiment or host scope changes", async () => {
+    const runtime = service()
+    let release!: (value: EvalReviewSnapshot) => void
+    runtime.open.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
     )
-    await user.click(screen.getByRole("button", { name: "lab.review.blind.create" }))
-    expect(screen.getByText("batch unavailable")).toBeInTheDocument()
+    const { rerender } = render(<BlindReviewPanel {...props} service={runtime} />)
+    const create = screen.getByRole("button", { name: "lab.review.blind.create" })
+    await waitFor(() => expect(create).toBeEnabled())
+    fireEvent.click(create)
+    rerender(<BlindReviewPanel {...props} experimentId="next" service={runtime} />)
+    await act(async () => release(snapshot))
+    expect(screen.queryByText("Left output")).not.toBeInTheDocument()
+    const next = service()
+    const scoped = { ...next, scopeId: "scope-2" }
+    next.load.mockResolvedValue(snapshot)
+    rerender(<BlindReviewPanel {...props} service={scoped} />)
+    await screen.findByText("Left output")
+    rerender(<BlindReviewPanel {...props} service={null} />)
+    expect(screen.queryByText("Left output")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("lab.review.blind.password")).not.toBeInTheDocument()
+  })
+
+  it("ignores the abandoned StrictMode load, including its busy cleanup", async () => {
+    const runtime = service()
+    let first!: (value: EvalReviewSnapshot | null) => void
+    let second!: (value: EvalReviewSnapshot | null) => void
+    runtime.load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          first = resolve
+        })
+    )
+    runtime.load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          second = resolve
+        })
+    )
+    render(
+      <StrictMode>
+        <BlindReviewPanel {...props} service={runtime} />
+      </StrictMode>
+    )
+    await waitFor(() => expect(runtime.load).toHaveBeenCalledTimes(2))
+    await act(async () => first(snapshot))
+    expect(screen.queryByText("Left output")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "lab.review.blind.create" })).toBeDisabled()
+    await act(async () => second(null))
+    expect(screen.getByRole("button", { name: "lab.review.blind.create" })).toBeEnabled()
+  })
+
+  it("shows load and create failures", async () => {
+    const runtime = service()
+    runtime.load.mockRejectedValueOnce(new Error("load failed"))
+    runtime.open.mockRejectedValueOnce(new Error("create failed"))
+    render(<BlindReviewPanel {...props} service={runtime} />)
+    await screen.findByText("load failed")
+    fireEvent.click(screen.getByRole("button", { name: "lab.review.blind.create" }))
+    await screen.findByText("create failed")
   })
 })

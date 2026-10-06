@@ -19,7 +19,7 @@
  * Resolves `true` once granted, `false` when this caller's own teardown
  * withdrew the request before it was.
  *
- * The request is QUEUED, not `ifAvailable`, and that matters for two callers:
+ * By default the request is QUEUED, and that matters for two callers:
  *
  * - A second webview waits here until the owner releases (window closed,
  *   subsystem torn down) and then takes over, rather than double-booting while
@@ -33,16 +33,25 @@
  *
  * Degrades to `true` when Web Locks is absent (SSR, an older webview) or the
  * request fails for any reason other than this caller's own abort. No guard,
- * but boot must not be blocked by a missing browser API.
+ * but boot must not be blocked by a missing browser API. Callers that cannot
+ * safely execute without ownership can opt into `required`; `ifAvailable`
+ * returns false immediately when another owner exists instead of waiting.
  */
-export function acquireExclusiveWebLock(name: string, signal: AbortSignal): Promise<boolean> {
+export function acquireExclusiveWebLock(
+  name: string,
+  signal: AbortSignal,
+  options: { required?: boolean; ifAvailable?: boolean } = {}
+): Promise<boolean> {
   const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks
-  if (!locks?.request) return Promise.resolve(true)
+  if (!locks?.request)
+    return options.required
+      ? Promise.reject(new Error("Exclusive runtime ownership requires Web Locks"))
+      : Promise.resolve(true)
   if (signal.aborted) return Promise.resolve(false)
-  return new Promise<boolean>((resolveAcquired) => {
+  return new Promise<boolean>((resolveAcquired, rejectAcquired) => {
     void locks
-      .request(name, { signal }, (lock) => {
-        if (!lock) {
+      .request(name, options.ifAvailable ? { ifAvailable: true } : { signal }, (lock) => {
+        if (!lock || signal.aborted) {
           resolveAcquired(false)
           return
         }
@@ -59,7 +68,9 @@ export function acquireExclusiveWebLock(name: string, signal: AbortSignal): Prom
         // AbortError means our own teardown withdrew a still-queued request, so
         // we never owned it. Anything else is a lock-API failure, and degrading
         // to "granted" matches the absent-API path above.
-        resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
+        if (options.required && !(err instanceof Error && err.name === "AbortError"))
+          rejectAcquired(err)
+        else resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
       })
   })
 }

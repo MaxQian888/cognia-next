@@ -11,7 +11,7 @@ const meta = {
   title: "Eval/DatasetDetail",
   component: DatasetDetail,
   parameters: { layout: "fullscreen" },
-  args: { dataset: makeDataset(), appSettings: null },
+  args: { dataset: makeDataset() },
   decorators: [
     (Story) => (
       <div className="h-[640px] w-full p-3">

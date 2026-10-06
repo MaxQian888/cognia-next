@@ -7,12 +7,14 @@
  */
 
 import type { AppSettings } from "@cognia/agent-config-types"
-import type { EvalReport } from "@/types/eval/eval"
+import type { EvalDataset, EvalReport } from "@/types/eval/eval"
 import type { EvalRunConfig } from "@/types/eval/run-config"
 import type { GateResult } from "@/types/eval/gate"
 import { evaluateGate } from "@cognia/eval-core"
 import { filterCases, runConfiguredEval, type RunConfiguredDeps } from "./run-config"
 import { buildConfiguredRunDeps } from "./browser-deps"
+import { loadEvalAppSettings } from "./runtime-context"
+import { resolveEvalSettings } from "./settings"
 
 export interface EvalProgress {
   done: number
@@ -148,4 +150,17 @@ export async function getRunDetail(runId: string): Promise<EvalRunDetail | undef
   const report = await getRun(runId)
   if (!report) return undefined
   return { report, cases: await listCaseResults(runId) }
+}
+
+/** Create a user dataset using the host's current default gate. */
+export async function createEvalDataset(input: {
+  name: string
+  capability: string
+}): Promise<EvalDataset> {
+  const name = input.name.trim()
+  const capability = input.capability.trim()
+  if (!name || !capability) throw new TypeError("Dataset name and capability are required")
+  const { defaultGate } = resolveEvalSettings(await loadEvalAppSettings())
+  const { createDataset } = await import("@/lib/db/eval-datasets")
+  return createDataset({ name, capability, ...(defaultGate ? { gate: defaultGate } : {}) })
 }

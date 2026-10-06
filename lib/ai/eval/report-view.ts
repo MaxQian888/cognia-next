@@ -1,4 +1,16 @@
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
+import {
+  buildEvalReportView,
+  type EvalPersistedArtifact,
+  type EvalReportCaseInput,
+  type EvalReportView,
+} from "@cognia/eval-core"
+export {
+  filterEvalReportCases,
+  type EvalPersistedArtifact,
+  type EvalReportCaseEvidence,
+  type EvalReportView,
+  type EvalReportFilters,
+} from "@cognia/eval-core"
 import type { EvalEncryptedEnvelope } from "./artifact-crypto"
 import { decryptEvalArtifact } from "./artifact-crypto"
 import type {
@@ -9,31 +21,6 @@ import type {
   EvalTaskRow,
 } from "@/lib/db/eval-lab"
 import { getDb } from "@/lib/db/schema"
-import { buildEvalCandidateEvidence } from "./finalization"
-
-export interface EvalPersistedArtifact {
-  case: EvalCase
-  sample: EvalSample
-  variantId: string
-  repetition: 1 | 2 | 3
-}
-
-export interface EvalReportCaseEvidence extends EvalPersistedArtifact {
-  sampleId: string
-  taskId: string
-  scores: Array<EvalScoreRow & { reasoning?: string }>
-  status: "passed" | "failed" | "errored"
-}
-
-export interface EvalReportView {
-  experiment: EvalExperimentRow
-  recommendation?: EvalRecommendationRow
-  evidence: ReturnType<typeof buildEvalCandidateEvidence>
-  cases: EvalReportCaseEvidence[]
-  cost: { actual: number; estimatedWorstCase: number; hardCap: number }
-  providerErrors: Array<{ taskId: string; providerId?: string; error: string }>
-}
-
 export interface EvalReportViewDependencies {
   loadExperiment(id: string): Promise<EvalExperimentRow | undefined>
   loadTasks(experimentId: string): Promise<EvalTaskRow[]>
@@ -73,77 +60,41 @@ export async function loadEvalReportView(
     scoresBySample.set(score.sampleId, rows)
   }
   const cases = await Promise.all(
-    samples.map(async (sampleRow): Promise<EvalReportCaseEvidence> => {
+    samples.map(async (sampleRow): Promise<EvalReportCaseInput> => {
       const artifact = await dependencies.decryptArtifact<EvalPersistedArtifact>(
         artifactKey,
         sampleRow.encryptedArtifact
       )
       const sampleScores = await Promise.all(
         (scoresBySample.get(sampleRow.id) ?? []).map(async (score) => ({
-          ...score,
-          ...(score.encryptedReasoning
-            ? await dependencies.decryptArtifact<{ reasoning: string }>(
-                artifactKey,
-                score.encryptedReasoning
-              )
-            : {}),
+          id: score.id,
+          scorerId: score.scorerId,
+          scorerVersion: score.scorerVersion,
+          value: score.value,
+          passed: score.passed,
+          status: score.status,
+          dimension: score.dimension,
+          error: score.error,
+          reasoning: score.encryptedReasoning
+            ? (
+                await dependencies.decryptArtifact<{ reasoning: string }>(
+                  artifactKey,
+                  score.encryptedReasoning
+                )
+              ).reasoning
+            : undefined,
         }))
       )
-      const scored = sampleScores.filter(
-        (score) => score.status === undefined || score.status === "scored"
-      )
       return {
-        ...artifact,
+        case: artifact.case,
+        sample: artifact.sample,
+        variantId: artifact.variantId,
+        repetition: artifact.repetition,
         sampleId: sampleRow.id,
         taskId: sampleRow.taskId,
         scores: sampleScores,
-        status:
-          artifact.sample.error || sampleScores.some((score) => score.status === "errored")
-            ? "errored"
-            : scored.length > 0 && scored.every((score) => score.passed)
-              ? "passed"
-              : "failed",
       }
     })
   )
-  return {
-    experiment,
-    recommendation: [...recommendations].sort((a, b) => b.createdAt - a.createdAt)[0],
-    evidence: buildEvalCandidateEvidence(experiment.manifest, { samples, scores }),
-    cases,
-    cost: {
-      actual: samples.reduce((sum, sample) => sum + sample.actualCost, 0),
-      estimatedWorstCase: tasks.reduce((sum, task) => sum + (task.estimatedWorstCaseCost ?? 0), 0),
-      hardCap: experiment.budgetCap ?? experiment.manifest.budget.hardCap,
-    },
-    providerErrors: tasks.flatMap((task) =>
-      task.lastError
-        ? [{ taskId: task.id, providerId: task.providerId, error: task.lastError }]
-        : []
-    ),
-  }
-}
-
-export interface EvalReportFilters {
-  split?: string
-  tag?: string
-  variantId?: string
-  scorerId?: string
-  status?: EvalReportCaseEvidence["status"]
-}
-
-export function filterEvalReportCases(
-  cases: EvalReportCaseEvidence[],
-  filters: EvalReportFilters
-): EvalReportCaseEvidence[] {
-  return cases.filter((item) => {
-    if (filters.split && item.case.split !== filters.split) return false
-    if (filters.tag && !item.case.tags?.includes(filters.tag)) return false
-    if (filters.variantId && item.variantId !== filters.variantId) return false
-    if (filters.scorerId && !item.scores.some((score) => score.scorerId === filters.scorerId)) {
-      return false
-    }
-    if (filters.status && item.status !== filters.status) return false
-    return true
-  })
+  return buildEvalReportView({ experiment, tasks, samples, scores, recommendations, cases })
 }

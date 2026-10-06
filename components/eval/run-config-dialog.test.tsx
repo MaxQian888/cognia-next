@@ -42,7 +42,25 @@ jest.mock("@/lib/ai/eval/service", () => ({
   runEvalService: (...a: unknown[]) => runEvalService(...(a as [ServiceInput])),
 }))
 
-import { RunConfigDialog } from "./run-config-dialog"
+import { RunConfigDialog as ConnectedRunConfigDialog } from "./run-config-dialog"
+import type { AppSettings } from "@cognia/agent-config-types"
+import type { ComponentProps } from "react"
+
+let currentSettings: AppSettings | null = null
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (state: { settings: AppSettings | null }) => unknown) =>
+    selector({ settings: currentSettings }),
+}))
+
+// Existing scenarios describe host settings; the production dialog receives
+// no settings prop. This fixture supplies them through the host store instead.
+function renderDialog({
+  appSettings,
+  ...props
+}: ComponentProps<typeof ConnectedRunConfigDialog> & { appSettings: AppSettings | null }) {
+  currentSettings = appSettings
+  return render(<ConnectedRunConfigDialog {...props} />)
+}
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
 import enEval from "@/i18n/messages/en/eval.json"
 import zhEval from "@/i18n/messages/zh-CN/eval.json"
@@ -59,7 +77,7 @@ beforeEach(() => {
 describe("RunConfigDialog", () => {
   it("holds the run, and says why, while the dataset has no cases", () => {
     evalCases.mockReturnValue([])
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     expect(screen.getByTestId("run-config-no-cases")).toHaveTextContent("runConfig.noCases")
     expect(screen.getByRole("button", { name: /runConfig\.run$/ })).toBeDisabled()
   })
@@ -67,14 +85,12 @@ describe("RunConfigDialog", () => {
   it("runs the default single chat target and reports completion", async () => {
     const onComplete = jest.fn()
     const onClose = jest.fn()
-    render(
-      <RunConfigDialog
-        datasetId="d"
-        appSettings={{ defaultModel: "claude-sonnet-4-6" } as never}
-        onClose={onClose}
-        onComplete={onComplete}
-      />
-    )
+    renderDialog({
+      datasetId: "d",
+      appSettings: { defaultModel: "claude-sonnet-4-6" } as never,
+      onClose: onClose,
+      onComplete: onComplete,
+    })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     const { datasetId, config } = runEvalService.mock.calls[0][0]
@@ -86,7 +102,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("adds a second target to form a matrix", async () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.addTarget"))
     const refs = screen.getAllByLabelText("runConfig.targetRef")
     expect(refs).toHaveLength(2)
@@ -97,7 +113,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("errors when every target ref is blank", async () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     const ref = screen.getByLabelText("runConfig.targetRef")
     fireEvent.change(ref, { target: { value: "" } })
     fireEvent.click(screen.getByText("runConfig.run"))
@@ -106,7 +122,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("passes a scorer subset when some scorers are unchecked", async () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByLabelText("scorerCatalog.cost")) // uncheck one
     fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m" } })
     fireEvent.click(screen.getByText("runConfig.run"))
@@ -117,19 +133,17 @@ describe("RunConfigDialog", () => {
   })
 
   it("renders option selects (model + character) and applies subset + k", async () => {
-    render(
-      <RunConfigDialog
-        datasetId="d"
-        appSettings={{ defaultModel: "m1" } as never}
-        options={{
-          models: ["m1", "m2"],
-          characters: [{ id: "char-1", name: "Ada" }],
-          teams: [{ id: "tm", name: "Team" }],
-          workflows: [{ id: "wf", name: "Flow" }],
-        }}
-        onClose={jest.fn()}
-      />
-    )
+    renderDialog({
+      datasetId: "d",
+      appSettings: { defaultModel: "m1" } as never,
+      options: {
+        models: ["m1", "m2"],
+        characters: [{ id: "char-1", name: "Ada" }],
+        teams: [{ id: "tm", name: "Team" }],
+        workflows: [{ id: "wf", name: "Flow" }],
+      },
+      onClose: jest.fn(),
+    })
     // RefField renders a <select> when options.models is provided
     fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m2" } })
     fireEvent.change(screen.getByLabelText("runConfig.character"), { target: { value: "char-1" } })
@@ -145,7 +159,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("builds team and workflow target specs from the kind select", async () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.change(screen.getByLabelText("runConfig.targetKind"), { target: { value: "team" } })
     fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "tm1" } })
     fireEvent.click(screen.getByText("runConfig.addTarget"))
@@ -163,14 +177,12 @@ describe("RunConfigDialog", () => {
   })
 
   it("builds a Twin target with a registry id and model", async () => {
-    render(
-      <RunConfigDialog
-        datasetId="d"
-        appSettings={{ defaultModel: "m1" } as never}
-        options={{ models: ["m1", "m2"], twins: [{ id: "twin-1", name: "Alice" }] }}
-        onClose={jest.fn()}
-      />
-    )
+    renderDialog({
+      datasetId: "d",
+      appSettings: { defaultModel: "m1" } as never,
+      options: { models: ["m1", "m2"], twins: [{ id: "twin-1", name: "Alice" }] },
+      onClose: jest.fn(),
+    })
     fireEvent.change(screen.getByLabelText("runConfig.targetKind"), {
       target: { value: "twin" },
     })
@@ -191,7 +203,7 @@ describe("RunConfigDialog", () => {
 
   it("surfaces a service failure as an alert", async () => {
     runEvalService.mockRejectedValueOnce(new Error("boom"))
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
   })
@@ -208,7 +220,7 @@ describe("RunConfigDialog", () => {
       })
       return { reports: [{ runId: "r1" }], deterministicOnly: false }
     })
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.run"))
     expect(await screen.findByTestId("run-progress")).toHaveTextContent("runConfig.starting")
     fireEvent.click(screen.getByText("runConfig.cancelRun"))
@@ -225,9 +237,7 @@ describe("RunConfigDialog", () => {
       })
       return { reports: [{ runId: "r1" }], deterministicOnly: false }
     })
-    const { unmount } = render(
-      <RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />
-    )
+    const { unmount } = renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(useEvalRunStore.getState().active).not.toBeNull())
     // Closing the dialog used to drop the AbortController while the promise
@@ -250,7 +260,7 @@ describe("RunConfigDialog", () => {
       })
       return { reports: [{ runId: "r1" }], deterministicOnly: false }
     })
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.run"))
     expect(await screen.findByTestId("run-progress")).toBeInTheDocument()
     // The ungraded count is shown alongside `passing`: a live "1 passing" that
@@ -265,7 +275,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("removes an added target row", () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("runConfig.addTarget"))
     expect(screen.getAllByLabelText("runConfig.targetRef")).toHaveLength(2)
     fireEvent.click(screen.getAllByLabelText("runConfig.removeTarget")[0])
@@ -284,7 +294,7 @@ describe("RunConfigDialog", () => {
     it("estimates cost from the most recent run once one exists", () => {
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
-      render(<RunConfigDialog datasetId="d" appSettings={settings()} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(), onClose: jest.fn() })
       // 0.20/unit × 2 cases × k1 × 1 target
       expect(screen.getByText(/cost\.estimate/)).toHaveTextContent('{"cost":"0.40"}')
     })
@@ -292,7 +302,7 @@ describe("RunConfigDialog", () => {
     it("requires a second click to run once the estimate exceeds the guard", async () => {
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
-      render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(0.1), onClose: jest.fn() })
       expect(screen.getByText(/cost\.overBudget/)).toBeInTheDocument()
 
       // The confirming click is the one labelled "anyway". The labels used to
@@ -314,7 +324,7 @@ describe("RunConfigDialog", () => {
       // pre-approved the far bigger one you get after adding targets.
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
-      render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(0.1), onClose: jest.fn() })
       fireEvent.click(screen.getByText("runConfig.run"))
       expect(screen.getByText("runConfig.runAnyway")).toBeInTheDocument()
       // Raise k → the estimate changes → the acknowledgement no longer applies.
@@ -327,7 +337,7 @@ describe("RunConfigDialog", () => {
     it("does not warn when the estimate is within the guard", () => {
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }])
-      render(<RunConfigDialog datasetId="d" appSettings={settings(100)} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(100), onClose: jest.fn() })
       expect(screen.queryByText(/cost\.overBudget/)).not.toBeInTheDocument()
       expect(screen.getByText("runConfig.run")).toBeInTheDocument()
       expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument()
@@ -338,7 +348,7 @@ describe("RunConfigDialog", () => {
       // pure friction.
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
-      render(<RunConfigDialog datasetId="d" appSettings={settings()} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(), onClose: jest.fn() })
       fireEvent.click(screen.getByText("runConfig.run"))
       await waitFor(() => expect(runEvalService).toHaveBeenCalledTimes(1))
     })
@@ -353,7 +363,7 @@ describe("RunConfigDialog", () => {
         })
         return { reports: [{ runId: "r1" }], deterministicOnly: false }
       })
-      render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
+      renderDialog({ datasetId: "d", appSettings: settings(0.1), onClose: jest.fn() })
       fireEvent.click(screen.getByText("runConfig.run"))
       fireEvent.click(screen.getByText("runConfig.runAnyway"))
       await waitFor(() => expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument())
@@ -363,15 +373,11 @@ describe("RunConfigDialog", () => {
   })
 
   it("names the configured judge model in the judge indicator", () => {
-    render(
-      <RunConfigDialog
-        datasetId="d"
-        appSettings={
-          { defaultModel: "m", evalSettings: { judgeModel: "claude-opus-4-8" } } as never
-        }
-        onClose={jest.fn()}
-      />
-    )
+    renderDialog({
+      datasetId: "d",
+      appSettings: { defaultModel: "m", evalSettings: { judgeModel: "claude-opus-4-8" } } as never,
+      onClose: jest.fn(),
+    })
     expect(screen.getByText(/judge\.using/)).toHaveTextContent("claude-opus-4-8")
   })
 
@@ -380,7 +386,7 @@ describe("RunConfigDialog", () => {
       deps: { sentinel: true },
       deterministicOnly: true,
     })
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     expect(screen.getByText("judge.deterministic")).toBeInTheDocument()
     expect(screen.getByText("runConfig.deterministicOnly")).toBeInTheDocument()
     buildConfiguredRunDeps.mockReturnValue({ deps: { sentinel: true }, deterministicOnly: false })
@@ -393,7 +399,7 @@ describe("RunConfigDialog", () => {
       deps: { sentinel: true },
       deterministicOnly: true,
     })
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     const judge = screen.getByLabelText("scorerCatalog.judge-task-completion")
     expect(judge).toBeDisabled()
     expect(judge).not.toBeChecked()
@@ -405,14 +411,12 @@ describe("RunConfigDialog", () => {
   })
 
   it("selects a target's character back to the default", async () => {
-    render(
-      <RunConfigDialog
-        datasetId="d"
-        appSettings={{ defaultModel: "m1" } as never}
-        options={{ models: ["m1"], characters: [{ id: "char-1", name: "Ada" }] }}
-        onClose={jest.fn()}
-      />
-    )
+    renderDialog({
+      datasetId: "d",
+      appSettings: { defaultModel: "m1" } as never,
+      options: { models: ["m1"], characters: [{ id: "char-1", name: "Ada" }] },
+      onClose: jest.fn(),
+    })
     const picker = screen.getByLabelText("runConfig.character")
     fireEvent.change(picker, { target: { value: "char-1" } })
     fireEvent.change(picker, { target: { value: "" } })
@@ -422,7 +426,7 @@ describe("RunConfigDialog", () => {
   })
 
   it("deep-links to the eval settings section", () => {
-    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByText("judge.configure"))
     expect(push).toHaveBeenCalledWith("/settings?section=eval")
   })

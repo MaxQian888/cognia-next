@@ -610,21 +610,19 @@ describe("browser evaluation task execution", () => {
       .fn()
       .mockReturnValueOnce({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })
       .mockReturnValue({ inputTokens: 100, outputTokens: 50, totalTokens: 150 })
-    mockRendererClient.mockReturnValue({
-      complete: async () =>
-        JSON.stringify({
-          pass: true,
-          reasoning: "ok",
-          score: 1,
-          relevant: true,
-          faithful: true,
-        }),
-      getUsageSnapshot,
-    })
+    const completeJudge = jest.fn(async () =>
+      JSON.stringify({ pass: true, reasoning: "ok", score: 1, relevant: true, faithful: true })
+    )
+    mockRendererClient.mockReturnValue({ complete: completeJudge, getUsageSnapshot })
+    const judgeController = new AbortController()
     const result = await createBrowserEvalTaskExecutor(
       { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
       overrides
-    )(task, new AbortController().signal)
+    )(task, judgeController.signal)
+    expect(completeJudge).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ abortSignal: judgeController.signal })
+    )
     expect(result.value.scores.some((score) => score.scorerId.startsWith("judge-"))).toBe(true)
     expect(result.value.sample).toMatchObject({
       judgeInputTokens: 100,
@@ -698,12 +696,37 @@ describe("Dexie evaluation orchestrator repository", () => {
     const repository = new DexieEvalOrchestratorRepository()
 
     await expect(repository.reserveTask("task-1", 0.5)).resolves.toBe(true)
-    await expect(repository.reserveTask("task-1", 0.5)).resolves.toBe(true)
+    await expect(repository.reserveTask("task-1", 0.5)).resolves.toBe(false)
     await expect(repository.reserveTask("task-2", 0.6)).resolves.toBe(false)
     await expect(repository.reserveTask("task-3", 0.01)).resolves.toBe(true)
 
     expect(await getDb().evalExperiments.get(manifest.id)).toMatchObject({ reservedCost: 0.51 })
     expect(await getDb().evalTasks.get("task-2")).toMatchObject({ reservedCost: 0 })
+  })
+
+  it("fences late updates after another window cancels an experiment", async () => {
+    await getDb().evalTasks.add({ ...task, state: "cancelled" })
+    await getDb().evalExperiments.update(manifest.id, { state: "cancelled" })
+    const repository = new DexieEvalOrchestratorRepository()
+    await repository.updateTask(task.id, { state: "running", attempt: 2 })
+    await repository.setExperimentState(manifest.id, "running")
+    await repository.setExperimentState(manifest.id, "completed")
+    expect((await getDb().evalTasks.get(task.id))?.state).toBe("cancelled")
+    expect((await getDb().evalExperiments.get(manifest.id))?.state).toBe("cancelled")
+  })
+
+  it("rejects a scope change between repository access and the transaction write", async () => {
+    await getDb().evalTasks.add(task)
+    let checks = 0
+    const repository = new DexieEvalOrchestratorRepository(undefined, {
+      db: getDb(),
+      assertActive() {
+        if (++checks > 1) throw new Error("scope changed")
+      },
+    })
+    await expect(repository.reserveTask(task.id, 0.4)).rejects.toThrow("scope changed")
+    expect((await getDb().evalTasks.get(task.id))?.reservedCost).toBe(0)
+    expect((await getDb().evalExperiments.get(manifest.id))?.reservedCost).toBe(0)
   })
 
   it("persists repository state, completion ordering, and reservation release", async () => {
@@ -729,7 +752,7 @@ describe("Dexie evaluation orchestrator repository", () => {
     await getDb().evalTasks.update(task.id, { state: "running", reservedCost: 0.1 })
     await getDb().evalExperiments.update(manifest.id, { reservedCost: 0.1 })
     await repository.completeTask(
-      { ...task, state: "running", reservedCost: 0.1 },
+      { ...task, attempt: 2, state: "running", reservedCost: 0.1 },
       {
         actualCost: sample.costUsd,
         value: {

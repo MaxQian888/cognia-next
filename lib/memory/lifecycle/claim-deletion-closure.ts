@@ -1,4 +1,5 @@
 import type { CogniaDB } from "@/lib/db/schema"
+import type { MemoryPersistenceScope } from "@/lib/db/memory-governance"
 import { parseAttachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
 import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 
@@ -33,20 +34,34 @@ import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
  * queuing one job per affected personal row would fill the queue with work whose
  * only outcome is `not_a_project_claim`. One bulk read is cheaper than that.
  */
-async function projectClaimIdsAmong(memoryIds: readonly string[]): Promise<string[]> {
+async function projectClaimIdsAmong(
+  memoryIds: readonly string[],
+  scope?: MemoryPersistenceScope
+): Promise<string[]> {
   if (memoryIds.length === 0) return []
   const { getDb } = await import("@/lib/db/schema")
-  const rows = await getDb().memories.bulkGet([...memoryIds])
+  scope?.assertActive()
+  const rows = await (scope?.db ?? getDb()).memories.bulkGet([...memoryIds])
+  scope?.assertActive()
   return rows
     .filter((row) => row?.projectMemoryKind !== undefined && row.status === "active")
     .map((row) => row!.id)
 }
 
-async function queueRechecks(memoryIds: readonly string[]): Promise<number> {
-  const targets = await projectClaimIdsAmong(memoryIds)
+async function queueRechecks(
+  memoryIds: readonly string[],
+  scope?: MemoryPersistenceScope
+): Promise<number> {
+  scope?.assertActive()
+  const targets = await projectClaimIdsAmong(memoryIds, scope)
   if (targets.length === 0) return 0
   const { enqueueClaimRevalidation } = await import("./enqueue-reconcile")
-  for (const memoryId of targets) await enqueueClaimRevalidation(memoryId)
+  scope?.assertActive()
+  for (const memoryId of targets) {
+    if (scope) await enqueueClaimRevalidation(memoryId, scope)
+    else await enqueueClaimRevalidation(memoryId)
+    scope?.assertActive()
+  }
   return targets.length
 }
 
@@ -76,14 +91,25 @@ export async function revokeClaimsForDeletedMessages(
  * `sessionId` and no `messageId`, so a sweep keyed on message ids would leave
  * them behind pointing at a conversation that no longer exists.
  */
-export async function revokeClaimsForDeletedSession(sessionId: string): Promise<number> {
+export async function revokeClaimsForDeletedSession(
+  sessionId: string,
+  scope?: MemoryPersistenceScope
+): Promise<number> {
   if (!sessionId) return 0
   try {
+    scope?.assertActive()
     const { revokeMemoryEvidenceForSession, cancelMemoryJobsForSession } =
       await import("@/lib/db/memory-governance")
-    const affected = await revokeMemoryEvidenceForSession(sessionId)
-    await cancelMemoryJobsForSession(sessionId).catch(() => 0)
-    return await queueRechecks(affected)
+    scope?.assertActive()
+    const affected = scope
+      ? await revokeMemoryEvidenceForSession(sessionId, undefined, scope)
+      : await revokeMemoryEvidenceForSession(sessionId)
+    scope?.assertActive()
+    await (
+      scope ? cancelMemoryJobsForSession(sessionId, scope) : cancelMemoryJobsForSession(sessionId)
+    ).catch(() => 0)
+    scope?.assertActive()
+    return await queueRechecks(affected, scope)
   } catch {
     return 0
   }

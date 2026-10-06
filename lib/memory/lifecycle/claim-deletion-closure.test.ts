@@ -139,6 +139,34 @@ describe("revokeClaimsForDeletedMessages", () => {
 })
 
 describe("revokeClaimsForDeletedSession", () => {
+  it("keeps all follow-up work bound to the supplied deletion scope", async () => {
+    const scopedBulkGet = jest.fn().mockResolvedValue([CLAIM])
+    const scope = { db: { memories: { bulkGet: scopedBulkGet } } as never, assertActive: jest.fn() }
+    await expect(revokeClaimsForDeletedSession("s1", scope)).resolves.toBe(1)
+    expect(mockRevokeForSession).toHaveBeenCalledWith("s1", undefined, scope)
+    expect(mockCancelJobs).toHaveBeenCalledWith("s1", scope)
+    expect(scopedBulkGet).toHaveBeenCalledWith(["claim1"])
+    expect(mockBulkGet).not.toHaveBeenCalled()
+    expect(mockEnqueueRecheck).toHaveBeenCalledWith("claim1", scope)
+  })
+
+  it("stops follow-up work when the original scope expires while revocation is pending", async () => {
+    let active = true
+    const scope = {
+      db: {} as never,
+      assertActive: () => {
+        if (!active) throw new Error("scope expired")
+      },
+    }
+    mockRevokeForSession.mockImplementation(async () => {
+      active = false
+      return ["claim1"]
+    })
+    await expect(revokeClaimsForDeletedSession("s1", scope)).resolves.toBe(0)
+    expect(mockCancelJobs).not.toHaveBeenCalled()
+    expect(mockEnqueueRecheck).not.toHaveBeenCalled()
+  })
+
   it("revokes by session, which is the only way to reach turn-level citations", async () => {
     // Those rows carry a sessionId and no messageId, so an id sweep leaves them
     // pointing at a conversation that no longer exists.

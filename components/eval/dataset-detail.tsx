@@ -26,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalDataset } from "@/types/eval/eval"
 import { toJsonl, toCsv } from "@/lib/ai/eval/export"
 import { useEvalCases } from "@/hooks/eval/use-eval-data"
@@ -53,11 +52,10 @@ function download(filename: string, content: string, type: string): void {
 
 export interface DatasetDetailProps {
   dataset: EvalDataset
-  appSettings: AppSettings | null
   runOptions?: RunConfigOptions
 }
 
-export function DatasetDetail({ dataset, appSettings, runOptions }: DatasetDetailProps) {
+export function DatasetDetail({ dataset, runOptions }: DatasetDetailProps) {
   const t = useTranslations("eval")
   const cases = useEvalCases(dataset.id)
   const [dialog, setDialog] = useState<DialogKind>("none")
@@ -182,7 +180,6 @@ export function DatasetDetail({ dataset, appSettings, runOptions }: DatasetDetai
           </DialogHeader>
           <RunConfigDialog
             datasetId={dataset.id}
-            appSettings={appSettings}
             {...(runOptions ? { options: runOptions } : {})}
             onClose={() => setDialog("none")}
             onComplete={() => setSegment("runs")}

@@ -3,6 +3,11 @@ jest.mock("@cognia/memory/lifecycle/belief", () => {
   return { ...actual, computeBeliefInputs: jest.fn(actual.computeBeliefInputs) }
 })
 
+jest.mock("./schema", () => {
+  const actual = jest.requireActual("./schema")
+  return { ...actual, getDb: jest.fn(actual.getDb) }
+})
+
 import { computeBeliefInputs } from "@cognia/memory/lifecycle/belief"
 import { createDbTestFixture } from "./test-fixture"
 import {
@@ -33,12 +38,78 @@ import {
 } from "./memory-governance"
 import { createMemory, getMemory } from "./memories"
 import { getDb } from "./schema"
+import * as schema from "./schema"
 
 const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
+
+describe("scoped deletion bookkeeping", () => {
+  it("uses the captured database for evidence, belief refresh, cancellation, and rechecks", async () => {
+    const db = getDb()
+    await createMemoryEvidence({
+      id: "scoped-evidence",
+      memoryId: "claim",
+      kind: "message",
+      sourceId: "source",
+      sessionId: "scoped-session",
+      contaminationState: "clean",
+      reviewed: false,
+    })
+    const draft = {
+      dedupeKey: "scoped-job",
+      kind: "project-claim-revalidate" as const,
+      scope: "workspace" as const,
+      provenance: "system" as const,
+      evidenceIds: [],
+      sessionId: "scoped-session",
+    }
+    const job = await enqueueMemoryJob(draft)
+    const scope = { db, assertActive: jest.fn() }
+    const globalDb = jest.mocked(schema.getDb)
+    const originalGetDb = globalDb.getMockImplementation()!
+    globalDb.mockClear().mockImplementation(() => {
+      throw new Error("global database must not be resolved")
+    })
+    try {
+      await expect(revokeMemoryEvidenceForSession("scoped-session", 100, scope)).resolves.toEqual([
+        "claim",
+      ])
+      await expect(cancelMemoryJobsForSession("scoped-session", scope)).resolves.toBe(1)
+      await enqueueMemoryJob({ ...draft, dedupeKey: "scoped-recheck" }, { scope })
+      expect((await db.memoryEvidence.get("scoped-evidence"))?.validationState).toBe("revoked")
+      expect((await db.memoryJobs.get(job.id))?.status).toBe("cancelled")
+      expect(globalDb).not.toHaveBeenCalled()
+    } finally {
+      globalDb.mockImplementation(originalGetDb)
+    }
+  })
+
+  it("rejects evidence writes when its scope expires after the asynchronous read", async () => {
+    const db = getDb()
+    await createMemoryEvidence({
+      id: "scoped-evidence",
+      kind: "message",
+      sourceId: "source",
+      sessionId: "scoped-session",
+      contaminationState: "clean",
+      reviewed: false,
+    })
+    let checks = 0
+    const scope = {
+      db,
+      assertActive: () => {
+        if (++checks >= 2) throw new Error("scope expired")
+      },
+    }
+    await expect(revokeMemoryEvidenceForSession("scoped-session", 100, scope)).rejects.toThrow(
+      "scope expired"
+    )
+    expect((await db.memoryEvidence.get("scoped-evidence"))?.validationState).not.toBe("revoked")
+  })
+})
 
 describe("memory evidence and audit", () => {
   it("persists source identities without raw source content", async () => {

@@ -24,10 +24,8 @@ import { ArrowLeftIcon, PlusIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
-import { createDataset } from "@/lib/db/eval-datasets"
-import { resolveEvalSettings } from "@/lib/ai/eval/settings"
+import { createEvalDataset } from "@/lib/ai/eval/service"
 import { useEvalDatasets } from "@/hooks/eval/use-eval-data"
 import { useRunConfigOptions } from "@/hooks/eval/use-run-config-options"
 import { DatasetDetail } from "./dataset-detail"
@@ -44,7 +42,6 @@ export interface EvalDashboardProps {
 export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
   const t = useTranslations("eval")
   const datasets = useEvalDatasets()
-  const settings = useSettingsStore((s) => s.settings)
   const runOptions = useRunConfigOptions()
   const isMobile = useIsMobile()
 
@@ -68,18 +65,16 @@ export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
 
   const handleCreate = useCallback(async () => {
     if (!name.trim() || !capability.trim()) return
-    const defaultGate = resolveEvalSettings(settings).defaultGate
-    const ds = await createDataset({
+    const ds = await createEvalDataset({
       name: name.trim(),
       capability: capability.trim(),
-      ...(defaultGate ? { gate: defaultGate } : {}),
     })
     setSelectedId(ds.id)
     setMobileDetailOpen(true)
     setName("")
     setCapability("")
     setCreating(false)
-  }, [name, capability, settings])
+  }, [name, capability])
 
   const select = (id: string) => {
     setSelectedId(id)
@@ -206,11 +201,7 @@ export function EvalDashboard({ initialDatasetId }: EvalDashboardProps = {}) {
         {showDetail && (
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3 sm:p-4">
             {selectedDataset ? (
-              <DatasetDetail
-                dataset={selectedDataset}
-                appSettings={settings}
-                runOptions={runOptions}
-              />
+              <DatasetDetail dataset={selectedDataset} runOptions={runOptions} />
             ) : (
               <p className="text-muted-foreground text-sm" data-testid="eval-detail-prompt">
                 {/* "Select a dataset" beside an empty list asks for something

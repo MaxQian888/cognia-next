@@ -408,7 +408,9 @@
         "reviewer": "评审者身份",
         "right": "输出 B",
         "tie": "平局",
-        "title": "多评审者盲审批次"
+        "title": "多评审者盲审批次",
+        "refreshPending": "评审已保存，推荐结果尚未刷新。",
+        "retryRefresh": "重试刷新推荐结果"
       },
       "caseEvidence": "逐用例证据",
       "caseEvidenceHint": "检查重复运行、输出、轨迹、评分来源和评审状态，且不会暴露凭据。",

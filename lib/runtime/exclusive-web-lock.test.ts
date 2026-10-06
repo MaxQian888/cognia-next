@@ -82,3 +82,30 @@ describe("acquireExclusiveWebLock", () => {
     expect(seen).toEqual({ name: "cognia-bot-runtime", hasSignal: true })
   })
 })
+
+it("requires real ownership when strict callers cannot safely degrade", async () => {
+  await expect(
+    acquireExclusiveWebLock("eval", new AbortController().signal, { required: true })
+  ).rejects.toThrow("requires Web Locks")
+  installLockManager({
+    onRequest: async () => {
+      throw new Error("denied")
+    },
+  })
+  await expect(
+    acquireExclusiveWebLock("eval", new AbortController().signal, { required: true })
+  ).rejects.toThrow("denied")
+})
+it("supports nonblocking ownership without combining ifAvailable and signal", async () => {
+  const request = jest.fn(async (_name, options, grant: Grant) => {
+    expect(options).toEqual({ ifAvailable: true })
+    await grant(null)
+  })
+  installLockManager({ onRequest: request })
+  await expect(
+    acquireExclusiveWebLock("eval", new AbortController().signal, {
+      required: true,
+      ifAvailable: true,
+    })
+  ).resolves.toBe(false)
+})

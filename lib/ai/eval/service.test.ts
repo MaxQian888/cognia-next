@@ -1,9 +1,10 @@
 /** Service facade — progress fan-out + gate verdicts over runConfiguredEval. */
-import { runEvalService, listDatasetSummaries, getRunDetail } from "./service"
+import { runEvalService, listDatasetSummaries, getRunDetail, createEvalDataset } from "./service"
 import type { RunConfiguredDeps } from "./run-config"
 import type { EvalCase, EvalDataset, Scorer } from "@/types/eval/eval"
 
 jest.mock("@/lib/db/eval-datasets", () => ({
+  createDataset: jest.fn(),
   listDatasets: jest.fn(async () => [
     { id: "d1", name: "DS", capability: "chat", version: 3, createdAt: 1, updatedAt: 2 },
   ]),
@@ -207,5 +208,59 @@ describe("queries", () => {
     expect(detail?.report.runId).toBe("r1")
     expect(detail?.cases).toHaveLength(1)
     expect(await getRunDetail("nope")).toBeUndefined()
+  })
+})
+
+jest.mock("./runtime-context", () => ({ loadEvalAppSettings: jest.fn() }))
+
+describe("createEvalDataset", () => {
+  const { createDataset } = jest.requireMock("@/lib/db/eval-datasets") as {
+    createDataset: jest.Mock
+  }
+  const { loadEvalAppSettings } = jest.requireMock("./runtime-context") as {
+    loadEvalAppSettings: jest.Mock
+  }
+
+  beforeEach(() => {
+    createDataset.mockReset().mockResolvedValue(dataset)
+    loadEvalAppSettings.mockReset().mockResolvedValue(null)
+  })
+
+  it("normalizes form fields and stamps the current configured gate", async () => {
+    const gate = { minPassAt1: 0.8 }
+    loadEvalAppSettings.mockResolvedValueOnce({ evalSettings: { defaultGate: gate } })
+    await expect(createEvalDataset({ name: " Set A ", capability: " chat " })).resolves.toBe(
+      dataset
+    )
+    expect(createDataset).toHaveBeenCalledWith({ name: "Set A", capability: "chat", gate })
+    loadEvalAppSettings.mockResolvedValueOnce({
+      evalSettings: { defaultGate: { minPassAt1: 0.9 } },
+    })
+    await createEvalDataset({ name: "Set B", capability: "chat" })
+    expect(createDataset).toHaveBeenLastCalledWith({
+      name: "Set B",
+      capability: "chat",
+      gate: { minPassAt1: 0.9 },
+    })
+  })
+
+  it("creates without a gate when settings have none", async () => {
+    await createEvalDataset({ name: "Set", capability: "chat" })
+    expect(createDataset).toHaveBeenCalledWith({ name: "Set", capability: "chat" })
+  })
+
+  it.each([
+    { name: " ", capability: "chat" },
+    { name: "Set", capability: " " },
+  ])("rejects blank fields before persistence: %j", async (input) => {
+    await expect(createEvalDataset(input)).rejects.toThrow(TypeError)
+    expect(createDataset).not.toHaveBeenCalled()
+  })
+
+  it("propagates persistence failure without reporting a created dataset", async () => {
+    createDataset.mockRejectedValueOnce(new Error("database unavailable"))
+    await expect(createEvalDataset({ name: "Set", capability: "chat" })).rejects.toThrow(
+      "database unavailable"
+    )
   })
 })

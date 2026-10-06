@@ -1,9 +1,53 @@
 import {
+  registerRuntimeTargetCleanup,
   registerRuntimeTargetTransitionParticipant,
   registerRuntimeTargetSubscriptionStopper,
   runRuntimeTargetTransitionPhase,
   stopRuntimeTargetSubscriptions,
 } from "./runtime-target-lifecycle"
+
+it("releases independent runtime owners alongside the Companion subscription slot", async () => {
+  const evalCleanup = jest.fn()
+  const otherCleanup = jest.fn()
+  const companion = jest.fn()
+  registerRuntimeTargetCleanup(evalCleanup)
+  const unregister = registerRuntimeTargetCleanup(otherCleanup)
+  registerRuntimeTargetSubscriptionStopper(companion)
+  unregister()
+  await stopRuntimeTargetSubscriptions()
+  await stopRuntimeTargetSubscriptions()
+  expect(evalCleanup).toHaveBeenCalledTimes(1)
+  expect(companion).toHaveBeenCalledTimes(1)
+  expect(otherCleanup).not.toHaveBeenCalled()
+})
+
+it("awaits every owner even if one cleanup fails, and propagates the failure", async () => {
+  const failure = new Error("cleanup failed")
+  const released: string[] = []
+  registerRuntimeTargetCleanup(() => {
+    throw failure
+  })
+  registerRuntimeTargetCleanup(async () => {
+    released.push("eval")
+  })
+  registerRuntimeTargetSubscriptionStopper(async () => {
+    released.push("companion")
+  })
+  await expect(stopRuntimeTargetSubscriptions()).rejects.toBe(failure)
+  expect(released.sort()).toEqual(["companion", "eval"])
+  await expect(stopRuntimeTargetSubscriptions()).resolves.toBeUndefined()
+})
+
+it("does not discard an owner registered while the previous scope is releasing", async () => {
+  const nextCleanup = jest.fn()
+  registerRuntimeTargetCleanup(() => {
+    registerRuntimeTargetCleanup(nextCleanup)
+  })
+  await stopRuntimeTargetSubscriptions()
+  expect(nextCleanup).not.toHaveBeenCalled()
+  await stopRuntimeTargetSubscriptions()
+  expect(nextCleanup).toHaveBeenCalledTimes(1)
+})
 
 afterEach(async () => {
   await stopRuntimeTargetSubscriptions()

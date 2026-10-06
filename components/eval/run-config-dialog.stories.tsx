@@ -4,13 +4,13 @@ import { fn } from "storybook/test"
 import { RunConfigDialog } from "./run-config-dialog"
 
 // Build an EvalRunConfig (target matrix × scorer subset × k × case subset).
-// `appSettings === null` falls back to a default model; when target option
-// lists are empty each ref field degrades to a free-text input.
+// Defaults come from the eval configuration hook; when target option lists
+// are empty each ref field degrades to a free-text input.
 const meta = {
   title: "Eval/RunConfigDialog",
   component: RunConfigDialog,
   parameters: { layout: "padded" },
-  args: { datasetId: "ds-1", appSettings: null, onClose: fn(), onComplete: fn() },
+  args: { datasetId: "ds-1", onClose: fn(), onComplete: fn() },
   decorators: [
     (Story) => (
       <div className="max-w-2xl">

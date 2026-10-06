@@ -16,13 +16,10 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
 jest.mock("@/hooks/eval/use-run-config-options", () => ({
   useRunConfigOptions: () => ({ models: ["m1"], characters: [], teams: [], workflows: [] }),
 }))
-jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: (selector: (s: { settings: null }) => unknown) => selector({ settings: null }),
-}))
 jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: jest.fn(() => false) }))
-const createDataset = jest.fn(async () => ({ id: "new-ds" }))
-jest.mock("@/lib/db/eval-datasets", () => ({
-  createDataset: (...a: unknown[]) => createDataset(...(a as [])),
+const createEvalDataset = jest.fn(async () => ({ id: "new-ds" }))
+jest.mock("@/lib/ai/eval/service", () => ({
+  createEvalDataset: (...a: unknown[]) => createEvalDataset(...(a as [])),
 }))
 // DatasetDetail is covered by its own suite; stub it here.
 jest.mock("./dataset-detail", () => ({
@@ -40,7 +37,7 @@ function dataset(id: string, name: string, version = 1): EvalDataset {
 
 beforeEach(() => {
   datasets = []
-  createDataset.mockClear()
+  createEvalDataset.mockClear()
   ;(useIsMobile as jest.Mock).mockReturnValue(false)
 })
 
@@ -73,7 +70,7 @@ describe("EvalDashboard", () => {
     })
     fireEvent.click(screen.getByText("datasets.create"))
     await waitFor(() =>
-      expect(createDataset).toHaveBeenCalledWith({ name: "Set A", capability: "chat" })
+      expect(createEvalDataset).toHaveBeenCalledWith({ name: "Set A", capability: "chat" })
     )
   })
 
@@ -102,7 +99,7 @@ describe("EvalDashboard", () => {
     fireEvent.change(capability, { target: { value: "chat" } })
     fireEvent.submit(capability.closest("form")!)
     await waitFor(() =>
-      expect(createDataset).toHaveBeenCalledWith({ name: "Set B", capability: "chat" })
+      expect(createEvalDataset).toHaveBeenCalledWith({ name: "Set B", capability: "chat" })
     )
   })
 

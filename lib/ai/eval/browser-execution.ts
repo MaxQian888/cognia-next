@@ -21,6 +21,7 @@ import {
   type EvalExperimentRow,
   type EvalSampleRow,
   type EvalScoreRow,
+  type EvalPersistenceScope,
 } from "@/lib/db/eval-lab"
 import { getCase } from "@/lib/db/eval-datasets"
 import { getDb } from "@/lib/db/schema"
@@ -50,11 +51,19 @@ export interface EvalExecutedTaskArtifacts {
 }
 
 export class DexieEvalOrchestratorRepository implements EvalOrchestratorRepository<EvalExecutedTaskArtifacts> {
-  constructor(private readonly artifactKey?: Uint8Array) {}
+  constructor(
+    private readonly artifactKey?: Uint8Array,
+    private readonly scope?: EvalPersistenceScope
+  ) {}
+
+  private database() {
+    this.scope?.assertActive()
+    return this.scope?.db ?? getDb()
+  }
   async getExperiment(
     id: string
   ): Promise<{ state: EvalExperimentState; hardCap: number } | undefined> {
-    const experiment = await getDb().evalExperiments.get(id)
+    const experiment = await this.database().evalExperiments.get(id)
     return experiment
       ? {
           state: experiment.state,
@@ -64,7 +73,7 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
   }
 
   listTasks(experimentId: string) {
-    return getDb().evalTasks.where("experimentId").equals(experimentId).toArray()
+    return this.database().evalTasks.where("experimentId").equals(experimentId).toArray()
   }
 
   async setExperimentState(
@@ -72,27 +81,45 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
     state: EvalExperimentState,
     details: { pauseReason?: "user" | "budget" | "rate-limit" | "recovery"; failure?: string } = {}
   ): Promise<void> {
-    await getDb().evalExperiments.update(id, {
-      state,
-      pauseReason: details.pauseReason,
-      failure: details.failure,
-      updatedAt: Date.now(),
+    const db = this.database()
+    await db.transaction("rw", db.evalExperiments, async () => {
+      const current = await db.evalExperiments.get(id)
+      this.scope?.assertActive()
+      if (!current || ["completed", "cancelled", "failed"].includes(current.state)) return
+      if (current.state === "paused" && state === "running") return
+      await db.evalExperiments.update(id, {
+        state,
+        pauseReason: details.pauseReason,
+        failure: details.failure,
+        updatedAt: Date.now(),
+      })
     })
   }
 
   async updateTask(id: string, patch: Partial<EvalTask> & { lastError?: string }): Promise<void> {
-    await getDb().evalTasks.update(id, patch)
+    const db = this.database()
+    await db.transaction("rw", db.evalTasks, async () => {
+      const current = await db.evalTasks.get(id)
+      this.scope?.assertActive()
+      if (!current || ["completed", "cancelled", "failed", "interrupted"].includes(current.state))
+        return
+      await db.evalTasks.update(id, patch)
+    })
   }
 
   async reserveTask(taskId: string, worstCaseCost: number): Promise<boolean> {
-    const db = getDb()
+    const db = this.database()
     return db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
       const task = await db.evalTasks.get(taskId)
       if (!task || task.state !== "queued") return false
       const experiment = await db.evalExperiments.get(task.experimentId)
-      if (!experiment || experiment.state === "paused" || experiment.state === "cancelled") {
+      if (
+        !experiment ||
+        ["paused", "cancelled", "completed", "failed", "interrupted"].includes(experiment.state)
+      ) {
         return false
       }
+      this.scope?.assertActive()
       const reservation = Math.max(0, worstCaseCost)
       const reservationDelta = Math.max(0, reservation - task.reservedCost)
       if (
@@ -101,7 +128,12 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
       ) {
         return false
       }
-      await db.evalTasks.update(taskId, { reservedCost: reservation, updatedAt: Date.now() })
+      await db.evalTasks.update(taskId, {
+        state: "running",
+        reservedCost: reservation,
+        updatedAt: Date.now(),
+      })
+      this.scope?.assertActive()
       await db.evalExperiments.update(experiment.id, {
         reservedCost: experiment.reservedCost + reservationDelta,
         updatedAt: Date.now(),
@@ -114,17 +146,22 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
     task: EvalTask,
     result: EvalTaskExecutionResult<EvalExecutedTaskArtifacts>
   ): Promise<void> {
-    await completeEvalTask({ task, sample: result.value.sample, scores: result.value.scores })
+    await completeEvalTask(
+      { task, sample: result.value.sample, scores: result.value.scores },
+      this.scope
+    )
   }
 
   async releaseTaskReservation(taskId: string): Promise<void> {
-    const db = getDb()
+    const db = this.database()
     await db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
       const task = await db.evalTasks.get(taskId)
       if (!task || task.reservedCost <= 0) return
       const experiment = await db.evalExperiments.get(task.experimentId)
+      this.scope?.assertActive()
       await db.evalTasks.update(taskId, { reservedCost: 0, updatedAt: Date.now() })
       if (experiment) {
+        this.scope?.assertActive()
         await db.evalExperiments.update(experiment.id, {
           reservedCost: Math.max(0, experiment.reservedCost - task.reservedCost),
           updatedAt: Date.now(),
@@ -134,7 +171,8 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
   }
 
   prepareNextStage(experimentId: string): Promise<boolean> {
-    return prepareNextEvalStage(experimentId, { artifactKey: this.artifactKey })
+    this.scope?.assertActive()
+    return prepareNextEvalStage(experimentId, { artifactKey: this.artifactKey, scope: this.scope })
   }
 }
 
@@ -144,6 +182,7 @@ interface BuildTargetInput {
   appSettings: AppSettings
   artifactKey: Uint8Array
   confirmedLocal: boolean
+  scope?: EvalPersistenceScope
 }
 
 export interface BrowserEvalExecutorDependencies {
@@ -152,7 +191,8 @@ export interface BrowserEvalExecutorDependencies {
   buildTarget(input: BuildTargetInput): EvalTarget
   resolveScorers(
     manifest: EvalExperimentManifest,
-    appSettings: AppSettings
+    appSettings: AppSettings,
+    execution?: { signal: AbortSignal; assertActive(): void }
   ): Scorer[] | ResolvedEvalScorers
   encryptArtifact: typeof encryptEvalArtifact
   now(): number
@@ -172,6 +212,7 @@ interface ResolvedEvalScorers {
 export interface BrowserEvalExecutorOptions {
   appSettings: AppSettings
   artifactKey: Uint8Array
+  scope?: EvalPersistenceScope
 }
 
 function providerSnapshotInput(appSettings: AppSettings) {
@@ -222,9 +263,12 @@ function agentTargetSpec(variant: EvalVariant): TargetSpec {
 async function artifactResolver(
   artifactKey: Uint8Array,
   assetId: string,
-  requireCloudClearance: boolean
+  requireCloudClearance: boolean,
+  scope?: EvalPersistenceScope
 ) {
-  const asset = await getDb().evalAssets.get(assetId)
+  scope?.assertActive()
+  const asset = await (scope?.db ?? getDb()).evalAssets.get(assetId)
+  scope?.assertActive()
   if (!asset) throw new Error(`Evaluation asset ${assetId} is unavailable`)
   if (
     requireCloudClearance &&
@@ -236,6 +280,7 @@ async function artifactResolver(
     artifactKey,
     asset.encryptedBytes
   )
+  scope?.assertActive()
   return { data: decrypted.data, mediaType: decrypted.mediaType ?? asset.mediaType }
 }
 
@@ -244,15 +289,16 @@ function defaultBuildTarget({
   appSettings,
   artifactKey,
   confirmedLocal,
+  scope,
 }: BuildTargetInput): EvalTarget {
   if (variant.kind !== "model") {
     return createTargetFromSpec(agentTargetSpec(variant), {
       chat: {
-        ...defaultChatTargetDeps(),
-        resolveAsset: (assetId) => artifactResolver(artifactKey, assetId, !confirmedLocal),
+        ...defaultChatTargetDeps(scope),
+        resolveAsset: (assetId) => artifactResolver(artifactKey, assetId, !confirmedLocal, scope),
       },
-      team: defaultTeamTargetDeps(),
-      workflow: defaultWorkflowTargetDeps(),
+      team: defaultTeamTargetDeps(scope),
+      workflow: defaultWorkflowTargetDeps(scope),
     })
   }
   return createPureModelEvalTarget(
@@ -280,7 +326,7 @@ function defaultBuildTarget({
       createSnapshot: createProviderSettingsSnapshot,
       resolveProvider: resolveFeatureProvider,
       createModel: createFeatureProviderModel,
-      resolveAsset: (assetId) => artifactResolver(artifactKey, assetId, !confirmedLocal),
+      resolveAsset: (assetId) => artifactResolver(artifactKey, assetId, !confirmedLocal, scope),
     }
   )
 }
@@ -373,7 +419,8 @@ function confirmedVariantLocality(variant: EvalVariant, appSettings: AppSettings
 
 function defaultResolveScorers(
   manifest: EvalExperimentManifest,
-  appSettings: AppSettings
+  appSettings: AppSettings,
+  execution?: { signal: AbortSignal; assertActive(): void }
 ): Scorer[] | ResolvedEvalScorers {
   const scorers = deterministicScorers()
   if (!manifest.judgePolicy.enabled) return scorers
@@ -402,8 +449,18 @@ function defaultResolveScorers(
   ) {
     throw new Error("The configured second evaluation judge is unavailable")
   }
-  const primaryScorers = llmScorers({ client })
-  const secondaryScorers = secondClient ? llmScorers({ client: secondClient }) : []
+  const scopedJudge = (judge: NonNullable<typeof client>) => ({
+    ...judge,
+    complete(prompt: string, options?: Parameters<typeof judge.complete>[1]) {
+      execution?.assertActive()
+      return judge.complete(prompt, {
+        ...options,
+        ...(execution ? { abortSignal: execution.signal } : {}),
+      })
+    },
+  })
+  const primaryScorers = llmScorers({ client: scopedJudge(client) })
+  const secondaryScorers = secondClient ? llmScorers({ client: scopedJudge(secondClient) }) : []
   const escalatedScorers = primaryScorers.map((primary, index): Scorer => {
     const secondary = secondaryScorers[index]
     if (!secondary) return primary
@@ -550,8 +607,8 @@ export function createBrowserEvalTaskExecutor(
   signal: AbortSignal
 ) => Promise<EvalTaskExecutionResult<EvalExecutedTaskArtifacts>> {
   const dependencies: BrowserEvalExecutorDependencies = {
-    loadExperiment: (id) => getDb().evalExperiments.get(id),
-    loadCase: getCase,
+    loadExperiment: (id) => (options.scope?.db ?? getDb()).evalExperiments.get(id),
+    loadCase: options.scope ? (id) => options.scope!.db.evalCases.get(id) : getCase,
     buildTarget: defaultBuildTarget,
     resolveScorers: defaultResolveScorers,
     encryptArtifact: encryptEvalArtifact,
@@ -561,11 +618,18 @@ export function createBrowserEvalTaskExecutor(
   }
 
   return async (task, signal) => {
+    const assertActive = () => {
+      options.scope?.assertActive()
+      signal.throwIfAborted()
+    }
+    assertActive()
     const experiment = await dependencies.loadExperiment(task.experimentId)
+    assertActive()
     if (!experiment) throw new Error(`Evaluation experiment ${task.experimentId} not found`)
     const variant = experiment.manifest.variants.find((item) => item.id === task.variantId)
     if (!variant) throw new Error(`Evaluation variant ${task.variantId} not found in manifest`)
     const evalCase = await dependencies.loadCase(task.caseId)
+    assertActive()
     if (!evalCase) throw new Error(`Evaluation case ${task.caseId} not found`)
     const confirmedLocal = confirmedVariantLocality(variant, options.appSettings)
     const target = dependencies.buildTarget({
@@ -574,13 +638,16 @@ export function createBrowserEvalTaskExecutor(
       appSettings: options.appSettings,
       artifactKey: options.artifactKey,
       confirmedLocal,
+      scope: options.scope,
     })
     const preparedAgentCase =
       variant.kind === "model"
         ? undefined
         : await prepareAgentTargetCase(evalCase, variant, confirmedLocal)
     const targetCase = preparedAgentCase?.evalCase ?? evalCase
+    assertActive()
     const targetSample = await target.run(targetCase, signal)
+    assertActive()
     const sample = preparedAgentCase
       ? {
           ...targetSample,
@@ -588,7 +655,10 @@ export function createBrowserEvalTaskExecutor(
           redactionDigest: preparedAgentCase.digest,
         }
       : targetSample
-    const resolvedScorers = dependencies.resolveScorers(experiment.manifest, options.appSettings)
+    const resolvedScorers = dependencies.resolveScorers(experiment.manifest, options.appSettings, {
+      signal,
+      assertActive,
+    })
     const scorers = Array.isArray(resolvedScorers) ? resolvedScorers : resolvedScorers.scorers
     const judgeUsageBefore = Array.isArray(resolvedScorers)
       ? { inputTokens: 0, outputTokens: 0, cost: 0 }
@@ -599,9 +669,11 @@ export function createBrowserEvalTaskExecutor(
         })
     const judgeEvidence = redactJudgeEvidence(evalCase, sample)
     const judgeRedactionDigest = await digestTargetPayload(judgeEvidence)
+    assertActive()
     const scores = await Promise.all(
       scorers.map(async (scorer) => {
         try {
+          assertActive()
           return await scorer.score(
             scorer.requiresLlm ? judgeEvidence.sample : sample,
             scorer.requiresLlm ? judgeEvidence.evalCase : evalCase
@@ -611,6 +683,7 @@ export function createBrowserEvalTaskExecutor(
         }
       })
     )
+    assertActive()
     const judgeUsageAfter = Array.isArray(resolvedScorers)
       ? judgeUsageBefore
       : (resolvedScorers.getJudgeAccounting?.() ?? judgeUsageBefore)
@@ -628,6 +701,7 @@ export function createBrowserEvalTaskExecutor(
       variantId: variant.id,
       repetition: task.repetition,
     })
+    assertActive()
     const scoreRows: EvalScoreRow[] = await Promise.all(
       scores.map(async (score) => ({
         id: dependencies.newId(),
@@ -651,6 +725,7 @@ export function createBrowserEvalTaskExecutor(
         createdAt,
       }))
     )
+    assertActive()
     const persistedSample: EvalSampleRow = {
       id: sampleId,
       experimentId: experiment.id,
@@ -683,7 +758,7 @@ export function createBrowserEvalOrchestrator(
   orchestratorOptions: EvalOrchestratorOptions = {}
 ): DurableEvalOrchestrator<EvalExecutedTaskArtifacts> {
   return new DurableEvalOrchestrator(
-    new DexieEvalOrchestratorRepository(options.artifactKey),
+    new DexieEvalOrchestratorRepository(options.artifactKey, options.scope),
     createBrowserEvalTaskExecutor(options),
     orchestratorOptions
   )

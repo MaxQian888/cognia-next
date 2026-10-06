@@ -8,6 +8,11 @@ import type {
 import type { EvalEncryptedEnvelope } from "@/lib/ai/eval/artifact-crypto"
 import { getDb } from "./schema"
 
+export interface EvalPersistenceScope {
+  db: ReturnType<typeof getDb>
+  assertActive(): void
+}
+
 export type EvalProjectRow = EvalProject
 
 export interface EvalExperimentRow {
@@ -71,6 +76,8 @@ export interface EvalReviewBatchRow {
   experimentId: string
   status: "open" | "completed" | "adjudicated"
   blindedAssignmentDigest: string
+  reviewRevision?: number
+  recommendationRevision?: number
   encryptedAssignments?: EvalEncryptedEnvelope
   encryptedPrivateMapping?: EvalEncryptedEnvelope
   createdAt: number
@@ -186,11 +193,16 @@ export async function getLatestEvalConfigurationApply(
   return rows.sort((left, right) => right.appliedAt - left.appliedAt)[0]
 }
 
-export async function createEvalExperiment(manifest: EvalExperimentManifest): Promise<void> {
-  const db = getDb()
+export async function createEvalExperiment(
+  manifest: EvalExperimentManifest,
+  scope?: EvalPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   if (await db.evalExperiments.get(manifest.id)) {
     throw new Error(`Evaluation experiment ${manifest.id} already exists`)
   }
+  scope?.assertActive()
   await db.evalExperiments.add({
     id: manifest.id,
     projectId: manifest.projectId,
@@ -205,50 +217,81 @@ export async function createEvalExperiment(manifest: EvalExperimentManifest): Pr
   })
 }
 
-export async function getEvalExperiment(id: string): Promise<EvalExperimentRow | undefined> {
-  return getDb().evalExperiments.get(id)
+export async function getEvalExperiment(
+  id: string,
+  scope?: EvalPersistenceScope
+): Promise<EvalExperimentRow | undefined> {
+  scope?.assertActive()
+  const result = await (scope?.db ?? getDb()).evalExperiments.get(id)
+  scope?.assertActive()
+  return result
 }
 
-export async function completeEvalTask(input: {
-  task: EvalTask
-  sample: EvalSampleRow
-  scores: EvalScoreRow[]
-}): Promise<void> {
-  const db = getDb()
+export async function completeEvalTask(
+  input: {
+    task: EvalTask
+    sample: EvalSampleRow
+    scores: EvalScoreRow[]
+  },
+  scope?: EvalPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   await db.transaction(
     "rw",
     [db.evalSamples, db.evalScores, db.evalTasks, db.evalExperiments],
     async () => {
+      scope?.assertActive()
+      const persistedTask = await db.evalTasks.get(input.task.id)
       const experiment = await db.evalExperiments.get(input.task.experimentId)
+      scope?.assertActive()
+      if (
+        !persistedTask ||
+        persistedTask.state !== "running" ||
+        persistedTask.attempt !== input.task.attempt
+      )
+        return
+      if (experiment && ["cancelled", "completed", "failed"].includes(experiment.state)) return
       if (!experiment) throw new Error(`Evaluation experiment ${input.task.experimentId} not found`)
       await db.evalSamples.add(input.sample)
+      scope?.assertActive()
       if (input.scores.length) await db.evalScores.bulkAdd(input.scores)
+      scope?.assertActive()
       await db.evalTasks.update(input.task.id, {
         state: "completed",
         reservedCost: 0,
         updatedAt: Date.now(),
       })
+      scope?.assertActive()
       await db.evalExperiments.update(experiment.id, {
         spentCost: experiment.spentCost + input.sample.actualCost,
-        reservedCost: Math.max(0, experiment.reservedCost - input.task.reservedCost),
+        reservedCost: Math.max(0, experiment.reservedCost - persistedTask.reservedCost),
         updatedAt: Date.now(),
       })
+      scope?.assertActive()
     }
   )
 }
 
-export async function recoverInterruptedEvalWork(experimentId: string): Promise<{
-  interruptedTaskIds: string[]
-  requeuedTaskIds: string[]
-}> {
-  const db = getDb()
-  const running = await db.evalTasks
-    .where("[experimentId+state]")
-    .equals([experimentId, "running"])
-    .toArray()
-  const interruptedTaskIds = running.filter((task) => !task.idempotencyKey).map((task) => task.id)
-  const requeuedTaskIds = running.filter((task) => task.idempotencyKey).map((task) => task.id)
-  await db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
+export async function recoverInterruptedEvalWork(
+  experimentId: string,
+  scope?: EvalPersistenceScope
+): Promise<{ interruptedTaskIds: string[]; requeuedTaskIds: string[] }> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
+  return db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
+    const experiment = await db.evalExperiments.get(experimentId)
+    scope?.assertActive()
+    if (!experiment || ["completed", "cancelled", "failed"].includes(experiment.state)) {
+      return { interruptedTaskIds: [], requeuedTaskIds: [] }
+    }
+    const running = await db.evalTasks
+      .where("[experimentId+state]")
+      .equals([experimentId, "running"])
+      .toArray()
+    scope?.assertActive()
+    const interruptedTaskIds = running.filter((task) => !task.idempotencyKey).map((task) => task.id)
+    const requeuedTaskIds = running.filter((task) => task.idempotencyKey).map((task) => task.id)
     const releasedReservation = running.reduce((sum, task) => sum + task.reservedCost, 0)
     if (interruptedTaskIds.length) {
       await db.evalTasks.where("id").anyOf(interruptedTaskIds).modify({
@@ -258,6 +301,7 @@ export async function recoverInterruptedEvalWork(experimentId: string): Promise<
         updatedAt: Date.now(),
       })
     }
+    scope?.assertActive()
     if (requeuedTaskIds.length) {
       await db.evalTasks.where("id").anyOf(requeuedTaskIds).modify({
         state: "queued",
@@ -265,15 +309,16 @@ export async function recoverInterruptedEvalWork(experimentId: string): Promise<
         updatedAt: Date.now(),
       })
     }
-    const experiment = await db.evalExperiments.get(experimentId)
+    scope?.assertActive()
     await db.evalExperiments.update(experimentId, {
       state: interruptedTaskIds.length > 0 ? "interrupted" : "queued",
       pauseReason: interruptedTaskIds.length > 0 ? "recovery" : undefined,
-      reservedCost: Math.max(0, (experiment?.reservedCost ?? 0) - releasedReservation),
+      reservedCost: Math.max(0, experiment.reservedCost - releasedReservation),
       updatedAt: Date.now(),
     })
+    scope?.assertActive()
+    return { interruptedTaskIds, requeuedTaskIds }
   })
-  return { interruptedTaskIds, requeuedTaskIds }
 }
 
 export async function deleteExpiredEvalArtifacts(now = Date.now()): Promise<{
@@ -323,9 +368,13 @@ export async function markEvalAssetCleared(
   })
 }
 
-export async function mergeEvalReviewVotes(votes: EvalReviewVoteRow[]): Promise<number> {
+export async function mergeEvalReviewVotes(
+  votes: EvalReviewVoteRow[],
+  scope?: EvalPersistenceScope
+): Promise<number> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   if (!votes.length) return 0
-  const db = getDb()
   const unique = new Map(votes.map((vote) => [vote.id, vote]))
   const existing = new Set(
     await db.evalReviewVotes
@@ -334,6 +383,7 @@ export async function mergeEvalReviewVotes(votes: EvalReviewVoteRow[]): Promise<
       .primaryKeys()
   )
   const additions = [...unique.values()].filter((vote) => !existing.has(vote.id))
+  scope?.assertActive()
   if (additions.length) await db.evalReviewVotes.bulkAdd(additions)
   return additions.length
 }

@@ -2,6 +2,7 @@ import {
   clearActiveRuntimeTargetContext,
   getActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
+  subscribeRuntimeTargetContext,
 } from "./runtime-target-context"
 
 afterEach(() => {
@@ -35,4 +36,25 @@ it("clears both dimensions atomically", () => {
   clearActiveRuntimeTargetContext()
 
   expect(getActiveRuntimeTargetContext()).toBeNull()
+})
+
+it("notifies scope owners for direct target, generation and lock changes only", () => {
+  const changes: Array<ReturnType<typeof getActiveRuntimeTargetContext>> = []
+  const unsubscribe = subscribeRuntimeTargetContext(() =>
+    changes.push(getActiveRuntimeTargetContext())
+  )
+  setActiveRuntimeTargetContext("acct_alpha", "desktop-studio", 100)
+  setActiveRuntimeTargetContext("acct_alpha", "desktop-studio", 100)
+  setActiveRuntimeTargetContext("acct_alpha", "desktop-studio", 101)
+  setActiveRuntimeTargetContext("acct_alpha", "desktop-cloud", 102)
+  clearActiveRuntimeTargetContext()
+  clearActiveRuntimeTargetContext()
+  unsubscribe()
+  setActiveRuntimeTargetContext("acct_alpha", "desktop-studio", 103)
+  expect(changes).toEqual([
+    { accountId: "acct_alpha", targetId: "desktop-studio", routingGeneration: 100 },
+    { accountId: "acct_alpha", targetId: "desktop-studio", routingGeneration: 101 },
+    { accountId: "acct_alpha", targetId: "desktop-cloud", routingGeneration: 102 },
+    null,
+  ])
 })

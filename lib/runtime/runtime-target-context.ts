@@ -10,6 +10,15 @@ const TARGET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/
 
 let activeScope: RuntimeTargetScope | null = null
 let nextRoutingGeneration = 1
+const listeners = new Set<() => void>()
+
+/** Observe direct routing changes as well as transitions through the lifecycle coordinator. */
+export function subscribeRuntimeTargetContext(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
 
 export function setActiveRuntimeTargetContext(
   accountId: string,
@@ -29,11 +38,13 @@ export function setActiveRuntimeTargetContext(
   if (!Number.isSafeInteger(generation) || generation < 0) {
     throw new Error("Invalid runtime routing generation.")
   }
+  if (sameRoute && previous.routingGeneration === generation) return
   activeScope = {
     accountId: checkedAccountId,
     targetId: checkedTargetId,
     routingGeneration: generation,
   }
+  for (const listener of [...listeners]) listener()
 }
 
 export function getActiveRuntimeTargetContext(): RuntimeTargetScope | null {
@@ -41,7 +52,9 @@ export function getActiveRuntimeTargetContext(): RuntimeTargetScope | null {
 }
 
 export function clearActiveRuntimeTargetContext(): void {
+  if (!activeScope) return
   activeScope = null
+  for (const listener of [...listeners]) listener()
 }
 
 function assertTargetId(targetId: string): string {

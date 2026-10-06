@@ -408,7 +408,9 @@
         "reviewer": "Reviewer identity",
         "right": "Output B",
         "tie": "Tie",
-        "title": "Blind multi-reviewer batch"
+        "title": "Blind multi-reviewer batch",
+        "refreshPending": "Review saved; recommendation refresh is pending.",
+        "retryRefresh": "Retry recommendation refresh"
       },
       "caseEvidence": "Case-level evidence",
       "caseEvidenceHint": "Inspect repetitions, outputs, trajectories, scorer provenance, and review state without exposing credentials.",

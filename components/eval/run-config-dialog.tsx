@@ -8,7 +8,7 @@
  * each falls back to a free-text id input when its list is empty.
  *
  * Defaults (k, scorer selection, judge model, deterministic-only) come from
- * `AppSettings.evalSettings` via {@link resolveEvalSettings}, so the run dialog
+ * the eval configuration hook, so the run dialog
  * inherits whatever the user configured under Settings → Agent 评估. A cost
  * estimate (extrapolated from the dataset's most recent run) warns before an
  * expensive matrix when the settings cost guard is set.
@@ -23,27 +23,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import type { AppSettings } from "@cognia/agent-config-types"
-import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
-import { runEvalService } from "@/lib/ai/eval/service"
-import { resolveEvalSettings } from "@/lib/ai/eval/settings"
+import { useEvalRunConfiguration, type RunConfigOptions } from "@/hooks/eval/use-run-config-options"
 import { useEvalRuns, useEvalCases } from "@/hooks/eval/use-eval-data"
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
 import type { EvalRunConfig, TargetKind, TargetSpec } from "@/types/eval/run-config"
 import { SCORER_CATALOG } from "@cognia/eval-core/scorers/catalog"
 import { ScorerPicker, expandScorerSelection, normalizeScorerSelection } from "./scorer-picker"
 
-interface NameId {
-  id: string
-  name: string
-}
-export interface RunConfigOptions {
-  models?: string[]
-  characters?: NameId[]
-  teams?: NameId[]
-  workflows?: NameId[]
-  twins?: NameId[]
-}
+export type { RunConfigOptions } from "@/hooks/eval/use-run-config-options"
 
 interface TargetDraft {
   kind: TargetKind
@@ -72,7 +59,6 @@ function draftToSpec(d: TargetDraft): TargetSpec {
 
 export interface RunConfigDialogProps {
   datasetId: string
-  appSettings: AppSettings | null
   options?: RunConfigOptions
   onClose: () => void
   onComplete?: (runCount: number) => void
@@ -80,15 +66,13 @@ export interface RunConfigDialogProps {
 
 export function RunConfigDialog({
   datasetId,
-  appSettings,
   options = {},
   onClose,
   onComplete,
 }: RunConfigDialogProps) {
   const t = useTranslations("eval")
   const router = useRouter()
-  const evalSettings = useMemo(() => resolveEvalSettings(appSettings), [appSettings])
-  const defaultModel = appSettings?.defaultModel ?? "claude-opus-4-8"
+  const { evalSettings, defaultModel, deterministicOnly, run } = useEvalRunConfiguration()
 
   const [targets, setTargets] = useState<TargetDraft[]>([
     { kind: "chat", label: "", ref: defaultModel },
@@ -112,16 +96,6 @@ export function RunConfigDialog({
   const activeRun = useEvalRunStore((st) => st.active)
   const running = activeRun !== null
   const progress = activeRun?.progress ?? null
-
-  const { deterministicOnly } = useMemo(
-    () =>
-      buildConfiguredRunDeps({
-        appSettings,
-        ...(evalSettings.deterministicOnly ? { forceDeterministic: true } : {}),
-        ...(evalSettings.judgeModel ? { judgeModel: evalSettings.judgeModel } : {}),
-      }),
-    [appSettings, evalSettings.deterministicOnly, evalSettings.judgeModel]
-  )
 
   // Cost estimate: extrapolate the dataset's most recent run's per-(case×rep)
   // cost across the current case count × k × target count. An upper bound (it
@@ -200,13 +174,10 @@ export function RunConfigDialog({
         label: config.targets.map((tg) => tg.label).join(", "),
         controller,
       })
-      const { reports } = await runEvalService({
+      const { reports } = await run({
         datasetId,
         config,
-        appSettings,
         signal: controller.signal,
-        ...(evalSettings.deterministicOnly ? { forceDeterministic: true } : {}),
-        ...(evalSettings.judgeModel ? { judgeModel: evalSettings.judgeModel } : {}),
         onProgress: reportProgress,
       })
       onComplete?.(reports.length)
@@ -225,10 +196,8 @@ export function RunConfigDialog({
     k,
     split,
     capabilities,
-    appSettings,
     datasetId,
-    evalSettings.deterministicOnly,
-    evalSettings.judgeModel,
+    run,
     startRun,
     reportProgress,
     finishRun,

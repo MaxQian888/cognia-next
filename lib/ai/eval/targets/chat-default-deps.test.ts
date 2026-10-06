@@ -11,6 +11,7 @@ jest.mock("@/lib/db/characters", () => ({
 jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(async (s: Record<string, unknown>) => ({ id: "ses-eval", ...s })),
   getSession: jest.fn(async () => ({ id: "ses-eval" })),
+  deleteSession: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn(async () => ({ defaultProvider: "anthropic" })),
@@ -30,10 +31,73 @@ jest.mock("@/lib/db/agent-traces", () => ({
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
 import { defaultChatTargetDeps } from "./chat"
-import { createSession } from "@/lib/db/sessions"
+import { createSession, deleteSession } from "@/lib/db/sessions"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { getSettings } from "@/lib/db/settings"
+import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
 
 describe("defaultChatTargetDeps", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("cleans up an allocated evaluation session when dispatch setup fails", async () => {
+    jest.mocked(resolveSendOptions).mockRejectedValueOnce(new Error("Invalid provider"))
+    await expect(
+      defaultChatTargetDeps().runTurn({ prompt: "private", model: "x" })
+    ).rejects.toThrow("Invalid provider")
+    expect(deleteSession).toHaveBeenCalledWith("ses-eval")
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+  })
+
+  it("cleans up when cancellation arrives while the session is being allocated", async () => {
+    const controller = new AbortController()
+    jest.mocked(createSession).mockImplementationOnce(async () => {
+      controller.abort()
+      return { id: "ses-eval" } as never
+    })
+    await expect(
+      defaultChatTargetDeps().runTurn({ prompt: "private", model: "x", signal: controller.signal })
+    ).rejects.toThrow()
+    expect(deleteSession).toHaveBeenCalledWith("ses-eval")
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+  })
+
+  it.each(["settings", "send-options"])(
+    "does not dispatch after the account changes while awaiting %s",
+    async (stage) => {
+      let active = true
+      const scope = {
+        db: { sessions: { get: jest.fn(async () => ({ id: "ses-eval" })) } },
+        assertActive: () => {
+          if (!active) throw new Error("Evaluation scope changed")
+        },
+      } as unknown as EvalPersistenceScope
+      const pending = stage === "settings" ? getSettings : resolveSendOptions
+      jest.mocked(pending).mockImplementationOnce(async () => {
+        active = false
+        return {} as never
+      })
+
+      await expect(
+        defaultChatTargetDeps(scope).runTurn({ prompt: "private prompt", model: "x" })
+      ).rejects.toThrow("Evaluation scope changed")
+      expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not create a session when cancelled while imports are pending", async () => {
+    const controller = new AbortController()
+    const run = defaultChatTargetDeps().runTurn({
+      prompt: "private prompt",
+      model: "x",
+      signal: controller.signal,
+    })
+    controller.abort()
+    await expect(run).rejects.toThrow()
+    expect(createSession).not.toHaveBeenCalled()
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+  })
+
   it("synthesizes a character and runs a turn when no characterId is given", async () => {
     const deps = defaultChatTargetDeps()
     const result = await deps.runTurn({ prompt: "hi", model: "claude-opus-4-8" })

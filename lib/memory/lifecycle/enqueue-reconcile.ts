@@ -17,7 +17,11 @@
  * retry) and the worker loop drains the job like any other.
  */
 
-import { enqueueMemoryJob } from "@/lib/db/memory-governance"
+import {
+  enqueueMemoryJob,
+  type MemoryJobDraft,
+  type MemoryPersistenceScope,
+} from "@/lib/db/memory-governance"
 
 const FAILURES_PER_RECONCILE = 3
 
@@ -73,17 +77,23 @@ export function noteMemoryVectorFailure(now: number = Date.now()): void {
  * many times over its life, and reusing yesterday's completed row would make
  * every deletion after the first a no-op.
  */
-export async function enqueueClaimRevalidation(memoryId: string): Promise<void> {
+export async function enqueueClaimRevalidation(
+  memoryId: string,
+  scope?: MemoryPersistenceScope
+): Promise<void> {
   if (!memoryId) return
   try {
-    await enqueueMemoryJob({
+    scope?.assertActive()
+    const draft: MemoryJobDraft = {
       dedupeKey: `project-claim-revalidate:${memoryId}`,
       kind: "project-claim-revalidate",
       memoryId,
       scope: "workspace",
       provenance: "system",
       evidenceIds: [],
-    })
+    }
+    if (scope) await enqueueMemoryJob(draft, { scope })
+    else await enqueueMemoryJob(draft)
   } catch {
     // Best-effort — the daily sweep is the backstop.
   }

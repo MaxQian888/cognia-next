@@ -89,6 +89,31 @@ describe("EvalProjectService v2", () => {
     })
   })
 
+  it("cannot resume or pause cancelled work and rejects stale scoped mutations", async () => {
+    const service = new EvalProjectService()
+    const experiment = await service.start("project-1", {
+      appVersion: "1",
+      scorerVersions: {},
+      randomSeed: 1,
+      environmentCompatibility: environment,
+    })
+    await service.cancel(experiment.id)
+    await service.resume(experiment.id)
+    await service.pause(experiment.id)
+    expect((await service.status(experiment.id)).experiment.state).toBe("cancelled")
+    let checks = 0
+    const scoped = new EvalProjectService({
+      scope: {
+        db: getDb(),
+        assertActive() {
+          if (++checks > 1) throw new Error("scope changed")
+        },
+      },
+    })
+    await expect(scoped.extendBudget(experiment.id, 99)).rejects.toThrow("scope changed")
+    expect((await service.status(experiment.id)).experiment.budgetCap).not.toBe(99)
+  })
+
   it("reserves cloud judge calls even when the evaluated target runs locally", async () => {
     const formal = project()
     formal.decisionPolicy.formal = true

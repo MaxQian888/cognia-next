@@ -171,15 +171,18 @@ describe("evaluation report view", () => {
       decryptArtifact: async <T>(_key: Uint8Array, encrypted: { ciphertext: string }) =>
         (encrypted.ciphertext === "artifact"
           ? { case: evalCase, sample, variantId: "variant", repetition: 1 }
-          : { reasoning: "exact match" }) as T,
+          : { reasoning: "exact match", passed: false, ciphertext: "not-public" }) as T,
     })
 
+    expect(view.cases[0].scores[0]).not.toHaveProperty("encryptedReasoning")
+    expect(JSON.stringify(view)).not.toContain("ciphertext")
     expect(view.recommendation?.result.recommendedVariantId).toBe("variant")
     expect(view.cost).toEqual({ actual: 0.02, estimatedWorstCase: 0.5, hardCap: 2 })
     expect(view.providerErrors).toEqual([
       { taskId: "task", providerId: "provider", error: "retried once" },
     ])
     expect(view.cases[0]).toMatchObject({
+      status: "passed",
       case: { input: "private" },
       sample: { output: "answer" },
       scores: [{ scorerId: "exact", reasoning: "exact match" }],
@@ -300,6 +303,9 @@ describe("evaluation report view", () => {
       scores: [{ reasoning: "invalid" }],
     })
     expect(view.cost).toMatchObject({ actual: 0.1, estimatedWorstCase: 0.2, hardCap: 2 })
+    expect(view.cases[0].scores[0]).not.toHaveProperty("encryptedReasoning")
+    expect(JSON.stringify(view)).not.toContain("ciphertext")
+    await expect(loadEvalReportView(manifest.id, new Uint8Array(32))).rejects.toThrow()
     await getDb().delete()
     __resetDbForTesting()
   }, 30_000)

@@ -18,6 +18,18 @@ export interface RuntimeTargetTransitionParticipant {
 const participants = new Map<string, RuntimeTargetTransitionParticipant>()
 
 let activeStopper: RuntimeTargetSubscriptionStopper | null = null
+const cleanups = new Set<{ run: RuntimeTargetSubscriptionStopper }>()
+
+/** Register a scope owner without replacing the Companion subscription slot. */
+export function registerRuntimeTargetCleanup(
+  cleanup: RuntimeTargetSubscriptionStopper
+): () => void {
+  const entry = { run: cleanup }
+  cleanups.add(entry)
+  return () => {
+    cleanups.delete(entry)
+  }
+}
 
 export function registerRuntimeTargetSubscriptionStopper(
   stopper: RuntimeTargetSubscriptionStopper
@@ -31,7 +43,23 @@ export function registerRuntimeTargetSubscriptionStopper(
 export async function stopRuntimeTargetSubscriptions(): Promise<void> {
   const stopper = activeStopper
   activeStopper = null
-  await stopper?.()
+  const pending = [...cleanups].map((entry) => entry.run)
+  cleanups.clear()
+  if (stopper) pending.push(stopper)
+  // Release all owners before allowing database/cipher replacement. A failed
+  // owner must not prevent the others from aborting their in-flight work.
+  const results = await Promise.allSettled(
+    pending.map((cleanup) => Promise.resolve().then(cleanup))
+  )
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  )
+  if (failures.length === 1) throw failures[0].reason
+  if (failures.length > 1)
+    throw new AggregateError(
+      failures.map((result) => result.reason),
+      "Runtime target cleanup failed"
+    )
 }
 
 export function registerRuntimeTargetTransitionParticipant(
