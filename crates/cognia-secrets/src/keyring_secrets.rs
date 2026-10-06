@@ -31,6 +31,14 @@ fn resolved_service(namespace: &str, key: &str) -> Result<String, String> {
     Ok(service_name(namespace))
 }
 
+/// A namespace may use `/` to separate its parts (`account-sync/v1`,
+/// `mcp-credentials/v1`, `retrieval-profile-dek/v1`): every secret is a row in
+/// one encrypted map keyed by `(service, account)` (`crate::secret_store`), so
+/// a slash names nothing on disk, and `service_name` stays one-to-one because
+/// it only wraps the namespace in a fixed prefix and suffix. What stays refused
+/// is what still reads as a path or is ambiguous: empty parts (a leading,
+/// trailing or doubled `/`), `.` / `..` parts, backslashes and control
+/// characters.
 fn validate_namespace(namespace: &str) -> Result<(), String> {
     if namespace.trim().is_empty() {
         return Err("keyring namespace must not be empty".into());
@@ -38,11 +46,14 @@ fn validate_namespace(namespace: &str) -> Result<(), String> {
     if namespace.trim() != namespace {
         return Err("keyring namespace must not have surrounding whitespace".into());
     }
-    if namespace
-        .chars()
-        .any(|ch| ch.is_control() || ch == '/' || ch == '\\')
-    {
+    if namespace.chars().any(|ch| ch.is_control() || ch == '\\') {
         return Err("keyring namespace contains invalid characters".into());
+    }
+    if namespace
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err("keyring namespace has an empty or relative path part".into());
     }
     Ok(())
 }
@@ -109,14 +120,56 @@ mod tests {
     }
 
     #[test]
-    fn resolved_service_rejects_namespace_separators_and_control_chars() {
-        assert!(resolved_service("bad/name", "k").is_err());
+    fn resolved_service_rejects_backslashes_and_control_chars() {
         assert!(resolved_service("bad\\name", "k").is_err());
         assert!(resolved_service("bad\nname", "k").is_err());
         assert_eq!(
             resolved_service("plugin:p", "token").unwrap(),
             "com.cognia.plugin:p/v1"
         );
+    }
+
+    // The app's own namespaces use `/` between a name and its version; they
+    // were refused here, so nothing under them could be stored on desktop or
+    // a headless host (account sync keys, MCP credentials, retrieval keys).
+    #[test]
+    fn resolved_service_accepts_slash_separated_namespaces() {
+        for namespace in [
+            "account-sync/v1",
+            "mcp-credentials/v1",
+            "retrieval-profile-dek/v1",
+        ] {
+            assert_eq!(
+                resolved_service(namespace, "k").unwrap(),
+                format!("com.cognia.{namespace}/v1")
+            );
+        }
+    }
+
+    #[test]
+    fn resolved_service_rejects_empty_or_relative_path_parts() {
+        for namespace in [
+            "/name", "name/", "a//b", ".", "..", "a/./b", "a/../b", "../a",
+        ] {
+            assert!(resolved_service(namespace, "k").is_err(), "{namespace}");
+        }
+    }
+
+    #[test]
+    fn slash_namespaces_round_trip_and_stay_apart_from_their_parent() {
+        set("keyring-slash/v1", "tok", "child").unwrap();
+        set("keyring-slash", "tok", "parent").unwrap();
+        assert_eq!(
+            get("keyring-slash/v1", "tok").unwrap(),
+            Some("child".to_string())
+        );
+        assert_eq!(
+            get("keyring-slash", "tok").unwrap(),
+            Some("parent".to_string())
+        );
+        clear("keyring-slash/v1", "tok").unwrap();
+        clear("keyring-slash", "tok").unwrap();
+        assert_eq!(get("keyring-slash/v1", "tok").unwrap(), None);
     }
 
     #[test]
