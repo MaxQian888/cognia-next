@@ -307,10 +307,13 @@ describe("chat main flow (integration)", () => {
 
     // 3. the sidecar boundary was crossed with the typed content.
     expect(sendPromptMock).toHaveBeenCalledTimes(1)
+    // The controller holds the transcript lock through dispatch, so it hands
+    // the prompt over as `prepared` and `sendPrompt` must not lock again.
     expect(sendPromptMock).toHaveBeenCalledWith(
       SID,
       "Hello from the user",
-      expect.objectContaining({ model: "sonnet" })
+      expect.objectContaining({ model: "sonnet" }),
+      expect.objectContaining({ transcriptRuntime: "prepared" })
     )
 
     // 2. real makeUserMessage → real store → user bubble rendered.
@@ -471,7 +474,8 @@ describe("chat main flow (integration)", () => {
     expect(sendPromptMock).toHaveBeenLastCalledWith(
       SID,
       "second question",
-      expect.objectContaining({ model: "sonnet" })
+      expect.objectContaining({ model: "sonnet" }),
+      expect.objectContaining({ transcriptRuntime: "prepared" })
     )
 
     await dispatchSidecar({
@@ -752,7 +756,8 @@ describe("plugin message pipeline (W3.3 integration)", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       SID,
       "hello there [signed]",
-      expect.objectContaining({ model: "sonnet" })
+      expect.objectContaining({ model: "sonnet" }),
+      expect.objectContaining({ transcriptRuntime: "prepared" })
     )
   })
 
