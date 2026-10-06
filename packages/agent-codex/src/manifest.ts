@@ -6,6 +6,7 @@
  */
 
 import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
 /**
@@ -26,6 +27,63 @@ export const CODEX_ECOSYSTEM_ID = "codex"
 export const CODEX_APP_SERVER_PROTOCOL = "codex-app-server"
 /** The session-history source id Codex rollouts are imported under. */
 export const CODEX_SESSION_SOURCE_ID = "codex"
+
+/**
+ * Codex's runtime catalog rows. `pnpm gen:external-agent-runtimes` writes them
+ * into `protocol/external-agent-runtimes.json`; edit them here, never there.
+ */
+export const CODEX_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
+  {
+    runtimeId: "codex-app-server",
+    presetIds: ["codex-app-server"],
+    displayName: "OpenAI Codex (app-server)",
+    ownership: "system",
+    protocol: "codex-app-server",
+    transport: "stdio",
+    platforms: ["darwin", "linux", "win32"],
+    systemCommand: "codex",
+    launchArgs: ["app-server"],
+    versionProbe: {
+      args: ["--version"],
+      parser: "semver-anywhere",
+      timeoutMs: 10000,
+    },
+    supportedRange: ">=0.149.0",
+    certifiedVersions: ["0.150.1"],
+    distributions: [],
+    sandbox: {
+      required: true,
+      windowsExceptionEligible: true,
+    },
+    docsUrl: "https://developers.openai.com/codex/app-server",
+  },
+  {
+    runtimeId: "codex-acp",
+    presetIds: ["codex", "codex-acp"],
+    displayName: "Codex ACP adapter",
+    ownership: "system",
+    protocol: "acp",
+    transport: "stdio",
+    platforms: ["darwin", "linux", "win32"],
+    systemCommand: "npx",
+    launchArgs: ["-y", "@agentclientprotocol/codex-acp"],
+    versionProbe: {
+      args: ["-y", "@agentclientprotocol/codex-acp", "--version"],
+      parser: "semver-anywhere",
+      timeoutMs: 20000,
+    },
+    distributions: [],
+    sandbox: {
+      required: true,
+      windowsExceptionEligible: true,
+    },
+    docsUrl: "https://github.com/agentclientprotocol/codex-acp",
+    notes: {
+      certification:
+        "Deliberately uncertified. This runtime launches through `npx -y @agentclientprotocol/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers.",
+    },
+  },
+]
 
 export const codexManifest: AgentIntegrationManifest = Object.freeze({
   ecosystem: Object.freeze({
@@ -48,4 +106,9 @@ export const codexManifest: AgentIntegrationManifest = Object.freeze({
   protocols: [
     { protocol: CODEX_APP_SERVER_PROTOCOL, semantics: CODEX_APP_SERVER_EXECUTION_SEMANTICS },
   ],
+  runtimes: CODEX_RUNTIMES,
+  unpinnedLaunchWaivers: {
+    "codex-acp":
+      "Maintained Codex ACP app-server adapter. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @agentclientprotocol/codex-acp` until one is.",
+  },
 }) as AgentIntegrationManifest

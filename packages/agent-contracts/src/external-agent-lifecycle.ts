@@ -355,6 +355,8 @@ export interface ExternalAgentRuntimeCatalogEntry {
   sandbox: ExternalAgentSandboxPolicy
   /** Docs URL used by the user-managed install handoff. */
   docsUrl?: string
+  /** Reviewer-facing notes (`certification`, …); never read at runtime. */
+  notes?: Record<string, string>
 }
 
 /**

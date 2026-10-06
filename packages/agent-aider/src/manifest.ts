@@ -5,6 +5,7 @@
  */
 
 import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
 /**
@@ -29,6 +30,37 @@ export const AIDER_CLI_PROTOCOL = "aider-cli"
 /** The session-history source id Aider chat files are imported under. */
 export const AIDER_SESSION_SOURCE_ID = "aider"
 
+/**
+ * Aider's runtime catalog rows. `pnpm gen:external-agent-runtimes` writes them
+ * into `protocol/external-agent-runtimes.json`; edit them here, never there.
+ */
+export const AIDER_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
+  {
+    runtimeId: "aider",
+    presetIds: ["aider"],
+    displayName: "Aider",
+    ownership: "system",
+    protocol: "aider-cli",
+    transport: "stdio",
+    platforms: ["darwin", "linux"],
+    systemCommand: "aider",
+    launchArgs: [],
+    versionProbe: {
+      args: ["--version"],
+      parser: "semver-anywhere",
+      timeoutMs: 10000,
+    },
+    supportedRange: ">=0.86.2 <0.87.0",
+    certifiedVersions: ["0.86.2"],
+    distributions: [],
+    sandbox: {
+      required: true,
+      windowsExceptionEligible: false,
+    },
+    docsUrl: "https://aider.chat/docs/install.html",
+  },
+]
+
 export const aiderManifest: AgentIntegrationManifest = Object.freeze({
   ecosystem: Object.freeze({
     // Aider runs through its official CLI; imported histories remain per repo.
@@ -44,4 +76,5 @@ export const aiderManifest: AgentIntegrationManifest = Object.freeze({
     memoryAgentId: null,
   }),
   protocols: [{ protocol: AIDER_CLI_PROTOCOL, semantics: AIDER_CLI_EXECUTION_SEMANTICS }],
+  runtimes: AIDER_RUNTIMES,
 }) as AgentIntegrationManifest

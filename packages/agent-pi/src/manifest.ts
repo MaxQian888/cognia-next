@@ -6,6 +6,7 @@
  */
 
 import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
 /**
@@ -29,6 +30,35 @@ export const PI_RPC_PROTOCOL = "pi-rpc"
 /** The session-history source id Pi sessions are imported under. */
 export const PI_SESSION_SOURCE_ID = "pi"
 
+/**
+ * Pi's runtime catalog rows. `pnpm gen:external-agent-runtimes` writes them
+ * into `protocol/external-agent-runtimes.json`; edit them here, never there.
+ */
+export const PI_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
+  {
+    runtimeId: "pi",
+    presetIds: ["pi-rpc"],
+    displayName: "Pi (native RPC)",
+    ownership: "system",
+    protocol: "pi-rpc",
+    transport: "stdio",
+    platforms: ["darwin", "linux"],
+    systemCommand: "pi",
+    launchArgs: ["--mode", "rpc"],
+    versionProbe: {
+      args: ["--version"],
+      parser: "semver-anywhere",
+      timeoutMs: 10000,
+    },
+    distributions: [],
+    sandbox: {
+      required: true,
+      windowsExceptionEligible: false,
+    },
+    docsUrl: "https://pi.dev/docs/latest/rpc",
+  },
+]
+
 export const piManifest: AgentIntegrationManifest = Object.freeze({
   ecosystem: Object.freeze({
     id: PI_ECOSYSTEM_ID,
@@ -43,4 +73,5 @@ export const piManifest: AgentIntegrationManifest = Object.freeze({
     memoryAgentId: "pi",
   }),
   protocols: [{ protocol: PI_RPC_PROTOCOL, semantics: PI_RPC_EXECUTION_SEMANTICS }],
+  runtimes: PI_RUNTIMES,
 }) as AgentIntegrationManifest

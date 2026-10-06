@@ -6,6 +6,7 @@
  */
 
 import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
 /**
@@ -27,6 +28,33 @@ export const DSH_SDK_EXECUTION_SEMANTICS: AgentExecutionSemantics = Object.freez
 export const DSH_ECOSYSTEM_ID = "deepseek-harness"
 export const DSH_SDK_PROTOCOL = "dsh-sdk"
 
+/**
+ * DeepSeek Harness's runtime catalog rows. `pnpm gen:external-agent-runtimes` writes them
+ * into `protocol/external-agent-runtimes.json`; edit them here, never there.
+ */
+export const DSH_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
+  {
+    runtimeId: "deepseek-harness",
+    presetIds: ["deepseek-harness-readonly", "deepseek-harness-workspace", "deepseek-harness-acp"],
+    displayName: "DeepSeek Harness (managed runtime)",
+    ownership: "managed",
+    protocol: "dsh-sdk",
+    transport: "stdio",
+    platforms: ["darwin", "linux"],
+    versionProbe: {
+      args: ["--version"],
+      parser: "semver-anywhere",
+      timeoutMs: 15000,
+    },
+    distributions: [],
+    sandbox: {
+      required: true,
+      windowsExceptionEligible: false,
+    },
+    docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+  },
+]
+
 export const deepseekHarnessManifest: AgentIntegrationManifest = Object.freeze({
   ecosystem: Object.freeze({
     id: DSH_ECOSYSTEM_ID,
@@ -43,4 +71,5 @@ export const deepseekHarnessManifest: AgentIntegrationManifest = Object.freeze({
     memoryAgentId: null,
   }),
   protocols: [{ protocol: DSH_SDK_PROTOCOL, semantics: DSH_SDK_EXECUTION_SEMANTICS }],
+  runtimes: DSH_RUNTIMES,
 }) as AgentIntegrationManifest

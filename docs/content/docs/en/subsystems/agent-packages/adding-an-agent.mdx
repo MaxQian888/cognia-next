@@ -164,8 +164,13 @@ migration subsystem (ADR-0107); they are not part of the package.
    gate and `redactCredentialText` as the diagnostic redactor (see
    `integrations/dsh.ts` and `integrations/aider.ts`). The manager registers
    it under its protocol in `registerBuiltinProtocolAdapters`.
-2. **Runtime and preset rows**: `protocol/external-agent-runtimes.json`,
-   checked by `pnpm audit:external-agent-runtimes`.
+2. **Runtime and preset rows**: author the package's catalog rows in its
+   manifest (`runtimes`, one per `ecosystem.runtimeIds` entry, plus any
+   `unpinnedLaunchWaivers`), add the manifest to `INTEGRATION_MANIFESTS` in
+   `lib/agent-ecosystem/catalog.ts`, and run `pnpm gen:external-agent-runtimes`
+   to write them into `protocol/external-agent-runtimes.json`.
+   `pnpm audit:external-agent-runtimes` fails if the file drifts from the
+   manifests, then checks pinning, waivers and launch parity.
 3. **Authorization, separately**: the spawn allowlist and approval defaults in
    `protocol/external-agent-security-policy.json` and the host's permission
    guard. Registering the package or declaring a need in its manifest

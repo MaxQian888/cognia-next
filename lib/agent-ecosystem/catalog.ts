@@ -15,7 +15,21 @@ import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
 import { opencodeManifest } from "@cognia/agent-opencode/manifest"
 import { piManifest } from "@cognia/agent-pi/manifest"
 
+import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
 import type { AgentEcosystemEntry } from "./types"
+
+/**
+ * The integration packages that own ecosystem rows and runtime catalog rows.
+ * `AGENT_ECOSYSTEMS` lists their rows and the runtime catalog generator writes
+ * their runtimes (`./runtime-catalog`).
+ */
+export const INTEGRATION_MANIFESTS: readonly AgentIntegrationManifest[] = [
+  aiderManifest,
+  codexManifest,
+  deepseekHarnessManifest,
+  opencodeManifest,
+  piManifest,
+]
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   {

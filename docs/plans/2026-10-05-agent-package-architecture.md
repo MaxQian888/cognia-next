@@ -351,6 +351,12 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
   the client has no vendor names left.
   Manager `instanceof` removal done: vendor controls are typed extensions defined by each
   package, and the manager's vendor accessors gave way to `getAdapterExtension`.
+  Runtime catalog generation done: Aider, Codex, DeepSeek Harness, OpenCode and Pi author
+  their rows and waivers in `./manifest` (`runtimes`, `unpinnedLaunchWaivers`, new optional
+  fields of `AgentIntegrationManifest`); `scripts/build/gen-external-agent-runtimes.mjs`
+  merges them into `protocol/external-agent-runtimes.json` (merge rules in
+  `lib/agent-ecosystem/runtime-catalog.ts`), and `audit:external-agent-runtimes` runs it
+  with `--check` first. ACP vendor runtimes without a package stay authored in the file.
 
 ### Phase 4 — tools and engines
 

@@ -13,6 +13,7 @@
  * so adding an ecosystem edits its own package and that one list.
  */
 
+import type { ExternalAgentRuntimeCatalogEntry } from "./external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "./semantics"
 
 /** One third-party agent ecosystem and everything the app knows it by. */
@@ -82,6 +83,20 @@ export interface AgentIntegrationManifest {
   ecosystem: AgentEcosystemEntry
   /** Protocols this package ships adapters for (empty for catalog-only ecosystems). */
   protocols: readonly AgentProtocolIntegration[]
+  /**
+   * The runtime catalog rows this package owns, one per `ecosystem.runtimeIds`
+   * entry. The host's catalog generator writes them into its runtime catalog
+   * (Cognia: `protocol/external-agent-runtimes.json`) and fails on drift, so
+   * the package is the only place a row is edited. Declaring a row grants
+   * nothing: the spawn allowlist and security policy stay the host's.
+   */
+  runtimes?: readonly ExternalAgentRuntimeCatalogEntry[]
+  /**
+   * Why a runtime of this package still launches through a network-resolving
+   * package runner, by runtime id. Each entry is a known governance hole that
+   * may only be removed by pinning the launch.
+   */
+  unpinnedLaunchWaivers?: Readonly<Record<string, string>>
 }
 
 /** The semantics a preset runs with under one protocol integration. */

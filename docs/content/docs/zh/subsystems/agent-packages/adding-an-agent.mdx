@@ -142,8 +142,12 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
    （`createAgentTransportFileHost`）、作为出站闸门的 `hasNoLeakingPiiDeep` 以及作为诊断
    脱敏器的 `redactCredentialText` 构建工厂（参见 `integrations/dsh.ts` 与
    `integrations/aider.ts`）。管理器在 `registerBuiltinProtocolAdapters` 中按协议注册它。
-2. **运行时与预设行**：`protocol/external-agent-runtimes.json`，由
-   `pnpm audit:external-agent-runtimes` 检查。
+2. **运行时与预设行**：在包的 manifest 中编写目录行（`runtimes`，每个
+   `ecosystem.runtimeIds` 条目一行，以及可能的 `unpinnedLaunchWaivers`），把 manifest
+   加入 `lib/agent-ecosystem/catalog.ts` 的 `INTEGRATION_MANIFESTS`，再运行
+   `pnpm gen:external-agent-runtimes` 写入 `protocol/external-agent-runtimes.json`。
+   文件与 manifest 不一致时 `pnpm audit:external-agent-runtimes` 会失败，随后再检查锁定、
+   豁免与启动一致性。
 3. **授权单独处理**：spawn 白名单与审批默认值在
    `protocol/external-agent-security-policy.json` 和宿主权限守卫中。注册包或在 manifest
    中声明需求都不会授予任何权限。

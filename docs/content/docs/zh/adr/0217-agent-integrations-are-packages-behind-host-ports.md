@@ -67,7 +67,7 @@ sidecar 引擎                 claude-agent-sdk 与 ai-sdk，按主机进程加�
 集成复用现有的身份来源，不注册任何新的身份：
 
 - **生态：**`lib/agent-ecosystem` 仍是身份表。集成包导出自己的那一行（`codexManifest.ecosystem`、`deepseekHarnessManifest.ecosystem`），目录列出这些行，而不是复制一份。
-- **运行时：**`protocol/external-agent-runtimes.json` 仍是受闸门检查的运行时与预设目录。
+- **运行时：**`protocol/external-agent-runtimes.json` 仍是所有使用方读取、受闸门检查的运行时与预设目录。有集成包的运行时在该包的 manifest 中编写自己的行（以及未锁定启动的豁免）（`runtimes`、`unpinnedLaunchWaivers`）；`pnpm gen:external-agent-runtimes` 把它写入文件，`audit:external-agent-runtimes` 在出现漂移时失败。没有包的运行时仍直接在文件中编写。每一行只有一个编辑位置。
 - **协议：**从配置或预设读取，从不从运行时行读取。
 - **配置实例：**`ExternalAgentConfig.id`。
 
@@ -252,7 +252,7 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
 | --- | --- | --- |
 | 1 | 基线、身份模型、迁移矩阵（`docs/plans/2026-10-05-agent-package-architecture.md`） | 完成 |
 | 2 | `agent-contracts`、`agent-runtime-kit`、`agent-dsh`、`agent-codex`（运行时 + 历史）；DSH 取消语义；原生恢复绑定 | 完成 |
-| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成，ACP 厂商分支已抽成 `AcpVendorProfile`；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。其余历史读取器、目录生成与 CLI 端口注入随后进行；管理器中的厂商 `instanceof` 分支已移除（改用带类型的扩展）。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
+| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成，ACP 厂商分支已抽成 `AcpVendorProfile`；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。其余历史读取器、CLI 端口注入与协议能力行随后进行；包拥有的运行时目录行已由 manifest 生成；管理器中的厂商 `instanceof` 分支已移除（改用带类型的扩展）。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
 | 4 | 中立工具；AI SDK 引擎与宿主无需 Claude SDK 即可运行；不依赖 SDK 的 wire；厂商闸门 | 完成（`44d622df7`、`c4ae605bd`）；工具内核包见范围决定 |
 | 5 | 位于存储/日志/脱敏/路径/远程会话端口之后的编排包；账本；打破 Team↔Workflow 导入环；结束会话的取消从不被报告为暂停 | 完成（`6bf0a830a`、`a4f1dd183`、`3719c8d51`、`ed4ea6611`、`e931feec0`）；闸门、队友池、波次运行器与合成工作流留在应用中（见范围决定） |
 | 6 | 文档、闸门、CI 和最终回归 | 已落地阶段已完成；阶段 3 的文档随其迁移补充 |
