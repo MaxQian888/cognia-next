@@ -28,8 +28,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "companion_push_status",
     "companion_push_configure_fcm",
     "companion_push_configure_apns",
+    "companion_push_configure_hms",
     "companion_push_clear_fcm",
     "companion_push_clear_apns",
+    "companion_push_clear_hms",
     "companion_push_notification",
     "companion_create_owner_invitation",
     "companion_server_status",
@@ -141,6 +143,18 @@ pub(super) async fn dispatch(
             crate::companion_api::commands::companion_push_status().map_err(RpcError::internal)?,
         ),
 
+        "companion_push_configure_hms" => {
+            let app_id: String = required_aliased(&args, "app_id", "appId")?;
+            let client_secret: String = required_aliased(&args, "client_secret", "clientSecret")?;
+            crate::companion_api::commands::companion_push_configure_hms(app_id, client_secret)
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+        "companion_push_clear_hms" => {
+            crate::companion_api::commands::companion_push_clear_hms()
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
         "companion_push_configure_fcm" => {
             let service_account_json: String =
                 required_aliased(&args, "service_account_json", "serviceAccountJson")?;
@@ -316,6 +330,8 @@ mod tests {
     /// would let a plain paired device reconfigure the Host.
     #[test]
     fn every_host_admin_command_is_known_and_owner_gated() {
+        assert!(COMMANDS.contains(&"companion_push_configure_hms"));
+        assert!(COMMANDS.contains(&"companion_push_clear_hms"));
         for name in COMMANDS {
             assert!(
                 crate::companion_api::rpc::known_commands().contains(name),

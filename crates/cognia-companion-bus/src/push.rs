@@ -37,6 +37,7 @@ const PUSH_TOKENS_FILE: &str = "push-tokens.json";
 pub enum PushProvider {
     Fcm,
     Apns,
+    Hms,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +76,7 @@ pub enum DeliveryOutcome {
     SuppressedNoToken,
     NotConfigured,
     Failed,
+    InvalidToken,
 }
 
 #[allow(dead_code)] // Trait surface for plugin / future built-in delivery clients.
@@ -220,7 +222,25 @@ impl PushTokenRegistry {
             Some(r) => r,
             None => return DeliveryOutcome::SuppressedNoToken,
         };
-        dispatcher.deliver(&record, payload).await
+        let outcome = dispatcher.deliver(&record, payload).await;
+        if matches!(outcome, DeliveryOutcome::InvalidToken) {
+            // A registration may rotate while the provider request is in flight.
+            let removed = {
+                let mut inner = self.inner.write();
+                if inner.tokens.get(device_id).is_some_and(|current| {
+                    current.token == record.token && current.provider == record.provider
+                }) {
+                    inner.tokens.remove(device_id);
+                    true
+                } else {
+                    false
+                }
+            };
+            if removed {
+                self.save_to_disk();
+            }
+        }
+        outcome
     }
 
     #[cfg(test)]
@@ -283,8 +303,8 @@ impl PushTokenRegistry {
     }
 }
 
-/// Holds the currently configured FCM + APNs dispatchers (Phase B2/B4).
-/// Both slots start empty; the user uploads credentials via Tauri commands
+/// Holds the currently configured FCM + APNs + HMS dispatchers (Phase B2/B4).
+/// All slots start empty; the user uploads credentials via Tauri commands
 /// to populate. The trigger wiring picks the right dispatcher based on
 /// each device's `PushProvider`.
 pub struct DispatcherSet {
@@ -294,6 +314,7 @@ pub struct DispatcherSet {
 struct DispatcherSlots {
     fcm: Option<Arc<dyn PushDispatcher>>,
     apns: Option<Arc<dyn PushDispatcher>>,
+    hms: Option<Arc<dyn PushDispatcher>>,
 }
 
 impl DispatcherSet {
@@ -302,6 +323,7 @@ impl DispatcherSet {
             inner: parking_lot::RwLock::new(DispatcherSlots {
                 fcm: None,
                 apns: None,
+                hms: None,
             }),
         })
     }
@@ -314,6 +336,14 @@ impl DispatcherSet {
     #[allow(dead_code)]
     pub fn set_apns(&self, dispatcher: Arc<dyn PushDispatcher>) {
         self.inner.write().apns = Some(dispatcher);
+    }
+
+    pub fn set_hms(&self, dispatcher: Arc<dyn PushDispatcher>) {
+        self.inner.write().hms = Some(dispatcher);
+    }
+
+    pub fn clear_hms(&self) {
+        self.inner.write().hms = None;
     }
 
     #[allow(dead_code)]
@@ -332,6 +362,7 @@ impl DispatcherSet {
         match provider {
             PushProvider::Fcm => g.fcm.clone(),
             PushProvider::Apns => g.apns.clone(),
+            PushProvider::Hms => g.hms.clone(),
         }
     }
 }
@@ -339,7 +370,7 @@ impl DispatcherSet {
 /// Currently configured push dispatchers (Phase B2). Process-wide singleton
 /// (mirrors `TLS_FINGERPRINT`) so the many test constructors of
 /// `CompanionState` aren't forced to pass it. Populated via the
-/// `companion_push_configure_{fcm,apns}` Tauri commands.
+/// `companion_push_configure_{fcm,apns,hms}` Tauri commands.
 static PUSH_DISPATCHERS: once_cell::sync::Lazy<Arc<DispatcherSet>> =
     once_cell::sync::Lazy::new(DispatcherSet::new);
 
@@ -349,6 +380,65 @@ pub fn push_dispatchers() -> Arc<DispatcherSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct InvalidatingDispatcher {
+        registry: Arc<PushTokenRegistry>,
+        rotate: bool,
+    }
+    #[async_trait::async_trait]
+    impl PushDispatcher for InvalidatingDispatcher {
+        async fn deliver(&self, record: &PushTokenRecord, _: &PushPayload) -> DeliveryOutcome {
+            if self.rotate {
+                let mut updated = record.clone();
+                updated.token = "rotated".into();
+                self.registry.register(updated);
+            }
+            DeliveryOutcome::InvalidToken
+        }
+    }
+
+    #[tokio::test]
+    async fn hms_invalid_tokens_are_removed_without_revoking_a_rotated_token() {
+        for rotate in [false, true] {
+            let registry = PushTokenRegistry::new();
+            let mut record = make_record("hms-phone");
+            record.provider = PushProvider::Hms;
+            registry.register(record);
+            let dispatcher = InvalidatingDispatcher {
+                registry: registry.clone(),
+                rotate,
+            };
+            registry
+                .dispatch_to_device(
+                    "hms-phone",
+                    &PushPayload {
+                        title: None,
+                        body: None,
+                        data: Default::default(),
+                    },
+                    &dispatcher,
+                )
+                .await;
+            assert_eq!(
+                registry.get("hms-phone").map(|record| record.token),
+                if rotate { Some("rotated".into()) } else { None }
+            );
+        }
+    }
+
+    #[test]
+    fn hms_provider_and_dispatcher_slot_roundtrip() {
+        assert_eq!(
+            serde_json::to_string(&PushProvider::Hms).unwrap(),
+            "\"hms\""
+        );
+        let set = DispatcherSet::new();
+        set.set_hms(Arc::new(NoopDispatcher));
+        assert!(set.for_provider(PushProvider::Hms).is_some());
+        assert!(set.for_provider(PushProvider::Fcm).is_none());
+        set.clear_hms();
+        assert!(set.for_provider(PushProvider::Hms).is_none());
+    }
 
     fn make_record(device_id: &str) -> PushTokenRecord {
         PushTokenRecord {

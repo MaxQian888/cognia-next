@@ -28,6 +28,11 @@
             </intent-filter>
 
             <!-- cognia:// URL scheme for OAuth deeplink + pair payload + open session -->
+            <intent-filter>
+                <action android:name="com.cognia.mobile.HUAWEI_PUSH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -63,6 +68,16 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="cognia-default" />
+
+        <service
+            android:name=".CogniaHuaweiMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- Register only after the user enables push and grants permission. -->
+        <meta-data android:name="push_kit_auto_init_enabled" android:value="false" />
 
         <!-- Prefetch the Google scanner UI; runtime installation remains the fallback. -->
         <meta-data

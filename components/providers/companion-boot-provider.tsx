@@ -33,7 +33,12 @@ import {
   onAction as onLocalNotifAction,
   subscribeNotificationPermissionGranted,
 } from "@/lib/capacitor/local-notifications"
-import { registerPushNotifications, reportPushTokenToDesktop } from "@/lib/push/push-notifications"
+import {
+  registerPushNotifications,
+  reportPushTokenToDesktop,
+  subscribeToPushTokenChanges,
+  type PushRegistration,
+} from "@/lib/push/push-notifications"
 import { installPushNotificationBridge } from "@/lib/notifications/inbound-push"
 import {
   installEventDrivenSync,
@@ -246,25 +251,55 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
       let pushRegistered = false
       let pushRegistration: Promise<void> | null = null
-      const registerAndReportPush = async () => {
+      let pendingPush: PushRegistration | null = null
+      let reportedPushKey: string | null = null
+      const registerAndReportPush = async (changed?: PushRegistration) => {
+        if (isStale()) return
+        if (changed) {
+          pendingPush = changed
+          pushRegistered = false
+        }
         if (pushRegistered) return
         if (pushRegistration) return pushRegistration
         const attempt = (async () => {
-          const push = await registerPushNotifications({ requestPermission: false })
-          if (isStale()) return
-          if (push.kind !== "registered") {
-            log.info("companion: push registration outcome", { kind: push.kind })
-            return
-          }
-          const sent = await reportPushTokenToDesktop(push.token, push.platform)
-          if (isStale()) return
-          if (!sent.ok) {
-            log.warn("companion: failed to report push token", { reason: sent.reason })
-            toast.error(tRef.current("pushTokenFailed", { reason: sent.reason }))
-            return
-          }
-          pushRegistered = true
-          log.info("companion: push token reported", { platform: push.platform })
+          do {
+            let push = pendingPush
+            pendingPush = null
+            if (!push) {
+              const registered = await registerPushNotifications({ requestPermission: false })
+              if (isStale()) return
+              if (registered.kind !== "registered") {
+                log.info("companion: push registration outcome", { kind: registered.kind })
+                return
+              }
+              push = registered
+            }
+            const key = `${push.provider ?? push.platform}:${push.token}`
+            if (key !== reportedPushKey) {
+              const sent = await reportPushTokenToDesktop(
+                push.token,
+                push.platform,
+                transport,
+                push.provider
+              )
+              if (isStale()) return
+              if (!sent.ok) {
+                // Retain the newest token for the next permission/reconnect
+                // attempt. A failed refresh must not leave the old token final.
+                pendingPush ??= push
+                pushRegistered = false
+                log.warn("companion: failed to report push token", { reason: sent.reason })
+                toast.error(tRef.current("pushTokenFailed", { reason: sent.reason }))
+                return
+              }
+              reportedPushKey = key
+              log.info("companion: push token reported", {
+                platform: push.platform,
+                provider: push.provider,
+              })
+            }
+            pushRegistered = true
+          } while (pendingPush && !isStale())
         })()
         pushRegistration = attempt
         try {
@@ -545,6 +580,28 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
             getDeviceId: () => loadCompanionConfig()?.deviceId,
           })
         )
+        const retryPush = (registration?: PushRegistration) => {
+          void registerAndReportPush(registration).catch((error) => {
+            log.warn("companion: push token refresh failed", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
+        }
+        try {
+          addHostCleanup(await subscribeToPushTokenChanges(retryPush))
+        } catch (error) {
+          log.warn("companion: push token listener unavailable", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        if (isStale()) return
+        if (typeof linkTransport.onConnectionStateChange === "function") {
+          addHostCleanup(
+            linkTransport.onConnectionStateChange((state) => {
+              if (state === "connected") retryPush()
+            })
+          )
+        }
         await registerAndReportPush()
       }
       const linking = linkHost()

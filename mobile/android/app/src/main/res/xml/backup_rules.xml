@@ -2,6 +2,7 @@
 <full-backup-content>
     <!-- Ciphertext is bound to the AndroidKeyStore key on this installation. -->
     <exclude domain="sharedpref" path="cap_sec.xml" />
+    <exclude domain="sharedpref" path="cognia-huawei-push.xml" />
     <exclude domain="root" path="app_ACRA-approved" />
     <exclude domain="root" path="app_ACRA-unapproved" />
     <exclude domain="root" path="no_backup/diagnostics" />

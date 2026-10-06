@@ -184,6 +184,30 @@ pub fn companion_push_configure_apns(
     Ok(())
 }
 
+/// Install Android Huawei Push Kit credentials on the host only.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn companion_push_configure_hms(app_id: String, client_secret: String) -> Result<(), String> {
+    let creds = cognia_companion::dispatchers::HmsCredentials {
+        app_id: app_id.trim().into(),
+        client_secret,
+    };
+    let dispatcher = cognia_companion::dispatchers::HmsDispatcher::new(creds.clone())?;
+    let store = cognia_companion::push_creds::active()
+        .ok_or("Push credential storage is not initialized")?;
+    store.store_hms(&creds)?;
+    cognia_companion::push_dispatchers().set_hms(dispatcher);
+    Ok(())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn companion_push_clear_hms() -> Result<(), String> {
+    if let Some(store) = cognia_companion::push_creds::active() {
+        store.clear_hms()?;
+    }
+    cognia_companion::push_dispatchers().clear_hms();
+    Ok(())
+}
+
 /// Clear the FCM dispatcher (e.g. after the user rotates credentials).
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn companion_push_clear_fcm() -> Result<(), String> {
@@ -211,18 +235,24 @@ pub fn companion_push_clear_apns() -> Result<(), String> {
 pub struct PushConfigStatus {
     pub fcm_configured: bool,
     pub apns_configured: bool,
+    pub hms_configured: bool,
 }
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn companion_push_status() -> Result<PushConfigStatus, String> {
     let store = cognia_companion::push_creds::active();
-    let (fcm, apns) = match store {
-        Some(s) => (s.load_fcm()?.is_some(), s.load_apns()?.is_some()),
-        None => (false, false),
+    let (fcm, apns, hms) = match store {
+        Some(s) => (
+            s.load_fcm()?.is_some(),
+            s.load_apns()?.is_some(),
+            s.load_hms()?.is_some(),
+        ),
+        None => (false, false, false),
     };
     Ok(PushConfigStatus {
         fcm_configured: fcm,
         apns_configured: apns,
+        hms_configured: hms,
     })
 }
 
@@ -310,6 +340,7 @@ pub async fn broadcast_notification_push(
     for provider in [
         cognia_companion::push::PushProvider::Fcm,
         cognia_companion::push::PushProvider::Apns,
+        cognia_companion::push::PushProvider::Hms,
     ] {
         if let Some(dispatcher) = dispatchers.for_provider(provider) {
             sent += push_tokens
@@ -377,6 +408,28 @@ fn host_for_authority(host: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hms_configuration_persists_restores_and_clears() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = cognia_companion::push_creds::FilePushCredStore::new(directory.path());
+        cognia_companion::push_creds::install(store);
+        assert!(companion_push_configure_hms("123".into(), " ".into()).is_err());
+        companion_push_configure_hms("123".into(), "secret".into()).unwrap();
+        assert!(companion_push_status().unwrap().hms_configured);
+        assert_eq!(
+            serde_json::to_value(companion_push_status().unwrap()).unwrap()["hmsConfigured"],
+            true
+        );
+        cognia_companion::push_dispatchers().clear_hms();
+        cognia_companion::push_creds::reinstall_persisted_dispatchers().unwrap();
+        assert!(cognia_companion::push_dispatchers()
+            .for_provider(cognia_companion::push::PushProvider::Hms)
+            .is_some());
+        companion_push_clear_hms().unwrap();
+        assert!(!companion_push_status().unwrap().hms_configured);
+    }
+
     #[test]
     fn an_ipv6_advertise_host_is_bracketed_for_the_url_authority() {
         assert_eq!(host_for_authority("100.101.2.3"), "100.101.2.3");

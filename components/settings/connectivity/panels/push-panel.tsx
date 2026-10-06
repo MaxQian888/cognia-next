@@ -13,7 +13,9 @@ import { PushTestBlock } from "../blocks/push-test-block"
 
 export function PushPanel() {
   const [status, setStatus] = useState<PushConfigStatus | null>(null)
-  const configured = Boolean(status?.fcmConfigured || status?.apnsConfigured)
+  const configured = Boolean(
+    status?.fcmConfigured || status?.apnsConfigured || status?.hmsConfigured
+  )
   return (
     <SettingsStack>
       <PushCredentialsBlock onStatus={setStatus} />

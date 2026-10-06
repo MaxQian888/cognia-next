@@ -81,8 +81,8 @@ const defaultCoreLoader: CoreLoader = () =>
 
 /**
  * Register every native Capacitor plugin advertised by `PluginHeaders` onto
- * `window.Capacitor.Plugins`. Idempotent (Capacitor's `registerPlugin` returns
- * the existing proxy on a repeat call). No-op off mobile.
+ * `window.Capacitor.Plugins`. Reuses existing proxies: Capacitor warns on
+ * duplicate registration, including its built-in plugins. No-op off mobile.
  *
  * @param opts.registerFn  Inject Capacitor's `registerPlugin` directly (reuse);
  *                          defaults to loading it via `coreLoader`.
@@ -136,7 +136,7 @@ export async function registerNativePlugins(
   const registered: string[] = []
   for (const header of headers) {
     try {
-      registerFn(header.name)
+      if (!cap.Plugins?.[header.name]) registerFn(header.name)
       registered.push(header.name)
     } catch (err) {
       log.warn("capacitor: registerPlugin failed", {

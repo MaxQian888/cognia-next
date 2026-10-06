@@ -63,6 +63,7 @@ captures/
 
 # Google Services (e.g. APIs or Firebase)
 # google-services.json
+agconnect-services.json
 
 # Freeline
 freeline.py

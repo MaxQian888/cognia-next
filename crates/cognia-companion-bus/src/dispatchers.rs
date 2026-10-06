@@ -1,10 +1,11 @@
-//! Real push dispatchers (Phase B3). Two implementations of
+//! Real push dispatchers. Implementations of
 //! [`super::push::PushDispatcher`]:
 //!
 //! - [`FcmDispatcher`] — Firebase Cloud Messaging HTTP v1.
 //! - [`ApnsDispatcher`] — Apple Push Notification service over HTTP/2.
+//! - [`HmsDispatcher`] — Huawei Push Kit HTTP v1 for Android without GMS.
 //!
-//! Both expect their credentials loaded at construction time. The current
+//! All expect their credentials loaded at construction time. The current
 //! token-management story is minimal: FCM bearer tokens are cached for one
 //! hour with a stamp, APNs provider JWTs are re-signed on every call (cheap;
 //! Apple recommends rotating no faster than 20 min and JWT signing is sub-ms).
@@ -199,6 +200,211 @@ impl PushDispatcher for FcmDispatcher {
 }
 
 // ---------------------------------------------------------------------------
+// Huawei Push Kit (Android HMS) HTTP v1
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct HmsCredentials {
+    pub app_id: String,
+    pub client_secret: String,
+}
+
+impl HmsCredentials {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.app_id.is_empty()
+            || self.app_id.len() > 64
+            || !self.app_id.bytes().all(|c| c.is_ascii_digit())
+        {
+            return Err("Huawei app ID must be a numeric AppGallery Connect client ID".into());
+        }
+        if self.client_secret.trim().is_empty() {
+            return Err("Huawei client secret is required".into());
+        }
+        Ok(())
+    }
+}
+
+pub struct HmsDispatcher {
+    creds: HmsCredentials,
+    // Serializes OAuth refreshes across concurrent notifications without a
+    // parking_lot guard crossing an await point.
+    token_cache: tokio::sync::Mutex<Option<HmsBearer>>,
+    oauth_url: String,
+    send_url: String,
+}
+
+struct HmsBearer {
+    token: String,
+    expires_at: Instant,
+}
+
+#[derive(Deserialize)]
+struct HmsTokenResponse {
+    access_token: String,
+    expires_in: u64,
+}
+
+impl HmsDispatcher {
+    pub fn new(creds: HmsCredentials) -> Result<Arc<Self>, String> {
+        creds.validate()?;
+        Ok(Arc::new(Self {
+            send_url: format!(
+                "https://push-api.cloud.huawei.com/v1/{}/messages:send",
+                creds.app_id
+            ),
+            oauth_url: "https://oauth-login.cloud.huawei.com/oauth2/v3/token".into(),
+            creds,
+            token_cache: tokio::sync::Mutex::new(None),
+        }))
+    }
+
+    async fn bearer(&self) -> Result<String, String> {
+        let mut cache = self.token_cache.lock().await;
+        if let Some(cached) = cache.as_ref() {
+            if Instant::now() < cached.expires_at {
+                return Ok(cached.token.clone());
+            }
+        }
+        let client = managed_client(
+            Client::builder().timeout(Duration::from_secs(15)),
+            &self.oauth_url,
+        )?;
+        let response = client
+            .post(&self.oauth_url)
+            .form(&[
+                ("grant_type", "client_credentials"),
+                ("client_id", self.creds.app_id.as_str()),
+                ("client_secret", self.creds.client_secret.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|_| "Huawei OAuth transport failed".to_string())?;
+        if !response.status().is_success() {
+            // Never log upstream bodies: they may echo submitted secrets.
+            return Err(format!("Huawei OAuth returned HTTP {}", response.status()));
+        }
+        let body: HmsTokenResponse = response
+            .json()
+            .await
+            .map_err(|_| "Invalid Huawei OAuth response".to_string())?;
+        if body.access_token.is_empty() || body.expires_in == 0 {
+            return Err("Huawei OAuth returned an empty or expired token".into());
+        }
+        let lifetime = body.expires_in.min(3600);
+        *cache = Some(HmsBearer {
+            token: body.access_token.clone(),
+            expires_at: Instant::now() + Duration::from_secs(lifetime.saturating_sub(60)),
+        });
+        Ok(body.access_token)
+    }
+}
+
+fn hms_message(record: &PushTokenRecord, payload: &PushPayload) -> serde_json::Value {
+    let mut data = payload.data.clone();
+    data.insert("title".into(), json!(payload.title));
+    data.insert("body".into(), json!(payload.body));
+    json!({"validate_only": false, "message": {
+        "token": [&record.token],
+        "data": serde_json::Value::Object(data).to_string(),
+        "android": {"notification": {
+            "foreground_show": false,
+            "title": payload.title.as_deref().unwrap_or("Cognia"),
+            "body": payload.body.as_deref().unwrap_or_default(),
+            "click_action": {"type": 1, "action": "com.cognia.mobile.HUAWEI_PUSH"}
+        }}
+    }})
+}
+
+fn hms_outcome(response: &serde_json::Value, token: &str) -> DeliveryOutcome {
+    match response["code"].as_str() {
+        Some("80000000") => DeliveryOutcome::Sent,
+        Some("80300007") => DeliveryOutcome::InvalidToken,
+        Some("80100000") => {
+            let details = response["msg"]
+                .as_str()
+                .and_then(|msg| serde_json::from_str::<serde_json::Value>(msg).ok());
+            if details
+                .as_ref()
+                .and_then(|v| v["illegal_tokens"].as_array())
+                .is_some_and(|tokens| tokens.iter().any(|value| value.as_str() == Some(token)))
+            {
+                DeliveryOutcome::InvalidToken
+            } else {
+                DeliveryOutcome::Failed
+            }
+        }
+        _ => DeliveryOutcome::Failed,
+    }
+}
+
+#[async_trait]
+impl PushDispatcher for HmsDispatcher {
+    async fn deliver(&self, record: &PushTokenRecord, payload: &PushPayload) -> DeliveryOutcome {
+        if record.provider != super::push::PushProvider::Hms {
+            return DeliveryOutcome::Failed;
+        }
+        let client = match managed_client(
+            Client::builder().timeout(Duration::from_secs(15)),
+            &self.send_url,
+        ) {
+            Ok(client) => client,
+            Err(_) => return DeliveryOutcome::Failed,
+        };
+        let message = hms_message(record, payload);
+        // Retry only explicit authentication failures; retrying transport errors
+        // could deliver a notification twice after an ambiguous timeout.
+        for attempt in 0..2 {
+            let bearer = match self.bearer().await {
+                Ok(token) => token,
+                Err(error) => {
+                    log::warn!("{error}");
+                    return DeliveryOutcome::Failed;
+                }
+            };
+            let response = match client
+                .post(&self.send_url)
+                .bearer_auth(&bearer)
+                .json(&message)
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(_) => {
+                    log::warn!("Huawei push transport failed");
+                    return DeliveryOutcome::Failed;
+                }
+            };
+            let status = response.status();
+            let body = response
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_default();
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                || matches!(body["code"].as_str(), Some("80200001" | "80200003"))
+            {
+                let mut cache = self.token_cache.lock().await;
+                if cache.as_ref().is_some_and(|entry| entry.token == bearer) {
+                    *cache = None;
+                }
+                drop(cache);
+                if attempt == 0 {
+                    continue;
+                }
+            }
+            let outcome = hms_outcome(&body, &record.token);
+            if !status.is_success() && !matches!(outcome, DeliveryOutcome::InvalidToken) {
+                return DeliveryOutcome::Failed;
+            }
+            if matches!(outcome, DeliveryOutcome::Failed) {
+                log::warn!("Huawei push rejected (HTTP {status})");
+            }
+            return outcome;
+        }
+        DeliveryOutcome::Failed
+    }
+}
+
+// ---------------------------------------------------------------------------
 // APNs credentials & dispatcher
 // ---------------------------------------------------------------------------
 
@@ -336,6 +542,184 @@ fn managed_client(builder: reqwest::ClientBuilder, target: &str) -> Result<Clien
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hms_test_server(
+        responses: Vec<&'static str>,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut requests = Vec::new();
+            for response in responses {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("mock accept failed: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut buf = [0; 4096];
+                    let len = stream.read(&mut buf).unwrap();
+                    assert!(len > 0);
+                    bytes.extend_from_slice(&buf[..len]);
+                    if let Some(header_end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..header_end]).to_lowercase();
+                        let length: usize = headers
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:").map(str::trim))
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        if bytes.len() >= header_end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                requests.push(String::from_utf8(bytes).unwrap());
+                let status = if response.contains("80300007") {
+                    "400 Bad Request"
+                } else {
+                    "200 OK"
+                };
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            }
+            requests
+        });
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn hms_refreshes_rejected_bearer_and_reuses_new_token() {
+        cognia_net::proxy_config::apply_current(Default::default()).unwrap();
+        let (url, server) = hms_test_server(vec![
+            r#"{"access_token":"old","expires_in":3600}"#,
+            r#"{"code":"80200003"}"#,
+            r#"{"access_token":"new","expires_in":3600}"#,
+            r#"{"code":"80000000"}"#,
+            r#"{"code":"80300007"}"#,
+        ]);
+        let dispatcher = HmsDispatcher {
+            creds: HmsCredentials {
+                app_id: "123456".into(),
+                client_secret: "a+b&c".into(),
+            },
+            token_cache: tokio::sync::Mutex::new(None),
+            oauth_url: format!("{url}/oauth"),
+            send_url: format!("{url}/push"),
+        };
+        let record = PushTokenRecord {
+            device_id: "phone".into(),
+            provider: super::super::push::PushProvider::Hms,
+            token: "token".into(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        };
+        let payload = PushPayload {
+            title: None,
+            body: None,
+            data: Default::default(),
+        };
+        dispatcher.bearer().await.expect("mock OAuth exchange");
+        assert!(matches!(
+            dispatcher.deliver(&record, &payload).await,
+            DeliveryOutcome::Sent
+        ));
+        assert!(matches!(
+            dispatcher.deliver(&record, &payload).await,
+            DeliveryOutcome::InvalidToken
+        ));
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("client_secret=a%2Bb%26c"));
+        assert!(requests[1].contains("Bearer old"));
+        assert!(requests[3].contains("Bearer new"));
+        assert!(requests[4].contains("Bearer new"));
+    }
+
+    #[test]
+    fn hms_credentials_reject_empty_secret_and_url_injection() {
+        assert!(HmsDispatcher::new(HmsCredentials {
+            app_id: "../evil".into(),
+            client_secret: "secret".into()
+        })
+        .is_err());
+        assert!(HmsDispatcher::new(HmsCredentials {
+            app_id: "123".into(),
+            client_secret: " ".into()
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn hms_payload_carries_notification_and_tap_route() {
+        let record = PushTokenRecord {
+            device_id: "phone".into(),
+            provider: super::super::push::PushProvider::Hms,
+            token: "huawei-token".into(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        };
+        let payload = PushPayload {
+            title: Some("Cognia".into()),
+            body: Some("Ready".into()),
+            data: serde_json::from_value(json!({"sessionId": "session-1"})).unwrap(),
+        };
+        let message = hms_message(&record, &payload);
+        assert_eq!(message["message"]["token"], json!(["huawei-token"]));
+        assert_eq!(
+            message["message"]["android"]["notification"]["click_action"]["action"],
+            "com.cognia.mobile.HUAWEI_PUSH"
+        );
+        assert_eq!(
+            message["message"]["android"]["notification"]["foreground_show"],
+            false
+        );
+        let data: serde_json::Value =
+            serde_json::from_str(message["message"]["data"].as_str().unwrap()).unwrap();
+        assert_eq!(data["sessionId"], "session-1");
+        assert_eq!(data["title"], "Cognia");
+    }
+
+    #[test]
+    fn hms_service_failure_is_not_http_success() {
+        assert!(matches!(
+            hms_outcome(&json!({"code":"80000000"}), "token"),
+            DeliveryOutcome::Sent
+        ));
+        assert!(matches!(
+            hms_outcome(&json!({"code":"80300007"}), "token"),
+            DeliveryOutcome::InvalidToken
+        ));
+        assert!(matches!(
+            hms_outcome(&json!({"code":"80300002"}), "token"),
+            DeliveryOutcome::Failed
+        ));
+        assert!(matches!(
+            hms_outcome(&json!({}), "token"),
+            DeliveryOutcome::Failed
+        ));
+        assert!(matches!(
+            hms_outcome(
+                &json!({"code":"80100000", "msg":"{\"illegal_tokens\":[\"token\"]}"}),
+                "token"
+            ),
+            DeliveryOutcome::InvalidToken
+        ));
+    }
 
     #[test]
     fn fcm_dispatcher_constructs_with_creds() {

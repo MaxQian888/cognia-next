@@ -38,6 +38,27 @@ afterEach(() => {
 })
 
 describe("registerNativePlugins", () => {
+  it("reuses built-in and previously registered proxies across concurrent boot callers", async () => {
+    setMobile([{ name: "WebView" }, { name: "Camera" }])
+    const cap = (window as Win).Capacitor!
+    const webView = {}
+    cap.Plugins!.WebView = webView
+    const registerPlugin = jest.fn((name: string) => {
+      if (cap.Plugins![name]) throw new Error("duplicate registration")
+      cap.Plugins![name] = {}
+    })
+    const options = { win: window as Win, coreLoader: async () => ({ registerPlugin }) }
+    const results = await Promise.all([
+      registerNativePlugins(options),
+      registerNativePlugins(options),
+    ])
+    expect(registerPlugin).toHaveBeenCalledTimes(1)
+    expect(registerPlugin).toHaveBeenCalledWith("Camera")
+    expect(cap.Plugins!.WebView).toBe(webView)
+    for (const result of results) expect(result.registered).toEqual(["WebView", "Camera"])
+    expect(logWarn).not.toHaveBeenCalled()
+  })
+
   it("skips off-mobile (web / Tauri) without touching registerFn", async () => {
     const w = window as Win
     delete w.Capacitor // detectNativePlatform → "web"

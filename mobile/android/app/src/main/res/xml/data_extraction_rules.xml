@@ -2,12 +2,14 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="cap_sec.xml" />
+        <exclude domain="sharedpref" path="cognia-huawei-push.xml" />
         <exclude domain="root" path="app_ACRA-approved" />
         <exclude domain="root" path="app_ACRA-unapproved" />
         <exclude domain="root" path="no_backup/diagnostics" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="cap_sec.xml" />
+        <exclude domain="sharedpref" path="cognia-huawei-push.xml" />
         <exclude domain="root" path="app_ACRA-approved" />
         <exclude domain="root" path="app_ACRA-unapproved" />
         <exclude domain="root" path="no_backup/diagnostics" />

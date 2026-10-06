@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+// AppGallery's downloaded client configuration is optional for ordinary builds.
+def huaweiPushConfigured = file('agconnect-services.json').isFile()
+if (huaweiPushConfigured) {
+    apply plugin: 'com.huawei.agconnect'
+}
+
 // Generated from the root package version by pnpm version:sync.
 def appVersion = new Properties()
 rootProject.file('version.properties').withInputStream { appVersion.load(it) }
@@ -21,6 +27,7 @@ android {
     }
     defaultConfig {
         applicationId "com.cognia.mobile"
+        buildConfigField 'boolean', 'HUAWEI_PUSH_CONFIGURED', huaweiPushConfigured.toString()
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode appVersionCode
@@ -62,8 +69,11 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "ch.acra:acra-core:5.13.1"
     implementation "com.google.android.gms:play-services-base:18.5.0"
+    implementation 'com.huawei.hms:push:6.13.0.301'
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // Run bridge payload normalization against real JSON instead of Android's JVM stubs.
+    testImplementation 'org.json:json:20250517'
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

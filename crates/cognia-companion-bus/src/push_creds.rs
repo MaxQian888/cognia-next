@@ -3,9 +3,9 @@
 //! Two storage backends, both honoring the same [`PushCredStore`] surface:
 //!
 //! - [`KeyringPushCredStore`] — OS keyring under
-//!   `com.cognia.companion-push/v1`, accounts `fcm` and `apns`. Default for
+//!   `com.cognia.companion-push/v1`, accounts `fcm`, `apns`, and `hms`. Default for
 //!   the Tauri desktop build.
-//! - [`FilePushCredStore`] — JSON files at `<data_dir>/push-credentials.{fcm,apns}.json`.
+//! - [`FilePushCredStore`] — JSON files at `<data_dir>/push-credentials.{fcm,apns,hms}.json`.
 //!   Default for the headless `cognia-server` binary, where the host
 //!   typically has no GNOME-keyring / Windows Credential Locker service.
 //!
@@ -18,13 +18,18 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::dispatchers::{ApnsCredentials, ApnsDispatcher, FcmDispatcher, FcmServiceAccount};
+use super::dispatchers::{
+    ApnsCredentials, ApnsDispatcher, FcmDispatcher, FcmServiceAccount, HmsCredentials,
+    HmsDispatcher,
+};
 use super::push::push_dispatchers;
 
 const SERVICE: &str = "com.cognia.companion-push/v1";
 const FCM_ACCOUNT: &str = "fcm";
 const APNS_ACCOUNT: &str = "apns";
 const FCM_FILE: &str = "push-credentials.fcm.json";
+const HMS_ACCOUNT: &str = "hms";
+const HMS_FILE: &str = "push-credentials.hms.json";
 const APNS_FILE: &str = "push-credentials.apns.json";
 
 /// Serialized APNs credential — `ApnsCredentials` mirrored as Serialize so
@@ -73,6 +78,9 @@ pub trait PushCredStore: Send + Sync {
     fn load_apns(&self) -> Result<Option<PersistedApns>, String>;
     fn store_apns(&self, creds: &PersistedApns) -> Result<(), String>;
     fn clear_apns(&self) -> Result<(), String>;
+    fn load_hms(&self) -> Result<Option<HmsCredentials>, String>;
+    fn store_hms(&self, creds: &HmsCredentials) -> Result<(), String>;
+    fn clear_hms(&self) -> Result<(), String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +96,23 @@ impl KeyringPushCredStore {
 }
 
 impl PushCredStore for KeyringPushCredStore {
+    fn load_hms(&self) -> Result<Option<HmsCredentials>, String> {
+        keyring_get(HMS_ACCOUNT)?
+            .map(|raw| {
+                serde_json::from_str(&raw)
+                    .map_err(|_| "Invalid Huawei credentials in keyring".to_string())
+            })
+            .transpose()
+    }
+    fn store_hms(&self, creds: &HmsCredentials) -> Result<(), String> {
+        let raw = serde_json::to_string(creds)
+            .map_err(|_| "Huawei credentials serialization failed".to_string())?;
+        keyring_set(HMS_ACCOUNT, &raw)
+    }
+    fn clear_hms(&self) -> Result<(), String> {
+        keyring_delete(HMS_ACCOUNT)
+    }
+
     fn load_fcm(&self) -> Result<Option<FcmServiceAccount>, String> {
         match keyring_get(FCM_ACCOUNT)? {
             Some(raw) => serde_json::from_str(&raw)
@@ -144,6 +169,7 @@ fn keyring_delete(account: &str) -> Result<(), String> {
 pub struct FilePushCredStore {
     fcm_path: PathBuf,
     apns_path: PathBuf,
+    hms_path: PathBuf,
 }
 
 impl FilePushCredStore {
@@ -151,11 +177,22 @@ impl FilePushCredStore {
         Arc::new(Self {
             fcm_path: data_dir.join(FCM_FILE),
             apns_path: data_dir.join(APNS_FILE),
+            hms_path: data_dir.join(HMS_FILE),
         })
     }
 }
 
 impl PushCredStore for FilePushCredStore {
+    fn load_hms(&self) -> Result<Option<HmsCredentials>, String> {
+        load_json(&self.hms_path)
+    }
+    fn store_hms(&self, creds: &HmsCredentials) -> Result<(), String> {
+        store_json(&self.hms_path, creds)
+    }
+    fn clear_hms(&self) -> Result<(), String> {
+        clear_file(&self.hms_path)
+    }
+
     fn load_fcm(&self) -> Result<Option<FcmServiceAccount>, String> {
         load_json(&self.fcm_path)
     }
@@ -240,15 +277,40 @@ pub fn reinstall_persisted_dispatchers() -> Result<(), String> {
     let Some(store) = active() else {
         return Ok(());
     };
-    if let Some(fcm) = store.load_fcm()? {
-        let dispatcher = FcmDispatcher::new(fcm);
-        push_dispatchers().set_fcm(dispatcher);
+    restore_dispatchers(store.as_ref(), push_dispatchers().as_ref())
+}
+
+fn restore_dispatchers(
+    store: &dyn PushCredStore,
+    dispatchers: &super::push::DispatcherSet,
+) -> Result<(), String> {
+    // One damaged credential must not stop the other providers from restoring.
+    let fcm = store.load_fcm().map(|creds| {
+        if let Some(creds) = creds {
+            dispatchers.set_fcm(FcmDispatcher::new(creds));
+        }
+    });
+    let apns = store.load_apns().and_then(|creds| {
+        if let Some(creds) = creds {
+            dispatchers.set_apns(ApnsDispatcher::new(creds.into())?);
+        }
+        Ok(())
+    });
+    let hms = store.load_hms().and_then(|creds| {
+        if let Some(creds) = creds {
+            dispatchers.set_hms(HmsDispatcher::new(creds)?);
+        }
+        Ok(())
+    });
+    let errors: Vec<String> = [("FCM", fcm), ("APNs", apns), ("HMS", hms)]
+        .into_iter()
+        .filter_map(|(provider, result)| result.err().map(|error| format!("{provider}: {error}")))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
-    if let Some(apns) = store.load_apns()? {
-        let dispatcher = ApnsDispatcher::new(apns.into())?;
-        push_dispatchers().set_apns(dispatcher);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -273,6 +335,54 @@ mod tests {
             private_key_pem: "fake-p8".into(),
             production: false,
         }
+    }
+
+    #[test]
+    fn corrupt_hms_credentials_do_not_prevent_fcm_restore() {
+        let tmp = tempdir().unwrap();
+        let store = FilePushCredStore::new(tmp.path());
+        store.store_fcm(&sample_fcm()).unwrap();
+        std::fs::write(tmp.path().join(HMS_FILE), "corrupt").unwrap();
+        let dispatchers = super::super::push::DispatcherSet::new();
+        assert!(restore_dispatchers(store.as_ref(), &dispatchers)
+            .unwrap_err()
+            .contains("HMS"));
+        assert!(dispatchers
+            .for_provider(super::super::push::PushProvider::Fcm)
+            .is_some());
+        assert!(dispatchers
+            .for_provider(super::super::push::PushProvider::Hms)
+            .is_none());
+    }
+
+    #[test]
+    fn file_store_roundtrip_hms() {
+        let tmp = tempdir().unwrap();
+        let store = FilePushCredStore::new(tmp.path());
+        assert!(store.load_hms().unwrap().is_none());
+        store
+            .store_hms(&HmsCredentials {
+                app_id: "123456".into(),
+                client_secret: "secret".into(),
+            })
+            .unwrap();
+        let loaded = store.load_hms().unwrap().unwrap();
+        assert_eq!(loaded.app_id, "123456");
+        assert_eq!(loaded.client_secret, "secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(tmp.path().join(HMS_FILE))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        store.clear_hms().unwrap();
+        assert!(store.load_hms().unwrap().is_none());
     }
 
     #[test]

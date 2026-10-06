@@ -40,7 +40,7 @@ tauri = { workspace = true, optional = true }
 
 # `http2` for APNs (`http2_prior_knowledge`); the TLS and proxy features come
 # from `cognia-net`'s declaration of the same reqwest.
-reqwest = { workspace = true, features = ["http2", "json"] }
+reqwest = { workspace = true, features = ["http2", "json", "form"] }
 # APNs provider tokens are ES256 JWTs; FCM exchanges an RS256 assertion.
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 chrono.workspace = true

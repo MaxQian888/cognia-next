@@ -1490,6 +1490,9 @@ struct BrowserRegisterResponse {
 struct SignalingRegistrationResponse {
     rendezvous_id: String,
     room_descriptor: RoomDescriptor,
+    /// Host-local keyring lookup, forwarded to the renderer but not the client.
+    #[serde(skip)]
+    signaling_key_ref: String,
 }
 
 /// Payload of `companion://device-paired` — mirrors `DevicePairedPayload` in
@@ -1525,6 +1528,9 @@ pub(crate) struct DevicePairedEvent {
     pub rendezvous_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_descriptor: Option<Value>,
+    /// Without this lookup the renderer drops the device from the signaling hub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signaling_key_ref: Option<String>,
 }
 
 /// The pairing event for a newly registered browser extension.
@@ -1554,6 +1560,7 @@ pub(crate) fn browser_device_paired_event(
         app_version: "unknown".to_owned(),
         rendezvous_id: None,
         room_descriptor: None,
+        signaling_key_ref: None,
     }
 }
 
@@ -1677,6 +1684,7 @@ async fn register_handler(
                 .clone()
                 .unwrap_or_else(|| "unknown".to_owned()),
             rendezvous_id: Some(signaling.rendezvous_id.clone()),
+            signaling_key_ref: Some(signaling.signaling_key_ref.clone()),
             room_descriptor: Some(
                 serde_json::to_value(&signaling.room_descriptor).unwrap_or(Value::Null),
             ),
@@ -1869,6 +1877,7 @@ fn provision_signaling(
     }
     Ok(SignalingRegistrationResponse {
         rendezvous_id: registration.rendezvous_id,
+        signaling_key_ref: registration.signaling_key_ref,
         room_descriptor,
     })
 }
@@ -2607,6 +2616,7 @@ mod tests {
                 paired_at_ms: 1_700_000_000_000,
                 app_version: "1.2.3".into(),
                 rendezvous_id: Some("rv-1".into()),
+                signaling_key_ref: Some("dev-1".into()),
                 room_descriptor: Some(json!({ "roomId": "r1" })),
             },
         );
@@ -2622,6 +2632,25 @@ mod tests {
         assert_eq!(frame.payload["app_version"], "1.2.3");
         assert_eq!(frame.payload["rendezvous_id"], "rv-1");
         assert_eq!(frame.payload["room_descriptor"]["roomId"], "r1");
+        assert_eq!(frame.payload["signaling_key_ref"], "dev-1");
+    }
+
+    #[test]
+    fn signaling_response_omits_the_host_keyring_reference() {
+        let response = SignalingRegistrationResponse {
+            rendezvous_id: "room".into(),
+            room_descriptor: build_room_descriptor(
+                "nonce".into(),
+                "desktop-public-key".into(),
+                "mobile-public-key".into(),
+                1_700_000_000_000,
+            ),
+            signaling_key_ref: "host-key-lookup".into(),
+        };
+        let payload = serde_json::to_value(response).expect("serialize response");
+        assert!(payload.get("signalingKeyRef").is_none());
+        assert!(payload.get("signaling_key_ref").is_none());
+        assert_eq!(payload["rendezvousId"], "room");
     }
 
     /// A registered browser reaches the renderer the way a phone does, named as
@@ -2659,6 +2688,7 @@ mod tests {
         let object = frame.payload.as_object().expect("an object payload");
         assert!(!object.contains_key("rendezvous_id"));
         assert!(!object.contains_key("room_descriptor"));
+        assert!(!object.contains_key("signaling_key_ref"));
     }
 
     /// Older clients omit the self-reported labels; the request still parses.

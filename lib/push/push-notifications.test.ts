@@ -6,6 +6,7 @@ import {
   registerPushNotifications,
   reportPushTokenToDesktop,
   subscribeToPushNotifications,
+  subscribeToPushTokenChanges,
   type PushPermission,
 } from "./push-notifications"
 
@@ -84,13 +85,73 @@ function makePlugin(opts: FakePluginOpts = {}) {
 const capacitorWindow = window as Window & typeof globalThis & { Capacitor?: unknown }
 
 describe("registerPushNotifications", () => {
+  it.each([0, 1])(
+    "uses configured Huawei push with Google service status %s and keeps the provider explicit",
+    async (googleStatus) => {
+      const hms = makePlugin({ initialPerm: "granted", token: "huawei-token" })
+      const fcm = makePlugin({ initialPerm: "granted" })
+      const previous = capacitorWindow.Capacitor
+      capacitorWindow.Capacitor = {
+        isNativePlatform: () => true,
+        getPlatform: () => "android",
+        Plugins: {
+          CogniaDeviceServices: { getStatus: async () => ({ status: googleStatus }) },
+          CogniaHuaweiPush: {
+            ...hms.plugin,
+            getStatus: async () => ({ configured: true, available: true, status: 0 }),
+          },
+          PushNotifications: fcm.plugin,
+        },
+      }
+      try {
+        await expect(registerPushNotifications({ requestPermission: false })).resolves.toEqual({
+          kind: "registered",
+          token: "huawei-token",
+          platform: "android",
+          provider: "hms",
+        })
+        expect(fcm.register).not.toHaveBeenCalled()
+        expect(hms.plugin.requestPermissions).not.toHaveBeenCalled()
+      } finally {
+        capacitorWindow.Capacitor = previous
+      }
+    }
+  )
+
+  it("returns unsupported without prompting when neither Android push service is available", async () => {
+    const fcm = makePlugin()
+    const previous = capacitorWindow.Capacitor
+    capacitorWindow.Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: {
+        CogniaDeviceServices: { getStatus: async () => ({ status: 1 }) },
+        CogniaHuaweiPush: {
+          getStatus: async () => ({ configured: false, available: false, status: 1 }),
+        },
+        PushNotifications: fcm.plugin,
+      },
+    }
+    try {
+      await expect(registerPushNotifications()).resolves.toEqual({ kind: "unsupported" })
+      expect(fcm.plugin.requestPermissions).not.toHaveBeenCalled()
+      expect(fcm.register).not.toHaveBeenCalled()
+    } finally {
+      capacitorWindow.Capacitor = previous
+    }
+  })
   it("returns registered + token on a happy path", async () => {
     const fake = makePlugin({ initialPerm: "granted", token: "abc-123" })
     const previous = capacitorWindow.Capacitor
     capacitorWindow.Capacitor = { getPlatform: () => "ios" }
     try {
       const out = await registerPushNotifications({ loader: async () => fake.plugin })
-      expect(out).toEqual({ kind: "registered", token: "abc-123", platform: "ios" })
+      expect(out).toEqual({
+        kind: "registered",
+        token: "abc-123",
+        platform: "ios",
+        provider: "apns",
+      })
     } finally {
       capacitorWindow.Capacitor = previous
     }
@@ -109,6 +170,7 @@ describe("registerPushNotifications", () => {
         kind: "registered",
         token: "global-token",
         platform: "android",
+        provider: "fcm",
       })
     } finally {
       capacitorWindow.Capacitor = previous
@@ -216,6 +278,19 @@ describe("registerPushNotifications", () => {
 })
 
 describe("reportPushTokenToDesktop", () => {
+  it("reports a Huawei token under hms rather than deriving FCM from Android", async () => {
+    const transport = {
+      call: jest.fn().mockResolvedValue(null),
+      subscribe: jest.fn(() => () => {}),
+    }
+    await expect(
+      reportPushTokenToDesktop("hms-token", "android", transport, "hms")
+    ).resolves.toEqual({ ok: true })
+    expect(transport.call).toHaveBeenCalledWith("register_push_token", {
+      token: "hms-token",
+      provider: "hms",
+    })
+  })
   it("calls _rpc/register_push_token via the transport", async () => {
     const transport = {
       call: jest.fn().mockResolvedValue({}),
@@ -280,6 +355,106 @@ describe("reportPushTokenToDesktop", () => {
 })
 
 describe("subscribeToPushNotifications", () => {
+  it("receives Huawei taps without probing availability, even before registration succeeds", async () => {
+    const hms = makePlugin({ initialPerm: "granted" })
+    const getStatus = jest.fn().mockRejectedValue(new Error("temporary service failure"))
+    const previous = capacitorWindow.Capacitor
+    capacitorWindow.Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: { CogniaHuaweiPush: { ...hms.plugin, getStatus } },
+    }
+    try {
+      const handler = jest.fn()
+      const teardown = await subscribeToPushNotifications(handler)
+      hms.listeners.pushNotificationActionPerformed.forEach((listener) =>
+        listener({
+          notification: { title: "Ready", data: { sessionId: "session-a" } },
+          actionId: "tap",
+        })
+      )
+      expect(handler).toHaveBeenCalledWith({
+        title: "Ready",
+        body: undefined,
+        data: { sessionId: "session-a" },
+        foreground: false,
+      })
+      expect(getStatus).not.toHaveBeenCalled()
+      await teardown()
+      expect(hms.removers.every((remove) => remove.mock.calls.length === 1)).toBe(true)
+    } finally {
+      capacitorWindow.Capacitor = previous
+    }
+  })
+
+  it("forwards only the registered service's refresh when both native services emit tokens", async () => {
+    const hms = makePlugin({ initialPerm: "granted", token: "hms-first" })
+    const fcm = makePlugin({ initialPerm: "granted" })
+    const previous = capacitorWindow.Capacitor
+    capacitorWindow.Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: {
+        CogniaHuaweiPush: {
+          ...hms.plugin,
+          getStatus: async () => ({ configured: true, available: true, status: 0 }),
+        },
+        PushNotifications: fcm.plugin,
+      },
+    }
+    try {
+      const handler = jest.fn()
+      const teardown = await subscribeToPushTokenChanges(handler)
+      await registerPushNotifications({ requestPermission: false })
+      handler.mockClear()
+      fcm.listeners.registration.forEach((listener) => listener({ value: "wrong-provider" }))
+      hms.listeners.registration.forEach((listener) => listener({ value: "hms-new" }))
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith({
+        token: "hms-new",
+        platform: "android",
+        provider: "hms",
+      })
+      await teardown()
+    } finally {
+      capacitorWindow.Capacitor = previous
+    }
+  })
+
+  it("removes the first listener if installing the action listener fails", async () => {
+    const fake = makePlugin()
+    fake.plugin.addListener
+      .mockImplementationOnce(async (event, handler) => {
+        fake.listeners[event] = [handler]
+        return {
+          remove: jest.fn(async () => {
+            fake.listeners[event] = []
+          }),
+        }
+      })
+      .mockRejectedValueOnce(new Error("listener failed"))
+    await expect(
+      subscribeToPushNotifications(jest.fn(), { loader: async () => fake.plugin })
+    ).rejects.toThrow("listener failed")
+    expect(fake.listeners.pushNotificationReceived).toEqual([])
+  })
+  it("forwards rotated Huawei tokens and stops forwarding after teardown", async () => {
+    const hms = makePlugin()
+    const handler = jest.fn()
+    const teardown = await subscribeToPushTokenChanges(handler, {
+      loader: async () => hms.plugin,
+      provider: "hms",
+    })
+    hms.listeners.registration.forEach((listener) => listener({ value: "rotated-token" }))
+    expect(handler).toHaveBeenCalledWith({
+      token: "rotated-token",
+      platform: "unknown",
+      provider: "hms",
+    })
+    await teardown()
+    hms.listeners.registration.forEach((listener) => listener({ value: "after-teardown" }))
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
   it("invokes the handler on pushNotificationReceived", async () => {
     const fake = makePlugin({ initialPerm: "granted" })
     const handler = jest.fn()

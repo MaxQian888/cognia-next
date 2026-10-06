@@ -976,6 +976,7 @@ pub async fn fan_out_push(
     for provider in [
         super::push::PushProvider::Fcm,
         super::push::PushProvider::Apns,
+        super::push::PushProvider::Hms,
     ] {
         if let Some(d) = dispatchers.for_provider(provider) {
             let _ = registry
@@ -1790,6 +1791,42 @@ mod tests {
     // Compile-only smoke: ensure the module builds without errors.
 
     use super::*;
+
+    #[tokio::test]
+    async fn hms_receives_host_event_push_fanout() {
+        struct Recorder(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl crate::companion_api::push::PushDispatcher for Recorder {
+            async fn deliver(
+                &self,
+                _: &crate::companion_api::push::PushTokenRecord,
+                _: &crate::companion_api::push::PushPayload,
+            ) -> crate::companion_api::push::DeliveryOutcome {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                crate::companion_api::push::DeliveryOutcome::Sent
+            }
+        }
+        let registry = crate::companion_api::push::PushTokenRegistry::new();
+        registry.register(crate::companion_api::push::PushTokenRecord {
+            device_id: "hms-fanout-phone".into(),
+            provider: crate::companion_api::push::PushProvider::Hms,
+            token: "token".into(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        });
+        let dispatchers = crate::companion_api::push::DispatcherSet::new();
+        let recorder = std::sync::Arc::new(Recorder(std::sync::atomic::AtomicUsize::new(0)));
+        dispatchers.set_hms(recorder.clone());
+        fan_out_push(
+            registry,
+            dispatchers,
+            "workflow://run-terminal",
+            r#"{"runId":"run-1"}"#,
+        )
+        .await;
+        assert_eq!(recorder.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn commands_module_compiles() {}

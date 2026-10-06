@@ -155,10 +155,26 @@ jest.mock("@/lib/sync/companion-sync", () => ({
 
 const registerPushMock = jest.fn()
 const reportPushTokenMock = jest.fn()
+let pushTokenChangeHandler:
+  ((registration: { token: string; platform: "android"; provider: "hms" }) => void) | null = null
+const pushTokenChangeUnsubMock = jest.fn(async () => {})
+const subscribePushTokenChangesMock = jest.fn(async (handler: typeof pushTokenChangeHandler) => {
+  pushTokenChangeHandler = handler
+  return pushTokenChangeUnsubMock
+})
 jest.mock("@/lib/push/push-notifications", () => ({
   registerPushNotifications: (options?: unknown) => registerPushMock(options),
-  reportPushTokenToDesktop: (token: string, platform: string) =>
-    reportPushTokenMock(token, platform),
+  reportPushTokenToDesktop: (
+    token: string,
+    platform: string,
+    _transport?: unknown,
+    provider?: string
+  ) =>
+    provider
+      ? reportPushTokenMock(token, platform, provider)
+      : reportPushTokenMock(token, platform),
+  subscribeToPushTokenChanges: (handler: typeof pushTokenChangeHandler) =>
+    subscribePushTokenChangesMock(handler),
 }))
 
 const uninstallPushBridgeMock = jest.fn(async () => {})
@@ -264,6 +280,9 @@ beforeEach(() => {
   installWorkflowRunStatusSyncMock.mockReset().mockReturnValue(() => {})
   registerPushMock.mockReset().mockResolvedValue({ kind: "permission_denied" })
   reportPushTokenMock.mockReset().mockResolvedValue({ ok: true })
+  pushTokenChangeHandler = null
+  pushTokenChangeUnsubMock.mockClear()
+  subscribePushTokenChangesMock.mockClear()
   uninstallPushBridgeMock.mockClear()
   installPushBridgeMock.mockReset().mockResolvedValue(uninstallPushBridgeMock)
   toastFn.mockReset()
@@ -1326,6 +1345,34 @@ describe("<CompanionBootProvider /> — host bindings detail", () => {
     expect(options.getDeviceId()).toBeUndefined()
   })
 
+  it("reports Huawei registration and token rotation to the bound host and tears down the listener", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    registerPushMock.mockResolvedValue({
+      kind: "registered",
+      token: "hms-initial",
+      platform: "android",
+      provider: "hms",
+    })
+    const view = mount()
+    await waitFor(() =>
+      expect(reportPushTokenMock).toHaveBeenCalledWith("hms-initial", "android", "hms")
+    )
+    await act(async () => {
+      pushTokenChangeHandler?.({ token: "hms-rotated", platform: "android", provider: "hms" })
+    })
+    await waitFor(() =>
+      expect(reportPushTokenMock).toHaveBeenCalledWith("hms-rotated", "android", "hms")
+    )
+    const listener = pushTokenChangeHandler
+    view.unmount()
+    expect(pushTokenChangeUnsubMock).toHaveBeenCalled()
+    await act(async () => {
+      listener?.({ token: "stale", platform: "android", provider: "hms" })
+    })
+    expect(reportPushTokenMock).not.toHaveBeenCalledWith("stale", "android", "hms")
+  })
+
   it("registers push once: a later permission grant is a no-op after success, and de-dupes a concurrent grant", async () => {
     setMobile()
     hydrateMock.mockResolvedValue(pairedConfig)
@@ -1347,6 +1394,37 @@ describe("<CompanionBootProvider /> — host bindings detail", () => {
     // Registered: a later grant has nothing to do.
     notificationPermissionHandler?.()
     await new Promise((r) => setTimeout(r, 0))
+    expect(registerPushMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a failed Huawei token refresh on reconnect without minting another token", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    const connectionListeners: Array<(state: string) => void> = []
+    mockTransport.onConnectionStateChange = (listener: (state: string) => void) => {
+      connectionListeners.push(listener)
+      return jest.fn()
+    }
+    registerPushMock.mockResolvedValue({
+      kind: "registered",
+      token: "hms-first",
+      platform: "android",
+      provider: "hms",
+    })
+    mount()
+    await waitFor(() =>
+      expect(reportPushTokenMock).toHaveBeenCalledWith("hms-first", "android", "hms")
+    )
+    reportPushTokenMock.mockResolvedValueOnce({ ok: false, reason: "offline" })
+    await act(async () => {
+      pushTokenChangeHandler?.({ token: "hms-new", platform: "android", provider: "hms" })
+    })
+    await waitFor(() => expect(reportPushTokenMock).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      connectionListeners.forEach((listener) => listener("connected"))
+    })
+    await waitFor(() => expect(reportPushTokenMock).toHaveBeenCalledTimes(3))
+    expect(reportPushTokenMock).toHaveBeenLastCalledWith("hms-new", "android", "hms")
     expect(registerPushMock).toHaveBeenCalledTimes(1)
   })
 
