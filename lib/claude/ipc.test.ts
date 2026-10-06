@@ -1091,6 +1091,24 @@ describe("transcript generation dispatch", () => {
     expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
   })
 
+  it("sends a host-owned history as given, without app transcript preparation", async () => {
+    // The CLI has no Dexie session row: preparing would hydrate an empty
+    // history and restart the runtime session on every turn.
+    callSpy.mockResolvedValue(undefined)
+    await sendPrompt(
+      "cli-session",
+      "next",
+      { provider: "openai" },
+      { transcriptRuntime: "host-owned" }
+    )
+    expect(mockWithTranscriptRuntimeLock).not.toHaveBeenCalled()
+    expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_send",
+      expect.objectContaining({ options: { provider: "openai" } })
+    )
+  })
+
   it("rejects stale frozen histories without relabeling or dispatching them", async () => {
     mockGetSession.mockResolvedValue({ runtimeTranscriptGeneration: "generation-2" })
     await expect(

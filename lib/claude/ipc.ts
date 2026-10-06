@@ -110,8 +110,15 @@ export class TranscriptRuntimeRecoveryError extends Error {
 
 type PromptDelivery = {
   commandId?: string
-  /** `prepared` requires the caller to hold the transcript lock through this receipt. */
-  transcriptRuntime?: "prepared" | "frozen"
+  /**
+   * `prepared` requires the caller to hold the transcript lock through this
+   * receipt. `host-owned` is for a host that keeps its own durable history
+   * and has no app transcript row (the CLI writes JSONL and restores provider
+   * history itself): the app's Dexie preparation would find no session and
+   * hydrate an empty `initialConversation`, restarting the runtime session
+   * without history on every turn.
+   */
+  transcriptRuntime?: "prepared" | "frozen" | "host-owned"
 }
 
 export async function sendPrompt(
@@ -133,7 +140,7 @@ export async function sendPrompt(
     }
     return sendPromptToTransport(sessionId, prompt, options, delivery)
   }
-  if (delivery?.transcriptRuntime === "prepared") {
+  if (delivery?.transcriptRuntime === "prepared" || delivery?.transcriptRuntime === "host-owned") {
     return sendPromptToTransport(sessionId, prompt, options, delivery)
   }
   const { withTranscriptRuntimeLock } = await import("@/lib/chat/transcript/revision-events")

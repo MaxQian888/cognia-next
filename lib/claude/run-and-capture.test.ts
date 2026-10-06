@@ -35,7 +35,9 @@ import { getExecutionBroker, __resetExecutionBrokerForTesting } from "@/lib/exec
 // test can dispatch synthetic events.
 
 let captured: ((evt: ClaudeEvent) => void) | null = null
-const sendPromptMock = jest.fn<Promise<void>, [string, unknown, unknown?]>(async () => undefined)
+const sendPromptMock = jest.fn<Promise<void>, [string, unknown, unknown?, unknown?]>(
+  async () => undefined
+)
 const interruptSessionMock = jest.fn<Promise<void>, [string]>(async () => undefined)
 const approveToolMock = jest.fn<Promise<void>, [string, string, string, string?, unknown?]>(
   async () => undefined
@@ -58,8 +60,12 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 
 const subscribeAgentEventsMock = jest.fn()
 jest.mock("./ipc", () => ({
-  sendPrompt: (sessionId: string, prompt: unknown, options?: unknown) =>
-    sendPromptMock(sessionId, prompt, options),
+  // A delivery hint is forwarded only when given, so the many three-argument
+  // call assertions keep describing the default send.
+  sendPrompt: (sessionId: string, prompt: unknown, options?: unknown, delivery?: unknown) =>
+    delivery === undefined
+      ? sendPromptMock(sessionId, prompt, options)
+      : sendPromptMock(sessionId, prompt, options, delivery),
   interruptSession: (sessionId: string) => interruptSessionMock(sessionId),
   onClaudeMessage: (handler: (evt: ClaudeEvent) => void) => onClaudeMessageMock(handler),
   approveTool: (s: string, r: string, d: string, m?: string, u?: unknown) =>
@@ -181,6 +187,24 @@ describe("runAndCaptureAssistantReply", () => {
     fire(sessionEnded())
     await promise
     expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", { turnId: "turn-frozen" })
+  })
+
+  it("forwards a host-owned transcript so the send skips the app's transcript preparation", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      transcriptRuntime: "host-owned",
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      SESSION,
+      "hi",
+      { turnId: expect.any(String) },
+      { transcriptRuntime: "host-owned" }
+    )
   })
 
   it("retains the provider conversation snapshot from the terminal frame", async () => {

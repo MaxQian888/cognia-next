@@ -564,6 +564,12 @@ export interface RunAndCaptureOptions {
    * through the CallLedger and its verified answer becomes this turn's text.
    */
   fusion?: FusionTurnRequest
+  /**
+   * Set by a host that keeps its own durable transcript and restores provider
+   * history itself (the CLI). The send then skips the app's Dexie transcript
+   * preparation, which only knows app sessions. See `sendPrompt` in `./ipc`.
+   */
+  transcriptRuntime?: "host-owned"
 }
 
 /** What a caller says about this turn's Router + Fusion action. */
@@ -1711,7 +1717,12 @@ async function captureAssistantReplyCore(
         // catch below cleans up; if it rejects async we still clean up
         // via the same path.
         promptSent = true
-        sendPrompt(sessionId, prompt, { ...(options ?? {}), turnId }).catch((err: unknown) => {
+        sendPrompt(
+          sessionId,
+          prompt,
+          { ...(options ?? {}), turnId },
+          cap?.transcriptRuntime ? { transcriptRuntime: cap.transcriptRuntime } : undefined
+        ).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err)
           finishErr(new RunAndCaptureError(`sendPrompt failed: ${message}`, "send_failed"))
         })

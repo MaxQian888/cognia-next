@@ -683,6 +683,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       activeInvocation = invocation
       try {
         result = await capture(sessionId, turnContent, sendOptions, {
+          // This session's history is the JSONL transcript plus the restored
+          // provider snapshot above, not an app Dexie row.
+          transcriptRuntime: "host-owned",
           signal: opts.signal,
           timeoutMs: opts.timeoutMs,
           // Idle (read) watchdog: interrupt a turn whose provider stream stalls
@@ -742,6 +745,12 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         }
       }
       if (result.sdkSessionId) sendOptions.resumeSessionId = result.sdkSessionId
+      // A restored provider snapshot seeds the first completed turn only. The
+      // sidecar restarts any session whose send carries one (`restartReason`),
+      // so leaving it set replayed the saved history on every later turn and
+      // dropped each live turn after a `--continue`. A failed turn keeps it,
+      // because the durable history still ends where the snapshot does.
+      delete sendOptions.initialConversation
       appendTranscript(
         home,
         sessionId,

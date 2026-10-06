@@ -1540,14 +1540,25 @@ describe("durable runtime history", () => {
       const first = createAgentSession(params)
       await first.send("ORIGINAL_REQUEST", { gate: createPermissionGate({ yes: true }) })
       await first.close()
-      const nextCapture = jest.fn(async () => result("continued"))
+      // The session reuses one options object across turns, so record what
+      // each turn was dispatched with at the moment it was dispatched.
+      const dispatched: SendOptions[] = []
+      const nextCapture = jest.fn(async (_id: string, _content: unknown, opts: SendOptions) => {
+        dispatched.push({ ...opts })
+        return { ...result("continued"), conversationSnapshot }
+      })
       const next = createAgentSession({
         ...params,
         resolveOptions: async () => ({ provider, model: "m", cwd: "/changed" }),
         capture: nextCapture as never,
       })
       await next.send("FOLLOWUP_REQUEST", { gate: createPermissionGate({ yes: true }) })
-      const sent = (nextCapture.mock.calls as unknown[][])[0][2] as SendOptions
+      // The CLI owns this history; the app's Dexie transcript preparation
+      // would otherwise replace it with an empty one on every turn.
+      expect((nextCapture.mock.calls as unknown[][])[0][3]).toMatchObject({
+        transcriptRuntime: "host-owned",
+      })
+      const sent = dispatched[0]!
       if (provider === "anthropic") {
         expect(sent.resumeSessionId).toBe("sdk-original")
         expect(sent.cwd).toBe("/changed")
@@ -1556,9 +1567,52 @@ describe("durable runtime history", () => {
           workspace: "/original",
         })
       } else expect(sent.initialConversation).toEqual(conversationSnapshot)
+      // A later live turn continues the sidecar session instead of restarting
+      // it from the saved snapshot, which would drop FOLLOWUP_REQUEST.
+      await next.send("SECOND_FOLLOWUP", { gate: createPermissionGate({ yes: true }) })
+      expect(dispatched[1]!.initialConversation).toBeUndefined()
       await next.close()
     }
   )
+})
+
+it("keeps the restored snapshot for a retry when the first resumed turn fails", async () => {
+  const fsx = memFs().fsx
+  const conversationSnapshot = [
+    { role: "user", content: "ORIGINAL_REQUEST" },
+    { role: "assistant", content: "fixed" },
+  ]
+  const params = {
+    config: cfg({ provider: "deepseek" }),
+    home: HOME,
+    sessionId: "restore-retry",
+    transcriptFs: fsx,
+    bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+    resolveOptions: async () => ({ provider: "deepseek", model: "m", cwd: "/w" }) as never,
+  }
+  const first = createAgentSession({
+    ...params,
+    capture: (async () => ({ ...result("fixed"), conversationSnapshot })) as never,
+  })
+  await first.send("ORIGINAL_REQUEST", { gate: createPermissionGate({ yes: true }) })
+  await first.close()
+  const dispatched: SendOptions[] = []
+  let calls = 0
+  const next = createAgentSession({
+    ...params,
+    capture: (async (_id: string, _content: unknown, opts: SendOptions) => {
+      dispatched.push({ ...opts })
+      if (++calls === 1) throw new Error("provider down")
+      return { ...result("continued"), conversationSnapshot }
+    }) as never,
+  })
+  await expect(
+    next.send("FOLLOWUP_REQUEST", { gate: createPermissionGate({ yes: true }) })
+  ).rejects.toThrow("provider down")
+  await next.send("FOLLOWUP_REQUEST", { gate: createPermissionGate({ yes: true }) })
+  expect(dispatched[0]!.initialConversation).toEqual(conversationSnapshot)
+  expect(dispatched[1]!.initialConversation).toEqual(conversationSnapshot)
+  await next.close()
 })
 
 describe("incompatible durable history", () => {
