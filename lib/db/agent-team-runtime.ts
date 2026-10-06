@@ -8,7 +8,6 @@ import type {
   AgentTeamEvidence,
   AgentTeamRetrospective,
   AgentTeamRunRecord,
-  AgentTeamRunStatus,
   AgentTeamSteeringReceipt,
   AgentTeamSteeringStatus,
   AgentTeamTrajectoryEvent,
