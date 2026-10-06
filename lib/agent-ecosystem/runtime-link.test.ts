@@ -5,8 +5,10 @@ import {
   presetIdsForMigrationVendor,
   presetIdsForSessionSource,
   presetIdsSharingEcosystem,
+  presetResumesNatively,
   primaryPresetIdForEcosystem,
   primaryPresetIdForMigrationVendor,
+  resumeSemanticsForPreset,
 } from "./runtime-link"
 
 describe("preset resolution", () => {
@@ -101,4 +103,25 @@ it("maps Aider imported sessions to its official CLI preset", () => {
 
 it("maps Cline imported sessions to its native ACP preset", () => {
   expect(presetIdsForSessionSource("cline")).toEqual(["cline"])
+})
+
+describe("resume semantics", () => {
+  it("reads a preset's resume behaviour from the package that implements its protocol", () => {
+    expect(resumeSemanticsForPreset("aider")).toBe("history-replay")
+    expect(resumeSemanticsForPreset("codex-app-server")).toBe("native")
+  })
+
+  it("does not guess for a protocol the owning package ships no adapter for", () => {
+    expect(resumeSemanticsForPreset("cursor-cli")).toBeUndefined()
+    // Codex's package ships the app-server adapter only; its ACP preset is not
+    // described by it, nor by any other package that happens to speak ACP.
+    expect(resumeSemanticsForPreset("codex-acp")).toBeUndefined()
+    expect(resumeSemanticsForPreset("not-a-preset")).toBeUndefined()
+    expect(presetResumesNatively("cursor-cli")).toBe(true)
+  })
+
+  it("keeps a history-replay preset out of native resume", () => {
+    expect(presetResumesNatively("aider")).toBe(false)
+    expect(presetResumesNatively("codex-app-server")).toBe(true)
+  })
 })

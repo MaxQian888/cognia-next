@@ -49,7 +49,7 @@ description: 面向 11 种本地编程 Agent 历史的有损可见图导入，�
 | Copilot CLI | 0.0.350 | `session-state`、SQLite 子集、task/checkpoint/background | 仅本地 chronicle |
 | Qwen Code | 0.16-alpha | JSON/JSONL 导出、resume/branch/fork/rewind | 不依赖未公开私有布局 |
 
-`buildExternalSessionSupportMatrix()` 直接从导入 registry 与 external preset catalog 生成恢复映射。Kiro、Droid 与 DeepSeek Harness 因缺少稳定公开 transcript 格式，保持 runtime-only。
+`buildExternalSessionSupportMatrix()` 直接从导入 registry 与 external preset catalog 生成恢复映射。Kiro、Droid 与 DeepSeek Harness 因缺少稳定公开 transcript 格式，保持 runtime-only。Aider 的 preset 也是 runtime-only，但原因不同：它的包声明恢复语义为 `history-replay`（恢复的 Aider 会话回放的是 Cognia 自己的聊天文件），所以导入的 Aider transcript 不会被当作原生恢复目标。
 
 ## 镜像与恢复语义
 

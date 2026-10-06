@@ -35,11 +35,22 @@ describe("external session support matrix", () => {
 
   it("leaves a history-only source with no resume candidate", () => {
     const rows = buildExternalSessionSupportMatrix().importSources
-    for (const sourceId of ["aider", "cline", "continue-dev"]) {
+    // Aider has a runnable preset, but its package declares `history-replay`:
+    // a resumed Aider session replays Cognia's chat file, not the imported one.
+    for (const sourceId of ["aider", "continue-dev"]) {
       const row = rows.find((candidate) => candidate.sourceId === sourceId)
       expect(row?.presetIds).toEqual([])
       expect(row?.nativeResumeCandidate).toBe(false)
     }
+    expect(buildExternalSessionSupportMatrix().runtimeOnlyPresetIds).toContain("aider")
+  })
+
+  it("offers a source's native ACP preset like any other runnable runtime", () => {
+    const cline = buildExternalSessionSupportMatrix().importSources.find(
+      (row) => row.sourceId === "cline"
+    )
+    expect(cline?.presetIds).toEqual(["cline"])
+    expect(cline?.nativeResumeCandidate).toBe(true)
   })
 
   it("publishes verification metadata and graph support instead of stale prose counts", () => {

@@ -1,5 +1,8 @@
 import { EXTERNAL_AGENT_PRESETS, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
-import { presetIdsForSessionSource } from "@/lib/agent-ecosystem/runtime-link"
+import {
+  presetIdsForSessionSource,
+  presetResumesNatively,
+} from "@/lib/agent-ecosystem/runtime-link"
 
 import { getSessionSources } from "./registry"
 
@@ -23,7 +26,8 @@ export function buildExternalSessionSupportMatrix(): {
     .filter(([, preset]) => preset !== null)
     .map(([id]) => id)
   // Retired native protocols may still describe imported history, but cannot
-  // be offered as execution targets for resuming that history.
+  // be offered as execution targets for resuming that history. Neither can a
+  // preset whose package replays its own history instead of resuming (Aider).
   const runnable = new Set(getRunnablePresets())
   const claimed = new Set<string>()
   const importSources = getSessionSources().map((source) => {
@@ -31,7 +35,7 @@ export function buildExternalSessionSupportMatrix(): {
     // their own id, which is how a plugin can name a preset it also ships.
     const candidates = presetIdsForSessionSource(source.id)
     const matching = (candidates.length > 0 ? candidates : [source.id]).filter(
-      (id) => presetIds.includes(id) && runnable.has(id)
+      (id) => presetIds.includes(id) && runnable.has(id) && presetResumesNatively(id)
     )
     matching.forEach((id) => claimed.add(id))
     return {

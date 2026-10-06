@@ -12,6 +12,8 @@
  */
 
 import { isBuiltinExecutableExternalAgentProtocol } from "@cognia/agent-config-types/external-agent-capability"
+import { semanticsForPreset } from "@cognia/agent-contracts/ecosystem"
+import type { AgentResumeSemantics } from "@cognia/agent-contracts/semantics"
 import {
   findRuntimeById,
   findRuntimeByPresetId,
@@ -22,6 +24,7 @@ import {
   findEcosystemById,
   findEcosystemByMigrationVendor,
   findEcosystemByRuntimeId,
+  INTEGRATION_MANIFESTS,
 } from "./catalog"
 
 // Built once. `presetIdsForSessionSource` is called per row when the support
@@ -89,6 +92,35 @@ export function presetIdsSharingEcosystem(presetId: string): string[] {
   const ecosystem = runtime ? findEcosystemByRuntimeId(runtime.runtimeId) : undefined
   const presets = ecosystem ? presetIdsForEcosystem(ecosystem.id) : []
   return presets.includes(presetId) ? presets : [presetId, ...presets]
+}
+
+/**
+ * How a preset's session continues once its process is gone, as the package
+ * owning the preset's runtime declares it for that runtime's protocol
+ * (ADR-0217 execution semantics). Matched through the owning manifest, not
+ * the protocol alone: ACP is shared by many ecosystems and none of their
+ * packages speaks for another's runtime. Undefined when the owning package
+ * ships no adapter for the protocol (Codex's ACP preset, Cursor), because
+ * nothing here may guess on a package's behalf.
+ */
+export function resumeSemanticsForPreset(presetId: string): AgentResumeSemantics | undefined {
+  const runtime = findRuntimeByPresetId(presetId)
+  if (!runtime) return undefined
+  const manifest = INTEGRATION_MANIFESTS.find((entry) =>
+    entry.ecosystem.runtimeIds.includes(runtime.runtimeId)
+  )
+  const integration = manifest?.protocols.find((entry) => entry.protocol === runtime.protocol)
+  return integration ? semanticsForPreset(integration, presetId).resume : undefined
+}
+
+/**
+ * False when the preset's package declares that a stored session cannot be
+ * resumed natively: Aider replays Cognia's own chat file (`history-replay`),
+ * which must not be shown as resuming the imported session.
+ */
+export function presetResumesNatively(presetId: string): boolean {
+  const resume = resumeSemanticsForPreset(presetId)
+  return resume !== "history-replay" && resume !== "unsupported"
 }
 
 /** The catalog's display name for an ecosystem, via its primary runtime. */
