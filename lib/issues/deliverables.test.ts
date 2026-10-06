@@ -1,5 +1,12 @@
 import type { IssueRun, IssueRunArtifact } from "@/types/issues"
-import { artifactDeliverableHref, deliverableKey, groupIssueDeliverables } from "./deliverables"
+import {
+  artifactDeliverableHref,
+  deliverableKey,
+  groupIssueDeliverables,
+  createDeliveryReceipt,
+  deliveryDigest,
+  deliverySnapshot,
+} from "./deliverables"
 
 function run(id: string, startedAt: number, artifacts: IssueRunArtifact[]): IssueRun {
   return {
@@ -56,4 +63,29 @@ it("answers nothing when no run handed anything over", () => {
   expect(
     groupIssueDeliverables([run("r1", 1, [{ label: "PR", href: "https://x/pull/1" }])])
   ).toEqual([])
+})
+
+it("addresses immutable delivery content, excluding mutable access bookkeeping", () => {
+  const source = {
+    id: "a",
+    type: "code",
+    title: "Report",
+    content: "v1",
+    version: 1,
+    sessionId: "s",
+    messageId: "m",
+    createdAt: 1,
+    updatedAt: 2,
+    metadata: { lastAccessedAt: 3 },
+  } as const
+  const snapshot = deliverySnapshot(source)
+  const receipt = createDeliveryReceipt("artifact:a", { snapshot })
+  expect(snapshot.metadata).not.toHaveProperty("lastAccessedAt")
+  expect(
+    deliveryDigest("artifact:a", { snapshot: deliverySnapshot({ ...source, updatedAt: 4 }) })
+  ).toBe(receipt.digest)
+  expect(deliveryDigest("artifact:a", { snapshot: { ...snapshot, content: "v2" } })).not.toBe(
+    receipt.digest
+  )
+  expect(() => createDeliveryReceipt("https://example.com", {})).toThrow("no pinned version")
 })

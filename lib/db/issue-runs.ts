@@ -34,6 +34,7 @@ import type {
 import { isActiveIssueRunStatus } from "@/types/issues"
 import { getDb } from "./schema"
 import { appendIssueEvent } from "./issue-events"
+import { deliveryDigest, sameIssueArtifact } from "@/lib/issues/deliverables"
 
 function newIssueRunId(): string {
   return `irun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -199,7 +200,7 @@ export async function markIssueRunRunning(id: string, now = Date.now()): Promise
 
 /**
  * Attach an artifact (PR, branch, worktree, session) to a run and append
- * `artifact_linked` to the issue's trail. Idempotent per `href`.
+ * `artifact_linked` to the issue's trail. Idempotent per href and pinned version.
  */
 export async function linkIssueRunArtifact(
   id: string,
@@ -210,7 +211,8 @@ export async function linkIssueRunArtifact(
   await db.transaction("rw", db.issueRuns, db.issueEvents, async () => {
     const existing = await db.issueRuns.get(id)
     if (!existing) return
-    if (existing.artifacts.some((candidate) => candidate.href === artifact.href)) return
+    assertNewDeliveryReceipt(artifact)
+    if (existing.artifacts.some((candidate) => sameIssueArtifact(candidate, artifact))) return
     await db.issueRuns.put({
       ...existing,
       artifacts: [...existing.artifacts, artifact],
@@ -220,6 +222,57 @@ export async function linkIssueRunArtifact(
       issueId: existing.issueId,
       payload: { kind: "artifact_linked", label: artifact.label, href: artifact.href, runId: id },
     })
+  })
+}
+
+function assertNewDeliveryReceipt(artifact: IssueRunArtifact): void {
+  const receipt = artifact.delivery
+  if (
+    receipt &&
+    (receipt.acceptedAt !== undefined ||
+      (!receipt.snapshot && !receipt.externalVersion?.trim()) ||
+      receipt.digest !== deliveryDigest(artifact.href, receipt) ||
+      receipt.id !== `delivery:${receipt.digest}`)
+  )
+    throw new Error("Invalid delivery receipt")
+}
+
+/** Local user acceptance, separate from engine success and bound to the exact delivered version. */
+export async function acceptIssueDeliverable(
+  runId: string,
+  deliveryId: string,
+  expectedDigest: string,
+  now = Date.now()
+): Promise<number> {
+  const db = getDb()
+  return db.transaction("rw", db.issueRuns, db.issueEvents, async () => {
+    const run = await db.issueRuns.get(runId)
+    const artifact = run?.artifacts.find((row) => row.delivery?.id === deliveryId)
+    const receipt = artifact?.delivery
+    if (
+      !run ||
+      !artifact ||
+      !receipt ||
+      (!receipt.snapshot && !receipt.externalVersion) ||
+      receipt.digest !== expectedDigest ||
+      deliveryDigest(artifact.href, receipt) !== expectedDigest
+    )
+      throw new Error("Delivery version changed or is unavailable")
+    if (receipt.acceptedAt !== undefined) return receipt.acceptedAt
+    receipt.acceptedAt = now
+    await db.issueRuns.put({ ...run, updatedAt: now })
+    await appendIssueEvent({
+      issueId: run.issueId,
+      payload: {
+        kind: "deliverable_accepted",
+        label: artifact.label,
+        runId,
+        deliveryId,
+        digest: expectedDigest,
+        by: { kind: "human" },
+      },
+    })
+    return now
   })
 }
 
@@ -254,7 +307,8 @@ export async function settleIssueRun(
     const extraArtifacts = "artifacts" in input ? (input.artifacts ?? []) : []
     const artifacts = [...existing.artifacts]
     for (const artifact of extraArtifacts) {
-      if (artifacts.some((candidate) => candidate.href === artifact.href)) continue
+      if (artifacts.some((candidate) => sameIssueArtifact(candidate, artifact))) continue
+      assertNewDeliveryReceipt(artifact)
       artifacts.push(artifact)
       await appendIssueEvent({
         issueId: existing.issueId,

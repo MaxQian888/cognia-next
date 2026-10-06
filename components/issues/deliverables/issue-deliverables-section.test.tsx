@@ -8,8 +8,8 @@ jest.mock("next-intl", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 jest.mock("@/components/artifacts/artifact-preview", () => ({
-  ArtifactPreview: ({ artifact }: { artifact: { id: string } }) => (
-    <div data-testid={`preview-${artifact.id}`} />
+  ArtifactPreview: ({ artifact }: { artifact: { id: string; content?: string } }) => (
+    <div data-testid={`preview-${artifact.id}`}>{artifact.content}</div>
   ),
 }))
 const mockArtifacts: Record<string, { id: string }> = { a2: { id: "a2" } }
@@ -18,9 +18,15 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
     select({ artifacts: mockArtifacts }),
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+const mockAcceptDelivery = jest.fn()
+jest.mock("@/lib/db/issue-runs", () => ({
+  acceptIssueDeliverable: (...args: unknown[]) => mockAcceptDelivery(...args),
+}))
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { IssueRun, IssueRunArtifact } from "@/types/issues"
 import { IssueDeliverablesSection } from "./issue-deliverables-section"
+import { createDeliveryReceipt } from "@/lib/issues/deliverables"
 
 const run = (id: string, startedAt: number, artifacts: IssueRunArtifact[]): IssueRun => ({
   id,
@@ -64,4 +70,40 @@ it("shows the newest version with a preview, and switches to an older one", () =
   // a1 is not on this device: say so instead of previewing.
   expect(screen.queryByTestId("preview-a2")).toBeNull()
   expect(screen.getByText("deliverables.previewUnavailable")).toBeInTheDocument()
+})
+
+it("previews the preserved copy and confirms exactly that version; failure remains retryable", async () => {
+  const snapshot = {
+    id: "a2",
+    sessionId: "s",
+    messageId: "m",
+    type: "code" as const,
+    title: "Report",
+    content: "old preserved bytes",
+    version: 1,
+  }
+  const first = {
+    ...artifact("a2", 10),
+    delivery: createDeliveryReceipt("artifact:a2", { snapshot }),
+  }
+  const second = {
+    ...artifact("a2", 20),
+    delivery: createDeliveryReceipt("artifact:a2", {
+      snapshot: { ...snapshot, content: "new bytes", version: 2 },
+    }),
+  }
+  mockAcceptDelivery.mockRejectedValueOnce(new Error("stale")).mockResolvedValue(123)
+  render(<IssueDeliverablesSection runs={[run("r", 1, [first, second])]} />)
+  fireEvent.click(screen.getByTestId("issue-deliverable-version-1"))
+  expect(screen.getByText("old preserved bytes")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "deliverables.accept" }))
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("deliverables.acceptFailed")
+  )
+  fireEvent.click(screen.getByRole("button", { name: "deliverables.accept" }))
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("deliverables.accepted"))
+  expect(mockAcceptDelivery).toHaveBeenLastCalledWith("r", first.delivery.id, first.delivery.digest)
+  fireEvent.click(screen.getByTestId("issue-deliverable-version-2"))
+  expect(screen.getByText("new bytes")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "deliverables.accept" })).toBeInTheDocument()
 })

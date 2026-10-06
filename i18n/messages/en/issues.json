@@ -167,7 +167,8 @@
     "work_started": "an agent turn started on this issue",
     "work_settled": "an agent turn on this issue finished: {to}",
     "wakeup_fired": "a wakeup fired ({delivery})",
-    "run_checked_in": "a periodic run checked in"
+    "run_checked_in": "a periodic run checked in",
+    "deliverable_accepted": "confirmed a delivered version"
   },
   "create": {
     "trigger": "New issue",
@@ -717,7 +718,13 @@
     "version": "v{version}",
     "versions": "Versions",
     "previewUnavailable": "This artifact is not on this device; open its conversation to see it.",
-    "conversationGone": "The conversation this artifact was made in no longer exists."
+    "conversationGone": "The conversation this artifact was made in no longer exists.",
+    "pinnedCopy": "Preserved artifact content. Referenced external resources may change; the link opens the current source conversation.",
+    "externalVersion": "External version: {version}. This reference is recorded; remote content has not been verified.",
+    "unversioned": "No preserved version. Any preview shows the current source; confirmation is unavailable.",
+    "accept": "Confirm this delivered version",
+    "accepted": "Confirmed on {date}",
+    "acceptFailed": "Could not confirm this version. Refresh and retry."
   },
   "cycles": {
     "manageTitle": "Cycles and milestones",
@@ -951,7 +958,8 @@
       "sync_conflict": "sync conflict",
       "sync_conflict_resolved": "sync conflict resolved",
       "child_status_changed": "sub-issue status changes",
-      "child_stage_changed": "sub-issue stage changes"
+      "child_stage_changed": "sub-issue stage changes",
+      "deliverable_accepted": "confirmed a delivered version"
     },
     "cue": {
       "active": "{count, plural, one {# wakeup waiting} other {# wakeups waiting}}",
@@ -977,13 +985,13 @@
     "instructionSavedToast": "Instruction saved",
     "expiresLabel": "Expires",
     "expiresIn": {
-      "none": "Never",
       "1": "In 1 hour",
       "4": "In 4 hours",
       "24": "In 1 day",
       "72": "In 3 days",
       "168": "In 1 week",
-      "336": "In 2 weeks"
+      "336": "In 2 weeks",
+      "none": "Never"
     },
     "wakeOnTimeout": "Wake when it expires",
     "wakeOnTimeoutHint": "If nothing it waits for happens in time, the issue is woken once more, told the wait ran out.",

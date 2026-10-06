@@ -219,6 +219,25 @@ describe("executeGoalTask", () => {
     expect(r.success).toBe(false)
     expect(r.error).toBe("im blocked")
   })
+
+  it("keeps result acceptance actionable without automatically creating another goal", async () => {
+    runGoalLoopMock.mockResolvedValue({ status: "paused", turns: 2, awaitingAcceptance: true })
+    const result = await executeGoalTask(
+      makeTask({ objective: "x" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(result).toMatchObject({
+      success: false,
+      terminalReason: "needs-approval",
+      output: {
+        awaitingAcceptance: true,
+        goalId: expect.any(String),
+        sessionId: expect.any(String),
+      },
+    })
+    expect(result.error).toContain("awaiting user acceptance")
+  })
 })
 
 describe("executeGoalTask · workspace attribution", () => {

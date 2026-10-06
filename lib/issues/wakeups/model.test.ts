@@ -450,6 +450,18 @@ describe("reading payloads and activity", () => {
 })
 
 describe("summarizeIssueEventPayload", () => {
+  it("includes the exact accepted delivery identity in subsequent wakeups", () => {
+    expect(
+      summarizeIssueEventPayload({
+        kind: "deliverable_accepted",
+        label: "Report",
+        digest: "sha256:123",
+        deliveryId: "d",
+        runId: "r",
+        by: { kind: "human" },
+      })
+    ).toBe("delivered version accepted: Report (sha256:123)")
+  })
   it("renders one line per kind", () => {
     expect(
       summarizeIssueEventPayload({

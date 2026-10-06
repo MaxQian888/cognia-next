@@ -17,6 +17,7 @@ import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { groupIssueDeliverables, type IssueDeliverable } from "@/lib/issues/deliverables"
+import { acceptIssueDeliverable } from "@/lib/db/issue-runs"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { IssueRun } from "@/types/issues"
 import { IssueRunArtifactLink } from "./issue-run-artifact-link"
@@ -27,12 +28,44 @@ export interface IssueDeliverablesSectionProps {
 
 function DeliverableRow({ deliverable }: { deliverable: IssueDeliverable }) {
   const t = useTranslations("issues")
-  const [selected, setSelected] = useState(0)
-  const version = deliverable.versions[Math.min(selected, deliverable.versions.length - 1)]!
+  const [selectedKey, setSelectedKey] = useState<string>()
+  const keyOf = (candidate: IssueDeliverable["versions"][number]) =>
+    `${candidate.runId}:${candidate.artifact.delivery?.id ?? candidate.artifact.href}`
+  const selected = Math.max(
+    0,
+    deliverable.versions.findIndex((candidate) => keyOf(candidate) === selectedKey)
+  )
+  const version = deliverable.versions[selected]!
+  const [accepted, setAccepted] = useState<Record<string, number>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const receipt = version.artifact.delivery
+  const selectedIdentity = keyOf(version)
+  const acceptedAt = receipt?.acceptedAt ?? accepted[selectedIdentity]
   const artifactId = version.artifact.artifactId
-  const artifact = useArtifactStore((state) =>
+  const currentArtifact = useArtifactStore((state) =>
     artifactId ? state.artifacts[artifactId] : undefined
   )
+  const artifact = receipt?.snapshot
+    ? {
+        ...receipt.snapshot,
+        createdAt: new Date(version.linkedAt),
+        updatedAt: new Date(version.linkedAt),
+      }
+    : currentArtifact
+  const accept = async () => {
+    if (!receipt) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const at = await acceptIssueDeliverable(version.runId, receipt.id, receipt.digest)
+      setAccepted((value) => ({ ...value, [selectedIdentity]: at }))
+    } catch {
+      setError(t("deliverables.acceptFailed"))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <li
@@ -58,12 +91,15 @@ function DeliverableRow({ deliverable }: { deliverable: IssueDeliverable }) {
         >
           {deliverable.versions.map((candidate, index) => (
             <Button
-              key={`${candidate.runId}:${candidate.artifact.href}`}
+              key={keyOf(candidate)}
               size="sm"
               variant={index === selected ? "secondary" : "ghost"}
               className="h-5 px-1.5 text-[10px]"
               aria-pressed={index === selected}
-              onClick={() => setSelected(index)}
+              onClick={() => {
+                setSelectedKey(keyOf(candidate))
+                setError(undefined)
+              }}
               data-testid={`issue-deliverable-version-${candidate.version}`}
             >
               {t("deliverables.version", { version: candidate.version })}
@@ -71,6 +107,30 @@ function DeliverableRow({ deliverable }: { deliverable: IssueDeliverable }) {
           ))}
         </span>
       ) : null}
+      <p className="text-muted-foreground">
+        {receipt?.snapshot
+          ? t("deliverables.pinnedCopy")
+          : receipt?.externalVersion
+            ? t("deliverables.externalVersion", { version: receipt.externalVersion })
+            : t("deliverables.unversioned")}
+      </p>
+      {receipt ? (
+        <div className="flex items-center gap-2">
+          {acceptedAt !== undefined ? (
+            <span role="status">
+              {t("deliverables.accepted", { date: new Date(acceptedAt).toLocaleString() })}
+            </span>
+          ) : (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void accept()}>
+              {t("deliverables.accept")}
+            </Button>
+          )}
+          <code className="truncate text-[10px] text-muted-foreground" title={receipt.digest}>
+            {receipt.digest}
+          </code>
+        </div>
+      ) : null}
+      {error ? <p role="alert">{error}</p> : null}
       {artifact ? (
         <div
           className="max-h-72 overflow-auto rounded border"

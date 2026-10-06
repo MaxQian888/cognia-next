@@ -19078,6 +19078,7 @@
       "commented": "commented",
       "created": "created this issue",
       "cycle_changed": "moved this to another cycle",
+      "deliverable_accepted": "confirmed a delivered version",
       "description_changed": "edited the description",
       "due_date_changed": "changed the due date",
       "estimate_changed": "changed the estimate",
@@ -19311,9 +19312,15 @@
       "working": "Deleting…"
     },
     "deliverables": {
+      "accept": "Confirm this delivered version",
+      "acceptFailed": "Could not confirm this version. Refresh and retry.",
+      "accepted": "Confirmed on {date}",
       "conversationGone": "The conversation this artifact was made in no longer exists.",
+      "externalVersion": "External version: {version}. This reference is recorded; remote content has not been verified.",
+      "pinnedCopy": "Preserved artifact content. Referenced external resources may change; the link opens the current source conversation.",
       "previewUnavailable": "This artifact is not on this device; open its conversation to see it.",
       "section": "Deliverables",
+      "unversioned": "No preserved version. Any preview shows the current source; confirmation is unavailable.",
       "version": "v{version}",
       "versions": "Versions"
     },
@@ -19913,6 +19920,7 @@
         "commented": "comments",
         "created": "issue created",
         "cycle_changed": "cycle changes",
+        "deliverable_accepted": "confirmed a delivered version",
         "description_changed": "description changes",
         "due_date_changed": "due date changes",
         "estimate_changed": "estimate changes",
@@ -22157,6 +22165,7 @@
         "description": "This permanently removes {count} memories. This can't be undone.",
         "title": "Delete selected memories?"
       },
+      "partialFailure": "{succeeded} succeeded; {failed} failed. Failed memories remain selected for retry.",
       "pin": "Pin",
       "selectAll": "Select all",
       "selected": "{count} selected",
@@ -22288,6 +22297,7 @@
       "idempotency_key_reused": "That operation ID was already used for a different request",
       "mutation_failed": "The memory operation failed — please try again",
       "not_found": "This memory no longer exists",
+      "partial_failure": "Some memories could not be deleted. Retry the failed items.",
       "pii_blocked": "Blocked: the text contains personal information",
       "policy_denied": "A memory policy blocked this change",
       "scope_denied": "That scope isn't allowed for this memory",
@@ -34614,6 +34624,26 @@
     }
   },
   "radar": {
+    "decisions": {
+      "accept": "Accept and run",
+      "acceptHelp": "Accept creates a tracked goal with a final confirmation step. Tools that need approval pause for you. The execution host must remain available; a missed start can resume after restart.",
+      "accepted": "Accepted",
+      "capture": "Capture",
+      "dismiss": "Dismiss",
+      "dismissed": "Dismissed",
+      "dispatchFailed": "The accepted task is saved, but dispatch needs to be retried or resumed by this host.",
+      "failed": "Could not finish this decision. Check the task status before retrying.",
+      "history": "Report history",
+      "latest": "Latest report",
+      "loading": "Loading source…",
+      "memory": "Memory",
+      "noEvidence": "No verified source reference was provided for this suggestion.",
+      "openSource": "Open memory",
+      "retry": "Retry dispatch",
+      "track": "View task, results, and retry controls",
+      "unavailable": "Source was deleted, archived, or is unavailable.",
+      "viewSource": "Show current source"
+    },
     "panel": {
       "empty": "No report yet. Run the radar to analyze your recent info diet.",
       "meta": "{count} items analyzed · {days}-day window",
@@ -46622,6 +46652,31 @@
       }
     },
     "memory": {
+      "access": {
+        "agentIds": "Agent IDs",
+        "characterIds": "Character IDs",
+        "denied": "All memory access denied",
+        "description": "Restrict shared memory API access for a trusted caller or transport. Unconfigured callers keep account access; restrictions are intersected on each operation. Existing tool permissions still apply. The account owner can still manage and delete data in the memory console.",
+        "edit": "Edit",
+        "inherit": "Restore inherited access",
+        "invalidPrincipal": "Enter a supported caller identity or transport identity.",
+        "namespaceHelp": "Separate IDs with commas. * allows all IDs in that dimension; an empty field allows none. Clear every scope to deny all memory access.",
+        "principal": "Caller identity",
+        "principalHelp": "Use plugin:PLUGIN_ID, companion:DEVICE_ID, workflow:RUN_ID, mcp:bridge, or transport:plugin / transport:companion / transport:workflow / transport:mcp for all callers on that transport.",
+        "projects": "Project IDs",
+        "restricted": "Custom restrictions",
+        "revoke": "Deny all",
+        "save": "Save restriction",
+        "saveFailed": "Could not save restrictions. Your draft is retained; try again.",
+        "scope": {
+          "agent": "Agent",
+          "character": "Character",
+          "global": "Global",
+          "workspace": "Workspace"
+        },
+        "scopes": "Allowed memory scopes",
+        "title": "Memory access by caller"
+      },
       "autoExtract": {
         "description": "After each turn, quietly extract durable facts from what you said.",
         "heading": "Learn automatically",

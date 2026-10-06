@@ -18,6 +18,7 @@ import {
   listDelegationChildren,
   reviseDelegationPlan,
   settleDelegation,
+  currentDelegationAttempts,
 } from "./delegation"
 
 jest.mock("@/lib/db/connector-conversation-state", () => ({
@@ -41,6 +42,24 @@ function imSession(): ChatSession {
 }
 
 describe("delegation runs", () => {
+  it("does not infer attempt replacement from timestamps or unrelated obligations", () => {
+    const base = { kind: "workflow", currentRevision: 0, startedAt: 1, updatedAt: 1 } as const
+    const children: import("@/types/execution/run").ExecutionRun[] = [
+      { ...base, id: "a", sourceId: "a", title: "a", status: "failed" as const },
+      {
+        ...base,
+        id: "b",
+        sourceId: "b",
+        title: "b",
+        status: "completed" as const,
+        replacesRunId: "a",
+        obligationId: "different",
+      },
+    ]
+    expect(currentDelegationAttempts(children)).toHaveLength(2)
+    children[1].obligationId = "a"
+    expect(currentDelegationAttempts(children).map((run) => run.id)).toEqual(["b"])
+  })
   let disableDbRuntime: (() => void) | undefined
 
   beforeEach(async () => {

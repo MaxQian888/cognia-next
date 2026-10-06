@@ -13,6 +13,7 @@ import {
   listExecutionRunEvents,
 } from "@/lib/db/execution-runs"
 import { executeRunControlCommand } from "./run-control"
+import { registerRunRetryHandler } from "./run-retry-registry"
 
 const mockCancelRendererBackgroundRun = jest.fn((_runId: string) => true)
 jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
@@ -1142,7 +1143,85 @@ describe("retry mints a replacement instead of reopening a settled run", () => {
     expect((await getDb().executionRuns.get("execution:workflow:wf-run-2"))?.parentRunId).toBe(
       "execution:delegation:d1"
     )
+    expect(await getExecutionRun("execution:workflow:wf-run-2")).toMatchObject({
+      replacesRunId: "execution:workflow:wf-run-1",
+      obligationId: "execution:workflow:wf-run-1",
+    })
     handlers.dispose()
+  })
+
+  it("retries every failed obligation of an open commitment once and preserves successful siblings", async () => {
+    const installed = installExecutionRunControlHandlers()
+    const parent = {
+      id: "open-commitment",
+      kind: "delegation" as const,
+      sourceId: "d",
+      title: "Deliver",
+      status: "recovery_required" as const,
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+      initiator: { remoteUserId: "operator-1" },
+    }
+    await createExecutionRun(parent)
+    for (const [id, status] of [
+      ["failed-a", "failed"],
+      ["failed-b", "failed"],
+      ["done-c", "completed"],
+    ] as const)
+      await createExecutionRun({
+        id,
+        sourceId: id,
+        title: id,
+        kind: "workflow",
+        parentRunId: parent.id,
+        status,
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 2,
+      })
+    const retry = jest.fn(
+      async ({ run }: { run: import("@/types/execution/run").ExecutionRun }) => {
+        const id = `${run.id}:replacement`
+        await createExecutionRun({
+          ...run,
+          id,
+          sourceId: id,
+          parentRunId: undefined,
+          status: "running",
+        })
+        return { runId: id }
+      }
+    )
+    const unregister = registerRunRetryHandler("workflow", retry)
+    const command = {
+      runId: parent.id,
+      action: "retry" as const,
+      expectedRevision: 0,
+      idempotencyKey: "recover-all",
+      actor: { remoteUserId: "operator-1" },
+    }
+    try {
+      expect(await executeRunControlCommand(command)).toMatchObject({ accepted: true })
+      expect(await executeRunControlCommand(command)).toMatchObject({
+        accepted: true,
+        duplicate: true,
+      })
+      expect(retry).toHaveBeenCalledTimes(2)
+      for (const id of ["failed-a", "failed-b"]) {
+        expect(await getExecutionRun(`${id}:replacement`)).toMatchObject({
+          parentRunId: parent.id,
+          obligationId: id,
+          replacesRunId: id,
+        })
+        expect((await getExecutionRun(id))?.latestSnapshot?.allowedActions).not.toContain("retry")
+      }
+      expect((await getExecutionRun("done-c"))?.retry).toBeUndefined()
+      expect((await getExecutionRun(parent.id))?.status).toBe("running")
+    } finally {
+      unregister()
+      installed.dispose()
+    }
   })
 
   it("a delegation with no settled child says so instead of failing opaquely", async () => {

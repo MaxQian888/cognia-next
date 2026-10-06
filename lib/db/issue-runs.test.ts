@@ -9,6 +9,7 @@ import { createIssue, deleteIssue } from "./issues"
 import { listIssueEvents } from "./issue-events"
 import {
   createIssueRun,
+  acceptIssueDeliverable,
   deleteIssueRuns,
   deleteIssueRunsForIssues,
   getIssueRun,
@@ -21,6 +22,43 @@ import {
   markIssueRunRunning,
   settleIssueRun,
 } from "./issue-runs"
+import { createDeliveryReceipt } from "@/lib/issues/deliverables"
+
+it("keeps versions of the same URL and confirms only the selected receipt, idempotently", async () => {
+  const run = await start()
+  const href = "https://example.com/report"
+  const first = createDeliveryReceipt(href, { externalVersion: "commit:1" })
+  const second = createDeliveryReceipt(href, { externalVersion: "commit:2" })
+  for (const delivery of [first, first, second])
+    await linkIssueRunArtifact(run.id, { href, label: "Report", deliverable: true, delivery })
+  expect((await getIssueRun(run.id))?.artifacts).toHaveLength(2)
+  await expect(acceptIssueDeliverable(run.id, first.id, second.digest)).rejects.toThrow(
+    "version changed"
+  )
+  expect(await acceptIssueDeliverable(run.id, first.id, first.digest, 123)).toBe(123)
+  expect(await acceptIssueDeliverable(run.id, first.id, first.digest, 456)).toBe(123)
+  expect((await getIssueRun(run.id))?.artifacts.map((row) => row.delivery?.acceptedAt)).toEqual([
+    123,
+    undefined,
+  ])
+  expect((await kindsOf(issueId)).filter((kind) => kind === "deliverable_accepted")).toHaveLength(1)
+  await expect(
+    linkIssueRunArtifact(run.id, { href, label: "forged", delivery: { ...second, acceptedAt: 1 } })
+  ).rejects.toThrow("Invalid delivery")
+  await expect(
+    settleIssueRun(run.id, {
+      status: "succeeded",
+      artifacts: [
+        {
+          href: "https://example.com/other",
+          label: "forged",
+          delivery: { ...second, acceptedAt: 1 },
+        },
+      ],
+    })
+  ).rejects.toThrow("Invalid delivery")
+  expect((await getIssueRun(run.id))?.status).toBe("running")
+})
 
 const dbFixture = createDbTestFixture()
 

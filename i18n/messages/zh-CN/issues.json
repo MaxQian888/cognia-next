@@ -167,7 +167,8 @@
     "work_started": "一次 Agent 回合开始处理此事项",
     "work_settled": "处理此事项的 Agent 回合已结束：{to}",
     "wakeup_fired": "触发了一个唤醒（{delivery}）",
-    "run_checked_in": "周期运行已签到"
+    "run_checked_in": "周期运行已签到",
+    "deliverable_accepted": "确认了交付版本"
   },
   "create": {
     "trigger": "新建议题",
@@ -717,7 +718,13 @@
     "version": "v{version}",
     "versions": "版本",
     "previewUnavailable": "此产物不在本设备上；打开它所在的对话查看。",
-    "conversationGone": "创建此产物的对话已不存在。"
+    "conversationGone": "创建此产物的对话已不存在。",
+    "pinnedCopy": "已保存交付时的产物内容。引用的外部资源仍可能变化；链接打开当前来源会话。",
+    "externalVersion": "外部版本：{version}。已记录版本标识，但尚未验证远端内容。",
+    "unversioned": "尚未保存版本。预览显示当前来源，不能确认历史交付。",
+    "accept": "确认此交付版本",
+    "accepted": "已于 {date} 确认",
+    "acceptFailed": "未能确认此版本，请刷新后重试。"
   },
   "cycles": {
     "manageTitle": "迭代与里程碑",
@@ -951,7 +958,8 @@
       "sync_conflict": "同步冲突",
       "sync_conflict_resolved": "同步冲突已解决",
       "child_status_changed": "子议题状态变化",
-      "child_stage_changed": "子议题阶段变化"
+      "child_stage_changed": "子议题阶段变化",
+      "deliverable_accepted": "确认了交付版本"
     },
     "cue": {
       "active": "{count, plural, other {# 个唤醒等待中}}",
@@ -977,13 +985,13 @@
     "instructionSavedToast": "说明已保存",
     "expiresLabel": "到期",
     "expiresIn": {
-      "none": "永不",
       "1": "1 小时后",
       "4": "4 小时后",
       "24": "1 天后",
       "72": "3 天后",
       "168": "1 周后",
-      "336": "2 周后"
+      "336": "2 周后",
+      "none": "永不"
     },
     "wakeOnTimeout": "到期时唤醒",
     "wakeOnTimeoutHint": "如果等待的事没有及时发生，会再唤醒一次该议题，并告知等待已超时。",

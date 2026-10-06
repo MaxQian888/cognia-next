@@ -124,7 +124,9 @@ function allowedActions(
         ? ["resume", "stop", "open_details"]
         : ["stop", "open_details"]
     case "recovery_required":
-      return ["stop", "open_details"]
+      return kind === "delegation" && canRetryRunKind(kind)
+        ? ["retry", "stop", "open_details"]
+        : ["stop", "open_details"]
     case "waiting":
       return hasPendingInterrupt
         ? ["approve", "deny", "stop", "open_details"]

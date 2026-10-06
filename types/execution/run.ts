@@ -352,6 +352,10 @@ export interface ExecutionRunRetryStamp {
 
 export interface ExecutionRun {
   id: string
+  /** Independent deliverable obligation within a delegation. Absent means this run's id. */
+  obligationId?: string
+  /** Explicit previous attempt for the same obligation; timestamps never imply replacement. */
+  replacesRunId?: string
   /** Previous immutable journal run when this run continues a recovered attempt. */
   parentRunId?: string
   kind: ExecutionRunKind

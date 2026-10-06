@@ -11,7 +11,7 @@ import {
 } from "@/lib/db/execution-runs"
 import type { ExecutionRunStatus } from "@/types/execution/run"
 
-import { acceptDelegation } from "./delegation"
+import { acceptDelegation, recordDelegationRetry } from "./delegation"
 import {
   delegationStepId,
   maybeSettleDelegation,
@@ -115,15 +115,35 @@ describe("delegation bridge", () => {
     expect((await getExecutionRun(runId))?.status).not.toBe("completed")
   })
 
-  it("closes on the LATEST attempt, so a retry after a failure still succeeds", async () => {
+  it("closes only when an explicitly linked retry fulfills the failed obligation", async () => {
     const { runId } = await acceptDelegation({ delegationId: "d-4", title: "Parent" })
     await child({ id: "c-fail", parentRunId: runId, status: "failed", startedAt: 10 })
     await child({ id: "c-ok", parentRunId: runId, status: "completed", startedAt: 20 })
     await getDb().executionRuns.update("c-fail", { updatedAt: 100 })
     await getDb().executionRuns.update("c-ok", { updatedAt: 200 })
+    await recordDelegationRetry({
+      parentRunId: runId,
+      previousRunId: "c-fail",
+      replacementRunId: "c-ok",
+      idempotencyKey: "retry",
+    })
 
     expect(await maybeSettleDelegation(runId)).toBe(true)
     expect((await getExecutionRun(runId))?.status).toBe("completed")
+  })
+
+  it("keeps an independent failure open even when a later sibling succeeds", async () => {
+    const { runId } = await acceptDelegation({ delegationId: "parallel", title: "Both results" })
+    await child({ id: "a", parentRunId: runId, status: "failed", startedAt: 10 })
+    await child({ id: "b", parentRunId: runId, status: "completed", startedAt: 20 })
+    expect(await maybeSettleDelegation(runId)).toBe(false)
+    expect((await getExecutionRun(runId))?.status).toBe("recovery_required")
+    expect(await maybeSettleDelegation(runId)).toBe(false)
+    expect(
+      (await listExecutionRunEvents(runId)).filter(
+        (event) => event.type === "run.recovery_required"
+      )
+    ).toHaveLength(1)
   })
 
   it("stays open while any child can still act", async () => {

@@ -20,6 +20,7 @@ import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
 import { resolveWorkspaceId } from "./_core"
+import { artifactRowFrom } from "@/lib/db/artifact-types"
 
 const schema = z
   .object({
@@ -41,6 +42,15 @@ const schema = z
       .describe(
         "What to call it, e.g. 'report.csv'. Reusing a label adds a new version of that deliverable. Defaults to the artifact's title."
       ),
+    versionRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        "Immutable revision, commit, or content hash for an external URL. Enables explicit user acceptance of that reference; Cognia does not verify remote bytes."
+      ),
   })
   .refine((args) => Boolean(args.artifactId) !== Boolean(args.url), {
     message: "Give exactly one of artifactId or url.",
@@ -48,13 +58,16 @@ const schema = z
 
 async function loadArtifact(
   id: string
-): Promise<{ id: string; sessionId: string; projectId?: string; title: string } | undefined> {
+): Promise<import("@/lib/db/artifact-types").ArtifactRow | undefined> {
   const { getDb } = await import("@/lib/db/schema")
   const row = await getDb().artifacts.get(id)
-  if (row) return row
-  // A just-created artifact may be in the store before its row is written.
+  // Creation and edits can still be queued in the store's persistence bridge.
   const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
-  return useArtifactStore.getState().artifacts[id]
+  const artifact = useArtifactStore.getState().artifacts[id]
+  const pending = artifact ? artifactRowFrom(artifact) : undefined
+  return pending && (!row || pending.version > row.version || pending.updatedAt >= row.updatedAt)
+    ? pending
+    : row
 }
 
 const skill: BuiltInSkill<typeof schema> = {
@@ -111,6 +124,10 @@ const skill: BuiltInSkill<typeof schema> = {
           sessionId: artifact.sessionId,
           deliverable: true,
           linkedAt: now,
+          delivery: deliverables.createDeliveryReceipt(
+            deliverables.artifactDeliverableHref(artifact.id),
+            { snapshot: deliverables.deliverySnapshot(artifact) }
+          ),
         },
         now
       )
@@ -122,7 +139,19 @@ const skill: BuiltInSkill<typeof schema> = {
     const label = args.label?.trim() || url.pathname.split("/").filter(Boolean).pop() || url.host
     await linkIssueRunArtifact(
       run.id,
-      { label, href: url.toString(), deliverable: true, linkedAt: now },
+      {
+        label,
+        href: url.toString(),
+        deliverable: true,
+        linkedAt: now,
+        ...(args.versionRef
+          ? {
+              delivery: deliverables.createDeliveryReceipt(url.toString(), {
+                externalVersion: args.versionRef,
+              }),
+            }
+          : {}),
+      },
       now
     )
     return { status: "linked", runId: run.id, issueId: run.issueId, label }

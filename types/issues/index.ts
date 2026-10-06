@@ -39,6 +39,7 @@
  */
 
 import type { IssueRunWakeup, IssueWakeupDelivery } from "./wakeup"
+import type { Artifact, ArtifactMetadata } from "@/types/artifact/artifact"
 
 export * from "./wakeup"
 
@@ -499,6 +500,7 @@ export type IssueEventKind =
   | "run_succeeded"
   | "run_failed"
   | "artifact_linked"
+  | "deliverable_accepted"
   | "github_linked"
   | "github_write_back"
   | "parent_changed"
@@ -548,6 +550,14 @@ export type IssueEventPayload =
   | { kind: "run_succeeded"; runId: string; adapterId: string; summary?: string }
   | { kind: "run_failed"; runId: string; adapterId: string; error: string }
   | { kind: "artifact_linked"; label: string; href: string; runId?: string }
+  | {
+      kind: "deliverable_accepted"
+      label: string
+      runId: string
+      deliveryId: string
+      digest: string
+      by: IssueActor
+    }
   | { kind: "github_linked"; ref: IssueGithubRef; by: IssueActor }
   | {
       kind: "github_write_back"
@@ -688,6 +698,31 @@ export function isActiveIssueRunStatus(status: IssueRunStatus): boolean {
  * session — or a deliverable an agent linked from inside its run
  * (`issue.link_artifact`).
  */
+/** A delivery copy belongs to the issue's history, independently of later edits to its source. */
+export type IssueDeliverableSnapshot = Pick<
+  Artifact,
+  | "id"
+  | "sessionId"
+  | "projectId"
+  | "messageId"
+  | "type"
+  | "title"
+  | "content"
+  | "language"
+  | "version"
+> & {
+  metadata?: Omit<ArtifactMetadata, "lastAccessedAt">
+}
+
+export interface IssueDeliveryReceipt {
+  id: string
+  digest: string
+  snapshot?: IssueDeliverableSnapshot
+  /** User-visible immutable reference supplied for an external result; not a verified remote content hash. */
+  externalVersion?: string
+  acceptedAt?: number
+}
+
 export interface IssueRunArtifact {
   label: string
   /**
@@ -707,6 +742,7 @@ export interface IssueRunArtifact {
   deliverable?: true
   /** Unix epoch ms the link was made. Orders versions. */
   linkedAt?: number
+  delivery?: IssueDeliveryReceipt
 }
 
 /**

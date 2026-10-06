@@ -87,6 +87,19 @@ beforeEach(() => {
 })
 
 describe("runGoalLoopHeadless", () => {
+  it("returns the persisted acceptance hold so the scheduler does not retry it", async () => {
+    getGoalMock.mockResolvedValue(activeGoal)
+    runCaptureMock.mockResolvedValue({ text: "Delivered" })
+    handleTurnCompleteMock.mockImplementation(async () => {
+      getGoalMock.mockResolvedValue({ ...activeGoal, status: "paused", awaitingAcceptance: true })
+      return { kind: "exit", exit: "judge_completed", resultingStatus: "paused" }
+    })
+    expect(await runGoalLoopHeadless(input())).toMatchObject({
+      status: "paused",
+      awaitingAcceptance: true,
+      lastResponse: "Delivered",
+    })
+  })
   it("returns stopped when the session is missing", async () => {
     getSessionMock.mockResolvedValue(undefined)
     const r = await runGoalLoopHeadless(input())

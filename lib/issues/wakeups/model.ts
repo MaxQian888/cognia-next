@@ -497,6 +497,8 @@ export function summarizeIssueEventPayload(payload: IssueEventPayload): string {
       return `run checked in: ${truncate(payload.note, ISSUE_WAKEUP_SUMMARY_MAX)}`
     case "artifact_linked":
       return `artifact linked: ${payload.label} (${payload.href})`
+    case "deliverable_accepted":
+      return `delivered version accepted: ${payload.label} (${payload.digest})`
     case "label_added":
       return `label added: ${payload.labelId}`
     case "label_removed":
@@ -714,6 +716,7 @@ export const ISSUE_WAKEUP_EVENT_KINDS = [
   "run_failed",
   "run_checked_in",
   "artifact_linked",
+  "deliverable_accepted",
   "github_linked",
   "github_write_back",
   "parent_changed",

@@ -11,6 +11,10 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: "w1" }) },
 }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: async () => undefined }))
+const mockPendingArtifacts: Record<string, unknown> = {}
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: { getState: () => ({ artifacts: mockPendingArtifacts }) },
+}))
 
 import { getSharedBuiltInSkillRegistry } from "../registry"
 import type { BuiltInSkillContext } from "../types"
@@ -38,6 +42,7 @@ const run = (args: Record<string, unknown>, sessionId = "session-of-run") =>
 let runId: string
 
 beforeEach(async () => {
+  for (const id of Object.keys(mockPendingArtifacts)) delete mockPendingArtifacts[id]
   registerIssueRunAdapter({
     id: "fake",
     kind: "agent-task",
@@ -95,8 +100,37 @@ describe("issue.link_artifact", () => {
         sessionId: "session-of-run",
         deliverable: true,
         linkedAt: expect.any(Number),
+        delivery: expect.objectContaining({
+          digest: expect.stringMatching(/^sha256:/),
+          snapshot: expect.objectContaining({ content: "a,b", version: 1 }),
+        }),
       },
     ])
+  })
+
+  it("preserves each linked version after the source is edited or deleted", async () => {
+    await run({ artifactId: "a1" })
+    await getDb().artifacts.update("a1", { content: "new content", version: 2 })
+    await run({ artifactId: "a1" })
+    await run({ artifactId: "a1" })
+    await getDb().artifacts.delete("a1")
+    const links = (await getIssueRun(runId))!.artifacts
+    expect(links).toHaveLength(2)
+    expect(links.map((row) => row.delivery?.snapshot?.content)).toEqual(["a,b", "new content"])
+  })
+
+  it("captures the latest in-memory edit while persistence is still pending", async () => {
+    mockPendingArtifacts.a1 = {
+      ...(await getDb().artifacts.get("a1")),
+      version: 2,
+      content: "pending edit",
+      createdAt: new Date(1),
+      updatedAt: new Date(3),
+    }
+    await run({ artifactId: "a1" })
+    expect((await getIssueRun(runId))?.artifacts[0].delivery?.snapshot?.content).toBe(
+      "pending edit"
+    )
   })
 
   it("links an https URL, labelled after its last path segment unless named", async () => {

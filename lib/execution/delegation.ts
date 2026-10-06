@@ -33,12 +33,15 @@ import {
   createExecutionRun,
   getExecutionRun,
   listChildExecutionRuns,
+  listExecutionRunEvents,
   runEventJournal,
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import type { ExecutionRun, ExecutionRunInitiator } from "@/types/execution/run"
+import { reduceRunEvents } from "./run-reducer"
 
 import { ensureConnectorRunBinding } from "./agent-state-bridge"
+import { getDb } from "@/lib/db/schema"
 
 /** Stable id so a repeated accept is a no-op rather than a second card. */
 export function delegationExecutionRunId(delegationId: string): string {
@@ -205,6 +208,71 @@ export async function adoptIntoDelegation(
 /** Engine runs carrying out this delegation, newest first. */
 export async function listDelegationChildren(delegationRunId: string): Promise<ExecutionRun[]> {
   return listChildExecutionRuns(delegationRunId)
+}
+
+/** Only an explicitly linked replacement can discharge an earlier attempt. */
+export function currentDelegationAttempts(children: readonly ExecutionRun[]): ExecutionRun[] {
+  const replaced = new Set(
+    children.flatMap((child) => {
+      const previous = children.find((candidate) => candidate.id === child.replacesRunId)
+      return previous && child.obligationId === (previous.obligationId ?? previous.id)
+        ? [previous.id]
+        : []
+    })
+  )
+  return children.filter((child) => !replaced.has(child.id))
+}
+
+/** Persist lineage and the old attempt's retry receipt together. */
+export async function recordDelegationRetry(input: {
+  parentRunId: string
+  previousRunId: string
+  replacementRunId: string
+  idempotencyKey: string
+}): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.executionRuns, db.executionRunEvents, async () => {
+    const [parent, previous, replacement] = await Promise.all([
+      db.executionRuns.get(input.parentRunId),
+      db.executionRuns.get(input.previousRunId),
+      db.executionRuns.get(input.replacementRunId),
+    ])
+    if (
+      !parent ||
+      parent.kind !== "delegation" ||
+      !previous ||
+      !replacement ||
+      previous.parentRunId !== parent.id ||
+      previous.id === replacement.id
+    )
+      throw new Error("Invalid delegation retry lineage")
+    if (previous.retry && previous.retry.runId !== replacement.id)
+      throw new Error("Delegation attempt already replaced")
+    if (!["failed", "cancelled"].includes(previous.status))
+      throw new Error("Only failed or cancelled obligations can be retried")
+    if (
+      replacement.parentRunId &&
+      replacement.parentRunId !== parent.id &&
+      replacement.parentRunId !== previous.id
+    )
+      throw new Error("Replacement belongs to another commitment")
+    if (
+      replacement.obligationId &&
+      replacement.obligationId !== (previous.obligationId ?? previous.id)
+    )
+      throw new Error("Replacement belongs to another obligation")
+    await db.executionRuns.update(replacement.id, {
+      parentRunId: parent.id,
+      obligationId: previous.obligationId ?? previous.id,
+      replacesRunId: previous.id,
+    })
+    const retry = { runId: replacement.id, idempotencyKey: input.idempotencyKey, at: Date.now() }
+    const latestSnapshot = reduceRunEvents(
+      { ...previous, retry, currentRevision: 0 },
+      await listExecutionRunEvents(previous.id)
+    )
+    await db.executionRuns.update(previous.id, { retry, latestSnapshot, updatedAt: retry.at })
+  })
 }
 
 const ACTIVE_CHILD_STATUSES = ["queued", "running", "waiting", "paused"] as const

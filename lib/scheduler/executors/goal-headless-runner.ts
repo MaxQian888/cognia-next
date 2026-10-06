@@ -150,6 +150,7 @@ export interface RunGoalLoopResult {
   turns: number
   lastResponse?: string
   error?: string
+  awaitingAcceptance?: boolean
   /** The goal's exit, when the loop ended on one (not on a stop, abort or error). */
   exit?: ExitReason
   /**
@@ -366,6 +367,9 @@ async function driveGoalLoop(
           turns,
           lastResponse,
           exit: outcome.exit,
+          ...(outcome.resultingStatus === "paused" && (await getGoal(goalId))?.awaitingAcceptance
+            ? { awaitingAcceptance: true }
+            : {}),
           ...(outcome.exit === "needs_approval"
             ? { error: needsApprovalSummary(permissions) }
             : {}),

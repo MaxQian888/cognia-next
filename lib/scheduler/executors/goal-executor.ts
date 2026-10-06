@@ -147,7 +147,8 @@ export async function executeGoalTask(
   const success = result.status === "completed"
   // A goal paused for approval is waiting on a person. Retrying would create a
   // fresh goal and drive its loop into the same denial.
-  const needsApproval = !success && result.exit === "needs_approval"
+  const needsApproval =
+    !success && (result.exit === "needs_approval" || result.awaitingAcceptance === true)
   return {
     success,
     ...(needsApproval ? { terminalReason: "needs-approval" as const } : {}),
@@ -156,10 +157,19 @@ export async function executeGoalTask(
       sessionId,
       status: result.status,
       turns: result.turns,
+      ...(result.awaitingAcceptance ? { awaitingAcceptance: true } : {}),
       lastResponse: result.lastResponse,
       ...(result.exit ? { exit: result.exit } : {}),
       ...(result.needsApproval ? { needsApproval: result.needsApproval } : {}),
     },
-    ...(success ? {} : { error: result.error ?? `Goal ended with status: ${result.status}` }),
+    ...(success
+      ? {}
+      : {
+          error:
+            result.error ??
+            (result.awaitingAcceptance
+              ? "Goal is awaiting user acceptance of its result"
+              : `Goal ended with status: ${result.status}`),
+        }),
   }
 }

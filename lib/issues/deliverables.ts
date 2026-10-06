@@ -10,7 +10,55 @@
  * is: the newest is what the inspector shows, the older ones stay reachable.
  */
 
-import type { IssueRun, IssueRunArtifact } from "@/types/issues"
+import { canonicalJson, sha256Hex } from "@cognia/agent"
+import type {
+  IssueRun,
+  IssueRunArtifact,
+  IssueDeliverableSnapshot,
+  IssueDeliveryReceipt,
+} from "@/types/issues"
+import type { Artifact } from "@/types/artifact/artifact"
+import type { ArtifactRow } from "@/lib/db/artifact-types"
+
+export function deliverySnapshot(artifact: Artifact | ArtifactRow): IssueDeliverableSnapshot {
+  const { lastAccessedAt: _accessed, ...metadata } = artifact.metadata ?? {}
+  return JSON.parse(
+    JSON.stringify({
+      id: artifact.id,
+      sessionId: artifact.sessionId,
+      projectId: artifact.projectId,
+      messageId: artifact.messageId,
+      type: artifact.type,
+      title: artifact.title,
+      content: artifact.content,
+      language: artifact.language,
+      version: artifact.version,
+      ...(artifact.metadata ? { metadata } : {}),
+    })
+  ) as IssueDeliverableSnapshot
+}
+
+export function deliveryDigest(
+  href: string,
+  receipt: Pick<IssueDeliveryReceipt, "snapshot" | "externalVersion">
+): string {
+  return `sha256:${sha256Hex(canonicalJson({ href, snapshot: receipt.snapshot, externalVersion: receipt.externalVersion }))}`
+}
+
+/** Only stable snapshots or explicitly versioned external references can be accepted. */
+export function createDeliveryReceipt(
+  href: string,
+  input: Pick<IssueDeliveryReceipt, "snapshot" | "externalVersion">
+): IssueDeliveryReceipt {
+  if (!input.snapshot && !input.externalVersion?.trim())
+    throw new Error("Delivery has no pinned version")
+  const digest = deliveryDigest(href, input)
+  return { ...input, id: `delivery:${digest}`, digest }
+}
+
+export function sameIssueArtifact(a: IssueRunArtifact, b: IssueRunArtifact): boolean {
+  return a.href === b.href && a.delivery?.id === b.delivery?.id
+}
 
 /** The `href` scheme a Cognia artifact deliverable is stored under. */
 export const ARTIFACT_HREF_PREFIX = "artifact:"

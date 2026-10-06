@@ -1,4 +1,9 @@
-import { adoptExecutionRun, getExecutionRun, listChildExecutionRuns } from "@/lib/db/execution-runs"
+import {
+  getExecutionRun,
+  listChildExecutionRuns,
+  runEventJournal,
+  semanticRunEvent,
+} from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
 import {
   fusionApprovalRunIdOf,
@@ -15,7 +20,12 @@ import {
   type RunControlHandlerOutcome,
   type SteerDegradedReason,
 } from "./run-control"
-import { registerRunRetryHandler, type RunRetryHandler } from "./run-retry-registry"
+import {
+  getRunRetryHandler,
+  registerRunRetryHandler,
+  type RunRetryHandler,
+} from "./run-retry-registry"
+import { currentDelegationAttempts, recordDelegationRetry } from "./delegation"
 
 /**
  * The action exists in the vocabulary but this run kind cannot perform it.
@@ -386,6 +396,18 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     if (command.action === "open_details") return
     const run = await getExecutionRun(command.runId)
     if (!run) throw new Error("Execution run not found")
+    if (command.action === "retry") {
+      await delegationRetry({ run, command })
+      await runEventJournal.append(
+        run.id,
+        semanticRunEvent(
+          "run.resumed",
+          {},
+          { sourceEventId: `delegation-retry:${command.idempotencyKey}` }
+        )
+      )
+      return
+    }
 
     if (command.action === "approve" || command.action === "deny") {
       const interrupt = command.interruptId
@@ -536,27 +558,38 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
 
   /**
    * A delegation does not execute, so it cannot itself be re-dispatched — it
-   * retries the child that carried the work and adopts the replacement.
-   *
-   * The newest settled child is the one that failed the commitment; older ones
-   * already handed off. Retrying all of them would multiply the work a single
-   * "try again" asked for exactly once.
+   * retries every unresolved obligation and explicitly links its replacement.
+   * Successful siblings stay settled; timestamps never stand in for lineage.
    */
   const delegationRetry: RunRetryHandler = async ({ run, command }) => {
-    const settled = (await listChildExecutionRuns(run.id)).filter((child) =>
-      TERMINAL_RETRY_STATUSES.has(child.status)
+    const targets = currentDelegationAttempts(await listChildExecutionRuns(run.id)).filter(
+      (child) =>
+        TERMINAL_RETRY_STATUSES.has(child.status) && child.status !== "completed" && !child.retry
     )
-    const target = settled.find((child) => !child.retry)
-    if (!target) throw new UnsupportedForKindError("retry", "delegation")
-    const handler =
-      target.kind === "workflow" || target.kind === "scheduled" ? workflowRetry : undefined
-    if (!handler) throw new UnsupportedForKindError("retry", target.kind)
-    const replacement = await handler({ run: target, command })
-    // The replacement belongs to the COMMITMENT, not to the attempt it
-    // replaces: a delegation is one card, and a child hanging off the failed
-    // child would drift off it.
-    await adoptExecutionRun(replacement.runId, run.id).catch(() => undefined)
-    return replacement
+    if (!targets.length) throw new UnsupportedForKindError("retry", "delegation")
+    // Preflight all obligations before starting any replacements.
+    for (const target of targets)
+      if (!getRunRetryHandler(target.kind)) throw new UnsupportedForKindError("retry", target.kind)
+    let replacement: { runId: string } | undefined
+    for (const target of targets) {
+      const idempotencyKey = `${command.idempotencyKey}:${target.id}`
+      replacement = await getRunRetryHandler(target.kind)!({
+        run: target,
+        command: {
+          ...command,
+          runId: target.id,
+          expectedRevision: target.currentRevision,
+          idempotencyKey,
+        },
+      })
+      await recordDelegationRetry({
+        parentRunId: run.id,
+        previousRunId: target.id,
+        replacementRunId: replacement.runId,
+        idempotencyKey,
+      })
+    }
+    return replacement!
   }
 
   const handlerForKind = (kind: ExecutionRun["kind"]): RunControlHandler | undefined => {

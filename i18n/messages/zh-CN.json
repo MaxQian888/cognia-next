@@ -19078,6 +19078,7 @@
       "commented": "发表了评论",
       "created": "创建了这个议题",
       "cycle_changed": "移到了另一个迭代",
+      "deliverable_accepted": "确认了交付版本",
       "description_changed": "编辑了描述",
       "due_date_changed": "更改了截止日期",
       "estimate_changed": "更改了估点",
@@ -19311,9 +19312,15 @@
       "working": "删除中…"
     },
     "deliverables": {
+      "accept": "确认此交付版本",
+      "acceptFailed": "未能确认此版本，请刷新后重试。",
+      "accepted": "已于 {date} 确认",
       "conversationGone": "创建此产物的对话已不存在。",
+      "externalVersion": "外部版本：{version}。已记录版本标识，但尚未验证远端内容。",
+      "pinnedCopy": "已保存交付时的产物内容。引用的外部资源仍可能变化；链接打开当前来源会话。",
       "previewUnavailable": "此产物不在本设备上；打开它所在的对话查看。",
       "section": "交付物",
+      "unversioned": "尚未保存版本。预览显示当前来源，不能确认历史交付。",
       "version": "v{version}",
       "versions": "版本"
     },
@@ -19913,6 +19920,7 @@
         "commented": "评论",
         "created": "议题创建",
         "cycle_changed": "周期变化",
+        "deliverable_accepted": "确认了交付版本",
         "description_changed": "描述变化",
         "due_date_changed": "截止日期变化",
         "estimate_changed": "估算变化",
@@ -22157,6 +22165,7 @@
         "description": "这将永久删除 {count} 条记忆，且无法撤销。",
         "title": "删除所选记忆？"
       },
+      "partialFailure": "{succeeded} 项成功，{failed} 项失败。失败的记忆仍保持选中，可以重试。",
       "pin": "置顶",
       "selectAll": "全选",
       "selected": "已选 {count} 条",
@@ -22288,6 +22297,7 @@
       "idempotency_key_reused": "该操作 ID 已被用于不同的请求",
       "mutation_failed": "记忆操作失败，请重试",
       "not_found": "这条记忆已不存在",
+      "partial_failure": "部分记忆未能删除，请重试失败项。",
       "pii_blocked": "已拦截：文本包含个人隐私信息",
       "policy_denied": "记忆策略拦截了本次改动",
       "scope_denied": "该记忆不允许使用这个作用域",
@@ -34614,6 +34624,26 @@
     }
   },
   "radar": {
+    "decisions": {
+      "accept": "接受并执行",
+      "acceptHelp": "接受后会创建带最终确认步骤的持续目标。需要审批的工具会暂停等待你处理。执行主机必须可用；重启后可补执行尚未开始的任务。",
+      "accepted": "已接受",
+      "capture": "收集项",
+      "dismiss": "忽略",
+      "dismissed": "已忽略",
+      "dispatchFailed": "已保存接受的任务，但需要重试调度或由本主机恢复。",
+      "failed": "未能完成此决定，请先检查任务状态再重试。",
+      "history": "报告历史",
+      "latest": "最新报告",
+      "loading": "正在加载来源…",
+      "memory": "记忆",
+      "noEvidence": "此建议未提供经过校验的来源引用。",
+      "openSource": "打开记忆",
+      "retry": "重试调度",
+      "track": "查看任务、结果与重试操作",
+      "unavailable": "来源已删除、归档或不可用。",
+      "viewSource": "显示当前来源"
+    },
     "panel": {
       "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",
       "meta": "已分析 {count} 项 · {days} 天窗口",
@@ -46622,6 +46652,31 @@
       }
     },
     "memory": {
+      "access": {
+        "agentIds": "智能体 ID",
+        "characterIds": "角色 ID",
+        "denied": "已禁止全部记忆访问",
+        "description": "限制可信调用方或整个通道对共享记忆 API 的访问。未配置的调用方保留账户级访问；每次操作会取各层限制的交集，并继续检查已有工具权限。账户所有者仍可在记忆控制台管理和删除数据。",
+        "edit": "编辑",
+        "inherit": "恢复继承权限",
+        "invalidPrincipal": "请输入支持的调用方身份或通道身份。",
+        "namespaceHelp": "多个 ID 用逗号分隔。* 表示允许该维度全部 ID，留空表示全部禁止。取消所有范围可禁止全部记忆访问。",
+        "principal": "调用方身份",
+        "principalHelp": "填写 plugin:插件ID、companion:设备ID、workflow:运行ID、mcp:bridge；或使用 transport:plugin / transport:companion / transport:workflow / transport:mcp 限制整个通道。",
+        "projects": "项目 ID",
+        "restricted": "自定义限制",
+        "revoke": "全部禁止",
+        "save": "保存限制",
+        "saveFailed": "无法保存限制，草稿已保留，请重试。",
+        "scope": {
+          "agent": "智能体",
+          "character": "角色",
+          "global": "全局",
+          "workspace": "工作区"
+        },
+        "scopes": "允许的记忆范围",
+        "title": "按调用方限制记忆访问"
+      },
       "autoExtract": {
         "description": "每轮对话后，悄悄从你说的话里抽取耐久事实。",
         "heading": "自动学习",

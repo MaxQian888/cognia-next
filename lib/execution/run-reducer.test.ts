@@ -507,6 +507,22 @@ describe("delegation allowed actions", () => {
       []
     )
     expect(running.allowedActions).toEqual(["pause", "stop", "steer", "open_details"])
+    registerRunRetryHandler("delegation", async () => ({ runId: "replacement" }))
+    const recovering = reduceRunEvents(
+      {
+        id: "delegation-recovery",
+        kind: "delegation",
+        sourceId: "d",
+        title: "Recovery",
+        status: "recovery_required",
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(recovering.allowedActions).toContain("retry")
+    __resetRunRetryHandlersForTesting()
 
     const paused = reduceRunEvents(
       {

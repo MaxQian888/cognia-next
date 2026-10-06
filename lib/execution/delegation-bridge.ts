@@ -29,7 +29,7 @@ import { getDb } from "@/lib/db/schema"
 import { safeStableActivityId } from "@/lib/execution/run-activity"
 import type { ExecutionRun, ExecutionRunStatus, RunEventType } from "@/types/execution/run"
 
-import { settleDelegation } from "./delegation"
+import { currentDelegationAttempts, settleDelegation } from "./delegation"
 
 const TERMINAL: ReadonlySet<ExecutionRunStatus> = new Set<ExecutionRunStatus>([
   "completed",
@@ -74,12 +74,12 @@ export async function syncDelegationChildren(delegationRunId: string): Promise<n
   const parent = await getExecutionRun(delegationRunId)
   if (!parent || parent.kind !== "delegation" || TERMINAL.has(parent.status)) return 0
 
-  const children = await listChildExecutionRuns(delegationRunId)
+  const children = currentDelegationAttempts(await listChildExecutionRuns(delegationRunId))
   let emitted = 0
   // Oldest first so the milestone order on the card matches the order the work
   // was actually taken on.
   for (const child of [...children].sort((left, right) => left.startedAt - right.startedAt)) {
-    const stepId = delegationStepId(child.id)
+    const stepId = delegationStepId(child.obligationId ?? child.id)
     const type = childEventType(child.status)
     try {
       await runEventJournal.append(
@@ -125,7 +125,7 @@ export async function maybeSettleDelegation(delegationRunId: string): Promise<bo
     .count()
   if (pendingInterrupts > 0) return false
 
-  const children = await listChildExecutionRuns(delegationRunId)
+  const children = currentDelegationAttempts(await listChildExecutionRuns(delegationRunId))
   const stillWorking = children.some((child) => !TERMINAL.has(child.status))
 
   // A recorded `stop` is a withdrawn commitment, and it has to close the
@@ -142,19 +142,26 @@ export async function maybeSettleDelegation(delegationRunId: string): Promise<bo
   if (children.length === 0) return false
   if (stillWorking) return false
 
-  // The latest attempt decides. An earlier failure followed by a successful
-  // retry is a delegation that succeeded — the whole reason retry mints a new
-  // child rather than reopening the failed one.
-  const latest = children.reduce((newest, child) =>
-    child.updatedAt >= newest.updatedAt ? child : newest
-  )
-  const status =
-    latest.status === "completed"
-      ? "completed"
-      : latest.status === "failed"
-        ? "failed"
-        : "cancelled"
-  await settleDelegation({ runId: delegationRunId, status })
+  const unresolved = children.filter((child) => child.status !== "completed")
+  if (unresolved.length) {
+    // A failed obligation keeps the commitment open for retry or human
+    // takeover. A successful sibling cannot erase it.
+    await runEventJournal.append(
+      delegationRunId,
+      semanticRunEvent(
+        "run.recovery_required",
+        {},
+        {
+          sourceEventId: `delegation-recovery:${unresolved
+            .map((child) => child.id)
+            .sort()
+            .join(":")}`,
+        }
+      )
+    )
+    return false
+  }
+  await settleDelegation({ runId: delegationRunId, status: "completed" })
   return true
 }
 
