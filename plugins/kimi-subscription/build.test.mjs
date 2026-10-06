@@ -19,10 +19,15 @@ test("the install ZIP contains a standalone executable entry and its declared fi
     assert.deepEqual(Object.keys(archive.files).sort(), [
       "README.md",
       "README.zh-CN.md",
+      "assets/icon.png",
       "dist/index.js",
       "plugin.json",
     ])
     const manifest = JSON.parse(await archive.file("plugin.json").async("string"))
+    assert.equal(
+      (await archive.file(manifest.icon).async("nodebuffer")).subarray(0, 8).toString("hex"),
+      "89504e470d0a1a0a"
+    )
     const entry = await archive.file(manifest.main).async("string")
     assert.equal(entry, await readFile(entryPath, "utf8"))
     for (const path of manifest.bundle_include) assert.ok(archive.file(path))

@@ -267,8 +267,8 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
           // registry through its service transport. A standalone CLI has no
           // companion service, so it keeps the established browser-only path.
           enablePython: headless,
-          // Frontend plugins load via dynamic `import()` under Node — the
-          // Tauri/fetch/eval strategies in the loader don't exist here.
+          // Read installed bundles from disk and bind their externals to the
+          // same SDK / React instances that the host manager uses.
           frontendImporter: makeNodeFrontendImporter(),
           // The five generated built-ins ship as chunks addressed by a
           // root-relative URL; Node's fetch cannot parse one, so without this

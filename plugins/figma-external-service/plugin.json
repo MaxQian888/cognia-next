@@ -5,6 +5,7 @@
   "description": "Reference external-service plugin for Figma MCP: design context, resources, prompts, Code Connect, and assets.",
   "descriptionKey": "manifest.description",
   "version": "1.0.0",
+  "icon": "assets/icon.png",
   "type": "frontend",
   "main": "src/index.ts",
   "author": "Cognia Official",

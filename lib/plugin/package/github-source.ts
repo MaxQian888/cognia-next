@@ -472,7 +472,12 @@ export async function fetchGithubPluginPreview(ref: GithubPluginRef): Promise<Gi
  */
 export interface GithubMarketplaceClient {
   getPlugin: (id: string) => Promise<{ manifest: PluginManifest; name?: string } | null>
-  installPlugin: (id: string, version?: string) => Promise<unknown>
+  supportsTransactionalConfig: true
+  installPlugin: (
+    id: string,
+    version?: string,
+    options?: { config?: Record<string, unknown> }
+  ) => Promise<unknown>
 }
 
 export function makeGithubMarketplaceClient(
@@ -481,14 +486,18 @@ export function makeGithubMarketplaceClient(
 ): GithubMarketplaceClient {
   return {
     getPlugin: async () => ({ manifest: preview.manifest, name: preview.manifest.name }),
-    installPlugin: async () => {
+    supportsTransactionalConfig: true,
+    installPlugin: async (_id, _version, options) => {
       const { getPluginManager } = await import("@/lib/plugin/core/manager")
-      return getPluginManager().installPluginFromGithub(
+      const args = [
         `${preview.ref.owner}/${preview.ref.repo}`,
         preview.ref.ref,
         preview.ref.subdir,
-        preview.generatedFiles
-      )
+        preview.generatedFiles,
+      ] as const
+      return options?.config === undefined
+        ? getPluginManager().installPluginFromGithub(...args)
+        : getPluginManager().installPluginFromGithub(...args, { config: options.config })
     },
   }
 }

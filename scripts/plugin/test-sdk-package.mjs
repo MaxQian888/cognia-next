@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assertStandaloneDeclaration } from "./generate-author-types.mjs"
+import { assertDeclaredArtifacts } from "../../packages/plugin-sdk/scripts/build-package.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageRoot = join(repoRoot, "packages/plugin-sdk")
@@ -45,6 +46,7 @@ try {
   mkdirSync(unpacked)
   run("tar", ["-xzf", tarball, "-C", unpacked])
   const packedPackage = join(unpacked, "package")
+  assertDeclaredArtifacts(packedPackage)
   const packedFiles = readdirSync(packedPackage)
   for (const expected of ["dist", "contract", "wit", "README.md", "LICENSE", "package.json"]) {
     if (!packedFiles.includes(expected)) throw new Error(`packed SDK is missing ${expected}`)
@@ -52,7 +54,7 @@ try {
   if (packedFiles.includes("src")) throw new Error("packed SDK must not contain host-linked source")
 
   const declarationText = readdirSync(join(packedPackage, "dist"))
-    .filter((entry) => entry.endsWith(".d.ts") || entry.endsWith(".d.cts"))
+    .filter((entry) => /\.d\.(?:c|m)?ts$/.test(entry))
     .map((entry) => readFileSync(join(packedPackage, "dist", entry), "utf8"))
     .join("\n")
   const declarationsWithoutComments = declarationText
@@ -165,6 +167,25 @@ try {
   writeFileSync(
     join(consumer, "index.ts"),
     [
+      ...Object.entries(packedManifest.exports)
+        .filter(([, conditions]) => typeof conditions === "object" && conditions.types)
+        .map(
+          ([subpath], index) =>
+            `import type * as SdkSubpath${index} from "@cognia/plugin-sdk${subpath === "." ? "" : subpath.slice(1)}";`
+        ),
+      'import { definePetItem, type PluginPetItemDef } from "@cognia/plugin-sdk/api/pet";',
+      'import { registerPluginI18n, type PluginI18nBundle } from "@cognia/plugin-sdk/api/i18n";',
+      'import { PluginAgentTurnError, type PluginAgentTurnRequest } from "@cognia/plugin-sdk/api/agent-turn";',
+      "const petHelper: (item: PluginPetItemDef) => PluginPetItemDef = definePetItem;",
+      'const i18nBundle: PluginI18nBundle = { pluginId: "test", messages: { en: { hello: "Hello" } } };',
+      "const i18nResult: { replaced: boolean } = registerPluginI18n(i18nBundle);",
+      'const turnRequest: PluginAgentTurnRequest = { characterId: "test", prompt: "Test", cwd: "/tmp" };',
+      'const turnError: Error = new PluginAgentTurnError("test");',
+      "// @ts-expect-error subpath declarations must preserve real argument types",
+      "definePetItem({ id: 42 });",
+      "// @ts-expect-error registerPluginI18n requires a message bundle",
+      'registerPluginI18n("test");',
+      "void petHelper; void i18nResult; void turnRequest; void turnError;",
       'import { defineContextPanel, type PluginManifest } from "@cognia/plugin-sdk";',
       'import { PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION, type PluginApiNamespaceContract } from "@cognia/plugin-sdk/contracts";',
       'import type { EventFilter } from "@cognia/plugin-sdk/events";',
@@ -283,6 +304,12 @@ try {
     )}\n`
   )
   run(join(repoRoot, "node_modules/.bin/tsc"), ["-p", "tsconfig.plugin.json"], consumer)
+  const typedExportCount = Object.values(packedManifest.exports).filter(
+    (entry) => typeof entry === "object" && entry.types
+  ).length
+  console.log(
+    `Packed SDK verified: ${typedExportCount} typed exports, ESM/CJS execution, API type contracts, and isolated deep-research compile`
+  )
 } finally {
   rmSync(workDir, { recursive: true, force: true })
 }

@@ -7,7 +7,18 @@ import type { PluginManifest } from "@/types/plugin"
 
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(),
+  getPlugin: jest.fn(async () => ({ id: "demo-plugin" })),
   setPluginConfig: jest.fn(),
+}))
+
+const mockRuntimeConfig = jest.fn()
+jest.mock("@/stores/plugin-runtime", () => ({
+  usePluginStore: {
+    getState: () => ({
+      plugins: { "demo-plugin": { config: {} } },
+      setPluginConfig: mockRuntimeConfig,
+    }),
+  },
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -48,6 +59,7 @@ describe("runMarketplaceInstall", () => {
     listPlugins.mockResolvedValue([])
     setPluginConfig.mockReset()
     setPluginConfig.mockResolvedValue(undefined)
+    mockRuntimeConfig.mockClear()
   })
 
   it("returns failed when the marketplace has no entry for the id", async () => {
@@ -291,6 +303,44 @@ describe("runMarketplaceInstall", () => {
     expect(client.installPlugin).not.toHaveBeenCalled()
   })
 
+  it("passes configuration into the package transaction instead of writing it after finalization", async () => {
+    const client = {
+      supportsTransactionalConfig: true,
+      getPlugin: jest.fn(async () => ({
+        manifest: makeManifest({
+          configSchema: { type: "object", properties: { token: { type: "string" } } },
+        } as never),
+      })),
+      installPlugin: jest.fn(async () => ({ success: true })),
+    }
+    const result = await runMarketplaceInstall(
+      makeOpts({
+        client,
+        requestConfig: jest.fn(async () => ({
+          result: "save" as const,
+          value: { token: "atomic" },
+        })),
+      })
+    )
+    expect(result.status).toBe("installed")
+    expect(client.installPlugin).toHaveBeenCalledWith("demo-plugin", undefined, {
+      config: { token: "atomic" },
+    })
+    expect(setPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("propagates a direct registry client's resolved failure", async () => {
+    const opts = makeOpts()
+    opts.client.installPlugin = jest.fn(async () => ({
+      success: false,
+      error: "configuration transaction failed",
+    }))
+    expect(await runMarketplaceInstall(opts)).toMatchObject({
+      status: "failed",
+      message: "configuration transaction failed",
+    })
+  })
+
   it("persists user-supplied config to dexie after install success", async () => {
     const client = {
       getPlugin: jest.fn().mockResolvedValue({
@@ -314,6 +364,10 @@ describe("runMarketplaceInstall", () => {
     expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
     expect(client.installPlugin).toHaveBeenCalledWith("demo-plugin", undefined)
     expect(setPluginConfig).toHaveBeenCalledWith("demo-plugin", { token: "abc123" })
+    expect(mockRuntimeConfig).toHaveBeenCalledWith("demo-plugin", { token: "abc123" })
+    expect(mockRuntimeConfig.mock.invocationCallOrder[0]).toBeGreaterThan(
+      setPluginConfig.mock.invocationCallOrder[0]
+    )
     // setPluginConfig must be invoked after installPlugin — order matters
     // because the dexie row only exists once installPlugin returns.
     const installOrder = client.installPlugin.mock.invocationCallOrder[0]

@@ -58,3 +58,35 @@ describe("createPluginAssetResolver", () => {
     await expect(resolve("/plugins/p", "../outside.woff2")).rejects.toThrow("unsafe plugin path")
   })
 })
+
+describe("plugin image assets", () => {
+  it("resolves the active installation root and preserves the image MIME type", async () => {
+    const read = jest.fn(async () => "data:image/webp;base64,AAAA")
+    jest.doMock("@/lib/plugin/bridge/plugin-file-path", () => ({ readContainedPluginAsset: read }))
+    jest.doMock("@/stores/plugin-runtime/plugin-store", () => ({
+      usePluginStore: { getState: () => ({ plugins: { image: { path: "/installed/image" } } }) },
+    }))
+    try {
+      const { resolvePluginImageAsset } = await import("./plugin-asset-resolver")
+      await expect(resolvePluginImageAsset("image", "assets/operator.webp")).resolves.toBe(
+        "data:image/webp;base64,AAAA"
+      )
+      expect(read).toHaveBeenCalledWith(
+        "image",
+        "/installed/image",
+        "assets/operator.webp",
+        "image/webp"
+      )
+      await expect(resolvePluginImageAsset("missing", "assets/operator.webp")).rejects.toThrow(
+        "not installed"
+      )
+      await expect(resolvePluginImageAsset("image", "index.js")).rejects.toThrow(
+        "Unsupported plugin image"
+      )
+    } finally {
+      jest.dontMock("@/stores/plugin-runtime/plugin-store")
+      jest.dontMock("@/lib/plugin/bridge/plugin-file-path")
+      jest.resetModules()
+    }
+  })
+})

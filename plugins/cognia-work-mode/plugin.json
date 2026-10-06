@@ -3,6 +3,7 @@
   "name": "Work Mode",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Outcome-to-deliverable knowledge work with source-grounded research, parallel specialists, review gates, and artifacts.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

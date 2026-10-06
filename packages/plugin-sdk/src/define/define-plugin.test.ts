@@ -26,6 +26,7 @@ describe("definePluginManifest", () => {
     name: "Example",
     version: "1.0.0",
     type: "frontend",
+    icon: "assets/icon.png",
     capabilities: ["tools", "character-pack"],
     permissions: ["clipboard:read"],
     activationEvents: ["startup"],
@@ -40,6 +41,7 @@ describe("definePluginManifest", () => {
   it("accepts a JSON manifest without a cast and types the result as PluginManifest", () => {
     const manifest: PluginManifest = definePluginManifest(json)
     expect(manifest.capabilities).toEqual(["tools", "character-pack"])
+    expect(manifest.icon).toBe("assets/icon.png")
     expect(manifest.runtimeCompatibility?.browser?.availability).toBe("supported")
   })
 

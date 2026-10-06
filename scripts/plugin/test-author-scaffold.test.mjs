@@ -73,3 +73,23 @@ test("scaffold installs the public dependencies its vendored declarations expose
     }
   }
 })
+
+// ACP's generated experimental protocol names changed in later minor releases.
+// Vendored declarations must use the same protocol contract as their source.
+test("scaffold pins ACP to the canonical host protocol declaration version", () => {
+  const readManifest = (relativePath) =>
+    JSON.parse(readFileSync(new URL(relativePath, import.meta.url), "utf8"))
+  const template = readManifest("../../crates/cognia-plugin-template-ts/package.json")
+  const contracts = readManifest("../../packages/agent-contracts/package.json")
+  const host = readManifest("../../package.json")
+  const sdk = readManifest("../../packages/plugin-sdk/package.json")
+  const expected = contracts.dependencies["@agentclientprotocol/sdk"]
+  assert.match(expected, /^\d+\.\d+\.\d+$/)
+  assert.equal(host.dependencies["@agentclientprotocol/sdk"], expected)
+  assert.equal(template.dependencies["@agentclientprotocol/sdk"], expected)
+  assert.equal(sdk.peerDependencies["@agentclientprotocol/sdk"], expected)
+  const lock = parse(readFileSync(new URL("../../pnpm-lock.yaml", import.meta.url), "utf8"))
+  const resolution = lock.importers["packages/plugin-sdk"].dependencies["@agentclientprotocol/sdk"]
+  assert.equal(resolution.specifier, expected)
+  assert.ok(resolution.version.startsWith(`${expected}(`))
+})

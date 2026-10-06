@@ -139,7 +139,9 @@ export function resolvePluginIcon({
       }
     }
 
-    const resolvedPath = resolveRelativePluginPath(pluginRoot, trimmed)
+    const builtinId = pluginRoot.startsWith("builtin://") ? pluginRoot.slice(10) : undefined
+    const root = builtinId ? `/_cognia/plugin-icons/${builtinId}` : pluginRoot
+    const resolvedPath = resolveRelativePluginPath(root, trimmed)
     if (!resolvedPath) {
       return {
         kind: "fallback",
@@ -152,7 +154,7 @@ export function resolvePluginIcon({
       kind: "image",
       src: resolvedPath,
       original: trimmed,
-      transport: "file",
+      transport: builtinId ? "public" : "file",
     }
   }
 

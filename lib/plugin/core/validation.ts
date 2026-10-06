@@ -1282,6 +1282,14 @@ export function validatePluginManifest(
     diagnostics.push({ severity: "warning", field, code, message, hint })
   }
 
+  if (m.icon !== undefined && (typeof m.icon !== "string" || !m.icon.trim())) {
+    pushError(
+      "icon",
+      "manifest.icon.invalid_type",
+      '"icon" must be a non-empty image path, URL, or Lucide icon name'
+    )
+  }
+
   // Required fields
   if (!m.id || typeof m.id !== "string") {
     pushError("id", "manifest.id.missing", 'Missing or invalid "id" field')

@@ -23,11 +23,16 @@ test("the install ZIP carries a CommonJS entry that only needs the host-shared S
     const archive = await JSZip.loadAsync(archiveBytes)
     assert.deepEqual(Object.keys(archive.files).sort(), [
       "README.md",
+      "assets/icon.png",
       "dist/index.js",
       "plugin.json",
     ])
 
     const manifest = JSON.parse(await archive.file("plugin.json").async("string"))
+    assert.equal(
+      (await archive.file(manifest.icon).async("nodebuffer")).subarray(0, 8).toString("hex"),
+      "89504e470d0a1a0a"
+    )
     assert.deepEqual(manifest, JSON.parse(await readFile(manifestPath, "utf8")))
     // The regenerated manifest is the committed one: the build is a fixed point.
     assert.deepEqual(manifest, JSON.parse(await readFile(join(pluginRoot, "plugin.json"), "utf8")))
@@ -60,6 +65,10 @@ test("the committed install ZIP matches a fresh build", async () => {
       await readFile(join(pluginRoot, "github-devin-bot.zip"))
     )
     assert.deepEqual(Object.keys(committed.files).sort(), Object.keys(fresh.files).sort())
+    assert.deepEqual(
+      await committed.file("assets/icon.png").async("nodebuffer"),
+      await fresh.file("assets/icon.png").async("nodebuffer")
+    )
     assert.deepEqual(
       JSON.parse(await committed.file("plugin.json").async("string")),
       JSON.parse(await fresh.file("plugin.json").async("string"))

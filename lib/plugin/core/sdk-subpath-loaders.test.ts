@@ -47,3 +47,12 @@ test("host loaders bind runtime ports before publishing only author exports", as
   expect(i18n).not.toHaveProperty("bindPluginTranslationsHost")
   expect(typeof i18n.registerPluginI18n).toBe("function")
 })
+
+test("loads the pet API against the host contribution registries", async () => {
+  const loaded = await PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/pet"]()
+  const host = await import("@cognia/plugin-sdk/api/pet")
+  expect(loaded).toEqual(host)
+  expect(typeof host.definePetItem).toBe("function")
+  const cliTsconfig = readFileSync(join(__dirname, "../../../cli/tsconfig.json"), "utf8")
+  expect(cliTsconfig).toContain('"@cognia/plugin-sdk/api/pet"')
+})

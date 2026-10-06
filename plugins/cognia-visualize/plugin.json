@@ -3,6 +3,7 @@
   "name": "Cognia Visualize",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

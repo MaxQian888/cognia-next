@@ -11,7 +11,7 @@
 //
 // Inert outside Pages: Tauri/Capacitor serve the bundle over custom protocols
 // and `next dev` treats this as a plain public/ asset.
-export default {
+const sharePagesWorker = {
   fetch(request, env) {
     const url = new URL(request.url)
     const path = url.pathname
@@ -24,3 +24,5 @@ export default {
     return Response.redirect(url.toString(), 302)
   },
 }
+
+export default sharePagesWorker

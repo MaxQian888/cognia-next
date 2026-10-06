@@ -141,3 +141,52 @@ export default definePlugin({
 | 假设 PII helper 是公共接口 | 提供插件自有 `canUseTool`/guardrail；宿主 PII gate 是内部实现 |
 
 新项目使用 `cognia plugin new <name> --kind ts` 生成。`pnpm plugin:create` 仅是该命令的兼容适配器。
+
+## 文档目录与渐进阅读
+
+复用 `ctx.project` 下的 `listKnowledgeDocuments`、`readKnowledgeOutline`、`readKnowledgeRange` 和 `locateKnowledgeDocument`。目录仅返回元数据；生成回答前应读取所选章节的原文。摘要只用于导航，来源内容是证据，不能视为指令。字符范围采用 UTF-16 左闭右开区间；页码和行号从 1 开始。
+
+这些方法需要 `project:read`。读取智能体知识库还需要显式的 `knowledge:read` 授权：
+
+```json
+{
+  "type": "frontend",
+  "capabilities": ["tools", "webview"],
+  "permissions": ["project:read", "knowledge:read", "project:write"]
+}
+```
+
+这是 manifest 片段；保留插件必需的标识、engines、入口和贡献声明。仅贡献工具或 webview 时才声明对应 capability；不修改项目文件时移除 `project:write`。
+
+```ts
+import type { PluginContext, PluginKnowledgeScope } from "@cognia/plugin-sdk"
+
+export async function readProcedure(ctx: PluginContext, projectId: string) {
+  const scope: PluginKnowledgeScope = { kind: "project", projectId }
+  const directory = await ctx.project.listKnowledgeDocuments({ scope, query: "guide", limit: 10 })
+  const document = directory.documents[0]
+  if (!document) return null
+  const identity = { scope, knowledgeBaseId: document.knowledgeBaseId,
+    sourceId: document.sourceId, generationId: document.generationId }
+  const outline = await ctx.project.readKnowledgeOutline(identity)
+  const section = outline.nodes.find((node) => node.level > 0)
+  if (!section) return null
+  const evidence = await ctx.project.readKnowledgeRange({ ...identity,
+    sectionId: section.id, maxChars: 4_000 })
+  const location = await ctx.project.locateKnowledgeDocument({ ...identity,
+    sectionId: section.id })
+  return { evidence, location }
+}
+```
+
+智能体知识库通过已注册工具的 `execute(args, toolContext)` 中宿主提供的 `toolContext.project` 读取，范围为 `{ kind: "agent", sessionId: toolContext.sessionId }`。模块 `ctx.project` 和普通 iframe 客户端不能授权智能体知识库读取。宿主必须已为真实智能体运行注册启用渐进阅读的 reader，捕获已授权知识库、来源 ACL 身份、不可变版本绑定及共享预算。缺少或不匹配的调用绑定返回 `session_scope_unavailable`，reader 已移除或替换则返回 `session_reader_unavailable`。执行结束或失败后接口失效，保留引用也不能读取后续运行。插件不能传入授权知识库列表、principal、版本授权或 trusted-local 标志；越界知识库返回 `source_unavailable`，每次调用重新检查授权。目录查询复用 BM25 导航；已有 RAG 继续使用宿主配置的向量或混合检索。
+
+项目索引继续使用 `addKnowledgeFile(projectId, { name, content, embeddableContent?, structure? })`、`updateKnowledgeFile` 和 `removeKnowledgeFile`，需要 `project:write`。`content` 保存解析后的原文，`embeddableContent` 独立保存嵌入投影，`structure` 保存解析器的规范导航结果，写入沿用现有 hash/reconcile 和索引生命周期。项目目录 generation 对应当前原文内容哈希；编辑后的旧版本读取返回 `revision_unavailable`，删除后的读取返回 `source_unavailable`。智能体历史版本只能在宿主冻结的版本授权内读取；没有任意智能体知识库写入接口。
+
+宿主 `knowledgeReading` 控制 `enabled`、调用次数、单次与总读取字符预算、目录节点数、摘要与检索设置。智能体工具和插件共享运行预算；项目 reader 在插件 API 生命周期中保留预算并读取宿主配置变更。`maxChars` 只能降低大小，不能突破宿主上限。截断后从 `nextCharStart` 继续读取；显式处理关闭、无效参数、预算耗尽、章节/页码或版本失效等错误。
+
+frontend 和 hybrid 模块通过 `ctx.project` 调用。声明项目读写权限的沙箱 webview 通过 `window.acquireCogniaProjectApi()` 获取同样的异步接口，也包含既有的三种项目索引写入操作。宿主执行前及返回结果前检查实时授权，限制方法和并发数量，插件禁用时解绑。每个 iframe 只获取一次客户端；关闭会拒绝待完成请求，十秒未响应则超时。该通道复用已有 webview transport，不暴露不受限的 `getKnowledgeFiles`。
+
+目录仅声明 desktop/web/mobile 的 frontend/hybrid 支持，不声明 Python、WASM 或 headless 支持。桌面 Node 的 activation-call replay 不提供异步宿主读取返回值；该场景使用沙箱 webview transport，不应依赖 replay 获取原文。
+
+权限级别 `forbid` 会拒绝访问，即使仍保存 manifest 授权。宿主 UI 撤销权限后，下一次调用及待完成读取返回前都会生效：宿主通过显式撤销记录统一现有权限存储。`hasPermission` 和 `getGrantedPermissions` 返回有效授权。重新授权需要宿主批准，插件保留的状态不能取消撤销。公共工作流调用不能借旧项目元数据或全文接口绕过绑定的文档范围，其项目范围读取也会被拒绝。

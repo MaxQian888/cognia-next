@@ -95,9 +95,23 @@ export async function installFromLocalFile(args: LocalInstallArgs): Promise<Loca
   return installFromLocalFileInternal(args, false)
 }
 
+/** Preview either supported package type without committing files. */
+export async function previewPluginBundleFromLocalFile(
+  args: LocalInstallArgs
+): Promise<LocalInstallResult> {
+  return installFromLocalFileInternal(args, true, "plugin_bundle_install_from_file")
+}
+
+export async function installPluginBundleFromLocalFile(
+  args: LocalInstallArgs
+): Promise<LocalInstallResult> {
+  return installFromLocalFileInternal(args, false, "plugin_bundle_install_from_file")
+}
+
 async function installFromLocalFileInternal(
   args: LocalInstallArgs,
-  previewOnly: boolean
+  previewOnly: boolean,
+  command = "plugin_wasm_install_from_file"
 ): Promise<LocalInstallResult> {
   if (!canUseTauriInvoke()) {
     throw new Error("Installing a plugin from a local file requires the Tauri desktop runtime.")
@@ -109,7 +123,7 @@ async function installFromLocalFileInternal(
   }
 
   const invoke = await getInvoke()
-  const result = await invoke<RustInstallResult>("plugin_wasm_install_from_file", {
+  const result = await invoke<RustInstallResult>(command, {
     bundlePath: args.bundlePath,
     signatureBase64: args.signatureBase64 ?? null,
     expectedPublicKeyBase64: args.expectedPublicKeyBase64 ?? null,

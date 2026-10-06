@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["themes"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-material-icon-theme/icons/folder-theme.svg",
+  "icon": "assets/icon.png",
   "keywords": ["icons", "file icons", "icon theme", "material", "vscode"],
   "author": {
     "name": "Material Extensions (Philipp Kief)",

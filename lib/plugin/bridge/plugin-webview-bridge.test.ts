@@ -32,6 +32,17 @@ describe("plugin-webview-bridge", () => {
     expect(w.srcDoc).toContain("connect-src https://api.example.com")
   })
 
+  it("attaches the project document bridge to permission-declaring webviews and cleans it up", async () => {
+    const def = {
+      ...manifest([{ id: "docs", html: "<main></main>" }]),
+      permissions: ["project:read" as const],
+    }
+    await registerWebviewsForPlugin(def, "/root", { hasPermission: () => false })
+    expect(getWebviewSnapshot()[0].srcDoc).toContain("acquireCogniaProjectApi")
+    unregisterWebviewsForPlugin("p")
+    expect(getWebviewSnapshot()).toEqual([])
+  })
+
   it("resolves html from an entry/export string", async () => {
     const importer = jest.fn(async () => ({ body: "<p>From module</p>" }))
     await registerWebviewsForPlugin(

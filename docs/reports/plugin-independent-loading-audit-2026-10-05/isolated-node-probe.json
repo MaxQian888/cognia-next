@@ -1,0 +1,27 @@
+{
+  "sameInputOutput": {
+    "result": "succeeded",
+    "sourceOverwritten": true,
+    "outputContainsCjs": true,
+    "sourceRetainsType": false
+  },
+  "cliSdkImport": {
+    "code": "MODULE_NOT_FOUND",
+    "message": "Cannot find module '@cognia/plugin-sdk'\nRequire stack:\n- /private/var/folders/h3/mypbg9ks5cj9ht4p61ffnwz40000gn/T/cognia-independent-audit-fJwRzP/sdk-plugin.cjs"
+  },
+  "cliCjsReload": {
+    "first": 1,
+    "afterRewrite": 1
+  },
+  "node": "v26.5.0",
+  "realNodeImporter": {
+    "sdk": {
+      "code": "MODULE_NOT_FOUND",
+      "message": "Cannot find module '@cognia/plugin-sdk'\nRequire stack:\n- /private/var/folders/h3/mypbg9ks5cj9ht4p61ffnwz40000gn/T/cognia-real-importer-ge8VF5/sdk.cjs"
+    },
+    "cjsReload": {
+      "first": 1,
+      "afterRewrite": 1
+    }
+  }
+}

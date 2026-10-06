@@ -282,6 +282,21 @@ pub(crate) fn validate_existing_manifest_paths(
             if field.sentinels.iter().any(|sentinel| sentinel == path) {
                 continue;
             }
+            if matches!(
+                manifest.get("type").and_then(Value::as_str),
+                Some("frontend" | "hybrid")
+            ) && (field.path == "main"
+                || field.path.ends_with(".entry")
+                || field.path.ends_with(".entrypoint"))
+                && matches!(
+                    std::path::Path::new(path)
+                        .extension()
+                        .and_then(|extension| extension.to_str()),
+                    Some("ts" | "tsx" | "jsx" | "mts" | "cts")
+                )
+            {
+                return Err(format!("manifest {} points to source '{path}'; build the plugin and install its compiled distribution", field.path));
+            }
             let resolved = match field.kind {
                 PathFieldKind::File => {
                     crate::contained_path::resolve_existing_plugin_file(root, path).map(|_| ())
@@ -740,5 +755,15 @@ mod tests {
             &json!({ "runtimeCompatibility": { "tauri": { "entrypoint": "node" } } }),
         )
         .unwrap();
+    }
+    #[test]
+    fn frontend_install_rejects_source_entrypoints_in_contributions() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("index.js"), "compiled").unwrap();
+        std::fs::write(root.path().join("panel.tsx"), "source").unwrap();
+        let manifest = serde_json::json!({"id":"demo", "type":"frontend", "main":"index.js", "extensions":[{"entry":"panel.tsx"}]});
+        let error = validate_existing_manifest_paths(root.path(), &manifest).unwrap_err();
+        assert!(error.contains("extensions[].entry"), "{error}");
+        assert!(error.contains("compiled distribution"), "{error}");
     }
 }

@@ -30,6 +30,11 @@ export async function buildPlugin({ outputDirectory = pluginRoot } = {}) {
   const archive = new JSZip()
   const fileOptions = { date: new Date("1980-01-01T00:00:00Z"), createFolders: false }
   archive.file("plugin.json", manifestBytes, fileOptions)
+  archive.file(
+    "assets/icon.png",
+    await readFile(resolve(pluginRoot, "assets/icon.png")),
+    fileOptions
+  )
   const entryPaths = {}
   for (const [output, source] of Object.entries(ENTRIES)) {
     const result = await build({

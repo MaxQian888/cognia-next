@@ -95,6 +95,12 @@ describe("plugin-file-path", () => {
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
+  it("resolves generated builtin assets beside their independent bundle", () => {
+    expect(publicBuiltinAssetUrl("cognia-anime-effort", "assets/operator.webp")).toBe(
+      "/_cognia/builtin-plugins/cognia-anime-effort/resources/assets/operator.webp"
+    )
+  })
+
   it("uses the public URL for a built-in asset inside Tauri too", async () => {
     mockIsTauri.mockReturnValue(true)
 
@@ -133,7 +139,7 @@ describe("plugin-file-path", () => {
         )
       ).resolves.toBe('{"file":"f"}')
       expect(fetchSpy).toHaveBeenCalledWith(
-        "/plugins/cognia-material-icon-theme/dist/material-icons.json"
+        "/_cognia/builtin-plugins/cognia-material-icon-theme/resources/dist/material-icons.json"
       )
       expect(mockReadTextFile).not.toHaveBeenCalled()
       expect(mockInvoke).not.toHaveBeenCalled()

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { readFile, readdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildFrontendPlugin } from "../plugin/build-frontend-plugins.mjs"
 
 import {
   isBuildCacheFresh,
@@ -15,46 +16,44 @@ import {
 const generatorFile = fileURLToPath(import.meta.url)
 const repoRoot = path.resolve(path.dirname(generatorFile), "../..")
 
-export const BROWSER_BUILTIN_PLUGIN_IDS = [
-  "cognia-office",
-  "cognia-pdf",
-  "cognia-documents",
-  "cognia-presentations",
-  "cognia-visualize",
-]
-
-const sharedModules = [
-  "react",
-  "react/jsx-runtime",
-  "react/jsx-dev-runtime",
-  "@cognia/plugin-sdk",
-  "@cognia/plugin-ui",
-  "lucide-react",
-]
-
-// Every published SDK subpath is host-shared (`lib/plugin/core/sdk-subpath-loaders.ts`):
-// most are registries, and an inlined copy registers into a Map the host never reads.
-const SDK_SUBPATH_PREFIX = "@cognia/plugin-sdk/"
-
-function rejectHostPrivateImports() {
-  return {
-    name: "reject-host-private-imports",
-    setup(buildApi) {
-      buildApi.onResolve({ filter: /^@\// }, (args) => ({
-        errors: [
-          {
-            text:
-              `Browser builtin ${args.importer} imports host-private module ${args.path}. ` +
-              "Use @cognia/plugin-ui or a permission-checked PluginContext capability.",
-          },
-        ],
-      }))
-    },
-  }
-}
+export const BROWSER_BUILTIN_PLUGIN_IDS = JSON.parse(
+  await readFile(new URL("../../plugins/browser-builtins.json", import.meta.url), "utf8")
+)
 
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex")
+}
+
+/** Publish package-owned identity images for builtin:// roots on every shell. */
+export async function stageBuiltinPluginIcons(root) {
+  const pluginsRoot = path.join(root, "plugins")
+  for (const directory of await readdir(pluginsRoot, { withFileTypes: true })) {
+    if (!directory.isDirectory()) continue
+    const pluginRoot = path.join(pluginsRoot, directory.name)
+    let manifest
+    try {
+      manifest = JSON.parse(await readFile(path.join(pluginRoot, "plugin.json"), "utf8"))
+    } catch (error) {
+      if (error.code === "ENOENT") continue
+      throw error
+    }
+    const icon = manifest.icon
+    if (
+      typeof icon !== "string" ||
+      /^(?:[a-z]+:|\/)/i.test(icon) ||
+      !/\.(?:png|svg|webp|jpe?g|gif|avif)$/i.test(icon)
+    ) continue
+    if (typeof manifest.id !== "string" || !/^[a-z0-9][a-z0-9._-]*$/.test(manifest.id)) {
+      throw new Error(`Invalid plugin id for icon staging: ${directory.name}`)
+    }
+    const relative = icon.replace(/\\/g, "/")
+    const source = path.resolve(pluginRoot, relative)
+    if (!source.startsWith(`${pluginRoot}${path.sep}`)) {
+      throw new Error(`Plugin icon outside plugin root: ${directory.name}/${icon}`)
+    }
+    const output = path.join(root, "public/_cognia/plugin-icons", manifest.id, relative)
+    writeIfChanged(output, await readFile(source))
+  }
 }
 
 async function preparePdfWorker(root, publicRoot) {
@@ -67,73 +66,38 @@ async function preparePdfWorker(root, publicRoot) {
   return { source, output, url: `/_cognia/builtin-plugins/_shared/pdf.worker.${digest}.mjs` }
 }
 
-async function buildPlugin(pluginId, { root, publicRoot, pdfWorkerUrl, bundle }) {
-  const pluginRoot = path.join(root, "plugins", pluginId)
-  const manifest = JSON.parse(await readFile(path.join(pluginRoot, "plugin.json"), "utf8"))
-  const result = await bundle({
-    absWorkingDir: root,
-    bundle: true,
-    define:
-      pluginId === "cognia-pdf"
-        ? { __COGNIA_PDF_WORKER_URL__: JSON.stringify(pdfWorkerUrl) }
-        : undefined,
-    entryPoints: [path.join(pluginRoot, "src/index.ts")],
-    external: [...sharedModules, `${SDK_SUBPATH_PREFIX}*`],
-    format: "cjs",
-    legalComments: "none",
-    metafile: true,
-    minify: true,
-    outdir: path.join(root, ".codex-tmp/browser-builtin-build", pluginId),
-    platform: "browser",
-    plugins: [rejectHostPrivateImports()],
-    sourcemap: false,
-    target: ["es2022"],
-    treeShaking: true,
-    write: false,
-  })
-
-  const javascript = result.outputFiles?.find((file) => file.path.endsWith(".js"))
-  if (!javascript) throw new Error(`No JavaScript output produced for ${pluginId}`)
-
-  const digest = sha256(javascript.contents)
-  const pluginOutputRoot = path.join(publicRoot, pluginId)
+async function buildPlugin(directory, { root, publicRoot, pdfWorkerUrl, bundle }) {
+  const result = await buildFrontendPlugin({ root, directory, pdfWorkerUrl, bundle })
+  const { manifest } = result
+  const javascript = result.files.get(manifest.main)
+  const digest = sha256(javascript)
+  const pluginOutputRoot = path.join(publicRoot, manifest.id)
   const outputs = [path.join(pluginOutputRoot, `${digest}.cjs`)]
-  writeIfChanged(outputs[0], javascript.contents)
-
-  const stylesheet = result.outputFiles?.find((file) => file.path.endsWith(".css"))
-  let stylesUrl
-  if (stylesheet) {
-    const stylesDigest = sha256(stylesheet.contents)
-    const stylesheetPath = path.join(pluginOutputRoot, `${stylesDigest}.css`)
-    outputs.push(stylesheetPath)
-    writeIfChanged(stylesheetPath, stylesheet.contents)
-    stylesUrl = `/_cognia/builtin-plugins/${pluginId}/${stylesDigest}.css`
+  writeIfChanged(outputs[0], javascript)
+  // Every package resource also has a builtin:// mirror. The independent ZIP
+  // contains these exact bytes, so plugins never depend on a host source path.
+  for (const [relative, contents] of result.files) {
+    const output = path.join(pluginOutputRoot, "resources", relative)
+    writeIfChanged(output, contents)
+    outputs.push(output)
   }
-
-  const externalImports = new Set()
-  for (const output of Object.values(result.metafile?.outputs ?? {})) {
-    for (const imported of output.imports ?? []) {
-      if (
-        imported.external &&
-        (sharedModules.includes(imported.path) || imported.path.startsWith(SDK_SUBPATH_PREFIX))
-      ) {
-        externalImports.add(imported.path)
-      }
-    }
-  }
-
+  const stylesheet = manifest.styles ? result.files.get(manifest.styles) : undefined
   return {
-    inputs: Object.keys(result.metafile.inputs),
+    inputs: result.inputs,
     outputs,
     entry: {
       manifest,
-      path: `builtin://${pluginId}`,
+      path: `builtin://${manifest.id}`,
       compatibilityDiagnostics: [],
+      ...(stylesheet ? { bundledStyles: stylesheet.toString("utf8") } : {}),
       asset: {
-        url: `/_cognia/builtin-plugins/${pluginId}/${digest}.cjs`,
+        url: `/_cognia/builtin-plugins/${manifest.id}/${digest}.cjs`,
         sha256: digest,
-        sharedModules: [...externalImports].sort(),
-        ...(stylesUrl ? { stylesUrl } : {}),
+        sharedModules: result.sharedModules,
+        resourcesUrl: `/_cognia/builtin-plugins/${manifest.id}/resources/`,
+        entryHashes: Object.fromEntries(
+          [...result.files].filter(([name]) => name.endsWith(".js")).map(([name, bytes]) => [name, sha256(bytes)])
+        ),
       },
     },
   }
@@ -166,6 +130,9 @@ export async function buildBrowserBuiltinPlugins({
   root = path.resolve(root)
   if (pluginIds.some((id) => !/^[a-z0-9][a-z0-9-]*$/.test(id)))
     throw new Error("Invalid browser builtin plugin id")
+  // Icons also belong to statically imported built-ins, and must refresh even
+  // when none of the five separately bundled plugins need recompilation.
+  await stageBuiltinPluginIcons(root)
   const publicRoot = path.join(root, "public/_cognia/builtin-plugins")
   const generatedIndexPath = path.join(
     root,
@@ -192,7 +159,7 @@ export async function buildBrowserBuiltinPlugins({
       pdfWorkerUrl: pdfWorker.url,
       bundle: build,
     })
-    entries[pluginId] = result.entry
+    entries[result.entry.manifest.id] = result.entry
     inputs.push(...result.inputs)
     outputs.push(...result.outputs)
   }
@@ -209,6 +176,8 @@ export async function buildBrowserBuiltinPlugins({
     startedAt,
     extraFiles: [
       generatorFile,
+      fileURLToPath(new URL("../plugin/build-frontend-plugins.mjs", import.meta.url)),
+      fileURLToPath(new URL("../../plugins/browser-builtins.json", import.meta.url)),
       pdfWorker.source,
       ...pluginIds.map((id) => path.join(root, "plugins", id, "plugin.json")),
     ],

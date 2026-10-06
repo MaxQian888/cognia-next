@@ -2,6 +2,7 @@ import type {
   FullPluginContext,
   NativeVideoInfo,
   PluginContext,
+  PluginProjectWebviewAPI,
   VideoAnalysisFrame,
   VideoAnalysisManifest,
   VideoAnalysisMode,
@@ -9,6 +10,19 @@ import type {
 } from "./index"
 
 describe("public FullPluginContext", () => {
+  it("exports only the bounded document methods to sandboxed project clients", () => {
+    type RequiredMethods =
+      | "listKnowledgeDocuments"
+      | "readKnowledgeOutline"
+      | "readKnowledgeRange"
+      | "locateKnowledgeDocument"
+      | "addKnowledgeFile"
+      | "updateKnowledgeFile"
+      | "removeKnowledgeFile"
+    const assertNever = <Value extends never>(): Value | undefined => undefined
+    expect(assertNever<Exclude<RequiredMethods, keyof PluginProjectWebviewAPI>>()).toBeUndefined()
+    expect(assertNever<Exclude<keyof PluginProjectWebviewAPI, RequiredMethods>>()).toBeUndefined()
+  })
   it("requires every API mounted by the full host context", () => {
     type OptionalKeys<T> = {
       [Key in keyof T]-?: object extends Pick<T, Key> ? Key : never

@@ -3,6 +3,7 @@
   "name": "Go Backend Refactor Suite",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "A refactoring system for Go backends: six role characters, a tool-enabled agent.turn workflow node, a review-board agent team, Go refactoring skills, and a Go backend refactor pipeline workflow template that stops before committing unless the build passes, the reviewer approves, and you approve. The pipeline runs in the desktop app; point it at a clean clone of a Go repository.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

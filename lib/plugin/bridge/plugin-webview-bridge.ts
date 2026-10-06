@@ -14,6 +14,7 @@
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginWebviewDef, ResolvedPluginWebview } from "@/types/plugin/plugin-webview"
 import { attachEditorWebviewRpc } from "@/lib/plugin/bridge/editor-webview-rpc"
+import { attachProjectWebviewRpc } from "@/lib/plugin/bridge/project-webview-rpc"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { wrapWebviewHtml } from "@/lib/plugin/security/webview-csp"
@@ -91,6 +92,10 @@ export async function registerWebviewsForPlugin(
       // the editor, and it must not ride along with `context-panel`: rendering
       // a panel is not grounds for writing into the user's open file.
       const editorApi = manifest.capabilities?.includes("editor") ?? false
+      const projectApi =
+        manifest.permissions?.some(
+          (permission) => permission === "project:read" || permission === "project:write"
+        ) ?? false
       const resolved = await resolveWebview(
         def,
         pluginId,
@@ -98,13 +103,22 @@ export async function registerWebviewsForPlugin(
         allowedDomains,
         importer,
         contextPanelApi,
-        editorApi
+        editorApi,
+        projectApi
       )
       registerWebview(resolved)
       // Attach AFTER registerWebview: the RPC server subscribes through the
       // webview registry, which has to know the frame first.
       if (editorApi) {
         const release = attachEditorWebviewRpc(pluginId, def.id, {
+          hasPermission: options.hasPermission ?? (() => false),
+        })
+        const disposers = editorRpcDisposers.get(pluginId) ?? []
+        disposers.push(release)
+        editorRpcDisposers.set(pluginId, disposers)
+      }
+      if (projectApi) {
+        const release = attachProjectWebviewRpc(pluginId, def.id, {
           hasPermission: options.hasPermission ?? (() => false),
         })
         const disposers = editorRpcDisposers.get(pluginId) ?? []
@@ -132,7 +146,8 @@ async function resolveWebview(
   allowedDomains: string[] | undefined,
   importer: NonNullable<WebviewBridgeOptions["importer"]>,
   contextPanelApi: boolean,
-  editorApi: boolean
+  editorApi: boolean,
+  projectApi: boolean
 ): Promise<ResolvedPluginWebview> {
   let body: string
   if (typeof def.html === "string") {
@@ -152,7 +167,7 @@ async function resolveWebview(
     )
   }
 
-  const srcDoc = wrapWebviewHtml(body, { allowedDomains, contextPanelApi, editorApi })
+  const srcDoc = wrapWebviewHtml(body, { allowedDomains, contextPanelApi, editorApi, projectApi })
   return {
     pluginId,
     viewId: def.id,

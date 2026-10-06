@@ -26,7 +26,7 @@
 
 export { cn } from "./cn"
 export { CopyFeedbackIcon, type CopyFeedbackIconProps } from "./copy-feedback-icon"
-export { PluginImage, type PluginImageProps } from "./plugin-image"
+export { PluginImage, bindPluginImageAssetResolver, type PluginImageProps } from "./plugin-image"
 export { parseToolOutput, ToolCard, type ToolCardProps, useParsedToolOutput } from "./tool-card"
 export { useCopy, type UseCopyOptions, type UseCopyResult } from "./use-copy"
 export { useLiveQuery } from "./live-query"

@@ -18,6 +18,7 @@
 
 import type { PluginBinaryRequirement, PluginManifest, PluginPermission } from "@/types/plugin"
 import { listPlugins, getPlugin, setPluginConfig } from "@/lib/db/plugins"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { ConflictDetector } from "@/lib/plugin/package/conflict-detector"
 import { satisfiesConstraint } from "@/lib/plugin/package/dependency-resolver"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
@@ -154,7 +155,12 @@ export interface RunMarketplaceInstallOpts {
    */
   client: {
     getPlugin: (id: string) => Promise<{ manifest: PluginManifest; name?: string } | null>
-    installPlugin: (id: string, version?: string) => Promise<unknown>
+    supportsTransactionalConfig?: boolean
+    installPlugin: (
+      id: string,
+      version?: string,
+      options?: { config?: Record<string, unknown> }
+    ) => Promise<unknown>
   }
 
   /**
@@ -453,7 +459,13 @@ export async function runMarketplaceInstall(
   // exists in Dexie but the user's intent (install + configure) wasn't
   // fully met, so silent degradation is not acceptable here.
   try {
-    await client.installPlugin(pluginId, version)
+    const result =
+      configValue !== undefined && client.supportsTransactionalConfig
+        ? await client.installPlugin(pluginId, version, { config: configValue })
+        : await client.installPlugin(pluginId, version)
+    if (result && typeof result === "object" && "success" in result && result.success === false) {
+      throw new Error("error" in result ? String(result.error) : "Plugin installation failed")
+    }
   } catch (err) {
     return {
       status: "failed",
@@ -462,9 +474,16 @@ export async function runMarketplaceInstall(
     }
   }
 
-  if (configValue !== undefined) {
+  if (configValue !== undefined && !client.supportsTransactionalConfig) {
     try {
+      if (!(await getPlugin(pluginId))) {
+        throw new Error(`Installed plugin metadata is missing: ${pluginId}`)
+      }
       await setPluginConfig(pluginId, configValue)
+      // The first activation reads the runtime store as well as Dexie. Keep
+      // both views aligned only after the durable write succeeds.
+      const store = usePluginStore.getState()
+      if (store.plugins[pluginId]) store.setPluginConfig(pluginId, configValue)
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       // The manager finished a successful install — the user's intent

@@ -46,3 +46,33 @@ export async function createPluginAssetResolver(pluginId: string): Promise<Plugi
   const { readContainedPluginAsset } = await import("@/lib/plugin/bridge/plugin-file-path")
   return (root, rel, mime) => readContainedPluginAsset(pluginId, root, rel, mime)
 }
+
+/** Resolve image bytes using the active installation, including a built-in's public mirror. */
+export async function resolvePluginImageAsset(
+  pluginId: string,
+  relativePath: string
+): Promise<string> {
+  const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+  const plugin = usePluginStore.getState().plugins[pluginId]
+  if (!plugin) throw new Error(`Plugin ${pluginId} is not installed`)
+  const resolve = await createPluginAssetResolver(pluginId)
+  return resolve(plugin.path, relativePath, pluginImageMimeType(relativePath))
+}
+
+/** Explicit image MIME types let contained native reads render as image data URLs. */
+export function pluginImageMimeType(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+    avif: "image/avif",
+    ico: "image/x-icon",
+  }
+  const mime = extension ? mimeTypes[extension] : undefined
+  if (!mime) throw new Error(`Unsupported plugin image type: ${path}`)
+  return mime
+}

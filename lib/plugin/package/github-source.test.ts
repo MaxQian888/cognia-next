@@ -510,6 +510,15 @@ describe("makeGithubMarketplaceClient", () => {
     const client = makeGithubMarketplaceClient(preview.ref, preview)
     await client.installPlugin("demo.plugin")
     expect(installPluginFromGithub).toHaveBeenCalledWith("acme/cool", "main", "packages/a", {})
+    expect(client.supportsTransactionalConfig).toBe(true)
+    await client.installPlugin("demo.plugin", undefined, { config: { token: "atomic" } })
+    expect(installPluginFromGithub).toHaveBeenLastCalledWith(
+      "acme/cool",
+      "main",
+      "packages/a",
+      {},
+      { config: { token: "atomic" } }
+    )
   })
 
   it("uses the approved preview commit even if passed a mutable source reference", async () => {

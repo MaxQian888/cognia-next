@@ -58,6 +58,26 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it.each([42, {}, [], null, "", "   "])("rejects invalid plugin identity icon %p", (icon) => {
+      expect(validatePluginManifest({ ...createValidManifest(), icon }).diagnostics).toContainEqual(
+        expect.objectContaining({
+          field: "icon",
+          code: "manifest.icon.invalid_type",
+          severity: "error",
+        })
+      )
+    })
+
+    it.each([
+      "assets/icon.png",
+      "icon.svg",
+      "FileText",
+      "https://example.com/icon.png",
+      "data:image/png;base64,iVBORw0KGgo=",
+    ])("accepts a plugin identity image or glyph: %s", (icon) => {
+      expect(validatePluginManifest({ ...createValidManifest(), icon }).valid).toBe(true)
+    })
+
     it("validates declarative subagent gateway bindings without accepting secret fields", () => {
       const manifest = {
         ...createValidManifest(),

@@ -5,7 +5,7 @@
 // ergonomic shape of hooks/skills/use-skill-marketplace.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { PluginSource } from "@/types/plugin"
+import type { PluginResolvedIcon, PluginSource } from "@/types/plugin"
 import {
   usePluginMarketplaceStore,
   type MarketplaceErrorCategory,
@@ -23,6 +23,11 @@ export interface PluginMarketplaceEntry {
   version: string
   description?: string
   author?: string
+  icon?: string
+  resolvedIcon?: PluginResolvedIcon
+  pluginRoot?: string
+  /** Image URL supplied by extension registries such as Open VSX. */
+  iconUrl?: string
   rating?: number
   downloads?: number
   signed?: boolean
@@ -93,7 +98,12 @@ export interface MarketplaceClient {
    * had one, and uninstalling is not a registry operation: it is the plugin
    * manager's (`uninstallPluginForHost`).
    */
-  installPlugin: (id: string, version?: string) => Promise<unknown>
+  supportsTransactionalConfig?: boolean
+  installPlugin: (
+    id: string,
+    version?: string,
+    options?: { config?: Record<string, unknown> }
+  ) => Promise<unknown>
 }
 
 let cachedClient: MarketplaceClient | null = null
@@ -131,8 +141,11 @@ function adaptRegistryClient(market: RegistryClient): MarketplaceClient {
     getRecentPlugins: async (limit) => (await market.getRecentPlugins(limit)).map(toEntry),
     getPlugin: (id) => market.getPlugin(id),
     getVersions: async (id) => (await market.getVersions(id)).map((version) => ({ ...version })),
-    installPlugin: async (id, version) => {
-      const result = await market.installPlugin(id, version)
+    supportsTransactionalConfig: true,
+    installPlugin: async (id, version, options) => {
+      const result = options
+        ? await market.installPlugin(id, version, options)
+        : await market.installPlugin(id, version)
       if (!result.success) throw new Error(result.error || `Failed to install plugin: ${id}`)
       return result
     },

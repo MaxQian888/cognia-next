@@ -8,6 +8,7 @@
 import { getPluginPathViolations, resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { readTextFile } from "@/lib/file/file-operations"
 import { isTauri } from "@/lib/platform/detect"
+import { getBrowserBuiltinRegistryEntry } from "@/lib/plugin/core/browser-builtin-registry"
 
 /** Reject paths that cannot be confined to the plugin root. */
 export function isUnsafeRelativePath(path: string): boolean {
@@ -33,7 +34,10 @@ export function publicBuiltinAssetUrl(pluginId: string, relative: string): strin
     .filter((segment) => segment.length > 0 && segment !== ".")
     .map(encodeURIComponent)
     .join("/")
-  return `/plugins/${encodeURIComponent(pluginId)}/${encodedPath}`
+  const resourcesUrl = getBrowserBuiltinRegistryEntry(pluginId)?.asset?.resourcesUrl
+  return resourcesUrl
+    ? `${resourcesUrl}${encodedPath}`
+    : `/plugins/${encodeURIComponent(pluginId)}/${encodedPath}`
 }
 
 /**

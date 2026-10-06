@@ -188,3 +188,47 @@ describe("usePluginStore", () => {
     })
   })
 })
+
+describe("independent plugin identity", () => {
+  const manifest = {
+    id: "independent-demo",
+    name: "Demo",
+    description: "Independent plugin fixture",
+    version: "1.0.0",
+    type: "frontend",
+    main: "dist/index.js",
+    capabilities: [],
+    author: { name: "Test" },
+  } as import("@/types/plugin").PluginManifest
+  beforeEach(() => usePluginStore.getState().reset())
+
+  it("keeps an independently installed version when the bundled fallback is rediscovered", () => {
+    const store = usePluginStore.getState()
+    store.discoverPlugin({ ...manifest, version: "2.0.0" }, "local", "/plugins/independent-demo")
+    store.discoverPlugin(manifest, "builtin", "builtin://independent-demo")
+    expect(usePluginStore.getState().plugins[manifest.id]).toMatchObject({
+      source: "local",
+      manifest: { version: "2.0.0" },
+    })
+  })
+
+  it("keeps a removed builtin absent across discovery and allows explicit reinstall", async () => {
+    const store = usePluginStore.getState()
+    store.discoverPlugin(manifest, "builtin", "builtin://independent-demo")
+    await store.installPlugin(manifest.id)
+    await store.uninstallPlugin(manifest.id, { viaManager: false, skipFileRemoval: true })
+    const key = usePluginStore.persist.getOptions().name
+    if (!key) throw new Error("Plugin persistence must have a storage key")
+    const saved = window.localStorage.getItem(key)
+    expect(saved).toContain('"removedPlugins":{"independent-demo":true}')
+    usePluginStore.setState({ removedPlugins: {} })
+    window.localStorage.setItem(key, saved!)
+    await usePluginStore.persist.rehydrate()
+    store.discoverPlugin(manifest, "builtin", "builtin://independent-demo")
+    expect(usePluginStore.getState().plugins[manifest.id]).toBeUndefined()
+    store.discoverPlugin(manifest, "local", "/plugins/independent-demo")
+    await store.installPlugin(manifest.id)
+    expect(usePluginStore.getState().plugins[manifest.id].status).toBe("installed")
+    expect(usePluginStore.getState().removedPlugins[manifest.id]).toBeUndefined()
+  })
+})

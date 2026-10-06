@@ -1,0 +1,903 @@
+[
+  {
+    "id": "cognia-agent-team-examples",
+    "dir": "agent-team-examples",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [
+      "subagents",
+      "agentTeamTemplates",
+      "sharedMemoryAdapters",
+      "balanceAdapters"
+    ],
+    "evaluation": "pass",
+    "exports": ["EXAMPLE_NAME_SUFFIX", "default", "manifest"],
+    "packagedVsBundleFields": [
+      "subagents",
+      "agentTeamTemplates",
+      "sharedMemoryAdapters",
+      "balanceAdapters"
+    ]
+  },
+  {
+    "id": "cognia-anthropic-skills",
+    "dir": "anthropic-skills",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["skills"],
+    "evaluation": "pass",
+    "exports": [
+      "PLUGIN_ID",
+      "STARTER_SKILLS",
+      "default",
+      "manifest",
+      "renderSkillList",
+      "starterSkillId"
+    ],
+    "packagedVsBundleFields": ["skills"]
+  },
+  {
+    "id": "cognia-browser-tools",
+    "dir": "browser-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["WAIT_FOR_MAX_TIMEOUT_MS", "default", "manifest", "toolFailure"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-clipboard-history",
+    "dir": "clipboard-history",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["MIN_POLL_INTERVAL_MS", "default", "manifest", "normalizeConfig", "toCodeSpan"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-clipboard-tools",
+    "dir": "clipboard-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "bytesToBase64",
+      "clearClipboard",
+      "createClipboardTools",
+      "createClipboardWorkflowNodes",
+      "default",
+      "imageToolResult",
+      "manifest",
+      "readClipboardImage",
+      "readClipboardStatus",
+      "sniffImageMime",
+      "writeClipboardText"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-anime-effort",
+    "dir": "cognia-anime-effort",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["extensions"],
+    "evaluation": "pass",
+    "exports": ["ANIME_EFFORT_CSS", "AnimeEffortControl", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-appearance-demo",
+    "dir": "cognia-appearance-demo",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-arknights-theme",
+    "dir": "cognia-arknights-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-azur-lane-theme",
+    "dir": "cognia-azur-lane-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-backend-refactor",
+    "dir": "cognia-backend-refactor",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [
+      "skills",
+      "characterPacks",
+      "subagents",
+      "agentTeamTemplates",
+      "workflowTemplates"
+    ],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": [
+      "skills",
+      "characterPacks",
+      "subagents",
+      "agentTeamTemplates",
+      "workflowTemplates"
+    ]
+  },
+  {
+    "id": "cognia-bugfix-review",
+    "dir": "cognia-bugfix-review",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-builtin-characters",
+    "dir": "cognia-builtin-characters",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["characterPacks"],
+    "evaluation": "pass",
+    "exports": [
+      "BUILTIN_LEGACY_ID_TO_LOCAL_ID",
+      "BUILTIN_PACK",
+      "BUILTIN_PLUGIN_ID",
+      "default",
+      "manifest"
+    ],
+    "packagedVsBundleFields": ["characterPacks"]
+  },
+  {
+    "id": "cognia-character-seeds",
+    "dir": "cognia-character-seeds",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-documents",
+    "dir": "cognia-documents",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-game-worlds-theme",
+    "dir": "cognia-game-worlds-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["GAME_WORLDS_APPEARANCE", "default", "manifest"],
+    "packagedVsBundleFields": ["themePacks"]
+  },
+  {
+    "id": "cognia-genshin-theme",
+    "dir": "cognia-genshin-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-goal-insights",
+    "dir": "cognia-goal-insights",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "GOAL_INSIGHTS_EXAMPLE",
+      "OBJECTIVE_EXCERPT_LIMIT",
+      "createGoalInsightHooks",
+      "default",
+      "manifest"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-honkai-star-rail-theme",
+    "dir": "cognia-honkai-star-rail-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-laya-guard",
+    "dir": "cognia-laya-guard",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "not-run"
+  },
+  {
+    "id": "cognia-material-icon-theme",
+    "dir": "cognia-material-icon-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-office",
+    "dir": "cognia-office",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-pdf",
+    "dir": "cognia-pdf",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-presentations",
+    "dir": "cognia-presentations",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-python-demo",
+    "dir": "cognia-python-demo",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "not-run"
+  },
+  {
+    "id": "cognia-python-runtime-demo",
+    "dir": "cognia-python-runtime-demo",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "not-run"
+  },
+  {
+    "id": "cognia-rfc-toolkit",
+    "dir": "cognia-rfc-toolkit",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-sandboxed-tools",
+    "dir": "cognia-sandboxed-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "SANDBOXED_TOOL_NAMES",
+      "SANDBOX_BASH_MAX_TIMEOUT_SECONDS",
+      "SANDBOX_BASH_TIMEOUT_MS",
+      "SANDBOX_FILE_TOOL_MAX_TIMEOUT_SECONDS",
+      "SANDBOX_FILE_TOOL_TIMEOUT_MS",
+      "SDK_TOOLS_REPLACED_BY_SANDBOX",
+      "boundTimeoutSeconds",
+      "buildSandboxedTools",
+      "default",
+      "manifest"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-scheduler-tools",
+    "dir": "cognia-scheduler-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["bots"],
+    "evaluation": "pass",
+    "exports": [
+      "AGENT_CREATABLE_TYPES",
+      "DELETE_TOOL",
+      "MANAGE_TOOL",
+      "PLUGIN_ID",
+      "RUN_TOOL",
+      "createSchedulerTools",
+      "default",
+      "deleteScheduledTask",
+      "manifest",
+      "parseTrigger",
+      "runScheduledTask",
+      "runSchedulerToolAction",
+      "scheduleDigestBot"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-scheduling-demo",
+    "dir": "cognia-scheduling-demo",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["HEARTBEAT_HANDLER", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-share-watch",
+    "dir": "cognia-share-watch",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["SHARE_WATCH_EXAMPLE", "createShareWatchHooks", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-visualize",
+    "dir": "cognia-visualize",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-work-mode",
+    "dir": "cognia-work-mode",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["modes", "skills", "subagents", "agentTeamTemplates"],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": ["modes", "skills", "subagents", "agentTeamTemplates"]
+  },
+  {
+    "id": "cognia-zenless-zone-zero-theme",
+    "dir": "cognia-zenless-zone-zero-theme",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-computer-use",
+    "dir": "computer-use",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["nativeAnthropicTools", "subagents", "agentTeamTemplates"],
+    "evaluation": "pass",
+    "exports": ["OCR_TOOL_TIMEOUT_MS", "default", "describeComputerUse", "manifest"],
+    "packagedVsBundleFields": ["nativeAnthropicTools", "subagents", "agentTeamTemplates"]
+  },
+  {
+    "id": "cognia-context-inspector",
+    "dir": "context-inspector",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["contextPanels", "webviews"],
+    "evaluation": "pass",
+    "exports": ["currentInspectorStrings", "default", "manifest"],
+    "packagedVsBundleFields": ["contextPanels", "webviews"]
+  },
+  {
+    "id": "cognia-deep-research",
+    "dir": "deep-research",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["skills"],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": ["skills"]
+  },
+  {
+    "id": "cognia-e2b-sandbox",
+    "dir": "e2b-sandbox",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["createE2BSandboxPlugin", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-eval",
+    "dir": "eval",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "EVAL_MAX_K",
+      "EVAL_PROJECT_TIMEOUT_MS",
+      "EVAL_RUN_TIMEOUT_MS",
+      "EVAL_TOOL_NAMES",
+      "buildEvalTools",
+      "default",
+      "manifest",
+      "parseProjectArgs",
+      "parseRunDatasetArgs"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-external-agent-adapter-example",
+    "dir": "external-agent-adapter-example",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["TYPED_CONTRIBUTIONS", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-external-agent-preset-example",
+    "dir": "external-agent-preset-example",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["PLUGIN_ID", "TYPED_CONTRIBUTIONS", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "figma-external-service",
+    "dir": "figma-external-service",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "github-delivery",
+    "dir": "github-delivery",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "DORMANT_V2_DEXIE_TABLES",
+      "GithubIntegrationError",
+      "checkGithubHealth",
+      "closeIssue",
+      "closePr",
+      "commentIssue",
+      "commentPr",
+      "createIssue",
+      "createRelease",
+      "default",
+      "generateChangelog",
+      "getCommitStatus",
+      "getIssue",
+      "getPullRequest",
+      "githubIntegration",
+      "labelIssue",
+      "listGithubResources",
+      "listIssueComments",
+      "manifest",
+      "mergePr",
+      "normalizeGithub",
+      "openPr",
+      "pushTag",
+      "reviewPr",
+      "reviewPrInline",
+      "runIssueLoop",
+      "searchIssues",
+      "updateIssue",
+      "workflowKindAliases"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "github-devin-bot",
+    "dir": "github-devin-bot",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "createGithubDevinBot",
+      "default",
+      "githubDevinBot",
+      "githubDevinBotDef",
+      "manifest"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-impeccable",
+    "dir": "impeccable",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-kimi-subscription",
+    "dir": "kimi-subscription",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-ocr",
+    "dir": "ocr",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "OCR_TOOL_TIMEOUT_MS",
+      "TOOL_PARAMETERS",
+      "default",
+      "manifest",
+      "ocrPluginDefinition",
+      "runOcrTool"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "pagerduty",
+    "dir": "pagerduty",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": ["characterPacks", "integrations", "bots"],
+    "evaluation": "pass",
+    "exports": [
+      "INCIDENT_RESPONDER_BOT",
+      "PAGERDUTY_ONCALL_PACK",
+      "PagerDutyIntegrationError",
+      "acknowledgePagerDutyIncident",
+      "addPagerDutyIncidentNote",
+      "checkPagerDutyHealth",
+      "createIncidentResponder",
+      "default",
+      "escalatePagerDutyIncident",
+      "getPagerDutyIncident",
+      "incidentResponder",
+      "listPagerDutyIncidentNotes",
+      "listPagerDutyResources",
+      "manifest",
+      "normalizePagerDuty",
+      "pagerDutyIntegration",
+      "resolvePagerDutyIncident"
+    ],
+    "packagedVsBundleFields": ["characterPacks", "integrations", "bots"]
+  },
+  {
+    "id": "pet-daily-quests",
+    "dir": "pet-daily-quests",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["PetCannotReceiveRewardError", "REWARD_EVENT_KIND", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-pi-latex-workbench",
+    "dir": "pi-latex-workbench",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-playwright-mcp",
+    "dir": "playwright-mcp",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-pro-ide-fixture",
+    "dir": "pro-ide-fixture",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "FIXTURE_CHANGED_URI",
+      "FIXTURE_MODEL",
+      "FIXTURE_NAMESPACE",
+      "FIXTURE_PING_COMMAND",
+      "FIXTURE_TESTS",
+      "chatParticipant",
+      "customEditor",
+      "default",
+      "languageModel",
+      "languageModelTool",
+      "notebookKernel",
+      "notebookSerializer",
+      "ping",
+      "provideFixtureLenses",
+      "sourceControl",
+      "testController",
+      "webviewView"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-prompt-templates",
+    "dir": "prompt-templates",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest", "parseAdd"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-repowiki",
+    "dir": "repowiki",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "not-run"
+  },
+  {
+    "id": "ripgrep-tools",
+    "dir": "ripgrep-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-screenshot",
+    "dir": "screenshot",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["CAPTURE_TOOL_TIMEOUT_MS", "captureToToolResult", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-skill-recorder",
+    "dir": "skill-recorder",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "sre-agent",
+    "dir": "sre-agent",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-stagehand-mcp",
+    "dir": "stagehand-mcp",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "strix-security",
+    "dir": "strix-security",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-test-lsp-contribution",
+    "dir": "test-lsp-contribution",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["activate", "deactivate"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "ui-surface-reference",
+    "dir": "ui-surface-reference",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "REFERENCE_PLUGIN_CSS",
+      "REFERENCE_SURFACE_IDS",
+      "ReferenceComposerAction",
+      "ReferenceComposerMenu",
+      "ReferenceConfig",
+      "ReferenceContextPanel",
+      "ReferenceContextWebview",
+      "ReferenceCustomView",
+      "ReferenceLinkMatcher",
+      "ReferenceMessageRenderer",
+      "ReferenceModal",
+      "ReferenceQuickAction",
+      "ReferenceToolRenderer",
+      "ReferenceTrayItem",
+      "ReferenceWebview",
+      "default",
+      "manifest",
+      "referenceTreeProvider",
+      "selectionReferenceActions"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "wasm-example-formatter",
+    "dir": "wasm-example-formatter",
+    "builtin": false,
+    "builtinAsset": false,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "not-run"
+  },
+  {
+    "id": "cognia-web-clone",
+    "dir": "web-clone",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "buildJob",
+      "default",
+      "manifest",
+      "parseWebCloneArgs",
+      "resolveInputPath",
+      "resolveOutput",
+      "runWebCloneCommand"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-web-tools",
+    "dir": "web-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "RESEARCH_FETCH_CONCURRENCY",
+      "RESEARCH_MAX_URLS",
+      "WEB_DOWNLOAD_TIMEOUT_MS",
+      "WEB_RESEARCH_TIMEOUT_MS",
+      "WEB_TOOL_NAMES",
+      "default",
+      "manifest",
+      "mapWithConcurrency",
+      "sanitizeFilename",
+      "sanitizeSubdir"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-workflow-ai",
+    "dir": "workflow-ai",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": ["buildWorkflowAiTools", "default", "manifest"],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "cognia-workspace-tools",
+    "dir": "workspace-tools",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [],
+    "evaluation": "pass",
+    "exports": [
+      "LIST_FILES_SCHEMA",
+      "LIST_MAX_ENTRIES",
+      "READ_DEFAULT_MAX_BYTES",
+      "READ_FILE_SCHEMA",
+      "READ_MAX_FILE_BYTES",
+      "READ_MAX_RETURN_BYTES",
+      "SEARCH_MAX_DEPTH",
+      "SEARCH_MAX_FILES",
+      "SEARCH_MAX_FILE_BYTES",
+      "SEARCH_MAX_MATCHES",
+      "SEARCH_READ_CONCURRENCY",
+      "SEARCH_SCHEMA",
+      "SEARCH_SKIP_DIRS",
+      "SEARCH_TIME_BUDGET_MS",
+      "SEARCH_TOOL_TIMEOUT_MS",
+      "WORKSPACE_TOOL_NAMES",
+      "buildWorkspaceNodes",
+      "buildWorkspaceTools",
+      "createWorkspaceReader",
+      "default",
+      "manifest",
+      "resolveInWorkspace"
+    ],
+    "packagedVsBundleFields": []
+  },
+  {
+    "id": "zhihu-content-pipeline",
+    "dir": "zhihu-content-pipeline",
+    "builtin": true,
+    "builtinAsset": true,
+    "packagedVsBuiltinFields": [
+      "skills",
+      "mcpServerPresets",
+      "characterPacks",
+      "agentTeamTemplates",
+      "workflowTemplates"
+    ],
+    "evaluation": "pass",
+    "exports": ["default", "manifest"],
+    "packagedVsBundleFields": [
+      "skills",
+      "mcpServerPresets",
+      "characterPacks",
+      "agentTeamTemplates",
+      "workflowTemplates"
+    ]
+  }
+]

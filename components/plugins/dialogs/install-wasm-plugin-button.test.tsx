@@ -24,12 +24,12 @@ jest.mock("@tauri-apps/plugin-dialog", () => ({
 
 jest.mock("@/lib/plugin/core/manager", () => ({
   getPluginManager: () => ({
-    installWasmPluginFromLocalFile: (...args: unknown[]) => installFromLocalMock(...args),
+    installPluginBundleFromLocalFile: (...args: unknown[]) => installFromLocalMock(...args),
   }),
 }))
 
 jest.mock("@/lib/plugin/package/local-installer", () => ({
-  previewLocalBundleManifest: (...args: unknown[]) => previewLocalBundleManifestMock(...args),
+  previewPluginBundleFromLocalFile: (...args: unknown[]) => previewLocalBundleManifestMock(...args),
 }))
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
@@ -107,7 +107,7 @@ describe("InstallWasmPluginButton", () => {
     await waitFor(() => expect(installFromLocalMock).not.toHaveBeenCalled())
   })
 
-  it("invokes installWasmPluginFromLocalFile after grant confirmation", async () => {
+  it("invokes installPluginBundleFromLocalFile after grant confirmation", async () => {
     const onInstalled = jest.fn()
     dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
     previewLocalBundleManifestMock.mockResolvedValue({
@@ -169,4 +169,23 @@ describe("InstallWasmPluginButton", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("boom")
     })
   })
+})
+
+it("installs a compiled frontend ZIP without fabricating WASM grants", async () => {
+  const manifest = { ...baseManifest, id: "demo.frontend", type: "frontend", main: "dist/index.js" }
+  const onInstalled = jest.fn()
+  dialogOpenMock.mockResolvedValue("/tmp/frontend.zip")
+  previewLocalBundleManifestMock.mockResolvedValue({
+    manifest,
+    bundleSha256: "b".repeat(64),
+    signatureVerified: false,
+  })
+  installFromLocalMock.mockResolvedValue({ manifest })
+  render(<InstallWasmPluginButton onInstalled={onInstalled} />)
+  fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
+  await waitFor(() => expect(onInstalled).toHaveBeenCalledWith("demo.frontend"))
+  expect(installFromLocalMock).toHaveBeenCalledWith("/tmp/frontend.zip", undefined, {
+    expectedBundleSha256: "b".repeat(64),
+  })
+  expect(screen.queryByTestId("wasm-capability-grant-sheet")).not.toBeInTheDocument()
 })

@@ -10,6 +10,21 @@ import {
   usePluginMarketplace,
 } from "./marketplace"
 
+const mockRegisterRegistryInstall = jest.fn(
+  async (stage: () => Promise<{ manifest: unknown; pluginId: string }>) => {
+    const staged = await stage()
+    return {
+      manifest: staged.manifest,
+      path: `/plugins/${staged.pluginId}`,
+      source: "marketplace",
+      status: "installed",
+    }
+  }
+)
+jest.mock("../core/manager", () => ({
+  getPluginManager: () => ({ installPluginFromRegistry: mockRegisterRegistryInstall }),
+}))
+
 // Mock fetch
 global.fetch = jest.fn()
 const mockFetch = global.fetch as jest.Mock
@@ -402,6 +417,7 @@ describe("PluginMarketplace", () => {
         manifest: {
           id: "trusted-plugin",
           name: "Trusted Plugin",
+          description: "A registry installation fixture",
           version: "1.0.0",
           type: "frontend",
           capabilities: [],
@@ -435,15 +451,38 @@ describe("PluginMarketplace", () => {
           if (cmd === "plugin_get_directory") {
             return "/plugins"
           }
-          if (cmd === "plugin_download_version") {
-            return { success: true, pluginId: "trusted-plugin", version: "1.0.0" }
+          if (cmd === "plugin_stage_version") {
+            return {
+              transactionId: "00000000-0000-4000-8000-000000000001",
+              pluginId: "trusted-plugin",
+              version: "1.0.0",
+              stagedPath: "/staging/trusted-plugin",
+              manifest: goodPluginPayload.manifest,
+              sizeBytes: 10,
+            }
           }
-          if (cmd === "plugin_install") {
-            return undefined
-          }
+          if (cmd === "plugin_discard_staged_update") return undefined
           throw new Error(`unexpected invoke: ${cmd}`)
         })
       })
+
+      it.each([undefined, "1.0.0"])(
+        "registers the selected registry version before completing (%s)",
+        async (version) => {
+          seedDesktopFetches()
+          mockGetSignatureVerifier.mockReturnValue({
+            verify: jest.fn(async () => ({ valid: true, warnings: [] })),
+            getConfig: () => ({ requireSignatures: false }),
+          })
+          expect((await marketplace.installPlugin("trusted-plugin", version)).success).toBe(true)
+          expect(mockRegisterRegistryInstall).toHaveBeenCalledTimes(1)
+          expect(mockInvoke).toHaveBeenCalledWith(
+            "plugin_stage_version",
+            expect.objectContaining({ version: "1.0.0" })
+          )
+          expect(mockInvoke).not.toHaveBeenCalledWith("plugin_install", expect.anything())
+        }
+      )
 
       it("(a) valid signature + toggle on → install succeeds", async () => {
         seedDesktopFetches()
@@ -461,7 +500,8 @@ describe("PluginMarketplace", () => {
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
         if (!result.success) console.warn("install failed:", result.error)
-        expect(verify).toHaveBeenCalledWith("/plugins/trusted-plugin")
+        expect(verify).not.toHaveBeenCalled()
+        expect(mockRegisterRegistryInstall).toHaveBeenCalledTimes(1)
         expect(result.success).toBe(true)
         expect(mockRecordSilentFailure).not.toHaveBeenCalled()
         // ADR-0209: the registry and exact version are recorded as the origin.
@@ -490,6 +530,9 @@ describe("PluginMarketplace", () => {
           getConfig: () => ({ requireSignatures: false }),
         })
 
+        mockRegisterRegistryInstall.mockRejectedValueOnce(
+          new Error("Signature verification failed: Cryptographic verification failed")
+        )
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
         expect(result.success).toBe(false)
@@ -514,14 +557,8 @@ describe("PluginMarketplace", () => {
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
         expect(result.success).toBe(true)
-        expect(mockRecordSilentFailure).toHaveBeenCalledWith(
-          "trusted-plugin",
-          expect.objectContaining({
-            site: "marketplace.signatureBypass",
-            expected: false,
-          }),
-          expect.any(Error)
-        )
+        // Signature policy diagnostics belong to the transactional manager.
+        expect(mockRegisterRegistryInstall).toHaveBeenCalledTimes(1)
       })
 
       it("(d) forwards the signature policy + integrity claims to the host download", async () => {
@@ -541,9 +578,7 @@ describe("PluginMarketplace", () => {
 
         await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
-        const downloadCall = mockInvoke.mock.calls.find(
-          ([cmd]) => cmd === "plugin_download_version"
-        )
+        const downloadCall = mockInvoke.mock.calls.find(([cmd]) => cmd === "plugin_stage_version")
         expect(downloadCall).toBeDefined()
         expect(downloadCall?.[1]).toEqual(
           expect.objectContaining({

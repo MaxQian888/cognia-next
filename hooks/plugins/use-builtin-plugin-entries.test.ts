@@ -39,6 +39,11 @@ function row(overrides: Partial<PluginRow> = {}): PluginRow {
 }
 
 describe("mapBuiltinRowToEntry", () => {
+  it("preserves the packaged icon and install root for Discover", () => {
+    const e = mapBuiltinRowToEntry(row({ manifest: { icon: "assets/icon.png" } }))
+    expect(e).toMatchObject({ icon: "assets/icon.png", pluginRoot: "builtin://com.cognia.cu" })
+  })
+
   it("projects a PluginRow into a built-in marketplace entry", () => {
     const e = mapBuiltinRowToEntry(row())
     expect(e).toMatchObject({

@@ -14,13 +14,13 @@ const installMock = jest.fn()
 const isPublisherKeyTrustedMock = jest.fn()
 
 jest.mock("@/lib/plugin/package/http-installer", () => ({
-  previewBundleManifest: (...args: unknown[]) => previewMock(...args),
+  previewPluginBundleFromUrl: (...args: unknown[]) => previewMock(...args),
   isPublisherKeyTrusted: (...args: unknown[]) => isPublisherKeyTrustedMock(...args),
 }))
 
 jest.mock("@/lib/plugin/core/manager", () => ({
   getPluginManager: () => ({
-    installWasmPluginFromUrl: (...args: unknown[]) => installMock(...args),
+    installPluginBundleFromUrl: (...args: unknown[]) => installMock(...args),
   }),
 }))
 
@@ -233,4 +233,33 @@ it("confirms the exact preview through manager registration only after capabilit
     expect.objectContaining({ expectedBundleSha256: "a".repeat(64) }),
     expect.objectContaining({ pluginId: "demo.wasm" })
   )
+})
+
+it("installs frontend bundles from the reviewed URL without requesting WASM capabilities", async () => {
+  const result = {
+    manifest: { ...baseManifest, id: "demo.frontend", type: "frontend", main: "dist/index.js" },
+    signatureVerified: false,
+    bundleSha256: "b".repeat(64),
+    path: "/plugins/demo.frontend",
+  }
+  previewMock.mockResolvedValue(result)
+  installMock.mockResolvedValue(result)
+  const onInstalled = jest.fn()
+  render(
+    <PluginSignedInstallFromUrlDialog open onOpenChange={() => {}} onInstalled={onInstalled} />
+  )
+  fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
+    target: { value: "https://example.com/frontend.zip" },
+  })
+  fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
+  fireEvent.click(await screen.findByTestId("install-from-url-confirm-button"))
+  await waitFor(() => expect(onInstalled).toHaveBeenCalledWith(result))
+  expect(installMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      bundleUrl: "https://example.com/frontend.zip",
+      expectedBundleSha256: "b".repeat(64),
+    }),
+    undefined
+  )
+  expect(screen.queryByTestId("wasm-capability-grant-sheet")).not.toBeInTheDocument()
 })

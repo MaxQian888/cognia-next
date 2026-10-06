@@ -1,6 +1,23 @@
 import { resolvePluginIcon } from "./icon"
 
 describe("resolvePluginIcon", () => {
+  it("serves a built-in plugin's packaged image from the staged public asset tree", () => {
+    expect(
+      resolvePluginIcon({ icon: "assets/icon.png", pluginRoot: "builtin://cognia-ocr" })
+    ).toEqual({
+      kind: "image",
+      src: "/_cognia/plugin-icons/cognia-ocr/assets/icon.png",
+      original: "assets/icon.png",
+      transport: "public",
+    })
+  })
+
+  it("rejects traversal out of a built-in plugin's asset directory", () => {
+    expect(
+      resolvePluginIcon({ icon: "../other/icon.png", pluginRoot: "builtin://cognia-ocr" })
+    ).toMatchObject({ kind: "fallback", reason: "outside-plugin-root" })
+  })
+
   it("treats Lucide icon names as lucide icons", () => {
     expect(
       resolvePluginIcon({

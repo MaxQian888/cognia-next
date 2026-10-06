@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["tools", "importers"],
   "main": "src/index.ts",
-  "icon": "FileSpreadsheet",
+  "icon": "assets/icon.png",
   "keywords": ["xlsx", "excel", "spreadsheet", "workbook", "lark"],
   "author": { "name": "cognia-next" },
   "license": "MIT",

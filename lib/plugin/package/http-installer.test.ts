@@ -11,7 +11,13 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
 
-import { installFromUrl, previewBundleManifest, isPublisherKeyTrusted } from "./http-installer"
+import {
+  previewPluginBundleFromUrl,
+  installPluginBundleFromUrl,
+  installFromUrl,
+  previewBundleManifest,
+  isPublisherKeyTrusted,
+} from "./http-installer"
 import { getDb } from "@/lib/db/schema"
 
 function setTauri(present: boolean) {
@@ -239,4 +245,33 @@ it("discards a staged response that did not verify the required signature", asyn
     pluginId: "test.plugin",
     transactionId: "stage",
   })
+})
+
+describe("generic frontend bundles", () => {
+  it.each([true, false])(
+    "uses the generic host endpoint with previewOnly=%s",
+    async (previewOnly) => {
+      const manifest = { ...baseManifest, type: "frontend", main: "dist/index.js" }
+      invokeMock.mockResolvedValueOnce({
+        manifest,
+        path: "/plugins/frontend",
+        signatureVerified: false,
+        bundleSha256: "a".repeat(64),
+        transactionId: previewOnly ? undefined : "txn",
+      })
+      const result = await (previewOnly ? previewPluginBundleFromUrl : installPluginBundleFromUrl)({
+        bundleUrl: "https://example.com/frontend.zip",
+        deferCommit: true,
+      })
+      expect(result.manifest.type).toBe("frontend")
+      expect(invokeMock).toHaveBeenCalledWith(
+        "plugin_bundle_install_from_url",
+        expect.objectContaining({
+          bundleUrl: "https://example.com/frontend.zip",
+          previewOnly,
+          deferCommit: true,
+        })
+      )
+    }
+  )
 })

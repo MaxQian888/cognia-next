@@ -8,16 +8,16 @@
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-game-worlds-theme/assets/worlds-emblem.svg",
+  "icon": "assets/icon.png",
   "screenshots": [
-    "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
-    "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
-    "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
-    "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp",
-    "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
-    "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp",
-    "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp",
-    "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
+    "assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
+    "assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
+    "assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
+    "assets/girls-frontline-2/groza-elmo-briefing.webp",
+    "assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
+    "assets/nikke/rapi-red-hood-ark-hangar.webp",
+    "assets/blue-archive/hoshino-abydos-afternoon.webp",
+    "assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
   ],
   "keywords": [
     "anime",
@@ -1035,8 +1035,8 @@
       "name": "FINALITY // Lunar Dawn",
       "description": "A quiet violet sunrise beyond the lunar observation deck.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp"
+        "light": "assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
+        "dark": "assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp"
       },
       "applies": {
         "themeId": "finality-cosmos",
@@ -1050,8 +1050,8 @@
       "name": "ORIGIN // Hyperion Rain",
       "description": "Rain, tea, and restrained violet light on the garden deck.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp"
+        "light": "assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp",
+        "dark": "assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp"
       },
       "applies": {
         "themeId": "finality-cosmos",
@@ -1065,8 +1065,8 @@
       "name": "EGO // Crystal Garden",
       "description": "Soft rose crystal light with generous, luminous workspace.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp"
+        "light": "assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp",
+        "dark": "assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp"
       },
       "applies": {
         "themeId": "finality-cosmos",
@@ -1080,8 +1080,8 @@
       "name": "BLACK SHORES // Blue Hour",
       "description": "A star-blue coast and a single luminous butterfly.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp"
+        "light": "assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
+        "dark": "assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp"
       },
       "applies": {
         "themeId": "resonance-tide",
@@ -1095,8 +1095,8 @@
       "name": "CAMELLYA // Rain Greenhouse",
       "description": "Wet glass, quiet foliage, and restrained crimson accents.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/camellya-rain-greenhouse.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/camellya-rain-greenhouse.webp"
+        "light": "assets/wuthering-waves/camellya-rain-greenhouse.webp",
+        "dark": "assets/wuthering-waves/camellya-rain-greenhouse.webp"
       },
       "applies": {
         "themeId": "resonance-tide",
@@ -1110,8 +1110,8 @@
       "name": "JINZHOU // Dawn Briefing",
       "description": "Warm mountain air and pale ceremonial teal at sunrise.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/jinhsi-jinzhou-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/jinhsi-jinzhou-dawn.webp"
+        "light": "assets/wuthering-waves/jinhsi-jinzhou-dawn.webp",
+        "dark": "assets/wuthering-waves/jinhsi-jinzhou-dawn.webp"
       },
       "applies": {
         "themeId": "resonance-tide",
@@ -1125,8 +1125,8 @@
       "name": "CRIMSON WEAVE // Metro Dawn",
       "description": "A measured maintenance break in a rain-dark service bay.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp"
+        "light": "assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
+        "dark": "assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp"
       },
       "applies": {
         "themeId": "construct-signal",
@@ -1140,8 +1140,8 @@
       "name": "STIGMATA // Cathedral Light",
       "description": "Graphite surfaces shaped by quiet silver window light.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp"
+        "light": "assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp",
+        "dark": "assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp"
       },
       "applies": {
         "themeId": "construct-signal",
@@ -1155,8 +1155,8 @@
       "name": "CAPRICCIO // Empty Stage",
       "description": "A dark concert hall balanced by cyan frame light.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/selena-capriccio-empty-stage.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/selena-capriccio-empty-stage.webp"
+        "light": "assets/punishing-gray-raven/selena-capriccio-empty-stage.webp",
+        "dark": "assets/punishing-gray-raven/selena-capriccio-empty-stage.webp"
       },
       "applies": {
         "themeId": "construct-signal",
@@ -1170,8 +1170,8 @@
       "name": "ELMO // Warm Briefing Bay",
       "description": "Amber expedition light over disciplined tactical surfaces.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp"
+        "light": "assets/girls-frontline-2/groza-elmo-briefing.webp",
+        "dark": "assets/girls-frontline-2/groza-elmo-briefing.webp"
       },
       "applies": {
         "themeId": "elmo-expedition",
@@ -1185,8 +1185,8 @@
       "name": "SUOMI // Snow Lantern",
       "description": "A warm lantern against a blue winter outpost.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/suomi-snow-outpost.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/suomi-snow-outpost.webp"
+        "light": "assets/girls-frontline-2/suomi-snow-outpost.webp",
+        "dark": "assets/girls-frontline-2/suomi-snow-outpost.webp"
       },
       "applies": {
         "themeId": "elmo-expedition",
@@ -1200,8 +1200,8 @@
       "name": "MAKIATTO // Rain Overwatch",
       "description": "A muted rooftop pause with a distant city horizon.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/makiatto-rain-overwatch.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/makiatto-rain-overwatch.webp"
+        "light": "assets/girls-frontline-2/makiatto-rain-overwatch.webp",
+        "dark": "assets/girls-frontline-2/makiatto-rain-overwatch.webp"
       },
       "applies": {
         "themeId": "elmo-expedition",
@@ -1215,8 +1215,8 @@
       "name": "INFINITE SIGHT // Lab Dawn",
       "description": "Crystal-blue calibration light inside a living laboratory.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp"
+        "light": "assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
+        "dark": "assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp"
       },
       "applies": {
         "themeId": "containment-frost",
@@ -1230,8 +1230,8 @@
       "name": "JADE ARC // Lantern Rain",
       "description": "Warm archive lanterns framed by a rain-blue mountain city.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/chenxing-jade-arc-lantern-rain.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/chenxing-jade-arc-lantern-rain.webp"
+        "light": "assets/snowbreak/chenxing-jade-arc-lantern-rain.webp",
+        "dark": "assets/snowbreak/chenxing-jade-arc-lantern-rain.webp"
       },
       "applies": {
         "themeId": "containment-frost",
@@ -1245,8 +1245,8 @@
       "name": "BLUE BOLT // Frost Terminal",
       "description": "Clean glacial light and a spacious silent terminal.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/katya-blue-bolt-frost-terminal.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/katya-blue-bolt-frost-terminal.webp"
+        "light": "assets/snowbreak/katya-blue-bolt-frost-terminal.webp",
+        "dark": "assets/snowbreak/katya-blue-bolt-frost-terminal.webp"
       },
       "applies": {
         "themeId": "containment-frost",
@@ -1260,8 +1260,8 @@
       "name": "RED HOOD // Ark Sunrise",
       "description": "Scarlet equipment light against a warm hangar sunrise.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp"
+        "light": "assets/nikke/rapi-red-hood-ark-hangar.webp",
+        "dark": "assets/nikke/rapi-red-hood-ark-hangar.webp"
       },
       "applies": {
         "themeId": "ark-scarlet",
@@ -1275,8 +1275,8 @@
       "name": "CINDERELLA // Glass Observatory",
       "description": "Moonlit white machinery reflected across silent glass.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/cinderella-glass-observatory.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/cinderella-glass-observatory.webp"
+        "light": "assets/nikke/cinderella-glass-observatory.webp",
+        "dark": "assets/nikke/cinderella-glass-observatory.webp"
       },
       "applies": {
         "themeId": "ark-scarlet",
@@ -1290,8 +1290,8 @@
       "name": "EDEN // After the Rain",
       "description": "Rose-white garden light and a calm skyline after rain.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/dorothy-eden-rain-garden.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/dorothy-eden-rain-garden.webp"
+        "light": "assets/nikke/dorothy-eden-rain-garden.webp",
+        "dark": "assets/nikke/dorothy-eden-rain-garden.webp"
       },
       "applies": {
         "themeId": "ark-scarlet",
@@ -1305,8 +1305,8 @@
       "name": "ABYDOS // Sleepy Afternoon",
       "description": "A warm empty classroom with a gentle pink-cyan balance.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp"
+        "light": "assets/blue-archive/hoshino-abydos-afternoon.webp",
+        "dark": "assets/blue-archive/hoshino-abydos-afternoon.webp"
       },
       "applies": {
         "themeId": "academy-blue-hour",
@@ -1320,8 +1320,8 @@
       "name": "MILLENNIUM // Night Repair",
       "description": "Deep blue clubroom light with crisp cyan focus accents.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/aris-millennium-night.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/aris-millennium-night.webp"
+        "light": "assets/blue-archive/aris-millennium-night.webp",
+        "dark": "assets/blue-archive/aris-millennium-night.webp"
       },
       "applies": {
         "themeId": "academy-blue-hour",
@@ -1335,8 +1335,8 @@
       "name": "GEHENNA // Before Dawn",
       "description": "A quiet violet office designed for focused late work.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hina-gehenna-before-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hina-gehenna-before-dawn.webp"
+        "light": "assets/blue-archive/hina-gehenna-before-dawn.webp",
+        "dark": "assets/blue-archive/hina-gehenna-before-dawn.webp"
       },
       "applies": {
         "themeId": "academy-blue-hour",
@@ -1350,8 +1350,8 @@
       "name": "MBCC // Rain Corridor",
       "description": "Controlled graphite noir with a restrained wine accent.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
+        "light": "assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp",
+        "dark": "assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
       },
       "applies": {
         "themeId": "minos-noir",
@@ -1365,8 +1365,8 @@
       "name": "ADELA // Fog Salon",
       "description": "Midnight salon mirrors, pale structure, and blue steel.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/adela-fog-salon.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/adela-fog-salon.webp"
+        "light": "assets/path-to-nowhere/adela-fog-salon.webp",
+        "dark": "assets/path-to-nowhere/adela-fog-salon.webp"
       },
       "applies": {
         "themeId": "minos-noir",
@@ -1380,8 +1380,8 @@
       "name": "HAMEL // Silent Theater",
       "description": "Violet stage water and a broad meditative workspace.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/hamel-silent-theater.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/hamel-silent-theater.webp"
+        "light": "assets/path-to-nowhere/hamel-silent-theater.webp",
+        "dark": "assets/path-to-nowhere/hamel-silent-theater.webp"
       },
       "applies": {
         "themeId": "minos-noir",
@@ -1395,8 +1395,8 @@
       "name": "TRUTH // Snow Workshop",
       "description": "Clean cyan machinery against a broad winter morning.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp"
+        "light": "assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp",
+        "dark": "assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp"
       },
       "applies": {
         "themeId": "finality-cosmos",
@@ -1410,8 +1410,8 @@
       "name": "VICISSITUDE // Tea Pavilion",
       "description": "Warm phoenix dusk and a calm mountain workspace.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp"
+        "light": "assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp",
+        "dark": "assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp"
       },
       "applies": {
         "themeId": "finality-cosmos",
@@ -1425,8 +1425,8 @@
       "name": "CHANGLI // Summer Rain",
       "description": "A warm strategy room framed by cool Jinzhou rain.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/changli-jinzhou-summer-rain.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/changli-jinzhou-summer-rain.webp"
+        "light": "assets/wuthering-waves/changli-jinzhou-summer-rain.webp",
+        "dark": "assets/wuthering-waves/changli-jinzhou-summer-rain.webp"
       },
       "applies": {
         "themeId": "resonance-tide",
@@ -1440,8 +1440,8 @@
       "name": "PHOEBE // Basilica Morning",
       "description": "Airy gold-blue garden light with generous quiet space.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/phoebe-basilica-morning.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/phoebe-basilica-morning.webp"
+        "light": "assets/wuthering-waves/phoebe-basilica-morning.webp",
+        "dark": "assets/wuthering-waves/phoebe-basilica-morning.webp"
       },
       "applies": {
         "themeId": "resonance-tide",
@@ -1455,8 +1455,8 @@
       "name": "LIV // Healing Garden",
       "description": "Soft white medical light settling into a living garden.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/liv-babylonia-healing-garden.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/liv-babylonia-healing-garden.webp"
+        "light": "assets/punishing-gray-raven/liv-babylonia-healing-garden.webp",
+        "dark": "assets/punishing-gray-raven/liv-babylonia-healing-garden.webp"
       },
       "applies": {
         "themeId": "construct-signal",
@@ -1470,8 +1470,8 @@
       "name": "VERA ROZEN // Night Garage",
       "description": "Cerberus red task lights over a focused graphite bay.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/vera-rozen-night-garage.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/vera-rozen-night-garage.webp"
+        "light": "assets/punishing-gray-raven/vera-rozen-night-garage.webp",
+        "dark": "assets/punishing-gray-raven/vera-rozen-night-garage.webp"
       },
       "applies": {
         "themeId": "construct-signal",
@@ -1485,8 +1485,8 @@
       "name": "DAIYAN // Rain Melody",
       "description": "A quiet cabin melody overlooking a rain-softened route.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/daiyan-elmo-rain-melody.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/daiyan-elmo-rain-melody.webp"
+        "light": "assets/girls-frontline-2/daiyan-elmo-rain-melody.webp",
+        "dark": "assets/girls-frontline-2/daiyan-elmo-rain-melody.webp"
       },
       "applies": {
         "themeId": "elmo-expedition",
@@ -1500,8 +1500,8 @@
       "name": "KLUKAI // Safehouse Dawn",
       "description": "Warm blind light and disciplined purple tactical surfaces.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/klukai-safehouse-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/klukai-safehouse-dawn.webp"
+        "light": "assets/girls-frontline-2/klukai-safehouse-dawn.webp",
+        "dark": "assets/girls-frontline-2/klukai-safehouse-dawn.webp"
       },
       "applies": {
         "themeId": "elmo-expedition",
@@ -1515,8 +1515,8 @@
       "name": "FENNY // Training Break",
       "description": "A warm empty training hall with bright field accents.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/fenny-coronet-training-break.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/fenny-coronet-training-break.webp"
+        "light": "assets/snowbreak/fenny-coronet-training-break.webp",
+        "dark": "assets/snowbreak/fenny-coronet-training-break.webp"
       },
       "applies": {
         "themeId": "containment-frost",
@@ -1530,8 +1530,8 @@
       "name": "SHADOW KA // Desert Twilight",
       "description": "Warm desert distance balanced by restrained cyan containment light.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp"
+        "light": "assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp",
+        "dark": "assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp"
       },
       "applies": {
         "themeId": "containment-frost",
@@ -1545,8 +1545,8 @@
       "name": "BLACK SHADOW // Snow Shrine",
       "description": "Blue winter silence held beside a low scarlet hearth.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/scarlet-black-shadow-snow-shrine.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/scarlet-black-shadow-snow-shrine.webp"
+        "light": "assets/nikke/scarlet-black-shadow-snow-shrine.webp",
+        "dark": "assets/nikke/scarlet-black-shadow-snow-shrine.webp"
       },
       "applies": {
         "themeId": "ark-scarlet",
@@ -1560,8 +1560,8 @@
       "name": "MODERNIA // Ark Greenhouse",
       "description": "Soft glasshouse daylight across graphite-gold machinery.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/modernia-ark-greenhouse.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/modernia-ark-greenhouse.webp"
+        "light": "assets/nikke/modernia-ark-greenhouse.webp",
+        "dark": "assets/nikke/modernia-ark-greenhouse.webp"
       },
       "applies": {
         "themeId": "ark-scarlet",
@@ -1575,8 +1575,8 @@
       "name": "ABYDOS // Bike Dawn",
       "description": "Cyan morning air over an open desert-school rooftop.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/shiroko-abydos-bike-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/shiroko-abydos-bike-dawn.webp"
+        "light": "assets/blue-archive/shiroko-abydos-bike-dawn.webp",
+        "dark": "assets/blue-archive/shiroko-abydos-bike-dawn.webp"
       },
       "applies": {
         "themeId": "academy-blue-hour",
@@ -1590,8 +1590,8 @@
       "name": "TRINITY // Rain Courtyard",
       "description": "Pale violet rain and a softly rounded academy workspace.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/mika-trinity-rain-courtyard.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/mika-trinity-rain-courtyard.webp"
+        "light": "assets/blue-archive/mika-trinity-rain-courtyard.webp",
+        "dark": "assets/blue-archive/mika-trinity-rain-courtyard.webp"
       },
       "applies": {
         "themeId": "academy-blue-hour",
@@ -1605,8 +1605,8 @@
       "name": "SYNDICATE // Garage Dawn",
       "description": "Hard graphite structure cut by a single warm sunrise.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp"
+        "light": "assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp",
+        "dark": "assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp"
       },
       "applies": {
         "themeId": "minos-noir",
@@ -1620,8 +1620,8 @@
       "name": "CABERNET // After the Banquet",
       "description": "Wine-red elegance in a quiet New City night kitchen.",
       "preview": {
-        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/cabernet-after-banquet.webp",
-        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/cabernet-after-banquet.webp"
+        "light": "assets/path-to-nowhere/cabernet-after-banquet.webp",
+        "dark": "assets/path-to-nowhere/cabernet-after-banquet.webp"
       },
       "applies": {
         "themeId": "minos-noir",

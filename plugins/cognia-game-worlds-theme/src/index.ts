@@ -702,8 +702,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
   },
 ]
 
-const assetBase = "/plugins/cognia-game-worlds-theme/"
-
 const wallpapers = wallpaperSpecs.map(({ id, name, asset }) =>
   defineWallpaper({
     id,
@@ -747,8 +745,8 @@ const themePacks = wallpaperSpecs.map((spec) =>
     name: spec.packName,
     description: spec.description,
     preview: {
-      light: `${assetBase}${spec.asset}`,
-      dark: `${assetBase}${spec.asset}`,
+      light: spec.asset,
+      dark: spec.asset,
     },
     applies: {
       themeId: spec.themeId,

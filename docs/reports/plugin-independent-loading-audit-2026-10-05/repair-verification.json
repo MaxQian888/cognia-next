@@ -1,0 +1,59 @@
+{
+  "verifiedAt": "2026-10-06",
+  "frontendPackages": 62,
+  "builtinPackages": 52,
+  "productionBuiltins": 51,
+  "jest": {
+    "suites": 30,
+    "tests": 744,
+    "failed": 0
+  },
+  "buildScriptTests": 36,
+  "productionBuild": {
+    "exitCode": 0,
+    "staticPages": 127,
+    "webpackCache": false
+  },
+  "typecheck": {
+    "exitCode": 2,
+    "diagnostics": [
+      "cli/src/agent/external-agent-session.test.ts(2705,41): error TS2345: Argument of type '{ type: \"permission_request\"; sessionId: string; requestId: string; toolName: string; input: {}; }' is not assignable to parameter of type 'PermissionRequestEvent'.",
+      "cli/src/agent/external-agent-session.ts(1320,61): error TS2345: Argument of type 'string' is not assignable to parameter of type 'string & AcpElicitationResponse'.",
+      "cli/src/agent/external-agent-session.ts(2007,58): error TS2345: Argument of type 'ExternalAgentManager | ExternalAgentSessionManager' is not assignable to parameter of type 'ExternalAgentSessionManager'.",
+      "cli/src/agent/external-agent-session.ts(2015,35): error TS2345: Argument of type 'ExternalAgentManager | ExternalAgentSessionManager' is not assignable to parameter of type 'ExternalAgentSessionManager'.",
+      "cli/src/agent/external-agent-session.ts(2030,60): error TS2345: Argument of type 'ExternalAgentManager | ExternalAgentSessionManager' is not assignable to parameter of type 'ExternalAgentSessionManager'.",
+      "cli/src/agent/external-agent-session.ts(2038,37): error TS2345: Argument of type 'ExternalAgentManager | ExternalAgentSessionManager' is not assignable to parameter of type 'ExternalAgentSessionManager'.",
+      "cli/src/tui/state/event-mapper.ts(177,52): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.",
+      "cli/src/tui/state/event-mapper.ts(328,17): error TS2561: Object literal may only specify known properties, but 'sessionId' does not exist in type 'RunAndCaptureResult'. Did you mean to write 'sdkSessionId'?",
+      "components/connectivity/pair/pair-failure-panel.stories.tsx(79,18): error TS2322: Type '\"reloadAndRetry\"' is not assignable to type 'PairRemedy'.",
+      "hooks/chat/use-claude-chat.test.ts(3875,9): error TS2769: No overload matches this call.",
+      "lib/ai/agent/external/manager.test.ts(4385,3): error TS2322: Type 'Mock<Promise<{ metadata: { restarted: boolean; }; id: string; agentId: string; status: ExternalAgentSessionStatus; permissionMode?: AcpPermissionMode | undefined; ... 9 more ...; error?: string | undefined; }>, [], any>' is not assignable to type 'Mock<Promise<ExternalAgentSession>, [string], any>'.",
+      "lib/ai/agent/external/manager.test.ts(4521,3): error TS2322: Type 'Mock<Promise<{ id: string; agentId: string; status: ExternalAgentSessionStatus; permissionMode?: AcpPermissionMode | undefined; allowedTools?: string[] | undefined; ... 9 more ...; metadata?: Record<...> | undefined; }>, [], any>' is not assignable to type 'Mock<Promise<ExternalAgentSession>, [string], any>'.",
+      "lib/ai/agent/external/runtimes/remote/remote-run-service.test.ts(831,5): error TS2322: Type 'Mock<{ id: string; agentId: string; status: \"ready\"; createdAt: Date; lastActivityAt: Date; }, [], any>' is not assignable to type '(agentId: string, sessionId: string) => ExternalAgentSession | undefined'.",
+      "lib/ai/agent/external/runtimes/remote/remote-run-service.test.ts(840,5): error TS2322: Type 'Mock<Promise<{ id: string; type: string; forkAt: { kind: string; id: string; boundary: string; }; }[]>, [], any>' is not assignable to type '(agentId: string, sessionId: string, since?: string | undefined) => Promise<ExternalAgentSessionEntry[]>'.",
+      "lib/ai/agent/external/runtimes/remote/remote-run-service.test.ts(905,7): error TS2322: Type 'string' is not assignable to type '{ type: \"text\" | \"thinking\"; text: string; }'.",
+      "lib/identity/personal-sign-in.test.ts(30,14): error TS2352: Conversion of type '{ localAccountId: string; userId: string; logtoSubject: string; logtoIssuer: string; createdAt: number; updatedAt: number; }' to type 'UserBindingRow' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "lib/push/push-notifications.ts(136,11): error TS2322: Type 'number' is not assignable to type 'Timeout'."
+    ]
+  },
+  "sdk": {
+    "typedExports": 55,
+    "declarationFiles": 84,
+    "authorDeclarations": 81,
+    "packageBuild": true,
+    "packedConsumer": true,
+    "scaffold": {
+      "install": true,
+      "typecheck": true,
+      "tests": 15,
+      "zipBuild": true
+    },
+    "buildValidatorTests": 5,
+    "authorToolTests": 9,
+    "buildConfigTypecheck": true
+  },
+  "i18n": {
+    "freshness": true,
+    "lint": true
+  }
+}

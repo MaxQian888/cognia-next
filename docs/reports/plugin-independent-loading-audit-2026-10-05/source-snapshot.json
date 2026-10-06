@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-05",
+  "timezone": "Asia/Shanghai",
+  "root": "/Users/bytedance/Project/cognia-next",
+  "head": "c932f327541e8e5af157d5159863d18a7dee5450",
+  "sourceSha256": {
+    "lib/plugin/core/browser-builtin-registry.ts": "fe135082bd4cc2ead9659f8428b4f0cb2c850fcb8da58cd939829677e0d7431e",
+    "lib/plugin/core/loader.ts": "6b447234737778eec6d1a1090274459d5833a896aedb6eda0449f63911ad2798",
+    "lib/plugin/core/manager.ts": "5d2fef76f5a0bc25c3c3bd5fd58ebc0823b438aa3d8b08a75a141058dc12e9e9",
+    "lib/plugin/core/manifest-parity.ts": "39819ff47f7b18f7b61c3e972d1517a19c6987bb52cabde967e8f11cb0571fe7",
+    "lib/plugin/core/sdk-subpath-loaders.ts": "05a83b9b59d426a251f48be9356bf22c476c0fd9bcb93e14ec4ca8926d76f86d",
+    "lib/plugin/package/marketplace.ts": "901160b4c4b1cc4eb2a329ed6956464ec3a47ec0401e48b629cc03c76f493209",
+    "lib/plugin/distribution/seed-bundled-plugins.ts": "893fa610258f3476cb842ccc0b346d17f46f9af58300055d995021e043c6fdbc",
+    "stores/plugin-runtime/plugin-store.ts": "cebbafbfee64c7a0df8833fa812f0dfbab009c65677f5e841aba2638e3591441",
+    "crates/cognia-cli/src/engine/frontend_build.rs": "ac18111d863da7cbdfb8a95358d4a834619c6b6046f3f679c8d990f4b3d89a62",
+    "crates/cognia-plugin-runtime/src/lifecycle.rs": "fb9acb198ecffcdf21e703e58af4372a88c5f36da20f083f946d96d9d34932c0",
+    "crates/cognia-plugin-runtime/src/marketplace.rs": "6e7385750bcba8a3d5b4c9baace5f7abe17dae5705c223bc1d9ab9796285eca3",
+    "cli/src/plugin/node-importer.ts": "df4f34896c03fd1c095164846d4cd577daca6c884b811ba44456cedef44a00cc",
+    "packages/plugin-sdk/package.json": "64244c654232bd79545ac1d6b567befec30ba1b90d072bf0c0c76112414c3860"
+  },
+  "scope": "Shared working tree, including pre-existing uncommitted changes; hashes captured after the probes."
+}

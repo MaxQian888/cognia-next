@@ -3,6 +3,7 @@
   "name": "Scheduling Demo (example)",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Example plugin (opt-in): a benign, paused-by-default daily task whose handler logs a heartbeat, showing the scheduledTasks contribution. Enabling it adds one example row to the scheduler; disabling removes it.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

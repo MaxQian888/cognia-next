@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-honkai-star-rail-theme/assets/astral-emblem.svg",
+  "icon": "assets/icon.png",
   "screenshots": [
     "/plugins/cognia-honkai-star-rail-theme/assets/characters/kafka-rain-station.webp",
     "/plugins/cognia-honkai-star-rail-theme/assets/characters/firefly-hangar-sunrise.webp",

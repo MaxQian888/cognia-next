@@ -3,6 +3,7 @@
   "name": "Share Watch (example)",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Example plugin (opt-in) for plugin authors: shows how to receive public-share-link hooks. It adds no UI — each link created or revoked is written as one line (share code and fragment-free URL, never the key) to this plugin's log (Plugins → Share Watch → Logs).",
   "descriptionKey": "manifest.description",
   "type": "frontend",

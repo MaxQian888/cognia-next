@@ -73,6 +73,15 @@ describe("wrapWebviewHtml", () => {
     expect(editorBacked).toContain("acquireCogniaEditorApi")
   })
 
+  it("mirrors document operations only for project-enabled webviews", () => {
+    expect(wrapWebviewHtml("", { designTokensCss: "" })).not.toContain("acquireCogniaProjectApi")
+    const html = wrapWebviewHtml("", { projectApi: true, designTokensCss: "" })
+    expect(html).toContain("acquireCogniaProjectApi")
+    expect(html).toContain("readKnowledgeRange")
+    expect(html).toContain("event.source !== window.parent")
+    expect(html).toContain('"pagehide"')
+  })
+
   it("does not hand editor access to a plugin that only renders a panel", () => {
     // The whole point of the separate flag: rendering a panel is not grounds
     // for writing into the file the user is editing.

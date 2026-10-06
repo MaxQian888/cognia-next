@@ -6,6 +6,7 @@
       "reason": "ADR-0146 product subsystem: repository wiki generation, dependency graph, cited search. Its 326-case pytest suite ships as source in the repo, not in the installer.",
       "include": [
         "plugin.json",
+        "assets/icon.png",
         "main.py",
         "pyproject.toml",
         "README.md",
@@ -16,7 +17,14 @@
     "cognia-laya-guard": {
       "id": "cognia-laya-guard",
       "reason": "ADR-0194 decision provider: Settings → Conversation → Decision provider lists \"Laya (local)\", and the inbound IM moderation hook ships with it. Seeded but manual-enable only, because activation provisions a Python venv and downloads the laya checkpoint. Calibration tools and the pytest suite stay in the repo.",
-      "include": ["plugin.json", "main.py", "pyproject.toml", "README.md", "layaguard/**/*.py"]
+      "include": [
+        "plugin.json",
+        "assets/icon.png",
+        "main.py",
+        "pyproject.toml",
+        "README.md",
+        "layaguard/**/*.py"
+      ]
     }
   },
   "devOnly": {

@@ -51,6 +51,17 @@ describe("built-in plugin manifests", () => {
   })
 
   it.each(manifests.map((m) => [m.plugin, m] as const))(
+    "%s ships its own PNG identity artwork",
+    (plugin, manifest) => {
+      expect(manifest.json.icon).toBe("assets/icon.png")
+      const png = readFileSync(join(PLUGINS_DIR, plugin, "assets/icon.png"))
+      expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a")
+      expect(png.readUInt32BE(16)).toBeGreaterThanOrEqual(128)
+      expect(png.readUInt32BE(20)).toBe(png.readUInt32BE(16))
+    }
+  )
+
+  it.each(manifests.map((m) => [m.plugin, m] as const))(
     "%s declares only canonical runtimeCompatibility keys",
     (_plugin, manifest) => {
       const compat = manifest.json.runtimeCompatibility as Record<string, unknown> | undefined

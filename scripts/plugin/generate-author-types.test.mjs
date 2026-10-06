@@ -2,6 +2,8 @@ import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import ts from "typescript"
 import { test } from "node:test"
 
 import {
@@ -59,5 +61,30 @@ test("author build rejects internal externals and escaped host imports", () => {
       () => assertStandaloneDeclaration(`type Value = import("${specifier}").Value`),
       /flatten internal imports/
     )
+  }
+})
+
+test("SDK author declarations resolve AgentTeam contracts and policies from canonical source", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url))
+  const configPath = join(root, "packages/plugin-sdk/tsconfig.json")
+  const config = ts.readConfigFile(configPath, ts.sys.readFile)
+  assert.equal(config.error, undefined)
+  const parsed = ts.parseJsonConfigFileContent(
+    config.config,
+    ts.sys,
+    join(root, "packages/plugin-sdk")
+  )
+  for (const [specifier, source] of [
+    ["@cognia/agent-orchestration/records", "agent-orchestration/src/records.ts"],
+    ["@cognia/agent-runtime-kit/permission-modes", "agent-runtime-kit/src/permission-modes.ts"],
+    ["@cognia/sync-protocol", "sync-protocol/src/index.ts"],
+  ]) {
+    const resolved = ts.resolveModuleName(
+      specifier,
+      join(root, "types/agent/agent-team-runtime.ts"),
+      parsed.options,
+      ts.sys
+    ).resolvedModule
+    assert.equal(resolved?.resolvedFileName, join(root, "packages", source))
   }
 })

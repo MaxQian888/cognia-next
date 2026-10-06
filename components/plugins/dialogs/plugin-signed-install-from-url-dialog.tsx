@@ -1,11 +1,11 @@
 "use client"
 
 /**
- * "Install from URL" dialog for signed WASM plugin bundles.
+ * "Install from URL" dialog for compiled frontend and WASM plugin bundles.
  *
  * Flow:
  *   1. user enters bundle URL + (optional) signature URL + author key
- *   2. we call `previewBundleManifest` to validate the manifest server-
+ *   2. we call `previewPluginBundleFromUrl` to validate the manifest server-
  *      side without committing
  *   3. show manifest summary + author fingerprint
  *      - if publisher is already trusted: skip step 4 entirely
@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import {
-  previewBundleManifest,
+  previewPluginBundleFromUrl,
   isPublisherKeyTrusted,
   type HttpInstallResult,
 } from "@/lib/plugin/package/http-installer"
@@ -108,7 +108,7 @@ export function PluginSignedInstallFromUrlDialog({
     setPreview(null)
     try {
       setStage("previewing")
-      const result = await previewBundleManifest({
+      const result = await previewPluginBundleFromUrl({
         bundleUrl: bundleUrl.trim(),
         signatureUrl: signatureUrl.trim() || undefined,
         expectedPublicKeyBase64: publicKey.trim() || undefined,
@@ -140,22 +140,26 @@ export function PluginSignedInstallFromUrlDialog({
         throw new Error(trustRequiredError)
       }
       if (!preview.bundleSha256) throw new Error(t("previewIntegrityError"))
-      setStage("granting")
-      const decision = await requestGrant({
-        manifest: preview.manifest,
-        authorFingerprint:
-          preview.signatureVerified && preview.authorFingerprint
-            ? shortFingerprint(preview.authorFingerprint)
-            : undefined,
-        persist: false,
-      })
-      if (attempt !== attemptRef.current) return
-      if (!decision) {
-        setStage("preview")
-        return
+      let grantDecision
+      if (preview.manifest.type === "wasm") {
+        setStage("granting")
+        const decision = await requestGrant({
+          manifest: preview.manifest,
+          authorFingerprint:
+            preview.signatureVerified && preview.authorFingerprint
+              ? shortFingerprint(preview.authorFingerprint)
+              : undefined,
+          persist: false,
+        })
+        if (attempt !== attemptRef.current) return
+        if (!decision) {
+          setStage("preview")
+          return
+        }
+        grantDecision = decision.decision
       }
       setStage("installing")
-      const result = await getPluginManager().installWasmPluginFromUrl(
+      const result = await getPluginManager().installPluginBundleFromUrl(
         {
           bundleUrl: bundleUrl.trim(),
           signatureUrl: signatureUrl.trim() || undefined,
@@ -163,7 +167,7 @@ export function PluginSignedInstallFromUrlDialog({
           expectedBundleSha256: preview.bundleSha256,
           requireSignature: preview.signatureVerified,
         },
-        decision.decision
+        grantDecision
       )
       if (attempt !== attemptRef.current) return
       onInstalled?.(result)

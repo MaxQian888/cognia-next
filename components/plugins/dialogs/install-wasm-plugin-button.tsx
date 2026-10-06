@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * "Install local WASM plugin" entry button + the underlying flow hook.
+ * "Install local plugin bundle" entry button + the underlying flow hook.
  *
  * Flow:
  *   1. preview the manifest without installing so we can show the user
@@ -26,7 +26,7 @@ import { canUseTauriInvoke } from "@/lib/native/utils"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import { useWasmCapabilityGrant } from "@/hooks/plugins/use-wasm-capability-grant"
 import { shortFingerprint } from "@/lib/plugin/security/signature"
-import { previewLocalBundleManifest } from "@/lib/plugin/package/local-installer"
+import { previewPluginBundleFromLocalFile } from "@/lib/plugin/package/local-installer"
 
 export interface InstallWasmPluginButtonProps {
   className?: string
@@ -98,25 +98,26 @@ export function useInstallWasmFromLocal(
       if (!picked.path.toLowerCase().endsWith(".zip")) {
         throw new Error(t("zipRequiredError"))
       }
-      const preview = await previewLocalBundleManifest({ bundlePath: picked.path })
+      const preview = await previewPluginBundleFromLocalFile({ bundlePath: picked.path })
       if (!preview.bundleSha256) throw new Error(t("previewIntegrityError"))
       const authorFingerprint =
         preview.signatureVerified && preview.authorFingerprint
           ? shortFingerprint(preview.authorFingerprint)
           : undefined
 
-      const decision = await grant.requestGrant({
-        manifest: preview.manifest,
-        authorFingerprint,
-        persist: false,
-      })
-      if (!decision) {
-        // Cancelled grant — abort before any disk write.
-        return
+      let grantDecision
+      if (preview.manifest.type === "wasm") {
+        const decision = await grant.requestGrant({
+          manifest: preview.manifest,
+          authorFingerprint,
+          persist: false,
+        })
+        if (!decision) return // Cancelled grant — abort before any disk write.
+        grantDecision = decision.decision
       }
 
       const manager = getPluginManager()
-      const plugin = await manager.installWasmPluginFromLocalFile(picked.path, decision.decision, {
+      const plugin = await manager.installPluginBundleFromLocalFile(picked.path, grantDecision, {
         expectedBundleSha256: preview.bundleSha256,
       })
       onInstalled?.(plugin.manifest.id)

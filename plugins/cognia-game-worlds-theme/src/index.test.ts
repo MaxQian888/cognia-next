@@ -43,7 +43,7 @@ describe("cognia-game-worlds-theme", () => {
       expect(wallpaperIds.has(pack.applies.wallpaperId)).toBe(true)
       expect(densities.has(pack.applies.density)).toBe(true)
       expect(pack.preview.light).toBe(pack.preview.dark)
-      expect(pack.preview.light).toMatch(/^\/plugins\/cognia-game-worlds-theme\/assets\/.+\.webp$/)
+      expect(pack.preview.light).toMatch(/^assets\/.+\.webp$/)
     }
   })
 

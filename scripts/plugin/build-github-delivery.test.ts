@@ -81,9 +81,18 @@ describe("buildGithubDeliveryArtifacts", () => {
     }
   })
 
-  it("packages exactly the manifest and the bundle", async () => {
+  it("packages the declared icon alongside the manifest and executable bundle", async () => {
     const zip = await JSZip.loadAsync(artifacts.archiveBytes)
-    expect(Object.keys(zip.files).sort()).toEqual(["dist/index.js", "plugin.json"])
+    expect(Object.keys(zip.files).sort()).toEqual([
+      "assets/icon.png",
+      "dist/index.js",
+      "plugin.json",
+    ])
+    const packagedManifest = JSON.parse(await zip.file("plugin.json")!.async("string"))
+    expect(packagedManifest.icon).toBe("assets/icon.png")
+    expect(await zip.file(packagedManifest.icon)!.async("nodebuffer")).toEqual(
+      await readFile(resolve(repoRoot, "plugins/github-delivery/assets/icon.png"))
+    )
   })
 })
 
@@ -123,13 +132,13 @@ describe("--check", () => {
   })
 
   it("compares archives by entry, formatting-insensitive for JSON only", async () => {
-    const reformatted = new JSZip()
+    const reformatted = await JSZip.loadAsync(artifacts.archiveBytes)
     reformatted.file("plugin.json", JSON.stringify(JSON.parse(artifacts.manifestBytes.toString())))
     reformatted.file("dist/index.js", artifacts.bundle)
     const reformattedBytes = await reformatted.generateAsync({ type: "uint8array" })
     expect(await archivesEquivalent(reformattedBytes, artifacts.archiveBytes)).toBe(true)
 
-    const tampered = new JSZip()
+    const tampered = await JSZip.loadAsync(artifacts.archiveBytes)
     tampered.file("plugin.json", artifacts.manifestBytes)
     tampered.file("dist/index.js", `${Buffer.from(artifacts.bundle).toString()}\n// changed`)
     const tamperedBytes = await tampered.generateAsync({ type: "uint8array" })

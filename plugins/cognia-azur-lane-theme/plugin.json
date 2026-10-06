@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-azur-lane-theme/assets/anchor-emblem.svg",
+  "icon": "assets/icon.png",
   "screenshots": [
     "/plugins/cognia-azur-lane-theme/assets/characters/enterprise-carrier-dawn.webp",
     "/plugins/cognia-azur-lane-theme/assets/characters/belfast-rain-lounge.webp",

@@ -5,11 +5,13 @@ jest.mock("./pdf-engine", () => ({
   pdfFieldValueMatches: jest.fn(),
   openPdfForRender: jest.fn(),
   isRenderCancelled: jest.fn(() => false),
+  disposePdfWorker: jest.fn(),
 }))
 
 import manifestJson from "../plugin.json"
 import definition, { manifest } from "./index"
 import { PDF_TOOL_NAMES } from "./tools"
+import { disposePdfWorker } from "./pdf-engine"
 
 const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
 
@@ -138,6 +140,7 @@ it("releases every registration through the lifecycle ledger", async () => {
   const env = context()
   await definition.activate?.(env.ctx as never)
   await env.dispose()
+  expect(disposePdfWorker).toHaveBeenCalled()
   expect(env.rendererDispose).toHaveBeenCalled()
   expect(env.importerDispose).toHaveBeenCalled()
   expect(env.toolDispose).toHaveBeenCalledTimes(PDF_TOOL_NAMES.length)

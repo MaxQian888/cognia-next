@@ -19,10 +19,8 @@
  *
  * ## Policy, stated rather than implied
  *
- * - **Upgrade.** The marker records the version that was seeded. A newer
- *   bundled version re-seeds, which replaces the directory wholesale. Local
- *   edits to a bundled plugin do not survive that, which is the right trade
- *   for something the installer owns.
+ * - **Upgrade.** Only an older, still-installed bundled package is replaced.
+ *   An independently installed package or newer version always wins.
  * - **Deletion.** If the user removes the plugin, the marker stays and it is
  *   NOT re-seeded on the next launch. Re-installing what someone deliberately
  *   removed, every launch, is the worse failure.
@@ -34,6 +32,9 @@
 import { loggers } from "@cognia/logging"
 import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
 
+import { compareVersions } from "../package/dependency-resolver"
+import { getInstallOrigin } from "@/lib/db/plugin-install-origins"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import stagedCatalog from "./bundled-plugins.generated.json"
 
 const log = loggers.plugin.child("bundled-plugin-seed")
@@ -64,6 +65,8 @@ export interface SeedBundledPluginsDeps {
   resolveResource: (relative: string) => Promise<string>
   /** `plugin_install_from_directory`, an atomic replace plus host registration. */
   installFromDirectory: (sourceDir: string, entry: StagedPluginEntry) => Promise<void>
+  readInstalled?: (pluginId: string) => Promise<{ version: string; origin?: string } | undefined>
+  isRemoved?: (pluginId: string) => boolean
   readMarker: () => Record<string, string>
   writeMarker: (next: Record<string, string>) => void
   /** Defaults to the generated catalog. Overridden only by tests. */
@@ -134,11 +137,33 @@ export async function seedBundledPlugins(deps: SeedBundledPluginsDeps): Promise<
   const next = { ...marker }
 
   for (const [directory, entry] of Object.entries(catalog.entries)) {
-    if (marker[directory] === entry.version) {
+    if (
+      deps.isRemoved?.(entry.id) ||
+      (marker[directory] && compareVersions(marker[directory], entry.version) >= 0)
+    ) {
       outcome.upToDate.push(directory)
       continue
     }
     try {
+      if (deps.readInstalled) {
+        const installed = await deps.readInstalled(entry.id)
+        // A missing previously seeded package records user intent even when
+        // the app was downgraded/upgraded or the runtime tombstone predates us.
+        const removed = !installed && Boolean(marker[directory])
+        const independentlyInstalled =
+          installed &&
+          (installed.origin
+            ? installed.origin !== "builtin"
+            : installed.version !== marker[directory])
+        if (
+          removed ||
+          independentlyInstalled ||
+          (installed && compareVersions(installed.version, entry.version) >= 0)
+        ) {
+          outcome.upToDate.push(directory)
+          continue
+        }
+      }
       const sourceDir = await deps.resolveResource(`${STAGED_PLUGIN_ROOT}/${directory}`)
       await deps.installFromDirectory(sourceDir, entry)
       // Recorded only after the install returns. A marker written first would
@@ -166,7 +191,30 @@ export async function seedBundledPluginsOnHost(): Promise<SeedOutcome> {
     import("@tauri-apps/api/path"),
     import("@tauri-apps/api/core"),
   ])
+  // Inspect the actual native package before deciding to replace it. A lost
+  // localStorage marker must not downgrade an independently updated package.
+  let installed: Array<{ manifest: { id: string; version: string } }>
+  try {
+    const directory = await invoke<string>("plugin_get_directory")
+    installed = await invoke<typeof installed>("plugin_scan_directory", { directory })
+  } catch (error) {
+    // Without the installed inventory it is unsafe to replace packages.
+    return {
+      seeded: [],
+      upToDate: [],
+      failed: Object.fromEntries(
+        Object.keys(bundledPluginCatalog().entries).map((directory) => [directory, String(error)])
+      ),
+    }
+  }
   return seedBundledPlugins({
+    isRemoved: (id) => Boolean(usePluginStore.getState().removedPlugins[id]),
+    readInstalled: async (id) => {
+      const entry = installed.find((item) => item.manifest.id === id)
+      if (!entry) return undefined
+      const origin = await getInstallOrigin(id)
+      return { version: entry.manifest.version, origin: origin?.origin.kind }
+    },
     resolveResource: (relative) => resolveResource(relative),
     installFromDirectory: async (sourceDir, entry) => {
       await invoke("plugin_install_from_directory", { sourceDir })

@@ -41,6 +41,21 @@ const callbacks = () => ({
 })
 
 describe("PluginMarketplaceCard", () => {
+  it("renders a built-in packaged image in Discover", () => {
+    render(
+      <PluginMarketplaceCard
+        entry={{ ...baseEntry, icon: "assets/icon.png", pluginRoot: "builtin://p1" }}
+        installed={false}
+        installing={false}
+        {...callbacks()}
+      />
+    )
+    expect(screen.getByTestId("plugin-avatar-image")).toHaveAttribute(
+      "src",
+      "/_cognia/plugin-icons/p1/assets/icon.png"
+    )
+  })
+
   it("renders core metadata", () => {
     const cb = callbacks()
     const { container } = render(

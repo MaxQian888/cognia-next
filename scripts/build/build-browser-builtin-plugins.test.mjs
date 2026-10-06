@@ -4,16 +4,14 @@ import { test } from "node:test"
 import {
   BROWSER_BUILTIN_PLUGIN_IDS,
   buildBrowserBuiltinPlugins,
+  stageBuiltinPluginIcons,
 } from "./build-browser-builtin-plugins.mjs"
 
-test("keeps the first migration batch explicit and deterministic", () => {
-  assert.deepEqual(BROWSER_BUILTIN_PLUGIN_IDS, [
-    "cognia-office",
-    "cognia-pdf",
-    "cognia-documents",
-    "cognia-presentations",
-    "cognia-visualize",
-  ])
+test("curates every builtin as an independent asset", () => {
+  assert.equal(BROWSER_BUILTIN_PLUGIN_IDS.length, 52)
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("clipboard-tools"))
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("ui-surface-reference"))
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("cognia-pdf"))
 })
 
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile, utimes } from "node:fs/promises"
@@ -32,12 +30,12 @@ async function fixture(t) {
   )
   await writeFile(
     path.join(root, "plugins/cognia-pdf/plugin.json"),
-    JSON.stringify({ id: "cognia-pdf", version: "1" })
+    JSON.stringify({ id: "cognia-pdf", version: "1", main: "src/index.ts" })
   )
   await writeFile(path.join(root, "plugins/cognia-pdf/src/value.ts"), "export const value = 1")
   await writeFile(
     path.join(root, "plugins/cognia-pdf/src/index.ts"),
-    'import { value } from "./value"; export const worker = __COGNIA_PDF_WORKER_URL__; export { value }'
+    'import { value } from "./value"; export const worker = typeof __COGNIA_PDF_WORKER_URL__ === "undefined" ? "metadata" : __COGNIA_PDF_WORKER_URL__; export { value }; export default { manifest: { id: "cognia-pdf", version: "1", main: "src/index.ts" }, activate() {} }'
   )
   await writeFile(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'")
   let calls = 0
@@ -65,6 +63,30 @@ test("a verified cache hit preserves bundle, worker and index mtimes", async (t)
   assert.deepEqual(await f.run(), entries)
   assert.equal(f.calls(), 1)
   for (const file of files) assert.equal((await stat(file)).mtimeMs, 1000000)
+})
+
+test("stages packaged icons for static built-ins and refreshes them on a chunk cache hit", async (t) => {
+  const f = await fixture(t)
+  const dir = path.join(f.root, "plugins/browser-tools")
+  await mkdir(path.join(dir, "assets"), { recursive: true })
+  await writeFile(path.join(dir, "plugin.json"), JSON.stringify({ id: "cognia-browser-tools", icon: "assets/icon.png" }))
+  await writeFile(path.join(dir, "assets/icon.png"), "first image")
+  await f.run()
+  const target = path.join(f.root, "public/_cognia/plugin-icons/cognia-browser-tools/assets/icon.png")
+  assert.equal(await readFile(target, "utf8"), "first image")
+  await writeFile(path.join(dir, "assets/icon.png"), "updated image")
+  await f.run()
+  assert.equal(await readFile(target, "utf8"), "updated image")
+  assert.equal(f.calls(), 1)
+})
+
+test("rejects missing packaged icons and paths escaping the plugin root", async (t) => {
+  const f = await fixture(t)
+  const manifest = path.join(f.root, "plugins/cognia-pdf/plugin.json")
+  await writeFile(manifest, JSON.stringify({ id: "cognia-pdf", icon: "../outside.png" }))
+  await assert.rejects(stageBuiltinPluginIcons(f.root), /outside plugin root/)
+  await writeFile(manifest, JSON.stringify({ id: "cognia-pdf", icon: "assets/missing.png" }))
+  await assert.rejects(stageBuiltinPluginIcons(f.root), /ENOENT/)
 })
 
 test("transitive imports, lockfile, configuration and PDF worker changes rebuild", async (t) => {

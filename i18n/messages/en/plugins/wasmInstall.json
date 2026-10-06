@@ -28,12 +28,12 @@
     "unsignedAuthor": "Unsigned author"
   },
   "fromLocalButton": {
-    "filePickerTitle": "Select a WASM plugin bundle",
+    "filePickerTitle": "Select a plugin bundle",
     "filterAllFiles": "All files",
-    "filterWasmBundle": "WASM bundle",
-    "label": "Install local WASM plugin",
-    "tauriRequiredError": "Installing a local WASM plugin requires the desktop app.",
-    "zipRequiredError": "Select a .zip bundle containing a plugin manifest and WASM component.",
+    "filterWasmBundle": "Plugin bundle",
+    "label": "Install local plugin bundle",
+    "tauriRequiredError": "Installing a local plugin bundle requires the desktop app.",
+    "zipRequiredError": "Select a .zip bundle containing a plugin manifest and compiled frontend or WASM entry.",
     "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing."
   },
   "fromUrlDialog": {
@@ -42,7 +42,7 @@
     "bundleUrlLabel": "Bundle URL",
     "bundleUrlPlaceholder": "https://example.com/plugin.zip",
     "cancel": "Cancel",
-    "description": "Provide a direct link to a signed WASM bundle. The manifest is fetched and verified before anything is installed.",
+    "description": "Provide a direct link to a compiled frontend or WASM plugin bundle. Its manifest and any supplied signature are verified before installation.",
     "fetchingManifest": "Fetching manifest…",
     "install": "Install",
     "installing": "Installing…",
@@ -53,7 +53,7 @@
     "signatureUrlLabel": "Signature URL (optional)",
     "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
     "signatureVerified": "Signature verified",
-    "title": "Install signed WASM plugin",
+    "title": "Install plugin from URL",
     "trustAriaLabel": "Trust this author",
     "trustFirstTime": "Trust this author for future installs.",
     "trustRequiredError": "Trust this author before installing.",

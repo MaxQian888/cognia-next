@@ -14,6 +14,7 @@
 // an explicit list is clamped to those origins over https/wss.
 
 import { buildWebviewTokenCss } from "../api/theme-tokens"
+import { acquireCogniaProjectApiSource } from "../bridge/project-webview-rpc"
 
 export interface WebviewCspInput {
   /** `manifest.networkAccess.allowedDomains` for the owning plugin. */
@@ -36,6 +37,8 @@ export interface WebviewCspInput {
    * must not ride along with panel rendering.
    */
   editorApi?: boolean
+  /** Mirror ctx.project documents for a plugin declaring project read/write permission. */
+  projectApi?: boolean
   /**
    * Host design tokens, serialized as a CSS rule, injected into the frame.
    *
@@ -99,6 +102,9 @@ export function wrapWebviewHtml(body: string, input: WebviewCspInput): string {
   // merely renders a panel has no business writing into the file the user is
   // editing. Same reasoning as the separate wire channel.
   const editorScript = input.editorApi ? `\n<script>${acquireCogniaEditorApiSource()}</script>` : ""
+  const projectScript = input.projectApi
+    ? `\n<script>${acquireCogniaProjectApiSource()}</script>`
+    : ""
   // Inline `<style>` rather than a linked sheet: the CSP allows
   // `style-src 'unsafe-inline'` but no external origins, and an opaque-origin
   // frame has nowhere to link to anyway.
@@ -109,7 +115,7 @@ export function wrapWebviewHtml(body: string, input: WebviewCspInput): string {
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />${tokenStyle}
-<script>${acquireCogniaWebviewApiSource()}</script>${contextPanelScript}${editorScript}
+<script>${acquireCogniaWebviewApiSource()}</script>${contextPanelScript}${editorScript}${projectScript}
 </head>
 <body>${body}</body>
 </html>`

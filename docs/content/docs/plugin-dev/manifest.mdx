@@ -107,7 +107,7 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
       type: "string",
     },
     icon: {
-      description: "Relative path to an SVG icon. Will be sanitized.",
+      description: "Packaged image path, public path, HTTP(S) or image data URL. Lucide names are also accepted.",
       type: "string",
     },
     entry: {
@@ -147,6 +147,33 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
     },
   }}
 />
+
+## Plugin identity images
+
+Declare an image on the manifest itself; no runtime registration or UI capability is needed:
+
+```json title="plugin.json (fragment)"
+{
+  "icon": "assets/icon.png"
+}
+```
+
+Include `assets/icon.png` in the plugin archive alongside `plugin.json`. PNG, SVG, WebP,
+JPEG and GIF images render through the shared plugin avatar in the Library, detail header,
+and Discover cards. Prefer a square PNG with transparent corners and a clear silhouette at
+small sizes. Paths are relative to the installed plugin root and cannot escape that root.
+The desktop host resolves installed files through its asset protocol. Built-in images are
+staged at build time under `/_cognia/plugin-icons/<plugin-id>/` for browser, desktop and mobile.
+
+Public paths such as `/plugins/example/icon.png`, HTTP(S) URLs, and image data URLs are also
+supported. A public path belongs to the host application; use a relative file for a portable
+plugin package. A remote marketplace can supply `resolvedIcon` or an absolute image URL for
+pre-install previews because package-relative files are not available before download.
+
+`PluginManifest` and `definePluginManifest` from `@cognia/plugin-sdk/manifest` preserve this
+field. It is optional for third-party plugins; when present it must be a non-empty string.
+Lucide names remain compatible with older plugins. Contribution icons such as `commands[].icon`
+are separate fields with their own Lucide-name contract; an identity PNG does not change them.
 
 ## Subscription providers
 

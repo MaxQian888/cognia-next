@@ -52,6 +52,7 @@ junit.xml
 # scripts/download-cubism-core.mjs (predev/prebuild). Never committed.
 /public/live2d/
 /public/_cognia/builtin-plugins/
+/public/_cognia/plugin-icons/
 /src-tauri/resources/plugin-node/
 /src-tauri/resources/plugins/
 /src-tauri/resources/browser-runtime/

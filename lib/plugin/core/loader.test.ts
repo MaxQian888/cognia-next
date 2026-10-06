@@ -989,21 +989,89 @@ describe("PluginLoader", () => {
       ).rejects.toThrow(/outside the declared root/i)
     })
 
-    it("resolves built-in secondary entries from restored module exports", async () => {
+    it("uses restored exports only for the builtin main entry", async () => {
       const definition: PluginDefinition = {
         manifest: createMockManifest("builtin-reference"),
         activate: jest.fn(),
       }
       const moduleExports = { default: definition, ReferencePanel: jest.fn() }
       loader.restoreModule("builtin-reference", definition, moduleExports)
+      const registry = jest
+        .spyOn(builtinRegistry, "getBrowserBuiltinRegistryEntry")
+        .mockReturnValue({
+          manifest: definition.manifest,
+          path: "builtin://builtin-reference",
+          compatibilityDiagnostics: [],
+        })
+      try {
+        await expect(
+          loader.importEntry(
+            "builtin://builtin-reference/index.js",
+            "builtin-reference",
+            "builtin://builtin-reference"
+          )
+        ).resolves.toBe(moduleExports)
+      } finally {
+        registry.mockRestore()
+      }
+    })
 
-      await expect(
-        loader.importEntry(
-          "builtin://ui-surface-reference/src/index.tsx",
-          "builtin-reference",
-          "builtin://ui-surface-reference"
+    it("fetches and evaluates a builtin secondary artifact instead of reusing main exports", async () => {
+      const manifest = createMockManifest("multi-entry")
+      loader.restoreModule(
+        manifest.id,
+        { manifest, activate: jest.fn() },
+        { wrongMainExport: true }
+      )
+      const registry = jest
+        .spyOn(builtinRegistry, "getBrowserBuiltinRegistryEntry")
+        .mockReturnValue({
+          manifest,
+          path: "builtin://multi-entry",
+          compatibilityDiagnostics: [],
+          asset: {
+            url: "/builtin/main.cjs",
+            sha256: "main-hash",
+            sharedModules: [],
+            resourcesUrl: "/builtin/resources",
+            entryHashes: { "dist/panel.js": "panel-hash" },
+          },
+        })
+      builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset.mockResolvedValueOnce(
+        "module.exports = { SecondaryPanel: 'separate-module' }"
+      )
+      try {
+        await expect(
+          loader.importEntry(
+            "builtin://multi-entry/dist/panel.js",
+            manifest.id,
+            "builtin://multi-entry"
+          )
+        ).resolves.toEqual({ SecondaryPanel: "separate-module" })
+        expect(builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: "/builtin/resources/dist/panel.js",
+            sha256: "panel-hash",
+          }),
+          undefined
         )
-      ).resolves.toBe(moduleExports)
+        await expect(
+          loader.importEntry(
+            "builtin://multi-entry/dist/unsigned.js",
+            manifest.id,
+            "builtin://multi-entry"
+          )
+        ).rejects.toThrow("no verified artifact")
+        await expect(
+          loader.importEntry(
+            "builtin://multi-entry/../outside.js",
+            manifest.id,
+            "builtin://multi-entry"
+          )
+        ).rejects.toThrow("Unsafe plugin-relative path")
+      } finally {
+        registry.mockRestore()
+      }
     })
 
     it("restores module definitions and exports", () => {

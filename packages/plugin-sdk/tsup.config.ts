@@ -1,6 +1,6 @@
 import { defineConfig } from "tsup"
 
-const runtimeEntries = {
+export const runtimeEntries = {
   index: "src/index.ts",
   manifest: "src/manifest/index.ts",
   context: "src/context/index.ts",

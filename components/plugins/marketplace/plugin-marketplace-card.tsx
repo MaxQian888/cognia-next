@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/card"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginSourceBadge } from "../plugin-source-badge"
+import { PluginAvatar } from "../plugin-avatar"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 import { cn } from "@/lib/utils"
@@ -170,6 +171,14 @@ export function PluginMarketplaceCard({
             className="h-auto w-full min-w-0 justify-start p-0 text-left font-normal hover:bg-transparent"
             onClick={() => onView(entry.id)}
           >
+            <PluginAvatar
+              name={entry.name}
+              seed={entry.id}
+              icon={entry.icon ?? entry.iconUrl}
+              resolvedIcon={entry.resolvedIcon}
+              pluginRoot={entry.pluginRoot}
+              size={40}
+            />
             <span className="block w-full min-w-0">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="font-medium truncate">{entry.name}</span>

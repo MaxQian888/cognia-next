@@ -3,8 +3,15 @@ import { KimiManagementCard } from "./kimi-management-card"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import en from "@/i18n/messages/en/kimiManagement.json"
 
-const clipboard = jest.fn(async () => {})
-const launch = jest.fn(async () => {})
+type WriteClipboardText = typeof import("@/lib/tauri/clipboard").writeClipboardText
+type RunInTerminalDock = typeof import("@/lib/terminal/run-in-dock").runInTerminalDock
+
+const clipboard = jest
+  .fn<ReturnType<WriteClipboardText>, Parameters<WriteClipboardText>>()
+  .mockResolvedValue(undefined)
+const launch = jest
+  .fn<ReturnType<RunInTerminalDock>, Parameters<RunInTerminalDock>>()
+  .mockResolvedValue(undefined)
 const transport = jest.fn(() => "tauri-channel")
 let mockConnection = "disconnected"
 let mockOtherAgent: ExternalAgentConfig | null = null
@@ -21,10 +28,10 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
   ),
 }))
 jest.mock("@/lib/tauri/clipboard", () => ({
-  writeClipboardText: (...args: unknown[]) => clipboard(...args),
+  writeClipboardText: (...args: Parameters<WriteClipboardText>) => clipboard(...args),
 }))
 jest.mock("@/lib/terminal/run-in-dock", () => ({
-  runInTerminalDock: (...args: unknown[]) => launch(...args),
+  runInTerminalDock: (...args: Parameters<RunInTerminalDock>) => launch(...args),
 }))
 jest.mock("@/lib/terminal/pick-transport", () => ({ selectTerminalTransport: () => transport() }))
 jest.mock("@/lib/terminal/shell-detect", () => ({ detectPlatform: () => "macos" }))
@@ -39,15 +46,19 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-const agent = {
+const agent: ExternalAgentConfig = {
   id: "kimi-agent",
+  name: "Kimi",
+  protocol: "acp",
+  transport: "stdio",
+  enabled: true,
   process: {
     command: "kimi",
     args: ["acp"],
     cwd: "/workspace",
     env: { KIMI_CODE_HOME: "/owned/state", KIMI_MODEL_API_KEY: "secret-key" },
   },
-} as ExternalAgentConfig
+}
 
 describe("KimiManagementCard", () => {
   beforeEach(() => {

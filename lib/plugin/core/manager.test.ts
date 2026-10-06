@@ -2,6 +2,14 @@
  * PluginManager Tests
  */
 
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
+
+const builtinAssetFetcher: typeof fetch = async (input) => {
+  const bytes = await readFile(join(process.cwd(), "public", String(input)))
+  return new Response(new Uint8Array(bytes))
+}
+
 import { invoke } from "@tauri-apps/api/core"
 import {
   PluginManager,
@@ -150,6 +158,7 @@ jest.mock("@/lib/db/plugin-install-origins", () => ({
   putInstallOrigin: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/plugin/package/github-source", () => ({
+  ...jest.requireActual("@/lib/plugin/package/github-source"),
   resolveGithubCommit: jest.fn(async (ref: { ref?: string }) => ({
     ...ref,
     ref: "0123456789abcdef0123456789abcdef01234567",
@@ -210,6 +219,7 @@ describe("PluginManager", () => {
   const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
   const mockGetState = usePluginStore.getState as unknown as jest.Mock
   const mockVerifier = {
+    clearCache: jest.fn(),
     verify: jest.fn(),
     readVscodeExtensionReceipt: jest.fn(async () => null as { verifiedVia: string } | null),
     getConfig: jest.fn().mockReturnValue({
@@ -221,6 +231,8 @@ describe("PluginManager", () => {
     registerPlugin: jest.fn(),
     unregisterPlugin: jest.fn(),
     revokeAll: jest.fn(),
+    resetRevocations: jest.fn(),
+    isRevoked: jest.fn(() => false),
     grant: jest.fn(),
     revoke: jest.fn(),
     getPluginPermissions: jest.fn(() => [] as string[]),
@@ -730,6 +742,82 @@ describe("PluginManager", () => {
   })
 
   describe("scanBrowserBuiltins persistence", () => {
+    it("preserves a loaded adapter's executable functions across metadata rediscovery", async () => {
+      const { getBrowserBuiltinRegistry } = await import("./browser-builtin-registry")
+      const entry = getBrowserBuiltinRegistry().find(
+        (item) => item.manifest.sharedMemoryAdapters?.length
+      )
+      expect(entry).toBeDefined()
+      const manifest = entry!.manifest
+      const write = jest.fn(async () => undefined)
+      const runtimeManifest = {
+        ...manifest,
+        sharedMemoryAdapters: manifest.sharedMemoryAdapters!.map((adapter) => ({
+          ...adapter,
+          write,
+        })),
+      }
+      const store = {
+        plugins: {
+          [manifest.id]: {
+            manifest: runtimeManifest,
+            path: entry!.path,
+            source: "builtin",
+            status: "loaded",
+            config: {},
+          },
+        },
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
+      const loader = (manager as unknown as { loader: { getDefinition: jest.Mock } }).loader
+      loader.getDefinition = jest.fn((id: string) =>
+        id === manifest.id ? { manifest: runtimeManifest } : undefined
+      )
+      const discovered = await manager.scanPlugins()
+      expect(
+        discovered.find((item) => item.manifest.id === manifest.id)?.manifest
+          .sharedMemoryAdapters?.[0].write
+      ).toBe(write)
+    })
+
+    it("does not persist bundled fallbacks over independent installs or explicit removals", async () => {
+      const { getBrowserBuiltinRegistry } = await import("./browser-builtin-registry")
+      const { upsertPlugins } = await import("@/lib/db/plugins")
+      const [first, second] = getBrowserBuiltinRegistry()
+      const external = {
+        manifest: { ...first.manifest, version: "99.0.0" },
+        source: "local",
+        path: `/plugins/${first.manifest.id}`,
+        status: "installed",
+        config: {},
+      }
+      const store = {
+        plugins: { [first.manifest.id]: external },
+        removedPlugins: { [second.manifest.id]: true },
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
+      const discovered = await manager.scanPlugins()
+      expect(discovered.map((entry) => entry.manifest.id)).not.toContain(first.manifest.id)
+      expect(discovered.map((entry) => entry.manifest.id)).not.toContain(second.manifest.id)
+      const drafts = (upsertPlugins as jest.Mock).mock.calls.at(-1)?.[0] ?? []
+      expect(drafts.map((entry: { id: string }) => entry.id)).not.toContain(first.manifest.id)
+      expect(drafts.map((entry: { id: string }) => entry.id)).not.toContain(second.manifest.id)
+    })
+
     it("persists every discovered built-in to the Dexie plugins table with source 'builtin'", async () => {
       const store: {
         plugins: Record<string, Plugin>
@@ -757,6 +845,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
       const discovered = await manager.scanPlugins()
 
@@ -790,6 +879,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
       const discovered = await manager.scanPlugins()
 
@@ -828,6 +918,7 @@ describe("PluginManager", () => {
         await new PluginManager({
           pluginDirectory: "/plugins",
           runtimeProfile: "browser",
+          builtinAssetFetcher,
         }).scanPlugins()
 
         expect(store.installPlugin).not.toHaveBeenCalledWith("github-delivery")
@@ -857,6 +948,7 @@ describe("PluginManager", () => {
       await new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       }).scanPlugins()
 
       const drafts = (upsertPlugins as jest.Mock).mock.calls[0]![0] as Array<
@@ -869,71 +961,18 @@ describe("PluginManager", () => {
   })
 
   describe("installPlugin", () => {
-    it("should call plugin_install with installType=git and write to store", async () => {
-      const store: {
-        plugins: Record<string, Plugin>
-        discoverPlugin: jest.Mock
-        installPlugin: jest.Mock
-      } = {
-        plugins: {},
-        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
-          store.plugins[manifest.id] = {
-            manifest,
-            status: "discovered",
-            source: source as never,
-            path,
-            config: {},
-          }
-        }),
-        installPlugin: jest.fn(async (pluginId: string) => {
-          const p = store.plugins[pluginId]
-          if (p) {
-            store.plugins[pluginId] = {
-              ...p,
-              status: "installed",
-              installedAt: new Date(),
-            }
-          }
-        }),
-      }
-
-      mockGetState.mockReturnValue(store)
-
-      const manifest = createManifest("git-plugin")
-      mockInvoke.mockResolvedValueOnce({
-        manifest,
-        path: "/plugins/git-plugin",
-      })
-
+    it("routes a GitHub source through the pinned transactional installer", async () => {
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
-
-      const plugin = await manager.installPlugin("https://example.com/repo.git", { type: "git" })
-
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_install", {
-        source: "https://example.com/repo.git",
-        installType: "git",
-        pluginDir: "/plugins",
-      })
-
-      expect(store.discoverPlugin).toHaveBeenCalledWith(
-        manifest,
-        "git",
-        "/plugins/git-plugin",
-        expect.objectContaining({
-          descriptor: expect.objectContaining({
-            source: "git",
-            resolvedPath: "/plugins/git-plugin",
-            installRoot: expect.objectContaining({ kind: "installed" }),
-          }),
-        })
-      )
-      expect(store.installPlugin).toHaveBeenCalledWith("git-plugin")
-      expect(plugin?.manifest.id).toBe("git-plugin")
-      expect(plugin?.status).toBe("installed")
-      // With requireSignatures=false and allowUntrusted=true, verify is skipped
+      const plugin = { manifest: createManifest("git-plugin") } as Plugin
+      const install = jest.spyOn(manager, "installPluginFromGithub").mockResolvedValue(plugin)
+      await expect(
+        manager.installPlugin("https://github.com/acme/plugin", { type: "git" })
+      ).resolves.toBe(plugin)
+      expect(install).toHaveBeenCalledWith("acme/plugin", undefined, undefined)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_install", expect.anything())
     })
 
-    it("should call plugin_install with installType=local when omitted", async () => {
+    it("stages a local directory when the source type is omitted", async () => {
       const store: {
         plugins: Record<string, Plugin>
         discoverPlugin: jest.Mock
@@ -965,6 +1004,7 @@ describe("PluginManager", () => {
 
       const manifest = createManifest("local-plugin")
       mockInvoke.mockResolvedValueOnce({
+        transactionId: "local-txn",
         manifest,
         path: "/plugins/local-plugin",
       })
@@ -973,10 +1013,8 @@ describe("PluginManager", () => {
 
       await manager.installPlugin("C:/some/folder")
 
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_install", {
-        source: "C:/some/folder",
-        installType: "local",
-        pluginDir: "/plugins",
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_stage_from_directory", {
+        sourceDir: "C:/some/folder",
       })
       // With requireSignatures=false and allowUntrusted=true, verify is skipped
     })
@@ -997,9 +1035,9 @@ describe("PluginManager", () => {
 
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
 
-      await expect(
-        manager.installPlugin("https://example.com/repo.git", { type: "git" })
-      ).rejects.toThrow(/Failed to install plugin/i)
+      await expect(manager.installPlugin("/tmp/plugin")).rejects.toThrow(
+        /Failed to install plugin/i
+      )
     })
 
     it("blocks incompatible plugin in compatibility block mode", async () => {
@@ -1015,6 +1053,7 @@ describe("PluginManager", () => {
 
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValueOnce({
+        transactionId: "local-txn",
         manifest: {
           ...createManifest("blocked-plugin"),
           engines: { cognia: ">=9.0.0" },
@@ -1028,9 +1067,7 @@ describe("PluginManager", () => {
         hostVersion: "0.1.0",
       })
 
-      await expect(manager.installPlugin("/tmp/blocked")).rejects.toThrow(
-        /Incompatible plugin manifest/i
-      )
+      await expect(manager.installPlugin("/tmp/blocked")).rejects.toThrow(/incompatible/i)
       expect(store.discoverPlugin).not.toHaveBeenCalled()
     })
 
@@ -1064,6 +1101,7 @@ describe("PluginManager", () => {
 
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValueOnce({
+        transactionId: "local-txn",
         manifest: {
           ...createManifest("warn-plugin"),
           engines: { cognia: ">=9.0.0" },
@@ -1113,6 +1151,7 @@ describe("PluginManager", () => {
 
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValueOnce({
+        transactionId: "local-txn",
         manifest: createManifest("verified-install"),
         path: "/plugins/verified-install",
       })
@@ -1357,6 +1396,138 @@ describe("PluginManager", () => {
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_commit_staged_update", expect.anything())
     })
 
+    it.each(["file", "url"])(
+      "installs a frontend %s bundle through staging without WASM preload",
+      async (kind) => {
+        const { store, manager, result } = setup()
+        const frontend = createManifest("frontend-bundle")
+        mockInvoke.mockImplementation(async (command) => {
+          if (
+            command === "plugin_bundle_install_from_file" ||
+            command === "plugin_bundle_install_from_url"
+          )
+            return { ...result, manifest: frontend, path: "/plugins/frontend-bundle" }
+          return undefined
+        })
+        if (kind === "file")
+          await manager.installPluginBundleFromLocalFile("/tmp/frontend.zip", undefined, {
+            expectedBundleSha256: "a".repeat(64),
+          })
+        else
+          await manager.installPluginBundleFromUrl({
+            bundleUrl: "https://example.com/frontend.zip",
+            expectedBundleSha256: "a".repeat(64),
+          })
+        expect(store.plugins[frontend.id]).toMatchObject({
+          manifest: frontend,
+          status: "installed",
+        })
+        expect(mockInvoke).toHaveBeenCalledWith(
+          `plugin_bundle_install_from_${kind}`,
+          expect.objectContaining({ deferCommit: true, expectedBundleSha256: "a".repeat(64) })
+        )
+        expect(mockInvoke).not.toHaveBeenCalledWith("plugin_wasm_load", expect.anything())
+        expect(mockInvoke).toHaveBeenCalledWith(
+          "plugin_finalize_staged_update",
+          expect.objectContaining({ pluginId: frontend.id })
+        )
+      }
+    )
+
+    it("registers a frontend registry package and persists its row before finalizing", async () => {
+      const { store, manager } = setup()
+      const { upsertPlugin } = await import("@/lib/db/plugins")
+      const frontend = { ...createManifest("registry-demo"), version: "2.0.0" }
+      const installed = await manager.installPluginFromRegistry(async () => ({
+        pluginId: frontend.id,
+        version: frontend.version,
+        manifest: frontend,
+        stagedPath: "/staging/registry-demo",
+        transactionId: "registry-txn",
+        sizeBytes: 10,
+      }))
+      expect(installed).toMatchObject({
+        source: "marketplace",
+        manifest: frontend,
+        status: "installed",
+      })
+      expect(store.plugins[frontend.id]).toBe(installed)
+      expect(upsertPlugin).toHaveBeenCalledWith(
+        expect.objectContaining({ id: frontend.id, version: "2.0.0", source: "marketplace" })
+      )
+      expect((upsertPlugin as jest.Mock).mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mockInvoke.mock.invocationCallOrder.at(-1)!
+      )
+      expect(mockInvoke).toHaveBeenLastCalledWith("plugin_finalize_staged_update", {
+        pluginId: frontend.id,
+        transactionId: "registry-txn",
+      })
+    })
+
+    it("persists replacement configuration before re-enabling and finalizing", async () => {
+      const { store, manager, old } = setup(true)
+      old.status = "enabled"
+      jest.spyOn(manager, "disablePlugin").mockImplementation(async () => {
+        store.plugins[manifest.id].status = "disabled"
+      })
+      jest.spyOn(manager, "unloadPlugin").mockImplementation(async () => {
+        store.plugins[manifest.id].status = "installed"
+      })
+      const enable = jest.spyOn(manager, "enablePlugin").mockImplementation(async () => {
+        expect(store.plugins[manifest.id].config).toEqual({ token: "replacement-token" })
+      })
+      const { upsertPlugin } = await import("@/lib/db/plugins")
+      await manager.installPluginFromRegistry(
+        async () => ({
+          pluginId: manifest.id,
+          version: manifest.version,
+          manifest,
+          stagedPath: "/staging/registry",
+          transactionId: "registry-config",
+          sizeBytes: 10,
+        }),
+        { token: "replacement-token" }
+      )
+      expect(upsertPlugin).toHaveBeenCalledWith(
+        expect.objectContaining({ config: { token: "replacement-token" } })
+      )
+      expect((upsertPlugin as jest.Mock).mock.invocationCallOrder.at(-1)).toBeLessThan(
+        enable.mock.invocationCallOrder[0]
+      )
+      expect(enable.mock.invocationCallOrder[0]).toBeLessThan(
+        mockInvoke.mock.invocationCallOrder.at(-1)!
+      )
+    })
+
+    it("rolls a registry package back if its persisted configuration row cannot be created", async () => {
+      const { store, manager } = setup()
+      const { upsertPlugin } = await import("@/lib/db/plugins")
+      ;(upsertPlugin as jest.Mock).mockRejectedValueOnce(new Error("metadata unavailable"))
+      const frontend = createManifest("registry-demo")
+      await expect(
+        manager.installPluginFromRegistry(
+          async () => ({
+            pluginId: frontend.id,
+            version: frontend.version,
+            manifest: frontend,
+            stagedPath: "/staging/registry-demo",
+            transactionId: "registry-txn",
+            sizeBytes: 10,
+          }),
+          { token: "must-rollback" }
+        )
+      ).rejects.toThrow("metadata unavailable")
+      expect(store.plugins[frontend.id]).toBeUndefined()
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
+        pluginId: frontend.id,
+        transactionId: "registry-txn",
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "plugin_finalize_staged_update",
+        expect.anything()
+      )
+    })
+
     it("registers URL installs and finalizes only after registration and grant persistence", async () => {
       const { store, manager } = setup()
       await manager.installWasmPluginFromUrl(
@@ -1544,12 +1715,17 @@ describe("PluginManager", () => {
         requireSignatures: true,
         allowUntrusted: false,
       })
-      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "bad sig" })
+      mockVerifier.verify.mockResolvedValueOnce({
+        transactionId: "local-txn",
+        valid: false,
+        reason: "bad sig",
+      })
 
       const manifest = createManifest("sig-fail-plugin")
       mockInvoke
         // 1st invoke: plugin_install (backend succeeds)
         .mockResolvedValueOnce({
+          transactionId: "local-txn",
           manifest,
           path: "/plugins/sig-fail-plugin",
         })
@@ -1563,9 +1739,9 @@ describe("PluginManager", () => {
       )
 
       // Backend install was undone via plugin_uninstall.
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
         pluginId: "sig-fail-plugin",
-        pluginPath: "/plugins/sig-fail-plugin",
+        transactionId: "local-txn",
       })
       // Store discovery + install never landed (signature check is before
       // those), so no store cleanup expected.
@@ -1582,7 +1758,7 @@ describe("PluginManager", () => {
         permissions: ["filesystem:read"],
       }
       mockInvoke
-        .mockResolvedValueOnce({ manifest, path: "/plugins/perm-fail" })
+        .mockResolvedValueOnce({ transactionId: "local-txn", manifest, path: "/plugins/perm-fail" })
         .mockResolvedValueOnce(undefined) // plugin_uninstall during rollback
 
       // registerPlugin on the permission guard throws — exercises the
@@ -1604,9 +1780,9 @@ describe("PluginManager", () => {
         expect.objectContaining({ skipFileRemoval: true })
       )
       // Backend uninstall ran.
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
         pluginId: "perm-fail-plugin",
-        pluginPath: "/plugins/perm-fail",
+        transactionId: "local-txn",
       })
     })
 
@@ -1632,11 +1808,15 @@ describe("PluginManager", () => {
         requireSignatures: true,
         allowUntrusted: false,
       })
-      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "bad sig" })
+      mockVerifier.verify.mockResolvedValueOnce({
+        transactionId: "local-txn",
+        valid: false,
+        reason: "bad sig",
+      })
 
       const manifest = createManifest("noisy-rollback-plugin")
       mockInvoke
-        .mockResolvedValueOnce({ manifest, path: "/plugins/noisy" })
+        .mockResolvedValueOnce({ transactionId: "local-txn", manifest, path: "/plugins/noisy" })
         // Backend plugin_uninstall ALSO fails — we still expect the
         // original install error to reach the caller.
         .mockRejectedValueOnce(new Error("disk locked"))
@@ -1723,6 +1903,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
 
       await manager.scanPlugins()
@@ -1780,6 +1961,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
 
       await manager.scanPlugins()
@@ -2113,7 +2295,11 @@ describe("PluginManager", () => {
           },
         },
       })
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
 
       await (
         manager as unknown as { restorePluginDexieTables: () => Promise<void> }
@@ -2195,6 +2381,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
 
       await manager.scanPlugins()
@@ -2281,7 +2468,11 @@ describe("PluginManager", () => {
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValue(undefined)
 
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
       await manager.scanPlugins()
 
       // First enable succeeds and leaves the runtime loaded.
@@ -2374,7 +2565,11 @@ describe("PluginManager", () => {
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValue(undefined)
 
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
       await manager.scanPlugins()
 
       await expect(manager.enablePlugin("cognia-clipboard-tools")).resolves.not.toThrow()
@@ -2443,7 +2638,11 @@ describe("PluginManager", () => {
       mockGetState.mockReturnValue(store)
       mockInvoke.mockResolvedValue(undefined)
 
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
 
       // The fixture declares a `dexie` block in its manifest, so
       // applyPluginTables must fire. Stub the manager's lock-internal load path (which is
@@ -2503,6 +2702,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
         compatibilityMode: "block",
       })
       const loadSpy = jest.spyOn(manager, "loadPlugin")
@@ -2704,6 +2904,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
       })
 
       await manager.syncRuntimeState()
@@ -3739,7 +3940,11 @@ describe("PluginManager", () => {
       }
       mockGetState.mockReturnValue({ plugins: { "cognia-native-only": nativeOnly } })
 
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
 
       await manager.handleActivationEvent("startup")
@@ -3936,7 +4141,11 @@ describe("PluginManager", () => {
         plugins: { "cognia-web-tools": supported, "cognia-computer-use": blocked },
       })
 
-      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        builtinAssetFetcher,
+      })
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
 
       await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
@@ -4028,6 +4237,7 @@ describe("PluginManager", () => {
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
+        builtinAssetFetcher,
         lifecycleStateAdapter,
       })
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
@@ -5590,6 +5800,46 @@ describe("PluginManager", () => {
 
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_get_tools", expect.anything())
+    })
+
+    it("hydrates executable contribution functions from the verified module before activation", async () => {
+      const plugin = createTypedPlugin("adapter-hydration", "frontend")
+      plugin.source = "dev"
+      const adapter = {
+        id: "adapter-hydration:memory",
+        name: "Memory",
+        write: jest.fn(async () => undefined),
+        read: jest.fn(async () => undefined),
+        delete: jest.fn(async () => undefined),
+        listChanges: jest.fn(async () => ({ entries: [], cursor: 0 })),
+      }
+      plugin.manifest.sharedMemoryAdapters = JSON.parse(JSON.stringify([adapter]))
+      const packagedPermissions = plugin.manifest.permissions
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      ;(usePluginStore.setState as unknown as jest.Mock).mockImplementation((update) =>
+        Object.assign(store, update(store))
+      )
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const activate = jest.fn(() => {
+        expect(store.plugins[plugin.manifest.id].manifest.sharedMemoryAdapters?.[0].write).toBe(
+          adapter.write
+        )
+        expect(store.plugins[plugin.manifest.id].manifest.permissions).toBe(packagedPermissions)
+      })
+      const loader = (manager as unknown as { loader: { load: jest.Mock; isLoaded: jest.Mock } })
+        .loader
+      loader.load = jest.fn(async () => ({
+        manifest: {
+          ...plugin.manifest,
+          permissions: ["filesystem:write"],
+          sharedMemoryAdapters: [adapter],
+        },
+        activate,
+      }))
+      loader.isLoaded = jest.fn(() => false)
+      await manager.loadPlugin(plugin.manifest.id)
+      expect(activate).toHaveBeenCalledTimes(1)
     })
 
     it("registers manifest i18n and extensions before activate", async () => {

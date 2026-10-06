@@ -41,6 +41,7 @@ test("staging copies the manifest and the package, and nothing else", () => {
       .map((entry) => String(entry).split(path.sep).join("/"))
 
     assert.ok(staged.includes("plugin.json"))
+    assert.ok(staged.includes("assets/icon.png"))
     assert.ok(staged.includes("main.py"))
     assert.ok(staged.includes("repowiki/core/analyzer.py"))
 

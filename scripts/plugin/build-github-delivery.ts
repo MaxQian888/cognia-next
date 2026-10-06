@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { resolve, sep } from "node:path"
 import { build, type Plugin } from "esbuild"
 import JSZip from "jszip"
 import { manifest } from "../../plugins/github-delivery/src/index"
@@ -85,6 +85,17 @@ export async function buildGithubDeliveryArtifacts(
     date: DETERMINISTIC_DATE,
     createFolders: false,
   })
+  if (manifest.icon && /\.(?:png|svg|webp|jpe?g|gif|avif)$/i.test(manifest.icon)) {
+    const pluginRoot = resolve(paths.root, "plugins/github-delivery")
+    const iconPath = resolve(pluginRoot, manifest.icon)
+    if (!iconPath.startsWith(`${pluginRoot}${sep}`)) {
+      throw new Error(`Plugin icon is outside its package: ${manifest.icon}`)
+    }
+    archive.file(manifest.icon, await readFile(iconPath), {
+      date: DETERMINISTIC_DATE,
+      createFolders: false,
+    })
+  }
   const archiveBytes = await archive.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",

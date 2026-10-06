@@ -14,6 +14,15 @@ import type {
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
 import type { CanonicalPluginPermission } from "@/packages/plugin-sdk/src/contracts/generated"
+import type {
+  PluginKnowledgeListRequest,
+  PluginKnowledgeListResult,
+  PluginKnowledgeDocumentRequest,
+  PluginKnowledgeOutlineResult,
+  PluginKnowledgeRangeRequest,
+  PluginKnowledgeRangeResult,
+  PluginKnowledgeLocation,
+} from "./plugin-knowledge"
 import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
@@ -530,7 +539,11 @@ export interface PluginManifest {
   /** Keywords for search/discovery */
   keywords?: string[]
 
-  /** Icon (Lucide icon name or data URL) */
+  /**
+   * Plugin identity image: a packaged relative path (e.g. `assets/icon.png`),
+   * public path, HTTP(S) URL, or image data URL. Lucide names remain supported.
+   * Relative files must be included in the plugin package and stay within its root.
+   */
   icon?: string
 
   /** Preview images */
@@ -1886,6 +1899,9 @@ export type PluginToolRegistration = Omit<PluginTool, "pluginId"> & {
 export interface PluginToolContext {
   /** Current session ID */
   sessionId?: string
+
+  /** Host-bound project API for this invocation; Agent library scope closes with execution. */
+  project?: PluginProjectAPI
 
   /** Current message ID */
   messageId?: string
@@ -4059,7 +4075,10 @@ export interface ProjectFilter {
  */
 export interface ProjectFileInput {
   name: string
+  /** Parsed original; do not pass the embedding projection here. */
   content: string
+  embeddableContent?: string
+  structure?: KnowledgeFile["structure"]
   type?: KnowledgeFile["type"]
   mimeType?: string
 }
@@ -4110,6 +4129,18 @@ export interface PluginProjectAPI {
   /** Get all knowledge files for a project */
   getKnowledgeFiles: (projectId: string) => Promise<KnowledgeFile[]>
 
+  /** Parsed originals follow the existing add/update/delete project indexing lifecycle. */
+  listKnowledgeDocuments: (
+    request: PluginKnowledgeListRequest
+  ) => Promise<PluginKnowledgeListResult>
+  readKnowledgeOutline: (
+    request: PluginKnowledgeDocumentRequest & { offset?: number; limit?: number }
+  ) => Promise<PluginKnowledgeOutlineResult>
+  readKnowledgeRange: (request: PluginKnowledgeRangeRequest) => Promise<PluginKnowledgeRangeResult>
+  locateKnowledgeDocument: (
+    request: PluginKnowledgeRangeRequest
+  ) => Promise<PluginKnowledgeLocation>
+
   /** Link a session to a project */
   linkSession: (projectId: string, sessionId: string) => Promise<void>
 
@@ -4128,6 +4159,18 @@ export interface PluginProjectAPI {
   /** Remove a tag from a project */
   removeTag: (projectId: string, tag: string) => Promise<void>
 }
+
+/** Asynchronous document operations exposed to sandboxed project webviews. */
+export type PluginProjectWebviewAPI = Pick<
+  PluginProjectAPI,
+  | "listKnowledgeDocuments"
+  | "readKnowledgeOutline"
+  | "readKnowledgeRange"
+  | "locateKnowledgeDocument"
+  | "addKnowledgeFile"
+  | "updateKnowledgeFile"
+  | "removeKnowledgeFile"
+>
 
 // =============================================================================
 // Vector/RAG API - Semantic Search and Retrieval
@@ -5476,6 +5519,7 @@ export type PluginAPIPermission =
   | "session:write"
   | "session:delete"
   | "project:read"
+  | "knowledge:read"
   | "project:write"
   | "project:delete"
   | "vector:read"

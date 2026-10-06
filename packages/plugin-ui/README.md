@@ -87,3 +87,17 @@ mounts and controls. Dialogs must include `DialogTitle`; pass localized
 Import author-facing components and motion helpers only from the package root.
 Deep component imports are intentionally outside the runtime shared-module
 contract.
+
+### Plugin-owned images
+
+Use `PluginImage` with the extension's `pluginId` and a relative asset path:
+
+```tsx
+<PluginImage pluginId={pluginId} src="assets/operator.webp" alt={t("operatorAlt")} />
+```
+
+Package the image inside the plugin directory. The host resolves it from the active
+installation through its contained file reader; built-ins use their public asset
+mirror. Omitting `pluginId` preserves the ordinary `src` behavior, including data
+URLs. The host binds the resolver before loading a plugin; plugin authors do not
+call `bindPluginImageAssetResolver`.

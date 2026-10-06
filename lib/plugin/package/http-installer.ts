@@ -110,6 +110,25 @@ export async function installFromUrl(args: HttpInstallArgs): Promise<HttpInstall
   return result
 }
 
+/** Preview a compiled frontend or WASM URL package. */
+export async function previewPluginBundleFromUrl(
+  args: HttpInstallArgs
+): Promise<HttpInstallResult> {
+  return installFromUrlInternal(
+    { ...args, requireSignature: args.requireSignature ?? false },
+    true,
+    "plugin_bundle_install_from_url"
+  )
+}
+
+export async function installPluginBundleFromUrl(
+  args: HttpInstallArgs
+): Promise<HttpInstallResult> {
+  const result = await installFromUrlInternal(args, false, "plugin_bundle_install_from_url")
+  if (!args.deferCommit) await recordInstalledPublisher(result)
+  return result
+}
+
 /** Record trust only after the complete install transaction succeeds. */
 export async function recordInstalledPublisher(result: HttpInstallResult): Promise<void> {
   if (result.authorPublicKey && result.authorFingerprint && result.signatureVerified) {
@@ -132,7 +151,8 @@ export async function recordInstalledPublisher(result: HttpInstallResult): Promi
 
 async function installFromUrlInternal(
   args: HttpInstallArgs,
-  previewOnly: boolean
+  previewOnly: boolean,
+  command = "plugin_wasm_install_from_url"
 ): Promise<HttpInstallResult> {
   if (!canUseTauriInvoke()) {
     throw new Error(
@@ -147,7 +167,7 @@ async function installFromUrlInternal(
   }
 
   const invoke = await getInvoke()
-  const result = await invoke<RustInstallResult>("plugin_wasm_install_from_url", {
+  const result = await invoke<RustInstallResult>(command, {
     bundleUrl: args.bundleUrl,
     signatureUrl: args.signatureUrl ?? null,
     expectedPublicKeyBase64: args.expectedPublicKeyBase64 ?? null,

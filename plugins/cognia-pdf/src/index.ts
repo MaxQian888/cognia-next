@@ -9,6 +9,7 @@ import { PDF_ARTIFACT_KIND, PDF_MIME } from "./model"
 import { createPdfRenderer } from "./preview"
 import { createPdfRuntime } from "./runtime"
 import { createPdfTools } from "./tools"
+import { disposePdfWorker } from "./pdf-engine"
 
 // plugin.json is the manifest source of truth — including the `i18n.locales`
 // bundle the manager registers before activate() runs.
@@ -19,6 +20,7 @@ type Translate = PluginContext["i18n"]["t"]
 export default definePlugin({
   manifest,
   activate: async (ctx) => {
+    ctx.lifecycle.onDispose(disposePdfWorker, "cognia-pdf:worker")
     const t: Translate = (key, params) => ctx.i18n.t(key, params)
     const runtime = createPdfRuntime(ctx)
 

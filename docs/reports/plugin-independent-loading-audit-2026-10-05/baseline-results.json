@@ -1,0 +1,19 @@
+{
+  "numTotalTestSuites": 5,
+  "numPassedTestSuites": 4,
+  "numFailedTestSuites": 1,
+  "numTotalTests": 115,
+  "numPassedTests": 114,
+  "numFailedTests": 1,
+  "success": false,
+  "startTime": 1791207235229,
+  "failedTests": [
+    {
+      "file": "/Users/bytedance/Project/cognia-next/scripts/plugin/build-github-delivery.test.ts",
+      "name": "--check keeps the committed plugin.json and compat ZIP in step with the source",
+      "failures": [
+        "Error: expect(received).toEqual(expected) // deep equality\n\n- Expected  - 1\n+ Received  + 3\n\n- Array []\n+ Array [\n+   \"/Users/bytedance/Project/cognia-next/packages/plugin-sdk/contract/compat/github-delivery-3.0.0.zip\",\n+ ]\n    at Object.toEqual (/Users/bytedance/Project/cognia-next/scripts/plugin/build-github-delivery.test.ts:143:63)"
+      ]
+    }
+  ]
+}

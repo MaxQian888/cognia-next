@@ -53,6 +53,7 @@ export function mapBuiltinRowToEntry(row: PluginRow): BuiltinMarketplaceEntry {
     ? ((manifest as { permissions: unknown[] }).permissions as PluginPermission[])
     : []
   const description = (manifest as { description?: unknown }).description
+  const icon = (manifest as { icon?: unknown }).icon
   const signatureState = signatureStateOf(manifest)
   return {
     id: row.id,
@@ -60,6 +61,8 @@ export function mapBuiltinRowToEntry(row: PluginRow): BuiltinMarketplaceEntry {
     version: row.version,
     description: typeof description === "string" ? description : undefined,
     author: authorOf(manifest),
+    icon: typeof icon === "string" ? icon : undefined,
+    pluginRoot: row.path,
     signed: signatureState === "verified",
     type: "plugin",
     source: "builtin",

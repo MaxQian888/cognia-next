@@ -162,8 +162,8 @@ describe("cognia-pi-latex-workbench manifest", () => {
     for (const tool of cliTools) {
       expect(tool.descriptionKey).toBeTruthy()
       const key = tool.descriptionKey!
-      expect(manifest.i18n!.locales.en[key]).toBe(tool.description)
-      expect(manifest.i18n!.locales["zh-CN"][key]).toMatch(/[\u4e00-\u9fff]/)
+      expect(manifest.i18n?.locales.en?.[key]).toBe(tool.description)
+      expect(manifest.i18n?.locales["zh-CN"]?.[key]).toMatch(/[\u4e00-\u9fff]/)
     }
   })
 

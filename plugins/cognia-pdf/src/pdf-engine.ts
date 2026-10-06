@@ -80,10 +80,17 @@ interface PdfDocumentLike {
       password?: string
     }>
   ) => Promise<Uint8Array>
-  destroy: () => Promise<void>
+  loadingTask: { destroy: () => Promise<void> }
 }
 
 declare const __COGNIA_PDF_WORKER_URL__: string | undefined
+let standaloneWorkerUrl: string | undefined
+
+/** Release the package-owned worker module when the plugin is disabled. */
+export function disposePdfWorker(): void {
+  if (standaloneWorkerUrl) URL.revokeObjectURL(standaloneWorkerUrl)
+  standaloneWorkerUrl = undefined
+}
 
 /**
  * The worker asset is emitted under a content hash by
@@ -93,6 +100,20 @@ declare const __COGNIA_PDF_WORKER_URL__: string | undefined
  */
 function resolvePdfWorkerUrl(): string {
   if (typeof __COGNIA_PDF_WORKER_URL__ === "string" && __COGNIA_PDF_WORKER_URL__.length > 0) {
+    // Standalone packages embed the worker bytes. Browser CSP permits blob
+    // modules, but does not permit importing data: scripts. Node's fake-worker
+    // path accepts data: modules and cannot import browser blob URLs.
+    const prefix = "data:text/javascript;base64,"
+    if (typeof window !== "undefined" && __COGNIA_PDF_WORKER_URL__.startsWith(prefix)) {
+      if (!standaloneWorkerUrl) {
+        const bytes = Uint8Array.from(
+          atob(__COGNIA_PDF_WORKER_URL__.slice(prefix.length)),
+          (char) => char.charCodeAt(0)
+        )
+        standaloneWorkerUrl = URL.createObjectURL(new Blob([bytes], { type: "text/javascript" }))
+      }
+      return standaloneWorkerUrl
+    }
     return __COGNIA_PDF_WORKER_URL__
   }
   throw new Error(
@@ -173,7 +194,7 @@ export async function openPdfForRender(
     destroy: async () => {
       inFlight?.cancel()
       inFlight = null
-      await doc.destroy()
+      await doc.loadingTask.destroy()
     },
   }
 }
@@ -311,7 +332,7 @@ export async function inspectPdf(bytes: Uint8Array, password?: string): Promise<
       warnings,
     }
   } finally {
-    await doc.destroy()
+    await doc.loadingTask.destroy()
   }
 }
 
@@ -430,7 +451,7 @@ export async function fillPdfFields(
     }
     return { bytes: saved, verifiedValues, inspection: reopened }
   } finally {
-    await doc.destroy()
+    await doc.loadingTask.destroy()
   }
 }
 
@@ -456,7 +477,7 @@ export async function extractPdfPages(
     }))
     return new Uint8Array(await doc.extractPages(entries))
   } finally {
-    await doc.destroy()
+    await doc.loadingTask.destroy()
   }
 }
 

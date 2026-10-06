@@ -1,0 +1,281 @@
+{
+  "generator": "image_gen built-in",
+  "style": "Individual square PNG icons; soft sculpted 3D clay/ceramic; centered on a deep navy rounded tile with transparent outside; generous padding; no lettering, text or watermark.",
+  "icons": [
+    {
+      "directory": "agent-team-examples",
+      "subject": "Three friendly cyan, lavender and coral robot heads collaborating around a glowing shared node"
+    },
+    {
+      "directory": "anthropic-skills",
+      "subject": "A coral starburst hovering above a small ivory open book and a teal skill gem"
+    },
+    {
+      "directory": "browser-tools",
+      "subject": "A miniature aqua browser window with a golden compass needle and a tiny cursor"
+    },
+    {
+      "directory": "clipboard-history",
+      "subject": "Two layered mint clipboards with an amber clock floating in front"
+    },
+    {
+      "directory": "clipboard-tools",
+      "subject": "A turquoise clipboard with a coral pencil and a small white checkmark"
+    },
+    {
+      "directory": "cognia-anime-effort",
+      "subject": "A playful purple comet with a golden star face racing past two tiny pastel sparkles"
+    },
+    {
+      "directory": "cognia-appearance-demo",
+      "subject": "A sculpted lavender painter palette with coral cyan and gold paint droplets"
+    },
+    {
+      "directory": "cognia-arknights-theme",
+      "subject": "An original silver angular watchtower standing on a black stone with an icy teal crystal"
+    },
+    {
+      "directory": "cognia-azur-lane-theme",
+      "subject": "A pearl-white nautical anchor intertwined with a turquoise ocean wave and coral jewel"
+    },
+    {
+      "directory": "cognia-backend-refactor",
+      "subject": "Three miniature teal server blocks being rearranged by a curved golden arrow"
+    },
+    {
+      "directory": "cognia-bugfix-review",
+      "subject": "A cute coral beetle under a large cyan magnifying glass with a tiny green checkmark"
+    },
+    {
+      "directory": "cognia-builtin-characters",
+      "subject": "A smiling lavender astronaut bust flanked by two small pastel character silhouette tokens"
+    },
+    {
+      "directory": "cognia-character-seeds",
+      "subject": "A tiny mint sprout growing from a lavender character-shaped seed capsule"
+    },
+    {
+      "directory": "cognia-documents",
+      "subject": "Two ivory document pages with folded corners and a coral fountain pen"
+    },
+    {
+      "directory": "cognia-game-worlds-theme",
+      "subject": "A small floating emerald island with a lavender portal and gold stars"
+    },
+    {
+      "directory": "cognia-genshin-theme",
+      "subject": "An original luminous teal four-point wind crystal framed in a pearl-white ornamental ring"
+    },
+    {
+      "directory": "cognia-goal-insights",
+      "subject": "A coral bullseye target with a golden arrow and a small rising cyan chart"
+    },
+    {
+      "directory": "cognia-honkai-star-rail-theme",
+      "subject": "An original pearl-white miniature space train sweeping along a golden planetary ring"
+    },
+    {
+      "directory": "cognia-laya-guard",
+      "subject": "A lavender protective shield with a mint speech bubble nestled safely inside"
+    },
+    {
+      "directory": "cognia-material-icon-theme",
+      "subject": "A golden folder overflowing with small cyan coral and lavender geometric file tokens"
+    },
+    {
+      "directory": "cognia-office",
+      "subject": "A mint spreadsheet tile, a coral pie chart and a small gold document corner"
+    },
+    {
+      "directory": "cognia-pdf",
+      "subject": "A coral folded document containing a sculpted ivory ribbon loop with an amber bookmark; no letters"
+    },
+    {
+      "directory": "cognia-presentations",
+      "subject": "An ivory presentation easel holding a lavender slide with a coral chart and golden pointer"
+    },
+    {
+      "directory": "cognia-python-demo",
+      "subject": "Two friendly interlocking miniature snakes, one sky blue and one golden yellow, curled into a rounded knot"
+    },
+    {
+      "directory": "cognia-python-runtime-demo",
+      "subject": "A golden and cyan snake loop surrounding a glowing lavender processor chip"
+    },
+    {
+      "directory": "cognia-rfc-toolkit",
+      "subject": "An ivory scroll with a turquoise drafting compass and a tiny coral seal"
+    },
+    {
+      "directory": "cognia-sandboxed-tools",
+      "subject": "A clear aqua safety cube containing a small coral wrench and golden bolt"
+    },
+    {
+      "directory": "cognia-scheduler-tools",
+      "subject": "A lavender calendar with a mint clock and golden alarm bell"
+    },
+    {
+      "directory": "cognia-scheduling-demo",
+      "subject": "A mint calendar page with a coral play triangle and a golden miniature timer"
+    },
+    {
+      "directory": "cognia-share-watch",
+      "subject": "Three coral and aqua connected share nodes surrounding a tiny ivory watch face"
+    },
+    {
+      "directory": "cognia-visualize",
+      "subject": "A glowing lavender prism transforming a golden ray into cyan coral and violet chart bars"
+    },
+    {
+      "directory": "cognia-work-mode",
+      "subject": "A pearl-white briefcase with a mint focus ring and a golden sun rising behind it"
+    },
+    {
+      "directory": "cognia-zenless-zone-zero-theme",
+      "subject": "An original chunky mint retro television with coral rabbit-ear antennae and a luminous golden zigzag"
+    },
+    {
+      "directory": "computer-use",
+      "subject": "A tiny lavender desktop monitor with an oversized ivory pointer and mint keyboard"
+    },
+    {
+      "directory": "context-inspector",
+      "subject": "A clear cyan magnifying lens revealing layers of coral and ivory chat cards"
+    },
+    {
+      "directory": "deep-research",
+      "subject": "A miniature ivory submarine periscope rising from a teal book with a golden magnifying lens"
+    },
+    {
+      "directory": "e2b-sandbox",
+      "subject": "An aqua open sandbox cube holding a miniature lavender terminal window and golden spark"
+    },
+    {
+      "directory": "eval",
+      "subject": "An ivory laboratory flask filled with lavender liquid beside a mint checkmark and gold measurement tick"
+    },
+    {
+      "directory": "external-agent-adapter-example",
+      "subject": "Two lavender and mint robot connector plugs joined by a golden adapter"
+    },
+    {
+      "directory": "external-agent-preset-example",
+      "subject": "A miniature coral robot head above a fan of ivory configuration cards with teal slider dots"
+    },
+    {
+      "directory": "figma-external-service",
+      "subject": "Five soft coral lavender cyan mint and gold design capsules arranged beside a small ivory vector pen nib; original composition"
+    },
+    {
+      "directory": "github-delivery",
+      "subject": "An ivory branching git node tree lifting a coral package on a mint delivery arrow"
+    },
+    {
+      "directory": "github-devin-bot",
+      "subject": "A friendly lavender coding robot holding a tiny mint pull-request branch symbol and golden wrench"
+    },
+    {
+      "directory": "impeccable",
+      "subject": "A faceted lavender jewel being polished by an ivory design brush with a tiny gold sparkle"
+    },
+    {
+      "directory": "kimi-subscription",
+      "subject": "A smooth ivory crescent moon cradling a luminous mint membership gem with one coral orbit dot"
+    },
+    {
+      "directory": "ocr",
+      "subject": "A golden scanning beam passing over an ivory document and forming three raised teal abstract text bars; no actual letters"
+    },
+    {
+      "directory": "pagerduty",
+      "subject": "A coral miniature alert beacon with a mint telephone handset and golden pulse ring"
+    },
+    {
+      "directory": "pet-daily-quests",
+      "subject": "A cute lavender paw resting on a mint quest scroll with a golden star reward"
+    },
+    {
+      "directory": "pi-latex-workbench",
+      "subject": "A tiny ivory mathematical manuscript with a sculpted golden integral-shaped curve and lavender pen"
+    },
+    {
+      "directory": "playwright-mcp",
+      "subject": "Two tiny theatre masks, one mint and one lavender, over a coral browser window"
+    },
+    {
+      "directory": "pro-ide-fixture",
+      "subject": "A lavender code editor window with ivory angle brackets and a golden mechanical gear"
+    },
+    {
+      "directory": "prompt-templates",
+      "subject": "Three ivory speech-bubble cards fanned out with mint and coral tabs and a gold sparkle"
+    },
+    {
+      "directory": "repowiki",
+      "subject": "An open ivory encyclopedia with a teal repository branch tree growing from its pages"
+    },
+    {
+      "directory": "ripgrep-tools",
+      "subject": "A golden magnifying glass racing through three teal document pages with coral speed marks"
+    },
+    {
+      "directory": "screenshot",
+      "subject": "A mint camera aperture inside four ivory crop corners with a small coral shutter button"
+    },
+    {
+      "directory": "skill-recorder",
+      "subject": "A coral recording orb beside a lavender magic wand and an ivory replay loop"
+    },
+    {
+      "directory": "sre-agent",
+      "subject": "A mint server stack protected by a lavender lifebuoy with a golden heartbeat line"
+    },
+    {
+      "directory": "stagehand-mcp",
+      "subject": "A small ivory theatrical gloved hand moving a coral cursor across a teal browser tile"
+    },
+    {
+      "directory": "strix-security",
+      "subject": "A watchful lavender owl face integrated into a mint shield with golden eyes"
+    },
+    {
+      "directory": "test-lsp-contribution",
+      "subject": "Two ivory code angle brackets flanking a lavender language orb connected by mint nodes"
+    },
+    {
+      "directory": "ui-surface-reference",
+      "subject": "Three layered lavender mint and coral miniature interface panels floating in a tidy fan"
+    },
+    {
+      "directory": "wasm-example-formatter",
+      "subject": "A lavender processor chip squeezing irregular coral blocks into a neat ivory code stack"
+    },
+    {
+      "directory": "web-clone",
+      "subject": "Two matching mint miniature browser windows linked by a curved golden duplication arrow"
+    },
+    {
+      "directory": "web-tools",
+      "subject": "A turquoise globe with an ivory wrench orbiting it and a small coral location bead"
+    },
+    {
+      "directory": "workflow-ai",
+      "subject": "Four mint and lavender process nodes linked in a curve around a glowing coral intelligence orb"
+    },
+    {
+      "directory": "workspace-tools",
+      "subject": "A golden open tool case containing a lavender folder and a mint wrench"
+    },
+    {
+      "directory": "zhihu-content-pipeline",
+      "subject": "An ivory fountain pen feeding a coral speech bubble into three connected mint publishing cards"
+    }
+  ],
+  "productionAssets": {
+    "path": "plugins/<directory>/assets/icon.png",
+    "dimensions": "256x256",
+    "totalBytes": 5483529,
+    "originals": "/Users/bytedance/.codex/generated_images/01a10c34-4d73-74d3-8fe7-0e50cae0cd6e",
+    "processing": "sips resize only; original generated PNGs preserved"
+  }
+}

@@ -75,6 +75,7 @@ export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<u
   "@cognia/plugin-sdk/api/native-anthropic-tool": () =>
     import("@cognia/plugin-sdk/api/native-anthropic-tool"),
   "@cognia/plugin-sdk/api/ocr-provider": () => import("@cognia/plugin-sdk/api/ocr-provider"),
+  "@cognia/plugin-sdk/api/pet": () => import("@cognia/plugin-sdk/api/pet"),
   "@cognia/plugin-sdk/api/resources": () => import("@cognia/plugin-sdk/api/resources"),
   "@cognia/plugin-sdk/api/sandbox": () => import("@cognia/plugin-sdk/api/sandbox"),
   "@cognia/plugin-sdk/api/scheduled-task": () => import("@cognia/plugin-sdk/api/scheduled-task"),

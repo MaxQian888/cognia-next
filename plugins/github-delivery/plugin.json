@@ -9,6 +9,7 @@
     "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
   },
   "version": "3.0.0",
+  "icon": "assets/icon.png",
   "engines": {
     "cognia": ">=0.1.0"
   },

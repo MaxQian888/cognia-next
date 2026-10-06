@@ -12,6 +12,7 @@
 // change — the plugin types stay frozen.
 
 import type { ChatSession, StoredMessage, Skill } from "@cognia/agent-config-types"
+import type { DocumentStructure } from "@cognia/document/types"
 import type { WorkspaceRoot } from "@/types/workspace"
 
 // Workspace roots are owned by `types/workspace`; re-export so the plugin
@@ -192,6 +193,9 @@ export interface KnowledgeFile {
   size: number
   mimeType?: string
   originalSize?: number
+  /** Original text stays in content; this projection is only for embedding. */
+  embeddableContent?: string
+  structure?: DocumentStructure
   pageCount?: number
   createdAt: Date
   updatedAt: Date
@@ -269,6 +273,7 @@ export interface Project {
   knowledgeSettings?: {
     enableProjectRag?: boolean
     ragTopK?: number
+    retrievalStrategy?: "vector" | "hybrid" | "keyword"
   }
   /**
    * Per-workspace enablement deltas for globally-defined capabilities —

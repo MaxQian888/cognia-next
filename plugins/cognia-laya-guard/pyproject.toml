@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cognia-laya-guard"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local System-1 guardrail decisions for Cognia, via the laya checkpoint."
 requires-python = ">=3.10"
 # Mirror of plugin.json `pythonDependencies` so `uv run --project` resolves the

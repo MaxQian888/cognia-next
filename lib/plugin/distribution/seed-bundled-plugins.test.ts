@@ -24,9 +24,18 @@ jest.mock("@cognia/logging", () => ({
 jest.mock("@tauri-apps/api/path", () => ({
   resolveResource: jest.fn(async (relative: string) => `/Bundle/${relative}`),
 }))
-jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn(async () => undefined) }))
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(async (command: string) =>
+    command === "plugin_scan_directory"
+      ? []
+      : command === "plugin_get_directory"
+        ? "/plugins"
+        : undefined
+  ),
+}))
 jest.mock("@/lib/db/plugin-install-origins", () => ({
   putInstallOrigin: jest.fn(async () => undefined),
+  getInstallOrigin: jest.fn(async () => undefined),
 }))
 
 const CATALOG = {
@@ -54,6 +63,39 @@ function deps(over: Partial<SeedBundledPluginsDeps> = {}) {
 }
 
 describe("seedBundledPlugins", () => {
+  it("never downgrades a newer seed marker", async () => {
+    const { base, installed } = deps({ readMarker: () => ({ repowiki: "2.0.0" }) })
+    expect((await seedBundledPlugins(base)).upToDate).toEqual(["repowiki"])
+    expect(installed).toEqual([])
+  })
+
+  it.each([
+    { version: "2.0.0", origin: "registry" },
+    { version: "0.0.1", origin: "local" },
+    { version: "2.0.0", origin: "builtin" },
+  ])("preserves an installed package with cleared markers: %j", async (entry) => {
+    const { base, installed } = deps({ readInstalled: async () => entry })
+    await seedBundledPlugins(base)
+    expect(installed).toEqual([])
+  })
+
+  it("does not resurrect a removed package when the bundled version advances", async () => {
+    const { base, installed } = deps({
+      readMarker: () => ({ repowiki: "0.0.1" }),
+      readInstalled: async () => undefined,
+    })
+    await seedBundledPlugins(base)
+    expect(installed).toEqual([])
+  })
+
+  it("upgrades an older package only when its origin is builtin", async () => {
+    const { base, installed } = deps({
+      readInstalled: async () => ({ version: "0.0.1", origin: "builtin" }),
+    })
+    await seedBundledPlugins(base)
+    expect(installed).toHaveLength(1)
+  })
+
   it("hands the catalog entry to the installer", async () => {
     const seen: Array<{ dir: string; id: string; version: string }> = []
     const { base } = deps({

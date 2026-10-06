@@ -3,6 +3,7 @@
   "name": "Impeccable",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Impeccable 4.0.4 design guidance and anti-pattern detection for frontend critique, audit, refinement, and design direction. The Cognia adapter excludes live-browser automation and hooks.",
   "descriptionKey": "manifest.description",
   "type": "frontend",
@@ -111,7 +112,8 @@
     "skills/impeccable/scripts/modern-screenshot.umd.js",
     "skills/impeccable/scripts/palette.mjs",
     "skills/impeccable/scripts/serve-question.mjs",
-    "skills/impeccable/scripts/surface-brief.mjs"
+    "skills/impeccable/scripts/surface-brief.mjs",
+    "assets/icon.png"
   ],
   "permissions": [],
   "activationEvents": ["startup"],

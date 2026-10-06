@@ -39,7 +39,7 @@ jest.mock("@cognia/plugin-sdk/api/effort-surface", () => {
   }
 })
 
-import definition, { AnimeEffortControl, ANIME_EFFORT_CSS, manifest } from "./index"
+import definition, { AnimeEffortControl, ANIME_EFFORT_CSS, manifest, styles } from "./index"
 import manifestJson from "../plugin.json"
 
 type Ctx = Parameters<typeof definition.activate>[0]
@@ -619,4 +619,24 @@ describe("AnimeEffortControl — the slot context the composer passes", () => {
       delete otherSessions.s2
     }
   })
+})
+
+test("loads the operator artwork from the installed plugin through PluginImage", async () => {
+  const { bindPluginImageAssetResolver } = await import("@cognia/plugin-ui")
+  const resolve = jest.fn(async () => "data:image/webp;base64,AAAA")
+  bindPluginImageAssetResolver(resolve)
+  render(<AnimeEffortControl {...SLOT_PROPS} />)
+  await userEvent.click(screen.getByRole("button", TRIGGER))
+  await waitFor(() =>
+    expect(resolve).toHaveBeenCalledWith("cognia-anime-effort", "assets/operator.webp")
+  )
+  expect(await screen.findByRole("img")).toHaveAttribute("src", "data:image/webp;base64,AAAA")
+})
+
+test("ships the complete source stylesheet in independent archives", async () => {
+  const { readFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  expect(styles).toBe(ANIME_EFFORT_CSS)
+  const bundledCss = await readFile(join(__dirname, "../styles.css"), "utf8")
+  expect(bundledCss.trim()).toBe(styles.trim())
 })

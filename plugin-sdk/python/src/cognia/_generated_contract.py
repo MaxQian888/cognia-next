@@ -37,6 +37,7 @@ VALID_PERMISSIONS = (
     "session:write",
     "session:delete",
     "project:read",
+    "knowledge:read",
     "project:write",
     "project:delete",
     "canvas:read",
@@ -6975,6 +6976,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "connectors.deleteEphemeralCard",
+                "name": "deleteEphemeralCard",
+                "requiredPermissions": [
+                    "connectors:send",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "connectors.deleteInstance",
                 "name": "deleteInstance",
                 "requiredPermissions": [
@@ -13135,8 +13150,36 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "project.listKnowledgeDocuments",
+                "name": "listKnowledgeDocuments",
+                "requiredPermissions": [
+                    "project:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "project.listProjects",
                 "name": "listProjects",
+                "requiredPermissions": [
+                    "project:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "project.locateKnowledgeDocument",
+                "name": "locateKnowledgeDocument",
                 "requiredPermissions": [
                     "project:read",
                 ],
@@ -13160,6 +13203,34 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "returned-disposer",
+                },
+            },
+            {
+                "id": "project.readKnowledgeOutline",
+                "name": "readKnowledgeOutline",
+                "requiredPermissions": [
+                    "project:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "project.readKnowledgeRange",
+                "name": "readKnowledgeRange",
+                "requiredPermissions": [
+                    "project:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
                 },
             },
             {

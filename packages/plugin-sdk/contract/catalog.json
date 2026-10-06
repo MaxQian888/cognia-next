@@ -39,6 +39,7 @@
     "session:write",
     "session:delete",
     "project:read",
+    "knowledge:read",
     "project:write",
     "project:delete",
     "canvas:read",
@@ -4116,6 +4117,18 @@
           "requiredPermissions": ["connectors:manage"],
           "consentTier": "policy",
           "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.deleteEphemeralCard",
+          "name": "deleteEphemeralCard",
+          "requiredPermissions": ["connectors:send"],
+          "consentTier": "policy",
+          "risk": "high",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9480,8 +9493,32 @@
           }
         },
         {
+          "id": "project.listKnowledgeDocuments",
+          "name": "listKnowledgeDocuments",
+          "requiredPermissions": ["project:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "project.listProjects",
           "name": "listProjects",
+          "requiredPermissions": ["project:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "project.locateKnowledgeDocument",
+          "name": "locateKnowledgeDocument",
           "requiredPermissions": ["project:read"],
           "consentTier": "policy",
           "risk": "medium",
@@ -9501,6 +9538,30 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "project.readKnowledgeOutline",
+          "name": "readKnowledgeOutline",
+          "requiredPermissions": ["project:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "project.readKnowledgeRange",
+          "name": "readKnowledgeRange",
+          "requiredPermissions": ["project:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
           }
         },
         {

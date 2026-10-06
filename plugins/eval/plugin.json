@@ -3,6 +3,7 @@
   "name": "Agent Eval",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Run agent eval datasets and read their results from chat. Wraps the eval engine (lib/ai/eval) as agent tools.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

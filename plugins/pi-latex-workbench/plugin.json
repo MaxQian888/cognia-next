@@ -3,6 +3,7 @@
   "name": "Pi LaTeX Workbench",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Governed LaTeX writing through the Pi LaTeX Workbench: a vendored, untouched snapshot of the upstream host CLI exposed to Cognia agents as declarative tools, writing/revising/tuning/checking skills, and the workbench as a Pi package for your Pi and for opted-in Cognia-hosted Pi agents. Approvals never come from the model. Desktop only.",
   "descriptionKey": "manifest.description",
   "type": "frontend",
@@ -2425,7 +2426,8 @@
     "vendor/runtime/presets/local-tectonic-xelatex.json",
     "vendor/runtime/toolchain-lock.json",
     "vendor/tsconfig.base.json",
-    "vendor/tsconfig.json"
+    "vendor/tsconfig.json",
+    "assets/icon.png"
   ],
   "i18n": {
     "locales": {

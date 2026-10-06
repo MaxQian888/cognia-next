@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-zenless-zone-zero-theme/assets/signal-emblem.svg",
+  "icon": "assets/icon.png",
   "screenshots": [
     "/plugins/cognia-zenless-zone-zero-theme/assets/characters/miyabi-training-dawn.webp",
     "/plugins/cognia-zenless-zone-zero-theme/assets/characters/ellen-neon-break.webp",

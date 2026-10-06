@@ -130,7 +130,8 @@
     "twin:read": "Query the employee twin's memory",
     "vector:read": "Search the vector store",
     "vector:write": "Add to and delete from the vector store",
-    "workflow:read": "Read workflow metadata and selection"
+    "workflow:read": "Read workflow metadata and selection",
+    "knowledge:read": "Read original documents authorized for the active Agent run"
   },
   "emptyAll": "No plugins are installed yet.",
   "groups": {

@@ -1,0 +1,17 @@
+[
+  {
+    "id": "cognia-documents",
+    "browserBuild": "pass",
+    "bytes": 596505
+  },
+  {
+    "id": "cognia-office",
+    "browserBuild": "pass",
+    "bytes": 1794106
+  },
+  {
+    "id": "cognia-presentations",
+    "browserBuild": "pass",
+    "bytes": 153422
+  }
+]

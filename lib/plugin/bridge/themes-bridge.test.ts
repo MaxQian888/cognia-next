@@ -21,6 +21,13 @@ import {
 } from "@/lib/theme/theme-registry"
 import type { PluginManifest } from "@/types/plugin/plugin"
 
+jest.mock("./plugin-file-path", () => ({
+  ...jest.requireActual("./plugin-file-path"),
+  readContainedPluginAsset: jest.fn((...args: unknown[]) =>
+    jest.requireActual("./plugin-file-path").readContainedPluginAsset(...args)
+  ),
+}))
+
 jest.mock("@/lib/file/file-operations", () => ({
   readTextFile: jest.fn(),
 }))
@@ -320,5 +327,67 @@ describe("subscribe propagation", () => {
       "/plugin/p"
     )
     expect(listPluginThemes().map((t) => t.id)).toContain("p.noir")
+  })
+})
+
+describe("portable theme-pack previews", () => {
+  it("resolves relative and legacy mirrored previews against the active installation", async () => {
+    const { getThemePack, unregisterThemePacksByPlugin } =
+      await import("@/lib/theme/theme-pack-registry")
+    const plugin = manifest([])
+    plugin.themePacks = [
+      {
+        id: "portable",
+        name: "Portable",
+        applies: {},
+        preview: {
+          light: "assets/light.webp",
+          dark: "/plugins/p/assets/dark.webp",
+        },
+      },
+    ]
+    const bridge = new PluginThemesBridge()
+    await bridge.registerPluginThemePacks("p", "Plugin P", plugin, "builtin://p")
+    expect(getThemePack("p", "portable")?.preview).toEqual({
+      light: "/plugins/p/assets/light.webp",
+      dark: "/plugins/p/assets/dark.webp",
+    })
+    const { readContainedPluginAsset } = await import("./plugin-file-path")
+    const read = jest.mocked(readContainedPluginAsset)
+    read.mockResolvedValue("data:image/webp;base64,AAAA")
+    try {
+      await bridge.registerPluginThemePacks("p", "Plugin P", plugin, "/installed/p")
+      expect(read).toHaveBeenCalledWith("p", "/installed/p", "assets/light.webp", "image/webp")
+      expect(read).toHaveBeenCalledWith("p", "/installed/p", "assets/dark.webp", "image/webp")
+      expect(getThemePack("p", "portable")?.preview?.light).toBe("data:image/webp;base64,AAAA")
+    } finally {
+      read.mockImplementation((...args) =>
+        jest.requireActual("./plugin-file-path").readContainedPluginAsset(...args)
+      )
+      unregisterThemePacksByPlugin("p")
+    }
+  })
+
+  it("keeps a theme pack usable when its preview is missing or outside its root", async () => {
+    const { getThemePack, unregisterThemePacksByPlugin } =
+      await import("@/lib/theme/theme-pack-registry")
+    const plugin = manifest([])
+    plugin.themePacks = [
+      {
+        id: "broken",
+        name: "Broken",
+        applies: {},
+        preview: {
+          light: "../outside.webp",
+          dark: "https://remote.example/image.webp",
+        },
+      },
+    ]
+    await new PluginThemesBridge().registerPluginThemePacks("p", "P", plugin, "/installed/p")
+    expect(getThemePack("p", "broken")?.preview).toEqual({ light: undefined, dark: undefined })
+    plugin.themePacks![0]!.preview = { light: "/plugins/p/assets/invalid%ZZ.webp" }
+    await new PluginThemesBridge().registerPluginThemePacks("p", "P", plugin, "/installed/p")
+    expect(getThemePack("p", "broken")?.preview?.light).toBeUndefined()
+    unregisterThemePacksByPlugin("p")
   })
 })

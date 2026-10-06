@@ -28,7 +28,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid, python | internal |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
 | `ctx.configuration` | 5 | `settings:read`, `settings:write` | frontend, hybrid | internal |
-| `ctx.connectors` | 64 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
+| `ctx.connectors` | 65 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
 | `ctx.contextMenu` | 2 | None | frontend, hybrid | internal |
 | `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
@@ -60,7 +60,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.perf` | 5 | `perf:read` | frontend, hybrid | internal |
 | `ctx.permissions` | 5 | None | frontend, hybrid | internal |
 | `ctx.pet` | 7 | `pet:interact`, `pet:read` | frontend, hybrid | internal |
-| `ctx.project` | 20 | `project:write`, `project:read`, `project:delete` | frontend, hybrid | sensitive |
+| `ctx.project` | 24 | `project:write`, `project:read`, `project:delete` | frontend, hybrid | sensitive |
 | `ctx.python` | 3 | None | frontend, hybrid | internal |
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
 | `ctx.resources` | 7 | `database:read` | frontend, hybrid | sensitive |
@@ -386,6 +386,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `connectors.bootstrapConversation` | `connectors:send` | high | No |
 | `connectors.createChat` | `connectors:send` | high | No |
 | `connectors.createInstance` | `connectors:manage` | medium | No |
+| `connectors.deleteEphemeralCard` | `connectors:send` | high | No |
 | `connectors.deleteInstance` | `connectors:manage` | medium | No |
 | `connectors.deleteMessage` | `connectors:send` | high | No |
 | `connectors.editMessage` | `connectors:send` | high | No |
@@ -941,8 +942,12 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `project.getProject` | `project:read` | medium | Yes |
 | `project.getProjectSessions` | `project:read` | medium | Yes |
 | `project.linkSession` | `project:read` | medium | No |
+| `project.listKnowledgeDocuments` | `project:read` | medium | Yes |
 | `project.listProjects` | `project:read` | medium | Yes |
+| `project.locateKnowledgeDocument` | `project:read` | medium | Yes |
 | `project.onProjectChange` | `project:read` | medium | No |
+| `project.readKnowledgeOutline` | `project:read` | medium | Yes |
+| `project.readKnowledgeRange` | `project:read` | medium | Yes |
 | `project.removeKnowledgeFile` | `project:delete` | high | No |
 | `project.removeTag` | `project:delete` | high | No |
 | `project.setActiveProject` | `project:write` | high | No |

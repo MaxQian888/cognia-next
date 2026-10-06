@@ -27,8 +27,17 @@ import {
   unregisterThemesByPlugin,
   type PluginTheme,
 } from "@/lib/theme/theme-registry"
-import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
-import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
+import {
+  registerThemePack,
+  unregisterThemePacksByPlugin,
+  themePackPreviewSrc,
+} from "@/lib/theme/theme-pack-registry"
+import { pluginImageMimeType } from "../core/plugin-asset-resolver"
+import {
+  isUnsafeRelativePath,
+  readContainedPluginFile,
+  readContainedPluginAsset,
+} from "./plugin-file-path"
 import { parseJsonc } from "@/lib/jsonc"
 import {
   vscodeThemeToCustomTheme,
@@ -287,18 +296,19 @@ export class PluginThemesBridge {
 
   /**
    * Register every entry under `manifest.themePacks` with the theme-pack
-   * registry. Unlike `registerPluginThemes`, this is purely metadata — no
-   * file IO, no settings writes. The bridge does not validate inter-pack
+   * registry. Plugin-relative previews are read through the contained asset
+   * boundary. The bridge does not validate inter-pack
    * references (theme/font/wallpaper ids); that is the theme-pack-applier's
    * job at apply time, where it can surface a useful UI error.
    *
    * v47 (ADR-0029).
    */
-  registerPluginThemePacks(
+  async registerPluginThemePacks(
     pluginId: string,
     pluginName: string,
-    manifest: PluginManifest
-  ): { registered: number } {
+    manifest: PluginManifest,
+    pluginRoot = `builtin://${pluginId}`
+  ): Promise<{ registered: number }> {
     const packs = manifest.themePacks ?? []
     let registered = 0
     for (const pack of packs) {
@@ -309,7 +319,38 @@ export class PluginThemesBridge {
         continue
       }
       try {
-        registerThemePack({ pluginId, pluginName, pack })
+        const resolvePreview = async (
+          candidate: string | undefined
+        ): Promise<string | undefined> => {
+          if (!candidate) return undefined
+          const allowed = themePackPreviewSrc(pluginId, candidate)
+          if (allowed?.startsWith("data:")) return allowed
+          const mirror = `/plugins/${encodeURIComponent(pluginId)}/`
+          try {
+            const relative = candidate.startsWith(mirror)
+              ? decodeURIComponent(candidate.slice(mirror.length))
+              : candidate
+            if (isUnsafeRelativePath(relative)) return undefined
+            return await readContainedPluginAsset(
+              pluginId,
+              pluginRoot,
+              relative,
+              pluginImageMimeType(relative)
+            )
+          } catch (error) {
+            loggers.manager.warn(`[themes-bridge] plugin ${pluginId}: preview could not be read`, {
+              error,
+            })
+            return undefined
+          }
+        }
+        const preview = pack.preview
+          ? {
+              light: await resolvePreview(pack.preview.light),
+              dark: await resolvePreview(pack.preview.dark),
+            }
+          : undefined
+        registerThemePack({ pluginId, pluginName, pack: { ...pack, preview } })
         registered += 1
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

@@ -3,6 +3,7 @@
   "name": "Skill Recorder",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Record a desktop workflow and turn it into a generated Skill (record-and-replay). Captures clicks / typing / scrolls plus the on-screen elements, then an LLM drafts a reusable SKILL.md you review and save.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

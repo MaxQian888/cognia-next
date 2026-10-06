@@ -27,7 +27,7 @@ export async function buildPlugin({ outputDirectory = resolve(pluginRoot, "dist"
   const fileOptions = { date: new Date("1980-01-01T00:00:00Z"), createFolders: false }
   archive.file("plugin.json", manifestBytes, fileOptions)
   archive.file(manifest.main, bundle, fileOptions)
-  for (const name of ["README.md", "README.zh-CN.md"]) {
+  for (const name of ["README.md", "README.zh-CN.md", "assets/icon.png"]) {
     archive.file(name, await readFile(resolve(pluginRoot, name)), fileOptions)
   }
   const zipBytes = await archive.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })

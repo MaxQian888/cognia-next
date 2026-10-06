@@ -143,3 +143,52 @@ export default definePlugin({
 | public PII helper assumption | provide a plugin-owned `canUseTool`/guardrail; host PII gates are internal |
 
 Generate new projects with `cognia plugin new <name> --kind ts`. `pnpm plugin:create` is only a compatibility adapter over that command.
+
+## Document directory and progressive reading
+
+The existing `ctx.project` API provides `listKnowledgeDocuments`, `readKnowledgeOutline`, `readKnowledgeRange`, and `locateKnowledgeDocument`. The directory returns metadata only. Read the selected original section before composing an answer; heading summaries are navigation hints and source text is untrusted evidence. Offsets are UTF-16, half-open; pages and lines are one-based.
+
+Declare `project:read` for these methods. An Agent-library scope also requires the explicit `knowledge:read` grant:
+
+```json
+{
+  "type": "frontend",
+  "capabilities": ["tools", "webview"],
+  "permissions": ["project:read", "knowledge:read", "project:write"]
+}
+```
+
+This is a manifest fragment: retain the required identity, engines, entries, and contributions of your plugin. `tools` and `webview` are needed only when your plugin contributes those surfaces. Remove `project:write` if it does not index or change project files.
+
+```ts
+import type { PluginContext, PluginKnowledgeScope } from "@cognia/plugin-sdk"
+
+export async function readProcedure(ctx: PluginContext, projectId: string) {
+  const scope: PluginKnowledgeScope = { kind: "project", projectId }
+  const directory = await ctx.project.listKnowledgeDocuments({ scope, query: "guide", limit: 10 })
+  const document = directory.documents[0]
+  if (!document) return null
+  const identity = { scope, knowledgeBaseId: document.knowledgeBaseId,
+    sourceId: document.sourceId, generationId: document.generationId }
+  const outline = await ctx.project.readKnowledgeOutline(identity)
+  const section = outline.nodes.find((node) => node.level > 0)
+  if (!section) return null
+  const evidence = await ctx.project.readKnowledgeRange({ ...identity,
+    sectionId: section.id, maxChars: 4_000 })
+  const location = await ctx.project.locateKnowledgeDocument({ ...identity,
+    sectionId: section.id })
+  return { evidence, location }
+}
+```
+
+For an Agent library, use the host-created `toolContext.project` API supplied to your registered tool’s `execute(args, toolContext)` call, and `{ kind: "agent", sessionId: toolContext.sessionId }` as the scope. The module `ctx.project` and ordinary iframe clients cannot authorize Agent-library access. The host must have registered a reader for that actual Agent run with progressive reading enabled. The host captures its authorized library IDs, source ACL identity, immutable revision bindings, and shared budget. A missing or mismatched invocation binding produces `session_scope_unavailable`; a removed/replaced reader produces `session_reader_unavailable`. The API closes when tool execution ends, including failures, so a retained reference cannot read a later run. A plugin cannot supply a library allowlist, principal, revision grant, or trusted-local flag. Naming a different session does not broaden authority. Naming a library outside the host scope produces `source_unavailable`; a revocation is checked on the next call. Directory queries reuse the existing BM25 implementation for navigation; indexed RAG remains the host's configured vector/hybrid retrieval path.
+
+Project indexing reuses `addKnowledgeFile(projectId, { name, content, embeddableContent?, structure? })`, `updateKnowledgeFile`, and `removeKnowledgeFile` with `project:write`. `content` is the parsed original, `embeddableContent` is a separate embedding projection, and `structure` is the parser's canonical navigation result. The existing hash/reconcile and indexing lifecycle handles the write. Project directory generations identify the current original's content hash; an old generation after an edit fails with `revision_unavailable`, and a deleted document fails with `source_unavailable`. Agent-library historical reads are available only inside the host's frozen revision grant. There is no plugin write API for arbitrary Agent libraries.
+
+Host `knowledgeReading` settings control `enabled`, `maxCalls`, `maxReadChars`, `totalReadChars`, `maxOutlineNodes`, summary settings, and retrieval settings. Agent scopes share the host run's budget across tools and plugin calls. Project scopes retain their bounded reader for the plugin API lifetime and observe live host setting changes. `maxChars` can lower the read size, but cannot raise the host limit. Continue truncated reads from `nextCharStart`; handle `reading_disabled`, `invalid_arguments`, `call_budget_exhausted`, `read_budget_exhausted`, and missing-page/section/version errors explicitly.
+
+Frontend and hybrid module plugins receive these APIs on `ctx.project`. Sandboxed webviews declaring project read/write permissions receive the same operations through `window.acquireCogniaProjectApi()`; its asynchronous client also mirrors the three existing indexing writes. The host checks live grants before executing and again before returning reads, validates the method allowlist, bounds concurrent requests, and detaches on plugin disable. Acquire once per iframe. Closing the frame rejects pending reads; timeouts reject after ten seconds. This channel uses the existing webview transport and never exposes `getKnowledgeFiles` as an unrestricted sandbox read.
+
+The project catalog supports frontend/hybrid on desktop, web, and mobile. Python, WASM, and headless runtimes are not advertised for these APIs. Desktop Node activation-call replay does not implement asynchronous host-return reads; use the sandboxed webview transport for that surface instead of relying on replayed calls.
+
+The permission tier `forbid` denies access even when a manifest grant remains stored. Revoking a permission in the host UI also takes effect on the next call and before a pending read returns: the host records an explicit revocation across its existing permission stores. `hasPermission` and `getGrantedPermissions` report these effective grants. Regranting requires a host-approved grant; retained plugin state cannot undo revocation. Public workflow invocations cannot use legacy project metadata or whole-file methods to bypass their bound document scope, and their project-scope reads are denied.

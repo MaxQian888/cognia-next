@@ -1,14 +1,14 @@
 /**
- * Node frontend-plugin importer. The shared loader's `importModule` uses
- * Tauri/fetch/eval strategies that don't exist under Node; this importer loads
- * a plugin's `main` bundle via dynamic `import()` of a `file://` URL, with a
- * per-plugin cache-busting `?v=N` query so `/plugin reload` re-executes the
- * module instead of returning the ESM-cached copy.
- *
- * The plugin `main` must be runnable JS (no `@/` aliases) — the same constraint
- * `discover-plugins` already implies for CLI-"supported" plugins.
+ * Installed frontend plugins use the same CJS bundle contract and host-shared
+ * modules as the desktop loader. Read and evaluate each load so replaced bytes
+ * are never hidden by Node's CommonJS cache. Native ESM / TypeScript imports
+ * remain available for the source-development path.
  */
+import { readFile } from "node:fs/promises"
+import { extname } from "node:path"
 import { pathToFileURL } from "node:url"
+import { evaluatePluginBundle } from "@/lib/plugin/core/evaluate-plugin-bundle"
+import { primeSharedModulesFor } from "@/lib/plugin/core/shared-modules"
 
 export interface NodeFrontendImporter {
   (absPath: string, pluginId: string): Promise<Record<string, unknown>>
@@ -18,15 +18,18 @@ export interface NodeFrontendImporter {
 
 type DynamicImport = (spec: string) => Promise<Record<string, unknown>>
 
-export function makeNodeFrontendImporter(
-  dynamicImport: DynamicImport = (spec) => import(spec)
-): NodeFrontendImporter {
+export function makeNodeFrontendImporter(dynamicImport?: DynamicImport): NodeFrontendImporter {
   const generation = new Map<string, number>()
   const importer = (async (absPath: string, pluginId: string) => {
+    if (!dynamicImport && ![".mjs", ".mts", ".ts", ".tsx"].includes(extname(absPath))) {
+      const code = await readFile(absPath, "utf8")
+      await primeSharedModulesFor(code)
+      return evaluatePluginBundle(code, absPath)
+    }
     const gen = (generation.get(pluginId) ?? 0) + 1
     generation.set(pluginId, gen)
     const url = `${pathToFileURL(absPath).href}?v=${gen}`
-    return dynamicImport(url)
+    return dynamicImport ? dynamicImport(url) : import(url)
   }) as NodeFrontendImporter
   importer.bumpGeneration = (pluginId: string) => {
     generation.set(pluginId, (generation.get(pluginId) ?? 0) + 1)

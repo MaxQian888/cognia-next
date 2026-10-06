@@ -10,6 +10,7 @@
 // Mirrors `theme-registry.ts`'s shape so React consumers can drive the UI
 // via `useSyncExternalStore` without bespoke wiring.
 
+import { getPluginPathViolations } from "@/lib/plugin/core/plugin-path"
 import type { PluginThemePackContribution } from "@/types/plugin/plugin"
 
 export interface RegisteredThemePack extends PluginThemePackContribution {
@@ -30,9 +31,9 @@ export interface RegisteredThemePack extends PluginThemePackContribution {
  * the containment boundary (`readContainedPluginAsset`), and a preview image is
  * the same kind of thing.
  *
- * So exactly two forms load. A `data:image/…` URL is bytes the manifest already
- * carries. A path under `/plugins/<pluginId>/` is the plugin's own public
- * mirror, which is the shape `publicBuiltinAssetUrl` builds. Everything else is
+ * Inline `data:image/…` bytes and the plugin's own public resource mirrors
+ * are allowed. Generated built-ins use `/_cognia/builtin-plugins/<id>/resources/`;
+ * older bundles use `/plugins/<id>/`. Everything else is
  * dropped and the card simply draws without an image: a remote host, a `blob:`,
  * a peer plugin's mirror, or a traversal back out of one.
  */
@@ -43,13 +44,17 @@ export function themePackPreviewSrc(
   const value = candidate?.trim()
   if (!value) return undefined
   if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(value)) return value
-  const mirror = `/plugins/${encodeURIComponent(pluginId)}/`
-  if (!value.startsWith(mirror)) return undefined
+  const encodedId = encodeURIComponent(pluginId)
+  const mirror = [
+    `/plugins/${encodedId}/`,
+    `/_cognia/builtin-plugins/${encodedId}/resources/`,
+  ].find((prefix) => value.startsWith(prefix))
+  if (!mirror) return undefined
   // A `..` anywhere past the prefix walks back out of the plugin's own folder,
   // which is the one thing the prefix check alone would let through.
   const rest = value.slice(mirror.length)
   if (rest.length === 0) return undefined
-  if (rest.split(/[/\\]/).includes("..")) return undefined
+  if (getPluginPathViolations(rest).length > 0) return undefined
   return value
 }
 

@@ -19,8 +19,6 @@ import { recordInstallOrigin } from "@/lib/plugin/origin/install-origin"
 import type { CogpackProvenance } from "@/types/plugin/plugin-cogset"
 import { compareVersions, satisfiesConstraint } from "./dependency-resolver"
 import { resolvePluginIcon } from "../utils/icon"
-import { getPluginSignatureVerifier } from "../security/signature"
-import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 // =============================================================================
 // Types
@@ -169,16 +167,6 @@ export interface PluginInstallResult {
   descriptor?: ExtensionDescriptor
   error?: string
   errorCategory?: MarketplaceErrorCategory
-  retryable?: boolean
-}
-
-interface PluginDownloadVersionResult {
-  success: boolean
-  pluginId?: string
-  version?: string
-  downloadUrl?: string
-  errorCode?: string
-  error?: string
   retryable?: boolean
 }
 
@@ -499,46 +487,12 @@ export function normalizeOperationError(
   }
 }
 
-function normalizeDownloadVersionResult(
-  payload: unknown,
-  pluginId: string,
-  version: string
-): PluginDownloadVersionResult {
-  const value = (payload || {}) as Record<string, unknown>
-  if (typeof value.success === "boolean") {
-    return {
-      success: value.success,
-      pluginId: typeof value.pluginId === "string" ? value.pluginId : pluginId,
-      version: typeof value.version === "string" ? value.version : version,
-      downloadUrl: typeof value.downloadUrl === "string" ? value.downloadUrl : undefined,
-      errorCode: typeof value.errorCode === "string" ? value.errorCode : undefined,
-      error: typeof value.error === "string" ? value.error : undefined,
-      retryable: typeof value.retryable === "boolean" ? value.retryable : undefined,
-    }
-  }
-
-  // Backward-compatible interpretation for legacy command responses.
-  if (typeof value.error === "string") {
-    return {
-      success: false,
-      pluginId,
-      version,
-      error: value.error,
-    }
-  }
-
-  return {
-    success: true,
-    pluginId,
-    version,
-    downloadUrl: typeof value.downloadUrl === "string" ? value.downloadUrl : undefined,
-  }
-}
-
 /**
  * Plugin Marketplace Client
  */
 export class PluginMarketplace {
+  readonly supportsTransactionalConfig = true
+
   private config: MarketplaceConfig
   private cache: Map<string, { data: unknown; timestamp: number }> = new Map()
   // Remembers recently-failed `getPlugin` keys (value = expiry timestamp) so a
@@ -846,6 +800,7 @@ export class PluginMarketplace {
       operation?: InstallOperation
       /** Set when a cogpack import drives this install (ADR-0209). */
       viaCogpack?: CogpackProvenance
+      config?: Record<string, unknown>
     } = {}
   ): Promise<PluginInstallResult> {
     const operation = options.operation || "install"
@@ -944,9 +899,6 @@ export class PluginMarketplace {
         }
       }
 
-      const { invoke } = await import("@tauri-apps/api/core")
-      const pluginDir = await invoke<string>("plugin_get_directory")
-
       this.emitProgress({
         pluginId,
         stage: "installing",
@@ -955,106 +907,25 @@ export class PluginMarketplace {
           operation === "update" ? `Updating ${plugin.name}...` : `Installing ${plugin.name}...`,
       })
 
-      if (version) {
-        // Integrity + provenance are enforced host-side (Rust) on the raw
-        // archive bytes before anything is unpacked. Pass the registry's
-        // claims plus the user's signature policy; an unsigned archive is
-        // rejected when the policy requires signatures.
-        const { getPluginSignatureVerifier } = await import("@/lib/plugin/security/signature")
-        const requireSignature = getPluginSignatureVerifier().getConfig().requireSignatures
-        const downloadResultPayload = await invoke<unknown>("plugin_download_version", {
-          pluginId,
-          version: targetVersion.version,
-          downloadUrl: targetVersion.downloadUrl,
-          checksum: targetVersion.checksum,
-          signatureHex: targetVersion.signature,
-          publicKeyHex: targetVersion.publicKey,
-          requireSignature,
+      const { getPluginManager } = await import("../core/manager")
+      // Rust verifies the archive while staging. The manager verifies the
+      // installed receipt after commit and before finalizing its rollback
+      // backup; a staged path has no installed plugin identity yet.
+      const installed = await getPluginManager().installPluginFromRegistry(
+        () => this.stagePluginUpdate(pluginId, targetVersion),
+        options.config
+      )
+      const descriptor =
+        installed.descriptor ||
+        buildExtensionDescriptor({
+          manifest: installed.manifest,
+          source: "marketplace",
+          path: installed.path,
+          installRootKind: "installed",
         })
-        const downloadResult = normalizeDownloadVersionResult(
-          downloadResultPayload,
-          pluginId,
-          targetVersion.version
-        )
-        if (!downloadResult.success) {
-          const errorInfo = normalizeOperationError(
-            new Error(downloadResult.error || "Version download failed"),
-            "Version download failed"
-          )
-          this.emitProgress({
-            pluginId,
-            stage: "error",
-            progress: 0,
-            message: errorInfo.message,
-            error: errorInfo.message,
-          })
-          return {
-            success: false,
-            error: errorInfo.message,
-            errorCategory: errorInfo.category,
-            retryable: downloadResult.retryable ?? errorInfo.retryable,
-          }
-        }
-      } else {
-        await invoke("plugin_install", {
-          source: pluginId,
-          installType: "marketplace",
-          pluginDir,
-        })
-      }
 
-      // ADR 0016 P0-3 — Verify signature before promoting the install. The
-      // verifier's `config.requireSignatures` is wired to the user-visible
-      // Settings → Plugins → Policy toggle via `applyPluginPolicyToRuntime`,
-      // so this single call honours whichever stance the user has set.
-      // Default is strict-on (signature required); turning the toggle off
-      // still runs verification but records a bypass diagnostic so the
-      // Audit Panel surfaces the lowered guarantee.
-      const pluginPath = `${pluginDir}/${pluginId}`
-      const verificationResult = await getPluginSignatureVerifier().verify(pluginPath)
-      if (!verificationResult.valid) {
-        const reason = verificationResult.reason || "Signature verification failed"
-        this.emitProgress({
-          pluginId,
-          stage: "error",
-          progress: 0,
-          message: reason,
-          error: reason,
-        })
-        return {
-          success: false,
-          error: reason,
-          errorCategory: "signature_invalid",
-          retryable: false,
-        }
-      }
-      if (verificationResult.warnings.length > 0) {
-        // Verifier returned `valid: true` but downgraded the result to
-        // warning-only — happens when the user has disabled signatureRequired
-        // and the bundle is unsigned, or when the signer isn't in the
-        // trusted-publishers list. Surface every bypass in the Audit Panel.
-        recordSilentFailure(
-          pluginId,
-          {
-            site: "marketplace.signatureBypass",
-            message: `Installed without strict signature enforcement: ${verificationResult.warnings.join(", ")}`,
-            expected: false,
-          },
-          new Error(verificationResult.warnings.join(", "))
-        )
-      }
-
-      const descriptor = buildExtensionDescriptor({
-        manifest: plugin.manifest,
-        source: "marketplace",
-        path: pluginPath,
-        pluginDirectory: pluginDir,
-        installRootKind: "installed",
-      })
-
-      // ADR-0209: this path never writes the plugin row (the next discovery
-      // pass does), so the origin is the only record of which registry and
-      // version were installed.
+      // Registration has completed, including the Dexie row, before origin
+      // tracking and before the install flow writes the user's configuration.
       await recordInstallOrigin({
         pluginId,
         version: targetVersion.version,
@@ -1132,12 +1003,18 @@ export class PluginMarketplace {
       throw new Error("Host returned an invalid staged update descriptor")
     }
     const validation = validatePluginManifest(staged.manifest)
-    if (!validation.valid) {
+    if (
+      !validation.valid ||
+      staged.manifest.id !== pluginId ||
+      staged.manifest.version !== version.version
+    ) {
       await invoke("plugin_discard_staged_update", {
         pluginId,
         transactionId: staged.transactionId,
       }).catch(() => undefined)
-      throw new Error(`Staged plugin manifest is invalid: ${validation.errors.join(", ")}`)
+      throw new Error(
+        `Staged plugin manifest is invalid: ${validation.errors.join(", ") || "identity or version differs from the selected package"}`
+      )
     }
     return staged
   }

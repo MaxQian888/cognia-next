@@ -95,6 +95,8 @@ const log = loggers.plugin
 // =============================================================================
 
 interface PluginState extends PluginStoreState {
+  /** Explicit uninstall intent; discovery must never restore a bundled fallback. */
+  removedPlugins: Record<string, true>
   // Actions - Plugin Lifecycle
   discoverPlugin: (
     manifest: PluginManifest,
@@ -169,6 +171,7 @@ interface PluginLifecycleActionOptions {
 
 interface PluginUninstallOptions extends PluginLifecycleActionOptions {
   skipFileRemoval?: boolean
+  rememberRemoval?: boolean
 }
 
 interface PluginDiscoveryOptions {
@@ -182,8 +185,10 @@ interface PluginDiscoveryOptions {
 // =============================================================================
 
 const initialState: PluginStoreState & {
+  removedPlugins: Record<string, true>
   eventListeners: Map<string, Set<(event: PluginSystemEvent) => void>>
 } = {
+  removedPlugins: {},
   plugins: {},
   loadOrder: [],
   loading: new Set(),
@@ -296,6 +301,11 @@ export const usePluginStore = create<PluginState>()(
 
       discoverPlugin: (manifest, source, path, options) => {
         const existing = get().plugins[manifest.id]
+        if (
+          source === "builtin" &&
+          (get().removedPlugins[manifest.id] || (existing && existing.source !== "builtin"))
+        )
+          return
         const observedSources = mergeObservedSources(existing, source)
         const mergedDiagnostics = withSourceTransitionDiagnostics(
           existing,
@@ -344,6 +354,10 @@ export const usePluginStore = create<PluginState>()(
           },
         }))
 
+        set((state) => {
+          const { [pluginId]: _removed, ...removedPlugins } = state.removedPlugins
+          return { removedPlugins }
+        })
         get().emitEvent({ type: "plugin:installed", pluginId })
       },
 
@@ -610,6 +624,10 @@ export const usePluginStore = create<PluginState>()(
           const { [pluginId]: __, ...remainingErrors } = state.errors
           return {
             plugins: remainingPlugins,
+            removedPlugins:
+              options?.rememberRemoval === false
+                ? state.removedPlugins
+                : { ...state.removedPlugins, [pluginId]: true as const },
             errors: remainingErrors,
             loadOrder: state.loadOrder.filter((id) => id !== pluginId),
           }
@@ -1158,6 +1176,7 @@ export const usePluginStore = create<PluginState>()(
       },
       partialize: (state) => ({
         // Only persist essential plugin state
+        removedPlugins: state.removedPlugins,
         plugins: Object.fromEntries(
           Object.entries(state.plugins).map(([id, plugin]) => [
             id,

@@ -26,6 +26,7 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "session:write",
   "session:delete",
   "project:read",
+  "knowledge:read",
   "project:write",
   "project:delete",
   "canvas:read",
@@ -725,6 +726,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.connectors.createInstance": {
+    kind: "none",
+  },
+  "ctx.connectors.deleteEphemeralCard": {
     kind: "none",
   },
   "ctx.connectors.deleteInstance": {
@@ -1916,11 +1920,23 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.project.linkSession": {
     kind: "none",
   },
+  "ctx.project.listKnowledgeDocuments": {
+    kind: "none",
+  },
   "ctx.project.listProjects": {
+    kind: "none",
+  },
+  "ctx.project.locateKnowledgeDocument": {
     kind: "none",
   },
   "ctx.project.onProjectChange": {
     kind: "returned-disposer",
+  },
+  "ctx.project.readKnowledgeOutline": {
+    kind: "none",
+  },
+  "ctx.project.readKnowledgeRange": {
+    kind: "none",
   },
   "ctx.project.removeKnowledgeFile": {
     kind: "none",

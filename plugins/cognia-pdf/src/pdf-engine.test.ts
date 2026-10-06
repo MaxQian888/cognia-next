@@ -17,6 +17,7 @@ import {
   isRenderCancelled,
   isSignedPdf,
   openPdfForRender,
+  disposePdfWorker,
 } from "./pdf-engine"
 
 interface MockWidget {
@@ -102,11 +103,12 @@ function installPdfDocument(bytes: Uint8Array) {
       return Uint8Array.from([9])
     }),
     extractPages: jest.fn(async () => Uint8Array.from([3])),
-    destroy: jest.fn(async () => undefined),
+    loadingTask: { destroy: jest.fn(async () => undefined) },
   }
 }
 
 beforeEach(() => {
+  disposePdfWorker()
   globalScope.__COGNIA_PDF_WORKER_URL__ = workerUrl
   workerOptions.workerSrc = ""
   initialAnnotations = [TEXT_FIELD]
@@ -298,6 +300,7 @@ describe("PDF engine public file seam", () => {
       { document: Uint8Array.from([2]), includePages: [0], password: "pw2" },
     ])
     expect(getDocument).toHaveBeenCalledWith(expect.objectContaining({ password: "pw1" }))
+    expect(doc.loadingTask.destroy).toHaveBeenCalledTimes(1)
   })
 
   it("points pdf.js at the build-injected worker asset", async () => {
@@ -310,6 +313,12 @@ describe("PDF engine public file seam", () => {
     delete globalScope.__COGNIA_PDF_WORKER_URL__
 
     await expect(inspectPdf(Uint8Array.from([1]))).rejects.toThrow("__COGNIA_PDF_WORKER_URL__")
+  })
+
+  it("keeps an embedded standalone worker importable in the Node runtime", async () => {
+    globalScope.__COGNIA_PDF_WORKER_URL__ = "data:text/javascript;base64,ZXhwb3J0IGNvbnN0IHg9MQ=="
+    await inspectPdf(Uint8Array.from([1]))
+    expect(workerOptions.workerSrc).toBe(globalScope.__COGNIA_PDF_WORKER_URL__)
   })
 
   it("refuses mutation when a signature marker is present", async () => {
@@ -447,7 +456,7 @@ describe("PDF canvas render session", () => {
           }),
           render,
         })),
-        destroy,
+        loadingTask: { destroy },
       }),
     }))
     return { render, destroy }

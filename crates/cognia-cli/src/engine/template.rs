@@ -915,7 +915,7 @@ mod tests {
         let package: serde_json::Value = serde_json::from_str(ts::PACKAGE_JSON).expect("package");
         assert_eq!(
             package["dependencies"]["@agentclientprotocol/sdk"],
-            "^1.5.0"
+            "1.5.0"
         );
         // They stay external at build time — the host hands out its instances.
         assert!(ts::PACKAGE_JSON.contains("--external:@cognia/plugin-sdk"));

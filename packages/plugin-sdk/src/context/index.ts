@@ -14,6 +14,15 @@
  */
 
 import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
+export type * from "@/types/plugin/plugin-knowledge"
+export type { PluginProjectWebviewAPI } from "@/types/plugin/plugin"
+
+declare global {
+  interface Window {
+    /** Present in a sandboxed webview declaring project read/write permission. */
+    acquireCogniaProjectApi?: () => import("@/types/plugin/plugin").PluginProjectWebviewAPI
+  }
+}
 
 // =============================================================================
 // Core PluginContext + per-field APIs (from types/plugin/plugin.ts)

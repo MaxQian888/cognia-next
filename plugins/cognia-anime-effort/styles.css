@@ -1,10 +1,348 @@
-/*
- * Declared so `manifest.styles` is set. That key, not this file, is what gates
- * style injection: `manager.ts` calls `loadPluginStyles`, which returns early
- * on a missing `stylesEntry` before it ever looks at the bundled source.
- *
- * The rules themselves live in `ANIME_EFFORT_CSS` (src/index.tsx) and reach the
- * document through the browser builtin registry's `bundledStyles`, which
- * `loadPluginStyles` prefers for any `builtin://` root. Keeping one copy there,
- * rather than duplicating ~200 lines here, is what stops the two drifting.
- */
+/* Theme hooks, declared on BOTH roots: the trigger renders inside the composer
+   slot, the panel inside a portal that re-stamps the scope root itself.
+   The accent tracks the host's own deepest-effort token instead of a literal,
+   so the control follows the palette and the style pack like its neighbours.
+   The plate and its ink are deliberately fixed: they sit over artwork rather
+   than over the theme surface, so they must stay legible in both themes. */
+:where(.aef-trigger, .aef-panel) {
+  --aef-accent: var(--effort-ultra);
+  --aef-plate: oklch(0.22 0.021 249);
+  --aef-ink: oklch(0.97 0.004 249);
+}
+.aef-trigger[data-compact] {
+  /* Folded toolbar: the host dropped the declared width box, so the trigger
+     sizes to its glyph like the host's own folded chip. */
+  width: auto;
+  padding: 0 0.375rem;
+}
+.aef-trigger {
+  height: 1.75rem;
+  /* The surface hands this control a fixed-width box, not a measurement —
+     fill it and no further, or a content-sized trigger paints past its right
+     edge over the next toolbar control. */
+  width: 100%;
+  min-width: 0;
+  gap: 0.45rem;
+  border-radius: var(--radius-control);
+  padding: 0 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+}
+/* Hover styling only where a pointer can hover: on touch the hover state
+   sticks to the last tapped element and reads as a second, phantom selection. */
+@media (hover: hover) {
+  .aef-trigger:hover {
+    color: var(--foreground);
+  }
+  .aef-level:not([aria-disabled="true"]):hover {
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
+    color: var(--foreground);
+  }
+}
+.aef-trigger-mark {
+  position: relative;
+  display: grid;
+  width: 0.65rem;
+  height: 0.65rem;
+  flex: none;
+  place-items: center;
+  transform: rotate(45deg);
+  border: 1px solid color-mix(in oklab, var(--primary) 70%, transparent);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+.aef-trigger-mark::before,
+.aef-trigger-mark::after,
+.aef-trigger-mark span {
+  content: "";
+  position: absolute;
+  width: 1.5px;
+  background: var(--primary);
+}
+.aef-trigger-mark::before {
+  height: 26%;
+}
+.aef-trigger-mark span {
+  height: 48%;
+  transform: translateX(-2px);
+}
+.aef-trigger-mark::after {
+  height: 76%;
+  transform: translateX(2px);
+}
+.aef-trigger[data-level="ultracode"] .aef-trigger-mark {
+  border-color: var(--aef-accent);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--aef-accent) 45%, transparent);
+}
+.aef-trigger-value {
+  /* A flex item's floor is its own content — without this the label holds
+     the trigger open past the surface instead of reaching the ellipsis. */
+  min-width: 0;
+  max-width: 6rem;
+  overflow: hidden;
+  font-weight: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aef-panel {
+  display: flex;
+  width: min(25rem, calc(100vw - 1rem));
+  /* Never taller than the space the popover actually has (Radix publishes it
+     on the content element), so on a short or phone-sized window the tier
+     list scrolls inside the panel instead of running off-screen. */
+  max-height: min(36rem, var(--radix-popover-content-available-height, calc(100dvh - 2rem)));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--foreground) 16%, transparent);
+  border-radius: var(--radius-panel);
+  padding: 0;
+  background: color-mix(in oklab, var(--popover) 96%, var(--aef-plate));
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.32);
+}
+.aef-hero {
+  position: relative;
+  flex: none;
+  height: 10.5rem;
+  overflow: hidden;
+  border-bottom: 1px solid color-mix(in oklab, var(--aef-accent) 25%, transparent);
+  background: var(--aef-plate);
+  isolation: isolate;
+}
+.aef-operator {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: -2;
+  width: 72%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  object-fit: cover;
+  object-position: 66% 24%;
+  filter: saturate(0.78) contrast(1.05);
+}
+.aef-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    90deg,
+    var(--aef-plate) 0 37%,
+    color-mix(in oklab, var(--aef-plate) 86%, transparent) 52%,
+    transparent 78%
+  );
+}
+.aef-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--aef-accent) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--aef-accent) 45%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 16px 16px;
+  mask-image: linear-gradient(90deg, #000, transparent 70%);
+}
+.aef-hero-copy {
+  position: absolute;
+  inset: 1.15rem auto auto 1rem;
+  width: 56%;
+  color: var(--aef-ink);
+}
+.aef-hero-copy > span {
+  color: var(--aef-accent);
+  font:
+    600 11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  letter-spacing: 0.14em;
+}
+.aef-hero-copy h3 {
+  margin: 0.55rem 0 0.4rem;
+  font:
+    800 1.22rem/0.96 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+.aef-hero-copy p {
+  margin: 0;
+  color: color-mix(in oklab, var(--aef-ink) 72%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.aef-signal {
+  position: absolute;
+  bottom: 0.8rem;
+  left: 1rem;
+  display: flex;
+  align-items: end;
+  gap: 3px;
+}
+.aef-signal span {
+  width: 4px;
+  background: color-mix(in oklab, var(--aef-ink) 18%, transparent);
+}
+.aef-signal span:nth-child(1) {
+  height: 4px;
+}
+.aef-signal span:nth-child(2) {
+  height: 6px;
+}
+.aef-signal span:nth-child(3) {
+  height: 8px;
+}
+.aef-signal span:nth-child(4) {
+  height: 10px;
+}
+.aef-signal span:nth-child(5) {
+  height: 12px;
+}
+.aef-signal span:nth-child(6) {
+  height: 14px;
+}
+.aef-signal span:nth-child(7) {
+  height: 16px;
+}
+.aef-signal span[data-active="true"] {
+  background: var(--aef-accent);
+  box-shadow: 0 0 7px color-mix(in oklab, var(--aef-accent) 55%, transparent);
+}
+.aef-levels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.45rem;
+}
+.aef-level {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.45rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+}
+.aef-level:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.aef-level[aria-disabled="true"] {
+  cursor: progress;
+}
+.aef-level--active {
+  border-left-color: var(--aef-accent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--aef-accent) 12%, transparent),
+    transparent 72%
+  );
+  color: var(--foreground);
+}
+.aef-index {
+  color: color-mix(in oklab, var(--aef-accent) 76%, var(--muted-foreground));
+  font:
+    600 11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.aef-level-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+.aef-level-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+.aef-level-heading strong {
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.1;
+}
+.aef-level-heading small {
+  overflow: hidden;
+  color: color-mix(in oklab, var(--muted-foreground) 72%, transparent);
+  font:
+    500 11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aef-level-copy > span:last-child {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aef-state {
+  color: var(--aef-accent);
+  font:
+    700 11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Touch: every tier row clears the 36px minimum target (the trigger gets the
+   host's own \`touch-hit\` expansion, like every other composer chip). */
+@media (pointer: coarse) {
+  .aef-level {
+    min-height: 2.75rem;
+  }
+}
+/* Short windows (landscape phones, a docked desktop window): shrink the art
+   first, then drop it, so the tiers — the actual control — keep the room. */
+@media (max-height: 600px) {
+  .aef-hero {
+    height: 7rem;
+  }
+  .aef-hero-copy p {
+    display: none;
+  }
+}
+@media (max-height: 420px) {
+  .aef-hero {
+    display: none;
+  }
+}
+/* Top level on purpose. The stylesheet is wrapped in @scope before injection,
+   and only TOP-LEVEL keyframes are hoisted back out of it. Left inside the
+   media query this name would be dropped and the animation below would
+   reference nothing. */
+@keyframes aef-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+/* A progress cue, not decoration: it runs only while the tier write is in
+   flight, and not at all for a user who asked for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .aef-state[data-syncing="true"] {
+    animation: aef-pulse 1.2s ease-in-out infinite;
+  }
+}

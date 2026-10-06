@@ -3,6 +3,7 @@
   "name": "Workflow AI",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "AI co-pilot for workflows — graph-read, graph-editing, layout, and run-control tools for the chat agent. The editing tools act on the workflow open in the visual editor; the run tools (wf_run_workflow_typed / wf_run_workflow_by_name / wf_list_workflows / wf_emit_workflow_event) work from any chat or IM session without an editor. All tools are offered in every chat while the plugin is enabled.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

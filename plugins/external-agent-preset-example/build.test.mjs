@@ -43,12 +43,17 @@ test("the install ZIP carries every entry the manifest names", async () => {
     const archiveBytes = await readFile(archivePath)
     const archive = await JSZip.loadAsync(archiveBytes)
     assert.deepEqual(Object.keys(archive.files).sort(), [
+      "assets/icon.png",
       "dist/context-provider.js",
       "dist/index.js",
       "plugin.json",
     ])
 
     const manifest = JSON.parse(await archive.file("plugin.json").async("string"))
+    assert.equal(
+      (await archive.file(manifest.icon).async("nodebuffer")).subarray(0, 8).toString("hex"),
+      "89504e470d0a1a0a"
+    )
     const declared = [
       manifest.main,
       ...Object.values(manifest.runtimeCompatibility)

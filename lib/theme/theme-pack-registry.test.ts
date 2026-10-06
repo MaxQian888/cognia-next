@@ -169,3 +169,18 @@ describe("themePackPreviewSrc", () => {
     expect(themePackPreviewSrc("demo", "   ")).toBeUndefined()
   })
 })
+
+test("accepts only contained generated resource previews for the owning plugin", () => {
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/assets/preview.webp")
+  ).toBe("/_cognia/builtin-plugins/demo/resources/assets/preview.webp")
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/other/resources/assets/preview.webp")
+  ).toBeUndefined()
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/../other.webp")
+  ).toBeUndefined()
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/%2e%2e/other.webp")
+  ).toBeUndefined()
+})

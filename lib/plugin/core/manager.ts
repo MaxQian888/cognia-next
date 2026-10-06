@@ -193,9 +193,14 @@ import {
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { installFromLocalFile, type LocalInstallArgs } from "@/lib/plugin/package/local-installer"
+import {
+  installFromLocalFile,
+  installPluginBundleFromLocalFile,
+  type LocalInstallArgs,
+} from "@/lib/plugin/package/local-installer"
 import {
   installFromUrl,
+  installPluginBundleFromUrl,
   recordInstalledPublisher,
   type HttpInstallArgs,
   type HttpInstallResult,
@@ -245,7 +250,8 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 // other three capabilities via the disable loop.
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
-import { assertPluginManifestParity } from "./manifest-parity"
+import { assertPluginManifestParity, findPluginManifestParityIssues } from "./manifest-parity"
+import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@/packages/plugin-sdk/src/contracts/catalog"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
@@ -2437,6 +2443,33 @@ export class PluginManager {
   // Plugin Discovery
   // ===========================================================================
 
+  /** Preserve verified executable contributions during a metadata-only rescan. */
+  private hydrateDiscoveredManifest(manifest: PluginManifest, path: string): PluginManifest {
+    const current = usePluginStore.getState().plugins[manifest.id]
+    const definition = this.loader.getDefinition(manifest.id)
+    if (
+      !definition?.manifest ||
+      current?.path !== path ||
+      current.manifest.version !== manifest.version ||
+      findPluginManifestParityIssues(manifest, definition.manifest).length > 0
+    )
+      return manifest
+    return this.hydrateManifestContributions(manifest, definition.manifest)
+  }
+
+  private hydrateManifestContributions(
+    packaged: PluginManifest,
+    moduleManifest: PluginManifest
+  ): PluginManifest {
+    const contributions = Object.fromEntries(
+      PLUGIN_MANIFEST_CONTRIBUTIONS.map(({ field }) => [
+        field,
+        moduleManifest[field as keyof PluginManifest],
+      ]).filter(([, value]) => value !== undefined)
+    )
+    return { ...packaged, ...contributions }
+  }
+
   async scanPlugins(): Promise<DiscoveredPlugin[]> {
     // Browser AND mobile discover built-ins from the static registry; only the
     // Tauri shell additionally scans the on-disk plugin directory below.
@@ -2468,7 +2501,8 @@ export class PluginManager {
       })
 
       for (const entry of localPlugins) {
-        const { manifest, path } = entry
+        const { path } = entry
+        const manifest = this.hydrateDiscoveredManifest(entry.manifest, path)
         // Validate manifest
         const validation = validatePluginManifest(manifest, {
           governanceMode: this.pluginPointGovernanceMode,
@@ -2649,7 +2683,9 @@ export class PluginManager {
     const pendingRows: Array<{ manifest: PluginManifest; source: PluginSource; path: string }> = []
 
     for (const entry of getBrowserBuiltinRegistry()) {
-      const manifest = entry.manifest
+      const manifest = this.hydrateDiscoveredManifest(entry.manifest, entry.path)
+      const current = store.plugins[manifest.id]
+      if (store.removedPlugins?.[manifest.id] || (current && current.source !== "builtin")) continue
       const validation = validatePluginManifest(manifest, {
         governanceMode: this.pluginPointGovernanceMode,
       })
@@ -2781,51 +2817,33 @@ export class PluginManager {
     }
   ): Promise<Plugin> {
     const type = options?.type || "local"
-
-    const txn: InstallTransactionState = {
-      pluginId: null,
-      pluginPath: null,
-      manifest: null,
-      stepsCompleted: {
-        backendInstall: false,
-        storeDiscovery: false,
-        storeInstall: false,
-        permissionRegistration: false,
-      },
+    if (type === "git") {
+      const { parseGithubPluginRef } = await import("@/lib/plugin/package/github-source")
+      const ref = parseGithubPluginRef(source)
+      return this.installPluginFromGithub(`${ref.owner}/${ref.repo}`, ref.ref, ref.subdir)
     }
-
-    try {
-      // Install via Tauri backend
-      const result = await invoke<{
-        manifest: PluginManifest
-        path: string
-        source?: PluginSource
-        installRootKind?: PluginInstallRootKind
-      }>("plugin_install", {
-        source,
-        installType: type,
-        pluginDir: this.config.pluginDirectory,
-      })
-      const plugin = await this.registerBackendInstall(result, type, txn)
-      // This entry point takes an unpinned source string (a path, a clone URL
-      // or a registry id with no version), so it cannot claim a reproducible
-      // origin. Recording it as local makes it export embedded.
-      await recordInstallOrigin({
-        pluginId: result.manifest.id,
-        version: result.manifest.version,
-        origin: { kind: "local", via: type === "local" ? "directory" : "unpinned" },
-      })
+    if (type === "marketplace") {
+      const { getPluginMarketplace } = await import("../package/marketplace")
+      const result = await getPluginMarketplace().installPlugin(source)
+      if (!result.success) throw new Error(`Failed to install plugin: ${result.error}`)
+      const plugin = usePluginStore.getState().plugins[source]
+      if (!plugin) throw new Error(`Installed plugin was not registered: ${source}`)
       return plugin
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
-        loggers.manager.error(
-          `[plugin:${txn.pluginId || "(unknown)"}] install rollback itself failed`,
-          rollbackErr
-        )
-      })
-      throw new Error(`Failed to install plugin: ${reason}`)
     }
+    if (/\.zip$/i.test(source)) return this.installPluginBundleFromLocalFile(source)
+    const installed = await this.installStagedBundle(
+      () =>
+        invoke<StagedBackendInstallResult>("plugin_stage_from_directory", { sourceDir: source }),
+      "local",
+      undefined,
+      true
+    )
+    await recordInstallOrigin({
+      pluginId: installed.plugin.manifest.id,
+      version: installed.plugin.manifest.version,
+      origin: { kind: "local", via: "directory" },
+    })
+    return installed.plugin
   }
 
   /**
@@ -2846,7 +2864,8 @@ export class PluginManager {
     },
     type: "local" | "git" | "marketplace",
     txn: InstallTransactionState,
-    grantDecision?: WasmCapabilityGrantDecision
+    grantDecision?: WasmCapabilityGrantDecision,
+    initialConfig?: Record<string, unknown>
   ): Promise<Plugin> {
     const store = usePluginStore.getState()
     txn.pluginId = result.manifest.id
@@ -2874,9 +2893,23 @@ export class PluginManager {
       validation.diagnostics || []
     )
 
-    // Verify signature
+    // A replaced package must not inherit a cached refusal from its previous
+    // bytes. Verification now reads the receipt committed with this package.
+    getPluginSignatureVerifier().clearCache(result.path)
     if (!(await this.verifyPluginSignature(result.path, result.manifest.id))) {
       throw new Error(`Signature verification failed for plugin ${result.manifest.id}`)
+    }
+
+    if (!getPluginSignatureVerifier().getConfig().requireSignatures) {
+      recordSilentFailure(
+        result.manifest.id,
+        {
+          site: "marketplace.signatureBypass",
+          message: "Installed while strict signature enforcement is disabled",
+          expected: false,
+        },
+        new Error("Strict signature enforcement is disabled")
+      )
     }
 
     const projection = this.buildDiscoveryProjection(
@@ -2899,7 +2932,17 @@ export class PluginManager {
     await store.installPlugin(result.manifest.id)
     txn.stepsCompleted.storeInstall = true
 
-    await this.persistDiscoveredPluginRow(result.manifest, projection.source, result.path)
+    const draft = await this.buildDiscoveredPluginDraft(
+      result.manifest,
+      projection.source,
+      result.path
+    )
+    if (!draft) throw new Error("Failed to prepare installed plugin metadata")
+    await upsertPlugin({
+      ...draft,
+      ...(initialConfig !== undefined ? { config: initialConfig } : {}),
+    })
+    if (initialConfig !== undefined) store.setPluginConfig(result.manifest.id, initialConfig)
 
     this.recordPluginVerification(result.manifest.id, {
       status: "installed",
@@ -2945,7 +2988,7 @@ export class PluginManager {
     gitRef?: string,
     subdir?: string,
     generatedFiles: Record<string, string> = {},
-    provenance?: { viaCogpack?: CogpackProvenance }
+    provenance?: { viaCogpack?: CogpackProvenance; config?: Record<string, unknown> }
   ): Promise<Plugin> {
     // Pin before downloading (ADR-0209). The preview path already hands us a
     // commit; any other caller's branch or tag is resolved here, so the origin
@@ -2973,7 +3016,10 @@ export class PluginManager {
           generatedFiles,
           deferCommit: true,
         }),
-      "git"
+      "git",
+      undefined,
+      false,
+      provenance?.config
     )
     // Descriptive source metadata is not part of package activation.
     try {
@@ -3046,6 +3092,7 @@ export class PluginManager {
         await store.uninstallPlugin(pluginId, {
           skipFileRemoval: true,
           viaManager: false,
+          rememberRemoval: false,
         })
       } catch (err) {
         loggers.manager.warn(`[plugin:${pluginId}] rollback: store cleanup failed`, err)
@@ -3120,6 +3167,55 @@ export class PluginManager {
     )
   }
 
+  /** Install a compiled frontend or WASM ZIP through the shared transaction. */
+  async installPluginBundleFromLocalFile(
+    bundlePath: string,
+    grantDecision?: WasmCapabilityGrantDecision,
+    options: Pick<LocalInstallArgs, "expectedBundleSha256"> = {}
+  ): Promise<Plugin> {
+    const installed = await this.installStagedBundle(
+      () => installPluginBundleFromLocalFile({ bundlePath, ...options, deferCommit: true }),
+      "local",
+      grantDecision,
+      true
+    )
+    await recordInstalledPublisher(installed.result)
+    await recordInstallOrigin({
+      pluginId: installed.plugin.manifest.id,
+      version: installed.plugin.manifest.version,
+      origin: { kind: "local", via: "disk" },
+    })
+    return installed.plugin
+  }
+
+  /** Install a compiled frontend or WASM URL package, pinned to preview bytes. */
+  async installPluginBundleFromUrl(
+    args: HttpInstallArgs,
+    grantDecision?: WasmCapabilityGrantDecision,
+    provenance?: { viaCogpack?: CogpackProvenance }
+  ): Promise<HttpInstallResult> {
+    const installed = await this.installStagedBundle(
+      () => installPluginBundleFromUrl({ ...args, deferCommit: true }),
+      "marketplace",
+      grantDecision,
+      true
+    )
+    await recordInstalledPublisher(installed.result)
+    await recordInstallOrigin({
+      pluginId: installed.result.manifest.id,
+      version: installed.result.manifest.version,
+      origin: {
+        kind: "url",
+        bundleUrl: args.bundleUrl,
+        sha256: installed.result.bundleSha256,
+        ...(args.signatureUrl ? { signatureUrl: args.signatureUrl } : {}),
+        ...(args.expectedPublicKeyBase64 ? { publicKey: args.expectedPublicKeyBase64 } : {}),
+      },
+      viaCogpack: provenance?.viaCogpack,
+    })
+    return installed.result
+  }
+
   /** Confirm a local ZIP through the same staged transaction as URL installs. */
   async installWasmPluginFromLocalFile(
     bundlePath: string,
@@ -3169,10 +3265,37 @@ export class PluginManager {
     return installed.result
   }
 
+  /** Commit a registry package through the same rollback-safe runtime transaction. */
+  async installPluginFromRegistry(
+    stage: () => Promise<import("../package/marketplace").StagedPluginUpdate>,
+    config?: Record<string, unknown>
+  ): Promise<Plugin> {
+    const installed = await this.installStagedBundle(
+      async () => {
+        const staged = await stage()
+        const directory =
+          this.config.pluginDirectory || (await invoke<string>("plugin_get_directory"))
+        return {
+          manifest: staged.manifest,
+          path: `${directory}/${staged.pluginId}`,
+          transactionId: staged.transactionId,
+          source: "marketplace" as const,
+        }
+      },
+      "marketplace",
+      undefined,
+      true,
+      config
+    )
+    return installed.plugin
+  }
+
   private async installStagedBundle<T extends StagedBackendInstallResult>(
     stage: () => Promise<T>,
     source: "local" | "marketplace" | "git",
-    grantDecision?: WasmCapabilityGrantDecision
+    grantDecision?: WasmCapabilityGrantDecision,
+    allowFrontend = false,
+    initialConfig?: Record<string, unknown>
   ): Promise<{ plugin: Plugin; result: T }> {
     const txn: InstallTransactionState = {
       pluginId: null,
@@ -3187,6 +3310,7 @@ export class PluginManager {
     }
     let result: T | undefined
     let previous: Plugin | undefined
+    let previouslyRemoved = false
     let previousRow: PluginRow | undefined
     let priorGrants: WasmCapabilityGrantDecision | undefined
     let graphReservation: PluginGraphReservation | undefined
@@ -3197,8 +3321,11 @@ export class PluginManager {
       result = await stage()
       if (!result.transactionId)
         throw new Error("The host did not return a staged install transaction")
-      if (source !== "git" && result.manifest.type !== "wasm")
+      if (!allowFrontend && source !== "git" && result.manifest.type !== "wasm")
         throw new Error('The bundle did not declare type: "wasm"')
+      if (grantDecision && result.manifest.type !== "wasm") {
+        throw new Error("WASM capability grants cannot be applied to a frontend plugin")
+      }
       if (grantDecision && grantDecision.pluginId !== result.manifest.id) {
         throw new Error("The capability decision does not match the previewed plugin")
       }
@@ -3214,6 +3341,7 @@ export class PluginManager {
       graphReservation = this.reservePluginRuntimeGraph(pluginId)
       const store = usePluginStore.getState()
       previous = store.plugins[pluginId]
+      previouslyRemoved = Boolean(store.removedPlugins?.[pluginId])
       previousRow = await getPlugin(pluginId)
       priorGrants = {
         pluginId,
@@ -3244,7 +3372,8 @@ export class PluginManager {
         { ...result, source },
         source,
         txn,
-        grantDecision
+        grantDecision,
+        initialConfig
       )
       if (wasActive) await this.enablePlugin(pluginId, "transactional-install")
       await invoke("plugin_finalize_staged_update", {
@@ -3326,8 +3455,17 @@ export class PluginManager {
               }))
               this.registerPluginPermissions(pluginId, previous.manifest.permissions || [])
             } else if (txn.stepsCompleted.storeDiscovery && store.plugins[pluginId]) {
-              await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
+              await store.uninstallPlugin(pluginId, {
+                skipFileRemoval: true,
+                viaManager: false,
+                rememberRemoval: false,
+              })
               getPermissionGuard().unregisterPlugin(pluginId)
+            }
+            if (previouslyRemoved) {
+              usePluginStore.setState((state) => ({
+                removedPlugins: { ...state.removedPlugins, [pluginId]: true },
+              }))
             }
           } catch (rollbackError) {
             failures.push(`store rollback: ${String(rollbackError)}`)
@@ -3617,8 +3755,18 @@ export class PluginManager {
         },
       })
       recordLoadSuccess(pluginId, Date.now())
-      if (plugin.source !== "builtin") {
-        assertPluginManifestParity(plugin.manifest, definition.manifest)
+      assertPluginManifestParity(plugin.manifest, definition.manifest)
+      // JSON packages carry contribution metadata; executable adapters belong
+      // to the verified module. Hydrate only catalogued fields after parity,
+      // keeping identity, permissions and runtime entrypoints package-owned.
+      if (definition.manifest) {
+        plugin.manifest = this.hydrateManifestContributions(plugin.manifest, definition.manifest)
+        usePluginStore.setState((state) => ({
+          plugins: {
+            ...state.plugins,
+            [pluginId]: { ...state.plugins[pluginId], manifest: plugin.manifest },
+          },
+        }))
       }
       definition.activation = this.parseActivationSpec(plugin.manifest)
 
@@ -3654,7 +3802,9 @@ export class PluginManager {
           pluginId,
           pluginRoot: stylesRoot,
           stylesEntry: plugin.manifest.styles,
-          bundledCss: getBrowserBuiltinRegistryEntry(pluginId)?.bundledStyles,
+          bundledCss: plugin.path?.startsWith("builtin://")
+            ? getBrowserBuiltinRegistryEntry(pluginId)?.bundledStyles
+            : undefined,
         })
       }
 
@@ -5871,10 +6021,11 @@ export class PluginManager {
     // registry. The bridge method exists but was never called from enable
     // (ADR-0029 wiring gap); packs become discoverable via `listThemePacks()`.
     if (plugin.manifest.themePacks?.length) {
-      this.ensureThemesBridge().registerPluginThemePacks(
+      await this.ensureThemesBridge().registerPluginThemePacks(
         pluginId,
         plugin.manifest.name,
-        plugin.manifest
+        plugin.manifest,
+        plugin.path
       )
     }
 
@@ -6194,10 +6345,6 @@ export class PluginManager {
     if (!pluginId) return this.loader.importEntry(entry)
     const plugin = usePluginStore.getState().plugins[pluginId]
     if (!plugin) throw new Error(`Plugin not found: ${pluginId}`)
-    if (plugin.path?.startsWith("builtin://")) {
-      const moduleExports = this.loader.getModuleExports(pluginId)
-      if (moduleExports) return Promise.resolve(moduleExports)
-    }
     return this.loader.importEntry(entry, pluginId, plugin.path)
   }
 

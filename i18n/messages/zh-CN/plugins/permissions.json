@@ -130,7 +130,8 @@
     "twin:read": "查询员工数字分身的记忆",
     "vector:read": "搜索向量库",
     "vector:write": "向向量库添加内容或从中删除内容",
-    "workflow:read": "读取工作流元数据和选区"
+    "workflow:read": "读取工作流元数据和选区",
+    "knowledge:read": "读取当前智能体运行已授权知识库中的原文"
   },
   "emptyAll": "尚未安装任何插件。",
   "groups": {

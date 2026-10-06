@@ -111,12 +111,29 @@ Dispatch is by `manifest.type`:
 | Type       | Build pipeline                                                                                                                 | Output                             |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
 | `wasm`     | `cargo component build --release` → embed `cognia:api-version` custom section → zip                                            | `target/cognia/<id>-<version>.zip` |
-| `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` plus the `--external:` flags below → zip | `target/cognia/<id>-<version>.zip` |
+| `frontend` | esbuild browser CommonJS bundles for the main and declared secondary entries → normalized manifest and plugin resources → zip | `target/cognia/<id>-<version>.zip` |
 | `python` | validate `pythonMain` → copy existing Python entry file + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
 | `hybrid` | copy existing `main`, `pythonMain`, optional `styles`, and `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
 | `vscode-extension` | validate `vscodeMain` → copy existing extension entry file + optional `styles` + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
 
-For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default) — the host does not transpile TypeScript on the fly. It reads that file at runtime and evaluates it as CommonJS in a module wrapper, which is why the build emits `--format=cjs`.
+For frontend plugins, the release manifest's `main` points to `dist/index.js`. The builder accepts a source entry through `tsEntry` or a source-valued `main`, compiles it without overwriting source, and rewrites declared JavaScript contribution paths to compiled entries. Installed packages must contain JavaScript: the host does not transpile TypeScript, TSX, or JSX at runtime. Browser loading uses external Blob scripts compatible with the desktop CSP; Node evaluates the same CommonJS package with the host's shared modules.
+
+### Build in-tree plugins as independent packages
+
+From the repository root:
+
+```bash
+pnpm plugin:packages:build                    # every frontend plugin
+pnpm plugin:packages:build cognia-pdf          # one plugin ID or directory
+pnpm plugin:packages:verify                   # rebuild, extract outside the repo, load every package
+pnpm plugin:builtin:build                     # generate the curated browser builtin assets
+```
+
+The package builder writes `dist/plugins/<id>/` and `dist/plugins/<id>-<version>.zip`. It materializes the full exported manifest, compiles named contribution entries, includes styles and resources, and preserves executable file modes. The PDF package embeds its worker so it can run without the app's public assets. Importing source for metadata does not activate the plugin.
+
+`plugins/browser-builtins.json` selects which packages ship with the app. These builtins use generated bundles and the same shared SDK boundary; the registry does not import their TypeScript implementations. Independently installed copies take precedence over the builtin with the same ID, and explicit uninstall persists across startup reseeding.
+
+Use Settings → Plugins to install the generated ZIP or its download URL. Frontend and WASM packages share the staged installation flow: preview, validate, register, save configuration, activate, then finalize. Failure rolls back the installation. WASM-specific permission grants apply only to WASM packages. A source checkout is not a release package; build it first.
 
 ### Externals
 
@@ -125,9 +142,9 @@ The build marks a fixed set of specifiers external, and the host supplies its ow
 | Specifier | Why |
 | --- | --- |
 | `react`, `react/jsx-runtime`, `react/jsx-dev-runtime` | Two React instances do not share a hook dispatcher, so a bundled copy makes every hook in your components throw `Invalid hook call`. `--external:react` alone is insufficient — esbuild matches import paths literally, so the jsx runtime needs its own entry. |
-| `@cognia/plugin-sdk`, `@cognia/plugin-ui` | Shared so every plugin gets one instance of the SDK's registries and one copy of the component kit. |
+| `@cognia/plugin-sdk`, its supported subpaths, `@cognia/plugin-ui`, `lucide-react` | Shared so every plugin gets the host SDK registries and component instances. |
 | `react-dom` | Externalised but **not** supplied. Keeping it external means it is never bundled; a `require` for it fails at load with an explicit message rather than a second reconciler rendering into a tree the host does not own. |
-| `@/types/plugin/index`, `@/lib/*` | Host path aliases, resolved by the host at runtime. |
+| `@/types/plugin/index`, `@/lib/*` | Private host imports are rejected by the loader. Use the public SDK; the in-tree package builder also rejects these imports at build time. |
 
 Everything else is bundled normally. Requiring a specifier that is neither bundled nor host-shared fails at load with an error naming it. See [Surfaces](./surfaces#sharing-the-hosts-react).
 
@@ -135,7 +152,7 @@ For Python, hybrid, and VS Code-extension plugins, `cognia plugin build` is inte
 
 ### Adding extra files to the bundle
 
-By default the bundle contains `plugin.json` plus the type-specific artifact (`wasmMain`, `main`, `pythonMain`, `vscodeMain`, and optional `styles` where applicable). Add `bundle_include` in `plugin.json` to ship more:
+By default the bundle contains `plugin.json` plus the type-specific artifact (`wasmMain`, `main`, `pythonMain`, `vscodeMain`, and optional `styles` where applicable). Frontend builds also include declared contribution entries, contract resource paths, conventional resource directories, and local LSP/IDE executables. Add `bundle_include` in `plugin.json` to ship additional files:
 
 ```json
 {

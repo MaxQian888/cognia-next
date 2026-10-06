@@ -11,7 +11,12 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
 
-import { installFromLocalFile, previewLocalBundleManifest } from "./local-installer"
+import {
+  previewPluginBundleFromLocalFile,
+  installPluginBundleFromLocalFile,
+  installFromLocalFile,
+  previewLocalBundleManifest,
+} from "./local-installer"
 import { getDb } from "@/lib/db/schema"
 
 function setTauri(present: boolean) {
@@ -172,4 +177,28 @@ it("pins local installation and refuses substituted signing identities", async (
     expect.objectContaining({ expectedBundleSha256: "a".repeat(64), previewOnly: false })
   )
   expect(await getDb().trustedPublishers.count()).toBe(0)
+})
+
+describe("generic frontend bundles", () => {
+  it.each([true, false])(
+    "uses the generic host endpoint with previewOnly=%s",
+    async (previewOnly) => {
+      const manifest = { ...baseManifest, type: "frontend", main: "dist/index.js" }
+      invokeMock.mockResolvedValueOnce({
+        manifest,
+        path: "/plugins/frontend",
+        signatureVerified: false,
+        bundleSha256: "a".repeat(64),
+        transactionId: previewOnly ? undefined : "txn",
+      })
+      const result = await (
+        previewOnly ? previewPluginBundleFromLocalFile : installPluginBundleFromLocalFile
+      )({ bundlePath: "/tmp/frontend.zip", deferCommit: true })
+      expect(result.manifest.type).toBe("frontend")
+      expect(invokeMock).toHaveBeenCalledWith(
+        "plugin_bundle_install_from_file",
+        expect.objectContaining({ bundlePath: "/tmp/frontend.zip", previewOnly, deferCommit: true })
+      )
+    }
+  )
 })

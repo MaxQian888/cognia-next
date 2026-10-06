@@ -3,6 +3,7 @@
   "name": "Sandboxed Tools",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the host's sandbox backend: the sandbox_exec command on the Tauri desktop, or the cognia-sandbox-exec helper on a Node host. A host with neither refuses the call instead of running it unconfined.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

@@ -50,6 +50,15 @@
       "@cognia/web-search/*": ["../../packages/web-search/src/*"],
       "@cognia/logging": ["../logging/src/index.ts"],
       "@cognia/logging/*": ["../../packages/logging/src/*"],
+      // AgentTeam's runtime shim re-exports canonical durable contracts here.
+      // Package paths replace the root aliases; author declarations must not
+      // depend on a workspace link or a prebuilt orchestration package.
+      "@cognia/sync-protocol": ["../sync-protocol/src/index.ts"],
+      "@cognia/sync-protocol/*": ["../../packages/sync-protocol/src/*"],
+      "@cognia/agent-runtime-kit": ["../agent-runtime-kit/src/index.ts"],
+      "@cognia/agent-runtime-kit/*": ["../../packages/agent-runtime-kit/src/*"],
+      "@cognia/agent-orchestration": ["../agent-orchestration/src/index.ts"],
+      "@cognia/agent-orchestration/*": ["../../packages/agent-orchestration/src/*"],
       // Reached through `@/types/agent/external-agent`, now a shim over the
       // contracts package (ADR-0217); inlined into the bundled declarations.
       "@cognia/agent-contracts": ["../agent-contracts/src/index.ts"],
@@ -58,6 +67,8 @@
       "@cognia/agent-config-types/*": ["../../packages/agent-config-types/src/*"],
       "@cognia/tts": ["../tts/src/index.ts"],
       "@cognia/tts/*": ["../../packages/tts/src/*"],
+      "@cognia/security-findings": ["../security-findings/src/index.ts"],
+      "@cognia/security-findings/*": ["../../packages/security-findings/src/*"],
       "@cognia/ocr": ["../ocr/src/index.ts"],
       "@cognia/ocr/*": ["../../packages/ocr/src/*"],
       // Reached INDIRECTLY: this package compiles `lib/plugin/api/memory-api.ts`,

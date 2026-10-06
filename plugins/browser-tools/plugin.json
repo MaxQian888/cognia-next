@@ -3,6 +3,7 @@
   "name": "Browser Tools",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Host-neutral Agent browser loop with structured snapshots, ref actions, tabs, downloads, PDF, emulation, cookie/storage inspection, request details, vault sign-in and extensions across the embedded preview, local Chromium, your own Chrome and the cloud browser.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

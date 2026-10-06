@@ -3,6 +3,7 @@
   "name": "Kimi Code Subscription Example",
   "nameKey": "manifest.name",
   "version": "0.2.0",
+  "icon": "assets/icon.png",
   "description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel.",
   "descriptionKey": "manifest.description",
   "type": "frontend",
@@ -18,7 +19,7 @@
     "cognia": ">=0.1.0"
   },
   "activationEvents": ["startup"],
-  "bundle_include": ["README.md", "README.zh-CN.md"],
+  "bundle_include": ["README.md", "README.zh-CN.md", "assets/icon.png"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",

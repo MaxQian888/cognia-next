@@ -8,7 +8,7 @@
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
-  "icon": "/plugins/cognia-arknights-theme/assets/command-emblem.svg",
+  "icon": "assets/icon.png",
   "screenshots": [
     "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp",
     "/plugins/cognia-arknights-theme/assets/operators/reed-flame-shadow-field-clinic.webp",

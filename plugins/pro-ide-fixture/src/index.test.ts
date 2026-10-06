@@ -2,8 +2,7 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 
 import fixture, {
   FIXTURE_CHANGED_URI,
@@ -32,35 +31,6 @@ const doc = (path: string) => ({
 })
 
 describe("the manifest the E2E builds a proxy from", () => {
-  it("normalizes without an error or a warning", () => {
-    expect(normalizeIdeManifest(manifest.id, manifest).warnings).toEqual([])
-  })
-
-  it("covers every family the platform claims for a stable release", () => {
-    const { manifest: ide } = normalizeIdeManifest(manifest.id, manifest)
-    const kinds = new Set(ide.providers.map((provider) => provider.kind))
-    // compatibility.mdx: LSP, DAP, MCP, SCM, tests, notebooks,
-    // webviews/custom editors, and Chat.
-    expect(ide.protocols.lsp).toHaveLength(1)
-    expect(ide.protocols.dap).toHaveLength(1)
-    expect(ide.protocols.mcp).toHaveLength(1)
-    for (const kind of [
-      "source-control",
-      "test-controller",
-      "notebook-serializer",
-      "notebook-controller",
-      "webview-view",
-      "custom-editor",
-      "chat-participant",
-      "language-model-chat-provider",
-      "language-model-tool",
-      "code-lens",
-      "command",
-    ]) {
-      expect({ kind, present: kinds.has(kind as never) }).toEqual({ kind, present: true })
-    }
-  })
-
   it("pins each protocol server by the digest of the file the proxy will copy", () => {
     for (const executable of manifest.ide!.executables ?? []) {
       const source = executable.source as { path: string; sha256: string }

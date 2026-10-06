@@ -3,6 +3,7 @@
   "name": "Workspace Tools",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Read-only agent tools and workflow nodes for the open project: list a folder, read a text file, and regex-search text files. Paths are confined to the active project root; desktop only.",
   "descriptionKey": "manifest.description",
   "type": "frontend",

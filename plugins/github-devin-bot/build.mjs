@@ -99,6 +99,10 @@ export async function buildPlugin({ outputDirectory = pluginRoot, pack = false }
     const date = new Date("1980-01-01T00:00:00.000Z")
     zip.file("plugin.json", manifestBytes, { date, createFolders: false })
     zip.file("dist/index.js", code, { date, createFolders: false })
+    zip.file("assets/icon.png", await readFile(join(pluginRoot, "assets/icon.png")), {
+      date,
+      createFolders: false,
+    })
     zip.file("README.md", await readFile(join(pluginRoot, "README.md")), {
       date,
       createFolders: false,

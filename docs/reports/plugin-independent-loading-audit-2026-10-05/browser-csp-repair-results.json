@@ -1,0 +1,18 @@
+{
+  "evalBlocked": true,
+  "sharedSdkIdentity": true,
+  "concurrentValues": [17, 23],
+  "executionFailure": "PluginEvaluationError: Failed to evaluate plugin code from /broken.js: Error: expected plugin failure",
+  "syntaxFailure": "PluginEvaluationError: Failed to evaluate plugin code from /syntax.js: SyntaxError: Unexpected token '='",
+  "releasePlugin": {
+    "id": "github-delivery",
+    "activate": "function",
+    "namedExport": "function"
+  },
+  "activeBlobScripts": 0,
+  "leakedGlobals": [],
+  "pdf": {
+    "pageCount": 1,
+    "warnings": []
+  }
+}

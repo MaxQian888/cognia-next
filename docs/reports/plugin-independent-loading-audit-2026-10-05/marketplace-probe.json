@@ -1,0 +1,20 @@
+{
+  "boundary": "Native download and signature verification mocked as successful; real JS marketplace and Dexie config methods",
+  "before": null,
+  "result": {
+    "success": false,
+    "error": "Plugin manager not initialized. Call initializePluginManager first.",
+    "errorCategory": "unknown",
+    "retryable": false
+  },
+  "after": null,
+  "runtime": null,
+  "pinnedCalls": [],
+  "noVersion": {
+    "success": false,
+    "error": "Plugin manager not initialized. Call initializePluginManager first.",
+    "errorCategory": "unknown",
+    "retryable": false
+  },
+  "noVersionCalls": []
+}

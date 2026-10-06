@@ -8,7 +8,27 @@ import {
   getBrowserBuiltinRegistryEntry,
 } from "./browser-builtin-registry"
 import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { PluginLoader } from "./loader"
 import type { PluginManifest } from "@/types/plugin"
+
+async function loadExports(pluginId: string): Promise<Record<string, unknown>> {
+  const entry = getBrowserBuiltinRegistryEntry(pluginId)!
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = jest.fn(async () => ({
+    ok: true,
+    text: async () => readFileSync(join(process.cwd(), "public", entry.asset!.url), "utf8"),
+  })) as unknown as typeof fetch
+  try {
+    return (await new PluginLoader().importEntry(`/plugins/${pluginId}/dist/index.js`)) as Record<
+      string,
+      unknown
+    >
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
 
 describe("browser-builtin-registry", () => {
   it("exposes the built-in plugin entries", () => {
@@ -69,20 +89,28 @@ describe("browser-builtin-registry", () => {
     ])
   })
 
-  it("every entry carries either a legacy loader or an external asset", () => {
+  it("every entry loads independently without importing plugin source at discovery", () => {
     const entries = getBrowserBuiltinRegistry()
     for (const entry of entries) {
-      expect(typeof entry.load === "function" || Boolean(entry.asset)).toBe(true)
+      expect(entry.load).toBeUndefined()
+      expect(entry.moduleExports).toBeUndefined()
+      expect(entry.asset).toBeDefined()
+      expect(entry.manifest.main).toBe("dist/index.js")
     }
   })
 
-  it("legacy load() resolves a plugin definition", async () => {
+  it("loads each packaged builtin and keeps its complete contribution manifest", async () => {
+    const { findPluginManifestParityIssues } = await import("./manifest-parity")
     for (const entry of getBrowserBuiltinRegistry()) {
-      if (!entry.load) continue
-      const def = await entry.load()
-      expect(typeof def.activate === "function" || typeof def.manifest === "object").toBe(true)
+      const exports = await loadExports(entry.manifest.id)
+      const definition = (exports.default ?? exports) as {
+        manifest: PluginManifest
+        activate: unknown
+      }
+      expect(typeof definition.activate).toBe("function")
+      expect(findPluginManifestParityIssues(entry.manifest, definition.manifest)).toEqual([])
     }
-  })
+  }, 120000)
 
   it("keeps migrated heavy plugins out of the static module graph", () => {
     for (const pluginId of [
@@ -125,11 +153,12 @@ describe("browser-builtin-registry", () => {
       executor: "handler",
       export: "githubDevinBot",
     })
-    expect(entry?.moduleExports?.githubDevinBot).toEqual(expect.any(Function))
-    expect((await entry?.load?.())?.activate).toEqual(expect.any(Function))
+    const exports = await loadExports("github-devin-bot")
+    expect(exports.githubDevinBot).toEqual(expect.any(Function))
+    expect((exports.default as { activate: unknown }).activate).toEqual(expect.any(Function))
   })
 
-  it("ships GitHub Delivery with its complete integration export namespace", () => {
+  it("ships GitHub Delivery with its complete integration export namespace", async () => {
     const entry = getBrowserBuiltinRegistryEntry("github-delivery")
 
     expect(entry?.manifest.runtimeCompatibility).toMatchObject({
@@ -139,7 +168,7 @@ describe("browser-builtin-registry", () => {
       headless: { availability: "degraded" },
     })
     expect(entry?.manifest.activationEvents).toBeUndefined()
-    expect(entry?.moduleExports).toEqual(
+    expect(await loadExports("github-delivery")).toEqual(
       expect.objectContaining({
         listGithubResources: expect.any(Function),
         checkGithubHealth: expect.any(Function),
@@ -220,13 +249,15 @@ describe("browser-builtin-registry", () => {
    * that object. A builtin that declares `extensions[]` without publishing its
    * namespace registers nothing and fails only as a runtime diagnostic.
    */
-  it("publishes the named export every builtin extension declares", () => {
+  it("publishes the named export every builtin extension declares", async () => {
     for (const entry of getBrowserBuiltinRegistry()) {
-      for (const extension of entry.manifest.extensions ?? []) {
+      if (!entry.manifest.extensions?.length) continue
+      const exports = await loadExports(entry.manifest.id)
+      for (const extension of entry.manifest.extensions) {
         expect({
           plugin: entry.manifest.id,
           export: extension.export,
-          resolved: typeof entry.moduleExports?.[extension.export],
+          resolved: typeof exports[extension.export],
         }).toEqual({
           plugin: entry.manifest.id,
           export: extension.export,

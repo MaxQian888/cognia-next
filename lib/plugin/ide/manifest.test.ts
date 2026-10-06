@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import type { PluginManifest } from "@/types/plugin"
 import type { PluginIdeManifest } from "@/types/plugin/plugin-ide"
 import {
   IdeManifestError,
@@ -782,5 +785,41 @@ describe("normalizeIdeManifest", () => {
         }),
       })
     ).toThrow("IDE_CONTRIBUTION_ID_INVALID")
+  })
+})
+
+// Host normalization belongs to the host suite; plugin tests use only the public SDK.
+describe("the pro-ide fixture manifest consumed by the host", () => {
+  const manifest = JSON.parse(
+    readFileSync(join(__dirname, "../../../plugins/pro-ide-fixture/plugin.json"), "utf8")
+  ) as PluginManifest
+
+  it("normalizes without an error or a warning", () => {
+    expect(normalizeIdeManifest(manifest.id, manifest).warnings).toEqual([])
+  })
+
+  it("covers every family the platform claims for a stable release", () => {
+    const { manifest: ide } = normalizeIdeManifest(manifest.id, manifest)
+    const kinds = new Set(ide.providers.map((provider) => provider.kind))
+    // compatibility.mdx: LSP, DAP, MCP, SCM, tests, notebooks,
+    // webviews/custom editors, and Chat.
+    expect(ide.protocols.lsp).toHaveLength(1)
+    expect(ide.protocols.dap).toHaveLength(1)
+    expect(ide.protocols.mcp).toHaveLength(1)
+    for (const kind of [
+      "source-control",
+      "test-controller",
+      "notebook-serializer",
+      "notebook-controller",
+      "webview-view",
+      "custom-editor",
+      "chat-participant",
+      "language-model-chat-provider",
+      "language-model-tool",
+      "code-lens",
+      "command",
+    ]) {
+      expect({ kind, present: kinds.has(kind as never) }).toEqual({ kind, present: true })
+    }
   })
 })

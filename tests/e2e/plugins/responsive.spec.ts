@@ -137,6 +137,34 @@ test.describe("plugin workspace — desktop (1440)", () => {
       timeout: 15_000,
     })
   })
+
+  test("@smoke packaged plugin PNGs load in Library, details and Discover", async ({ page }) => {
+    const source = "/_cognia/plugin-icons/cognia-browser-tools/assets/icon.png"
+    await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
+    const row = page.locator('[data-plugin-id="cognia-browser-tools"]')
+    const libraryImage = row.locator(`img[src="${source}"]`)
+    await expect(libraryImage).toBeVisible()
+    await expect
+      .poll(() => libraryImage.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0)
+    await page.getByTestId("plugin-library-row-cognia-browser-tools").click()
+    const detailImage = page.getByTestId("plugin-detail-header").locator(`img[src="${source}"]`)
+    await expect(detailImage).toBeVisible()
+    await expect
+      .poll(() => detailImage.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0)
+    await page.goto("/plugins?section=discover", { waitUntil: "domcontentloaded" })
+    await page.getByTestId("plugin-discover-origin").click()
+    await page.getByRole("option", { name: "Built-in", exact: true }).click()
+    await page.getByTestId("plugin-discover-search").fill("Browser Tools")
+    const discoveryImage = page
+      .getByTestId("feature-shell-plugins-center")
+      .locator(`img[src="${source}"]`)
+    await expect(discoveryImage).toBeVisible()
+    await expect
+      .poll(() => discoveryImage.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0)
+  })
 })
 
 test.describe("plugin workspace — mobile (375)", () => {

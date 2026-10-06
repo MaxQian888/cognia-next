@@ -3,6 +3,7 @@
   "name": "Web Tools",
   "nameKey": "manifest.name",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "description": "Agent tools on top of the promoted web built-ins: web_download saves a URL to disk, web_research distills and summarizes URLs into a cited answer. (web_search / web_fetch themselves are host built-ins.)",
   "descriptionKey": "manifest.description",
   "type": "frontend",

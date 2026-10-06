@@ -52,21 +52,9 @@ struct PartialManifest {
     #[serde(rename = "wasmMain", default)]
     wasm_main: Option<String>,
     #[serde(default)]
-    author: Option<PartialAuthor>,
+    author: Option<serde_json::Value>,
     #[serde(default)]
     wasm: Option<PartialWasmBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PartialAuthor {
-    #[serde(default)]
-    #[allow(dead_code)]
-    name: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    email: Option<String>,
-    #[serde(default, rename = "publicKey")]
-    public_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,7 +126,7 @@ fn extract_zip_bundle_with_limits(
             max_entries
         ));
     }
-    let mut manifest_path: Option<PathBuf> = None;
+    let mut manifest_paths = Vec::new();
     let mut total_written = 0_u64;
     for i in 0..archive.len() {
         let mut entry = archive
@@ -174,11 +162,27 @@ fn extract_zip_bundle_with_limits(
             max_unpacked_bytes,
             entry_path.to_string_lossy().as_ref(),
         )?;
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            // Retain executability for plugin-owned servers without setuid/setgid or broad write bits.
+            let safe_mode = if mode & 0o111 != 0 { 0o755 } else { 0o644 };
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(safe_mode))
+                .map_err(|error| format!("set plugin file mode {target:?}: {error}"))?;
+        }
         if entry_path.file_name().is_some_and(|n| n == "plugin.json") {
-            manifest_path = Some(target.clone());
+            manifest_paths.push(target.clone());
         }
     }
-    manifest_path.ok_or_else(|| "bundle is missing plugin.json".to_string())
+    let root_manifest = target_dir.join("plugin.json");
+    if manifest_paths.contains(&root_manifest) {
+        return Ok(root_manifest);
+    }
+    match manifest_paths.as_slice() {
+        [manifest] => Ok(manifest.clone()),
+        [] => Err("bundle is missing plugin.json".into()),
+        _ => Err("bundle has multiple nested plugin.json files and no root manifest".into()),
+    }
 }
 
 fn read_manifest(path: &Path) -> Result<(serde_json::Value, PartialManifest), String> {
@@ -229,6 +233,54 @@ pub async fn plugin_wasm_install_from_url(
     preview_only: Option<bool>,
     expected_bundle_sha256: Option<String>,
     defer_commit: Option<bool>,
+) -> Result<WasmInstallResult, String> {
+    install_bundle_from_url(
+        state,
+        bundle_url,
+        signature_url,
+        expected_public_key_base64,
+        preview_only,
+        expected_bundle_sha256,
+        defer_commit,
+        true,
+    )
+    .await
+}
+
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn plugin_bundle_install_from_url(
+    state: State<'_, PluginRuntimeState>,
+    bundle_url: String,
+    signature_url: Option<String>,
+    expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
+) -> Result<WasmInstallResult, String> {
+    install_bundle_from_url(
+        state,
+        bundle_url,
+        signature_url,
+        expected_public_key_base64,
+        preview_only,
+        expected_bundle_sha256,
+        defer_commit,
+        false,
+    )
+    .await
+}
+
+#[cfg(feature = "tauri-host")]
+async fn install_bundle_from_url(
+    state: State<'_, PluginRuntimeState>,
+    bundle_url: String,
+    signature_url: Option<String>,
+    expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
+    wasm_only: bool,
 ) -> Result<WasmInstallResult, String> {
     // Step 1 — fetch the bundle.
     cognia_net::proxy_config::ensure_crypto_provider();
@@ -284,7 +336,7 @@ pub async fn plugin_wasm_install_from_url(
     let state_root = state.plugin_state_dir.clone();
     let bundle = bundle.to_vec();
     tokio::task::spawn_blocking(move || {
-        install_downloaded_wasm_bundle(
+        install_downloaded_plugin_bundle(
             &install_root,
             &bundle,
             signature_verified
@@ -295,6 +347,7 @@ pub async fn plugin_wasm_install_from_url(
             defer_commit
                 .unwrap_or(false)
                 .then_some(state_root.as_path()),
+            wasm_only,
         )
     })
     .await
@@ -338,6 +391,54 @@ pub async fn plugin_wasm_install_from_file(
     expected_bundle_sha256: Option<String>,
     defer_commit: Option<bool>,
 ) -> Result<WasmInstallResult, String> {
+    install_bundle_from_file(
+        state,
+        bundle_path,
+        signature_base64,
+        expected_public_key_base64,
+        preview_only,
+        expected_bundle_sha256,
+        defer_commit,
+        true,
+    )
+    .await
+}
+
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn plugin_bundle_install_from_file(
+    state: State<'_, PluginRuntimeState>,
+    bundle_path: String,
+    signature_base64: Option<String>,
+    expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
+) -> Result<WasmInstallResult, String> {
+    install_bundle_from_file(
+        state,
+        bundle_path,
+        signature_base64,
+        expected_public_key_base64,
+        preview_only,
+        expected_bundle_sha256,
+        defer_commit,
+        false,
+    )
+    .await
+}
+
+#[cfg(feature = "tauri-host")]
+async fn install_bundle_from_file(
+    state: State<'_, PluginRuntimeState>,
+    bundle_path: String,
+    signature_base64: Option<String>,
+    expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
+    wasm_only: bool,
+) -> Result<WasmInstallResult, String> {
     let install_root = state.plugin_install_dir.clone();
     let state_root = state.plugin_state_dir.clone();
     let path = PathBuf::from(bundle_path.trim());
@@ -375,7 +476,7 @@ pub async fn plugin_wasm_install_from_file(
     };
 
     let mut result = tokio::task::spawn_blocking(move || {
-        install_downloaded_wasm_bundle(
+        install_downloaded_plugin_bundle(
             &install_root,
             &bundle,
             signature_verified
@@ -386,6 +487,7 @@ pub async fn plugin_wasm_install_from_file(
             defer_commit
                 .unwrap_or(false)
                 .then_some(state_root.as_path()),
+            wasm_only,
         )
     })
     .await
@@ -395,6 +497,63 @@ pub async fn plugin_wasm_install_from_file(
     // what the plugin store shows and filters on.
     result.source = "local".into();
     Ok(result)
+}
+
+/// Stage a validated local directory without replacing a running plugin.
+/// Kept local-only: remote companion callers must never select host paths.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn plugin_stage_from_directory(
+    state: State<'_, PluginRuntimeState>,
+    source_dir: String,
+) -> Result<WasmInstallResult, String> {
+    let install_root = state.plugin_install_dir.clone();
+    let state_root = state.plugin_state_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        stage_plugin_directory(&install_root, &state_root, Path::new(&source_dir))
+    })
+    .await
+    .map_err(|error| format!("stage plugin directory task failed: {error}"))?
+}
+
+fn stage_plugin_directory(
+    install_root: &Path,
+    state_root: &Path,
+    source: &Path,
+) -> Result<WasmInstallResult, String> {
+    if !source.is_absolute() || !source.is_dir() {
+        return Err("sourceDir must be an absolute plugin directory".into());
+    }
+    crate::contained_path::validate_symlink_free_tree(source)?;
+    let (manifest, parsed) = read_manifest(&source.join("plugin.json"))?;
+    crate::contract::validate_manifest_contract(&manifest)?;
+    crate::contract::validate_existing_manifest_paths(source, &manifest)?;
+    let plugin_id =
+        crate::validate_plugin_id_path_component(&parsed.id).map_err(|error| error.to_string())?;
+    let prepared = tempfile::tempdir().map_err(|error| error.to_string())?;
+    copy_dir_recursive(source, prepared.path(), &[".git", "node_modules", "target"])?;
+    // Local authored trees cannot grant themselves a signature receipt.
+    let receipt = prepared
+        .path()
+        .join(crate::marketplace::VERIFICATION_RECEIPT_FILE);
+    if receipt.exists() {
+        std::fs::remove_file(receipt).map_err(|error| error.to_string())?;
+    }
+    let transaction_id =
+        crate::marketplace::stage_tree_install(state_root, prepared.path(), &manifest)
+            .map_err(|error| error.to_string())?;
+    Ok(WasmInstallResult {
+        manifest,
+        path: install_root.join(plugin_id).to_string_lossy().into_owned(),
+        source: "local".into(),
+        install_root_kind: "installed".into(),
+        signature_verified: false,
+        bundle_sha256: None,
+        transaction_id: Some(transaction_id),
+        author_public_key: None,
+        author_fingerprint: None,
+        resolved_commit: None,
+    })
 }
 
 /// Read a local bundle without letting an enormous file become an OOM.
@@ -417,6 +576,7 @@ fn read_bundle_file_limited(path: &Path, limit: u64) -> Result<Vec<u8>, String> 
     std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))
 }
 
+#[cfg(test)]
 fn install_downloaded_wasm_bundle(
     install_root: &Path,
     bundle: &[u8],
@@ -424,6 +584,26 @@ fn install_downloaded_wasm_bundle(
     preview_only: bool,
     expected_bundle_sha256: Option<&str>,
     deferred_state_root: Option<&Path>,
+) -> Result<WasmInstallResult, String> {
+    install_downloaded_plugin_bundle(
+        install_root,
+        bundle,
+        verified_public_key,
+        preview_only,
+        expected_bundle_sha256,
+        deferred_state_root,
+        true,
+    )
+}
+
+fn install_downloaded_plugin_bundle(
+    install_root: &Path,
+    bundle: &[u8],
+    verified_public_key: Option<&str>,
+    preview_only: bool,
+    expected_bundle_sha256: Option<&str>,
+    deferred_state_root: Option<&Path>,
+    wasm_only: bool,
 ) -> Result<WasmInstallResult, String> {
     let digest = sha256_hex(bundle);
     if expected_bundle_sha256.is_some_and(|expected| !expected.eq_ignore_ascii_case(&digest)) {
@@ -435,7 +615,11 @@ fn install_downloaded_wasm_bundle(
     let staging = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
     let manifest_path = extract_zip_bundle(bundle, staging.path())?;
     let (manifest_value, parsed) = read_manifest(&manifest_path)?;
-    assert_wasm_manifest(&parsed)?;
+    if wasm_only || parsed.plugin_type.as_deref() == Some("wasm") {
+        assert_wasm_manifest(&parsed)?;
+    } else if parsed.plugin_type.as_deref() != Some("frontend") {
+        return Err("bundle installer supports prebuilt frontend and WASM plugins".into());
+    }
     crate::contract::validate_manifest_contract(&manifest_value)?;
     let plugin_root = manifest_path.parent().unwrap_or(staging.path());
     crate::contract::validate_existing_manifest_paths(plugin_root, &manifest_value)?;
@@ -448,7 +632,7 @@ fn install_downloaded_wasm_bundle(
     let declared_key = parsed
         .author
         .as_ref()
-        .and_then(|author| author.public_key.as_deref());
+        .and_then(|author| author.get("publicKey").and_then(serde_json::Value::as_str));
     if let (Some(verified), Some(declared)) = (verified_public_key, declared_key) {
         if b64()
             .decode(verified.trim())
@@ -809,7 +993,11 @@ fn install_prebuilt_wasm_from_git(
     let plugin_dir = install_root.join(plugin_id);
     atomically_install_tree(prepared.path(), &plugin_dir, &manifest_value)?;
 
-    let (author_pk, author_fp) = match parsed.author.as_ref().and_then(|a| a.public_key.clone()) {
+    let (author_pk, author_fp) = match parsed.author.as_ref().and_then(|a| {
+        a.get("publicKey")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    }) {
         Some(pk) => {
             let decoded = b64().decode(pk.as_bytes()).ok();
             let fp = decoded.as_ref().map(|b| sha256_hex(b));
@@ -1131,6 +1319,148 @@ mod tests {
             .exists());
     }
 
+    fn frontend_test_zip(entry: &str) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("plugin.json", options).unwrap();
+        writer.write_all(serde_json::json!({"id":"demo.frontend", "version":"1.0.0", "type":"frontend", "main":entry, "author":"Cognia"}).to_string().as_bytes()).unwrap();
+        writer
+            .start_file(entry, options.unix_permissions(0o755))
+            .unwrap();
+        writer
+            .write_all(b"module.exports = { activate() {} };")
+            .unwrap();
+        writer.start_file("assets/icon.png", options).unwrap();
+        writer.write_all(b"image").unwrap();
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn frontend_zip_uses_verified_staged_install_and_preserves_assets() {
+        let root = tempfile::tempdir().unwrap();
+        let state = PluginRuntimeState::new(root.path().to_path_buf());
+        let existing = state.plugin_dir("demo.frontend");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("index.js"), "old").unwrap();
+        let bytes = frontend_test_zip("dist/index.js");
+        let preview = install_downloaded_plugin_bundle(
+            &state.plugin_install_dir,
+            &bytes,
+            None,
+            true,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(preview.transaction_id.is_none());
+        assert_eq!(preview.manifest["author"], "Cognia");
+        let result = install_downloaded_plugin_bundle(
+            &state.plugin_install_dir,
+            &bytes,
+            None,
+            false,
+            preview.bundle_sha256.as_deref(),
+            Some(&state.plugin_state_dir),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(existing.join("index.js")).unwrap(),
+            "old"
+        );
+        let transaction = result.transaction_id.unwrap();
+        crate::marketplace::commit_staged_update_for_state(&state, "demo.frontend", &transaction)
+            .unwrap();
+        assert!(existing.join("dist/index.js").is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(existing.join("dist/index.js"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o755
+            );
+        }
+        assert_eq!(
+            std::fs::read(existing.join("assets/icon.png")).unwrap(),
+            b"image"
+        );
+        crate::marketplace::discard_staged_update_for_state(&state, "demo.frontend", &transaction)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(existing.join("index.js")).unwrap(),
+            "old"
+        );
+    }
+
+    #[test]
+    fn frontend_zip_rejects_uncompiled_source_and_wasm_endpoint_remains_strict() {
+        let root = tempfile::tempdir().unwrap();
+        let error = install_downloaded_plugin_bundle(
+            root.path(),
+            &frontend_test_zip("src/index.ts"),
+            None,
+            false,
+            None,
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("compiled distribution"), "{error}");
+        assert!(!root.path().join("demo.frontend").exists());
+        assert!(install_downloaded_wasm_bundle(
+            root.path(),
+            &frontend_test_zip("index.js"),
+            None,
+            false,
+            None,
+            None
+        )
+        .unwrap_err()
+        .contains("wasm"));
+    }
+
+    #[test]
+    fn local_directory_stages_without_overwriting_and_drops_authored_receipts() {
+        let root = tempfile::tempdir().unwrap();
+        let state = PluginRuntimeState::new(root.path().to_path_buf());
+        let source = tempfile::tempdir().unwrap();
+        extract_zip_bundle(&frontend_test_zip("dist/index.js"), source.path()).unwrap();
+        std::fs::write(
+            source
+                .path()
+                .join(crate::marketplace::VERIFICATION_RECEIPT_FILE),
+            "forged",
+        )
+        .unwrap();
+        let result = stage_plugin_directory(
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            source.path(),
+        )
+        .unwrap();
+        assert_eq!(result.source, "local");
+        assert!(!state.plugin_dir("demo.frontend").exists());
+        let transaction = result.transaction_id.unwrap();
+        crate::marketplace::commit_staged_update_for_state(&state, "demo.frontend", &transaction)
+            .unwrap();
+        assert!(state
+            .plugin_dir("demo.frontend")
+            .join("dist/index.js")
+            .is_file());
+        assert!(!state
+            .plugin_dir("demo.frontend")
+            .join(crate::marketplace::VERIFICATION_RECEIPT_FILE)
+            .exists());
+        crate::marketplace::discard_staged_update_for_state(&state, "demo.frontend", &transaction)
+            .unwrap();
+    }
+
     #[test]
     fn local_bundle_size_is_refused_from_metadata_before_the_read() {
         // Checked from metadata FIRST on purpose: reading then measuring would
@@ -1167,6 +1497,26 @@ mod tests {
         let (raw, parsed) = read_manifest(&manifest_path).unwrap();
         assert_wasm_manifest(&parsed).unwrap();
         assert_eq!(raw["id"], "demo.wasm");
+    }
+
+    #[test]
+    fn root_manifest_wins_over_nested_plugin_resource_manifests() {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, content) in [
+            ("plugin.json", "root"),
+            ("assets/vendor/plugin.json", "nested"),
+        ] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(content.as_bytes()).unwrap();
+        }
+        let bytes = writer.finish().unwrap().into_inner();
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            extract_zip_bundle(&bytes, root.path()).unwrap(),
+            root.path().join("plugin.json")
+        );
     }
 
     #[test]

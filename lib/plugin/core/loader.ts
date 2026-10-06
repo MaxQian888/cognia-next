@@ -28,14 +28,14 @@ import {
   type NodePluginActivationSnapshot,
   type PluginJsHostInvoker,
 } from "../launcher/launchPluginJs"
-import { resolvePluginPath } from "./plugin-path"
+import { resolvePluginPath, normalizePluginRelativePath } from "./plugin-path"
 import {
-  createPluginRequire,
   primeSharedModules,
   primeSharedModulesFor,
   sharedModulesReferencedBy,
 } from "./shared-modules"
-import { assertNoHostPrivateImports } from "../security/import-boundary"
+import { evaluatePluginBundleAsync, PluginEvaluationError } from "./evaluate-plugin-bundle"
+export { PluginEvaluationError } from "./evaluate-plugin-bundle"
 import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
@@ -50,23 +50,6 @@ const pluginLoaderLogger = loggers.plugin.child("loader")
  * via `dirtyTeardowns` so a subsequent `load()` can react.
  */
 export const DEFAULT_TEARDOWN_TIMEOUT_MS = 5_000
-
-/**
- * The plugin's code was retrieved and then threw while evaluating.
- *
- * Distinct from a transport failure so `importModule` can stop walking its
- * fallback chain: another transport would fetch the same bytes and throw the
- * same way, and continuing would bury the author's real error.
- */
-export class PluginEvaluationError extends Error {
-  constructor(
-    message: string,
-    readonly cause?: unknown
-  ) {
-    super(message)
-    this.name = "PluginEvaluationError"
-  }
-}
 
 // =============================================================================
 // Types
@@ -348,7 +331,7 @@ export class PluginLoader {
           ...builtinRegistryEntry.asset.sharedModules,
           ...sharedModulesReferencedBy(code),
         ])
-        const moduleExports = this.evaluatePluginCode(code, builtinRegistryEntry.asset.url)
+        const moduleExports = await this.evaluatePluginCode(code, builtinRegistryEntry.asset.url)
         const definition = this.extractDefinition(moduleExports, manifest)
         this.loadedModules.set(manifest.id, {
           definition,
@@ -727,28 +710,8 @@ export class PluginLoader {
    * `primeSharedModulesFor(code)` first: `require` is synchronous, so the instances
    * have to already be in hand by the time the bundle runs.
    */
-  private evaluatePluginCode(code: string, originalPath: string): unknown {
-    assertNoHostPrivateImports(code, originalPath)
-
-    // Create a module-like environment for the plugin
-    const pluginExports: Record<string, unknown> = {}
-    const pluginModule: { exports: Record<string, unknown> } = { exports: pluginExports }
-
-    // Wrap the plugin code in a function to provide module/exports
-    const wrappedCode = `(function(module, exports, require) { ${code} })`
-
-    try {
-      const factory = (0, eval)(wrappedCode)
-      factory(pluginModule, pluginExports, createPluginRequire(originalPath))
-
-      // Return either module.exports or the exports object
-      return pluginModule.exports !== pluginExports ? pluginModule.exports : pluginExports
-    } catch (error) {
-      throw new PluginEvaluationError(
-        `Failed to evaluate plugin code from ${originalPath}: ${error}`,
-        error
-      )
-    }
+  private evaluatePluginCode(code: string, originalPath: string): Promise<Record<string, unknown>> {
+    return evaluatePluginBundleAsync(code, originalPath)
   }
 
   private async importInstalledEntry(
@@ -758,9 +721,27 @@ export class PluginLoader {
     absolutePath: string
   ): Promise<unknown> {
     if (pluginRoot.startsWith("builtin://")) {
-      const restoredExports = this.loadedModules.get(pluginId)?.exports
-      if (restoredExports) return restoredExports
-      return this.importModule(absolutePath)
+      const entry = normalizePluginRelativePath(relativeEntry)
+      const builtin = getBrowserBuiltinRegistryEntry(pluginId)
+      if (!builtin) throw new Error(`Unknown browser builtin plugin: ${pluginId}`)
+      if (builtin.manifest.main && entry === normalizePluginRelativePath(builtin.manifest.main)) {
+        const restoredExports = this.loadedModules.get(pluginId)?.exports
+        if (restoredExports) return restoredExports
+        await this.loadFrontendModule(builtin.manifest, pluginRoot)
+        return this.loadedModules.get(pluginId)!.exports
+      }
+      const asset = builtin.asset
+      const hash = asset?.entryHashes?.[entry]
+      if (!asset?.resourcesUrl || !hash) {
+        throw new Error(`Browser builtin entry has no verified artifact: ${pluginId}/${entry}`)
+      }
+      const url = resolvePluginPath(asset.resourcesUrl, entry)
+      const code = await fetchAndVerifyBrowserBuiltinAsset(
+        { ...asset, url, sha256: hash },
+        this.builtinAssetFetcher
+      )
+      await primeSharedModules([...asset.sharedModules, ...sharedModulesReferencedBy(code)])
+      return this.evaluatePluginCode(code, url)
     }
     if (!isTauri()) {
       return this.frontendImporter

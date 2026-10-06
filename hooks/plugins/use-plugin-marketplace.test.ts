@@ -273,7 +273,19 @@ describe("describeSearchFailure", () => {
 })
 
 describe("loadPluginMarketplaceClient", () => {
-  const registryEntry = { id: "r1", name: "Registry One", version: "1.0.0", source: "marketplace" }
+  const registryEntry = {
+    id: "r1",
+    name: "Registry One",
+    version: "1.0.0",
+    source: "marketplace",
+    icon: "https://example.com/plugin.png",
+    resolvedIcon: {
+      kind: "image",
+      src: "https://example.com/plugin.png",
+      original: "https://example.com/plugin.png",
+      transport: "remote",
+    },
+  }
   const market = {
     searchPluginsStrict: jest.fn(async () => ({
       plugins: [registryEntry],
@@ -321,6 +333,12 @@ describe("loadPluginMarketplaceClient", () => {
     const client = await loadPluginMarketplaceClient()
     await expect(client.installPlugin("r1", "1.0.0")).resolves.toEqual({ success: true })
     expect(market.installPlugin).toHaveBeenCalledWith("r1", "1.0.0")
+    market.installPlugin.mockResolvedValueOnce({ success: true })
+    expect(client.supportsTransactionalConfig).toBe(true)
+    await client.installPlugin("r1", "1.0.0", { config: { token: "atomic" } })
+    expect(market.installPlugin).toHaveBeenLastCalledWith("r1", "1.0.0", {
+      config: { token: "atomic" },
+    })
   })
 
   it("exposes no uninstall on the registry client", async () => {
