@@ -43,6 +43,7 @@ function newReportId(now: number): string {
 export async function runRadarReport(opts: RunRadarOptions = {}): Promise<RadarReport | null> {
   const settings = await getSettings()
   const radar = settings?.attentionRadar ?? DEFAULT_RADAR_SETTINGS
+  if (!opts.force && !radar.enabled) return null
   const now = opts.now ?? Date.now()
   const windowDays = radar.windowDays ?? DEFAULT_RADAR_SETTINGS.windowDays
   const intervalDays = radar.intervalDays ?? DEFAULT_RADAR_SETTINGS.intervalDays
@@ -65,14 +66,21 @@ export async function runRadarReport(opts: RunRadarOptions = {}): Promise<RadarR
   if (!client) throw new NoRadarModelError()
 
   const out = await generateRadarReport(client, { items, locale: settings?.language })
+  const reportId = newReportId(now)
   const report: RadarReport = {
-    id: newReportId(now),
+    id: reportId,
     scope: "self",
     generatedAt: now,
     windowDays,
     itemCount: items.length,
     heatmap: computeHeatmap(items, windowDays, now),
     ...out,
+    sources: items.map(({ id, source, at }) => ({ id, source, at })),
+    suggestions: out.actions.map((_, actionIndex) => ({
+      id: `${reportId}:action:${actionIndex}`,
+      actionIndex,
+      status: "pending",
+    })),
   }
   await saveRadarReport(report)
   await pruneRadarReports()

@@ -1,4 +1,24 @@
 {
+  "decisions": {
+    "accept": "接受并执行",
+    "dismiss": "忽略",
+    "accepted": "已接受",
+    "dismissed": "已忽略",
+    "track": "查看任务、结果与重试操作",
+    "acceptHelp": "接受后会创建带最终确认步骤的持续目标。需要审批的工具会暂停等待你处理。执行主机必须可用；重启后可补执行尚未开始的任务。",
+    "noEvidence": "此建议未提供经过校验的来源引用。",
+    "memory": "记忆",
+    "capture": "收集项",
+    "loading": "正在加载来源…",
+    "unavailable": "来源已删除、归档或不可用。",
+    "viewSource": "显示当前来源",
+    "openSource": "打开记忆",
+    "failed": "未能完成此决定，请先检查任务状态再重试。",
+    "dispatchFailed": "已保存接受的任务，但需要重试调度或由本主机恢复。",
+    "retry": "重试调度",
+    "history": "报告历史",
+    "latest": "最新报告"
+  },
   "panel": {
     "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",
     "meta": "已分析 {count} 项 · {days} 天窗口",

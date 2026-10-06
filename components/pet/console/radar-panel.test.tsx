@@ -15,12 +15,19 @@ import { getSettings, saveSettings } from "@/lib/db/settings"
 import { toast } from "sonner"
 import type { RadarReport } from "@/types/radar"
 
-jest.mock("@/lib/db/radar-reports", () => ({ getLatestRadarReport: jest.fn() }))
+jest.mock("@/lib/db/radar-reports", () => ({
+  getLatestRadarReport: jest.fn(),
+  getRadarReport: jest.fn(),
+  listRadarReports: jest.fn(async () => []),
+}))
 jest.mock("@/lib/radar/radar-runner", () => {
   class NoRadarModelError extends Error {}
   return { runRadarReport: jest.fn(), NoRadarModelError }
 })
-jest.mock("@/lib/radar/radar-cron-bridge", () => ({ syncRadarCronToScheduler: jest.fn() }))
+jest.mock("@/lib/radar/radar-cron-bridge", () => ({
+  ...jest.requireActual("@/lib/radar/radar-cron-bridge"),
+  syncRadarCronToScheduler: jest.fn(),
+}))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(), saveSettings: jest.fn() }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -93,5 +100,22 @@ describe("RadarPanel", () => {
     await waitFor(() => expect(mockSaveSettings).toHaveBeenCalled())
     expect(mockSync).toHaveBeenCalled()
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  it("does not save an enabled invalid schedule over the previous settings", async () => {
+    mockGetSettings.mockResolvedValue({
+      attentionRadar: {
+        enabled: true,
+        windowDays: 14,
+        intervalDays: 3,
+        schedule: { mode: "custom", customCron: "invalid" },
+      },
+    })
+    render(<RadarPanel />)
+    await waitFor(() => expect(screen.getByRole("switch")).toBeChecked())
+    await userEvent.click(screen.getByTestId("radar-settings-save"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(mockSaveSettings).not.toHaveBeenCalled()
+    expect(mockSync).not.toHaveBeenCalled()
   })
 })

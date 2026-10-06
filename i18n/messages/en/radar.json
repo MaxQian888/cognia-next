@@ -1,4 +1,24 @@
 {
+  "decisions": {
+    "accept": "Accept and run",
+    "dismiss": "Dismiss",
+    "accepted": "Accepted",
+    "dismissed": "Dismissed",
+    "track": "View task, results, and retry controls",
+    "acceptHelp": "Accept creates a tracked goal with a final confirmation step. Tools that need approval pause for you. The execution host must remain available; a missed start can resume after restart.",
+    "noEvidence": "No verified source reference was provided for this suggestion.",
+    "memory": "Memory",
+    "capture": "Capture",
+    "loading": "Loading source…",
+    "unavailable": "Source was deleted, archived, or is unavailable.",
+    "viewSource": "Show current source",
+    "openSource": "Open memory",
+    "failed": "Could not finish this decision. Check the task status before retrying.",
+    "dispatchFailed": "The accepted task is saved, but dispatch needs to be retried or resumed by this host.",
+    "retry": "Retry dispatch",
+    "history": "Report history",
+    "latest": "Latest report"
+  },
   "panel": {
     "empty": "No report yet. Run the radar to analyze your recent info diet.",
     "meta": "{count} items analyzed · {days}-day window",

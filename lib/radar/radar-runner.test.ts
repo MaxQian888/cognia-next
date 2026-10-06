@@ -58,6 +58,15 @@ beforeEach(() => {
 })
 
 describe("runRadarReport", () => {
+  it("blocks automatic runs with a stale schedule while retaining explicit manual runs", async () => {
+    mockGetSettings.mockResolvedValue({ attentionRadar: { enabled: false } })
+    expect(await runRadarReport()).toBeNull()
+    expect(mockCollect).not.toHaveBeenCalled()
+    mockCollect.mockResolvedValue(items(6))
+    const report = await runRadarReport({ force: true })
+    expect(report?.sources).toHaveLength(6)
+    expect(report?.sources?.[0]).not.toHaveProperty("text")
+  })
   it("generates + persists a report on the happy path", async () => {
     mockCollect.mockResolvedValue(items(6))
     const report = await runRadarReport({ now: NOW })

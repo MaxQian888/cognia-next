@@ -3,6 +3,18 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { RadarDataItem } from "@/types/radar"
 
 describe("normalizeRadarOutput", () => {
+  it("keeps only valid source indexes while preserving legacy text actions", () => {
+    const result = normalizeRadarOutput(
+      {
+        actions: [{ text: "Read", sourceIndexes: [0, 0, -1, 2.5, 99] }, "Legacy", null],
+        graveyard: [null],
+        topicCloud: [null],
+      },
+      3
+    )
+    expect(result.actions).toEqual(["Read", "Legacy"])
+    expect(result.actionEvidence).toEqual([[0], []])
+  })
   it("fills defaults for a malformed payload", () => {
     const out = normalizeRadarOutput({}, 3)
     expect(out.verdict).toBe("")

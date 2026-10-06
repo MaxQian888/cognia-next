@@ -51,6 +51,8 @@ export interface RadarHeatCell {
  * heatmap into a {@link RadarReport}.
  */
 export interface RadarLlmOutput {
+  /** Validated input indexes supporting each action; absent on legacy reports. */
+  actionEvidence?: number[][]
   /** One-line opinionated summary. */
   verdict: string
   /** 2–3 high-level highlights. */
@@ -71,6 +73,9 @@ export interface RadarLlmOutput {
 
 /** A persisted radar report (one row in the `radarReports` table). */
 export interface RadarReport extends RadarLlmOutput {
+  /** References only: deleted source text is never retained here as a second copy. */
+  sources?: Array<Pick<RadarDataItem, "id" | "source" | "at">>
+  suggestions?: RadarSuggestion[]
   id: string
   /** Analysis scope — currently always "self". */
   scope: string
@@ -81,6 +86,15 @@ export interface RadarReport extends RadarLlmOutput {
   itemCount: number
   /** Capture-activity distribution over the window (computed locally). */
   heatmap: RadarHeatCell[]
+}
+
+export interface RadarSuggestion {
+  id: string
+  actionIndex: number
+  status: "pending" | "accepted" | "dismissed"
+  decidedAt?: number
+  taskId?: string
+  dispatchError?: string
 }
 
 export type RadarScheduleMode = "off" | "daily" | "weekly" | "custom"

@@ -34,6 +34,15 @@ function report(id: string, generatedAt: number): RadarReport {
 }
 
 describe("radar-reports CRUD", () => {
+  it("preserves unresolved and accepted suggestions beyond the history retention window", async () => {
+    await saveRadarReport({
+      ...report("old", 1),
+      suggestions: [{ id: "s", actionIndex: 0, status: "accepted", taskId: "t" }],
+    })
+    await saveRadarReport(report("new", 2))
+    await pruneRadarReports(1)
+    expect(await getRadarReport("old")).toBeDefined()
+  })
   it("saves, reads by id, and returns the latest for a scope", async () => {
     await saveRadarReport(report("r1", 1000))
     await saveRadarReport(report("r2", 2000))

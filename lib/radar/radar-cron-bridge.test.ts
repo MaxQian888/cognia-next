@@ -6,6 +6,11 @@ import {
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 
+it("removes an existing schedule when the master switch is disabled", async () => {
+  ;(schedulerDb.getTask as jest.Mock).mockResolvedValue({ id: RADAR_REPORT_TASK_ID })
+  expect((await syncRadarCronToScheduler({ mode: "daily" }, false)).action).toBe("deleted")
+})
+
 jest.mock("@/lib/scheduler/scheduler-db", () => ({
   schedulerDb: {
     getTask: jest.fn(),
@@ -15,6 +20,13 @@ jest.mock("@/lib/scheduler/scheduler-db", () => ({
   },
 }))
 jest.mock("@/lib/scheduler/cron-parser", () => ({ validateCronExpression: jest.fn() }))
+const mockArmRadar = jest.fn()
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: () => ({
+    updateTask: (...args: unknown[]) => mockArmRadar(...args),
+    deleteTask: (id: string) => schedulerDb.deleteTask(id),
+  }),
+}))
 
 const db = schedulerDb as jest.Mocked<typeof schedulerDb>
 const mockValidate = validateCronExpression as jest.Mock
@@ -43,6 +55,7 @@ describe("syncRadarCronToScheduler", () => {
     expect(db.createTask).toHaveBeenCalledWith(
       expect.objectContaining({ id: RADAR_REPORT_TASK_ID, type: "radar-report" })
     )
+    expect(mockArmRadar).toHaveBeenCalledWith(RADAR_REPORT_TASK_ID, {})
   })
 
   it("deletes on off when a row exists", async () => {

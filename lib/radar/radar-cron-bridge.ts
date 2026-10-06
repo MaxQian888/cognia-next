@@ -79,13 +79,15 @@ export interface SyncRadarCronResult {
 }
 
 export async function syncRadarCronToScheduler(
-  schedule: RadarScheduleSettings | undefined
+  schedule: RadarScheduleSettings | undefined,
+  enabled = true
 ): Promise<SyncRadarCronResult> {
   const existing = await schedulerDb.getTask(RADAR_REPORT_TASK_ID)
 
-  if (!schedule || schedule.mode === "off") {
+  if (!enabled || !schedule || schedule.mode === "off") {
     if (existing) {
-      await schedulerDb.deleteTask(RADAR_REPORT_TASK_ID)
+      const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+      await getTaskScheduler().deleteTask(RADAR_REPORT_TASK_ID)
       return { action: "deleted" }
     }
     return { action: "skipped" }
@@ -93,7 +95,7 @@ export async function syncRadarCronToScheduler(
 
   if (schedule.mode === "custom") {
     const raw = schedule.customCron?.trim() ?? ""
-    if (!raw) return { action: "skipped" }
+    if (!raw) return { action: "invalid", invalidExpression: raw }
     if (!validateCronExpression(raw).valid) {
       return { action: "invalid", invalidExpression: raw }
     }
@@ -105,8 +107,12 @@ export async function syncRadarCronToScheduler(
   const next = buildTask(cronExpression, schedule, existing)
   if (existing) {
     await schedulerDb.updateTask(next)
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    await getTaskScheduler().updateTask(next.id, {})
     return { action: "updated" }
   }
   await schedulerDb.createTask(next)
+  const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+  await getTaskScheduler().updateTask(next.id, {})
   return { action: "created" }
 }

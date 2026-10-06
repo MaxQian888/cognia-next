@@ -32,7 +32,11 @@ export async function listRadarReports(limit = 20): Promise<RadarReport[]> {
 /** Trim to the newest `keep` reports (called after each write). */
 export async function pruneRadarReports(keep = 20): Promise<number> {
   const db = getDb()
-  const ids = await db.radarReports.orderBy("generatedAt").reverse().offset(keep).primaryKeys()
+  const rows = await db.radarReports.orderBy("generatedAt").reverse().offset(keep).toArray()
+  // Decisions and accepted commitments remain reachable after newer reports.
+  const ids = rows
+    .filter((row) => !row.suggestions?.some((suggestion) => suggestion.status !== "dismissed"))
+    .map((row) => row.id)
   if (ids.length === 0) return 0
   await db.radarReports.bulkDelete(ids as string[])
   return ids.length

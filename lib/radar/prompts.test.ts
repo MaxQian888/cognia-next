@@ -6,6 +6,8 @@ describe("RADAR_SYSTEM_PROMPT", () => {
     expect(RADAR_SYSTEM_PROMPT).toContain("verdict")
     expect(RADAR_SYSTEM_PROMPT).toContain("graveyard")
     expect(RADAR_SYSTEM_PROMPT).toContain("JSON")
+    expect(RADAR_SYSTEM_PROMPT).toContain("sourceIndexes")
+    expect(RADAR_SYSTEM_PROMPT).toContain("Never invent evidence")
   })
 })
 

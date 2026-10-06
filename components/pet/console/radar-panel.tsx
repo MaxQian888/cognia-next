@@ -28,9 +28,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { getLatestRadarReport } from "@/lib/db/radar-reports"
+import { getLatestRadarReport, getRadarReport, listRadarReports } from "@/lib/db/radar-reports"
+import { RadarSource, RadarSuggestions } from "./radar-suggestions"
 import { runRadarReport, NoRadarModelError } from "@/lib/radar/radar-runner"
-import { syncRadarCronToScheduler } from "@/lib/radar/radar-cron-bridge"
+import { resolveRadarCron, syncRadarCronToScheduler } from "@/lib/radar/radar-cron-bridge"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import {
   DEFAULT_RADAR_SETTINGS,
@@ -45,7 +46,12 @@ export function RadarPanel() {
   const [settings, setSettings] = useState<RadarSettings>(DEFAULT_RADAR_SETTINGS)
   const [saving, setSaving] = useState(false)
 
-  const report = useLiveQuery<RadarReport | undefined>(() => getLatestRadarReport("self"), [])
+  const [reportId, setReportId] = useState("")
+  const reports = useLiveQuery(() => listRadarReports(Number.MAX_SAFE_INTEGER), [])
+  const report = useLiveQuery<RadarReport | undefined>(
+    () => (reportId ? getRadarReport(reportId) : getLatestRadarReport("self")),
+    [reportId]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -81,8 +87,18 @@ export function RadarPanel() {
   const onSaveSettings = useCallback(async () => {
     setSaving(true)
     try {
+      if (
+        settings.enabled &&
+        settings.schedule?.mode === "custom" &&
+        resolveRadarCron(settings.schedule) === null
+      ) {
+        toast.error(
+          t("settings.scheduleInvalidCron", { expression: settings.schedule.customCron ?? "" })
+        )
+        return
+      }
       await saveSettings({ attentionRadar: settings })
-      const action = await syncRadarCronToScheduler(settings.schedule)
+      const action = await syncRadarCronToScheduler(settings.schedule, settings.enabled)
       if (action.action === "invalid") {
         toast.error(
           t("settings.scheduleInvalidCron", { expression: action.invalidExpression ?? "" })
@@ -121,6 +137,21 @@ export function RadarPanel() {
       </div>
 
       <SettingsStack>
+        <label className="space-y-1 text-sm">
+          <span>{t("decisions.history")}</span>
+          <select
+            className="w-full rounded border bg-background p-2"
+            value={reportId}
+            onChange={(e) => setReportId(e.target.value)}
+          >
+            <option value="">{t("decisions.latest")}</option>
+            {reports?.map((row) => (
+              <option key={row.id} value={row.id}>
+                {new Date(row.generatedAt).toLocaleString()} — {row.verdict}
+              </option>
+            ))}
+          </select>
+        </label>
         <SettingsBlock title={t("panel.title")}>
           {report ? (
             <RadarReportView report={report} t={t} />
@@ -280,11 +311,7 @@ function RadarReportView({
 
       {report.actions.length > 0 && (
         <Section title={t("section.actions")}>
-          <ul className="list-decimal space-y-1 pl-4">
-            {report.actions.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
+          <RadarSuggestions report={report} />
         </Section>
       )}
 
@@ -293,7 +320,14 @@ function RadarReportView({
           <ul className="space-y-1 text-muted-foreground">
             {report.graveyard.map((g, i) => (
               <li key={i}>
-                <span className="font-mono text-xs">#{g.index}</span> — {g.reason}
+                <p>{g.reason}</p>
+                {report.sources?.[g.index] ? (
+                  <ul>
+                    <RadarSource source={report.sources[g.index]} />
+                  </ul>
+                ) : (
+                  <span>{t("decisions.noEvidence")}</span>
+                )}
               </li>
             ))}
           </ul>

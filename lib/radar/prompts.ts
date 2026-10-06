@@ -21,7 +21,7 @@ export const RADAR_SYSTEM_PROMPT =
   '  "subconscious": string,       // interests you may not realize, with evidence\n' +
   '  "graveyard": [{ "index": number, "reason": string }],  // forgotten high-value items to revisit\n' +
   '  "blindSpots": string,         // neglected angles or contradictions\n' +
-  '  "actions": string[],          // 3 concrete next actions\n' +
+  '  "actions": [{ "text": string, "sourceIndexes": number[] }], // 3 concrete suggestions with supporting input indexes; [] if no source supports one. Never invent evidence.\n' +
   '  "topicCloud": [{ "topic": string, "weight": number }]  // weight in 0..1\n' +
   "}"
 

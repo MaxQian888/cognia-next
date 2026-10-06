@@ -19,12 +19,33 @@ export function normalizeRadarOutput(raw: unknown, itemCount: number): RadarLlmO
   const o = (raw ?? {}) as Record<string, unknown>
   const asStringArray = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []
+  const actions = (Array.isArray(o.actions) ? o.actions : [])
+    .flatMap((action) => {
+      if (typeof action === "string") return [{ text: action, evidence: [] as number[] }]
+      if (!action || typeof action !== "object" || typeof action.text !== "string") return []
+      const evidence = Array.isArray(action.sourceIndexes)
+        ? [
+            ...new Set<number>(
+              action.sourceIndexes.filter(
+                (index: unknown): index is number =>
+                  typeof index === "number" &&
+                  Number.isInteger(index) &&
+                  index >= 0 &&
+                  index < itemCount
+              )
+            ),
+          ]
+        : []
+      return [{ text: action.text, evidence }]
+    })
+    .filter((action) => action.text.trim())
   const graveyard = Array.isArray(o.graveyard)
     ? (o.graveyard as unknown[])
-        .map((g) => g as Record<string, unknown>)
+        .filter((g): g is Record<string, unknown> => !!g && typeof g === "object")
         .filter(
           (g) =>
             typeof g.index === "number" &&
+            Number.isInteger(g.index) &&
             g.index >= 0 &&
             g.index < itemCount &&
             typeof g.reason === "string"
@@ -33,7 +54,7 @@ export function normalizeRadarOutput(raw: unknown, itemCount: number): RadarLlmO
     : []
   const topicCloud = Array.isArray(o.topicCloud)
     ? (o.topicCloud as unknown[])
-        .map((t) => t as Record<string, unknown>)
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
         .filter((t) => typeof t.topic === "string")
         .map((t) => ({
           topic: t.topic as string,
@@ -47,7 +68,10 @@ export function normalizeRadarOutput(raw: unknown, itemCount: number): RadarLlmO
     subconscious: typeof o.subconscious === "string" ? o.subconscious : "",
     graveyard,
     blindSpots: typeof o.blindSpots === "string" ? o.blindSpots : "",
-    actions: asStringArray(o.actions),
+    actions: actions.map((action) => action.text),
+    ...(actions.some((action) => action.evidence.length)
+      ? { actionEvidence: actions.map((action) => action.evidence) }
+      : {}),
     topicCloud,
   }
 }
