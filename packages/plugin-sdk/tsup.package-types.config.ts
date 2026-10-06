@@ -1,9 +1,9 @@
 import { defineConfig } from "tsup"
 // static-export-exempt: Node-only declaration build config, never imported by runtime code.
 import { fileURLToPath } from "node:url"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs" // static-export-exempt: Node-only declaration build config.
+import { tmpdir } from "node:os" // static-export-exempt: Node-only declaration build config.
+import { join } from "node:path" // static-export-exempt: Node-only declaration build config.
 import { runtimeEntries } from "./tsup.config"
 
 const local = (path: string) => fileURLToPath(new URL(path, import.meta.url))
