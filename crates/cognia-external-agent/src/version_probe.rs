@@ -406,24 +406,24 @@ mod tests {
     async fn a_package_runner_runtime_is_named_rather_than_installed_to_answer() {
         // `npx -y @google/gemini-cli --version` DOWNLOADS the package. Detection
         // must never pay that to draw a badge, so these report the third state.
-        let report = detect_runtimes().await;
-        let npx_backed: Vec<&DetectedRuntime> = report
-            .runtimes
-            .iter()
-            .filter(|runtime| runtime.command.as_deref() == Some("npx"))
-            .collect();
+        static FIXTURE: std::sync::LazyLock<CatalogEntry> =
+            std::sync::LazyLock::new(|| CatalogEntry {
+                runtime_id: "package-runner-fixture".to_string(),
+                system_command: Some("npx".to_string()),
+                version_probe: Some(ProbeSpec {
+                    args: vec!["-y".into(), "fixture-package".into(), "--version".into()],
+                    timeout_ms: 1_000,
+                }),
+            });
+        let runtime = detect_one(&FIXTURE).await;
+        assert_eq!(runtime.runtime_id, "package-runner-fixture");
+        assert_eq!(runtime.command.as_deref(), Some("npx"));
+        assert_eq!(runtime.resolution, RUNTIME_PACKAGE_RUNNER);
         assert!(
-            !npx_backed.is_empty(),
-            "the catalog is expected to still ship npx-backed runtimes"
+            runtime.version_output.is_none(),
+            "{} was probed through its package runner",
+            runtime.runtime_id
         );
-        for runtime in npx_backed {
-            assert_eq!(runtime.resolution, RUNTIME_PACKAGE_RUNNER);
-            assert!(
-                runtime.version_output.is_none(),
-                "{} was probed through its package runner",
-                runtime.runtime_id
-            );
-        }
     }
 
     #[tokio::test]
