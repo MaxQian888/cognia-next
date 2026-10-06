@@ -74,6 +74,24 @@ describe("mobile outbound queue target isolation", () => {
     })
   })
 
+  it("mints UUID idempotency keys for paired-host read markers", async () => {
+    const first = await enqueue({
+      command: "session_mark_read",
+      payload: { sessionId: "s1", readThrough: 20 },
+    })
+    const second = await enqueue({
+      command: "session_mark_read",
+      payload: { sessionId: "s1", readThrough: 20 },
+    })
+    expect(first.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    )
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey)
+    expect((await getDb().mobileOutboundQueue.get(first.id))?.idempotencyKey).toBe(
+      first.idempotencyKey
+    )
+  })
+
   it("reuses the durable queue for HostState actions and retains terminal conflicts", async () => {
     const row = await enqueueHostStateAction({
       channel: "cognia://target/desktop-studio/sessions/s1",

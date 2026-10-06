@@ -5,6 +5,7 @@ import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accoun
 
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import {
+  hostStateDigest,
   sessionIndexChannel,
   sessionStateChannel,
   type AllowedHostStateIntent,
@@ -15,6 +16,7 @@ import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
   acquireHostStateLease,
   commitHostStateAction,
+  commitHostStateRuntimeProjection,
   getHostStateAction,
   getHostStateSnapshot,
   renewHostStateLease,
@@ -267,6 +269,125 @@ describe("HostState durable store", () => {
         now: 51_001,
       })
     ).rejects.toThrow("stale_host_generation")
+  })
+
+  it("refreshes restarted projections from session rows while retaining live channel state", async () => {
+    await acquireWritableLease()
+    await commitHostStateAction({
+      action: draftAction(),
+      mutation: {
+        kind: "draft.replaced",
+        text: "saved draft",
+        attachments: [],
+        draftRevision: 1,
+        revision: 1,
+      },
+      now: 1,
+    })
+    await commitHostStateRuntimeProjection({
+      hostId: scope.hostId,
+      hostGeneration: 1,
+      ownerId: "brain-a",
+      channel,
+      envelopeId: "running",
+      envelopeDigest: "running",
+      mutation: () => ({ kind: "turn.started", turnId: "turn-1", startedAt: 2, revision: 2 }),
+      now: 2,
+    })
+    const before = await getHostStateSnapshot(channel)
+    const indexChannel = sessionIndexChannel(scope.targetId)
+    await getHostStateSnapshot(indexChannel)
+    await getDb().sessions.update("session-1", {
+      title: "Account sync title",
+      archivedAt: 3,
+      transcriptRevision: 7,
+      updatedAt: 3,
+    })
+    await getDb().sessions.put({
+      id: "synced-session",
+      title: "New synced session",
+      transcriptRevision: 4,
+      createdAt: 3,
+      updatedAt: 3,
+    })
+
+    // A lease renewal must not silently rewrite the current ordered stream.
+    await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-a", now: 10 })
+    expect((await getHostStateSnapshot(channel)).state).toEqual(before.state)
+    await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-b", now: 31_000 })
+
+    const refreshed = await getHostStateSnapshot(channel)
+    expect(refreshed).toMatchObject({
+      hostGeneration: 2,
+      cutHostSeq: 0,
+      revision: before.revision,
+      state: {
+        ...before.state,
+        title: "Account sync title",
+        conversation: "archived",
+        transcriptRevision: 7,
+      },
+    })
+    expect(refreshed.digest).toBe(hostStateDigest(refreshed.state))
+    expect((await getHostStateSnapshot(indexChannel)).state).toMatchObject({
+      sessions: expect.arrayContaining([
+        {
+          sessionId: "session-1",
+          title: "Account sync title",
+          conversation: "archived",
+          turn: "running",
+          revision: 2,
+          transcriptRevision: 7,
+        },
+        {
+          sessionId: "synced-session",
+          title: "New synced session",
+          conversation: "present",
+          turn: "idle",
+          revision: 0,
+          transcriptRevision: 4,
+        },
+      ]),
+    })
+  })
+
+  it("tombstones sessions removed while the host was stopped instead of restoring them from its index", async () => {
+    await acquireWritableLease()
+    await getHostStateSnapshot(channel)
+    const indexChannel = sessionIndexChannel(scope.targetId)
+    await getHostStateSnapshot(indexChannel)
+    await getDb().sessions.delete("session-1")
+    await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-b", now: 31_000 })
+    const deleted = await getHostStateSnapshot(channel)
+    expect(deleted.state).toMatchObject({
+      conversation: "tombstoned",
+      tombstone: { deletedAt: 31_000, hostSeq: 0 },
+    })
+    expect((await getHostStateSnapshot(indexChannel)).state).toMatchObject({
+      sessions: [
+        expect.objectContaining({
+          sessionId: "session-1",
+          conversation: "tombstoned",
+          tombstone: { deletedAt: 31_000, hostSeq: 0 },
+        }),
+      ],
+    })
+    expect(deleted.digest).toBe(hostStateDigest(deleted.state))
+    expect(await getDb().sessions.get("session-1")).toBeUndefined()
+
+    // A stale replicated row must not undo an already durable deletion.
+    await getDb().sessions.put({
+      id: "session-1",
+      title: "Stale sync copy",
+      transcriptRevision: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-c", now: 62_000 })
+    expect((await getHostStateSnapshot(channel)).state).toEqual(deleted.state)
+    expect((await getHostStateSnapshot(indexChannel)).state).toMatchObject({
+      sessions: [expect.objectContaining({ conversation: "tombstoned" })],
+    })
   })
 
   it("persists queued messages and transcript edits in the ledger transaction", async () => {

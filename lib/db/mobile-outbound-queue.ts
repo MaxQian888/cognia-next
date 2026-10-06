@@ -226,7 +226,7 @@ function buildQueueRow(input: EnqueueInput): MobileOutboundJobRow {
     attempts: 0,
     createdAt: now,
     nextAttemptAt: now,
-    idempotencyKey: input.idempotencyKey ?? nanoid(),
+    idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
     label: input.label,
     protocol: input.protocol,
     channel: input.channel,

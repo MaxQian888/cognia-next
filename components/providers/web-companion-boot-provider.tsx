@@ -238,7 +238,14 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
         updateRuntimeSnapshot({
           host: runtimeHostSnapshotFromManifest(manifest, { hostStateWriteEnabled: false }),
         })
-        if (manifest.features["session.state-sync"]?.version === 1 && !hostStateSync) {
+        if (manifest.features["session.state-sync"]?.version === 1 && hostStateSync) {
+          // A restarted Host can have a new generation without broadcasting
+          // another action. Re-cut the existing mirrors before enabling writes
+          // with their hostGeneration/baseRevision, even when replay had no gap.
+          await hostStateSync.resync()
+          if (cancelled) return false
+          updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
+        } else if (manifest.features["session.state-sync"]?.version === 1) {
           // Host-state is addressed in the HOST's namespace, not ours.
           // `config.targetId` is the id we filed this pairing under; the Host
           // writes its channels under its own active runtime target and

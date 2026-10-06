@@ -354,6 +354,45 @@ describe("WebCompanionBootProvider", () => {
     expect(hostStateStopMock).toHaveBeenCalledTimes(1)
   })
 
+  it("re-cuts HostState and restores writes before declaring a restarted Host online", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      deviceId: "dev-1",
+      accountId: "acct-web",
+      targetId: "companion-cloud",
+    })
+    transportCallMock.mockResolvedValue(
+      buildLocalHostFeatureManifest({ platform: "headless", hostId: "host-cloud" })
+    )
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(getRuntimeSnapshot().host?.operations).toContain("host_state_submit")
+
+    let finishSnapshot!: () => void
+    hostStateResyncMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSnapshot = resolve
+        })
+    )
+    planeHealthValue = { rpc: "ready", events: "connecting" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+    planeHealthValue = { rpc: "ready", events: "ready" }
+    for (const listener of planeHealthListeners) listener(planeHealthValue)
+
+    await waitFor(() => expect(hostStateResyncMock).toHaveBeenCalledTimes(1))
+    expect(getRuntimeSnapshot().connectionState).toBe("connecting")
+    expect(getRuntimeSnapshot().host?.operations).not.toContain("host_state_submit")
+    await act(async () => finishSnapshot())
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
+    expect(getRuntimeSnapshot().host?.operations).toContain("host_state_submit")
+    expect(installHostStateSyncMock).toHaveBeenCalledTimes(1)
+  })
+
   it("addresses host-state in the Host's namespace when the manifest declares one", async () => {
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",

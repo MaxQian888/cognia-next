@@ -75,6 +75,35 @@ describe("createOutboundRunner", () => {
     await runner.stop()
   })
 
+  it("retries legacy read markers with one UUID across runner restarts", async () => {
+    const legacyKey = "V1StGXR8_Z5jdHi6B-myT"
+    const row = await enqueue({
+      command: "session_mark_read",
+      payload: { sessionId: "s1", readThrough: 20 },
+      idempotencyKey: legacyKey,
+    })
+    const call = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValue(null)
+    const first = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await first.kick()
+    await first.stop()
+    await getDb().mobileOutboundQueue.update(row.id, { nextAttemptAt: 0 })
+    const restarted = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await restarted.kick()
+    await restarted.stop()
+
+    expect(call).toHaveBeenCalledTimes(2)
+    const firstKey = call.mock.calls[0][2].idempotencyKey
+    expect(firstKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(call.mock.calls[1][2].idempotencyKey).toBe(firstKey)
+    expect(await getDb().mobileOutboundQueue.get(row.id)).toMatchObject({
+      idempotencyKey: legacyKey,
+      status: "sent",
+    })
+  })
+
   it("dispatches legacy Bot retry receipts with the native UUID contract without rewriting their audit identity", async () => {
     const call = jest.fn().mockResolvedValue({ replayed: true })
     const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })

@@ -15,11 +15,12 @@ import {
   type HostStateAppliedAction,
   type HostStateChannelState,
   type HostStateMutation,
+  type HostStateSessionSummary,
   type HostStateSnapshot,
 } from "@cognia/agent-config-types/host-state"
 
 import { getDb } from "@/lib/db/schema"
-import type { StoredMessage } from "@cognia/agent-config-types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import {
   isCanonicalSession,
   type CanonicalSession,
@@ -120,7 +121,7 @@ export async function acquireHostStateLease(input: HostStateLeaseInput): Promise
   const db = getDb()
   const now = input.now ?? Date.now()
   const ttlMs = normalizeTtl(input.ttlMs)
-  return db.transaction("rw", db.hostStateMeta, db.hostStateChannels, async () => {
+  return db.transaction("rw", db.hostStateMeta, db.hostStateChannels, db.sessions, async () => {
     const current = await db.hostStateMeta.get(HOST_STATE_META_ID)
     if (
       current &&
@@ -151,13 +152,97 @@ export async function acquireHostStateLease(input: HostStateLeaseInput): Promise
       updatedAt: now,
     }
     await db.hostStateMeta.put(next)
-    await db.hostStateChannels.toCollection().modify((row) => {
-      row.hostGeneration = hostGeneration
-      row.hostSeq = 0
-      row.updatedAt = now
-    })
+    await refreshHostStateGeneration(db, next, now)
     return next
   })
+}
+
+/**
+ * A new generation starts from the business rows that survived shutdown,
+ * including account-sync changes made while no Host owned the live channels.
+ * Keep durable runtime/draft state for recovery; only refresh session metadata
+ * and index membership. Renewals never rewrite the current ordered stream.
+ */
+async function refreshHostStateGeneration(
+  db: ReturnType<typeof getDb>,
+  meta: HostStateMetaRow,
+  now: number
+): Promise<void> {
+  const rows = await db.hostStateChannels.toArray()
+  if (rows.length === 0) return
+  const sessions = new Map((await db.sessions.toArray()).map((session) => [session.id, session]))
+  const channels = new Map(rows.map((row) => [row.channel, row]))
+  for (const row of rows) {
+    if (row.state.kind !== "session" || row.state.tombstone) continue
+    const session = sessions.get(row.state.sessionId)
+    row.state = session
+      ? { ...row.state, ...sessionProjectionMetadata(session) }
+      : reduceHostStateMutation(row.state, {
+          kind: "session.tombstoned",
+          deletedAt: now,
+          hostSeq: 0,
+          revision: row.state.revision,
+        })
+  }
+  for (const row of rows) {
+    if (row.state.kind === "session-index") {
+      const summaries = new Map(row.state.sessions.map((summary) => [summary.sessionId, summary]))
+      for (const session of sessions.values()) {
+        if (!summaries.has(session.id)) {
+          summaries.set(session.id, {
+            sessionId: session.id,
+            ...sessionProjectionMetadata(session),
+            turn: "idle",
+            revision: 0,
+          })
+        }
+      }
+      row.state = {
+        ...row.state,
+        sessions: Array.from(summaries.values(), (summary): HostStateSessionSummary => {
+          const channel = channels.get(`${row.channel}/${encodeURIComponent(summary.sessionId)}`)
+          const state = channel?.state
+          // A session channel carries the latest runtime state even if the
+          // previous owner stopped before publishing its index summary.
+          if (state?.kind === "session") {
+            return {
+              sessionId: state.sessionId,
+              ...(state.title !== undefined ? { title: state.title } : {}),
+              conversation: state.conversation,
+              turn: state.turn,
+              revision: state.revision,
+              transcriptRevision: state.transcriptRevision,
+              ...(state.tombstone ? { tombstone: state.tombstone } : {}),
+            }
+          }
+          if (summary.tombstone) return summary
+          const session = sessions.get(summary.sessionId)
+          return session
+            ? { ...summary, ...sessionProjectionMetadata(session) }
+            : {
+                ...summary,
+                conversation: "tombstoned",
+                turn: "idle",
+                tombstone: { deletedAt: now, hostSeq: 0 },
+              }
+        }),
+      }
+    }
+    row.hostId = meta.hostId
+    row.hostGeneration = meta.hostGeneration
+    row.hostSeq = 0
+    row.digest = hostStateDigest(row.state)
+    row.updatedAt = now
+  }
+  await db.hostStateChannels.bulkPut(rows)
+}
+
+function sessionProjectionMetadata(session: ChatSession) {
+  return {
+    title: session.title,
+    conversation: session.archivedAt !== undefined ? ("archived" as const) : ("present" as const),
+    transcriptRevision: session.transcriptRevision ?? 0,
+  }
 }
 
 export async function renewHostStateLease(input: {
