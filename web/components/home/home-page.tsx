@@ -107,7 +107,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       <CapabilityPanorama
         copy={copy.home.panorama}
         common={copy.common}
-        evidence={evidence}
+        inventory={evidence.inventory}
         locale={locale}
         docsOrigin={docsOrigin}
         index={index("system")}

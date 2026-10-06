@@ -9,13 +9,13 @@ import { Section, SectionHeading } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
 import { NumberTicker } from "@web/components/ui/number-ticker"
 import type { CommonCopy, PanoramaCopy } from "@web/content/types"
-import { INVENTORY_KEYS, inventoryFigure, type Evidence } from "@web/lib/evidence"
+import { INVENTORY_KEYS, inventoryFigure, type Inventory } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 
 interface CapabilityPanoramaProps {
   copy: PanoramaCopy
   common: CommonCopy
-  evidence: Evidence
+  inventory: Inventory
   locale: Locale
   docsOrigin: string
   index?: number
@@ -42,7 +42,7 @@ export const GLYPH_STEP_MS = 90
 export function CapabilityPanorama({
   copy,
   common,
-  evidence,
+  inventory,
   locale,
   docsOrigin,
   index,
@@ -74,7 +74,7 @@ export function CapabilityPanorama({
           className="mt-4 grid grid-cols-2 gap-px border-y border-hairline bg-hairline md:grid-cols-4 xl:grid-cols-7 [&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1"
         >
           {INVENTORY_KEYS.map((key) => {
-            const figure = inventoryFigure(evidence.inventory, key)
+            const figure = inventoryFigure(inventory, key)
             return (
               <div
                 key={key}

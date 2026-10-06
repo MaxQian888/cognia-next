@@ -1,15 +1,21 @@
 {
-  "readAt": "2026-09-30T04:35:57.121Z",
-  "lastGoodReadAt": "2026-09-30T04:35:57.121Z",
+  "readAt": "2026-10-06T15:32:16.796Z",
+  "lastGoodReadAt": "2026-10-06T15:32:16.796Z",
   "errors": [],
   "repo": {
-    "stars": 54,
+    "stars": 55,
     "license": "AGPL-3.0",
     "description": null
   },
   "contributors": 3,
   "releases": [],
   "changesets": [
+    {
+      "id": "a2a-task-cancel-keeps-context",
+      "bump": "patch",
+      "summary": "Stopping an A2A agent's task no longer drops its conversation: the next message continues in the same context instead of reconnecting, and pausing an A2A teammate reports it as paused.",
+      "date": "2026-10-06T11:30:23+08:00"
+    },
     {
       "id": "a2ui-app-editor-improvements",
       "bump": "minor",
@@ -47,10 +53,28 @@
       "date": "2026-07-20T18:09:24+08:00"
     },
     {
+      "id": "account-dialog-scrolls-per-column",
+      "bump": "patch",
+      "summary": "The account manager now scrolls its account list and the selected account's details separately, so the lower part of a long tab (such as Identity, with sync and account deletion) can be reached with the mouse wheel.",
+      "date": "2026-10-06T12:05:12+08:00"
+    },
+    {
       "id": "account-gate-settles-on-failure",
       "bump": "patch",
       "summary": "A local account registry that fails to load no longer leaves the app sitting on \"Loading accounts…\" forever. The boot read marked itself finished only when it succeeded, and the gate shows its loading shell until that flag flips — so any failure reading the account registry presented as an indefinite hang, with the actual reason reaching only a console warning. The gate's own error message sat behind that same check and could never be reached.\n\nThe load now settles whether it succeeds or fails, so you see what went wrong instead of a spinner, and a failed read can still be retried rather than being stuck for the rest of the session.",
       "date": "2026-07-29T11:19:44+08:00"
+    },
+    {
+      "id": "account-sync-data-preview",
+      "bump": "minor",
+      "summary": "Account sync preview, phase 3a: chats, messages, characters, skills, memories and shared settings now sync between your enrolled devices, end-to-end encrypted. Changes arrive live, with a fallback when the live connection is blocked, and the same field edited on two devices resolves to the newer edit. When a device and your account both hold data, the account page asks whether to merge or use the account's data, and saves a backup first. Two switches choose what syncs. A Cognia server enrolls and syncs from its own terminal with `cognia-agent account-sync` after `cognia-agent logto login`. Still off unless the account sync build flag is on.",
+      "date": "2026-10-06T10:33:33+08:00"
+    },
+    {
+      "id": "account-sync-device-enrollment",
+      "bump": "minor",
+      "summary": "Account sync preview (staging builds): set up sync keys with a sync recovery key, approve a new device by comparing a six-digit code, add a device with the recovery key, and remove devices or rotate keys from Settings → Account. Nothing syncs yet; production builds show the feature as not in this build.",
+      "date": "2026-10-05T17:20:41+08:00"
     },
     {
       "id": "acp-extension-notifications-debug",
@@ -63,6 +87,12 @@
       "bump": "patch",
       "summary": "Stop rendering ACP state-mirror republishes as transcript rows: `available_commands_update`, `current_mode_update`, `config_option_update`, and `session_info_update` are full-state snapshots the agent re-sends at every prompt boundary, so identical republishes are now suppressed at the client instead of producing a \"commands changed: 150 commands available\" / \"External mode\" line on every turn (metadata still tracks the latest state). Harden `elicitation/create` handling for the Devin ACP path so the agent's ask tool no longer hard-fails: the request normalizer now accepts MCP-dialect payloads without a `mode` field, schemas with no `properties`, enum/oneOf properties missing an explicit `type`, dual-scope requests, and drops undeclared `required` names; integer/number answers are coerced to numbers; and a response that fails schema validation now settles the wire request with `cancel` instead of orphaning the agent's tool call until the 5-minute timeout while killing the turn.",
       "date": "2026-09-17T02:11:25+08:00"
+    },
+    {
+      "id": "acp-turn-cancel-keeps-session",
+      "bump": "patch",
+      "summary": "Stopping an ACP agent's turn (Claude Code, Codex, Gemini, Goose, Kimi, Devin and other ACP agents) no longer discards its session: the next message continues in the same session instead of reconnecting, and pausing an ACP teammate reports it as paused.",
+      "date": "2026-10-06T12:01:29+08:00"
     },
     {
       "id": "acp-usage-token-accounting",
@@ -111,6 +141,12 @@
       "bump": "minor",
       "summary": "Server deployments accept an optional fourth release image, the agent bundle that project runtime environments inject into their images (ADR-0183). The deployment wizard and the upgrade dialog take it as an optional digest, and production certification requires it to be digest-pinned when set. The Ops Controller remembers the bundles each server has run and ships the two most recent earlier bundles with every release, so projects pinned to an older agent bundle keep working through an upgrade. Servers without a bundle deploy exactly as before.",
       "date": "2026-09-16T01:47:59+08:00"
+    },
+    {
+      "id": "agent-cancel-retired-session",
+      "bump": "patch",
+      "summary": "Stopping a DeepSeek Harness turn no longer leaves the closed session in place, so the next message opens a fresh session instead of failing.",
+      "date": "2026-10-05T18:35:05+08:00"
     },
     {
       "id": "agent-capability-grants",
@@ -243,6 +279,12 @@
       "bump": "minor",
       "summary": "Upgrade to Vercel AI SDK 7 (`ai` 7.0.48 and the matching `@ai-sdk/*` majors) across the app, the sidecar, the plugin SDK and the plugin scaffold template.\n\nToken accounting changes: multi-step turns are now billed as the sum of every step rather than the final step alone, so reported usage for agentic sessions goes up — the previous figure under-reported real consumption. Cached and reasoning token counts now come from the canonical `inputTokenDetails` / `outputTokenDetails` objects, which v7 makes the only source.\n\nAlso in this release: MCP servers reached over HTTP/SSE no longer follow redirects (an SSRF guard that is now on by default) and report an actionable error instead; OpenTelemetry span collection moved to `@ai-sdk/otel` with the sidecar's no-endpoint-means-silent behaviour and its never-record-prompt-content policy both preserved; images sent to and returned from models use AI SDK 7's single canonical file part; and files a model references inside its reasoning trace arrive as a distinct part type that is deliberately dropped rather than rendered or persisted, matching the existing raw chain-of-thought policy.",
       "date": "2026-08-03T22:46:25+08:00"
+    },
+    {
+      "id": "aider-turn-cancel-keeps-session",
+      "bump": "patch",
+      "summary": "Stopping an Aider turn now keeps the session: the next message continues the same Aider history instead of reconnecting, and pausing an Aider teammate in an Agent Team reports it as paused rather than asking for input.",
+      "date": "2026-10-06T10:19:48+08:00"
     },
     {
       "id": "ambient-cost-visibility",
@@ -659,6 +701,12 @@
       "date": "2026-08-28T01:43:46+08:00"
     },
     {
+      "id": "browser-commands-calling-webview",
+      "bump": "patch",
+      "summary": "The lightweight preview responds again once a page is open in it: element selection, navigation, zoom and the other preview controls (and the downloads, extensions, password and cookie-import controls next to it) no longer fail with \"current webview is not a WebviewWindow\".",
+      "date": "2026-10-04T16:42:03+08:00"
+    },
+    {
       "id": "browser-companion-and-sandbox-pin-fixes",
       "bump": "patch",
       "summary": "Fix the Browser Companion's template, replay and stop paths, and make the sandbox tier un-pin stick\n\n- A template delivery target could never be submitted: the side panel sent an empty `instruction`, which the RPC request schema (`required`, `minLength: 1`) refused before the Host ever saw it.\n- Replaying an already-accepted submission no longer re-resolves its delivery target, so the ordinary lost-response retry is answered with the original receipt instead of `unknown_target` — and no longer re-records a template use.\n- Stopping a task now reports the Host's actual refusal. Every non-applied outcome used to be reported as \"another device is driving this task\", sending people to a machine that was not driving anything.\n- The append-to-conversation dropdown counts targets offered rather than rows scanned, so filing a few pages as issues no longer empties it.\n- Issue boards in `backlog` — the state every newly created board starts in — are offered as file-here targets.\n- \"Follow the default again\" on the composer's sandbox shield now holds; the next message used to re-pin the tier it had just released.\n- Codex managed/enterprise limits are read before the first request can outrun them, the refusal is classified as `managed_policy_refused` with localized recovery advice, and the status card distinguishes \"not read yet\" from \"declares no limits\" and names an allowlist that permits nothing.\n- A truncated task answer is cut on a codepoint boundary, so an emoji at the ceiling no longer becomes a replacement character.\n- The capability digest that rides on every list poll is cached for a beat instead of rebuilding the whole delivery-target catalogue and palette every three seconds, and reading a task's answer scans the tail of the transcript instead of loading all of it.",
@@ -783,6 +831,12 @@
       "bump": "minor",
       "summary": "Add compact, standard, detailed, and forensic browser annotation output levels.",
       "date": "2026-07-16T11:54:16+08:00"
+    },
+    {
+      "id": "browser-pane-lease-race",
+      "bump": "patch",
+      "summary": "The lightweight preview no longer gets stuck loading, with its toolbar disabled, when a page tab opens in it: a pane that went away while its page was still being created no longer leaves a stray preview behind.",
+      "date": "2026-10-04T16:10:51+08:00"
     },
     {
       "id": "browser-pane-narrow-rail-toolbar",
@@ -939,6 +993,12 @@
       "bump": "minor",
       "summary": "Closing a Canvas tab no longer deletes the document. The tab strip now tracks which documents are open, so the X takes a document out of the strip and leaves it in the workspace. Deleting is a separate, confirmed action that says what goes with the document (its comments, and how many saved versions), and it now also releases the pin, the tab and the in-memory comment threads that used to outlive it.",
       "date": "2026-09-05T08:04:24+08:00"
+    },
+    {
+      "id": "canvas-collab-shared-baseline",
+      "bump": "patch",
+      "summary": "Canvas collaboration: peers now see each other's cursors, devices joining a document share one baseline instead of duplicating its text, and reconnects catch up on the full history",
+      "date": "2026-10-01T14:36:43+08:00"
     },
     {
       "id": "canvas-collaboration-core",
@@ -1193,6 +1253,18 @@
       "date": "2026-07-20T22:20:09+08:00"
     },
     {
+      "id": "chat-row-width-budget",
+      "bump": "minor",
+      "summary": "On narrow desktop windows the right panel now keeps the conversation readable: it shrinks first, then folds the conversation list to its icon rail (temporarily, without changing your setting), and finally floats over the chat with a backdrop you can dismiss with Escape. A panel the window narrowed grows back when the window widens.",
+      "date": "2026-10-04T02:58:33+08:00"
+    },
+    {
+      "id": "chat-run-controls-and-approvals",
+      "bump": "minor",
+      "summary": "Chat run controls and approvals: while a turn runs the composer's send button becomes Stop (mobile and desktop) — the run strip no longer interrupts on tap and is now a compact tab docked on the input showing state, elapsed time, tool count and the newest tool, and a follow-up typed mid-run gets its own quiet send button. The message list snaps to the bottom when you send and keeps following the reply until you scroll up; \"Back to latest\" only appears when you have scrolled away and no longer overlaps the newest message; the gap above the input is tighter; reasoning rows drop the duplicated \"Thinking\" label. Tool approvals show one consistent action group (full-width \"Allow once\" on phones) and display the actual command for agents such as Kimi Code that stream their arguments instead of sending them with the request, never a bare `{}`. An external agent's turn no longer times out while it is working or while you are deciding on an approval — the deadline now measures inactivity. Tapping a file from a tool row opens it in a read-only preview read from the Host (also on phones), with the workbench sheet opening at full height and a phone-friendly task toolbar. On phones the composer, toolbar included, now rides directly above the keyboard with a smooth transition, and the slash/@ popovers stay below the header and scroll instead of running off-screen. The \"+\" sheet opens skills, web search and room members in place with a back button instead of a separate popover, without popping the keyboard. With an external agent selected, the model picker lists only that agent's own models (reported by the Host after each turn) and the chip shows the agent's model instead of a Cognia one. Error cards are compact and no longer repeat themselves; long tool-row paths scroll inside the row; Read results no longer show every line number twice; the fullscreen code viewer has a single tidy header, theme-consistent backgrounds and no oversized footer. Global search on phones moves its help into the search row and no longer highlights rows while you scroll.",
+      "date": "2026-10-04T17:00:43+08:00"
+    },
+    {
       "id": "chat-selection-ui-fixes",
       "bump": "patch",
       "summary": "Fix message multi-select UX and the hover action bar vanishing under its own overflow menu. The row checkbox no longer appears on hover — selection mode is entered deliberately via the message's \"More\" menu (\"Select messages\") or the long-press sheet on touch, removing accidental activations and hover noise; ticks still render on every selectable row once the mode is on. The message action bar now also stays visible for the whole lifetime of an open Radix popup inside it (the \"⋯\" menu and plugin menus portaled out, where neither hover nor focus-within held).",
@@ -1301,6 +1373,12 @@
       "date": "2026-07-16T16:57:49+08:00"
     },
     {
+      "id": "chromium-element-pick",
+      "bump": "minor",
+      "summary": "Pick elements, queue annotations and try Browser Adjust on pages open in Chromium (Cognia's own and your Chrome), and let the agent's `browser_annotate` work there without switching to the lightweight preview. Pages in Chromium also no longer jump to an error page right after they load, log to the console or change their address.",
+      "date": "2026-10-04T15:18:53+08:00"
+    },
+    {
       "id": "clamp-large-file-tool-previews",
       "bump": "minor",
       "summary": "Bound large file-tool payloads in the message stream: Read/Write/NotebookEdit code bodies and diffs now preview the first ~120 lines (Write also keeps a 4,000-char guard; diffs clamp each side before intraline highlighting), MultiEdit caps at 20 rendered edits, and Grep/Glob/LS lists cap at 200 rows — each with a \"Show all\" reveal. Prevents giant tool outputs from flooding the chat DOM and stalling highlighting/diff work.",
@@ -1325,6 +1403,12 @@
       "date": "2026-09-09T21:11:19+08:00"
     },
     {
+      "id": "cli-ai-sdk-multi-turn-history",
+      "bump": "patch",
+      "summary": "CLI: chats with OpenAI-compatible and other non-Anthropic providers keep their conversation across turns again, including after `cognia chat --continue`; each turn no longer starts the model from an empty or stale history.",
+      "date": "2026-10-06T16:24:57+08:00"
+    },
+    {
       "id": "cli-approval-barrier-and-shell-rules",
       "bump": "patch",
       "summary": "Stop the CLI running tools while an approval is still on screen, and tell the model what shell it is actually in. A call the policy allowed outright was authorized the moment it was asked for, so a turn with several tool calls kept working behind the approval dialog: the user was being asked whether to allow one command while the work they might be about to stop was already happening. Nothing is authorized now until every open question has been answered, on both the projected-tool path and Pi's native one, and a pre-approved tool takes its place in the queue instead of jumping it. The system prompt also carries the host's shell facts: which interpreter, which platform, whose sandbox is in force when an external backend owns the shell, and the rules that hold everywhere. One command per call rather than a chain whose exit status comes from the wrong half, no redirecting to `/dev/null` or any other device a sandbox may refuse, and BSD rather than GNU utilities on macOS. The agent had been rediscovering each of these by failing, and retrying the same construct because nothing had told it the construct was the problem.",
@@ -1335,6 +1419,12 @@
       "bump": "minor",
       "summary": "CLI: when a background sub-agent finishes, its result is pushed into the parent chat as a framed turn while the session is idle (or queued behind the running turn, shown as a `↩ N bg result queued` footer chip), so the model reacts without polling `collect`. Results left undelivered by an earlier process are picked up on resume, and the footer's background counters refresh the moment a run settles.",
       "date": "2026-09-09T21:27:01+08:00"
+    },
+    {
+      "id": "cli-background-stale-runs",
+      "bump": "patch",
+      "summary": "CLI: background sub-agent runs left `running` by a previous CLI process are marked interrupted again instead of breaking the journal, so collecting a finished run a second time returns its result.",
+      "date": "2026-10-06T15:58:25+08:00"
     },
     {
       "id": "cli-bundles-mcp-oauth-helper",
@@ -1511,6 +1601,12 @@
       "date": "2026-07-29T15:23:10+08:00"
     },
     {
+      "id": "cloud-session-single-refresh",
+      "bump": "patch",
+      "summary": "Staying signed in to the Cognia account no longer fails when several parts of the app (or several windows) renew the sign-in at the same moment: renewals now happen one at a time, and a renewal that lost the race uses the winner's session instead of asking you to sign in again.",
+      "date": "2026-10-06T12:10:29+08:00"
+    },
+    {
       "id": "cloud-sign-in-capacitor",
       "bump": "patch",
       "summary": "Cloud sign-in works on the phone. The Capacitor shell now signs in through the system in-app browser and the `cognia://logto/callback` deep link registered on the native Logto application instead of a popup the WebView cannot open. The pairing page asks for the organizations scope, so the session it leaves behind can adopt an organization afterwards.",
@@ -1637,10 +1733,22 @@
       "date": "2026-09-06T03:14:52+08:00"
     },
     {
+      "id": "collab-feishu-union-from-logto-raw-data",
+      "bump": "patch",
+      "summary": "Collaboration server reads the Feishu union id and tenant key from Logto's connector data, so a Feishu sign-in links to the same person's bot identities instead of a per-app open id.",
+      "date": "2026-10-04T21:39:39+08:00"
+    },
+    {
       "id": "collaboration-plane-is-reachable",
       "bump": "minor",
       "summary": "The collaboration plane can now be pointed at a server. A new Collaboration server card takes its address, and from there the shared issue board fills, and membership arrives from the server instead of being guessed from a login token — including workspace guests, who hold access to a workspace without belonging to the organisation.",
       "date": "2026-08-26T12:00:10+08:00"
+    },
+    {
+      "id": "collaboration-realtime-and-notifications",
+      "bump": "minor",
+      "summary": "Collaboration and multi-device hardening (ADR-0206/0207/0208):\n\n- **Live feed:** shared issues, plans, runs and memberships now arrive over a per-organisation change feed instead of a 60-second poll. Polling remains as the fallback.\n- **Field-level merges:** edits to different fields of the same shared issue or plan merge. Only an edit to the same field conflicts, and the conflicts panel names that field, both values and who changed it.\n- **Collaboration notifications:** being assigned, mentioned in an issue comment (new teammate picker), asked to approve a high-risk shared run, or invited to a shared conversation now notifies you through the \"Collaboration\" notification source. That reaches the center, OS, phone and IM according to your existing preferences. Reading one on any device clears it everywhere, and a named invite can be accepted straight from its notification.\n- **Device pairing alert:** existing devices are alerted when a new device pairs.\n- **Paired-phone deletes:** deletions now propagate to paired phones for every synced table, so deleted skills, plugins, runs and others no longer linger there.\n- **Conversation links:** \"open this conversation\" links, used by plan notifications, a memory's source and issue runs, now actually open the conversation.\n- **Relay data-lane quota:** the relay data lane enforces a per-room byte quota, and clients pause relayed data until the window resets.",
+      "date": "2026-10-01T16:21:26+08:00"
     },
     {
       "id": "collapsed-dexie-schema",
@@ -2225,6 +2333,12 @@
       "date": "2026-08-21T14:24:18+08:00"
     },
     {
+      "id": "conversation-manager-and-archive",
+      "bump": "minor",
+      "summary": "Add a Conversations page (`/conversations`) with Active and Archived tabs to sort, filter, search, rename, file, archive, restore and delete conversations across every workspace in bulk.\n\nThe archive also gets several fixes and additions:\n\n- It shows its count.\n- An archived conversation shows a banner, and sending a message to it restores it, with Undo.\n- Pins and folders survive archiving.\n- \"Search everywhere\" stays in the archive.\n- New: Empty archive, auto-archive after a chosen number of inactive days, multi-select on the phone, and a rebindable archive shortcut (Ctrl+Shift+Backspace).",
+      "date": "2026-10-04T17:01:14+08:00"
+    },
+    {
       "id": "conversation-model-override-select",
       "bump": "patch",
       "summary": "Settings → Conversation (and the desktop pet's LLM-speak) now pick the background utility model from a dropdown of the selected provider's models instead of a free-text field. The provider and model selects stay in sync: switching provider drops a model the new provider can't serve, and the model list follows the effective provider (override → app default).",
@@ -2241,6 +2355,12 @@
       "bump": "patch",
       "summary": "Sidebar fixes: reordering pinned nav items no longer drops pins that belong to another platform, and legacy nav ids are migrated before a layout change. \"Mark all read\" on a workspace or team clears only the conversations the list is showing. On mobile, Canvas opens in the main area and plugin view containers open in the drawer instead of showing nothing. The mobile \"search message content\" switch saves correctly. New conversations show \"New chat\" in your language. Dragging the sidebar edge no longer saves the width on every frame. A failed message-content search now says so, instead of asking you to refine the query. Agent branch checkout and delete, knowledge re-indexing, and workspace trust changes now report failures instead of failing silently.",
       "date": "2026-09-26T23:09:22+08:00"
+    },
+    {
+      "id": "conversation-sidebar-management-flow",
+      "bump": "minor",
+      "summary": "Conversation sidebar management: the open conversation now always keeps a row in its scope-tree group instead of disappearing behind \"Show more\"; \"Select conversations\" (⋯ menu, a row's Select, or Space) enters a selection mode with checkboxes where a click selects instead of opening, and \"Select conversations here\" on a folder, Chats or squad header selects that whole section (unfolding it and lifting its Show-more cut); the bulk bar is now two rows — count with Select all / Deselect all / Done, then the actions — its pin and read switches show the one direction that applies to the selection (adding bulk \"Mark as unread\"), and its delete confirm names the conversations it will remove; \"Move to folder → New folder…\" (row menu and bulk bar) creates a folder, files the conversations into it and opens its name; folder headers answer a right-click with the same menu as their ⋯ button; the no-results state offers Clear search, Search everywhere and one-click widening to message content, archived conversations or all workspaces; the empty archive offers a way back; rows in the Pinned section no longer repeat the pin glyph; pressing Escape to close a menu or dialog no longer drops the selection; and on the bar-less web shell the sidebar's collapse button moves to the sidebar footer (the chat header keeps only the expand button for a collapsed sidebar). Phone app bar: the missing-API-key warning is a tonal chip / red icon in the action cluster instead of a solid red pill beside the title, and a private conversation no longer spends a whole row on a lone lock button — \"Share conversation…\" lives in the ⋮ menu, and the sharing strip appears only for a shared conversation.",
+      "date": "2026-10-04T17:01:14+08:00"
     },
     {
       "id": "conversation-sidebar-row-actions",
@@ -2387,10 +2507,22 @@
       "date": "2026-09-25T12:53:52+08:00"
     },
     {
+      "id": "desktop-pet-window-and-plugin-api",
+      "bump": "minor",
+      "summary": "Desktop pet fixes and a complete plugin API. The pet now drags, throws and stays where you drop it on high-DPI and multi-monitor setups. The right-click popup opens next to the pet and stays there as it resizes. The size slider applies live. The pet no longer steals focus or shows in Alt-Tab on Windows, and only one pet is on screen at a time. Settings changed in one pet window no longer overwrite another window's changes. Closing a pet window with the OS shortcut, quitting, or switching the pet off cleans up its windows. The popup groups its window actions and the `/pet` console gains a desktop toggle. Plugins get `ctx.pet.getAvailability()`, a neutral `pluginReward` kind, per-call reward caps, typed cooldown and item errors, permission-gated `onPet*` hooks, validated `petItems`/`petAchievements`, and an `@cognia/plugin-sdk/api/pet` subpath. `ctx.pet.emitEvent` and `interact` now require `pet:interact`.",
+      "date": "2026-10-04T17:02:09+08:00"
+    },
+    {
       "id": "desktop-proxy-full-coverage",
       "bump": "minor",
       "summary": "The desktop proxy setting now actually covers the desktop. Web search, RAG reranking, cloud OCR, remote-agent transports (ACP over WebSocket and SSE, A2A, OpenCode), share links, the MCP registry, outbound webhooks, integration actions, workflow HTTP/OCR/ingest nodes, GitHub plugin previews, the paste-a-URL plugin installer, WeCom media, the Site preview probe and the IP lookup all route through it — each was previously a bare renderer `fetch` that the packaged shell's CSP blocked outright and that ignored the proxy, its bypass list and its keyring credentials even when it did get out. Adds a native streaming bridge so SSE and large downloads work through the proxy at all, a proxy-aware WebSocket for callers outside the connector subsystem, and proxy routing for the sandbox's filtering forwarder, the Companion OIDC/JWKS client, the workspace runtime, and network-capable child processes. Proxy hosts are now validated with a specific message per mistake instead of failing later as an opaque connection error, and IPv6 proxies and bypass entries work: `::1` in the default bypass list had never matched a `[::1]` target, so loopback IPv6 was silently proxied.",
       "date": "2026-08-23T14:12:23+08:00"
+    },
+    {
+      "id": "desktop-safe-mode-stale-plugin-rows",
+      "bump": "patch",
+      "summary": "Desktop no longer gets stuck in diagnostics safe mode after an update: built-in plugins are checked against the manifest the build ships instead of a stale stored copy, and a restart re-runs read-only checks that failed in an earlier session.",
+      "date": "2026-10-01T16:19:37+08:00"
     },
     {
       "id": "desktop-shell-audit-followups",
@@ -2409,6 +2541,12 @@
       "bump": "patch",
       "summary": "Fix five companion capabilities that no device could ever hold. `client.read`, `client.write`, `performance.observe`, `performance.traces` and `performance.capture` were required by 33 commands in the command manifest but were granted by no role and rejected by the grant API, so every paired device — owner included — was refused by its own capability gate. The whole remote performance dashboard answered 403. Owner devices now receive all five by default, member devices receive `client.read`, and all five are assignable so a grant can be adjusted or revoked. Two new tests pin the invariant: every device capability the manifest can demand must be grantable, and an owner's default grants must cover every command the manifest exposes to device transports.",
       "date": "2026-08-29T17:58:18+08:00"
+    },
+    {
+      "id": "device-console-layout-and-flow",
+      "bump": "minor",
+      "summary": "Device console (`/devices`) layout and interaction pass. Each device's dashboard is now ordered task-first per kind (a phone leads with its grants, this machine with routing and runtimes, a host with its workspaces), half-width cards are kept in pairs, and every \"not available here\" card is folded into one record at the end. A sticky jump strip under the device header lists the cards and tracks the one in view. Connect/disconnect/re-pair, inline rename and remove for hosts, and pause/resume/revoke for paired devices now sit beside the device's name; revoking asks for confirmation, and disabled lifecycle buttons say why. The list gains kind chips with counts, a \"needs attention\" filter (also reachable from the header badge), arrow-key navigation and a clear-filters action. Fixes a `?device=` link snapping the selection back after clicking another device, mirrors the selection into the URL, and reports links to devices that are no longer in the fleet. On phones the console now honours `?device=` links, shows the standalone and local-record notices and the attention count, and keeps \"Pair a device\" reachable at any fleet size.",
+      "date": "2026-10-04T17:01:51+08:00"
     },
     {
       "id": "device-console",
@@ -2519,6 +2657,12 @@
       "date": "2026-08-01T21:37:40+08:00"
     },
     {
+      "id": "dock-page-tabs-chromium",
+      "bump": "minor",
+      "summary": "Web pages open as tabs in the chat's right panel, in Cognia's own Chromium (local dev servers included) once it is installed, and each tab can switch to the lightweight preview. A task's pages close when you leave it and reopen when you come back, unless the task is still running, and an agent in a background task works on its own pages without changing the one you are looking at.",
+      "date": "2026-10-04T13:11:37+08:00"
+    },
+    {
       "id": "dock-panel-switch-no-reflow-flash",
       "bump": "patch",
       "summary": "Right-side dock: stop layout shake and scrollbar flashes when switching widths or opening Workspace and Prompt Templates. Programmatic resizes now commit one final layout and animate stable panel snapshots instead of reflowing the live conversation on every frame; unsupported engines resize immediately, and the embedded Pro IDE remains on its no-animation path.",
@@ -2529,6 +2673,12 @@
       "bump": "patch",
       "summary": "More dock kernel groundwork: saved layout presets you can name, set as a default, export to a file and import back; a projection that folds a desktop arrangement onto a tablet or phone without losing a panel; and the dock's command surface, with layout undo/redo bound to Ctrl/Cmd+Alt+Z and Ctrl/Cmd+Alt+Shift+Z and the split, float, pop-out and reset actions listed in shortcut settings ready to bind. Still not wired into a visible surface — the chat dock adopts it next.",
       "date": "2026-08-01T21:37:40+08:00"
+    },
+    {
+      "id": "dock-tab-strip-new-tab",
+      "bump": "minor",
+      "summary": "The chat's right panel now has one tab strip for everything open in a task — tools like the side chat, workspace and browser alongside open artifacts — with drag reordering and a browser-style New Tab page (search box, this task's tools and artifacts, dev servers, links and recent pages; Ctrl+T in the desktop app). Each conversation remembers its tabs and whether the panel was open.",
+      "date": "2026-10-04T11:08:08+08:00"
     },
     {
       "id": "dock-workspace-first-class-and-mobile",
@@ -2723,6 +2873,12 @@
       "date": "2026-07-24T00:36:08+08:00"
     },
     {
+      "id": "event-stream-host-restart",
+      "bump": "patch",
+      "summary": "Phones and browsers keep receiving live updates after their Host restarts: a resume cursor left over from the Host's previous run now triggers a resync instead of silently discarding every new event, which had left Host-run agent replies unrendered and a stopped turn stuck on \"sending\".",
+      "date": "2026-10-04T16:58:22+08:00"
+    },
+    {
       "id": "exact-action-approvals-and-remembered-denials",
       "bump": "patch",
       "summary": "\"Allow always\" now grants the command you approved, not its whole family, and \"Deny\" is remembered. Approving `git status` used to write a permanent `Bash(git *)` rule, so one click on a read-only command also, and forever, approved `git push --force`, `git reset --hard` and `git clean -fdx`. The derived rule is now the approved command itself; a family grant is still available, but only if you author it deliberately in Settings → Agent → Permissions. In the other direction, a refusal used to buy nothing — the same call asked again next turn, and any widening in between started auto-approving the very thing you had just turned down. A refusal is now remembered for the conversation and sent as an explicit deny, which the tool gate honours ahead of any always-allow grant. If a session refuses more calls than the memory can hold it fails closed: every auto-approval is dropped for that session and it asks about everything, rather than silently forgetting a refusal.",
@@ -2753,6 +2909,12 @@
       "date": "2026-08-22T22:46:30+08:00"
     },
     {
+      "id": "external-agent-cognia-models",
+      "bump": "minor",
+      "summary": "External agents can switch between their own models and Cognia models inside a conversation: the model picker shows the agent's native models and a \"Cognia models\" section (or why it is unavailable for that agent), and the choice is stored per conversation and per agent — a built-in model pick is no longer read as a Cognia binding nor overwritten by an agent pick, so switching back to the Cognia agent restores it. Before an agent has listed its own models, the picker offers its default model, so a conversation that began on a Cognia model can always switch back; replies are labelled with the agent that answered instead of the conversation's agent mode. Switching between Cognia models keeps the agent's own history (in-task rebind); switching between native and Cognia hands over the turns the other side has not seen. Kimi Code, Goose, GitHub Copilot CLI, Aider and the OpenCode server join the agents that can run on Cognia models; Cline, Gemini CLI, Cursor, Kiro, Devin, Qoder and Droid are shown as unsupported with the reason. Phones and browsers paired to a Host can run Host-owned agents on the Host's Cognia models, with an \"update the Host\" message for older Hosts; a headless Host serves the providers in its provider profiles, and `cognia-server profiles credential-set` stores a provider key for them. A new chat without a project can send its first turn to a Host-owned agent from a phone instead of failing with \"workspace unavailable\". Sandboxed Cognia-model tasks no longer time out at session start because the agent could not resolve its own task home. Also fixes turns that stayed \"running\" after a failure or restart (open tool calls are closed and orphaned running states settle), the workbench sheet reopening on every launch on phones, desktop shortcut hints in the phone editor's empty state, a \"0s\" previous-turn duration, and run records saving a wrong start time.",
+      "date": "2026-10-04T17:00:25+08:00"
+    },
+    {
       "id": "external-agent-config-pin",
       "bump": "minor",
       "summary": "Squad teammates and subagent templates can now be pinned to one exact saved external-agent config (e.g. \"Codex strict\" instead of any Codex). A pinned config that is missing, disabled, or no longer of the chosen preset fails the run with a clear error instead of quietly using another config, and preset-only bindings now pick a config deterministically (enabled, connected, oldest, then id).",
@@ -2781,6 +2943,12 @@
       "bump": "patch",
       "summary": "Say which external agent failed, where you pressed the button, and what the failure was wrapping. A connect failure used to be one string for the whole panel, drawn as a red banner above the list of agents and repeated as a toast, so with more than one agent configured it could not name the one that failed, and Dismiss was the only state it had: the single record of a failed connection was gone after one click, and a retry that failed the same way looked like it had done nothing. The report is now recorded against the agent, drawn in that agent's row with a retry, cleared when a new attempt starts, and it carries the cause chain, which is the difference between \"could not connect\" and the sentence that names the actual obstacle. The connection pills lost their solid fills, since an error beside an agent name is one field of that agent's state rather than an alert about the panel. Choosing an agent that lists no models of its own now says why: not connected, connected with nothing open, or asked and unable to answer, three situations that previously all rendered as an unchanged model list. Connection state also stopped having two answers: the panel rendered a copy of the agent list rebuilt inside its own hook, while every other surface read the shared map, so the two disagreed for as long as the rebuild took and an agent could read connected in the composer and disconnected in the manager. Both now read the map, which the runtime projects into, and the projection listener moved to app startup: it used to live inside a hook that only three panels mount, so an agent that changed state with all of them closed changed nothing anywhere. Picking a runtime in a conversation works again: the chip wrote the conversation's lane but read its current selection back from the app default, so the radio group answered with the row the user had just left and choosing an external agent looked like it did nothing. The catalog now resolves against the same lane the chip writes. The chip also stops hiding its own name on a wide composer, where it had been reduced to a bare icon beside empty toolbar: the built-in runtime collapses to a glyph on a genuinely narrow row, by the same measurement the rest of that row lays itself out by, and an external agent keeps its name at any width. Choosing an external agent now brings it up. A configured agent that had never been connected was selectable with nothing saying the lane could not dispatch, and the first send reached the manager's adapter map and came back `Agent not found: <id>`, a sentence about the manager's internals offered as the reason the agent would not run. Selection registers the agent and connects it, the connect button does the same rather than assuming startup already registered it, and a failure is recorded against the agent where the panel draws it. Subscribing to a host event channel also waits for the host to acknowledge it: the companion plane's subscribe is synchronous and its control frame is dropped while the socket is still opening, so a caller that subscribed and immediately started the work it wanted to watch raced its own subscription and read an empty stream, which is what made a healthy Pi report as an unsupported version on a paired browser.",
       "date": "2026-09-02T22:16:59+08:00"
+    },
+    {
+      "id": "external-agent-instances-isolation",
+      "bump": "minor",
+      "summary": "External agents: several configurations of one runtime are now truly separate. New and duplicated configurations get their own state folder (their own sign-in, settings and history; existing ones keep the shared state until switched), launch with their own saved credentials after a restart, can bind their own Codex subscription account, and honour their session limit and approval lists. Duplicating asks for a name, state and enablement first; settings group agents by runtime and show what sets each apart, with inline rename and a responsive list → detail layout; the phone gains a per-agent detail screen and Host-side duplicate. Plugins get `ctx.externalAgents` (read / manage permissions, change events), and `runExternalAgent` is clamped to the configuration's own permission mode.",
+      "date": "2026-10-05T17:28:29+08:00"
     },
     {
       "id": "external-agent-lifecycle-governance",
@@ -3041,6 +3209,12 @@
       "date": "2026-07-30T16:16:34+08:00"
     },
     {
+      "id": "gateway-settings-flow",
+      "bump": "minor",
+      "summary": "Gateway settings: guided first-run setup, config load/retry guard, one-click allowlist fixes, scopes at key creation, and cross-panel links from keys to their request log.",
+      "date": "2026-10-04T16:58:16+08:00"
+    },
+    {
       "id": "gateway-settings-panel-completion",
       "bump": "minor",
       "summary": "Gateway settings: restart state now comes from the gateway itself (a banner on every panel lists the saved-but-unapplied bind-time fields and restarts the listener), and the global rate limit and connect timeout are correctly marked as restart-only instead of \"applies immediately\". Status refreshes live while visible, and a running gateway can be stopped even after its last key is deleted. The request log shows each request's routing decision and full failover attempt chain, adapts its columns to narrow panes, pages, exports CSV/JSON, and asks before clearing. Keys show created date, recent usage, and a quota bar, with inline validation and honest copy feedback; allowlist, retry-status and field-strip entries are validated before they reach the gateway; parked upstream accounts can be restored per provider; route tickets expand into their operations, budget and candidates and ask before revoking.",
@@ -3105,6 +3279,12 @@
       "bump": "minor",
       "summary": "GitHub integration: every GitHub read (issue mirror and import sync, PR observation, stack publishing, project-thread PR watch, PR review) now uses the accounts connected in Settings → Connections before falling back to the `gh` CLI, and reads a GitHub Enterprise repository from its own server with that server's credential (the issue loop, bot publication and the Devin bot included). A GitHub webhook now refreshes the issue board within seconds instead of waiting for the 15-minute poll, and transferred or deleted issues leave the board. PR observation reads every page of reviews, review comments and check runs, so a long review no longer reports a stale \"changes requested\". Webhooks can be delivered through a public or tunnel URL; personal-access-token accounts get their repository webhook configured for them, and the loopback listener address is never written to GitHub. New webhook events (review comments, comment edits and deletions, assignment changes, milestones, transfers, commit statuses, branch and tag creation and deletion, release creation), with PR conversation comments joining the pull request's inbox thread. New `createIssue` action and read actions (`getIssue`, `getPullRequest`, `getCommitStatus`, `listIssueComments`, `searchIssues`) for workflows. Issues can be published to a bound GitHub repository or Lark tasklist/table from the detail panel, which also shows the GitHub conversation, and a changed assignee now syncs back to GitHub when it is a GitHub user.",
       "date": "2026-09-30T12:33:50+08:00"
+    },
+    {
+      "id": "github-runner-environments",
+      "bump": "minor",
+      "summary": "Add temporary GitHub Actions execution Hosts with digest-pinned environments,\nencrypted relay pairing, durable cancellation/recovery, and existing remote Agent\nand plugin-tool transport integration.\n\nSupport scoped private registry credentials, sandbox plugin-tool bridges,\nand task-scoped model delegation for Host-native and Docker sandbox Agents.\nPreserve Agent customization across editors, add operator-controlled custom\ncommand/environment permissions, and coordinate model/plugin startup and cleanup.\nAuthorize local Tauri sandbox model bridges with native task tickets, preserve\nreviewed environment settings through launch filters, and retain version-correct\nOpenCode Agent customization without losing the selected model route.\nAdd independent runner\nrecovery and saved public configuration, with English and Simplified Chinese\ndeployment guides.",
+      "date": "2026-10-01T16:22:40+08:00"
     },
     {
       "id": "global-search-and-history-import",
@@ -3315,6 +3495,12 @@
       "bump": "patch",
       "summary": "Computer Use on a phone: \"No host to watch\" now offers Refresh and \"Pair a desktop\" instead of naming the fix with no way to reach it.",
       "date": "2026-09-26T20:41:42+08:00"
+    },
+    {
+      "id": "host-boundaries-and-trusted-ssh-keys",
+      "bump": "minor",
+      "summary": "Show terminal host attribution and trusted SSH keys, require approval for paired-device SFTP file creation, and honor teammate host bindings and DSH runtime sandbox placement.",
+      "date": "2026-10-04T17:00:15+08:00"
     },
     {
       "id": "host-declares-its-own-state-scope",
@@ -3863,6 +4049,12 @@
       "date": "2026-07-14T02:17:35+08:00"
     },
     {
+      "id": "lark-signed-in-owner-and-union-id",
+      "bump": "patch",
+      "summary": "Feishu bots now recognize you once you confirm yourself: the connector records each sender's `union_id`, a bind request from the Feishu account you signed in with is labeled \"matches your sign-in\" with a \"This is me\" approval, and after that one confirmation the same account reaches your other bots in the tenant without a new bind code (only over the long connection or a signed webhook, and only while you stay signed in). Bind approvals and sign-ins also fill in the person's login subject, and the lark-cli skill reads the app ID from the keyring where the settings form stores it instead of always failing with \"no appId\".",
+      "date": "2026-10-04T20:46:36+08:00"
+    },
+    {
       "id": "lark-user-token-cache-eviction",
       "bump": "patch",
       "summary": "Lark send-as-user: re-authorizing now takes effect immediately. The in-process user-token cache holds a keyring read with no known expiry and was never evicted when a new token was stored, so re-authorizing (to add a scope, or to connect as a different user) kept sending with the previous token until the app was restarted.",
@@ -4001,6 +4193,12 @@
       "date": "2026-07-14T21:36:15+08:00"
     },
     {
+      "id": "localize-cli-tools-and-lint-nested-paths",
+      "bump": "patch",
+      "summary": "Localize plugin CLI tool descriptions and lint paths inside nested manifest arrays.",
+      "date": "2026-10-04T17:02:41+08:00"
+    },
+    {
       "id": "localize-external-agent-recommended-actions",
       "bump": "patch",
       "summary": "An external agent's \"recommended actions\" now appear in your language. The readiness panel told you what to do about a missing CLI — install this, set an absolute path, prefer WSL2 on Windows — and said it in English regardless of the language the rest of the panel was in, because those sentences were assembled in code rather than looked up in the message catalogue.\n\nThe advice this app generates is now a message reference, resolved at render time like the recovery hints beside it. Advice that arrives some other way is left alone: a line saved by an older build, or supplied by a third-party agent preset, is shown exactly as it was written, because there is no translation to look it up by and dropping it would throw away the only guidance such a preset offers.\n\nNothing needs migrating and no configuration changes. Existing saved agents keep whatever they had; new advice generated from this release forward is translated.",
@@ -4043,6 +4241,12 @@
       "date": "2026-09-26T01:19:13+08:00"
     },
     {
+      "id": "logs-page-flow",
+      "bump": "minor",
+      "summary": "Logs page: clicking an entry now opens its details (the chevron still expands in place), and j/k move a visible cursor that the detail pane follows. Level tabs filter by exact level with counts that stay put, and the dashboard, trace view and detail pane pivot straight back into a filtered list or the Traces channel. Live follow is its own button and now follows the newest entries. Transport health collapses to one chip that surfaces the failing ones. Also: named presets, whole-day calendar ranges, a volume histogram timeline, a right-side detail drawer below xl, a de-duplicated Diagnostics detail, a note when the newest-1,000 window is full, and translated labels throughout.",
+      "date": "2026-10-04T17:01:22+08:00"
+    },
+    {
       "id": "logs-page-log-first-and-agent-traces",
       "bump": "minor",
       "summary": "Rebuild the /logs page around logs and add a full agent-trace surface. The page opened on a \"Health\" view built from four hard-coded status cards, with the log viewer demoted to the second of six rail items and its agent-trace support switched off; \"Recovery\" and \"Advanced\" were likewise static copy with no data behind them. It is now three channels — Logs / Traces / Incidents — opening on Logs, with the three static views removed and their real status (transport health, native-log readiness, retained incidents) shown live in the header. The new Traces channel is a trace list, a span waterfall, and a full span detail pane (timing, model, tokens, cache split, cost, finish reasons, hand-off, events, errors, content previews, ids), sharing one time window with the cost/token stats bar and linking both ways with the observability dashboard. The Logs channel now merges agent-trace spans into the stream again, restoring the trace view and stats bar; \"Receipts\" became a filter on Incidents; and channel plus selected trace are deep-linkable.",
@@ -4053,6 +4257,12 @@
       "bump": "minor",
       "summary": "Rebuild the Logs settings page as a master/detail pane, and stop it from showing settings that were not in effect.\n\nSettings → Observability → Logs was two link cards stacked above a 2 300-line component whose five tabs (`Levels / Transports / PostHog / Advanced / Retention`) appeared with no visual relationship to anything around them — a tab strip floating inside a page that already had a sidebar, with `Advanced` acting as the drawer for everything the other four had no home for. It is now the same shell the Gateway, External Bridge and Memory sections use: a grouped nav rail beside one panel, deep-linkable via `?logsPanel=`, with the rail moving into a sheet on narrow screens.\n\nThe six panels are grouped by what a setting does to a log line — where it is captured, what survives the filters, and where it ends up:\n\n- **Overview** — native (Rust) bridge readiness and a live per-transport health list, plus the on-disk log file viewer and the link to the full log panel. Transport health was already polled but only ever rendered as one banner about native logging.\n- **Levels** — the global threshold, the two enrichment toggles, per-module overrides, and the native tracing targets that used to sit in a different tab.\n- **Filtering & redaction** — sampling rules, diagnostic throttling and redaction, which were scattered across `Advanced`.\n- **Transports** — the seven sinks, each with a live health badge and its own configuration. The remote retry-queue bounds moved in beside the endpoint that fills them.\n- **Telemetry & analytics** — behaviour telemetry and PostHog merged into one panel, because product analytics only emits while behaviour telemetry is on and the two tabs hid that dependency.\n- **Local retention** — the entry and age caps, with a line saying which one wins.\n\nWiring fixes found while auditing that every control does what it says:\n\n- **\"Console Output\" never actually turned the console transport off.** The core keeps its own `enableConsole` flag and re-applies it inside `ensureInitialized()`, which runs on every transport-registry call — so removing the console transport was undone by the very next `addTransport` in the same save, and again by each health poll. `applyLoggingSettings` now derives `enableConsole` (and the `enableStorage` / `enableRemote` / `maxStorageEntries` mirrors) from the records that own them.\n- **IndexedDB write batching was configured but never applied.** `bufferSize` and `flushInterval` were validated on read and written on save, yet never passed to `createIndexedDBTransport`, so batching always ran at the transport's own defaults. Both are now wired through and exposed on the IndexedDB transport row.\n- **Several sliders offered a narrower range than the setting accepts** — 20 000 queued entries against a real ceiling of 100 000, 50 MB against 100 MB, a 10 s diagnostic throttle against 60 s, and 90 days of agent-trace retention against 365. A value set outside the slider's range snapped down the first time the control was touched. Ranges now come from exported `CONFIG_BOUNDS` / `RETENTION_BOUNDS` records that the sanitizer itself uses.\n- **Retention was the one persisted record read without validation**, so a corrupted bound went straight into the IndexedDB cleanup pass, where a negative or `NaN` value silently disables pruning. It is now clamped like every other read.\n\nThe three config fields nothing reads (`enableStorage`, `enableRemote`, `maxStorageEntries`) plus the unused `sampling` field are now documented as inert at the type, and their mirroring is pinned by a test.\n\nFixes:\n\n- Sampling showed five rules (`mouse` 1%, `keyboard` 10%, `scroll` 5%, `animation` 1%, `error` 100%) whenever nothing was stored, but the logger applies no sampling for an empty map — so the panel displayed filtering that was not happening. The list now starts empty and says every module logs at 100%; the five rules are offered as an explicit \"apply recommended preset\" action.\n- \"Reset\" restored a hand-copied set of defaults that had drifted from the ones the app actually ships: the remote and Langfuse transports were reset to off when they default to on, and `minLevel`, `bufferSize`, `flushInterval` and `includeSource` all differed. Restoring defaults now reuses the same records `bootstrap.ts` reads, behind a confirmation, and loads them as an unsaved draft.\n- The OTLP headers field committed on every keystroke through a `parse`/`serialize` round-trip, so a partially-typed pair parsed to nothing and erased itself — the field could only be pasted into, never typed into. It now commits on blur/Enter.\n- \"Maximum local events\" clamped on every keystroke against a three-digit floor, so typing `5000` snapped `5` to `100` and appended the rest to that.\n- The minimum-level control mirrored its two-line option into a trigger too narrow to hold it.\n- The save affordance was a permanent bar that always looked like it had something to do. It now appears only when something changed, names how many fields changed, and offers a discard.\n- A failed save is reported instead of leaving the form silently dirty.",
       "date": "2026-08-20T01:01:06+08:00"
+    },
+    {
+      "id": "logs-workspace-flow",
+      "bump": "minor",
+      "summary": "Rework the Logs and diagnostics page so every channel links, filters and recovers properly.\n\n- **Logs**: search now covers agent trace spans, and the list is one continuous keyboard-navigable list instead of pages. The dashboard cards filter when clicked. The native log viewer opens inline. The header and the panel share one health poll and agree on the count.\n- **Traces**: links survive reloads and in-app navigation, using their own `t`-prefixed URL keys. Dashboard charts drill into matching traces. Hidden panels keep their layout. The list holds still while you read it.\n- **Crash reports**: previews always belong to the report on screen, and each report is linkable. Mobile submission works. Destructive actions ask first. The opt-in automatic submission now sends reports and shows each receipt.\n- **Service console**: it only fetches while open, learns your access role, and saves downloaded artifacts.\n- **Names**: the channels are renamed Errors and Crash reports to say what they hold.",
+      "date": "2026-10-04T17:01:22+08:00"
     },
     {
       "id": "loopback-companion-transport",
@@ -4337,6 +4547,12 @@
       "date": "2026-08-21T14:24:18+08:00"
     },
     {
+      "id": "minimal-bootstrap-agent",
+      "bump": "minor",
+      "summary": "Add a standalone bootstrap Agent for small tasks and environment initialization,\nwith shell and text editing, bounded execution, explicit readiness checks, and\noptional configuration in project environment settings. Ship the executable\nwith desktop and container bundles before the full Agent runtime starts.\n\nExpand the utility with interactive chat, resumable complete-turn sessions,\nmanual and automatic compaction, overflow recovery, DSH-compatible Bash/editor\ntools and streamed response transport. Allow custom model endpoints, request\nparameters, authentication/header references, personas, tool grants, shell\nsettings, context policies and output budgets through CLI and environment UI.\n\nAdd native, independently copyable Bash and PowerShell Agents with matching configuration,\nsessions, model/tool customization and initialization behavior. Select the\nruntime in environment settings, including PowerShell on Windows, and validate\nboth scripts against a shared local-provider acceptance suite. Bash uses curl\nand jq; PowerShell uses built-in modules and .NET APIs, without an embedded\nPython or C# engine.\n\nAdd shared provider/task presets, initialization recipes and ordered custom\npreset files. Expose offline diagnostics, authenticated model discovery and\nin-chat model switching in both scripts. Apply editable presets in Cognia's\nenvironment settings, clearing old provider authentication and saving recipe\nsetup/readiness settings together. Preserve privacy checks while avoiding false\npassport matches caused by JSON newline escapes before file offsets.\n\nAdd bounded UTF-8 task and context file inputs, local history inspection,\nresumable transcript export and active configuration saving to both native\nscripts. Preserve attachments across failed turns and defer credential prompts\nuntil a provider request. Export privately without overwriting existing files.",
+      "date": "2026-10-01T16:22:40+08:00"
+    },
+    {
       "id": "missing-translation-keys",
       "bump": "patch",
       "summary": "Fix screens that showed raw translation keys instead of text: the scheduled-task script editor and tool picker, the Live2D model import dialog, the local model provider \"not running\" state, provider-switch warnings, log filter placeholders, trace prune/clear toasts, skill discovery, and the WeChat OA test check.",
@@ -4355,6 +4571,12 @@
       "date": "2026-07-17T03:49:50+08:00"
     },
     {
+      "id": "mobile-boot-host-retry",
+      "bump": "patch",
+      "summary": "A phone that opens without network now connects to its Host once the network returns, instead of staying offline until the app is restarted.",
+      "date": "2026-10-04T16:58:30+08:00"
+    },
+    {
       "id": "mobile-boot-screen-redesign",
       "bump": "minor",
       "summary": "Redesigned mobile boot screen. The Capacitor splash overlay is now a full boot screen rather than a 1.5-second logo: it continues the native splash canvas (same navy, the coin exactly where the launcher icon was, Android 12 hand-over now fades via `launchFadeOutDuration`), adds a breathing halo, two counter-rotating satellite orbits and a spinning accent arc around the mark, and — new — a live timeline of what the phone is actually doing: unlocking the account, loading preferences, waking the native bridge, reading the pairing, reaching the desktop, syncing conversations. Each step ticks with its measured duration and its outcome as a chip (Paired / Standalone / Not paired, Online / Offline / Needs update, Up to date / Will retry, Not needed), a progress bar with a step counter leans into the running step, and once the boot has settled the arc closes into a solid ring with a check badge before the overlay fades. Dismissal is signal-driven — it leaves as soon as the host is linked (or is known not to be), never before 1.2 s and never after 4.5 s, so a stage that fails to report can't strand anyone. While the overlay is up the status and navigation bars are painted to its canvas instead of the app theme. The account / onboarding gates and route transitions on the phone use the same screen (full canvas on a cold boot, a compact in-flow mark inside the themed shell for page loads) instead of the desktop card, and every animation is compositor-only (transform / opacity, no blur, no color-mix) so it stays fluid on Capacitor's iOS 15 / Android 7 WebView floor and collapses cleanly under reduced motion.",
@@ -4371,6 +4593,12 @@
       "bump": "minor",
       "summary": "Find a node on the workflow canvas from a phone.\n\nCanvas-scoped search has existed since Spotlight shipped, reachable only by Ctrl/Cmd+F, which a touch device has no way to press. The rows, the group breadcrumb and the \"go to this node\" behaviour now live in one hook that both shells use, so the phone gets a bottom sheet with a real input and thumb-sized rows while the desktop keeps its command dialog. Two entry points on the phone: a top-bar control, and a row in the long-press canvas menu.",
       "date": "2026-09-01T01:32:38+08:00"
+    },
+    {
+      "id": "mobile-chat-chrome-tighten",
+      "bump": "patch",
+      "summary": "Mobile chat: unify the app bar's workspace and job-center buttons with its other icon buttons, tighten the action cluster, and remove the empty band above the composer input. When the host is unreachable, the reconnecting / read-only banners, the outbound queue and the \"waiting for host\" card collapse into one line docked flush on the composer (with Review and Settings), and the composer placeholder says why sending is off. Message action bars on phones show only under the latest reply; every other message's actions stay one long-press away.",
+      "date": "2026-10-04T16:58:30+08:00"
     },
     {
       "id": "mobile-chat-header-room",
@@ -4421,6 +4649,12 @@
       "date": "2026-09-30T12:34:24+08:00"
     },
     {
+      "id": "mobile-external-agents-flow",
+      "bump": "minor",
+      "summary": "Mobile external agents: adding one is now a full-screen flow straight onto the paired Host — pick a preset (agents the Host has installed first, with search), review a short form with advanced settings folded away, and \"Add to Host\"; the list manages the Host's agents (on/off, permission mode, remove) and keeps desktop-only agents in their own section. The composer's runtime menu opens this flow on a phone. Fixes external agents never connecting from a phone on the WAN tier: the data lane now subscribes to the agent's output channels (they are off by default on the Host), so `initialize` no longer times out and the agent is no longer killed and respawned in a loop. Fixes a phone being unable to join a Host that had been online for more than five minutes (\"signaling subscription expired\"): a peer's forwarded proof is no longer held to the admission clock window. Support tiers are shown translated, a failed load of the Host's agents reads as a load failure with a retry, and the desktop form no longer asks OpenCode V2 for an endpoint it never uses.",
+      "date": "2026-10-04T16:58:30+08:00"
+    },
+    {
       "id": "mobile-goals-open-chat",
       "bump": "patch",
       "summary": "Goals on a phone: the empty overview has an \"Open chat\" button, since goals start from /goal in a chat and nothing on the screen led there.",
@@ -4433,6 +4667,12 @@
       "date": "2026-09-07T18:37:27+08:00"
     },
     {
+      "id": "mobile-host-state-queue-drains",
+      "bump": "patch",
+      "summary": "A paired phone now actually sends the conversation actions it queues for its Host. The outbound runner only started when the phone's runtime mode read exactly \"paired\", but that device-local setting is often missing on a working pairing (`/pair` never records it, and each paired Host has its own database), while the boot path links the Host for any pairing that is not \"standalone\". Drafts, sends and list actions were queued and shown as \"N pending — waiting for the Host\" with zero attempts, even though the Host link was up. The runner now uses the same rule as the boot path.\n\nRows queued before a Host restart are delivered too. A Host moves to a new generation on every restart and refuses actions stamped with an older one. A row that no Host has seen yet is now re-stamped onto the Host's current generation when it is sent. A row the Host may already hold keeps its original stamp so it is never applied twice, and a refused row the user retries is re-stamped on retry. A burst of queued draft saves now goes out as the latest draft of each conversation, instead of one row per save that the Host rejected as revision conflicts.",
+      "date": "2026-10-04T16:58:30+08:00"
+    },
+    {
       "id": "mobile-ios-platform",
       "bump": "minor",
       "summary": "Add the committed Capacitor 8 iOS platform with CocoaPods plugin wiring, an\niOS 16 deployment target, localized permissions, deep links, Bonjour\ndiscovery, background modes, and Cognia launch assets.",
@@ -4443,6 +4683,12 @@
       "bump": "patch",
       "summary": "The phone New issue sheet no longer runs its fields into the screen edges: it gets the same header and inset as the issue detail sheet, and its selects span the form width.",
       "date": "2026-09-26T02:06:10+08:00"
+    },
+    {
+      "id": "mobile-lock-screen-redesign",
+      "bump": "patch",
+      "summary": "Redesign the unlock screen: an optically centred layout with a prominent full display name, touch-sized fields, a \"Remember password\" option on the mobile app (kept in Android Keystore / iOS Keychain), status and navigation bars painted to match, and the lock screen now uses the active theme's full palette. Fixes passwords and renamed profile names losing everything after the first character on Android keyboards.",
+      "date": "2026-10-04T16:58:30+08:00"
     },
     {
       "id": "mobile-me-eval-page",
@@ -4481,6 +4727,12 @@
       "date": "2026-09-30T12:34:24+08:00"
     },
     {
+      "id": "mobile-paired-step-flat-layout",
+      "bump": "patch",
+      "summary": "Mobile \"Connect to desktop\" paired screen: replace the four stacked cards with one flat column (live status header, hairline status list, side-by-side Refresh / Continue, and flat rows for diagnostics, help and sign-out), roughly halving its height; and undo the residual page scroll the soft keyboard left behind on close, which hid the window bar and left a keyboard-tall blank band at the bottom.",
+      "date": "2026-10-04T16:58:30+08:00"
+    },
+    {
       "id": "mobile-platform-aware-copy",
       "bump": "patch",
       "summary": "Mobile: an unpaired device no longer shows sync tables as failed and sync retries report their real result; the device console names the phone's model; keyboard hints (Esc, ⌘/Ctrl+Enter, Shift+Tab, arrow keys) are hidden on touch devices; \"browser\" copy is platform-neutral; workspace-only starter prompts are hidden without a working directory; `/sessions` and `/resume` output is localized; biometric copy no longer says Face ID on Android; dictation follows the app language until a language is picked.",
@@ -4497,6 +4749,12 @@
       "bump": "patch",
       "summary": "Five routes were reachable on a phone and rendered as a blank strip. The compact shell hands most routes a document scroll, which is not a definite height, so the height chain inside a feature-shell page collapses to zero and the page paints nothing under the top bar. Three routes had already shipped that way and been fixed one at a time. The list of exceptions was hand-maintained with no check, and `/workspace`, `/squads`, `/projects`, `/plugins` and `/twin` were all missing from it. The list is now derived and guarded, so a new console route cannot repeat it. The settings home also stops cutting the wallpaper off at its own door, which every one of its sub-pages already renders. The mobile home's agent-teams tile now opens Squads, the surface that replaced it, instead of a route taken out of navigation, and it keeps its place on grids that already had it. The `/me` workspace row shows which workspace the device is pointed at, which nothing outside the chat route said. A leftover mobile settings panel with no consumers is deleted.",
       "date": "2026-08-31T22:55:08+08:00"
+    },
+    {
+      "id": "mobile-relay-when-pinning-unavailable",
+      "bump": "patch",
+      "summary": "Mobile: a phone whose native HTTP stack cannot pin the Host's self-signed certificate now reaches it over the authenticated relay instead of failing every request after pairing. Clients no longer reject a Host's feature manifest as incompatible when one operation belongs to two features (the external-agent tool host), which had blocked every headless Host from coming online. `cognia-server serve` now advertises itself over mDNS (opt out with `--no-mdns`) so the app's \"Find your desktop\" scan lists headless Hosts.",
+      "date": "2026-10-04T16:58:30+08:00"
     },
     {
       "id": "mobile-run-target",
@@ -4607,6 +4865,12 @@
       "date": "2026-07-16T17:06:07+08:00"
     },
     {
+      "id": "native-resume-bound-agent",
+      "bump": "patch",
+      "summary": "Resuming an imported Codex session also works on a Codex app-server agent, and a resumed session goes back to the agent it last ran on instead of switching accounts when that agent is offline.",
+      "date": "2026-10-05T21:20:15+08:00"
+    },
+    {
       "id": "native-video-processing",
       "bump": "minor",
       "summary": "Plugins can process local video natively. A new Rust crate owns FFmpeg/FFprobe discovery, metadata probing, frame extraction, focused analysis, near-duplicate frame removal and trimming, exposed to plugins through the media API — so a plugin asking for a video's duration, a frame at a timestamp, or a trimmed clip no longer gets a runtime rejection. Missing FFmpeg is reported as a named dependency error rather than a generic failure, and every step is bounded by its own timeout.",
@@ -4683,6 +4947,30 @@
       "bump": "minor",
       "summary": "Office workbooks now compute their formulas: every create and edit recalculates the workbook (own parser plus the MIT `@formulajs/formulajs` function library) and stores each formula's real value instead of a number the agent asserted, turning cycles into `#REF!`, keeping the cached value of anything it cannot evaluate, and reporting error cells and unevaluated formulas back to the agent. People can now fix a cell directly in the workbook preview (Enter / F2 / double-click or just type; Delete clears; each edit is a new, recalculated version with a conflict notice if the agent changed it meanwhile). And a new `artifact_capture` tool lets the agent see any artifact the way the user does — workbooks, PDFs, documents, charts, pages — as an image, so it can catch clipped, blank or wrong-looking output before calling the work done.",
       "date": "2026-09-30T12:34:00+08:00"
+    },
+    {
+      "id": "official-cognia-account",
+      "bump": "minor",
+      "summary": "Sign in with the official Cognia account (Feishu, GitHub, Google or Apple) on desktop, phone, web and the CLI, offered once on first launch, with account deletion after a 7-day cooling-off period; self-hosted Logto deployments keep working.",
+      "date": "2026-10-05T01:29:47+08:00"
+    },
+    {
+      "id": "official-provider-choice",
+      "bump": "patch",
+      "summary": "Choosing a sign-in provider for the Cognia account now signs in with that provider, instead of reusing a session another provider left in the browser.",
+      "date": "2026-10-05T03:41:10+08:00"
+    },
+    {
+      "id": "offline-host-surfaces",
+      "bump": "patch",
+      "summary": "Paired devices with an offline host: Me/settings and Discover stay usable, one connection band (with a Connection settings action) replaces the stacked \"Reconnecting\" and \"Read-only\" bars, the Workflows/Goals/Memory pages fill the phone width again, and the conversation list names the model or agent a conversation actually runs on instead of \"Claude Sonnet 5\" for every row.",
+      "date": "2026-10-04T16:58:30+08:00"
+    },
+    {
+      "id": "oidc-issuer-kind-and-native-callback",
+      "bump": "patch",
+      "summary": "Sign-in works with standard OIDC issuers besides Logto: a deployment can announce `issuerKind: \"oidc\"`, and the apps then skip Logto-only parameters and return through the new `cn.cognia.app:/auth/callback` link, which desktop, iOS and Android now register. Logto deployments are unchanged.",
+      "date": "2026-10-04T22:14:11+08:00"
     },
     {
       "id": "olive-cameras-shave",
@@ -4859,6 +5147,18 @@
       "date": "2026-07-20T19:24:38+08:00"
     },
     {
+      "id": "opencode-import-reports-losses",
+      "bump": "patch",
+      "summary": "OpenCode session imports now list what they could not carry over exactly: patches and snapshots that import as text markers, files without content, unknown part types, and failed tool calls with no recorded error.",
+      "date": "2026-10-06T14:01:52+08:00"
+    },
+    {
+      "id": "opencode-turn-cancel-keeps-session",
+      "bump": "patch",
+      "summary": "Stopping an OpenCode V2 turn now keeps its session: the next message continues on the same service session instead of reconnecting, and pausing an OpenCode teammate in an Agent Team reports it as paused rather than asking for input.",
+      "date": "2026-10-06T11:24:30+08:00"
+    },
+    {
       "id": "opencode-v2-external-agent",
       "bump": "minor",
       "summary": "Add OpenCode V2 as an external agent backend. Point Cognia at a locally running `opencode2` service and it appears alongside the other external agents — usable in chat, bindable as an Agent Team teammate, and driven through the same permission modes (`default`, `acceptEdits`, `bypassPermissions`, `plan`) as every other backend, so approvals behave the way you already expect.\n\nConnection is discovery-based rather than a command line you have to get right: Cognia finds the local service and checks its version, and an incompatible service says so by version instead of failing as a generic connection error. Session listing, forking and resuming report as available only once a connection proves the service supports them, rather than being advertised up front and failing when used.\n\nDesktop only. The service is discovered over a local endpoint that the web and mobile shells cannot reach, so those shells report it as unavailable and tell you to connect from the desktop app rather than offering a control that could not work.",
@@ -4867,7 +5167,7 @@
     {
       "id": "openvsx-marketplace-vscode-section",
       "bump": "minor",
-      "summary": "Install VS Code extensions from Open VSX, in-app. The plugin marketplace gains a \"VS Code\" section that searches the Open VSX registry, resolves the right build for your machine, and installs through the normal consent flow — conflicts, permissions, bundled binaries, and configuration — with permissions inferred from the extension's real code rather than from anything the extension declares about itself. Dependencies (`extensionDependencies`) install as one all-or-nothing set; extension packs are offered separately instead of being installed behind your back. \"Check for updates\" now routes VS Code extensions to Open VSX instead of sending their ids to cognia's plugin registry, which previously leaked what you had installed and could never return a result.\n\nWhat we verify, and what we don't — the UI says the same thing:\n\n- **Downloads are checked against a SHA-256 checksum only.** That proves the file wasn't corrupted in transit, and nothing more: the checksum comes from the same server as the extension, so it cannot detect a compromised registry, a registry insider, or a publisher who simply ships something malicious. No PKCS#7 signature verification is performed and `.sigzip` is not validated, so extensions are never labelled \"signature verified\".\n- **Open VSX's \"verified publisher\" flag is shown attributed to Open VSX**, because it is Open VSX's claim that a publisher owns a namespace — not our claim, and not a statement that the extension is safe.\n- **Extensions run with real filesystem, network, and process access**, like any program you install. The install dialog says so next to the permission list.\n- **Extensions using APIs cognia doesn't implement** (`vscode.debug`, `notebooks`, `scm`, `comments`, `tests`) are flagged at install and on the extension card, rather than blocked. The detection reads the extension's bundle and is best-effort: a minified extension can hide its API use, so it is a hint, not a guarantee. A mismatched `engines.vscode` range warns but never blocks — the range says nothing about which APIs an extension actually calls.\n- **Microsoft's marketplace is out of scope.** Its terms of use limit it to Microsoft products, which is why VS Codium and code-server also use Open VSX.\n- **Desktop only.** Installing requires the Cognia desktop app, since the download runs in the Rust backend to honour your proxy settings and verify checksums.",
+      "summary": "Install VS Code extensions from Open VSX, in-app. The plugin marketplace gains a \"VS Code\" section that searches the Open VSX registry, resolves the right build for your machine, and installs through the normal consent flow — conflicts, permissions, bundled binaries, and configuration — with permissions inferred from the extension's real code rather than from anything the extension declares about itself. Dependencies (`extensionDependencies`) install as one all-or-nothing set; extension packs are offered separately instead of being installed behind your back. \"Check for updates\" now routes VS Code extensions to Open VSX instead of sending their ids to cognia's plugin registry, which previously leaked what you had installed and could never return a result.\n\nWhat we verify, and what we don't — the UI says the same thing:\n\n- **Downloads are checked against Open VSX's SHA-256 checksum and its signature.** The checksum proves the file wasn't corrupted in transit. The `.sigzip` signature is checked against Open VSX's key built into Cognia, which proves the file is what Open VSX published. Neither detects a compromised registry, a registry insider, or a publisher who simply ships something malicious.\n- **Open VSX's \"verified publisher\" flag is shown attributed to Open VSX**, because it is Open VSX's claim that a publisher owns a namespace — not our claim, and not a statement that the extension is safe.\n- **Extensions run with real filesystem, network, and process access**, like any program you install. The install dialog says so next to the permission list.\n- **Extensions using APIs cognia doesn't implement** (`vscode.debug`, `notebooks`, `scm`, `comments`, `tests`) are flagged at install and on the extension card, rather than blocked. The detection reads the extension's bundle and is best-effort: a minified extension can hide its API use, so it is a hint, not a guarantee. A mismatched `engines.vscode` range warns but never blocks — the range says nothing about which APIs an extension actually calls.\n- **Microsoft's marketplace is out of scope.** Its terms of use limit it to Microsoft products, which is why VS Codium and code-server also use Open VSX.\n- **Desktop only.** Installing requires the Cognia desktop app, since the download runs in the Rust backend to honour your proxy settings and verify checksums.",
       "date": "2026-07-15T19:23:29+08:00"
     },
     {
@@ -4901,6 +5201,12 @@
       "date": "2026-08-29T17:58:29+08:00"
     },
     {
+      "id": "paired-browser-write-recovery",
+      "bump": "patch",
+      "summary": "Restore paired browser read receipts and HostState write availability after reconnecting to a restarted host.",
+      "date": "2026-10-06T18:20:02+08:00"
+    },
+    {
       "id": "paired-client-session-list-writes-reach-host",
       "bump": "patch",
       "summary": "Paired web and mobile clients no longer drift from their desktop Host when organizing conversations. Pinning, filing into or out of a folder, drag-reordering, and deleting a conversation are now forwarded to the Host (like rename and archive already were), so the change lands on the Host and syncs back to every device instead of living only on the device that made it. In the other direction, filing or reordering a conversation on the desktop now reaches paired devices too, without moving the conversation in the recency order. Deleting a conversation from a paired device requires the owner grant, and a conversation frozen for a cross-host handoff refuses all of these writes — including a remote rename or archive; deleting a folder whose member is handoff-locked now fails as a whole instead of half-unfiling it.",
@@ -4911,6 +5217,12 @@
       "bump": "minor",
       "summary": "`@msg:`, `@prompt:` and `^` on a paired phone or browser now search the host's whole history instead of the recent part of each conversation the device has synced. A picked message, prompt or tool result is read from the host too, so a reference to something the device never downloaded stages its real text, and a staged chip is checked for changes against the host. When the host can't be reached, the picker shows what the device has and says the list is partial.",
       "date": "2026-09-15T00:18:45+08:00"
+    },
+    {
+      "id": "paired-phone-sign-in-gate-relay",
+      "bump": "patch",
+      "summary": "A paired phone no longer stops at a full-screen \"can't sign in right now\" when its Host is only reachable over the relay. A LAN Host uses a self-signed certificate that was pinned at pairing. When the phone's native HTTP stack cannot enforce that pin, all Host traffic already goes over the relay data lane. The sign-in gate, however, tried to read the Host's login configuration directly, which can never succeed on such a build (`native_spki_pinning_unavailable`). The gate now lets a pairing that has a relay route through. A pairing with no relay route at all still shows the screen.",
+      "date": "2026-10-04T16:58:30+08:00"
     },
     {
       "id": "pairing-failures-name-their-cause",
@@ -4941,6 +5253,12 @@
       "bump": "minor",
       "summary": "Performance panel: add a System tab (host OS, kernel, CPU model and core count, installed memory, app/Tauri version, build profile and enabled features), keep the chosen sampling cadence across visits, stop the rolling graphs from silently mixing sampling rates after a cadence change or a pause, make every sortable column header keyboard-operable, and remove the per-frame O(n²) recomputation behind the process table's trend sparklines.",
       "date": "2026-07-23T17:27:24+08:00"
+    },
+    {
+      "id": "performance-workspace-flow",
+      "bump": "minor",
+      "summary": "Make the Performance page work everywhere and read the way it is used. Web and\nmobile now open it instead of a \"needs a paired desktop\" wall, chart what this\nwindow can measure (frame rate, main-thread blocking, long tasks, JS heap), and\nshow only the metrics each source actually reports instead of flat zero lines.\nTabs, resource sections and the selected metric live in the URL, so the status\nbar and the capture chip land where they point. Diagnose adds this window's chat\nand render timings and a confirmed reset for backend hotspot statistics. Host-only\nsections explain why they are empty. Captures gain confirmed deletion, translated\nstatus and errors, a progress bar, an eligibility-checked comparison on any\nmetric, and immutable performance budgets with pass/warn/fail checks.",
+      "date": "2026-10-04T17:01:43+08:00"
     },
     {
       "id": "persist-snapshot-invalidation",
@@ -5009,6 +5327,12 @@
       "date": "2026-09-07T10:59:53+08:00"
     },
     {
+      "id": "phone-secure-token-storage",
+      "bump": "patch",
+      "summary": "On phones, sign-in tokens and other saved secrets now live in the iOS Keychain or Android Keystore; secrets saved by earlier versions move there the first time they are read.",
+      "date": "2026-10-05T11:35:33+08:00"
+    },
+    {
       "id": "pi-agent-link-repair",
       "bump": "patch",
       "summary": "Pi agent: session listing and resume now work (host reads Pi's own session store), the model list is available before the first turn via `pi --list-models`, extension-registered providers no longer show as \"Not signed in\", the credential card lists Pi's model catalog and opens Pi in the terminal for `/login`, and the capability rows for parallel tools, fragmented tool JSON, rate-limit handling and subagents are verified against Pi 0.84.3.",
@@ -5025,6 +5349,12 @@
       "bump": "patch",
       "summary": "Fix external agents — Pi in particular — being unable to start on the self-hosted server image. Two shipped preconditions were enforced at runtime and satisfied nowhere: the container never installed `bubblewrap`, so the sandbox launcher refused every external-agent spawn (\"bubblewrap (bwrap) is required for strict external-agent hosting\"), and the pkg/Node CLI layout that becomes the brain never staged the bundled Pi extension, so every Pi session refused with the extension reported missing. The image now installs bubblewrap, runs with `NODE_ENV=production` (which disables the `COGNIA_PI_EXTENSION_PATH` override that could otherwise swap out the component holding Pi's native-tool permission gate), and creates the workspace and Pi credential directories owned by the runtime user. All three CLI layout builds now stage the Pi extension through one shared helper that also verifies its pinned digest, so a forgotten re-pin fails the build instead of shipping an extension that refuses on the user's machine.",
       "date": "2026-08-28T18:54:43+08:00"
+    },
+    {
+      "id": "pi-import-reports-losses",
+      "bump": "patch",
+      "summary": "Pi session imports now list what they could not carry over in the import report (extension state that never reached the model, unrecognized entries, tool results whose call is on another branch, and unreadable lines), for the main conversation and each branch.",
+      "date": "2026-10-06T14:13:04+08:00"
     },
     {
       "id": "pi-install-plan-and-credential-diagnostic",
@@ -5055,6 +5385,18 @@
       "bump": "patch",
       "summary": "Fix the `External agent capability drift` warning on every `pi-rpc` session: the capability manifest declared `hooks.lifecycle` as `unsupported` (`agentOwned`), but Cognia hooks are a host facility the protocol cannot answer for — every other protocol row already says `unknown` and lets the live host fact decide. The CLI hook runtime does dispatch lifecycle hooks around external turns, so the row now reads `equivalent` when the runtime is present instead of permanently disagreeing with it.",
       "date": "2026-09-21T22:55:30+08:00"
+    },
+    {
+      "id": "pi-session-dir-listing",
+      "bump": "patch",
+      "summary": "Pi sessions stored in a directory set by `PI_CODING_AGENT_SESSION_DIR` now appear when choosing a Pi session to resume, on the desktop and in the CLI, matching where session import already looked.",
+      "date": "2026-10-06T15:20:44+08:00"
+    },
+    {
+      "id": "pi-turn-cancel-keeps-session",
+      "bump": "patch",
+      "summary": "Stopping a Pi turn now keeps its session: the next message goes to the same Pi process instead of reconnecting, and pausing a Pi teammate in an Agent Team reports it as paused rather than asking for input.",
+      "date": "2026-10-06T10:54:43+08:00"
     },
     {
       "id": "placeholder-avatar-glyph",
@@ -5129,6 +5471,12 @@
       "date": "2026-08-29T23:08:05+08:00"
     },
     {
+      "id": "plugin-adapter-core-check",
+      "bump": "patch",
+      "summary": "A plugin-provided external agent that lacks a required method now fails to load with a message naming the method, instead of crashing later in the middle of a turn, and Python-backed adapters gain their missing session list and health check.",
+      "date": "2026-10-05T21:32:34+08:00"
+    },
+    {
       "id": "plugin-api-call-inspector",
       "bump": "minor",
       "summary": "DevTools gains a Plugin API calls inspector. Every `ctx.*` call a plugin makes into the host has been measured for a while (method, runtime, permission verdict, duration), but the only consumer was the trace bridge, which forwards a deliberately sampled subset to `/logs`. An author debugging a permission problem had to leave DevTools, open Traces, and hope their call was one of the sampled ones. The new pane, under Devtools → Advanced diagnostics, reads the same ring unsampled, with filters by plugin and outcome and a toggle that shows exactly which calls do reach Traces, so \"my call isn't in Traces\" stops being a mystery. It records metadata only: arguments and return values were never accepted into this ring and still are not.",
@@ -5145,6 +5493,12 @@
       "bump": "minor",
       "summary": "Plugin API: every `@cognia/plugin-sdk` subpath is now shared with the host, so an installed plugin's registrations reach the app instead of a private copy, and every context method a plugin can see is in the contract catalog (a test now enforces both directions). New for authors: `ctx.ui.navigate()` for in-app pages, `usePluginTranslations()`, localized plugin names through `nameKey` / `descriptionKey`, `useLiveQuery` from `@cognia/plugin-ui`, `createTestPluginContext()` from `@cognia/plugin-sdk/testing`, `evaluatePluginCompatibility`, the `web_clone` host tool, `rawArgs` for multi-line slash-command bodies, and a `context` prop for extension slots. `ctx.config` now reflects settings changes without reactivation, `deactivate()` receives the plugin context, context providers only run for their own plugin, `ctx.files.save` saves on mobile and reports where the file went, and connector hooks require the `connectors:read` / `connectors:send` permission. Plugins may no longer import `next`, `next-intl`, `dexie`, `@tauri-apps` or `@capacitor` directly.",
       "date": "2026-09-25T22:19:42+08:00"
+    },
+    {
+      "id": "plugin-author-root-only-imports",
+      "bump": "minor",
+      "summary": "`cognia plugin lint` and `cognia plugin build` now check a plugin's own source before esbuild runs and reject any `@/` alias, `@cognia/plugin-sdk/host`, a `@cognia/plugin-ui` subpath, or any other `@cognia/*` package. Previously such a plugin built cleanly and was refused at load time, or worse, had the host module inlined into its bundle where the loader's text scan could no longer see it. The load-time boundary now covers every `@/` directory rather than four of them.",
+      "date": "2026-10-06T18:13:18+08:00"
     },
     {
       "id": "plugin-author-scaffold-installable",
@@ -5229,6 +5583,12 @@
       "bump": "patch",
       "summary": "`cognia plugin new --kind wasm` now writes a correct `wasmMain`. Previously every wasm scaffold shipped the template's own `wasmMain: \"cognia_plugin_template.wasm\"` regardless of the plugin's name, because substitution only replaced the hyphenated package name. A scaffold named `hello-wasm` now correctly declares `wasmMain: \"hello_wasm.wasm\"` — matching the underscore-normalized artifact `cargo-component` emits.",
       "date": "2026-07-17T10:25:52+08:00"
+    },
+    {
+      "id": "plugin-cogsets-and-cogpacks",
+      "bump": "minor",
+      "summary": "Cogsets and cogpacks: save plugin combinations as cogsets and switch between them from the Plugins toolbar (turning off plugins outside the set, except always-on ones), bind a cogset to a workspace, and share a cogset as a signed `.cogpack` file that pins every plugin to an exact version and installs in one reviewed step. Every install now records where the plugin came from, and marketplace presets can be saved as cogsets.",
+      "date": "2026-10-01T16:19:37+08:00"
     },
     {
       "id": "plugin-command-hooks",
@@ -5319,6 +5679,12 @@
       "bump": "minor",
       "summary": "Plugin API: `ctx.ui.openViewContainer(id)` shows one of a plugin's own view containers. It is the only way to open a `location: \"panel\"` container, which has no rail button. It needs the `extension:ui` permission and refuses another plugin's containers. Python plugins get it through `ctx.ui` too, and `isViewContainerOpenError` from `@cognia/plugin-sdk` tells the refusal reasons apart. A plugin's \"Contributed\" tab can now open panel containers as well.",
       "date": "2026-09-26T23:05:58+08:00"
+    },
+    {
+      "id": "plugin-pi-packages-and-latex-workbench",
+      "bump": "minor",
+      "summary": "Plugins can ship a Pi package: a plugin's detail page now prepares its dependencies, installs it into your Pi (user or project scope, falling back to a settings edit when Pi is not on PATH) and removes it again, and a Pi agent can opt in to load a plugin's Pi extension in its Cognia-hosted sessions. The new Pi LaTeX Workbench plugin uses this: Cognia agents drive the `latexwb` host CLI (import, build, draft lint, page rendering, release pipeline) with LaTeX skills and `/latex-write`, `/latex-revise`, `/latex-tune`, `/latex-check`, while approvals stay with you. Plugin conversion now keeps a whole Pi package (extensions, prompts, themes) instead of failing, follows the vendors' October 2026 documentation (Agent Plugins 1.1.0 and Copilot/OpenHands namespace folders, Kimi's real `plugin.json`, Codex, Cursor, Copilot, Devin, OpenCode, Claude Code and Gemini CLI hooks), and adds Factory Droid, Qoder, CodeBuddy, Auggie and Open Plugins (`.plugin/plugin.json`). For plugin authors: `cliTools` argv literals and env values now expand `${COGNIA_PLUGIN_ROOT}` (shown expanded in the consent prompt), and settings fields can be localized with `titleKey`, `descriptionKey` and `enumItemLabelKeys`.",
+      "date": "2026-10-04T17:02:53+08:00"
     },
     {
       "id": "plugin-points-virtual-hook-labels",
@@ -5531,10 +5897,28 @@
       "date": "2026-07-27T00:22:10+08:00"
     },
     {
+      "id": "pro-ide-broker-cancel-progress",
+      "bump": "patch",
+      "summary": "Pro IDE: a timed-out agent request is now withdrawn in VS Code instead of left running, long editor operations show their progress next to the engine switch, \"Send problems to chat\" and workspace-panel rows in VS Code finally do something in Cognia, the workspace panel refills as soon as the extension reconnects, and the Cognia panel in VS Code is translated.",
+      "date": "2026-10-02T22:00:42+08:00"
+    },
+    {
+      "id": "pro-ide-broker-credential-file",
+      "bump": "patch",
+      "summary": "Pro IDE no longer exposes its broker secret to commands run inside VS Code. The secret used to sit in code-server's environment, so any terminal, task or language server in the workbench could read it and take over the editor connection. It now travels as a single-use file the Cognia extension deletes on read, reconnects use a derived session key that never crosses the wire, and if something else reads the file first Cognia revokes the connection, issues a new key and tells you. The retired newline protocol is gone, and a broker build that fails its integrity check or install is reported instead of silently leaving agent drive off.",
+      "date": "2026-10-02T21:23:28+08:00"
+    },
+    {
       "id": "pro-ide-code-server",
       "bump": "minor",
       "summary": "Add an optional desktop \"Pro IDE\" mode to the Agent Team Project Editor: a full browser VS Code (code-server) embedded alongside the built-in Monaco editor. A new engine toggle in the editor header switches between Monaco and code-server, which is downloaded on first use (streamed with progress, SHA-256-verified against a pinned version) and served from a loopback-only port with a dedicated native webview pinned over the pane. macOS and Linux only — the toggle is disabled on unsupported platforms with a hint to use your local VS Code instead. The Monaco editor, the in-app browser, and the web/mobile shells are unchanged.",
       "date": "2026-07-14T21:36:15+08:00"
+    },
+    {
+      "id": "pro-ide-desktop-relay-and-errors",
+      "bump": "minor",
+      "summary": "Pro IDE: a Cognia desktop paired to another desktop can now open that desktop's VS Code, after its owner approves the device for the project (approvals are listed and revocable in Settings → Pro IDE). Start-up failures now say what went wrong and what to do in your language instead of showing a raw error, the engine switch shows when agent drive is off and why, a companion host whose managed IDE is switched off still serves VS Code without agent drive (as the desktop already did), and a browser on the same machine opens the workbench without waiting for its first status check.",
+      "date": "2026-10-02T23:17:56+08:00"
     },
     {
       "id": "pro-ide-editor-workflow-nodes",
@@ -5559,6 +5943,18 @@
       "bump": "minor",
       "summary": "Pro IDE (code-server) is available from a browser, not only the desktop app. A browser paired with a host can start that host's workbench and, on the host's own machine, edit in it from the right rail — with terminal links, review jumps and agent file-follows landing in that workbench rather than the read-only viewer. Anywhere else it says where the workbench can be opened instead of claiming the platform is unsupported.",
       "date": "2026-09-04T22:18:28+08:00"
+    },
+    {
+      "id": "pro-ide-managed-dev-mode",
+      "bump": "minor",
+      "summary": "Pro IDE plugin authors get Managed IDE Dev Mode in Plugin DevTools: a live trace of the editor broker (payload values only on request, and redacted), per-session permission simulation with a badge on the plugin, live `manifest.ide` diagnostics for plugin folders, and folder-based development where an edit reinstalls the plugin and reloads it with a temporary Pro IDE proxy, trusted only while Dev Mode is on. A plugin folder or zip can no longer bring its own verification receipt, and Pro IDE proxies are built only for plugins the app verified.",
+      "date": "2026-10-03T04:23:58+08:00"
+    },
+    {
+      "id": "pro-ide-managed-families-real-e2e",
+      "bump": "patch",
+      "summary": "Pro IDE: plugin language servers now actually show hovers, completions, definitions, symbols, code actions and the rest in VS Code (their answers used to be dropped silently, and only the features a server supports are offered), a plugin's language model tools and debuggers register, its own language is matched by its providers, a plugin installed while VS Code is open activates without a restart, and plugins keep working after VS Code restarts or reloads. Plugin source control, test runs, notebooks, and chat models now pass their results through.",
+      "date": "2026-10-03T02:27:42+08:00"
     },
     {
       "id": "pro-ide-plan-review-and-issue-links",
@@ -5813,6 +6209,12 @@
       "date": "2026-07-25T14:46:10+08:00"
     },
     {
+      "id": "public-signaling-status-live",
+      "bump": "minor",
+      "summary": "The public status page (`/status`) now reports the real hosted relay instead of preview data. A separate status service measures `signaling.cognia.cn` every minute through its public route: the health endpoint, an authenticated two-peer signaling round trip, and the explicit data lane in both directions, plus simulated web, iOS and Android client origins. It publishes count-based history with coverage, where missing evidence shows as unknown and never as 100 %. The page also shows observer freshness, latency percentiles, incidents and maintenance windows, along with Atom/RSS feeds and double-opt-in email subscriptions with preference management and unsubscribe. Settings → Connectivity → Cloud & relay gains a link to the public status page that says it describes the official relay only, not a self-hosted one.",
+      "date": "2026-10-02T19:57:53+08:00"
+    },
+    {
       "id": "pwa-install-surface",
       "bump": "minor",
       "summary": "The web client can now be installed as a PWA from inside the product. Settings → About gains an \"Install the app\" card (web shell only) that drives the browser's install prompt, shows iOS's manual Share → Add to Home Screen steps on Safari, and explains that the installed app stays a client of your Cognia server — the desktop app remains the host.\n\nThe manifest now pins an explicit app `id`, focuses the existing window on relaunch instead of multiplying windows, adds dock-icon shortcuts, registers `web+cognia` protocol handling through the existing deep-link page, and ships wide + narrow screenshots for the richer install dialog (generated by `pnpm screenshots:pwa`).\n\nThe service worker precaches a bilingual offline page and serves it for uncached navigations while offline — a standalone window no longer dead-ends on a browser error page — and the installed icon shows an unread badge fed by the same session unread counts as the mobile shell.",
@@ -5943,6 +6345,12 @@
       "bump": "patch",
       "summary": "Open the transcript revision subscription from an effect instead of during render, so loading a companion session no longer trips React's \"Cannot update a component while rendering a different component\".",
       "date": "2026-09-03T10:33:24+08:00"
+    },
+    {
+      "id": "quieter-thinking-indicator",
+      "bump": "patch",
+      "summary": "The chat's waiting indicator is one quiet line now: a shimmering status word with no bouncing dots or placeholder bars, and a single muted tip after eight seconds.",
+      "date": "2026-10-06T16:46:57+08:00"
     },
     {
       "id": "rail-keyboard-roving",
@@ -6081,6 +6489,12 @@
       "bump": "minor",
       "summary": "Remote hosts and SSH hosts become a real cross-shell fleet console. Adding a host now works in a browser and on a phone instead of dead-ending on a desktop-only settings page, `/devices` and `/servers` stop rendering blank on mobile, the current execution host is pinned in the chrome with an explicit switch, an inactive host's worktrees can be read without repointing the whole app at it, an unhealthy host says why and offers a reconnect or a re-pair, a deployed server can be added as a remote host from its own page, and saved SSH hosts appear in the same list as every other machine.",
       "date": "2026-08-31T12:02:40+08:00"
+    },
+    {
+      "id": "remote-host-switch-guard",
+      "bump": "patch",
+      "summary": "Every way of switching, reconnecting or removing a remote host now asks first while a turn is running; the status bar and Connectivity overview describe the host a desktop is driving instead of \"Local\"; Settings → Remote hosts gains Disconnect, remove confirmation, connection errors and the device console's wording; adding a host no longer puts a bare URL in the invitation field, the LAN check sees what you paste, and the status-bar switcher offers \"Add a host\".\n\nPairing and tunnel help text now points to the current Settings → Connectivity topics (Local host, Pairing) and Connections → Overview instead of the retired \"Companion\" settings, and the external bridge's workspace access panel reloads its client list when you switch hosts.",
+      "date": "2026-10-04T16:58:22+08:00"
     },
     {
       "id": "remote-pro-ide",
@@ -6515,6 +6929,12 @@
       "date": "2026-08-27T16:16:56+08:00"
     },
     {
+      "id": "scheduler-detail-tags-mobile-layout",
+      "bump": "minor",
+      "summary": "Scheduled tasks: the detail now shows what a task runs (prompt, command, workflow, plugin handler, with names resolved and the stored payload one click away) and leads its outcomes with success rate, run count, average duration and last result. Tags can be added and removed in the task form (templates and composer drafts keep theirs) and the list search matches them, with `#tag` for tags only. On desktop the task list no longer shrinks below a readable width, the host control sits beside refresh instead of taking a header row, the keyboard highlight scrolls into view and the agenda shows three days before \"show more\". On phones the page splits into Tasks and Activity tabs (stats, outcomes, agenda, recent runs), uses the desktop's compact filter bar, gains a refresh button and duplicate / backfill / dependency-graph actions, drops the row checkboxes that did nothing, and the detail's actions fit on one line.",
+      "date": "2026-10-04T17:02:00+08:00"
+    },
+    {
       "id": "scheduler-execution-control",
       "bump": "minor",
       "summary": "Scheduler: enforce the concurrent-execution limit, and let a running task be stopped from the panel or by the assistant",
@@ -6579,6 +6999,12 @@
       "bump": "minor",
       "summary": "The scheduler's permission settings now actually apply. Agent auto-creation, the per-source task limit, the script-task switch, and the per-type confirmation list are enforced on every write an agent or plugin makes, and the task limit is counted per source rather than across your whole schedule.",
       "date": "2026-09-04T01:02:39+08:00"
+    },
+    {
+      "id": "scheduler-plugin-api-complete",
+      "bump": "minor",
+      "summary": "Scheduler plugin API: `ctx.scheduler.runTaskNow` returns the real execution id and passes its arguments to the handler, `cancelExecution` actually stops the run, plugin-created tasks go through the scheduler permission policy and quota, task and execution statuses are reported correctly, and handler log lines appear in the execution history. New `onExecution`, `emitEvent`, `getStatistics` and `previewTrigger`, plus the full execution options (overlap policy, max runs, auto-pause, end date, jitter, catch-up). `ctx.userScheduler` can no longer attribute a write to the user, checks the policy on every write, and gains `getTask`, `updateTask`, `pauseTask`, `resumeTask`, `listExecutions`, `getExecution`, `cancelExecution` and `getUpcoming`, including for Python plugins.",
+      "date": "2026-10-04T17:02:00+08:00"
     },
     {
       "id": "scheduler-rail-labels",
@@ -6675,6 +7101,12 @@
       "bump": "patch",
       "summary": "Secret store no longer fails credential reads while it is still starting up, reports a locked system keychain once instead of flooding boot with errors, and shows an Unlock button at startup that reloads subscriptions, proxy settings, speech keys and plugin secrets once the keychain is unlocked.",
       "date": "2026-09-25T01:02:07+08:00"
+    },
+    {
+      "id": "secret-store-slash-namespaces",
+      "bump": "patch",
+      "summary": "Desktop and headless hosts can store account sync keys, MCP credentials and retrieval keys again, so encrypted backups there no longer fail with \"keyring namespace contains invalid characters\".",
+      "date": "2026-10-06T17:33:10+08:00"
     },
     {
       "id": "security-workbench-and-cli",
@@ -6801,6 +7233,12 @@
       "bump": "patch",
       "summary": "The \"No API key\" warning now leads somewhere: Session settings opens on Model & account, which offers an \"Add an API key\" button straight to AI connections instead of an empty section.",
       "date": "2026-09-26T02:03:01+08:00"
+    },
+    {
+      "id": "session-summary-card",
+      "bump": "minor",
+      "summary": "Task summary is now a Codex-style card opened from the title bar: it floats beside a wide chat (a popover on narrower windows) and shows the project and branch, run progress, what is waiting for you, changes, artifacts, sources and sharing, with each row customisable. It no longer narrows the conversation, and the dock rail's source and workspace badges now show real counts.",
+      "date": "2026-10-04T01:48:27+08:00"
     },
     {
       "id": "session-workspace-attribution",
@@ -7115,6 +7553,24 @@
       "date": "2026-09-09T23:12:17+08:00"
     },
     {
+      "id": "sign-in-callback-pages",
+      "bump": "patch",
+      "summary": "Sign-in callback pages now look like Cognia and say what happened: the web popup no longer reports success when sign-in failed, the CLI's browser page is localized, and signing out no longer reports a failed revocation for tokens that simply expire.",
+      "date": "2026-10-05T02:22:08+08:00"
+    },
+    {
+      "id": "sign-in-mascot",
+      "bump": "patch",
+      "summary": "Sign-in pages (the Cognia account's hosted pages, the web sign-in popup and the CLI's browser tab) get a roomier layout and Cognia's chibi spot icons, one for each outcome.",
+      "date": "2026-10-05T03:54:47+08:00"
+    },
+    {
+      "id": "sign-in-provider-marks",
+      "bump": "patch",
+      "summary": "Sign-in buttons show each provider's logo (Feishu, GitHub, Google, Apple), and the web sign-in popup is opened during the click so slow networks and Safari no longer block it.",
+      "date": "2026-10-05T18:10:23+08:00"
+    },
+    {
       "id": "signaling-reconnect-storm",
       "bump": "patch",
       "summary": "The desktop no longer rebuilds every paired device's WebRTC signaling connection whenever an unrelated setting changes. The renderer re-pushed its signaling configuration on every `AppSettings` write, because the settings row is a single Dexie record, so a theme change (or any of the ~169 `saveSettings` call sites) re-fired the live query. The Rust hub then applied each push by tearing down one WebSocket per paired device and re-running each one's full challenge / signature / key-exchange handshake. Both sides now compare before acting, so an unchanged configuration is a no-op.\n\nA device that is _paused_ also stops holding a signaling connection open: pausing already puts it on the deny-list, so the socket could never serve a request. Cancelling a signaling client is now observed during its connect and handshake instead of only after, which removes a race where a torn-down client could reclaim the room and knock its own replacement offline. Finally, an established socket that the network drops is logged quietly and only escalates after ten consecutive losses, so ordinary WAN churn across many paired devices no longer buries real failures.",
@@ -7305,6 +7761,12 @@
       "bump": "minor",
       "summary": "Slack OAuth works. It previously could not succeed at all: the settings dialog stored the CSRF state under a key the deep-link router never read, minted a bare UUID where the completion handler required `slack:<adapterId>:<nonce>`, took the client id from a `NEXT_PUBLIC_SLACK_CLIENT_ID` env var that is set nowhere while the exchange read a per-adapter keyring entry the dialog never wrote, and pointed Slack at a `cognia://` redirect Slack refuses to register. Every attempt ended on \"OAuth state mismatch\".\n\nThe flow now mirrors the Lark one end to end and runs in the brain on both hosts: the dialog collects the Slack app's client id/secret into the keyring, `beginSlackOAuth` mints and durably persists the pending authorization before handing out the URL, and a new `/oauth/connector/{kind}/callback` relay on the connectors ingress fans the result to the desktop deep link and to the headless brain alike. A self-hosted install authorizes with `cognia-agent lark authorize` (the operator verb now dispatches on the adapter's own type and names the right developer console). The completion handler validates against the durable record — not browser storage — and spends it before the exchange, so a replayed redirect cannot reuse it.",
       "date": "2026-08-21T14:24:18+08:00"
+    },
+    {
+      "id": "smart-zoos-hang",
+      "bump": "patch",
+      "summary": "Clarify that paired-host chats forward device-local provider credentials per request without syncing provider settings.",
+      "date": "2026-10-06T17:11:57+08:00"
     },
     {
       "id": "source-control-clone-and-identity",
@@ -7511,6 +7973,12 @@
       "date": "2026-09-01T00:05:21+08:00"
     },
     {
+      "id": "ssh-hosts-connect-flow",
+      "bump": "minor",
+      "summary": "SSH hosts get a proper home and one connect flow. Settings → Terminal is now a topic rail (Appearance, Shell, Host, Launch profiles, SSH hosts, …) and the SSH hosts editor lists each host as one summary line with Connect, Test connection, Browse files, Duplicate and confirmed Remove. Every \"fix this in Settings\" link opens the right host. The dock, device console, phone and settings share one connect flow: a missing password on the target or a jump host, or a broken jump chain, is caught before dialing with a button that opens the profile to fix; a re-trusted host key reconnects automatically; Restart on an SSH tab reconnects instead of starting a local shell. Idle SSH sessions no longer drop after 30 seconds, paired devices and SFTP now reach bastion-backed hosts through their jump hosts, a desktop driving a remote host still dials its own SSH hosts, and a device's SSH spawn can never open the desktop's port forwards.",
+      "date": "2026-10-04T17:00:15+08:00"
+    },
+    {
       "id": "ssh-hosts-in-device-console",
       "bump": "patch",
       "summary": "Saved SSH hosts now actually appear in the device console (`/devices`) and in global search. All three read sites looked for them under `AppSettings.terminalSettings`, a key the settings shape has never declared, so the lookup resolved to `undefined` and every saved profile was silently missing from both surfaces. They now read the real path, `AppSettings.terminal.sshHosts`, which is the same one Settings → Terminal writes. A saved SSH row whose profile is no longer in Settings now says so, instead of rendering a Connect button that is dead with no explanation. Device search also isolates its three sources, so one unhydrated store no longer empties the whole device section of the command palette.",
@@ -7587,6 +8055,24 @@
       "bump": "patch",
       "summary": "Standalone (BYOK) chat in the browser and the phone no longer leaves an unhandled promise rejection behind when a provider rejects the request (for example an invalid API key) or when you press Stop mid-reply. The turn still reports the provider error, or seals the partial answer, exactly as before; only the stray \"No output generated\" / \"signal is aborted\" rejection that the AI SDK's unused telemetry context raised is gone.",
       "date": "2026-09-25T01:02:42+08:00"
+    },
+    {
+      "id": "status-email-redesign",
+      "bump": "patch",
+      "summary": "Redesigned status notification emails: branded card layout matching the status page, colour-coded status pill, component chips, a clear action button, readable UTC dates, inbox preview text and dark mode.",
+      "date": "2026-10-02T22:09:56+08:00"
+    },
+    {
+      "id": "status-page-redesign",
+      "bump": "patch",
+      "summary": "Refreshed the public status page design: sections sit in cards with clearer empty states, incidents and maintenance carry colour accents, history bars are easier to read, and the subscribe, manage and incident dialogs get a clearer layout with a segmented language picker and selectable component cards.",
+      "date": "2026-10-02T22:53:54+08:00"
+    },
+    {
+      "id": "status-page-scoped-messages",
+      "bump": "patch",
+      "summary": "Public status page loads only its own translations (about 15 KB instead of the full 2 MB catalog), turns on email subscriptions from noreply@status.cognia.cn, and never lets a non-production status deployment probe the production relay.",
+      "date": "2026-10-02T21:55:47+08:00"
     },
     {
       "id": "steer-live-delivery-and-sidechat",
@@ -7805,6 +8291,12 @@
       "date": "2026-08-20T00:59:34+08:00"
     },
     {
+      "id": "team-pause-retired-session",
+      "bump": "patch",
+      "summary": "Pausing an Agent Team teammate that runs on an external agent whose stop ends the whole session (such as DeepSeek Harness, or a gateway-managed session) no longer leaves the teammate \"paused\" on a session that no longer exists: the session is released, later steering waits for the teammate's next turn, and the teammate is parked for input when its unfinished work cannot be replayed safely.",
+      "date": "2026-10-05T23:10:57+08:00"
+    },
+    {
       "id": "team-plan-approval-gate-unhang",
       "bump": "patch",
       "summary": "Fix the team plan-approval gate hanging forever. With `requirePlanApproval` enabled, the runtime now publishes the lead's proposed plan to the board (so the Plan Approval panel actually renders with enabled buttons) and opens the HITL gate modal, instead of waiting on a decision no UI could produce. Answering from the board panel also dismisses the matching gate modal, and the lead always leaves `awaiting_approval` once a decision (or abort) lands.",
@@ -7833,6 +8325,12 @@
       "bump": "minor",
       "summary": "A team room's `@` picker lists the people in it. Typing `@` in a character-team conversation now opens a Members section above agents and files, showing each member's avatar and its role in that team, and picking one inserts the exact name the turn router matches.",
       "date": "2026-09-09T11:21:17+08:00"
+    },
+    {
+      "id": "team-run-recovery-fixes",
+      "bump": "patch",
+      "summary": "Agent Team runs interrupted by a restart are recovered by the team coordinator instead of being replayed (and failed) by workflow resume, the headless brain now recovers them too, and a workflow run that lost its lease to another device stops instead of overwriting that device's progress.",
+      "date": "2026-10-05T21:58:35+08:00"
     },
     {
       "id": "team-store-phantom-run-reset",
@@ -7977,6 +8475,12 @@
       "bump": "patch",
       "summary": "Fix terminal font settings being swallowed while typing, and show a live font preview\n\nNumeric terminal settings clamped on every keystroke, so a typed value could never pass through an out-of-range prefix — typing `20` into font size landed on `8`, and `20000` into scrollback landed on `100000`. They now clamp on commit (blur / Enter) and revert when left blank. The font-family and custom-shell boxes commit on blur instead of persisting every half-typed character. Settings → Terminal gains a live specimen of the configured typography that names the font actually being used and warns when the requested family isn't installed, plus a reset-to-default button. The mobile terminal now honors the configured font size and scrollback instead of hard-pinning phone defaults.",
       "date": "2026-07-25T14:25:55+08:00"
+    },
+    {
+      "id": "terminal-host-resilience",
+      "bump": "patch",
+      "summary": "The terminal host no longer exits when one connection fails its check, and a credential problem is reported as such instead of \"connection refused\".",
+      "date": "2026-10-04T17:00:15+08:00"
     },
     {
       "id": "terminal-nerd-font-bundled",
@@ -8633,6 +9137,18 @@
       "date": "2026-08-02T16:52:27+08:00"
     },
     {
+      "id": "usage-insights-deeper-analytics",
+      "bump": "minor",
+      "summary": "Usage analytics go deeper: headline tiles show the change against the previous period, the budget card and Settings → Usage & cost project month-end spend against the monthly limit, the breakdown ranks by surface, provider or workspace, cost over time can stack by model, surface or provider, and new Efficiency (cache savings, p50/p90/p99 per-turn cost, latency and speed) and Activity pattern (weekday × hour) sections plus spend-spike insights explain where the money goes. Session Insights adds a per-turn cost and context timeline, the priciest turns with jump-to-turn, and how the conversation ranks against your recent ones; the session cost badge now prices turns the same way as the dashboard and marks unpriced spend as a lower bound.\n\nEvery conversation's side dock gains a \"Usage & context\" panel: the context window's live composition as a ring (with the detailed breakdown and compact-now), context size across every turn against the window and auto-compact lines with compactions marked, cost per turn with the priciest turns one click from the transcript, token mix, tool-call counts and failure rate, model mix, cache savings and per-turn percentiles, plus a shortcut to the full health report. The composer's context ring and the panel now resolve the window through one shared path.",
+      "date": "2026-10-04T17:02:18+08:00"
+    },
+    {
+      "id": "vault-locked-recovery",
+      "bump": "patch",
+      "summary": "A page blocked by a locked Vault now offers \"Unlock account\", which brings up the account unlock screen, instead of linking to the Profile page that could not unlock anything.",
+      "date": "2026-10-04T16:58:10+08:00"
+    },
+    {
       "id": "vector-agent-memory-tools",
       "bump": "minor",
       "summary": "Add project-scoped vector memory tools for the agent (`vector_search`, `vector_add_document`, `vector_delete_document`), opt-in from Settings → Tools. Collections are scoped to the session's linked project — the agent can neither name nor reach another project's memory — and every call passes the PII redaction gate before anything is embedded or stored. Desktop only: they run against the local native vector store, never a configured cloud vector provider.",
@@ -8663,6 +9179,132 @@
       "date": "2026-08-21T13:21:07+08:00"
     },
     {
+      "id": "vscode-api-coverage",
+      "bump": "patch",
+      "summary": "The warning a VS Code extension's card shows when it uses APIs Cognia lacks now names the exact calls (for example `vscode.window.createTreeView`), not only whole namespaces like `vscode.debug`, measured against the full VS Code 1.91 API the extension host implements.",
+      "date": "2026-10-03T19:09:38+08:00"
+    },
+    {
+      "id": "vscode-extension-activation",
+      "bump": "minor",
+      "summary": "VS Code extensions now start when VS Code would start them instead of all at launch. An enabled extension starts at launch only for `*`, `onStartupFinished` or contributed views; otherwise it starts when you run one of its commands, open a file in a language it handles (`onLanguage`), open a project folder containing a file it looks for (`workspaceContains`), follow one of its links (`onUri`), or when something asks for its sign-in provider (`onAuthenticationRequest`), including the events VS Code infers from contributed commands, languages and authentication providers. Until it starts, its commands are listed with their titles, categories and `when` clauses, and its languages are known to the editor. Activation events Cognia never fires (debugging, notebooks, custom editors, restoring webview panels, terminal profiles, tasks, file systems, walkthroughs, chat participants, language model tools) are shown on the extension's card. Extensions installed before this keep starting at launch until they are reinstalled or updated.",
+      "date": "2026-10-03T18:21:11+08:00"
+    },
+    {
+      "id": "vscode-extension-api-surface",
+      "bump": "minor",
+      "summary": "VS Code extensions find the rest of the VS Code 1.91 API in place. Every class and enum it declares now exists (tasks, notebooks, debugging, testing and coverage, drag and drop, chat history, terminal links and profiles), so an extension that builds these objects no longer fails on `undefined`. `window.state` and `window.activeColorTheme` follow the app window's focus and its light or dark theme, `env` reports the desktop app, your shell and its install directory, `workspace.registerTaskProvider` works, and `env.createTelemetryLogger` returns a logger that sends nothing, because Cognia never sends extension telemetry. The parts Cognia does not provide (tree views, custom editors, file decorations, editor tabs, notebooks, file-operation events, save-as, file system providers, language status items, drop edits) are still present: registrations are accepted and never used, their events never fire, and calls that have to produce something fail with the reason. The first time an extension meets one of them, its log says what is not supported and why. Only `tasks.onDidStartTaskProcess` and `onDidEndTaskProcess` remain missing.",
+      "date": "2026-10-03T19:41:37+08:00"
+    },
+    {
+      "id": "vscode-extension-compat-section",
+      "bump": "minor",
+      "summary": "A VS Code extension's details now list what it uses that Cognia does not provide, in a \"Not available in Cognia\" section: debuggers, notebooks, tree views and view containers, context menus, keyboard shortcuts, syntax grammars in the code editor (they still color code in chat and previews), the extensions an extension pack lists, and extensions built as ES modules, which cannot start. The same section names the unsupported VS Code APIs found in the extension's code and the activation events Cognia never fires. An ES module extension now fails with that reason instead of an internal note about a future phase.",
+      "date": "2026-10-03T19:57:22+08:00"
+    },
+    {
+      "id": "vscode-extension-documents",
+      "bump": "minor",
+      "summary": "VS Code extensions can now open, edit and save documents. `workspace.openTextDocument` opens files from the project (with the extension's file-read permission), new untitled documents and documents from content providers (`registerTextDocumentContentProvider`, including its change event). `workspace.applyEdit` applies text edits and file creates, renames and deletes in the order they were added: open documents change in the editor (undoable, unsaved), other files change on disk with the extension's file-write permission, and a failed step answers `false` with the reason in the extension's log. `document.save()`, `workspace.save` and `saveAll` save through the project editor, extensions see the user's saves through `onDidSaveTextDocument`, `window.showTextDocument` opens a file in the project editor at a selection, and `editor.edit` / `applyEdit` resolve once the document shows the change. Saving an untitled document is not supported yet. Extensions that open or edit files now ask for file read/write permission when installed.",
+      "date": "2026-10-03T14:54:34+08:00"
+    },
+    {
+      "id": "vscode-extension-editor-ops",
+      "bump": "minor",
+      "summary": "VS Code extensions can now work on the editor itself: `TextEditor.edit` and `insertSnippet` change the text (refused when the document moved on, as in VS Code), decoration types draw colors, borders, whole-line backgrounds, before/after text, light/dark variants and overview-ruler marks, `revealRange`, setting `selections` and `options` move the real editor, and extensions see the editor's visible ranges and indentation with their change events. A decoration's gutter or content icon and cursor style are not drawn yet.",
+      "date": "2026-10-03T13:44:20+08:00"
+    },
+    {
+      "id": "vscode-extension-env-links",
+      "bump": "minor",
+      "summary": "VS Code extensions can now use the clipboard (with the clipboard permissions you grant), open links, and receive app links. `env.openExternal` asks before opening a web or mail link in your browser (or copies it if you prefer), sends `cognia://<extension id>/…` links to that extension, and opens a file in its default app only for an extension allowed to run programs. `env.asExternalUri` turns an extension's `cognia://` callback into a link your system routes back to it (through the app's deep-link page in a browser), and `window.registerUriHandler` receives those links, activating the extension on demand, which makes sign-in flows that return to the extension work.",
+      "date": "2026-10-03T16:30:02+08:00"
+    },
+    {
+      "id": "vscode-extension-extensions-api",
+      "bump": "patch",
+      "summary": "VS Code extensions can now see each other: `extensions.all` and `getExtension` list the installed VS Code extensions (case-insensitive ids) with their `packageJSON`, install location and whether they are running, `onDidChange` fires when that changes, and an extension's own entry carries its exports. `activate()` on another extension resumes or waits for it, and fails for one the user disabled. Another extension's `exports` are not available, because each extension runs in its own process.",
+      "date": "2026-10-03T16:07:42+08:00"
+    },
+    {
+      "id": "vscode-extension-install-result",
+      "bump": "patch",
+      "summary": "Installing a VS Code extension that has code no longer fails with \"VS Code extension id mismatch … Rust unpacked to \"undefined\"\". The desktop answered the install in a shape the app did not read, so every such install from Open VSX or a `.vsix` file was refused.",
+      "date": "2026-10-04T00:20:38+08:00"
+    },
+    {
+      "id": "vscode-extension-language-features",
+      "bump": "minor",
+      "summary": "VS Code extensions' language features now work in Cognia's editors: hover, completion, definition, declaration, type definition, implementation, references, highlights, formatting, code actions, rename, symbols, signature help, inline completions, colors, folding, selection ranges, links, semantic tokens, inlay hints and linked editing reach the extension with the real document, position, context and cancellation, and come back in the shapes Monaco renders. Extensions see open documents, edits and the active editor, can set language configurations and switch a document's language, and diagnostics show even for files opened after they were reported. Call and type hierarchy register but stay inert, since the editor has no view for them.",
+      "date": "2026-10-03T12:19:57+08:00"
+    },
+    {
+      "id": "vscode-extension-language-models",
+      "bump": "minor",
+      "summary": "VS Code extensions that use `vscode.lm` now talk to the model you configured in Cognia. `lm.selectChatModels` offers that model (vendor `cognia`), and its `sendRequest` streams the reply, honors cancellation, and throws VS Code's `LanguageModelError` (`NoPermissions`, `Blocked`, `NotFound`) when a request is refused. Requests need the `ai:chat` permission (asked for at install when an extension uses `vscode.lm`), go through the PII gate and the plugin rate limit, and never use a key or provider of the extension's own. `countTokens`, `onDidChangeChatModels` and `languageModelAccessInformation` work. Tools are not supported: models never call an extension's tools, and `lm.registerTool` and the model and MCP provider registrations are accepted but unused, which the extension's log says.",
+      "date": "2026-10-03T17:43:57+08:00"
+    },
+    {
+      "id": "vscode-extension-sandbox",
+      "bump": "patch",
+      "summary": "VS Code extensions now have the globals they expect: `queueMicrotask`, `structuredClone`, `AbortController`, `performance`, `atob`/`btoa`, `crypto`, `Blob`, `FormData`, `Headers`/`Request`/`Response`, `MessageChannel` and Node's `global`. `fetch` works for an extension that has the `network:fetch` permission and `WebSocket` for one that has `network:websocket`; without them they refuse with a message naming the permission, and the extension's log records it. Using either now asks for that permission at install. Extension traffic (`fetch`, `WebSocket` and the `http`/`https` modules) goes through the proxy you configured, and nowhere at all when the proxy settings are unusable.",
+      "date": "2026-10-03T18:30:58+08:00"
+    },
+    {
+      "id": "vscode-extension-settings",
+      "bump": "minor",
+      "summary": "VS Code extensions' settings now work. Settings an extension declares in `contributes.configuration` appear on its Configure tab (titles, descriptions, enums, bounds and patterns included, with `package.nls` text resolved), and `workspace.getConfiguration` reads them synchronously as in VS Code: the user's value, else the declared default, with whole sections readable as objects, `has`, `inspect`, and VS Code's defaults for common core settings. `update` saves the extension's own settings and resolves once the new value is visible, and `onDidChangeConfiguration` reports which settings changed, including edits made on the Configure tab. An extension's name and description written as `%key%` now show in the user's language. Language-specific settings and `configurationDefaults` are not supported yet, and every update is saved as a user setting.",
+      "date": "2026-10-03T15:58:23+08:00"
+    },
+    {
+      "id": "vscode-extension-signatures",
+      "bump": "minor",
+      "summary": "VS Code extensions from Open VSX are checked against Open VSX's signature, and extensions it does not vouch for need your trust before they start. Every download's `.sigzip` signature is verified on the desktop against Open VSX's key, which is built into Cognia rather than taken from the registry. A signature that does not match stops the install. A verified extension shows \"Signed by Open VSX\" and starts as before. An extension added from a `.vsix` file, one signed by a key Cognia does not know, or one installed before this check existed has nothing vouching for it, so it starts only after you turn on \"Trust this extension\" in its Permissions section; the install dialog and the error say so. VS Code extensions no longer go through the plugin signature policy, which none of them could pass before, so with that policy on (the default) no VS Code extension could start at all.",
+      "date": "2026-10-03T20:44:34+08:00"
+    },
+    {
+      "id": "vscode-extension-tasks",
+      "bump": "minor",
+      "summary": "VS Code extensions can run tasks. `vscode.tasks.executeTask` opens a terminal in the dock for the task: a shell task runs its command line in your shell (or the one it names), with its arguments quoted for that shell, a process task runs its program directly, and a custom task shows the extension's own terminal. The task runs in its workspace folder unless it names another directory, and `${workspaceFolder}`, `${workspaceFolderBasename}`, `${userHome}`, `${pathSeparator}` and `${env:NAME}` are filled in. The extension hears the task start and end, and the exit code of its process, and can stop it. A task without an execution is first completed by the extension's own task provider. `fetchTasks` returns every extension's tasks; another extension's custom task cannot be run. Running tasks needs the extension's terminal permission, which is now asked for at install when its code runs tasks. Problem matchers are not supported, so a task's output produces no diagnostics. The extension hears the process id of the task's shell or program when it starts.",
+      "date": "2026-10-03T20:08:52+08:00"
+    },
+    {
+      "id": "vscode-extension-terminals",
+      "bump": "minor",
+      "summary": "VS Code extensions can now open terminals. `window.createTerminal` opens a tab in the terminal dock, named as the extension asks: a shell (your default, or the one the extension names, with its arguments, folder, environment and tab color) that `sendText` types into, behind the extension's terminal permissions, or an extension-driven terminal (`Pseudoterminal`) that shows what the extension writes and hands it what you type and the tab's size. `show`, `hide` and `dispose` work, and an extension sees its own terminals through `window.terminals`, `activeTerminal` and the open, close, active and state events, including whether you, the extension or the process ended each one. A shell terminal's `processId` is its shell's process id. Your own terminals stay out of extensions' sight. Shell integration, `strictEnv` and the `message`, `location` and `iconPath` options are not supported.",
+      "date": "2026-10-03T16:48:29+08:00"
+    },
+    {
+      "id": "vscode-extension-webviews",
+      "bump": "minor",
+      "summary": "VS Code extensions' webviews now work. Webview panels and webview views appear as tabs in the extension rail beside the main content, in a sandboxed frame that follows the app's theme (with VS Code's `--vscode-*` variables). The extension's scripts run and its files load from its own folder and the workspace (`localResourceRoots`), including files it loads later, `acquireVsCodeApi()` with saved state works, messages flow both ways, links open after you agree (or run the commands the webview allows), and a view is filled the first time you open its tab. Panels can be closed, and a tab can keep its page alive while hidden when the extension asks. Remote resources, relative imports between script modules, `portMapping` and restoring panels after a restart are not supported.",
+      "date": "2026-10-03T17:18:39+08:00"
+    },
+    {
+      "id": "vscode-extension-window-ui",
+      "bump": "minor",
+      "summary": "VS Code extensions can now talk to the user: information, warning and error messages (as toasts, or dialogs when modal) return the chosen item; quick picks and input boxes, including live `createQuickPick` / `createInputBox` with multi-select, buttons, busy state and validation, open in the app; `withProgress` shows a notification with a working Cancel or a status bar spinner; status bar items and messages appear in the status bar and run their commands; output channels (including log channels) write to the plugin's logs with an \"Open logs\" notice; and open/save dialogs use the desktop's native file dialogs. A stray promise rejection in an extension is logged instead of crashing its host.",
+      "date": "2026-10-03T13:14:03+08:00"
+    },
+    {
+      "id": "vscode-extension-workspace-files",
+      "bump": "minor",
+      "summary": "VS Code extensions now see the project folders open in the app's editors: `workspace.workspaceFolders`, `name`, `rootPath`, `getWorkspaceFolder`, `asRelativePath` and `onDidChangeWorkspaceFolders` all work, and `showWorkspaceFolderPick` offers them. `workspace.fs` reads, writes, stats, lists, copies, renames and deletes files (binary included) inside those folders with the extension's file permissions, and in the extension's own storage without asking; symlinks cannot lead outside a folder. `workspace.findFiles` searches the folders with full VS Code glob syntax (relative patterns, excludes, result limits), and `createFileSystemWatcher` reports created, changed and deleted files on the desktop. Documents an extension opened without an editor now follow changes on disk. Not supported yet: moving files to the trash (`delete` with `useTrash`), changing the folder list (`updateWorkspaceFolders` answers `false`), and file system providers for other schemes. Extensions that watch files now ask for file-read permission when installed.",
+      "date": "2026-10-03T15:42:57+08:00"
+    },
+    {
+      "id": "vscode-extensions-desktop-only",
+      "bump": "patch",
+      "summary": "The web and mobile apps no longer offer Open VSX in Discover, since VS Code extensions run only in the desktop app; a remembered Open VSX choice shows all plugins instead. Installing a `.vsix` outside the desktop app is refused with a message rather than recording an extension that can never load.",
+      "date": "2026-10-03T18:56:33+08:00"
+    },
+    {
+      "id": "vscode-extensions-run",
+      "bump": "minor",
+      "summary": "VS Code extensions now actually run as Cognia plugins: an installed `.vsix` loads from its own install root, `require(\"vscode\")` resolves to the shim (sensitive Node modules stay permission-gated), the extension context carries real storage paths and a persisted `globalState` / `workspaceState`, a crashed extension host restarts with backoff before the plugin is marked errored, its stderr shows in Plugin DevTools, and uninstalling removes the extension's install and state.",
+      "date": "2026-10-03T11:12:43+08:00"
+    },
+    {
       "id": "wakeup-deadlines",
       "bump": "minor",
       "summary": "Issue wakeups can have a deadline (1 hour to 2 weeks) and, when it passes before what they wait for, either stop or wake the issue once more to say the wait ran out. Event-triggered scheduled tasks now actually expire at their end date instead of firing past it.",
@@ -8679,6 +9321,12 @@
       "bump": "minor",
       "summary": "Wallpaper: better image fitting, a wallpaper-aware theme generator, and a reorganized panel. Adds a `Stretch` fit and a 3×3 focal-point anchor so an over-wide or portrait image keeps its subject through a `cover` crop, and the active gallery tile now previews the real fit instead of a fixed thumbnail. \"Generate theme from wallpaper\" now works for gradient and solid-color wallpapers (previously image-only, which excluded every built-in preset), extracts a secondary color alongside the accent, tints the neutral surfaces toward the wallpaper instead of leaving them gray, and suggests an opacity/blur pair matched to how busy the image is. The contrast chip measures the sampled wallpaper rather than assuming worst-case noise for every image, and \"Auto-fix\" now applies the highest opacity that still clears WCAG AA instead of a fixed 40%. The adjustments are grouped into Placement and Readability, the scope picker gained arrow-key navigation, and dragging the blur/opacity sliders previews live without writing to the database on every pointer move.",
       "date": "2026-08-17T00:36:28+08:00"
+    },
+    {
+      "id": "wallpaper-legibility-guard",
+      "bump": "minor",
+      "summary": "Image wallpapers no longer make text unreadable or leave opaque blocks over the image: a new automatic readability protection (on by default, in Appearance → Wallpaper) measures each wallpaper's darkest and brightest areas and caps its opacity where text keeps WCAG contrast for the current theme, and outline buttons, sidebar search, canvas panels and the remaining ai-elements panels now blend with the wallpaper instead of painting solid blocks. Nested wallpaper layers no longer stack into a brighter image than the setting allows, solid-colour wallpapers paint again, and the wallpaper panel now says when a wallpaper suits the other light/dark variant, with a one-click switch and a new \"follow the wallpaper\" automatic light/dark mode; automatic light/dark now runs on every page. Stat strips, the scheduler's task list and server fact lists now blend with the wallpaper too, the home and About glows no longer dim text over a wallpaper, and selected rows in the command palette, menus, settings navigation and skill list keep readable descriptions under colour presets and high-contrast themes.",
+      "date": "2026-10-01T16:23:01+08:00"
     },
     {
       "id": "wallpaper-theme-generate-flicker",
@@ -8759,6 +9407,12 @@
       "date": "2026-08-31T10:57:24+08:00"
     },
     {
+      "id": "web-sign-in-callback-gate",
+      "bump": "patch",
+      "summary": "Let web sign-in callbacks complete without waiting for local account loading, unlock, or onboarding. Official Cognia and self-hosted Logto popups now use the existing lightweight route shell.",
+      "date": "2026-10-05T11:29:16+08:00"
+    },
+    {
       "id": "web-terminal-host-parity",
       "bump": "minor",
       "summary": "The integrated terminal now works from a browser paired to a Cognia server, instead of only appearing to. Reloading the page reattaches to the sessions the host kept running (previously they were orphaned with no way back — only the mobile screen ever reattached). New terminals spawn the shell you picked: the host reports its own platform and installed shells, and your saved profiles are pushed to it, so a profile no longer fails as \"unknown terminal profile\" and the shell picker offers what the host actually has rather than what your laptop has. Terminal settings — the host's session and replay limits, and the remote-access switch — now reach the host over a capability-gated call and show what it actually has, rather than writing a local copy nothing read. When a server has remote terminal access switched off, the dock says so and points at the setting, instead of reporting a generic connection failure. The \"free the port\" quick fix frees it on the host that owns it, and workflow and agent terminal steps run on the host you are attached to instead of refusing with \"requires the desktop app\".",
@@ -8769,6 +9423,12 @@
       "bump": "patch",
       "summary": "Fix the Web Tools plugin: `web_download` no longer writes 0-byte files on desktop — it now routes through the host `network:download` gateway, which streams real bytes into the plugin's data sandbox with traversal-safe paths (model-supplied `filename`/`directory` are sanitized or refused). The tool fails honestly on mobile instead of silently dropping the download. `web_research` is now actually tool-enabled (`allowedTools` previously did nothing on the text channel), distills each source against the query, forwards the caller's abort signal/session for cancellation and billing, returns the raw text when structured parsing fails, collapses run failures into the `{ok:false}` envelope, and reports unreachable sources separately from fetched ones. The manifest now describes only the tools it registers, declares the `userAgent`/`downloadDirectory` settings, and marks mobile as degraded.",
       "date": "2026-09-11T20:24:30+08:00"
+    },
+    {
+      "id": "webrtc-dead-channel-recovery",
+      "bump": "patch",
+      "summary": "Phones recover when their WebRTC data channel to the Host dies after the app resumes from the background: the Host refuses an ICE restart it has no connection for, so the phone negotiates a fresh connection instead of sending requests the Host silently discards. A liveness probe on the main channel fails requests fast on a dead channel and falls back to the relay. The Host logs each data channel by label, stream and handle.",
+      "date": "2026-10-04T16:58:22+08:00"
     },
     {
       "id": "webrtc-turn-reconnect-fixes",
@@ -8841,6 +9501,12 @@
       "bump": "minor",
       "summary": "Add a customizable usage dashboard to the chat welcome page — stat tiles (sessions, turns, tokens, cost, active days, streaks, peak hour, top model), a calendar heatmap, and a per-model breakdown over a 7/30/90-day window. Every figure is derived from the same `sessionUsage` aggregation the Subscription → Usage tab uses, and both surfaces now draw the same heatmap component. Tiles, the heatmap, the window and the active view are persisted per user; the ✕ hides the panel and Settings → Appearance → Personalization restores it.",
       "date": "2026-08-03T01:13:52+08:00"
+    },
+    {
+      "id": "wide-mugs-divide",
+      "bump": "patch",
+      "summary": "Show the correct Kimi and Qoder brand marks for teammate runtimes.",
+      "date": "2026-10-05T18:20:22+08:00"
     },
     {
       "id": "wide-pumas-argue",
@@ -9192,12 +9858,12 @@
     }
   ],
   "inventory": {
-    "plugins": 66,
+    "plugins": 67,
     "connectors": 11,
     "workflowNodeKinds": 237,
-    "crates": 59,
-    "packages": 33,
-    "adrs": 199,
-    "testFiles": 11004
+    "crates": 61,
+    "packages": 46,
+    "adrs": 211,
+    "testFiles": 11794
   }
 }

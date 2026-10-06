@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { GLYPH_NAMES } from "@web/components/glyph"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import type { Evidence } from "@web/lib/evidence"
+import type { Inventory } from "@web/lib/evidence"
 import { INVENTORY_KEYS } from "@web/lib/evidence"
 
 let reduced = false
@@ -29,35 +29,26 @@ import { CapabilityPanorama } from "./capability-panorama"
 
 const DOCS = "https://docs.example.test"
 
-function evidence(overrides: Partial<Evidence> = {}): Evidence {
+function inventory(overrides: Partial<Inventory> = {}): Inventory {
   return {
-    readAt: "2026-09-05T00:00:00.000Z",
-    lastGoodReadAt: "2026-09-05T00:00:00.000Z",
-    errors: [],
-    repo: { stars: 53, license: "AGPL-3.0", description: null },
-    contributors: 3,
-    releases: [],
-    changesets: [],
-    inventory: {
-      plugins: 59,
-      connectors: 11,
-      workflowNodeKinds: 185,
-      crates: 35,
-      packages: 32,
-      adrs: 167,
-      testFiles: 9496,
-    },
+    plugins: 59,
+    connectors: 11,
+    workflowNodeKinds: 185,
+    crates: 35,
+    packages: 32,
+    adrs: 167,
+    testFiles: 9496,
     ...overrides,
   }
 }
 
-function renderPanorama(locale: "en" | "zh" = "en", data: Evidence = evidence()) {
+function renderPanorama(locale: "en" | "zh" = "en", data: Inventory = inventory()) {
   const copy = locale === "en" ? en : zh
   return render(
     <CapabilityPanorama
       copy={copy.home.panorama}
       common={copy.common}
-      evidence={data}
+      inventory={data}
       locale={locale}
       docsOrigin={DOCS}
       index={8}
@@ -84,11 +75,21 @@ describe("CapabilityPanorama", () => {
   })
 
   it("shows a dash rather than a zero when a count did not run", () => {
-    const data = evidence()
-    data.inventory.crates = 0
+    const data = inventory({ crates: 0 })
     const { container } = renderPanorama("en", data)
     const cell = container.querySelector('[data-figure="crates"]') as HTMLElement
     expect(within(cell).getByText("—")).toBeInTheDocument()
+  })
+
+  it.each(["en", "zh"] as const)("preserves every formatted count in %s", (locale) => {
+    reduced = true
+    const data = inventory()
+    const { container } = renderPanorama(locale, data)
+    const formatter = new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "en-US")
+    for (const key of INVENTORY_KEYS) {
+      const cell = container.querySelector(`[data-figure="${key}"]`) as HTMLElement
+      expect(within(cell).getByText(formatter.format(data[key]))).toBeInTheDocument()
+    }
   })
 
   it("places every subsystem on a lane with its own mark and a next step", () => {

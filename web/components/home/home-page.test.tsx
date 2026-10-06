@@ -14,8 +14,11 @@ jest.mock("@web/content/generated/product-videos.json", () => ({ renderedAt: nul
 
 import videoManifest from "@web/content/generated/product-videos.json"
 import { render, screen, within } from "@testing-library/react"
+import { Children, isValidElement } from "react"
+import { evidence } from "@web/components/site-shell"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
+import { CapabilityPanorama } from "./capability-panorama"
 import { HomePage } from "./home-page"
 
 jest.mock("next-themes", () => ({
@@ -40,6 +43,23 @@ beforeEach(() => {
 })
 
 describe("HomePage", () => {
+  it.each(["en", "zh"] as const)(
+    "sends only inventory evidence across the panorama client boundary in %s",
+    (locale) => {
+      // Inspect the server-produced props: a DOM render would hide unused data
+      // that Next still serializes into the client payload.
+      const page = HomePage({ locale })
+      const panorama = Children.toArray(page.props.children).find(
+        (child) => isValidElement(child) && child.type === CapabilityPanorama
+      )
+
+      expect(isValidElement(panorama)).toBe(true)
+      if (!isValidElement(panorama)) throw new Error("Missing capability panorama")
+      expect(panorama.props).not.toHaveProperty("evidence")
+      expect(panorama.props).toHaveProperty("inventory", evidence.inventory)
+    }
+  )
+
   it("renders all eleven sections in the order the spec fixes", () => {
     render(<HomePage locale="en" />)
     const headings = screen
