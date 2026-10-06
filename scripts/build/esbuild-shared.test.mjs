@@ -35,7 +35,7 @@ test("the fixture variant drops the shebang and keeps every plugin", () => {
     banner: false,
   })
   assert.equal(options.banner, undefined)
-  assert.equal(options.plugins.length, 4)
+  assert.equal(options.plugins.length, 3)
   assert.ok(options.plugins.some((p) => p.name === "stub-next-runtime"))
   assert.ok(options.plugins.some((p) => p.name === "json-default-only-messages"))
 })

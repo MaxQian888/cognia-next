@@ -10,7 +10,6 @@
 // See scripts/build/dev-cli.mjs for the history.
 
 import path from "node:path"
-import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 
 // Stub Next.js runtime + RSC marker modules. The CLI reuses lib/claude/*, whose
 // static graph incidentally reaches a few UI components that import next/image,
@@ -78,7 +77,6 @@ export function createBundleAgentProtocolDependenciesPlugin(root) {
 /** The plugin list, in the order the CLI bundle has always used. */
 export function createCliEsbuildPlugins(root) {
   return [
-    createCliExternalAgentAliasPlugin(root),
     createBundleAgentProtocolDependenciesPlugin(root),
     stubNextPlugin,
     jsonDefaultOnlyPlugin,

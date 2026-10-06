@@ -13,6 +13,9 @@
  *
  * Every call here is best-effort: a broken or absent hook bridge (web/mobile,
  * IPC error) must never break agent execution.
+ *
+ * A shell that installed an external-agent host (the standalone CLI) answers
+ * both systems itself through the host's hook plane (ADR-0217).
  */
 
 import { invoke } from "@tauri-apps/api/core"
@@ -25,6 +28,10 @@ import type {
 } from "@/types/agent/external-agent"
 import type { HookAgentKind } from "@/lib/claude/hooks"
 import { resolveToolProvenance } from "@/lib/claude/hooks/tool-provenance"
+import {
+  getInstalledExternalAgentHost,
+  type InstalledExternalAgentPluginHooks,
+} from "./host/installed-host"
 
 const log = createLogger("agent.external.hooks")
 
@@ -97,6 +104,12 @@ export function noticeFromDecision(
   return { event, toolName, outcome, block, additionalContext, warnings }
 }
 
+/** System-A plugin hooks: the installed host's (possibly none), else the app's. */
+function pluginHooks(): InstalledExternalAgentPluginHooks | null {
+  const installed = getInstalledExternalAgentHost()
+  return installed ? installed.hooks.pluginHooks : getPluginEventHooks()
+}
+
 function maybeEmit(emit: EmitHookNotice | undefined, notice: ExternalHookFireNotice | null): void {
   if (emit && notice) emit(notice)
 }
@@ -132,13 +145,23 @@ function toolPayload(
 
 /**
  * Call the Rust settings.json hook runtime for one external-agent lifecycle
- * event. Returns null on web/mobile or any bridge error.
+ * event. Returns null on web/mobile or any bridge error. An installed host runs
+ * the event through its own hook plane.
  */
 export async function fireAgentHook(
   event: string,
   ctx: AgentHookContext,
   opts?: { toolName?: string; payload?: Record<string, unknown> }
 ): Promise<AgentHookDecision | null> {
+  const installed = getInstalledExternalAgentHost()
+  if (installed) {
+    try {
+      return await installed.hooks.run(event, ctx, opts)
+    } catch (e) {
+      log.warn("installed_agent_hook_failed", { event, host: installed.kind, error: String(e) })
+      return null
+    }
+  }
   if (!isTauri()) return null
   try {
     return await invoke<AgentHookDecision>("run_agent_hook", {
@@ -166,7 +189,7 @@ export async function observeExternalAgentEvent(
   event: ExternalAgentEvent,
   emit?: EmitHookNotice
 ): Promise<void> {
-  const plugin = getPluginEventHooks()
+  const plugin = pluginHooks()
   switch (event.type) {
     case "session_start": {
       const d = await fireAgentHook("SessionStart", ctx)
@@ -174,7 +197,7 @@ export async function observeExternalAgentEvent(
       break
     }
     case "tool_use_start":
-      plugin.dispatchExternalAgentToolCall(
+      plugin?.dispatchExternalAgentToolCall(
         ctx.agentId,
         ctx.sessionId,
         event.toolName,
@@ -230,7 +253,7 @@ export async function gateExternalAgentPermission(
   const requestId = req.requestId ?? req.id
   const toolInput = req.rawInput ?? {}
 
-  getPluginEventHooks().dispatchExternalAgentPermissionRequest(
+  pluginHooks()?.dispatchExternalAgentPermissionRequest(
     ctx.agentId,
     ctx.sessionId,
     toolName,

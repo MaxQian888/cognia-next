@@ -29,6 +29,10 @@ import {
   type AgentHookContext,
   type ExternalHookFireNotice,
 } from "./agent-hooks"
+import {
+  installExternalAgentHost,
+  type InstalledExternalAgentHookPlane,
+} from "./host/installed-host"
 
 const ctx: AgentHookContext = {
   agentId: "a1",
@@ -380,5 +384,87 @@ describe("gateExternalAgentPermission", () => {
     const emit = jest.fn()
     await gateExternalAgentPermission(ctx, permEvent(), deny, emit)
     expect(emit).not.toHaveBeenCalled()
+  })
+})
+
+describe("installed external-agent host (ADR-0217)", () => {
+  async function withHost(
+    hooks: InstalledExternalAgentHookPlane,
+    run: () => Promise<void>
+  ): Promise<void> {
+    const uninstall = installExternalAgentHost({
+      kind: "test",
+      process: {} as never,
+      terminals: {} as never,
+      hooks,
+    })
+    try {
+      await run()
+    } finally {
+      uninstall()
+    }
+  }
+
+  const permission = {
+    type: "permission_request",
+    timestamp: new Date(),
+    request: {
+      id: "p1",
+      requestId: "p1",
+      toolInfo: { id: "bash", name: "bash" },
+      options: [],
+      rawInput: { command: "rm -rf /" },
+    },
+  } as unknown as ExternalAgentPermissionRequestEvent
+
+  it("runs settings hooks through the host's plane instead of run_agent_hook", async () => {
+    const run = jest.fn(async () => ({ block: "no", warnings: [] }))
+    await withHost({ run, pluginHooks: null }, async () => {
+      const deny = jest.fn(async () => undefined)
+      await expect(gateExternalAgentPermission(ctx, permission, deny)).resolves.toBe(true)
+      expect(run).toHaveBeenCalledWith(
+        "PreToolUse",
+        ctx,
+        expect.objectContaining({ toolName: "bash" })
+      )
+      expect(deny).toHaveBeenCalledWith("p1", "no")
+      expect(invoke).not.toHaveBeenCalled()
+      // No plugin event hooks on this host: the app's registry is not consulted.
+      expect(dispatchExternalAgentPermissionRequest).not.toHaveBeenCalled()
+    })
+  })
+
+  it("dispatches plugin event hooks to the host's own registry", async () => {
+    const pluginHooks = {
+      dispatchExternalAgentToolCall: jest.fn(),
+      dispatchExternalAgentPermissionRequest: jest.fn(),
+    }
+    await withHost({ run: async () => null, pluginHooks }, async () => {
+      await observeExternalAgentEvent(ctx, {
+        type: "tool_use_start",
+        toolUseId: "u1",
+        toolName: "bash",
+        rawInput: { command: "ls" },
+        timestamp: new Date(),
+      } as never)
+      expect(pluginHooks.dispatchExternalAgentToolCall).toHaveBeenCalledWith("a1", "s1", "bash", {
+        command: "ls",
+      })
+      expect(dispatchExternalAgentToolCall).not.toHaveBeenCalled()
+    })
+  })
+
+  it("keeps a failing host hook best-effort", async () => {
+    await withHost(
+      {
+        run: async () => {
+          throw new Error("hook runtime down")
+        },
+        pluginHooks: null,
+      },
+      async () => {
+        await expect(fireAgentHook("Stop", ctx)).resolves.toBeNull()
+      }
+    )
   })
 })

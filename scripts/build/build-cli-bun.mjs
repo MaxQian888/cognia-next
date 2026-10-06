@@ -7,7 +7,6 @@ import path from "node:path"
 
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { fileURLToPath } from "node:url"
-import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 import {
   buildCliArtifactManifest,
   verifyCliArtifactLayout,
@@ -280,7 +279,6 @@ const result = await Bun.build({
     autoloadBunfig: false,
   },
   plugins: [
-    createCliExternalAgentAliasPlugin(root),
     embeddedMulticallRolesPlugin,
     createWebcloneBundlePlugin({ root }),
     dynamicRequireCompatPlugin,

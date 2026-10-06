@@ -13,6 +13,10 @@
  *
  * Terminal support stays desktop-only (no headless `acp_terminal_*` arms) —
  * the ACP capability advertisement reflects that.
+ *
+ * A shell with its own process table (the standalone CLI) installs an
+ * {@link InstalledExternalAgentHost} at startup; every export here then
+ * delegates to its process plane (ADR-0217).
  */
 // `isTauri` via @/lib/utils (the app-wide re-export the existing agent test
 // suites mock); `isHeadlessHost` from the platform leaf.
@@ -29,6 +33,12 @@ import {
   subscribeActiveRemoteTransport,
 } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
+import { getInstalledExternalAgentHost } from "./host/installed-host"
+
+/** The installed shell's process plane, or `undefined` in the app. */
+function installedPlane() {
+  return getInstalledExternalAgentHost()?.process
+}
 
 // A process id belongs to the Host that spawned it. Switching the selected
 // Host must never redirect a send/kill to an identically named remote process.
@@ -72,6 +82,8 @@ function localProcessTarget(): boolean {
  * is the state during boot and in every test that never wires one.
  */
 export function supportsExternalAgents(): boolean {
+  const installed = installedPlane()
+  if (installed) return installed.supportsExternalAgents()
   return localProcessTarget() || canStartExternalAgentProcess()
 }
 
@@ -89,21 +101,29 @@ export function supportsExternalAgents(): boolean {
  * being offered a control whose command can only ever be answered locally.
  */
 export function runsExternalAgentProcessesLocally(): boolean {
+  const installed = installedPlane()
+  if (installed) return installed.runsExternalAgentProcessesLocally()
   return localProcessTarget()
 }
 
 /** Whether the ACP fs capability (read/write text file) is available. */
 export function supportsAgentFs(): boolean {
+  const installed = installedPlane()
+  if (installed) return installed.supportsAgentFs()
   return localProcessTarget() || canStartExternalAgentProcess()
 }
 
 /** Whether the ACP terminal capability is available (desktop-only). */
 export function supportsAgentTerminal(): boolean {
+  const installed = installedPlane()
+  if (installed) return installed.supportsAgentTerminal()
   return isTauri() && !getActiveRemoteTransport()
 }
 
-/** Runtime-owned ACP capability truth shared through the CLI build alias. */
+/** Runtime-owned ACP capability truth; an installed shell answers for itself. */
 export function getAcpHostCapabilities(): AcpHostCapabilities {
+  const installed = installedPlane()
+  if (installed) return installed.getAcpHostCapabilities()
   const desktop = isTauri() && !getActiveRemoteTransport()
   const headless = isHeadlessHost() || Boolean(getActiveRemoteTransport())
   return {
@@ -136,9 +156,12 @@ export function getAcpHostCapabilities(): AcpHostCapabilities {
  * runtime can lose its placement by being the one that was not updated — and
  * with no placement registered `withSpawnPlacement` returns the caller's own
  * object, so a deployment without runtime environments sends exactly the
- * payload it always did.
+ * payload it always did. An installed shell receives the caller's arguments
+ * unchanged and owns placement for the processes it starts.
  */
 export async function agentInvoke<T>(name: string, args: Record<string, unknown>): Promise<T> {
+  const installed = installedPlane()
+  if (installed) return installed.invoke<T>(name, args)
   if (name === "spawn_external_agent") args = withSpawnPlacement(args)
   const remote = getActiveRemoteTransport()
   const hostIdentity = processHostIdentity(remote)
@@ -196,6 +219,8 @@ export async function agentListen<T>(
   event: string,
   handler: (payload: T) => void
 ): Promise<() => void> {
+  const installed = installedPlane()
+  if (installed) return installed.listen<T>(event, handler)
   const remote = getActiveRemoteTransport()
   if (remote) {
     const hostIdentity = processHostIdentity(remote)
@@ -310,6 +335,8 @@ function resolveSessionWorkspacePath(
 
 /** Read a text file through the host's symlink-aware workspace boundary. */
 export async function agentReadTextFile(path: string, allowedRoots: string[]): Promise<string> {
+  const installed = installedPlane()
+  if (installed) return installed.readTextFile(path, allowedRoots)
   if (!supportsAgentFs()) {
     throw new Error("File system access not available in browser")
   }
@@ -323,6 +350,8 @@ export async function agentWriteTextFile(
   content: string,
   allowedRoots: string[]
 ): Promise<void> {
+  const installed = installedPlane()
+  if (installed) return installed.writeTextFile(path, content, allowedRoots)
   if (!supportsAgentFs()) {
     throw new Error("File system access not available in browser")
   }
@@ -332,6 +361,8 @@ export async function agentWriteTextFile(
 
 /** Delete a runtime-owned file through the existing workspace boundary. */
 export async function agentDeleteTextFile(path: string, allowedRoots: string[]): Promise<void> {
+  const installed = installedPlane()
+  if (installed) return installed.deleteTextFile(path, allowedRoots)
   if (!supportsAgentFs()) throw new Error("File system access not available in browser")
   const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
   await agentInvoke("fs_delete_workspace_entry", { root, relPath, recursive: false })

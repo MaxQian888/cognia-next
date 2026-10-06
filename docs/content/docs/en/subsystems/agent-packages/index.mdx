@@ -141,7 +141,7 @@ Rules every package holds:
 | Manager vendor branches | Done: the manager imports no vendor class; vendor controls are typed extensions (`codexAppServerExtension`, `openCodeServerExtension`, `openCodeV2Extension`, `piRpcExtension`, `acpClientExtension`, `devinAcpExtension`) and native Devin isolation lives in `integrations/acp.ts` |
 | Runtime catalog rows | Done: Aider, Codex, DeepSeek Harness, OpenCode and Pi author their rows (and waivers) in `./manifest`; `pnpm gen:external-agent-runtimes` writes `protocol/external-agent-runtimes.json` and `audit:external-agent-runtimes` fails on drift. Runtimes without a package stay authored in the file |
 | Protocol capability rows | Done: every protocol row of `protocol/agent-capabilities.json` and the preset refinements (`devin`, `deepseek-harness-acp`, `opencode-v2-service`) are `AgentCapabilityContribution`s in the packages' manifests; `pnpm gen:agent-capabilities` writes the file and `audit:agent-capabilities` fails on drift |
-| CLI port injection | Not done yet (Phase 3) |
+| CLI port injection | Done: the CLI installs an external-agent host at boot (`lib/ai/agent/external/host/installed-host.ts`, `installCliExternalAgentHost`); the process, terminal and hook modules delegate to it, and the esbuild aliases are deleted |
 | Engines and tools | Done: the AI SDK engine and the host run without the Claude Agent SDK; the wire and shared runtime modules do not reference it, even for types |
 | Orchestration | Done for run state, ledgers, coordinator, scheduling and recovery; team gates, teammate pool, wave runner and the synthesized workflow stay in the app (they are typed against the app's `AgentTeam` model) |
 

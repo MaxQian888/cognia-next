@@ -4,7 +4,8 @@
  * `external-agent://{stdout,stderr,exit,state-change}` are emitted by
  * `runtime/external/node-backend.ts` and, until now, had ZERO subscribers — an
  * agent that failed to spawn left no trace the user could look at. This module
- * is the consumer; it pushes into the coalescer, never straight into dispatch.
+ * is the consumer (through the CLI's installed external-agent host); it pushes
+ * into the coalescer, never straight into dispatch.
  *
  * Pure except for the subscriptions: the clock is injected so the mapping
  * unit-tests deterministically.
@@ -18,7 +19,7 @@ import {
   type ExternalAgentStateChangeEvent,
   type ExternalAgentStderrEvent,
   type ExternalAgentStdoutEvent,
-} from "../../runtime/external/native-shim"
+} from "@/lib/native/external-agent"
 import { classifyAgentStderr, toLogLines } from "./log-model"
 import type { LogInput } from "../state/types"
 

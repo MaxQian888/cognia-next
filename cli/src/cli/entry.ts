@@ -87,6 +87,10 @@ async function boot(): Promise<number> {
   // global before any `@/lib` module (and the eager Dexie databases they
   // construct at import) is evaluated. See ../db/install-indexeddb.
   await import("../db/install-indexeddb")
+  // The shared external-agent code reaches this process's own process table,
+  // PTY terminals and hook policy through the host installed here (ADR-0217).
+  const { installCliExternalAgentHost } = await import("../runtime/external/host-branch")
+  installCliExternalAgentHost()
   const { main } = await import("./index")
   return main(process.argv.slice(2))
 }

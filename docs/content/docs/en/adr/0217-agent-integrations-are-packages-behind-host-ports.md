@@ -179,6 +179,17 @@ is the companion or Tauri bridge with `spawn_external_agent`, `send_to_external_
 workspace file commands (`fs_read_workspace_file`, `fs_write_workspace_file`,
 `fs_delete_workspace_entry`), which refuse traversal and symlink escapes.
 
+A shell with its own process table installs an `InstalledExternalAgentHost`
+(`lib/ai/agent/external/host/installed-host.ts`) before any agent code runs: a process
+plane (the same commands and event channels, plus workspace files and ACP capability
+truth), a terminal plane and a hook plane. `agent-transport.ts`,
+`lib/native/external-agent.ts` and `agent-hooks.ts` delegate to it at call time, so the
+ports above are built the same way for every host. The CLI installs one in
+`cli/src/cli/entry.ts` (`installCliExternalAgentHost`): `NodeExternalAgentBackend` with
+its spawn allowlist and strict sandbox, node-pty terminals and a no-hooks policy. The
+esbuild aliases that used to swap these modules in the CLI bundle are deleted. A second
+install is refused, because two hosts would split one process table.
+
 **Declaring a need grants nothing.** The host still applies the spawn allowlist, sandbox,
 placement, permission guard and audit, and registering an integration does not authorize
 what its manifest declares.
@@ -342,7 +353,7 @@ Team↔Workflow import cycle is broken. A boundary test keeps it that way.
 | --- | --- | --- |
 | 1 | Baseline, identity model, migration matrix (`docs/plans/2026-10-05-agent-package-architecture.md`) | Done |
 | 2 | `agent-contracts`, `agent-runtime-kit`, `agent-dsh`, `agent-codex` (runtime + history); DSH cancel semantics; native-resume binding | Done |
-| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`), Aider (`@cognia/agent-aider`, with the file port) Pi (`@cognia/agent-pi`, with `PiHostServices`) OpenCode (`@cognia/agent-opencode`, with `AgentFetch`), A2A (`@cognia/agent-a2a`) and ACP with Devin (`@cognia/agent-acp`, with the terminal and WebSocket ports) are done, with the ACP vendor branches extracted into `AcpVendorProfile`s; the remote-host run plane and ACP's MCP plumbing stay in the app (Scope decisions). The remaining history readers, CLI port injection follows; package-owned runtime catalog rows and protocol capability rows are generated from manifests; the manager's vendor `instanceof` branches are gone (typed extensions). Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
+| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`), Aider (`@cognia/agent-aider`, with the file port) Pi (`@cognia/agent-pi`, with `PiHostServices`) OpenCode (`@cognia/agent-opencode`, with `AgentFetch`), A2A (`@cognia/agent-a2a`) and ACP with Devin (`@cognia/agent-acp`, with the terminal and WebSocket ports) are done, with the ACP vendor branches extracted into `AcpVendorProfile`s; the remote-host run plane and ACP's MCP plumbing stay in the app (Scope decisions). CLI port injection is done: the CLI installs its external-agent host at boot and the esbuild aliases are deleted. The remaining history readers follow; package-owned runtime catalog rows and protocol capability rows are generated from manifests; the manager's vendor `instanceof` branches are gone (typed extensions). Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
 | 4 | Neutral tools; the AI SDK engine and the host run without the Claude SDK; SDK-free wire; vendor gate | Done (`44d622df7`, `c4ae605bd`); see Scope decisions for the tool-kernel package |
 | 5 | Orchestration package behind store/journal/redaction/path/remote-session ports; ledgers; Team↔Workflow cycle broken; session-ending cancel never reported as pause | Done (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`, `e931feec0`); gates, pool, wave runner and synthesized workflow stay in the app (Scope decisions) |
 | 6 | Docs, gates, CI and final regression | Done for the landed phases; Phase 3 docs follow its migration |

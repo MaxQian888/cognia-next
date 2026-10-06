@@ -42,6 +42,10 @@ import {
   createInteractiveTerminal,
   cleanupSessionTerminals,
 } from "./external-agent"
+import {
+  installExternalAgentHost,
+  type InstalledExternalAgentHost,
+} from "@/lib/ai/agent/external/host/installed-host"
 
 const mockedInvoke = invoke as unknown as jest.Mock
 
@@ -628,5 +632,99 @@ describe("native listener cleanup", () => {
     await rejected.catch(() => {})
     expect(attached).toBe(1)
     expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("installed external-agent host (ADR-0217)", () => {
+  function installedHost() {
+    const exitStatus = { exitCode: 0, signal: null }
+    const processPlane = {
+      invoke: jest.fn(async (name: string) => (name === "spawn_external_agent" ? "cli-1" : true)),
+      listen: jest.fn(async () => () => {}),
+    }
+    const terminals = {
+      create: jest.fn(async () => "t1"),
+      output: jest.fn(async () => ({ output: "ok", truncated: false, exitStatus })),
+      kill: jest.fn(async () => undefined),
+      release: jest.fn(async () => undefined),
+      waitForExit: jest.fn(async () => ({ exitStatus })),
+      write: jest.fn(async () => undefined),
+      sessionTerminals: jest.fn(async () => ["t1"]),
+      killSessionTerminals: jest.fn(async () => undefined),
+      isRunning: jest.fn(async () => false),
+      info: jest.fn(async () => ({
+        id: "t1",
+        sessionId: "s1",
+        command: "sh",
+        state: { type: "Running" as const },
+        exitCode: null,
+      })),
+      list: jest.fn(async () => ["t1"]),
+    }
+    const host = {
+      kind: "test",
+      process: processPlane as unknown as InstalledExternalAgentHost["process"],
+      terminals,
+      hooks: { run: async () => null, pluginHooks: null },
+    } satisfies InstalledExternalAgentHost
+    return { host, processPlane, terminals }
+  }
+
+  it("routes process commands and event channels to the host, never to Tauri", async () => {
+    const { host, processPlane } = installedHost()
+    const uninstall = installExternalAgentHost(host)
+    try {
+      const config = { id: "a", command: "sh" }
+      await expect(spawnExternalAgent(config)).resolves.toBe("cli-1")
+      expect(processPlane.invoke).toHaveBeenCalledWith("spawn_external_agent", { config })
+      await expect(checkExternalAgentCommandExists("pi")).resolves.toBe(true)
+      expect(processPlane.invoke).toHaveBeenCalledWith("check_command_exists", { command: "pi" })
+      await killAllExternalAgents()
+      expect(processPlane.invoke).toHaveBeenCalledWith("kill_all_external_agents", {})
+      const handler = jest.fn()
+      await onExternalAgentExit(handler)
+      expect(processPlane.listen).toHaveBeenCalledWith("external-agent://exit", handler)
+      expect(mockedInvoke).not.toHaveBeenCalled()
+      expect(listenMock).not.toHaveBeenCalled()
+    } finally {
+      uninstall()
+    }
+  })
+
+  it("routes every ACP terminal command and the composed helpers to the host's terminals", async () => {
+    const { host, terminals } = installedHost()
+    const uninstall = installExternalAgentHost(host)
+    try {
+      await expect(
+        acpTerminalCreate("s1", "sh", ["-c", "true"], "/w", { A: "1" }, 64)
+      ).resolves.toBe("t1")
+      expect(terminals.create).toHaveBeenCalledWith(
+        "s1",
+        "sh",
+        ["-c", "true"],
+        "/w",
+        { A: "1" },
+        64
+      )
+      await acpTerminalOutput("t1", 8)
+      expect(terminals.output).toHaveBeenCalledWith("t1", 8)
+      await acpTerminalWaitForExit("t1", 5)
+      expect(terminals.waitForExit).toHaveBeenCalledWith("t1", 5)
+      await acpTerminalWrite("t1", "x")
+      expect(terminals.write).toHaveBeenCalledWith("t1", "x")
+      await acpTerminalKill("t1")
+      await acpTerminalRelease("t1")
+      await expect(acpTerminalGetSessionTerminals("s1")).resolves.toEqual(["t1"])
+      await acpTerminalKillSessionTerminals("s1")
+      await expect(acpTerminalIsRunning("t1")).resolves.toBe(false)
+      await expect(acpTerminalGetInfo("t1")).resolves.toMatchObject({ id: "t1" })
+      await expect(acpTerminalList()).resolves.toEqual(["t1"])
+      await expect(executeCommand("s1", "sh")).resolves.toEqual({ output: "ok", exitCode: 0 })
+      await cleanupSessionTerminals("s1")
+      expect(terminals.killSessionTerminals).toHaveBeenCalledTimes(2)
+      expect(mockedInvoke).not.toHaveBeenCalled()
+    } finally {
+      uninstall()
+    }
   })
 })

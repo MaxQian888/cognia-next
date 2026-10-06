@@ -3,7 +3,13 @@ import { open, realpath, stat, unlink, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 
 import type { AcpHostCapabilities } from "@cognia/agent-acp/feature-profile"
+import {
+  installExternalAgentHost,
+  type InstalledExternalAgentHost,
+} from "@/lib/ai/agent/external/host/installed-host"
+import { cliAgentHookPlane } from "./hook-plane"
 import { NodeExternalAgentBackend } from "./node-backend"
+import { cliTerminalPlane } from "./pty-terminals"
 
 interface CliExternalAgentBackend {
   invoke<T = unknown>(name: string, args: Record<string, unknown>): Promise<T>
@@ -28,21 +34,15 @@ export function createCliAgentHost(
 }
 
 const defaultBackend = new NodeExternalAgentBackend()
-const defaultHost = createCliAgentHost(defaultBackend)
 
 /** Called by the trusted local CLI connect flow, never by an agent RPC. */
 export const selectCliAgentWorkspace = (cwd: string): void => defaultBackend.selectWorkspace(cwd)
 
-export const supportsExternalAgents = defaultHost.supportsExternalAgents
-export const runsExternalAgentProcessesLocally = defaultHost.runsExternalAgentProcessesLocally
-export const supportsAgentFs = defaultHost.supportsAgentFs
-export const supportsAgentTerminal = defaultHost.supportsAgentTerminal
-export const agentInvoke = defaultHost.agentInvoke
-export const agentListen = defaultHost.agentListen
-
-/** CLI capability provider consumed through the agent-transport build alias. */
-export function getAcpHostCapabilities(): AcpHostCapabilities {
-  const supportsPty = process.platform !== "win32"
+/** The CLI's ACP capability truth, answered through its installed host. */
+export function getAcpHostCapabilities(
+  platform: NodeJS.Platform = process.platform
+): AcpHostCapabilities {
+  const supportsPty = platform !== "win32"
   return {
     kind: "cli",
     fs: { read: true, write: true },
@@ -178,4 +178,46 @@ export async function agentDeleteTextFile(filePath: string, allowedRoots: string
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * The external-agent host the CLI installs at boot (ADR-0217): the Node
+ * backend's process plane and workspace files, node-pty terminals and the
+ * no-hooks policy. The shared graph reaches it through
+ * `@/lib/ai/agent/external/host/installed-host`; nothing is swapped at build
+ * time.
+ */
+export function createCliExternalAgentHost(
+  backend: CliExternalAgentBackend,
+  platform: NodeJS.Platform = process.platform
+): InstalledExternalAgentHost {
+  const host = createCliAgentHost(backend, platform)
+  return Object.freeze({
+    kind: "cli",
+    process: Object.freeze({
+      supportsExternalAgents: host.supportsExternalAgents,
+      runsExternalAgentProcessesLocally: host.runsExternalAgentProcessesLocally,
+      supportsAgentFs: host.supportsAgentFs,
+      supportsAgentTerminal: host.supportsAgentTerminal,
+      getAcpHostCapabilities: () => getAcpHostCapabilities(platform),
+      invoke: host.agentInvoke,
+      listen: host.agentListen,
+      readTextFile: agentReadTextFile,
+      writeTextFile: agentWriteTextFile,
+      deleteTextFile: agentDeleteTextFile,
+    }),
+    terminals: cliTerminalPlane,
+    hooks: cliAgentHookPlane,
+  })
+}
+
+let defaultExternalAgentHost: InstalledExternalAgentHost | undefined
+
+/**
+ * Install the CLI's external-agent host over the process-wide Node backend.
+ * Idempotent; returns the uninstall function. Must run before any agent code.
+ */
+export function installCliExternalAgentHost(): () => void {
+  defaultExternalAgentHost ??= createCliExternalAgentHost(defaultBackend)
+  return installExternalAgentHost(defaultExternalAgentHost)
 }

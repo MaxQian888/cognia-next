@@ -3,9 +3,6 @@
   "compilerOptions": {
     "baseUrl": "..",
     "paths": {
-      "@/lib/native/external-agent": ["cli/src/runtime/external/native-shim.ts"],
-      "@/lib/ai/agent/external/agent-transport": ["cli/src/runtime/external/host-branch.ts"],
-      "@/lib/ai/agent/external/agent-hooks": ["cli/src/runtime/external/agent-hooks-shim.ts"],
       "@/*": ["./*"],
       // A child `paths` REPLACES the root's — it does NOT merge — so every
       // `@cognia/*` workspace package the CLI's own files import must be

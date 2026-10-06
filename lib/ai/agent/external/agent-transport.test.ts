@@ -52,6 +52,7 @@ import {
   __resetRoutingForTests,
 } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
+import type { InstalledExternalAgentProcessPlane } from "./host/installed-host"
 
 const g = globalThis as Record<string, unknown>
 
@@ -456,4 +457,65 @@ describe("remote Host process identity", () => {
       expect(target.call).not.toHaveBeenCalled()
     }
   )
+})
+
+describe("installed external-agent host (ADR-0217)", () => {
+  function processPlane() {
+    return {
+      supportsExternalAgents: jest.fn(() => true),
+      runsExternalAgentProcessesLocally: jest.fn(() => true),
+      supportsAgentFs: jest.fn(() => true),
+      supportsAgentTerminal: jest.fn(() => false),
+      getAcpHostCapabilities: jest.fn(() => ({ kind: "cli" }) as never),
+      invoke: jest.fn(async () => "agent-1"),
+      listen: jest.fn(async () => () => {}),
+      readTextFile: jest.fn(async () => "text"),
+      writeTextFile: jest.fn(async () => undefined),
+      deleteTextFile: jest.fn(async () => undefined),
+    }
+  }
+
+  it("delegates every export to the installed process plane and skips the app's transports", async () => {
+    const { installExternalAgentHost } = await import("./host/installed-host")
+    const plane = processPlane()
+    const uninstall = installExternalAgentHost({
+      kind: "test",
+      // The mocks are concrete; the plane's invoke/listen are generic.
+      process: plane as unknown as InstalledExternalAgentProcessPlane,
+      terminals: {} as never,
+      hooks: { run: async () => null, pluginHooks: null },
+    })
+    invokeMock.mockClear()
+    listenMock.mockClear()
+    transportCall.mockClear()
+    try {
+      expect(supportsExternalAgents()).toBe(true)
+      expect(runsExternalAgentProcessesLocally()).toBe(true)
+      expect(supportsAgentFs()).toBe(true)
+      expect(supportsAgentTerminal()).toBe(false)
+      expect(getAcpHostCapabilities()).toEqual({ kind: "cli" })
+
+      const config = { id: "agent-1", command: "pi" }
+      await expect(agentInvoke("spawn_external_agent", { config })).resolves.toBe("agent-1")
+      // The caller's arguments arrive unchanged: the installed host owns placement.
+      expect(plane.invoke).toHaveBeenCalledWith("spawn_external_agent", { config })
+
+      const handler = jest.fn()
+      await agentListen("external-agent://stdout", handler)
+      expect(plane.listen).toHaveBeenCalledWith("external-agent://stdout", handler)
+
+      await expect(agentReadTextFile("/w/a.txt", ["/w"])).resolves.toBe("text")
+      await agentWriteTextFile("/w/a.txt", "x", ["/w"])
+      await agentDeleteTextFile("/w/a.txt", ["/w"])
+      expect(plane.readTextFile).toHaveBeenCalledWith("/w/a.txt", ["/w"])
+      expect(plane.writeTextFile).toHaveBeenCalledWith("/w/a.txt", "x", ["/w"])
+      expect(plane.deleteTextFile).toHaveBeenCalledWith("/w/a.txt", ["/w"])
+
+      expect(invokeMock).not.toHaveBeenCalled()
+      expect(listenMock).not.toHaveBeenCalled()
+      expect(transportCall).not.toHaveBeenCalled()
+    } finally {
+      uninstall()
+    }
+  })
 })

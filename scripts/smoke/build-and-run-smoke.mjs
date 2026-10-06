@@ -8,8 +8,6 @@ import path from "node:path"
 import fs from "node:fs"
 import { fileURLToPath } from "node:url"
 
-import { createCliExternalAgentAliasPlugin } from "../build/cli-external-agent-aliases.mjs"
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const kimiAcp = process.argv.includes("--kimi-acp")
 const clineAcp = process.argv.includes("--cline-acp")
@@ -86,9 +84,22 @@ const jsonDefaultOnlyPlugin = {
   },
 }
 
+// Every smoke runs over the CLI's external-agent host, installed exactly the
+// way cli/src/cli/entry.ts installs it, before the smoke module is evaluated.
+const smokeEntry = {
+  contents: [
+    `import { installCliExternalAgentHost } from ${JSON.stringify(path.join(root, "cli/src/runtime/external/host-branch.ts"))}`,
+    "installCliExternalAgentHost()",
+    `await import(${JSON.stringify(entry)})`,
+  ].join("\n"),
+  resolveDir: root,
+  sourcefile: `${path.basename(entry, ".ts")}-entry.mjs`,
+  loader: "js",
+}
+
 fs.mkdirSync(path.dirname(outfile), { recursive: true })
 await esbuild.build({
-  entryPoints: [entry],
+  stdin: smokeEntry,
   outfile,
   bundle: true,
   banner: { js: "globalThis.__COGNIA_CLI__ = true;" },
@@ -104,7 +115,7 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [createCliExternalAgentAliasPlugin(root), stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "warning",
 })
 

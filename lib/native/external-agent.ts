@@ -3,6 +3,10 @@
  *
  * Provides TypeScript wrappers for external agent and ACP terminal management.
  * Used for spawning, managing, and communicating with external agent processes.
+ *
+ * A shell with its own process table (the standalone CLI) installs an external-
+ * agent host at startup; every call here then goes to that host's process and
+ * terminal planes instead of to Tauri (ADR-0217).
  */
 
 import { invoke } from "@tauri-apps/api/core"
@@ -10,6 +14,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
 import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+import { getInstalledExternalAgentHost } from "@/lib/ai/agent/external/host/installed-host"
 
 // ============================================================================
 // Types
@@ -115,36 +120,51 @@ export interface ExternalAgentStderrEvent {
 // External Agent Commands
 // ============================================================================
 
+/** A process-plane command on the installed host, or the Tauri command. */
+function processCommand<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  const installed = getInstalledExternalAgentHost()
+  if (installed) return installed.process.invoke<T>(name, args ?? {})
+  return args === undefined ? invoke<T>(name) : invoke<T>(name, args)
+}
+
+/** The installed host's terminal plane, or `undefined` for the Tauri commands. */
+function installedTerminals() {
+  return getInstalledExternalAgentHost()?.terminals
+}
+
 export async function spawnExternalAgent(config: ExternalAgentSpawnConfig): Promise<string> {
   // The run's runtime-environment placement, if one was resolved for this
   // agent id. `withSpawnPlacement` returns the same arguments object when
   // there is none, so a deployment without runtime environments sends exactly
-  // the payload it always did (ADR-0182 Q39).
+  // the payload it always did (ADR-0182 Q39). An installed host owns placement
+  // for the processes it starts.
+  const installed = getInstalledExternalAgentHost()
+  if (installed) return installed.process.invoke<string>("spawn_external_agent", { config })
   return invoke<string>("spawn_external_agent", withSpawnPlacement({ config }))
 }
 
 export async function sendToExternalAgent(agentId: string, message: string): Promise<void> {
-  return invoke<void>("send_to_external_agent", { agentId, message })
+  return processCommand<void>("send_to_external_agent", { agentId, message })
 }
 
 export async function killExternalAgent(agentId: string): Promise<void> {
-  return invoke<void>("kill_external_agent", { agentId })
+  return processCommand<void>("kill_external_agent", { agentId })
 }
 
 export async function getExternalAgentStatus(agentId: string): Promise<string> {
-  return invoke<string>("get_external_agent_status", { agentId })
+  return processCommand<string>("get_external_agent_status", { agentId })
 }
 
 export async function listExternalAgents(): Promise<string[]> {
-  return invoke<string[]>("list_external_agents")
+  return processCommand<string[]>("list_external_agents")
 }
 
 export async function killAllExternalAgents(): Promise<void> {
-  return invoke<void>("kill_all_external_agents")
+  return processCommand<void>("kill_all_external_agents")
 }
 
 export async function isExternalAgentRunning(agentId: string): Promise<boolean> {
-  return invoke<boolean>("is_external_agent_running", { agentId })
+  return processCommand<boolean>("is_external_agent_running", { agentId })
 }
 
 /**
@@ -153,7 +173,7 @@ export async function isExternalAgentRunning(agentId: string): Promise<boolean> 
  * whether a preset is executable.
  */
 export async function checkExternalAgentCommandExists(command: string): Promise<boolean> {
-  return invoke<boolean>("check_command_exists", { command })
+  return processCommand<boolean>("check_command_exists", { command })
 }
 
 export interface ExternalAgentInfo {
@@ -167,15 +187,15 @@ export interface ExternalAgentInfo {
 }
 
 export async function getExternalAgentInfo(agentId: string): Promise<ExternalAgentInfo> {
-  return invoke<ExternalAgentInfo>("get_external_agent_info", { agentId })
+  return processCommand<ExternalAgentInfo>("get_external_agent_info", { agentId })
 }
 
 export async function setExternalAgentRunning(agentId: string): Promise<void> {
-  return invoke<void>("set_external_agent_running", { agentId })
+  return processCommand<void>("set_external_agent_running", { agentId })
 }
 
 export async function setExternalAgentFailed(agentId: string): Promise<void> {
-  return invoke<void>("set_external_agent_failed", { agentId })
+  return processCommand<void>("set_external_agent_failed", { agentId })
 }
 
 // ============================================================================
@@ -190,6 +210,8 @@ export async function acpTerminalCreate(
   env?: Record<string, string>,
   outputByteLimit?: number
 ): Promise<string> {
+  const installed = installedTerminals()
+  if (installed) return installed.create(sessionId, command, args, cwd, env, outputByteLimit)
   return invoke<string>("acp_terminal_create", {
     sessionId,
     command,
@@ -204,6 +226,8 @@ export async function acpTerminalOutput(
   terminalId: string,
   outputByteLimit?: number
 ): Promise<TerminalOutputResult> {
+  const installed = installedTerminals()
+  if (installed) return installed.output(terminalId, outputByteLimit)
   return invoke<TerminalOutputResult>("acp_terminal_output", {
     terminalId,
     outputByteLimit,
@@ -211,10 +235,14 @@ export async function acpTerminalOutput(
 }
 
 export async function acpTerminalKill(terminalId: string): Promise<void> {
+  const installed = installedTerminals()
+  if (installed) return installed.kill(terminalId)
   return invoke<void>("acp_terminal_kill", { terminalId })
 }
 
 export async function acpTerminalRelease(terminalId: string): Promise<void> {
+  const installed = installedTerminals()
+  if (installed) return installed.release(terminalId)
   return invoke<void>("acp_terminal_release", { terminalId })
 }
 
@@ -222,6 +250,8 @@ export async function acpTerminalWaitForExit(
   terminalId: string,
   timeout?: number
 ): Promise<TerminalWaitResult> {
+  const installed = installedTerminals()
+  if (installed) return installed.waitForExit(terminalId, timeout)
   return invoke<TerminalWaitResult>("acp_terminal_wait_for_exit", {
     terminalId,
     timeout,
@@ -229,26 +259,38 @@ export async function acpTerminalWaitForExit(
 }
 
 export async function acpTerminalWrite(terminalId: string, data: string): Promise<void> {
+  const installed = installedTerminals()
+  if (installed) return installed.write(terminalId, data)
   return invoke<void>("acp_terminal_write", { terminalId, data })
 }
 
 export async function acpTerminalGetSessionTerminals(sessionId: string): Promise<string[]> {
+  const installed = installedTerminals()
+  if (installed) return installed.sessionTerminals(sessionId)
   return invoke<string[]>("acp_terminal_get_session_terminals", { sessionId })
 }
 
 export async function acpTerminalKillSessionTerminals(sessionId: string): Promise<void> {
+  const installed = installedTerminals()
+  if (installed) return installed.killSessionTerminals(sessionId)
   return invoke<void>("acp_terminal_kill_session_terminals", { sessionId })
 }
 
 export async function acpTerminalIsRunning(terminalId: string): Promise<boolean> {
+  const installed = installedTerminals()
+  if (installed) return installed.isRunning(terminalId)
   return invoke<boolean>("acp_terminal_is_running", { terminalId })
 }
 
 export async function acpTerminalGetInfo(terminalId: string): Promise<TerminalInfo> {
+  const installed = installedTerminals()
+  if (installed) return installed.info(terminalId)
   return invoke<TerminalInfo>("acp_terminal_get_info", { terminalId })
 }
 
 export async function acpTerminalList(): Promise<string[]> {
+  const installed = installedTerminals()
+  if (installed) return installed.list()
   return invoke<string[]>("acp_terminal_list")
 }
 
@@ -260,6 +302,8 @@ async function listenExternalAgentEvent<T>(
   event: string,
   callback: (payload: T) => void
 ): Promise<UnlistenFn> {
+  const installed = getInstalledExternalAgentHost()
+  if (installed) return installed.process.listen<T>(event, callback)
   const unlisten = await listen<T>(event, (message) => callback(message.payload))
   let disposed = false
   return () => {

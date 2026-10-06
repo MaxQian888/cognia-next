@@ -10,11 +10,11 @@ description: How cognia-agent hosts Codex and Claude Code directly in the termin
 <TLDR>
   `cognia-agent chat --backend codex` and `--backend claude-code` replace only the turn session
   factory. Presets, ACP/Codex adapters, `ExternalAgentManager`, credential overlays, and protocol
-  events are reused from the desktop implementation. CLI-only build aliases connect those shared
-  modules to a Node process backend, which validates command, cwd, and environment before launching
-  the child through a native Seatbelt or bubblewrap sandbox. External events then enter the existing
-  TUI reducer, permission overlay, usage display, and transcript store. The desktop app is not
-  required.
+  events are reused from the desktop implementation. The CLI installs an external-agent host at
+  boot that connects those shared modules to a Node process backend, which validates command, cwd,
+  and environment before launching the child through a native Seatbelt or bubblewrap sandbox.
+  External events then enter the existing TUI reducer, permission overlay, usage display, and
+  transcript store. The desktop app is not required.
 </TLDR>
 
 ```mermaid
@@ -25,7 +25,7 @@ flowchart LR
   Session --> Preset["shared preset registry"]
   Preset --> Manager["shared ExternalAgentManager"]
   Manager --> Adapter{"shared protocol adapter"}
-  Adapter -->|"Codex JSON-RPC"| Host["CLI host aliases"]
+  Adapter -->|"Codex JSON-RPC"| Host["installed CLI host"]
   Adapter -->|"ACP JSON-RPC"| Host
   Host --> Node["NodeExternalAgentBackend"]
   Node --> Sandbox["strict native launcher"]
@@ -42,12 +42,18 @@ flowchart LR
 | ACP and Codex protocol clients | `acp-client.ts`, `codex-app-server-client.ts` | reused unchanged |
 | Lifecycle and execution | `ExternalAgentManager` | reused with its health interval disabled for short-lived CLI processes |
 | Credential overlay | `env-builder.ts` | reused; CLI credentials are supplied as the explicit base environment |
-| Process/event host | Tauri on desktop | replaced by CLI build aliases and `NodeExternalAgentBackend` |
+| Process/event host | Tauri on desktop | the CLI's installed host over `NodeExternalAgentBackend` |
 | Presentation | desktop chat reducer | adapted to the existing Agent CLI TUI reducer |
 
-Only three host-bound imports are redirected by `scripts/build/cli-external-agent-aliases.mjs`:
-the native external-process API, the host capability branch, and agent hooks. There is no second ACP
-or Codex implementation under `cli/`.
+Three shared modules are host-bound: the native external-process API
+(`lib/native/external-agent.ts`), the host capability branch (`agent-transport.ts`) and agent hooks
+(`agent-hooks.ts`). Each asks `getInstalledExternalAgentHost()`
+(`lib/ai/agent/external/host/installed-host.ts`) at call time and delegates to the installed host when
+there is one. `cli/src/cli/entry.ts` installs the CLI's host before any agent code runs
+(`installCliExternalAgentHost` in `cli/src/runtime/external/host-branch.ts`): the Node backend's process
+plane and workspace files, node-pty terminals (`pty-terminals.ts`) and the no-hooks policy
+(`hook-plane.ts`). Nothing is swapped at build time; ADR-0217 removed the esbuild aliases that used to
+redirect these imports. There is no second ACP or Codex implementation under `cli/`.
 
 ## Supported entry points
 

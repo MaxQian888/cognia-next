@@ -24,7 +24,10 @@ if (!interactive) {
 }
 
 // Keep the non-TTY fallback dependency-light, but mount the real production App
-// for every interactive PTY scenario.
+// for every interactive PTY scenario, over the external-agent host the CLI
+// entry installs (cli/src/cli/entry.ts).
+const { installCliExternalAgentHost } = await import("../../runtime/external/host-branch")
+installCliExternalAgentHost()
 const { App } = await import("../components/App")
 
 interface FixtureScenario extends ConversationScenario {

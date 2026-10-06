@@ -133,7 +133,7 @@ flowchart BT
 | 管理器中的厂商分支 | 完成：管理器不导入任何厂商类；厂商控制改为带类型的扩展（`codexAppServerExtension`、`openCodeServerExtension`、`openCodeV2Extension`、`piRpcExtension`、`acpClientExtension`、`devinAcpExtension`），原生 Devin 的隔离放在 `integrations/acp.ts` |
 | 运行时目录行 | 完成：Aider、Codex、DeepSeek Harness、OpenCode 与 Pi 在 `./manifest` 中编写自己的行（及豁免）；`pnpm gen:external-agent-runtimes` 生成 `protocol/external-agent-runtimes.json`，出现漂移时 `audit:external-agent-runtimes` 失败。没有包的运行时仍直接写在文件中 |
 | 协议能力行 | 完成：`protocol/agent-capabilities.json` 的每个协议行以及预设细化（`devin`、`deepseek-harness-acp`、`opencode-v2-service`）都是各包 manifest 中的 `AgentCapabilityContribution`；`pnpm gen:agent-capabilities` 生成该文件，出现漂移时 `audit:agent-capabilities` 失败 |
-| CLI 端口注入 | 尚未完成（阶段 3） |
+| CLI 端口注入 | 完成：CLI 在启动时安装外部 agent 宿主（`lib/ai/agent/external/host/installed-host.ts`、`installCliExternalAgentHost`）；进程、终端与 hook 模块委托给它，esbuild alias 已删除 |
 | 引擎与工具 | 完成：AI SDK 引擎与宿主无需 Claude Agent SDK 即可运行；wire 与共享运行时模块不再引用它，连类型也不引用 |
 | 编排 | 运行状态、账本、协调器、调度与恢复已完成；团队闸门、队友池、波次运行器与合成工作流仍留在应用中（它们以应用的 `AgentTeam` 模型为类型） |
 

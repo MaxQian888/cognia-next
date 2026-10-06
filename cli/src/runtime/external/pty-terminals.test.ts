@@ -1,39 +1,36 @@
 /** @jest-environment node */
-const invokeMock = jest.fn()
-const listenMock = jest.fn()
-
-jest.mock("./host-branch", () => ({
-  agentInvoke: (...args: unknown[]) => invokeMock(...args),
-  agentListen: (...args: unknown[]) => listenMock(...args),
-}))
-
 import {
   acpTerminalCreate,
+  acpTerminalGetInfo,
   acpTerminalGetSessionTerminals,
+  acpTerminalIsRunning,
+  acpTerminalKill,
+  acpTerminalKillSessionTerminals,
+  acpTerminalList,
   acpTerminalOutput,
   acpTerminalRelease,
   acpTerminalWaitForExit,
-  checkExternalAgentCommandExists,
-  onExternalAgentStdout,
-  spawnExternalAgent,
+  acpTerminalWrite,
+  cliTerminalPlane,
   truncateTerminalOutputUtf8,
-} from "./native-shim"
+} from "./pty-terminals"
 
-describe("CLI native external-agent shim", () => {
-  it("delegates process commands and raw event payloads to the host branch", async () => {
-    invokeMock.mockResolvedValueOnce("a1")
-    const config = { id: "a1", command: "codex", args: ["app-server"] }
-    await expect(spawnExternalAgent(config)).resolves.toBe("a1")
-    expect(invokeMock).toHaveBeenCalledWith("spawn_external_agent", { config })
-
-    invokeMock.mockResolvedValueOnce(true)
-    await expect(checkExternalAgentCommandExists("codex")).resolves.toBe(true)
-    expect(invokeMock).toHaveBeenCalledWith("check_command_exists", { command: "codex" })
-
-    const handler = jest.fn()
-    listenMock.mockResolvedValueOnce(() => undefined)
-    await onExternalAgentStdout(handler)
-    expect(listenMock).toHaveBeenCalledWith("external-agent://stdout", handler)
+describe("CLI PTY terminals", () => {
+  it("exposes every ACP terminal command as the installed terminal plane", () => {
+    expect(cliTerminalPlane).toEqual({
+      create: acpTerminalCreate,
+      output: acpTerminalOutput,
+      kill: acpTerminalKill,
+      release: acpTerminalRelease,
+      waitForExit: acpTerminalWaitForExit,
+      write: acpTerminalWrite,
+      sessionTerminals: acpTerminalGetSessionTerminals,
+      killSessionTerminals: acpTerminalKillSessionTerminals,
+      isRunning: acpTerminalIsRunning,
+      info: acpTerminalGetInfo,
+      list: acpTerminalList,
+    })
+    expect(Object.isFrozen(cliTerminalPlane)).toBe(true)
   })
 
   it("does not require the Darwin-only spawn helper for a Linux PTY", async () => {
@@ -49,13 +46,13 @@ describe("CLI native external-agent shim", () => {
       jest.doMock("node:fs", () => ({ ...jest.requireActual("node:fs"), chmodSync: chmod }))
       jest.doMock("node-pty", () => ({ spawn }))
       await jest.isolateModulesAsync(async () => {
-        const shim = await import("./native-shim")
-        const id = await shim.acpTerminalCreate("linux-session", "/bin/sh")
+        const terminals = await import("./pty-terminals")
+        const id = await terminals.acpTerminalCreate("linux-session", "/bin/sh")
         try {
           expect(spawn).toHaveBeenCalled()
           expect(chmod).not.toHaveBeenCalled()
         } finally {
-          await shim.acpTerminalRelease(id)
+          await terminals.acpTerminalRelease(id)
         }
       })
     } finally {

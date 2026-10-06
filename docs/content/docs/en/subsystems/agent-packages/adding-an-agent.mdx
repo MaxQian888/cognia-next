@@ -182,8 +182,11 @@ migration subsystem (ADR-0107); they are not part of the package.
    `protocol/external-agent-security-policy.json` and the host's permission
    guard. Registering the package or declaring a need in its manifest
    authorizes nothing.
-5. **The CLI**, if it should run the agent: give it the Node implementation of
-   the same ports.
+5. **The CLI** needs nothing per agent. It installs its external-agent host at
+   boot (`installCliExternalAgentHost`, `cli/src/runtime/external/host-branch.ts`),
+   so the ports built in step 1 reach its Node process backend, PTY terminals and
+   hook policy. A launch command the CLI should admit goes into its spawn
+   allowlist, which is authorization, not registration.
 
 ## 7. Verify
 

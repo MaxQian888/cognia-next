@@ -156,7 +156,10 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
 4. **授权单独处理**：spawn 白名单与审批默认值在
    `protocol/external-agent-security-policy.json` 和宿主权限守卫中。注册包或在 manifest
    中声明需求都不会授予任何权限。
-5. **CLI**：若 CLI 也要运行该 agent，为它提供同一组端口的 Node 实现。
+5. **CLI**：无需为每个 agent 做任何事。CLI 在启动时安装其外部 agent 宿主
+   （`cli/src/runtime/external/host-branch.ts` 中的 `installCliExternalAgentHost`），
+   因此第 1 步构建的端口会到达它的 Node 进程后端、PTY 终端与 hook 策略。CLI 应当
+   放行的启动命令要加入它的 spawn 白名单，这属于授权，而不是注册。
 
 ## 7. 验证
 

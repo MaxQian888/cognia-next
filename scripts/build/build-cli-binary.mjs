@@ -36,7 +36,6 @@ import path from "node:path"
 
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import fs from "node:fs"
-import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 import {
   createMcpHostBridgePlugin,
   writeCheckedMcpSidecarOutput,
@@ -269,7 +268,7 @@ await esbuild.build({
   // TUI_EXTERNALS); those resolve from the adjacent node_modules at runtime.
   external: TUI_EXTERNALS,
   loader: ASSET_LOADERS,
-  plugins: [createCliExternalAgentAliasPlugin(root), stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, cliBundle)}`)

@@ -10,7 +10,7 @@ description: cognia-agent 如何复用 Cognia 外部 Agent 协议平面，并通
 <TLDR>
   `cognia-agent chat --backend codex` 和 `--backend claude-code` 只替换 turn session factory。
   preset、ACP/Codex adapter、`ExternalAgentManager`、凭据覆盖和协议事件全部复用桌面端实现。
-  CLI 专属 build alias 把这些共享模块连接到 Node 进程后端。后端在通过原生 Seatbelt 或
+  CLI 在启动时安装一个外部 agent 宿主，把这些共享模块连接到 Node 进程后端。后端在通过原生 Seatbelt 或
   bubblewrap 沙箱启动子进程前验证 command、cwd 与 environment。外部事件随后进入现有 TUI
   reducer、权限 overlay、usage 展示和 transcript store。整个流程不要求桌面应用运行。
 </TLDR>
@@ -23,7 +23,7 @@ flowchart LR
   Session --> Preset["共享 preset registry"]
   Preset --> Manager["共享 ExternalAgentManager"]
   Manager --> Adapter{"共享 protocol adapter"}
-  Adapter -->|"Codex JSON-RPC"| Host["CLI host alias"]
+  Adapter -->|"Codex JSON-RPC"| Host["已安装的 CLI 宿主"]
   Adapter -->|"ACP JSON-RPC"| Host
   Host --> Node["NodeExternalAgentBackend"]
   Node --> Sandbox["严格原生 launcher"]
@@ -40,10 +40,10 @@ flowchart LR
 | ACP 与 Codex 协议 client | `acp-client.ts`、`codex-app-server-client.ts` | 原样复用 |
 | 生命周期与执行 | `ExternalAgentManager` | 复用；短生命周期 CLI 关闭 health interval |
 | 凭据覆盖 | `env-builder.ts` | 复用；CLI 凭据作为显式 base environment |
-| 进程/事件宿主 | 桌面端使用 Tauri | 替换为 CLI build alias 与 `NodeExternalAgentBackend` |
+| 进程/事件宿主 | 桌面端使用 Tauri | CLI 安装的宿主，基于 `NodeExternalAgentBackend` |
 | 展示 | 桌面 chat reducer | 适配到现有 Agent CLI TUI reducer |
 
-`scripts/build/cli-external-agent-aliases.mjs` 只重定向三个宿主相关 import：原生外部进程 API、宿主 capability branch 和 agent hook。`cli/` 下不存在第二套 ACP 或 Codex 实现。
+三个共享模块与宿主相关：原生外部进程 API（`lib/native/external-agent.ts`）、宿主 capability branch（`agent-transport.ts`）和 agent hook（`agent-hooks.ts`）。它们在调用时询问 `getInstalledExternalAgentHost()`（`lib/ai/agent/external/host/installed-host.ts`），若已安装宿主就委托给它。`cli/src/cli/entry.ts` 在任何 agent 代码运行前安装 CLI 的宿主（`cli/src/runtime/external/host-branch.ts` 中的 `installCliExternalAgentHost`）：Node 后端的进程平面与工作区文件、node-pty 终端（`pty-terminals.ts`）以及不运行 hook 的策略（`hook-plane.ts`）。构建时不替换任何模块；ADR-0217 删除了过去重定向这些 import 的 esbuild alias。`cli/` 下不存在第二套 ACP 或 Codex 实现。
 
 ## 支持的入口
 
