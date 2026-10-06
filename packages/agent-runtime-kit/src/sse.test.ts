@@ -1,4 +1,4 @@
-import { readServerSentEvents } from "./sse-reader"
+import { readServerSentEvents } from "./sse"
 
 function streamOf(...pieces: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()

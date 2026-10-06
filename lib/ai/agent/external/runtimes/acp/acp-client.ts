@@ -21,7 +21,7 @@ import {
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { createPlatformWebSocket, type PlatformWebSocket } from "@/lib/network/platform-websocket"
-import { readServerSentEvents } from "@/lib/network/sse-reader"
+import { readServerSentEvents } from "@cognia/agent-runtime-kit/sse"
 import { loggers } from "@cognia/logging"
 import { truncateForLog } from "@cognia/logging/truncate"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"

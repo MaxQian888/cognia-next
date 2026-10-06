@@ -101,6 +101,7 @@ const SPECS = {
       "./plugin-compat",
       "./prompt-gate",
       "./elicitation",
+      "./sse",
     ],
     dataOnly: ["./history"],
     runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
@@ -220,6 +221,31 @@ const SPECS = {
       const parsed: ParsedHistorySession = parseCodexRollout("", "r", { redactText: (t) => t })
       const summary: HistorySessionSummary | null = summarizeCodexRollout("", "r")
       export { adapter, status, parsed, summary }
+    `,
+  },
+  "agent-a2a": {
+    entries: [".", "./manifest", "./client"],
+    dataOnly: ["./manifest"],
+    runtimeModules: ["client", "base-adapter", "prompt-gate", "sse"],
+    smoke: `
+      import { A2A_EXECUTION_SEMANTICS } from "@cognia/agent-a2a/manifest"
+      import { A2aClientAdapter } from "@cognia/agent-a2a/client"
+      const seen = []
+      const adapter = new A2aClientAdapter({
+        fetch: async (input) => { seen.push(String(input)); return new Response("{}", { status: 404 }) },
+        outboundGate: () => true,
+      })
+      if (adapter.semantics !== A2A_EXECUTION_SEMANTICS) throw new Error("semantics")
+      await adapter.connect({ id: "a", name: "a", protocol: "a2a", transport: "http", network: { endpoint: "https://agent.example" } }).catch(() => undefined)
+      if (!seen.some((url) => url.startsWith("https://agent.example/"))) throw new Error("the host fetch must carry the card request")
+    `,
+    types: `
+      import { A2aClientAdapter } from "@cognia/agent-a2a/client"
+      import type { AgentFetch } from "@cognia/agent-contracts/host"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      declare const fetch: AgentFetch
+      const adapter: ProtocolAdapter = new A2aClientAdapter({ fetch, outboundGate: () => true })
+      export { adapter }
     `,
   },
   "agent-aider": {

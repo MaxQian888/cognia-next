@@ -3,8 +3,8 @@
  * adapters (ADR-0217): the base adapter, JSON-RPC peer, LF frame decoding,
  * content-block helpers, unsupported-extension errors, orphan-process
  * reclaim, permission-mode ranking, history-reader building blocks, ACP-shaped
- * elicitation normalization, the outbound-gate prompt check and the
- * plugin-adapter compatibility wrapper. Depends only on
+ * elicitation normalization, server-sent-event reading, the outbound-gate
+ * prompt check and the plugin-adapter compatibility wrapper. Depends only on
  * `@cognia/agent-contracts`; never on a host.
  */
 export * from "./base-adapter"
@@ -18,3 +18,4 @@ export * from "./plugin-compat"
 export * from "./prompt-gate"
 export * from "./session-extension-errors"
 export * from "./spawn-reclaim"
+export * from "./sse"

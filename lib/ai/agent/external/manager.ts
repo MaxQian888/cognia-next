@@ -88,7 +88,7 @@ import {
   canProjectOpenCodeV2McpOnThisHost,
   createOpenCodeV2AdapterFactory,
 } from "./integrations/opencode"
-import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
+import { createA2aAdapterFactory } from "./integrations/a2a"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
 import { createDshSdkAdapterFactory, dshManagedLaunchHost } from "./integrations/dsh"
@@ -346,7 +346,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   registry.register("acp", () => new AcpClientAdapter())
   registry.register("codex-app-server", createCodexAppServerAdapterFactory())
   registry.register("opencode-v2", createOpenCodeV2AdapterFactory())
-  registry.register("a2a", () => new A2aClientAdapter())
+  registry.register("a2a", createA2aAdapterFactory())
   // Managed install/facts are local-host commands; the integration wiring
   // hands DSH the local process host (paired remote installation is not exposed).
   registry.register("dsh-sdk", createDshSdkAdapterFactory())

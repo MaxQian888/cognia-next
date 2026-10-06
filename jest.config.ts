@@ -244,6 +244,8 @@ const projectCommon: Config = {
     "^@cognia/agent-pi/(.*)$": "<rootDir>/packages/agent-pi/src/$1",
     "^@cognia/agent-opencode$": "<rootDir>/packages/agent-opencode/src/index.ts",
     "^@cognia/agent-opencode/(.*)$": "<rootDir>/packages/agent-opencode/src/$1",
+    "^@cognia/agent-a2a$": "<rootDir>/packages/agent-a2a/src/index.ts",
+    "^@cognia/agent-a2a/(.*)$": "<rootDir>/packages/agent-a2a/src/$1",
     "^@cognia/agent-codex$": "<rootDir>/packages/agent-codex/src/index.ts",
     "^@cognia/agent-codex/(.*)$": "<rootDir>/packages/agent-codex/src/$1",
     "^@cognia/agent-orchestration$": "<rootDir>/packages/agent-orchestration/src/index.ts",

@@ -25,12 +25,13 @@ import type {
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
   AcpCapabilities,
-} from "@/types/agent/external-agent"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
-import { readServerSentEvents } from "@/lib/network/sse-reader"
+} from "@cognia/agent-contracts/external-agent"
+import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
+import type { AgentFetch, AgentOutboundGate } from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+import { readServerSentEvents } from "@cognia/agent-runtime-kit/sse"
+import { A2A_EXECUTION_SEMANTICS, A2A_PROTOCOL } from "./manifest"
 
 /** A2A TaskState string values (JSON-RPC binding). */
 export type A2aTaskState =
@@ -345,21 +346,24 @@ function normalizeTaskState(state: A2aWireTaskState | undefined): A2aTaskState {
 
 export interface A2aClientDeps {
   /**
-   * Injected for tests; defaults to the shell's streaming transport.
-   *
-   * A bare `fetch` was wrong on the desktop twice: `message/stream` answers
-   * with SSE, and a renderer `fetch` to an operator-supplied agent host is
-   * blocked by `connect-src` before it leaves the WebView — and would ignore
-   * the configured proxy if it got out. `platformStreamingFetch` fixes both
-   * and still serves the non-streaming calls, whose bodies simply end.
+   * The host's streaming fetch. A bare `fetch` was wrong on the desktop twice:
+   * `message/stream` answers with SSE, and a renderer `fetch` to an
+   * operator-supplied agent host is blocked by `connect-src` before it leaves
+   * the WebView — and would ignore the configured proxy if it got out. The
+   * host's fetch fixes both and still serves the non-streaming calls, whose
+   * bodies simply end.
    */
-  fetchImpl?: typeof fetch
+  fetch: AgentFetch
+  /** Every outbound message passes it. */
+  outboundGate: AgentOutboundGate
 }
 
 export class A2aClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "a2a"
+  readonly protocol = A2A_PROTOCOL
+  readonly semantics = A2A_EXECUTION_SEMANTICS
 
-  private readonly fetchImpl: typeof fetch
+  private readonly fetchImpl: AgentFetch
+  private readonly outboundGate: AgentOutboundGate
   private endpoint = ""
   private rpcUrl = ""
   private headers: Record<string, string> = {}
@@ -369,12 +373,10 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
   private readonly sessionCtx = new Map<string, A2aSessionCtx>()
   private rpcId = 0
 
-  constructor(deps: A2aClientDeps = {}) {
+  constructor(deps: A2aClientDeps) {
     super()
-    // Wrapped rather than passed directly: the streaming transport's init type
-    // is narrower than `RequestInit`, so it is not assignable to `typeof fetch`
-    // under `strictFunctionTypes`.
-    this.fetchImpl = deps.fetchImpl ?? ((input, init) => platformStreamingFetch(input, init))
+    this.fetchImpl = deps.fetch
+    this.outboundGate = deps.outboundGate
   }
 
   async connect(config: ExternalAgentConfig): Promise<void> {
@@ -447,7 +449,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     this.sessionCtx.set(sessionId, ctx)
 
     try {
-      if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+      if (!promptInputPassesGate(message, this.outboundGate, { sessionId })) {
         throw new Error("A2A outbound payload blocked by the PII gate")
       }
       const isV1 = this.protocolVersion === "1.0"
@@ -499,7 +501,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
         ...(ctx.contextId ? { contextId: ctx.contextId } : {}),
         ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
       }
-      if (!hasNoLeakingPiiDeep(a2aMessage)) {
+      if (!this.outboundGate(a2aMessage)) {
         throw new Error("A2A outbound payload blocked by the PII gate")
       }
 

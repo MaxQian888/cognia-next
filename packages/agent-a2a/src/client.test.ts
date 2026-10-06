@@ -1,5 +1,10 @@
-import { A2aClientAdapter, mapA2aResult } from "./a2a-client"
-import type { ExternalAgentConfig, ExternalAgentMessage } from "@/types/agent/external-agent"
+import { A2aClientAdapter, mapA2aResult } from "./client"
+import { A2A_EXECUTION_SEMANTICS } from "./manifest"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type {
+  ExternalAgentConfig,
+  ExternalAgentMessage,
+} from "@cognia/agent-contracts/external-agent"
 
 // ── pure mapper ──────────────────────────────────────────────────────────────
 
@@ -272,7 +277,7 @@ async function collect(it: AsyncIterable<unknown>): Promise<unknown[]> {
 describe("A2aClientAdapter", () => {
   it("cleans local sessions and reports unavailable service health", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     expect(await a.healthCheck()).toBe(false)
     await a.connect(makeConfig())
     expect(await a.healthCheck()).toBe(true)
@@ -294,7 +299,7 @@ describe("A2aClientAdapter", () => {
         ok: true,
         json: async () => ({ result: { message: { parts: [{ text: "done" }] } } }),
       }))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect({
       ...makeConfig(),
       network: { endpoint: "https://x", authMethod: "api-key", apiKey: "fixture" },
@@ -354,7 +359,7 @@ describe("A2aClientAdapter", () => {
           result: { message: { role: "ROLE_AGENT", parts: [{ text: "done" }] } },
         }),
       }))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession({
       systemPrompt: "Session instruction",
@@ -391,7 +396,7 @@ describe("A2aClientAdapter", () => {
 
   it("rejects reverse tool mounts and blocks sensitive added instructions", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     await expect(
       a.createSession({ mcpServers: [{ name: "cognia", command: "node", args: [], env: [] }] })
@@ -422,7 +427,7 @@ describe("A2aClientAdapter", () => {
         },
       ])
     )
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
 
     await a.connect(makeConfig())
 
@@ -440,21 +445,21 @@ describe("A2aClientAdapter", () => {
         },
       ])
     )
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
 
     await expect(a.connect(makeConfig())).rejects.toThrow(/supported JSON-RPC interface/i)
   })
 
   it("rejects an Agent Card that explicitly advertises no interfaces", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(interfacesCardResponse([]))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
 
     await expect(a.connect(makeConfig())).rejects.toThrow(/supported JSON-RPC interface/i)
   })
 
   it("rejects a path-only local file instead of sending an invalid A2A 1.0 Part", async () => {
     const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const message: ExternalAgentMessage = {
@@ -489,7 +494,7 @@ describe("A2aClientAdapter", () => {
           result: { message: { role: "ROLE_AGENT", parts: [{ text: "ok" }] } },
         }),
       } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const message: ExternalAgentMessage = {
@@ -525,7 +530,7 @@ describe("A2aClientAdapter", () => {
       .fn()
       .mockResolvedValueOnce(v1CardResponse(true))
       .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
 
@@ -561,7 +566,7 @@ describe("A2aClientAdapter", () => {
           result: { kind: "task", id: "task-working", status: { state: "working" } },
         }),
       } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
 
@@ -576,7 +581,7 @@ describe("A2aClientAdapter", () => {
 
   it("rejects an image part with neither URL nor content", async () => {
     const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const message: ExternalAgentMessage = {
@@ -599,7 +604,7 @@ describe("A2aClientAdapter", () => {
 
   it("blocks PII-bearing messages before the A2A network request", async () => {
     const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
 
@@ -615,7 +620,7 @@ describe("A2aClientAdapter", () => {
 
   it("blocks PII hidden in a base64 text attachment before the A2A network request", async () => {
     const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const message: ExternalAgentMessage = {
@@ -658,7 +663,7 @@ describe("A2aClientAdapter", () => {
       }),
     } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(sendRes)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("hello")))) as Array<{
@@ -719,7 +724,7 @@ describe("A2aClientAdapter", () => {
       .mockResolvedValueOnce(v1CardResponse(false))
       .mockResolvedValueOnce(firstReply)
       .mockResolvedValueOnce(secondReply)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
 
@@ -760,7 +765,7 @@ describe("A2aClientAdapter", () => {
         status: 200,
         json: async () => ({ result: { task: { id: "task-v1" } } }),
       } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     await collect(a.prompt(session.id, userMessage("stream")))
@@ -804,7 +809,7 @@ describe("A2aClientAdapter", () => {
       .fn()
       .mockResolvedValueOnce(v1CardResponse(true))
       .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
 
@@ -823,7 +828,7 @@ describe("A2aClientAdapter", () => {
 
   it("connects by fetching the agent card and reflects streaming capability", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(cardResponse(true))
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     expect(a.isConnected()).toBe(true)
     expect(a.capabilities).toMatchObject({ streaming: true })
@@ -835,14 +840,14 @@ describe("A2aClientAdapter", () => {
 
   it("degrades to connected (non-streaming) when the card is unreachable", async () => {
     const fetchImpl = jest.fn().mockResolvedValue({ ok: false, status: 404 } as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     expect(a.isConnected()).toBe(true)
     expect(a.capabilities).toMatchObject({ streaming: false, mcpTools: false })
   })
 
   it("throws when network.endpoint is missing", async () => {
-    const a = new A2aClientAdapter({ fetchImpl: jest.fn() })
+    const a = new A2aClientAdapter({ fetch: jest.fn(), outboundGate: hasNoLeakingPiiDeep })
     await expect(
       a.connect({ id: "x", protocol: "a2a", transport: "http" } as ExternalAgentConfig)
     ).rejects.toThrow(/network.endpoint/)
@@ -869,7 +874,7 @@ describe("A2aClientAdapter", () => {
     const streamRes = { ok: true, status: 200, body: stream } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(streamRes)
 
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("yo")))) as Array<{
@@ -896,7 +901,7 @@ describe("A2aClientAdapter", () => {
     } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(sendRes)
 
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("yo")))) as Array<{
@@ -910,7 +915,7 @@ describe("A2aClientAdapter", () => {
     const card = cardResponse(true)
     const fail = { ok: false, status: 500, body: null } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(fail)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("x")))) as Array<{
@@ -931,7 +936,7 @@ describe("A2aClientAdapter", () => {
       }),
     } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(rpcErr)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("x")))) as Array<{
@@ -960,7 +965,7 @@ describe("A2aClientAdapter", () => {
       .fn()
       .mockResolvedValueOnce(card)
       .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("x")))) as Array<{
@@ -1001,7 +1006,7 @@ describe("A2aClientAdapter", () => {
       .mockResolvedValueOnce(card)
       .mockResolvedValueOnce({ ok: true, status: 200, body: firstStream } as unknown as Response)
       .mockResolvedValueOnce({ ok: true, status: 200, body: resubStream } as unknown as Response)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const events = (await collect(a.prompt(session.id, userMessage("x")))) as Array<{
@@ -1025,7 +1030,7 @@ describe("A2aClientAdapter", () => {
       }),
     } as unknown as Response
     const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(sendRes)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     const msg: ExternalAgentMessage = {
@@ -1056,7 +1061,7 @@ describe("A2aClientAdapter", () => {
           capabilities: { streaming: true },
         }),
       } as unknown as Response) // agent.json
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     expect(a.capabilities).toMatchObject({ streaming: true })
     expect(fetchImpl).toHaveBeenCalledWith("https://x/.well-known/agent.json", expect.anything())
@@ -1065,7 +1070,7 @@ describe("A2aClientAdapter", () => {
   it("cancels via tasks/cancel using the session's taskId", async () => {
     const card = cardResponse(true)
     const fetchImpl = jest.fn().mockResolvedValueOnce(card)
-    const a = new A2aClientAdapter({ fetchImpl })
+    const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
     await a.connect(makeConfig())
     const session = await a.createSession()
     // Prime a taskId through the mapper by streaming one status-update.
@@ -1091,5 +1096,12 @@ describe("A2aClientAdapter", () => {
       "https://x/rpc",
       expect.objectContaining({ body: expect.stringContaining("tasks/cancel") })
     )
+  })
+})
+
+describe("A2aClientAdapter — host ports", () => {
+  it("declares a task-scoped cancel against a remote agent", () => {
+    const adapter = new A2aClientAdapter({ fetch: jest.fn(), outboundGate: () => true })
+    expect(adapter.semantics).toBe(A2A_EXECUTION_SEMANTICS)
   })
 })
