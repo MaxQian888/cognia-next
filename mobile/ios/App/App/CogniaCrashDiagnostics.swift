@@ -235,7 +235,8 @@ final class CogniaCrashCollector: NSObject, MXMetricManagerSubscriber {
         configuration.enableMemoryIntrospection = false
         configuration.addConsoleLogToReport = false
         do {
-            kscrashHealthy = try KSCrash.shared.install(with: configuration)
+            try KSCrash.shared.install(with: configuration)
+            kscrashHealthy = true
             migrateKSCrashReports()
         } catch {
             kscrashHealthy = false

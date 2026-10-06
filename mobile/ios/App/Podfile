@@ -3,25 +3,24 @@ require_relative '../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+co
 platform :ios, '16.0'
 use_frameworks!
 
-# workaround to avoid Xcode caching of Pods that requires
-# Product -> Clean Build Folder after new Cordova plugins installed
-# Requires CocoaPods 1.6 or newer
-install! 'cocoapods', :disable_input_output_paths => true
+# Keep CocoaPods' input/output file lists so Xcode can track embedded frameworks
+# and skip unchanged copy phases. `cap sync ios` regenerates these lists.
+install! 'cocoapods', :disable_input_output_paths => false
 
 def capacitor_pods
   pod 'Capacitor', :path => '../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+core@8.5.2/node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+core@8.5.2/node_modules/@capacitor/ios'
   pod 'CapacitorMlkitBarcodeScanning', :path => '../../../node_modules/.pnpm/@capacitor-mlkit+barcode-scanning@8.2.1_@capacitor+core@8.5.2/node_modules/@capacitor-mlkit/barcode-scanning'
-  pod 'CapacitorApp', :path => '../../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.5.2/node_modules/@capacitor/app'
+  pod 'CapacitorApp', :path => '../../../node_modules/.pnpm/@capacitor+app@8.1.2_@capacitor+core@8.5.2/node_modules/@capacitor/app'
   pod 'CapacitorBrowser', :path => '../../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.5.2/node_modules/@capacitor/browser'
   pod 'CapacitorCamera', :path => '../../../node_modules/.pnpm/@capacitor+camera@8.2.4_@capacitor+core@8.5.2/node_modules/@capacitor/camera'
   pod 'CapacitorClipboard', :path => '../../../node_modules/.pnpm/@capacitor+clipboard@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/clipboard'
   pod 'CapacitorDevice', :path => '../../../node_modules/.pnpm/@capacitor+device@8.0.3_@capacitor+core@8.5.2/node_modules/@capacitor/device'
   pod 'CapacitorDialog', :path => '../../../node_modules/.pnpm/@capacitor+dialog@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/dialog'
-  pod 'CapacitorFilesystem', :path => '../../../node_modules/.pnpm/@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem'
+  pod 'CapacitorFilesystem', :path => '../../../node_modules/.pnpm/@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem'
   pod 'CapacitorGeolocation', :path => '../../../node_modules/.pnpm/@capacitor+geolocation@8.2.2_@capacitor+core@8.5.2/node_modules/@capacitor/geolocation'
   pod 'CapacitorHaptics', :path => '../../../node_modules/.pnpm/@capacitor+haptics@8.0.2_@capacitor+core@8.5.2/node_modules/@capacitor/haptics'
-  pod 'CapacitorKeyboard', :path => '../../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard'
+  pod 'CapacitorKeyboard', :path => '../../../node_modules/.pnpm/@capacitor+keyboard@8.0.6_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard'
   pod 'CapacitorLocalNotifications', :path => '../../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.5.2/node_modules/@capacitor/local-notifications'
   pod 'CapacitorNetwork', :path => '../../../node_modules/.pnpm/@capacitor+network@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/network'
   pod 'CapacitorPushNotifications', :path => '../../../node_modules/.pnpm/@capacitor+push-notifications@8.1.2_patch_hash=00d217d65aac2798c675558ccb7e6ecfe1c85053_321a55e524bb7e4c8179d65830b3c855/node_modules/@capacitor/push-notifications'
@@ -34,7 +33,7 @@ def capacitor_pods
   pod 'CapgoCapacitorNavigationBar', :path => '../../../node_modules/.pnpm/@capgo+capacitor-navigation-bar@8.2.10_@capacitor+core@8.5.2/node_modules/@capgo/capacitor-navigation-bar'
   pod 'CapacitorNativeSettings', :path => '../../../node_modules/.pnpm/capacitor-native-settings@8.2.0_@capacitor+core@8.5.2/node_modules/capacitor-native-settings'
   pod 'CapacitorSecureStoragePlugin', :path => '../../../node_modules/.pnpm/capacitor-secure-storage-plugin@0.13.0_patch_hash=107761618a151e09b442053f6e7c72f39a0ab_d6242a0209018884186a99f7ad63edd2/node_modules/capacitor-secure-storage-plugin'
-  pod 'CapacitorVoiceRecorder', :path => '../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder'
+  pod 'CapacitorVoiceRecorder', :path => '../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder'
   pod 'CapacitorZeroconf', :path => '../../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0d_302228fe4ee7d40d8584b2ba398e4ea7/node_modules/capacitor-zeroconf'
 end
 

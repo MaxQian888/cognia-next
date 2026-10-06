@@ -85,7 +85,7 @@ export async function sourceFingerprint(root, run, env) {
     { cwd: root, capture: true }
   )
   const roots =
-    /^(app|components|hooks|lib|stores|types|packages|i18n|public|generated|skills\/built-in|plugins|docs\/content\/docs|scripts\/build|scripts\/mobile|scripts\/i18n)\//
+    /^(app|components|hooks|lib|stores|types|packages|i18n|public|assets\/icons|generated|skills\/built-in|plugins|docs\/content\/docs|scripts\/build|scripts\/mobile|scripts\/i18n)\//
   const config =
     /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|next\.config\.[^/]+|tsconfig[^/]*\.json|postcss\.config\.[^/]+|\.browserslistrc|\.npmrc|browserslist)$/
   const files = new Set(

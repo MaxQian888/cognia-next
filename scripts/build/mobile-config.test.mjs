@@ -6,6 +6,22 @@ import vm from "node:vm"
 import ts from "typescript"
 
 const require = createRequire(import.meta.url)
+
+test("production type checking preserves the root workspace and generated-output exclusions", () => {
+  const readConfig = (file) => {
+    const result = ts.readConfigFile(file, ts.sys.readFile)
+    assert.equal(result.error, undefined)
+    return result.config
+  }
+  const root = readConfig("tsconfig.json")
+  const build = readConfig("tsconfig.build.json")
+  // `exclude` replaces the inherited array. Dropping a root exclusion pulls
+  // other apps and bundled TypeScript into the mobile production program.
+  for (const excluded of root.exclude) {
+    assert.ok(build.exclude.includes(excluded), `Build config must exclude ${excluded}`)
+  }
+})
+
 function config(env, observeSerwist = () => {}) {
   const source = readFileSync(new URL("../../next.config.ts", import.meta.url), "utf8")
   const compiled = ts.transpileModule(source, {
@@ -86,4 +102,24 @@ test("mobile production disables the service worker before export pruning", () =
     serwist = options
   })
   assert.equal(serwist.disable, true)
+})
+
+test("bundle analysis is opt-in and preserves the mobile webpack configuration", () => {
+  for (const analyze of [undefined, "true"]) {
+    const next = config({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_PLATFORM: "mobile",
+      ANALYZE: analyze,
+    })
+    const webpack = next.webpack(
+      { resolve: { extensions: [".tsx", ".js"] }, plugins: [] },
+      { isServer: true, nextRuntime: "nodejs" }
+    )
+    assert.equal(webpack.resolve.extensions[0], ".mobile.tsx")
+    assert.equal(webpack.plugins.length, analyze === "true" ? 1 : 0)
+    if (analyze === "true") {
+      assert.equal(webpack.plugins[0].opts.analyzerMode, "static")
+      assert.equal(webpack.plugins[0].opts.openAnalyzer, false)
+    }
+  }
 })

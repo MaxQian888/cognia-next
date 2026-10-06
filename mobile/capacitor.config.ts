@@ -142,7 +142,8 @@ const config: CapacitorConfig = {
     },
   },
   ios: {
-    contentInset: "automatic",
+    // Page shells own safe-area padding; UIKit must not add a second inset.
+    contentInset: "never",
     limitsNavigationsToAppBoundDomains: false,
     scheme: "cognia",
   },

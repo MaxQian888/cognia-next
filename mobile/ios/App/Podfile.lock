@@ -1,7 +1,7 @@
 PODS:
   - Capacitor (8.5.2):
     - CapacitorCordova
-  - CapacitorApp (8.1.1):
+  - CapacitorApp (8.1.2):
     - Capacitor
   - CapacitorBrowser (8.0.4):
     - Capacitor
@@ -15,15 +15,15 @@ PODS:
     - Capacitor
   - CapacitorDialog (8.0.1):
     - Capacitor
-  - CapacitorFilesystem (8.1.3):
+  - CapacitorFilesystem (8.1.4):
     - Capacitor
-    - IONFilesystemLib (~> 1.1.1)
+    - IONFilesystemLib (~> 2.0.0)
   - CapacitorGeolocation (8.2.2):
     - Capacitor
     - IONGeolocationLib (= 2.1.0)
   - CapacitorHaptics (8.0.2):
     - Capacitor
-  - CapacitorKeyboard (8.0.5):
+  - CapacitorKeyboard (8.0.6):
     - Capacitor
   - CapacitorLocalNotifications (8.3.1):
     - Capacitor
@@ -81,7 +81,7 @@ PODS:
     - GoogleUtilities/Privacy
   - GTMSessionFetcher/Core (3.5.0)
   - IONCameraLib (2.0.0)
-  - IONFilesystemLib (1.1.4)
+  - IONFilesystemLib (2.0.0)
   - IONGeolocationLib (2.1.0)
   - KSCrash (2.5.1):
     - KSCrash/Installations (= 2.5.1)
@@ -133,17 +133,17 @@ PODS:
 
 DEPENDENCIES:
   - "Capacitor (from `../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+core@8.5.2/node_modules/@capacitor/ios`)"
-  - "CapacitorApp (from `../../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.5.2/node_modules/@capacitor/app`)"
+  - "CapacitorApp (from `../../../node_modules/.pnpm/@capacitor+app@8.1.2_@capacitor+core@8.5.2/node_modules/@capacitor/app`)"
   - "CapacitorBrowser (from `../../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.5.2/node_modules/@capacitor/browser`)"
   - "CapacitorCamera (from `../../../node_modules/.pnpm/@capacitor+camera@8.2.4_@capacitor+core@8.5.2/node_modules/@capacitor/camera`)"
   - "CapacitorClipboard (from `../../../node_modules/.pnpm/@capacitor+clipboard@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/clipboard`)"
   - "CapacitorCordova (from `../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+core@8.5.2/node_modules/@capacitor/ios`)"
   - "CapacitorDevice (from `../../../node_modules/.pnpm/@capacitor+device@8.0.3_@capacitor+core@8.5.2/node_modules/@capacitor/device`)"
   - "CapacitorDialog (from `../../../node_modules/.pnpm/@capacitor+dialog@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/dialog`)"
-  - "CapacitorFilesystem (from `../../../node_modules/.pnpm/@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem`)"
+  - "CapacitorFilesystem (from `../../../node_modules/.pnpm/@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem`)"
   - "CapacitorGeolocation (from `../../../node_modules/.pnpm/@capacitor+geolocation@8.2.2_@capacitor+core@8.5.2/node_modules/@capacitor/geolocation`)"
   - "CapacitorHaptics (from `../../../node_modules/.pnpm/@capacitor+haptics@8.0.2_@capacitor+core@8.5.2/node_modules/@capacitor/haptics`)"
-  - "CapacitorKeyboard (from `../../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard`)"
+  - "CapacitorKeyboard (from `../../../node_modules/.pnpm/@capacitor+keyboard@8.0.6_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard`)"
   - "CapacitorLocalNotifications (from `../../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.5.2/node_modules/@capacitor/local-notifications`)"
   - "CapacitorMlkitBarcodeScanning (from `../../../node_modules/.pnpm/@capacitor-mlkit+barcode-scanning@8.2.1_@capacitor+core@8.5.2/node_modules/@capacitor-mlkit/barcode-scanning`)"
   - "CapacitorNativeSettings (from `../../../node_modules/.pnpm/capacitor-native-settings@8.2.0_@capacitor+core@8.5.2/node_modules/capacitor-native-settings`)"
@@ -155,7 +155,7 @@ DEPENDENCIES:
   - "CapacitorSplashScreen (from `../../../node_modules/.pnpm/@capacitor+splash-screen@8.0.2_@capacitor+core@8.5.2/node_modules/@capacitor/splash-screen`)"
   - "CapacitorStatusBar (from `../../../node_modules/.pnpm/@capacitor+status-bar@8.0.3_@capacitor+core@8.5.2/node_modules/@capacitor/status-bar`)"
   - "CapacitorToast (from `../../../node_modules/.pnpm/@capacitor+toast@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/toast`)"
-  - "CapacitorVoiceRecorder (from `../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder`)"
+  - "CapacitorVoiceRecorder (from `../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder`)"
   - "CapacitorZeroconf (from `../../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0d_302228fe4ee7d40d8584b2ba398e4ea7/node_modules/capacitor-zeroconf`)"
   - "CapgoCapacitorNativeBiometric (from `../../../node_modules/.pnpm/@capgo+capacitor-native-biometric@8.7.0_patch_hash=8aed032e94ffe6e4edf67ccaf6954431b9e5_a41b64d454e82c8558cd64c7d49a2e1d/node_modules/@capgo/capacitor-native-biometric`)"
   - "CapgoCapacitorNavigationBar (from `../../../node_modules/.pnpm/@capgo+capacitor-navigation-bar@8.2.10_@capacitor+core@8.5.2/node_modules/@capgo/capacitor-navigation-bar`)"
@@ -184,7 +184,7 @@ EXTERNAL SOURCES:
   Capacitor:
     :path: "../../../node_modules/.pnpm/@capacitor+ios@8.5.2_@capacitor+core@8.5.2/node_modules/@capacitor/ios"
   CapacitorApp:
-    :path: "../../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.5.2/node_modules/@capacitor/app"
+    :path: "../../../node_modules/.pnpm/@capacitor+app@8.1.2_@capacitor+core@8.5.2/node_modules/@capacitor/app"
   CapacitorBrowser:
     :path: "../../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.5.2/node_modules/@capacitor/browser"
   CapacitorCamera:
@@ -198,13 +198,13 @@ EXTERNAL SOURCES:
   CapacitorDialog:
     :path: "../../../node_modules/.pnpm/@capacitor+dialog@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/dialog"
   CapacitorFilesystem:
-    :path: "../../../node_modules/.pnpm/@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem"
+    :path: "../../../node_modules/.pnpm/@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem"
   CapacitorGeolocation:
     :path: "../../../node_modules/.pnpm/@capacitor+geolocation@8.2.2_@capacitor+core@8.5.2/node_modules/@capacitor/geolocation"
   CapacitorHaptics:
     :path: "../../../node_modules/.pnpm/@capacitor+haptics@8.0.2_@capacitor+core@8.5.2/node_modules/@capacitor/haptics"
   CapacitorKeyboard:
-    :path: "../../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard"
+    :path: "../../../node_modules/.pnpm/@capacitor+keyboard@8.0.6_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard"
   CapacitorLocalNotifications:
     :path: "../../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.5.2/node_modules/@capacitor/local-notifications"
   CapacitorMlkitBarcodeScanning:
@@ -228,7 +228,7 @@ EXTERNAL SOURCES:
   CapacitorToast:
     :path: "../../../node_modules/.pnpm/@capacitor+toast@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/toast"
   CapacitorVoiceRecorder:
-    :path: "../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder"
+    :path: "../../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder"
   CapacitorZeroconf:
     :path: "../../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0d_302228fe4ee7d40d8584b2ba398e4ea7/node_modules/capacitor-zeroconf"
   CapgoCapacitorNativeBiometric:
@@ -238,17 +238,17 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Capacitor: 89067779e14fb7ea56af07b4817f45d1f0c2a269
-  CapacitorApp: 305bd13c44f6f9d164e2ee66a4faa956ed8c0e06
+  CapacitorApp: 7b7e43debe505bc61beedb83796aa1368c86078b
   CapacitorBrowser: 752e0208aa07c7aa63d1f7cde895a3e9519b2656
   CapacitorCamera: 4299fe8cf9b2b15e6ad602bce68d063b2008e8be
   CapacitorClipboard: c75fdaa6e622111119f35e7914ecfc67b05efecb
   CapacitorCordova: 5bec5648cbd09a176ce34ce5e7b6cdabb2c8a327
   CapacitorDevice: 708e742b60a61572cd593e44c809592e8f31da14
   CapacitorDialog: 854c5dac405081cae697c177ca43bcaa95ae67bf
-  CapacitorFilesystem: b2bbd84bb91c177906c9dbc252864cb71ab9957b
+  CapacitorFilesystem: 17ee1862a45ef2e5012311a87e18de1d45a6811b
   CapacitorGeolocation: 327f18983c8f8a55e191fcf7dee80b9294f1ab78
   CapacitorHaptics: 296f771ecd89c7a1bd92a7b6826a7d268e2e70f5
-  CapacitorKeyboard: b6b0744890cdb1d9a96e2cafcc9253fdcc55de3b
+  CapacitorKeyboard: f9e85e685082e9f63404de15db4a4291448b0912
   CapacitorLocalNotifications: e0747a329ddde3074d52dc74a003688af90e42be
   CapacitorMlkitBarcodeScanning: 1070a9d56dd84c08a7354d12354293daeee28100
   CapacitorNativeSettings: 3f12e9700e0a10cb5d0e22aec00de29d72589a12
@@ -270,7 +270,7 @@ SPEC CHECKSUMS:
   GoogleUtilities: db34c1c11c6f2eccb6fab2340cb8ceb1451299dc
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
   IONCameraLib: 729cae576e1a952602ce750a9790b6dc7d7e2e95
-  IONFilesystemLib: e6610c2b260d15e4b9cb9d5e37a87095479b669e
+  IONFilesystemLib: 0a001124dedc317c03032d138aaefbf4c18adb09
   IONGeolocationLib: 6a7b6f76063fb1b01cfb14fae7d0f526e3c9b271
   KSCrash: 8c4464fd5da7de520f2ce4a00fdf63f169a80f18
   MLImage: 2ab9c968e75f57911c16f4c9d9e8a8e9604a86a1
@@ -281,6 +281,6 @@ SPEC CHECKSUMS:
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
   SwiftKeychainWrapper: 807ba1d63c33a7d0613288512399cd1eda1e470c
 
-PODFILE CHECKSUM: fd03035c681846daa4ce9298c527d30f29fa45d8
+PODFILE CHECKSUM: 3968a6e57b3eb9700839f3de355a5ea3c17e94ed
 
 COCOAPODS: 1.16.2

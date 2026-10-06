@@ -5,7 +5,11 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { isExcludedMobileAsset, pruneMobileAssets } from "./mobile-assets.mjs"
+import {
+  MOBILE_ASSET_EXCLUSIONS,
+  isExcludedMobileAsset,
+  pruneMobileAssets,
+} from "./mobile-assets.mjs"
 import { sourceFingerprint, stampArtifact, verifyArtifact } from "./android-artifact.mjs"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
@@ -85,6 +89,32 @@ test("every current mobile icon and agent avatar runtime asset remains available
     for (const name of await readdir(path.join(root, "public", prefix)))
       assert.equal(isExcludedMobileAsset(`${prefix}/${name}`), false)
   }
+})
+
+test("authoring artwork stays outside public while provenance and QA assets resolve", async () => {
+  const authoringPaths = MOBILE_ASSET_EXCLUSIONS.filter((relative) =>
+    /\/(?:raw|qa)\/$|\/contact-sheet[^/]*$/.test(relative)
+  )
+  assert.equal(authoringPaths.length, 5)
+  for (const relative of authoringPaths) {
+    await assert.rejects(stat(path.join(root, "public", relative)), { code: "ENOENT" })
+    await stat(path.join(root, "assets", relative))
+  }
+  const manifestDirectory = path.join(root, "public/icons/cognia-mobile-spots")
+  const manifest = JSON.parse(await readFile(path.join(manifestDirectory, "icon-manifest.json")))
+  assert.equal(manifest.sourceRoot, "../../../assets/icons/cognia-mobile-spots")
+  for (const icon of manifest.icons) {
+    if (icon.source)
+      assert.ok(
+        (await stat(path.join(manifestDirectory, manifest.sourceRoot, icon.source))).isFile()
+      )
+  }
+  const previewDirectory = path.join(root, "assets/icons/cognia-mobile-spots/qa")
+  const preview = await readFile(path.join(previewDirectory, "index.html"), "utf8")
+  const images = [...preview.matchAll(/<img\s+src="([^"]+)"/g)]
+  assert.equal(images.length, manifest.icons.length)
+  for (const [, src] of images)
+    assert.ok((await stat(path.resolve(previewDirectory, src))).isFile(), src)
 })
 
 test("pruning is idempotent and the filtered export passes artifact integrity verification", async () => {
@@ -205,10 +235,10 @@ test("missing export and symlink paths fail without changing source files", asyn
   }
 })
 
-test("source fingerprints retain authoring inputs referenced by generation manifests", async () => {
+test("source fingerprints retain relocated authoring inputs referenced by generation manifests", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cognia-mobile-input-policy-"))
   try {
-    const relative = "public/icons/cognia-mobile-spots/raw/concept.png"
+    const relative = "assets/icons/cognia-mobile-spots/raw/concept.png"
     await put(directory, relative, "first")
     const run = async () => `${relative}\0`
     const before = await sourceFingerprint(directory, run, {})
