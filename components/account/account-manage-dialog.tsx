@@ -71,8 +71,14 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="@container min-h-0 flex-1 overflow-hidden px-6 pb-6">
-          <div className="grid h-full min-h-0 gap-4 @lg:grid-cols-[minmax(0,15rem)_1fr]">
+        <div className="@container flex min-h-0 flex-1 flex-col overflow-hidden px-6 pb-6">
+          {/* The grid flexes to the dialog body (a max height alone gives `h-full`
+              nothing to resolve against) and keeps one row that tall, so each
+              column scrolls on its own instead of growing past the body. */}
+          <div
+            className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 @lg:grid-cols-[minmax(0,15rem)_1fr]"
+            data-testid="account-manage-grid"
+          >
             <div
               className={cn("flex min-h-0 flex-col", narrowView === "detail" && "hidden @lg:flex")}
               data-testid="account-manage-list-col"

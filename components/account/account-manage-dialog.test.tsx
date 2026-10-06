@@ -113,6 +113,18 @@ describe("AccountManageDialog", () => {
     expect(detailCol().className).not.toMatch(/hidden/)
   })
 
+  it("keeps the row as tall as the dialog body so each column scrolls on its own", () => {
+    renderDialog()
+    // Without the bounded row the grid grows with the detail, and the body
+    // (overflow hidden) leaves the lower half of a long tab unreachable.
+    const grid = screen.getByTestId("account-manage-grid")
+    expect(grid.className).toMatch(/grid-rows-\[minmax\(0,1fr\)\]/)
+    expect(grid.className).toMatch(/flex-1/)
+    expect(grid.parentElement?.className).toMatch(/flex-col/)
+    expect(detailCol().className).toMatch(/overflow-y-auto/)
+    expect(detailCol().className).toMatch(/min-h-0/)
+  })
+
   it("selects the newly created account", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("stub-create"))
