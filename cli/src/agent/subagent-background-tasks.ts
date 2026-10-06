@@ -15,6 +15,7 @@ import {
 import {
   createDexieBackgroundTaskJournal,
   getBackgroundTaskRecord,
+  interruptBackgroundTasksOnBoot,
   listBackgroundTaskRecords,
 } from "@/lib/db/background-tasks"
 import { ensureCliDb } from "../db/bootstrap"
@@ -399,18 +400,18 @@ async function runWithCliDb<T>(
   return operation(handle)
 }
 
+/**
+ * Settle the `running` rows a previous CLI process left behind. Those runs
+ * were never admitted by this process's journal, so they go through the
+ * journal's boot reconciliation rather than its lease-guarded `update`, which
+ * refuses execution changes to a run it did not start. Runs live in this
+ * process are left alone.
+ */
 async function markCliRunningRowsInterrupted(): Promise<void> {
-  const now = Date.now()
-  const running = await listBackgroundTaskRecords({ host: "cli", status: "running" })
-  await Promise.all(
-    running.map((record) =>
-      dexieJournal.update(record.runId, {
-        status: "interrupted",
-        settledAt: now,
-        error: "Background task interrupted because its host process stopped.",
-      })
-    )
-  )
+  await interruptBackgroundTasksOnBoot({
+    host: "cli",
+    isLive: (runId) => registry.has(runId),
+  })
 }
 
 function errorMessage(error: unknown): string {
