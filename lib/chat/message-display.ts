@@ -93,9 +93,14 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
   focused: {
     preset: "focused",
     layout: "hybrid",
+    // ADR-0218: no speaker line by default. In a one-agent chat "Assistant"
+    // tells the reader nothing, and the time moves to the hover meta chip.
+    // Rooms (a named speaker) and routed turns (`@agent`, Squad) still show
+    // the identity in the header: there it is the only thing that says who is
+    // talking (`MessageShell`'s `inRoom` / `route`).
     metadata: {
-      identity: "header",
-      timestamp: "header",
+      identity: "hidden",
+      timestamp: "details",
       model: "details",
       provider: "hidden",
       duration: "hidden",
@@ -122,10 +127,11 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
   balanced: {
     preset: "balanced",
     layout: "hybrid",
+    // Same as `focused` (ADR-0218): the model joins the time in the meta chip.
     metadata: {
-      identity: "header",
-      timestamp: "header",
-      model: "header",
+      identity: "hidden",
+      timestamp: "details",
+      model: "details",
       provider: "details",
       duration: "details",
       usage: "details",

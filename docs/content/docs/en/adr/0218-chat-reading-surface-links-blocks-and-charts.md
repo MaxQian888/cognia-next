@@ -186,6 +186,28 @@ still must, so the setting picks a curated light/dark pair from `CHAT_CODE_THEME
 memoised per pair and the finalised highlight cache keys on it. The tool-approval code surface keeps
 the default pair.
 
+### 6. The speaker line
+
+The `focused` and `balanced` presets no longer draw a speaker line ("● Assistant · model · time")
+above every reply. In a chat with one agent it named the same agent on every turn. Identity is
+`hidden`, and time and model move to `details`, the meta chip on the hover action row. `inspector`
+keeps its full header, and an explicit `header` placement still wins.
+
+The line comes back where it tells speakers apart:
+
+- **Rooms:** a named speaker (team member, shared-session author, IM sender), as before.
+- **Routed turns:** an `@agent` or Squad turn, as before.
+- **Several agents in one transcript:** once two assistant turns were answered by different agents
+  (a composition switch such as Build → Plan, or a routed turn), every assistant turn names its
+  agent. `lib/chat/transcript-agents.ts` keys a turn by its route handle or its stamped preset. The
+  lists provide the answer through `TranscriptAgentsProvider`. The timeline view reads it from a new
+  optional `agentKey` on turn previews (`TranscriptMessagePreview`), because collapsed turns carry no
+  metadata. Unstamped turns (streaming, older transcripts) take no part.
+
+The status dot rides on a header that exists for one of these reasons and never keeps one alive by
+itself. Otherwise every reply would carry a lone dot row, and a streaming-only header would
+disappear when the turn finished and jump the transcript. A failed turn keeps its header and dot.
+
 ## Consequences
 
 - Links look different by default. The `link` token is tuned to pass 4.5:1 against both

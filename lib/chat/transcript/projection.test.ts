@@ -107,6 +107,36 @@ describe("transcript projection", () => {
     })
   })
 
+  it("stamps which agent answered on assistant previews only (ADR-0218)", () => {
+    const items = projectTranscriptTimeline({
+      sessionId: "session-1",
+      revision: 1,
+      messages: [
+        message("u1", "user", [text("q1")], { createdAt: 1 }),
+        message("a1", "assistant", [text("a1")], {
+          createdAt: 2,
+          metadata: { run: { agent: { presetId: "build" } } },
+        }),
+        message("u2", "user", [text("q2")], { createdAt: 3 }),
+        message("a2", "assistant", [text("a2")], {
+          createdAt: 4,
+          metadata: { run: { route: { handle: "codex", label: "Codex" } } },
+        }),
+        message("u3", "user", [text("q3")], { createdAt: 5 }),
+        message("a3", "assistant", [text("a3")], { createdAt: 6 }),
+      ],
+    })
+    const turns = items.filter((item) => item.kind === "completed-turn")
+    expect(turns.map((turn) => turn.finalResponse?.agentKey)).toEqual([
+      "preset:build",
+      "route:codex",
+      undefined,
+    ])
+    expect(turns[0]?.userMessages[0]).not.toHaveProperty("agentKey")
+    // Unstamped turns omit the field rather than carrying `undefined`.
+    expect(turns[2]?.finalResponse).not.toHaveProperty("agentKey")
+  })
+
   it("previews a user message by its typed text, not the context envelope", () => {
     // A companion renders this preview as the user's question. The envelope
     // would also eat the summary byte budget before the typed words appear.

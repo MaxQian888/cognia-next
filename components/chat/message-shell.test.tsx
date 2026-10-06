@@ -4,6 +4,7 @@ import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 import { useSettingsStore } from "@/stores/settings"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { METADATA_FIELDS, MessageMetaLine, MessageShell } from "./message-shell"
+import { TranscriptAgentsProvider } from "./transcript-agents-context"
 
 const message: UIMessage = {
   id: "a1",
@@ -22,13 +23,16 @@ const message: UIMessage = {
 }
 
 describe("MessageShell", () => {
-  it("shows balanced identity, timestamp and model in the header", () => {
+  it("draws no speaker line by default and moves time and model to the meta chip (ADR-0218)", () => {
+    const display = resolveMessageDisplayOptions()
     render(
-      <MessageShell message={message} display={resolveMessageDisplayOptions()}>
-        <p>Hello</p>
-      </MessageShell>
+      <TooltipProvider>
+        <MessageShell message={message} display={display}>
+          <p>Hello</p>
+        </MessageShell>
+        <MessageMetaLine message={message} display={display} />
+      </TooltipProvider>
     )
-
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-preset", "balanced")
     // ADR-0127: body font travels as a data attribute the typeset CSS reads.
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-body-font", "sans")
@@ -42,8 +46,85 @@ describe("MessageShell", () => {
     expect(shell).toHaveAttribute("data-code-max-height", "tall")
     expect(shell).toHaveAttribute("data-block-border", "on")
     expect(shell).toHaveAttribute("data-block-header", "on")
-    expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument()
+    // One agent, nothing to tell apart: no header row at all, not even the
+    // quiet "complete" dot on its own.
+    expect(screen.queryByTestId("message-shell-header")).toBeNull()
+    expect(screen.queryByTestId("message-status-dot")).toBeNull()
+    expect(screen.queryByRole("time")).toBeNull()
+    // Still one hover away, in the footer's meta chip.
+    const meta = screen.getByTestId("message-meta-line")
+    expect(meta).toHaveTextContent("claude-sonnet-4-6")
+    expect(meta).not.toHaveTextContent("Assistant")
+  })
+
+  it("still honours an explicit header placement for identity and time", () => {
+    render(
+      <MessageShell
+        message={message}
+        display={resolveMessageDisplayOptions({
+          preset: "balanced",
+          overrides: { metadata: { identity: "header", timestamp: "header", model: "header" } },
+        })}
+      >
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toHaveTextContent("Assistant")
+    expect(header).toHaveTextContent("claude-sonnet-4-6")
     expect(screen.getByRole("time")).toHaveAttribute("dateTime", "2023-11-14T22:13:20.000Z")
+    expect(screen.getByTestId("message-status-dot")).toBeInTheDocument()
+  })
+
+  it("names every assistant turn once the transcript has several agents", () => {
+    const { rerender } = render(
+      <TranscriptAgentsProvider multiAgent>
+        <MessageShell message={message} display={resolveMessageDisplayOptions()}>
+          <p>Hello</p>
+        </MessageShell>
+      </TranscriptAgentsProvider>
+    )
+    expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Assistant")
+    // The user's own turns stay quiet: only the agents need telling apart.
+    rerender(
+      <TranscriptAgentsProvider multiAgent>
+        <MessageShell
+          message={{ ...message, role: "user" }}
+          display={resolveMessageDisplayOptions()}
+        >
+          <p>Hi</p>
+        </MessageShell>
+      </TranscriptAgentsProvider>
+    )
+    expect(screen.queryByTestId("message-shell-header")).toBeNull()
+  })
+
+  it("keeps a failed turn's header even with nothing else to show", () => {
+    render(
+      <MessageShell
+        message={{
+          ...message,
+          metadata: {
+            ...(message.metadata as Record<string, unknown>),
+            run: { finishReason: "error" },
+          },
+        }}
+        display={resolveMessageDisplayOptions()}
+      >
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.getByTestId("message-shell-header")).toBeInTheDocument()
+    expect(screen.getByTestId("message-status-dot")).toBeInTheDocument()
+  })
+
+  it("does not grow a header just for the streaming dot, so finishing does not jump", () => {
+    render(
+      <MessageShell message={message} display={resolveMessageDisplayOptions()} isStreaming>
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.queryByTestId("message-shell-header")).toBeNull()
   })
 
   it("puts usage and cost in the header when that is the chosen placement", () => {
@@ -118,7 +199,10 @@ describe("MessageShell", () => {
     rerender(
       <MessageShell
         message={{ ...message, role: "user" }}
-        display={resolveMessageDisplayOptions({ preset: "focused" })}
+        display={resolveMessageDisplayOptions({
+          preset: "focused",
+          overrides: { metadata: { identity: "header" } },
+        })}
       >
         User body
       </MessageShell>
@@ -312,7 +396,10 @@ describe("status dot and agent identity", () => {
     // NO "Complete" text chip: the row only speaks when something is live
     // (streaming) or went wrong (error).
     render(
-      <MessageShell message={message} display={resolveMessageDisplayOptions()}>
+      <MessageShell
+        message={message}
+        display={resolveMessageDisplayOptions({ preset: "inspector" })}
+      >
         <p>Hello</p>
       </MessageShell>
     )
@@ -332,10 +419,13 @@ describe("status dot and agent identity", () => {
         },
       },
     }
+    // A sealed composition name is shown where it tells agents apart.
     render(
-      <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
-        <p>Hello</p>
-      </MessageShell>
+      <TranscriptAgentsProvider multiAgent>
+        <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
+          <p>Hello</p>
+        </MessageShell>
+      </TranscriptAgentsProvider>
     )
     const header = screen.getByTestId("message-shell-header")
     expect(header).toHaveTextContent("Build")
@@ -351,10 +441,13 @@ describe("status dot and agent identity", () => {
         run: { agent: { presetId: "custom", name: "Scout", icon: "🔍" } },
       },
     }
+    // A sealed composition name is shown where it tells agents apart.
     render(
-      <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
-        <p>Hello</p>
-      </MessageShell>
+      <TranscriptAgentsProvider multiAgent>
+        <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
+          <p>Hello</p>
+        </MessageShell>
+      </TranscriptAgentsProvider>
     )
     expect(screen.getByTestId("message-shell-header")).toHaveTextContent("🔍")
     expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Scout")

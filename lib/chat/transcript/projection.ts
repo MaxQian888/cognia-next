@@ -14,6 +14,7 @@ import {
   TRANSCRIPT_SUMMARY_MEDIA_LIMIT,
 } from "@cognia/agent-config-types"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { assistantAgentKey } from "@/lib/chat/transcript-agents"
 
 interface ProjectTimelineOptions {
   sessionId: string
@@ -97,12 +98,14 @@ function collectMedia(message: StoredMessage): TranscriptMediaReference[] {
 function preview(message: StoredMessage): TranscriptMessagePreview {
   const textResult = truncateUtf8(messageText(message), PREVIEW_TEXT_BYTE_LIMIT)
   const allMedia = collectMedia(message)
+  const agentKey = assistantAgentKey(message)
   return {
     id: message.id,
     role: message.role,
     ...(textResult.text ? { text: textResult.text } : {}),
     ...(allMedia.length > 0 ? { media: allMedia.slice(0, TRANSCRIPT_SUMMARY_MEDIA_LIMIT) } : {}),
     createdAt: message.createdAt,
+    ...(agentKey ? { agentKey } : {}),
     ...(textResult.truncated || allMedia.length > TRANSCRIPT_SUMMARY_MEDIA_LIMIT
       ? { truncated: true }
       : {}),

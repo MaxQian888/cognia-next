@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { ChatLinkOptionsProvider } from "@/components/chat/markdown/chat-link-options"
+import { useTranscriptHasMultipleAgents } from "@/components/chat/transcript-agents-context"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
@@ -269,7 +270,18 @@ export function MessageShell({
    * placement preference.
    */
   const route = isAssistant ? run?.route : undefined
-  const showIdentity = inRoom || Boolean(route) || display.metadata.identity === "header"
+  /**
+   * The presets hide the speaker line (ADR-0218): in a one-agent chat it says
+   * "Assistant" on every turn. Once the transcript has answers from more than
+   * one agent (a composition switch, an `@agent` turn) every assistant turn
+   * names its agent, so the reader can tell them apart.
+   */
+  const multiAgent = useTranscriptHasMultipleAgents()
+  const showIdentity =
+    inRoom ||
+    Boolean(route) ||
+    (isAssistant && multiAgent) ||
+    display.metadata.identity === "header"
   // Auto-routing explainability chip (ADR-0043 Phase 12). Opt-out: the flag
   // defaults to on and only an explicit `false` hides it.
   const showRoutingIndicator =
@@ -285,6 +297,12 @@ export function MessageShell({
   // is the default state, so it gets a quiet green dot and no "Complete" text —
   // the status chip below only speaks when something is actually happening
   // (streaming) or went wrong (error).
+  //
+  // The dot rides on a header that exists for another reason; it never keeps
+  // one alive by itself (ADR-0218). Otherwise every turn would carry a lone
+  // dot row, and a streaming-only header would collapse when the turn
+  // finished, jumping the transcript. An error is the exception: it is worth
+  // a row of its own.
   const statusDot: ToolDotStatus | null = isAssistant
     ? isStreaming
       ? "running"
@@ -331,10 +349,10 @@ export function MessageShell({
           )}
         >
           {(showIdentity ||
-            display.metadata.timestamp === "header" ||
+            (display.metadata.timestamp === "header" && createdAt !== undefined) ||
             headerItems.length > 0 ||
             routingChip ||
-            statusDot) && (
+            (isAssistant && isError)) && (
             <header
               className={cn(
                 "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",

@@ -64,6 +64,8 @@ import { cn } from "@/lib/utils"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { PerfBoundary } from "@/lib/perf"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
+import { transcriptHasMultipleAgents } from "@/lib/chat/transcript-agents"
+import { TranscriptAgentsProvider } from "@/components/chat/transcript-agents-context"
 
 // Lists at or below this length render in normal document flow (no
 // virtualization): the per-row ResizeObserver churn and the scroll-time
@@ -232,6 +234,9 @@ export function MessageList({
     return null
   }, [messages])
 
+  // ADR-0218: the speaker line shows on every assistant turn once more than
+  // one agent has answered in this transcript.
+  const multiAgent = useMemo(() => transcriptHasMultipleAgents(messages), [messages])
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") return messages[i].id
@@ -975,7 +980,7 @@ export function MessageList({
   // the whole list rather than one branch of it.
   return (
     <TranscriptSelectionHostContext.Provider value={selectionHost}>
-      {view}
+      <TranscriptAgentsProvider multiAgent={multiAgent}>{view}</TranscriptAgentsProvider>
     </TranscriptSelectionHostContext.Provider>
   )
 }

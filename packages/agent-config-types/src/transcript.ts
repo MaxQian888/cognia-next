@@ -73,6 +73,14 @@ export interface TranscriptMessagePreview {
   media?: TranscriptMediaReference[]
   createdAt: number
   truncated?: boolean
+  /**
+   * Which agent answered an assistant turn: `route:<handle>` or
+   * `preset:<id>`, as `lib/chat/transcript-agents.ts` keys it. Lets a reader
+   * of collapsed turns tell when a transcript has several agents without the
+   * full message (ADR-0218). Absent on user turns and unstamped turns, and
+   * from hosts that do not compute it; an absent key takes no part.
+   */
+  agentKey?: string
 }
 
 export interface TranscriptCollapsedDetail {

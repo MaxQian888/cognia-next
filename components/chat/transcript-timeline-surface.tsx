@@ -18,6 +18,8 @@ import type { TranscriptRenderStatus } from "./transcript-message-list"
 import { MessageRenderer } from "./message-renderer"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
+import { assistantAgentKey, hasMultipleAgentKeys } from "@/lib/chat/transcript-agents"
+import { TranscriptAgentsProvider } from "@/components/chat/transcript-agents-context"
 
 export interface TranscriptTimelineLabels {
   expand: string
@@ -161,89 +163,107 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
   const newestCompletedItemKey = [...props.items]
     .reverse()
     .find((item) => item.kind === "completed-turn")?.itemKey
+  // ADR-0218: collapsed turns carry only previews, so the projection stamps
+  // `agentKey` on each final response; live turns are full messages.
+  const multiAgent = useMemo(
+    () =>
+      hasMultipleAgentKeys([
+        ...props.items.flatMap((item) =>
+          item.kind === "completed-turn"
+            ? [item.finalResponse?.agentKey]
+            : item.kind === "active-turn"
+              ? item.messages.map(assistantAgentKey)
+              : []
+        ),
+        ...props.liveMessages.map(assistantAgentKey),
+      ]),
+    [props.items, props.liveMessages]
+  )
 
   return (
-    <PerfBoundary id="chat:transcript-timeline">
-      <div
-        ref={scrollRef}
-        role="log"
-        aria-busy={props.loading || props.liveStatus === "streaming"}
-        data-session-id={props.sessionId}
-        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
-      >
-        <div className="mx-auto w-full max-w-[52rem] py-5 sm:py-7">
-          {props.error ? (
-            <div className="px-3 pb-3 sm:px-5">
-              <Button type="button" variant="outline" size="sm" onClick={props.onRetry}>
-                {props.labels.retry}
-              </Button>
-            </div>
-          ) : null}
-          {props.hasMore ? (
-            <div className="px-3 pb-3 sm:px-5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={props.loadingOlder}
-                onClick={props.onLoadOlder}
-              >
-                {props.loadingOlder ? props.labels.loading : props.labels.loadOlder}
-              </Button>
-            </div>
-          ) : null}
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-            {virtualizer.getVirtualItems().map((virtualItem) => {
-              const item = props.items[virtualItem.index]
-              const isLive = virtualItem.index === props.items.length
-              return (
-                <div
-                  key={virtualItem.key}
-                  ref={virtualizer.measureElement}
-                  data-index={virtualItem.index}
-                  className="absolute left-0 top-0 w-full"
-                  style={{ transform: `translateY(${virtualItem.start}px)` }}
+    <TranscriptAgentsProvider multiAgent={multiAgent}>
+      <PerfBoundary id="chat:transcript-timeline">
+        <div
+          ref={scrollRef}
+          role="log"
+          aria-busy={props.loading || props.liveStatus === "streaming"}
+          data-session-id={props.sessionId}
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          <div className="mx-auto w-full max-w-[52rem] py-5 sm:py-7">
+            {props.error ? (
+              <div className="px-3 pb-3 sm:px-5">
+                <Button type="button" variant="outline" size="sm" onClick={props.onRetry}>
+                  {props.labels.retry}
+                </Button>
+              </div>
+            ) : null}
+            {props.hasMore ? (
+              <div className="px-3 pb-3 sm:px-5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={props.loadingOlder}
+                  onClick={props.onLoadOlder}
                 >
-                  {isLive ? (
-                    renderMessages(
-                      props.liveMessages,
-                      props.liveStatus === "streaming",
-                      props.renderAdapters,
-                      true
-                    )
-                  ) : item ? (
-                    <TranscriptTimelineRow
-                      item={item}
-                      sessionId={props.sessionId}
-                      expanded={
-                        item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
-                      }
-                      detail={
-                        item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
-                          ? props.getDetail(item.turnKey)
-                          : undefined
-                      }
-                      adapters={props.renderAdapters}
-                      allowRegenerate={
-                        item.itemKey === newestCompletedItemKey && props.liveMessages.length === 0
-                      }
-                      labels={props.labels}
-                      onExpand={props.onExpand}
-                      onCollapse={props.onCollapse}
-                      onPageTurn={props.onPageTurn}
-                      loadingDetail={
-                        item.kind === "completed-turn" &&
-                        Boolean(props.loadingTurnKeys?.has(item.turnKey))
-                      }
-                    />
-                  ) : null}
-                </div>
-              )
-            })}
+                  {props.loadingOlder ? props.labels.loading : props.labels.loadOlder}
+                </Button>
+              </div>
+            ) : null}
+            <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const item = props.items[virtualItem.index]
+                const isLive = virtualItem.index === props.items.length
+                return (
+                  <div
+                    key={virtualItem.key}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualItem.index}
+                    className="absolute left-0 top-0 w-full"
+                    style={{ transform: `translateY(${virtualItem.start}px)` }}
+                  >
+                    {isLive ? (
+                      renderMessages(
+                        props.liveMessages,
+                        props.liveStatus === "streaming",
+                        props.renderAdapters,
+                        true
+                      )
+                    ) : item ? (
+                      <TranscriptTimelineRow
+                        item={item}
+                        sessionId={props.sessionId}
+                        expanded={
+                          item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
+                        }
+                        detail={
+                          item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
+                            ? props.getDetail(item.turnKey)
+                            : undefined
+                        }
+                        adapters={props.renderAdapters}
+                        allowRegenerate={
+                          item.itemKey === newestCompletedItemKey && props.liveMessages.length === 0
+                        }
+                        labels={props.labels}
+                        onExpand={props.onExpand}
+                        onCollapse={props.onCollapse}
+                        onPageTurn={props.onPageTurn}
+                        loadingDetail={
+                          item.kind === "completed-turn" &&
+                          Boolean(props.loadingTurnKeys?.has(item.turnKey))
+                        }
+                      />
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
-      </div>
-    </PerfBoundary>
+      </PerfBoundary>
+    </TranscriptAgentsProvider>
   )
 }
 

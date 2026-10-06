@@ -12,6 +12,8 @@ import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import { useStickToBottom } from "@/hooks/chat/use-stick-to-bottom"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
+import { transcriptHasMultipleAgents } from "@/lib/chat/transcript-agents"
+import { TranscriptAgentsProvider } from "@/components/chat/transcript-agents-context"
 
 const BOTTOM_SLOP_PX = 80
 
@@ -61,6 +63,8 @@ export function TranscriptMessageList({
     [messages, sessionId]
   )
 
+  // ADR-0218: name each assistant turn once several agents answered here.
+  const multiAgent = useMemo(() => transcriptHasMultipleAgents(messages), [messages])
   const lastAssistantId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       if (messages[index]?.role === "assistant") return messages[index]!.id
@@ -112,56 +116,58 @@ export function TranscriptMessageList({
   if (virtualize && liveTail) rows.push({ index: streamingRowIndex, start: 0, live: true })
 
   return (
-    <PerfBoundary id="chat:read-only-transcript">
-      <div
-        ref={scrollRef}
-        role="log"
-        aria-busy={status === "streaming"}
-        data-session-id={sessionId}
-        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        onScroll={handleScroll}
-      >
+    <TranscriptAgentsProvider multiAgent={multiAgent}>
+      <PerfBoundary id="chat:read-only-transcript">
         <div
-          ref={contentRef}
-          onClickCapture={handleContentClick}
-          className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
-          data-slot="conversation-reading-column"
+          ref={scrollRef}
+          role="log"
+          aria-busy={status === "streaming"}
+          data-session-id={sessionId}
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          onScroll={handleScroll}
         >
           <div
-            style={{
-              paddingTop: virtualize ? rowVirtualizer.getTotalSize() : undefined,
-              position: "relative",
-            }}
+            ref={contentRef}
+            onClickCapture={handleContentClick}
+            className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
+            data-slot="conversation-reading-column"
           >
-            {rows.map((row) => {
-              const message = messages[row.index]
-              if (!message) return null
-              return (
-                <div
-                  key={message.id}
-                  ref={row.live ? undefined : rowVirtualizer.measureElement}
-                  data-index={row.live ? -1 : row.index}
-                  data-msg-id={message.id}
-                  className="px-3 sm:px-5"
-                  style={
-                    row.live
-                      ? undefined
-                      : {
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${row.start}px)`,
-                        }
-                  }
-                >
-                  {renderMessage(message, row.index)}
-                </div>
-              )
-            })}
+            <div
+              style={{
+                paddingTop: virtualize ? rowVirtualizer.getTotalSize() : undefined,
+                position: "relative",
+              }}
+            >
+              {rows.map((row) => {
+                const message = messages[row.index]
+                if (!message) return null
+                return (
+                  <div
+                    key={message.id}
+                    ref={row.live ? undefined : rowVirtualizer.measureElement}
+                    data-index={row.live ? -1 : row.index}
+                    data-msg-id={message.id}
+                    className="px-3 sm:px-5"
+                    style={
+                      row.live
+                        ? undefined
+                        : {
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            transform: `translateY(${row.start}px)`,
+                          }
+                    }
+                  >
+                    {renderMessage(message, row.index)}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
-      </div>
-    </PerfBoundary>
+      </PerfBoundary>
+    </TranscriptAgentsProvider>
   )
 }
