@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "Renderer invoke() call sites whose argument keys disagree with the #[tauri::command] signature they name. THIS LIST MAY ONLY SHRINK — `pnpm audit:invoke-arg-parity` fails when a key appears that is not listed here. Regenerate with `--write-baseline` only after fixing call sites, never to admit a new mismatch.",
+  "findings": []
+}

@@ -215,6 +215,7 @@ const REGISTRY = [
   // signatures themselves — the artifact no generator in this repo reads — and
   // holds the RPC arms and the enforced contract schemas to them.
   { script: "audit:rpc-semantic-parity", group: "audit" },
+  { script: "audit:invoke-arg-parity", group: "audit" },
   // Every gate above asks "does the same command exist, with the same
   // payload". None asks "can this host actually reach it" — a command can be
   // registered, manifested and semantically faithful and still 503 on one
