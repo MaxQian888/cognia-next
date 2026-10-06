@@ -5,7 +5,7 @@ description: "外部 Agent 集成、共享的适配器契约和运行时构件�
 
 # ADR 0217 — Agent 集成是位于主机端口之后的包
 
-**状态：** 已接受（进行中：契约、运行时工具包、DeepSeek Harness、Codex、Aider、Pi、OpenCode、A2A、引擎拆分和编排核心已落地；阶段 3 的其余集成正在进行，见实施状态）
+**状态：** 已接受（进行中：契约、运行时工具包、DeepSeek Harness、Codex、Aider、Pi、OpenCode、A2A、ACP、引擎拆分和编排核心已落地；阶段 3 的其余集成正在进行，见实施状态）
 **日期：** 2026-10-05
 **修订：** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（适配器契约和规范事件契约移入 `@cognia/agent-contracts`）、[ADR-0062](./0062-external-agent-session-import)（运行时会话存储的读取器放在其集成包中，返回中立的会话记录）、[ADR-0216](./0216-each-agent-configuration-keeps-its-own-state)（原生恢复记录并回到它的配置）、[ADR-0051](./0051-external-agent-adapter-plugin-type)（插件适配器按新的核心来读取）
 **相关：** [ADR-0068](./0068-frontend-package-extraction-and-compile-speed)（包提取规则）、[ADR-0107](./0107-coding-agent-migration)（迁移读取器留在迁移子系统）、[ADR-0142](./0142-agent-sdk-two-layer-product)、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)、[ADR-0197](./0197-the-sidecar-runs-its-typescript-unbuilt)
@@ -126,6 +126,9 @@ DeepSeek Harness 声明进程级取消、每会话一个进程。Codex app-serve
 | `AgentApprovalPolicy` | 配置的审批列表对单个请求的判断 |
 | `AgentOutboundGate` | 主机的 PII 闸门；**必需**，集成发出的每个提示或载荷都要经过它 |
 | `AgentFetch` | 主机的流式 HTTP 客户端（传输、代理、网络策略），供经网络访问的 agent 使用 |
+| `AgentWebSocketFactory` | 经主机传输与代理策略建立的 WebSocket，能携带裸 `WebSocket` 无法设置的认证头 |
+| `AgentTerminalHost` | 由主机拥有、由 agent 驱动的终端（ACP `terminal/*`、终端认证），按会话释放 |
+| `AgentToolPreApproval` | 会话的允许列表是否预先批准某次调用，供从不弹出提示的模式使用 |
 | `AgentDiagnosticRedactor` | 在进程输出与错误文本被展示或存储之前做凭据脱敏 |
 | `AgentLogger` | 结构化日志；条目大小由主机限制 |
 
@@ -221,6 +224,10 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
   不是第三方集成：它是 Cognia 经 companion RPC 平面驱动自己已配对的 Host，以应用的配置
   存储、宿主功能清单、准入策略和管理器为类型。其他厂商 agent 所用的协议 A2A 已迁入
   `@cognia/agent-a2a`。
+- **ACP 在宿主侧的 MCP 管线留在应用中。** `@cognia/agent-acp` 拥有协议；动态 MCP 网关
+  （`acp-dynamic-mcp-controller`，基于应用的 MCP 传输与凭据解析器）以 `dynamicMcpHost`
+  依赖的形式交给客户端，`resolve-acp-mcp-servers`（应用的 MCP 服务器存储）与官方 SDK
+  一致性测试工具留在 `lib/ai/agent/external/runtimes/acp/` 中。
 
 ### 兼容性
 
@@ -242,14 +249,14 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
 | --- | --- | --- |
 | 1 | 基线、身份模型、迁移矩阵（`docs/plans/2026-10-05-agent-package-architecture.md`） | 完成 |
 | 2 | `agent-contracts`、`agent-runtime-kit`、`agent-dsh`、`agent-codex`（运行时 + 历史）；DSH 取消语义；原生恢复绑定 | 完成 |
-| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）与 A2A（`@cognia/agent-a2a`）已完成；远程宿主运行平面留在应用中（见范围决策）。ACP、远程运行时、目录生成、CLI 端口注入和移除 `instanceof` 随后进行。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
+| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。ACP 厂商 profile、其余历史读取器、目录生成、CLI 端口注入和移除 `instanceof` 随后进行。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
 | 4 | 中立工具；AI SDK 引擎与宿主无需 Claude SDK 即可运行；不依赖 SDK 的 wire；厂商闸门 | 完成（`44d622df7`、`c4ae605bd`）；工具内核包见范围决定 |
 | 5 | 位于存储/日志/脱敏/路径/远程会话端口之后的编排包；账本；打破 Team↔Workflow 导入环；结束会话的取消从不被报告为暂停 | 完成（`6bf0a830a`、`a4f1dd183`、`3719c8d51`、`ed4ea6611`、`e931feec0`）；闸门、队友池、波次运行器与合成工作流留在应用中（见范围决定） |
 | 6 | 文档、闸门、CI 和最终回归 | 已落地阶段已完成；阶段 3 的文档随其迁移补充 |
 
 ## 后果
 
-- **复用：**主机只要实现集成所用的端口就能使用它。DSH、Codex、Aider、Pi、OpenCode 和 A2A 适配器不再导入应用代码。
+- **复用：**主机只要实现集成所用的端口就能使用它。DSH、Codex、Aider、Pi、OpenCode、A2A 和 ACP 适配器不再导入应用代码。
 - **契约约束：**集成包单独做类型检查和打包测试。契约改动如果破坏了已安装的使用方，会在 `agent:packages:pack-test` 中失败，而不是等到之后的应用构建。这项测试已经发现两个真实问题。第一，ACP SDK 的版本范围会解析到一个缺少契约所用类型的版本，现已精确锁定。第二，`@cognia/redact` 无法作为构件安装，所以 PII 闸门被设计成必需的主机端口。
 - **发布：**升级一个集成包本身不会改变原生行为。进程平面、安全策略和沙箱仍由主机发布。
 - **运行时目录：**仍是运行时与预设行唯一的受检来源。由清单生成这些行属于阶段 3，并保留现有闸门。

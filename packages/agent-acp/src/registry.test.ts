@@ -5,7 +5,7 @@ import {
   resolveAcpRegistryDistribution,
   resetAcpRegistryCacheForTests,
   validateAcpRegistry,
-} from "./acp-registry"
+} from "./registry"
 
 const catalog = {
   version: "1.0.0",

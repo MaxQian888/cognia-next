@@ -9,11 +9,11 @@ import { COMPANION_SOURCES } from "./lib/companion-source-paths.mjs"
 const stableMetaPath = new URL("../../protocol/acp/v1/meta.json", import.meta.url)
 const previewMetaPath = new URL("../../protocol/acp/v1/meta.unstable.json", import.meta.url)
 const acpClientSource = readFileSync(
-  new URL("../../lib/ai/agent/external/runtimes/acp/acp-client.ts", import.meta.url),
+  new URL("../../packages/agent-acp/src/client.ts", import.meta.url),
   "utf8"
 )
 const jsonRpcPeerSource = readFileSync(
-  new URL("../../lib/ai/agent/external/json-rpc-peer.ts", import.meta.url),
+  new URL("../../packages/agent-runtime-kit/src/json-rpc-peer.ts", import.meta.url),
   "utf8"
 )
 const serverHandlerSource = readFileSync(

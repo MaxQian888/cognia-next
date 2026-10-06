@@ -315,8 +315,11 @@ describe("agent fs seam", () => {
 })
 
 describe("static-import guard (T-A10 contract)", () => {
-  it("acp-client has no static @tauri-apps imports left", () => {
-    const source = fs.readFileSync(path.join(__dirname, "runtimes/acp/acp-client.ts"), "utf8")
+  it("the ACP client has no static @tauri-apps imports", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "../../../../packages/agent-acp/src/client.ts"),
+      "utf8"
+    )
     const staticImport = /^import[^\n]*from\s+"@tauri-apps\//m
     expect(staticImport.test(source)).toBe(false)
   })

@@ -26,7 +26,7 @@ import type { DenyReason, PermissionSendOptions, RailProfile } from "./ladder.ts
  * Built-in file-edit-class tools auto-approved in `acceptEdits` mode — the
  * write/edit family a user who "accepted edits" implicitly trusts. Mirrors the
  * Anthropic SDK's native `acceptEdits` and the ACP client's edit auto-approval
- * (`lib/ai/agent/external/runtimes/acp/acp-client.ts`) so the AI-SDK path stops prompting for
+ * (`packages/agent-acp/src/client.ts`) so the AI-SDK path stops prompting for
  * every edit. DELIBERATELY excludes exec/process/git-mutation tools (bash,
  * shell, start_process, git_commit, …) — those
  * still route through the normal approval policy. Read-only tools are already

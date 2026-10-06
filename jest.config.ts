@@ -246,6 +246,8 @@ const projectCommon: Config = {
     "^@cognia/agent-opencode/(.*)$": "<rootDir>/packages/agent-opencode/src/$1",
     "^@cognia/agent-a2a$": "<rootDir>/packages/agent-a2a/src/index.ts",
     "^@cognia/agent-a2a/(.*)$": "<rootDir>/packages/agent-a2a/src/$1",
+    "^@cognia/agent-acp$": "<rootDir>/packages/agent-acp/src/index.ts",
+    "^@cognia/agent-acp/(.*)$": "<rootDir>/packages/agent-acp/src/$1",
     "^@cognia/agent-codex$": "<rootDir>/packages/agent-codex/src/index.ts",
     "^@cognia/agent-codex/(.*)$": "<rootDir>/packages/agent-codex/src/$1",
     "^@cognia/agent-orchestration$": "<rootDir>/packages/agent-orchestration/src/index.ts",
@@ -701,7 +703,7 @@ const globalConfig: Config = {
     // subprocess. jsdom can stub the surface but can't drive the live
     // protocol — full coverage requires the Rust integration tests under
     // `src-tauri/`. Exclude here so they don't drag the lib/** gate down.
-    "!lib/ai/agent/external/runtimes/acp/acp-client.ts",
+    "!packages/agent-acp/src/client.ts",
     "!lib/ai/agent/external/manager.ts",
     "!packages/agent-opencode/src/client.ts",
     // search-type-router.ts is a 40+ provider dispatch table. Each provider

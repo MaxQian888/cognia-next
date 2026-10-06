@@ -27,7 +27,7 @@ jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
     appendCanonicalEnvelopesMock(...(args as [string, Array<{ event: { kind: string } }>])),
 }))
 
-jest.mock("./runtimes/acp/acp-client", () => ({
+jest.mock("@cognia/agent-acp/client", () => ({
   AcpClientAdapter: class {
     readonly protocol = "acp"
     async prepareForkSessionForExecution() {
@@ -87,8 +87,8 @@ import {
 } from "./protocol-adapter"
 import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
 import { PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
-import { AcpClientAdapter } from "./runtimes/acp/acp-client"
-import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
+import { AcpClientAdapter } from "@cognia/agent-acp/client"
+import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
 import {
   __setModelSurfaceDepsForTests,
   cachedAgentModelSurface,
@@ -121,6 +121,9 @@ import type {
   ExternalAgentExecutionOptions,
   AcpPermissionResponse,
 } from "@/types/agent/external-agent"
+
+/** The mocked ACP client class above takes no host ports. */
+const newMockedAcpClient = () => new (AcpClientAdapter as unknown as new () => AcpClientAdapter)()
 
 class MockAdapter {
   readonly protocol = "mock"
@@ -1361,7 +1364,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
       const m = freshManager()
       await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
       const session = await m.createSession("agent-1")
-      const adapter = Object.assign(new AcpClientAdapter(), currentMock)
+      const adapter = Object.assign(newMockedAcpClient(), currentMock)
       Object.defineProperties(adapter, Object.getOwnPropertyDescriptors(MockAdapter.prototype))
       const prepare = jest.fn(async () => {
         if (fails) {
@@ -4120,7 +4123,7 @@ describe("Cognia gateway task lifecycle", () => {
 
 describe("Devin ACP adapter selection", () => {
   it("isolates built-in native Devin while preserving custom registered adapters", () => {
-    protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
+    protocolAdapterRegistry.register("acp", () => newMockedAcpClient())
     const config = buildBaseConfig({
       transport: "stdio",
       process: { command: "/usr/local/bin/devin", args: ["acp"] },

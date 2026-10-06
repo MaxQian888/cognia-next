@@ -78,8 +78,9 @@ import {
   type SessionCreateOptions,
   type SessionListOptions,
 } from "./protocol-adapter"
-import { AcpClientAdapter } from "./runtimes/acp/acp-client"
-import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
+import { AcpClientAdapter } from "@cognia/agent-acp/client"
+import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
+import { createAcpAdapterFactory, createDevinAcpAdapter } from "./integrations/acp"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import { OpenCodeClientAdapter } from "@cognia/agent-opencode/client"
@@ -343,7 +344,7 @@ export interface ExternalAgentLifecycleEvent {
  * time, which is the worst place to find out.
  */
 export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
-  registry.register("acp", () => new AcpClientAdapter())
+  registry.register("acp", createAcpAdapterFactory())
   registry.register("codex-app-server", createCodexAppServerAdapterFactory())
   registry.register("opencode-v2", createOpenCodeV2AdapterFactory())
   registry.register("a2a", createA2aAdapterFactory())
@@ -363,7 +364,7 @@ export function createConfiguredProtocolAdapter(
   const adapter = protocolAdapterRegistry.create(config.protocol)
   const isDevin = isDevinAgentConfig(config)
   return config.transport === "stdio" && isDevin && adapter?.constructor === AcpClientAdapter
-    ? new DevinAcpAdapter(adapter as AcpClientAdapter)
+    ? createDevinAcpAdapter(adapter as AcpClientAdapter)
     : adapter
 }
 

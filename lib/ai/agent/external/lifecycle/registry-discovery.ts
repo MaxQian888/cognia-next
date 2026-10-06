@@ -29,7 +29,7 @@
  * The split is the whole point. Presenting an unpinnable entry as installable
  * is how a governed installer quietly becomes an ungoverned one.
  *
- * @see ../acp-registry.ts for validation and distribution resolution
+ * @see `@cognia/agent-acp/registry` for validation and distribution resolution
  */
 
 import {
@@ -37,7 +37,8 @@ import {
   fetchAcpRegistry,
   resolveAcpRegistryDistribution,
   type AcpRegistryAgent,
-} from "../runtimes/acp/acp-registry"
+} from "@cognia/agent-acp/registry"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type {
   ExternalAgentBinaryDistribution,
   ExternalAgentRuntimeCatalogEntry,
@@ -181,10 +182,10 @@ export interface RegistryDiscoveryResult {
  */
 export async function discoverRegistryAgents(options: {
   platformKey: string
-  /** Injected for tests; production uses the module's proxy-aware default. */
+  /** Injected for tests; production uses the app's proxy-aware fetch. */
   fetcher?: typeof fetch
 }): Promise<RegistryDiscoveryResult> {
-  const catalog = await fetchAcpRegistry(options.fetcher ? { fetcher: options.fetcher } : {})
+  const catalog = await fetchAcpRegistry({ fetcher: options.fetcher ?? proxyFetch })
   return {
     sourceUrl: ACP_REGISTRY_URL,
     registryVersion: catalog.version,

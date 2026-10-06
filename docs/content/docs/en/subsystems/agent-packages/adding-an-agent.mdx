@@ -34,8 +34,9 @@ flowchart LR
 ## 1. Decide whether it needs a package
 
 - **A plain ACP agent needs no package of its own.** It is a row in the runtime
-  catalog run by the ACP adapter. Vendor quirks belong in an ACP vendor profile
-  (Phase 3, not yet extracted).
+  catalog run by the ACP client in `@cognia/agent-acp`. Vendor quirks belong in
+  an ACP vendor profile (Phase 3; today they are still branches inside the
+  client).
 - **A runtime with its own protocol** (an RPC dialect, an SDK, a CLI per turn)
   or **its own session store** gets a package.
 
@@ -101,7 +102,12 @@ and take everything machine-facing from the constructor:
   `isWithinRoot` rejects a path before an agent process could open it outside
   the plane (Aider's chat files and context files);
 - `AgentFetch` when the runtime is reached over HTTP (OpenCode services, A2A
-  peers): the host's streaming fetch, never the global one;
+  peers, remote ACP agents): the host's streaming fetch, never the global one;
+- `AgentWebSocketFactory` for a WebSocket transport (remote ACP agents): the
+  host's socket carries auth headers and obeys the proxy policy, which a bare
+  `WebSocket` cannot;
+- `AgentTerminalHost` when the agent asks the host to run commands in
+  terminals it owns (ACP `terminal/*`, terminal authentication);
 - `AgentOutboundGate`, **required**, called on every prompt or
   payload the adapter sends;
 - a runtime-specific services interface for questions only the host can

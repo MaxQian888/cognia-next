@@ -31,11 +31,15 @@ import type {
 } from "@cognia/agent-config-types"
 import type {
   AcpConfigOption,
-  AcpConfigOptionValue,
   AcpSessionModelState,
   ExternalAgentCogniaModelBinding,
 } from "@/types/agent/external-agent"
 import { parseGatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
+import { findModelConfigOption, flattenValues } from "@cognia/agent-runtime-kit/config-options"
+
+// The config-option lookup lives in the runtime kit (ADR-0217) so the ACP
+// integration reads models the same way; re-exported for app importers.
+export { findModelConfigOption, flattenValues }
 
 /**
  * The provider id an external agent's own models are grouped under.
@@ -496,23 +500,6 @@ const EMPTY: ExternalAgentModelSurface = Object.freeze({
   currentModelId: null,
   write: Object.freeze({ kind: "none" }) as { kind: "none" },
 })
-
-/** The one select option an agent uses for models, if it declares one. */
-export function findModelConfigOption(
-  configOptions: readonly AcpConfigOption[] | undefined
-): Extract<AcpConfigOption, { type: "select" }> | undefined {
-  return configOptions?.find(
-    (option): option is Extract<AcpConfigOption, { type: "select" }> =>
-      option.category === "model" && option.type === "select"
-  )
-}
-
-/** Flatten `AcpConfigOptionValue[] | AcpConfigOptionGroup[]` into plain values. */
-export function flattenValues(
-  options: Extract<AcpConfigOption, { type: "select" }>["options"]
-): AcpConfigOptionValue[] {
-  return options.flatMap((entry) => ("group" in entry ? entry.options : [entry]))
-}
 
 /**
  * Resolve what a picker should show and where a selection should go.

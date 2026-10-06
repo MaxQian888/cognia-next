@@ -1,11 +1,11 @@
-import type { AcpConfigOption, AcpConfigOptionValue } from "@/types/agent/external-agent"
+import type { AcpConfigOption, AcpConfigOptionValue } from "@cognia/agent-contracts/external-agent"
 import {
   DEVIN_THOUGHT_LEVEL_OPTION_ID,
   devinModelIdForLevel,
   devinThoughtLevelOption,
   withDevinThoughtLevelOption,
 } from "./devin-model-axis"
-import { flattenValues } from "../../session/session-models"
+import { flattenValues } from "@cognia/agent-runtime-kit/config-options"
 
 function option(value: string, name: string): AcpConfigOptionValue {
   return { value, name }

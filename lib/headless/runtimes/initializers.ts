@@ -191,7 +191,7 @@ registerHeadlessRuntime({
   },
 })
 
-// ── A10: external-agent rehydrate (acp-client routes via the transport seam) ─
+// ── A10: external-agent rehydrate (ACP clients route via the transport seam)
 
 registerHeadlessRuntime({
   name: "external-agent",
@@ -203,7 +203,7 @@ registerHeadlessRuntime({
       { createAcpDynamicMcpHostController },
     ] = await Promise.all([
       import("@/lib/ai/agent/external/session/rehydrate"),
-      import("@/lib/ai/agent/external/runtimes/acp/acp-client"),
+      import("@/lib/ai/agent/external/integrations/acp"),
       import("@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"),
     ])
     setAcpDynamicMcpHostController(createAcpDynamicMcpHostController())

@@ -2,7 +2,7 @@
 //! Client Protocol (agentclientprotocol.com) the cognia ACP *server* speaks.
 //!
 //! The shapes deliberately mirror what cognia's own ACP *client*
-//! (`lib/ai/agent/external/runtimes/acp/acp-client.ts`) sends and consumes, so both sides
+//! (`packages/agent-acp/src/client.ts`) sends and consumes, so both sides
 //! of the codebase agree on one dialect of the spec (protocol version 1).
 //! Field names are camelCase on the wire.
 
@@ -94,7 +94,7 @@ pub fn rpc_request(id: u64, method: &str, params: Value) -> Value {
 
 /// Build the `initialize` result advertising this server's capabilities.
 ///
-/// Mirrors what `acp-client.ts` negotiates: `protocolVersion`, an
+/// Mirrors what the ACP client negotiates: `protocolVersion`, an
 /// `agentCapabilities` object, and `agentInfo`. `loadSession: true` because
 /// the global resume index supports `session/load` across reconnects.
 pub fn initialize_result() -> Value {
@@ -416,7 +416,7 @@ pub fn parse_mcp_servers(value: Option<&Value>) -> Result<Value, String> {
 
 /// One `session/update` payload — the `update` object inside the
 /// notification params. Serialized with the `sessionUpdate` discriminator
-/// exactly as `acp-client.ts` consumes it (`handleSessionUpdate`).
+/// exactly as the ACP client consumes it (`handleSessionUpdate`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "sessionUpdate", rename_all = "snake_case")]
 pub enum SessionUpdate {

@@ -1,91 +1,33 @@
 /**
- * Smoke tests for AcpClientAdapter — exercises the public surface that runs
- * without a live ACP process. Full protocol negotiation requires a Tauri
- * runtime + child process, which jsdom can't provide; those paths are covered
- * by integration tests under src-tauri/.
+ * AcpClientAdapter over host ports. Full protocol negotiation with a live
+ * agent needs a real process; these suites drive the adapter through ports
+ * that map onto mock functions the way the app's hosts map onto the Tauri
+ * bridge: `mockInvoke` is the process-plane command channel, `mockListen` its
+ * event channel (handlers receive `{ payload }`), `mockTerminal*` the host
+ * terminal commands and `mockIsTauri` whether this is a desktop host.
  */
 
-jest.mock("@/lib/native/external-agent", () => ({
-  acpTerminalCreate: jest.fn(async () => "terminal-1"),
-  cleanupSessionTerminals: jest.fn(async () => undefined),
-  acpTerminalKill: jest.fn(async () => undefined),
-  acpTerminalOutput: jest.fn(async () => ({
-    output: "",
-    truncated: false,
-    exitStatus: { exitCode: 0, signal: null },
-  })),
-  acpTerminalRelease: jest.fn(async () => undefined),
-  acpTerminalWaitForExit: jest.fn(async () => ({
-    exitStatus: { exitCode: 0, signal: null },
-  })),
-  acpTerminalWrite: jest.fn(async () => undefined),
-}))
-
-jest.mock("@/lib/network/proxy-fetch", () => ({
-  proxyFetch: jest.fn(),
-}))
-
-jest.mock("@/lib/network/platform-streaming-fetch", () => ({
-  platformStreamingFetch: jest.fn(),
-}))
-
-jest.mock("@/lib/network/platform-websocket", () => ({
-  createPlatformWebSocket: jest.fn(),
-}))
-
-jest.mock("../../agent-transport", () => ({
-  ...jest.requireActual("../../agent-transport"),
-  agentReadTextFile: jest.fn(),
-  agentWriteTextFile: jest.fn(),
-}))
-
-// Tauri IPC + event bridge — override only invoke/listen so the stdio connect
-// path can register listeners and spawn without a real desktop runtime. Keep
-// the rest real (plugin-fs extends `Resource` from core, so a bare mock that
-// drops it breaks module load).
-jest.mock("@tauri-apps/api/core", () => ({
-  ...jest.requireActual("@tauri-apps/api/core"),
-  invoke: jest.fn(async () => "proc-1"),
-}))
-jest.mock("@tauri-apps/api/event", () => ({
-  ...jest.requireActual("@tauri-apps/api/event"),
-  listen: jest.fn(async () => jest.fn()),
-}))
-
-// isTauri is togglable so terminal/fs paths can be exercised both ways. cn and
-// the rest of @/lib/utils stay real.
-jest.mock("@/lib/utils", () => ({
-  ...jest.requireActual("@/lib/utils"),
-  isTauri: jest.fn(() => false),
-}))
-
+import type {
+  AgentLogger,
+  AgentProcessExitEvent,
+  AgentProcessOutputEvent,
+  AgentToolPreApproval,
+} from "@cognia/agent-contracts/host"
+import type { AcpDynamicMcpHostController } from "@cognia/agent-contracts/external-agent"
 import { JsonRpcPeer } from "@cognia/agent-runtime-kit/json-rpc-peer"
-import { isTauri } from "@/lib/utils"
-import {
-  acpTerminalCreate,
-  acpTerminalKill,
-  acpTerminalOutput,
-  acpTerminalRelease,
-  acpTerminalWaitForExit,
-  acpTerminalWrite,
-  cleanupSessionTerminals,
-} from "@/lib/native/external-agent"
-import { listen } from "@tauri-apps/api/event"
-import { invoke } from "@tauri-apps/api/core"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
-import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   AcpClientAdapter,
   buildAcpPromptBlocks,
   buildSpawnArgs,
   createAcpClient,
-  setAcpDynamicMcpHostController,
   SUPPORTED_ACP_PROTOCOL_VERSIONS,
   LATEST_ACP_PROTOCOL_VERSION,
   RAPID_EXIT_THRESHOLD_MS,
   MAX_RAPID_EXITS,
-} from "./acp-client"
+  type AcpClientDeps,
+} from "./client"
+import type { AcpHostCapabilities } from "./feature-profile"
 import type {
   ExternalAgentConfig,
   ExternalAgentContent,
@@ -94,28 +36,194 @@ import type {
   AcpPermissionMode,
   AcpConfigOption,
   ExternalAgentEvent,
-} from "@/types/agent/external-agent"
-import { loggers } from "@cognia/logging"
-import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
-import { agentReadTextFile, agentWriteTextFile } from "../../agent-transport"
+} from "@cognia/agent-contracts/external-agent"
 
-const mockIsTauri = isTauri as jest.Mock
-const mockTerminalWrite = acpTerminalWrite as jest.Mock
-const mockTerminalCreate = acpTerminalCreate as jest.Mock
-const mockTerminalKill = acpTerminalKill as jest.Mock
-const mockTerminalOutput = acpTerminalOutput as jest.Mock
-const mockTerminalRelease = acpTerminalRelease as jest.Mock
-const mockTerminalWaitForExit = acpTerminalWaitForExit as jest.Mock
-const mockCleanupSessionTerminals = cleanupSessionTerminals as jest.Mock
-const mockListen = listen as jest.Mock
-const mockInvoke = invoke as jest.Mock
-const mockAgentReadTextFile = agentReadTextFile as jest.Mock
-const mockAgentWriteTextFile = agentWriteTextFile as jest.Mock
+// ============================================================================
+// Host ports over mock functions
+// ============================================================================
+
+// Loosely typed like the module mocks they replace, so a test can script any
+// command or event shape.
+const mockIsTauri: jest.Mock<boolean, []> = jest.fn(() => false)
+const mockInvoke: jest.Mock = jest.fn(async () => "proc-1")
+const mockListen: jest.Mock = jest.fn(async () => jest.fn())
+const mockTerminalCreate: jest.Mock = jest.fn(async () => "terminal-1")
+const mockCleanupSessionTerminals: jest.Mock = jest.fn(async () => undefined)
+const mockTerminalKill: jest.Mock = jest.fn(async () => undefined)
+const mockTerminalOutput: jest.Mock = jest.fn(async () => ({
+  output: "",
+  truncated: false,
+  exitStatus: { exitCode: 0, signal: null },
+}))
+const mockTerminalRelease: jest.Mock = jest.fn(async () => undefined)
+const mockTerminalWaitForExit: jest.Mock = jest.fn(async () => ({
+  exitStatus: { exitCode: 0, signal: null },
+}))
+const mockTerminalWrite: jest.Mock = jest.fn(async () => undefined)
+const mockAgentReadTextFile: jest.Mock = jest.fn()
+const mockAgentWriteTextFile: jest.Mock = jest.fn()
+const proxyFetch: jest.Mock = jest.fn()
+const platformStreamingFetch: jest.Mock = jest.fn()
+const createPlatformWebSocket: jest.Mock = jest.fn()
+
+/** Methods are spied per test. */
+const testLogger: AgentLogger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+}
+
+let dynamicMcpController: AcpDynamicMcpHostController | undefined
+/** What the app's `setAcpDynamicMcpHostController` does: the dep reads it live. */
+function setAcpDynamicMcpHostController(controller: AcpDynamicMcpHostController | undefined) {
+  dynamicMcpController = controller
+}
+
+/** The desktop/browser split the app's `getAcpHostCapabilities` computes. */
+function hostCapabilities(): AcpHostCapabilities {
+  const desktop = mockIsTauri()
+  return {
+    kind: desktop ? "desktop" : "headless",
+    fs: { read: desktop, write: desktop },
+    terminal: desktop,
+    terminalAuth: desktop,
+    elicitation: { form: desktop, url: desktop, durableInteraction: desktop },
+    preview: {
+      compaction: true,
+      providers: desktop,
+      dynamicMcp: desktop,
+      nes: desktop,
+      identifiedPlans: true,
+      previewToolNames: true,
+      sessionFork: true,
+    },
+  }
+}
+
+/**
+ * Stands in for the host's allow-list check (`isToolPreApproved`): a bare
+ * `Tool` glob approves the tool, `Tool(glob)` also needs the call's command,
+ * path, url or pattern to match.
+ */
+const toolPreApproval: AgentToolPreApproval = (toolName, rawInput, allowedTools) => {
+  if (!allowedTools?.length || !toolName) return false
+  const glob = (pattern: string, target: string) =>
+    new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".")}$`
+    ).test(target)
+  const target = ["command", "file_path", "filePath", "path", "url", "pattern"]
+    .map((key) => rawInput?.[key])
+    .find((value): value is string => typeof value === "string" && value.length > 0)
+  return allowedTools.some((entry) => {
+    const open = entry.indexOf("(")
+    const base = (open >= 0 ? entry.slice(0, open) : entry).trim()
+    if (!base || !glob(base, toolName)) return false
+    if (open < 0) return true
+    const close = entry.lastIndexOf(")")
+    const specifier = entry.slice(open + 1, close > open ? close : entry.length)
+    return target !== undefined && glob(specifier, target)
+  })
+}
+
+type PlaneOutput = { payload: { agentId: string; data: string } }
+type PlaneExit = { payload: { agentId: string; code: number; signal?: string | null } }
+
+function output(channel: string) {
+  return (listener: (event: AgentProcessOutputEvent) => void) =>
+    mockListen(channel, (event: PlaneOutput) =>
+      listener({ processId: event.payload.agentId, data: event.payload.data })
+    )
+}
+
+/** Fresh ports per adapter; every call reaches the mocks at call time. */
+function acpDeps(): AcpClientDeps {
+  return {
+    processHost: {
+      get available() {
+        return mockIsTauri()
+      },
+      spawn: async (spec) => {
+        const registered = await mockInvoke("spawn_external_agent", { config: spec })
+        return typeof registered === "string" && registered.length > 0 ? registered : spec.id
+      },
+      send: async (processId, message) => {
+        await mockInvoke("send_to_external_agent", { agentId: processId, message })
+      },
+      kill: async (processId) => {
+        await mockInvoke("kill_external_agent", { agentId: processId })
+      },
+      commandExists: async (command) =>
+        (await mockInvoke("check_command_exists", { command })) === true,
+      onStdoutLine: output("external-agent://stdout"),
+      onStdoutRaw: output("external-agent://stdout-raw"),
+      onStderr: output("external-agent://stderr"),
+      onExit: (listener: (event: AgentProcessExitEvent) => void) =>
+        mockListen("external-agent://exit", (event: PlaneExit) =>
+          listener({ processId: event.payload.agentId, code: event.payload.code })
+        ),
+    },
+    files: {
+      get available() {
+        return mockIsTauri()
+      },
+      isWithinRoot: (path, root) => path === root || path.startsWith(`${root}/`),
+      readText: (path, roots) => mockAgentReadTextFile(path, roots),
+      writeText: async (path, content, roots) => {
+        await mockAgentWriteTextFile(path, content, roots)
+      },
+      delete: async () => {
+        throw new Error("delete is not used by the ACP client")
+      },
+    },
+    terminals: {
+      get available() {
+        return mockIsTauri()
+      },
+      create: (request) =>
+        mockTerminalCreate(
+          request.sessionId,
+          request.command,
+          request.args ?? [],
+          request.cwd,
+          request.env,
+          request.outputByteLimit
+        ),
+      output: (...args) => mockTerminalOutput(...args),
+      write: async (...args) => {
+        await mockTerminalWrite(...args)
+      },
+      kill: async (...args) => {
+        await mockTerminalKill(...args)
+      },
+      release: async (...args) => {
+        await mockTerminalRelease(...args)
+      },
+      waitForExit: (...args) => mockTerminalWaitForExit(...args),
+      closeSession: async (...args) => {
+        await mockCleanupSessionTerminals(...args)
+      },
+    },
+    requestFetch: (...args) => proxyFetch(...args),
+    streamFetch: (...args) => platformStreamingFetch(...args),
+    openWebSocket: (...args) => createPlatformWebSocket(...args),
+    hostCapabilities,
+    resolveLaunchEnvironment: async (_config, baseEnv) => ({ ...baseEnv }),
+    approvalPolicy: () => null,
+    toolPreApproval,
+    outboundGate: hasNoLeakingPiiDeep,
+    dynamicMcpHost: () => dynamicMcpController,
+    logger: testLogger,
+  }
+}
 
 describe("AcpClientAdapter — prompt deadlines and host response envelopes", () => {
   async function connectedAdapter(timeout?: number) {
     mockIsTauri.mockReturnValue(true)
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { initialize: () => Promise<unknown> }).initialize = jest.fn(
       async () => ({ protocolVersion: 1, agentCapabilities: {} })
     )
@@ -493,7 +601,7 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
 
 describe("AcpClientAdapter — Devin permission identity", () => {
   function adapterWithEvents(preset = "devin") {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset },
@@ -764,7 +872,7 @@ describe("AcpClientAdapter — Devin permission identity", () => {
 describe("AcpClientAdapter — timeout cancellation failure", () => {
   it("reports the original deadline even when cancelling agent work rejects", async () => {
     jest.useFakeTimers()
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     seedSession(adapter, "s", "default")
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     const peer = new JsonRpcPeer({ writeRaw: async () => {} })
@@ -812,7 +920,7 @@ describe("AcpClientAdapter — Devin permission modes", () => {
   ]
 
   function devinAdapter() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "devin" },
@@ -982,7 +1090,7 @@ describe("AcpClientAdapter — OpenCode permission modes", () => {
   ]
 
   function openCodeAdapter() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "opencode-acp" },
@@ -1073,7 +1181,7 @@ describe("AcpClientAdapter — Kimi native modes", () => {
   ])(
     "maps %s to %s and preserves host approval authority on native echoes",
     async (canonical, native) => {
-      const adapter = new AcpClientAdapter()
+      const adapter = new AcpClientAdapter(acpDeps())
       ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
         ...stdioConfig(),
         metadata: { preset: "kimi" },
@@ -1108,7 +1216,7 @@ describe("AcpClientAdapter — Kimi native modes", () => {
 
 describe("AcpClientAdapter — Kimi background compaction boundary", () => {
   it("keeps native /compact advertised but refuses a managed operation that cannot confirm completion", async () => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "kimi" },
@@ -1135,7 +1243,7 @@ describe("AcpClientAdapter — Kimi background compaction boundary", () => {
 
 describe("AcpClientAdapter — Kimi fork MCP restoration", () => {
   function forkAdapter(kimi = true) {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       ...(kimi
@@ -1330,7 +1438,7 @@ describe("AcpClientAdapter — Kimi fork MCP restoration", () => {
 describe("AcpClientAdapter — Cline Plan/Act", () => {
   it("reports unsupported images and refuses ignored MCP declarations before RPC", async () => {
     mockIsTauri.mockReturnValue(true)
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const internal = adapter as unknown as { sendRequest: jest.Mock }
     internal.sendRequest = jest.fn().mockResolvedValue({
       protocolVersion: 1,
@@ -1367,7 +1475,7 @@ describe("AcpClientAdapter — Cline Plan/Act", () => {
     ["bypassPermissions", "act"],
     ["dontAsk", "act"],
   ])("maps %s to %s while retaining Cognia's permission policy", async (canonical, native) => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "cline" },
@@ -1404,7 +1512,7 @@ describe("AcpClientAdapter — Cline Plan/Act", () => {
 
 describe("AcpClientAdapter — Qoder permission modes", () => {
   function qoderAdapter() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "qoder" },
@@ -1474,7 +1582,7 @@ describe("AcpClientAdapter — Goose permission modes", () => {
   it("starts manual Goose binaries in approval mode even when stored env requests auto", async () => {
     mockIsTauri.mockReturnValue(true)
     mockInvoke.mockResolvedValue("goose-test")
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const config = {
       ...stdioConfig(),
       metadata: {},
@@ -1513,7 +1621,7 @@ describe("AcpClientAdapter — Goose permission modes", () => {
     },
   ]
   function gooseAdapter() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "goose" },
@@ -1829,7 +1937,7 @@ describe("buildSpawnArgs", () => {
 
 describe("AcpClientAdapter — basic state", () => {
   it("starts disconnected with no capabilities or tools", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     expect(a.protocol).toBe("acp")
     expect(a.connectionStatus).toBe("disconnected")
     expect(a.isConnected()).toBe(false)
@@ -1838,11 +1946,11 @@ describe("AcpClientAdapter — basic state", () => {
   })
 
   it("createAcpClient produces a fresh instance", () => {
-    expect(createAcpClient()).toBeInstanceOf(AcpClientAdapter)
+    expect(createAcpClient(acpDeps())).toBeInstanceOf(AcpClientAdapter)
   })
 
   it("getSessionExtensionSupport returns the unknown defaults before any probe", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const support = a.getSessionExtensionSupport()
     expect(support["session/list"].state).toBe("unknown")
     expect(support["session/fork"].state).toBe("unknown")
@@ -1850,7 +1958,7 @@ describe("AcpClientAdapter — basic state", () => {
   })
 
   it("getAcpInitializationMetadata reports an empty contract before connect()", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const meta = a.getAcpInitializationMetadata()
     expect(meta).toEqual({
       protocolVersion: undefined,
@@ -1861,20 +1969,20 @@ describe("AcpClientAdapter — basic state", () => {
   })
 
   it("getAuthMethods/isAuthenticationRequired return safe defaults pre-connect", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     expect(a.getAuthMethods()).toEqual([])
     expect(a.isAuthenticationRequired()).toBe(false)
   })
 
   it("clearSessionExtensionSupportCache clears extension state without throwing", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     expect(() => a.clearSessionExtensionSupportCache()).not.toThrow()
   })
 
   it("ignores `_`-prefixed extension notifications at debug, warns on unknown standard methods", () => {
-    const a = new AcpClientAdapter()
-    const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
-    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
+    const a = new AcpClientAdapter(acpDeps())
+    const warnSpy = jest.spyOn(testLogger, "warn").mockImplementation(() => {})
+    const debugSpy = jest.spyOn(testLogger, "debug").mockImplementation(() => {})
     try {
       const notify = (
         a as unknown as { handleNotification: (notification: unknown) => void }
@@ -1914,21 +2022,21 @@ describe("AcpClientAdapter — unsupported transports and missing config", () =>
   it("rejects stdio when no runtime here can start a process", async () => {
     // Not "when not in Tauri": a browser paired to a Host reaches this path and
     // succeeds, so the refusal names what is actually missing.
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     await expect(
       a.connect(baseConfig({ transport: "stdio", process: { command: "x", args: [] } }))
     ).rejects.toThrow(/needs a runtime that can start a process/)
   })
 
   it("rejects unknown transports", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     await expect(a.connect(baseConfig({ transport: "carrier-pigeon" as never }))).rejects.toThrow(
       /Unsupported transport/
     )
   })
 
   it("rejects http transport when network endpoint is missing", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     await expect(a.connect(baseConfig({ transport: "http" }))).rejects.toThrow(
       /Network endpoint required/
     )
@@ -1939,7 +2047,7 @@ describe("AcpClientAdapter — operations on a disconnected client", () => {
   let a: AcpClientAdapter
 
   beforeEach(() => {
-    a = new AcpClientAdapter()
+    a = new AcpClientAdapter(acpDeps())
   })
 
   it("createSession throws when not connected", async () => {
@@ -1983,7 +2091,7 @@ describe("AcpClientAdapter — operations on a disconnected client", () => {
 
 describe("AcpClientAdapter — extension handler registry", () => {
   it("registers and unregisters extension handlers without error", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const handler = jest.fn()
     a.registerExtensionHandler("_custom/method", handler)
     a.unregisterExtensionHandler("_custom/method")
@@ -1993,13 +2101,13 @@ describe("AcpClientAdapter — extension handler registry", () => {
 
 describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   it("cancels when the request names a session that does not exist", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const res = await callPermission(a, { sessionId: "ghost", kind: "execute", options: [ALLOW] })
     expect(res.outcome.outcome).toBe("cancelled")
   })
 
   it("bypassPermissions auto-approves any kind, including execute", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "bypassPermissions")
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2010,14 +2118,14 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("bypassPermissions cancels when options exist but none allow", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "bypassPermissions")
     const res = await callPermission(a, { sessionId: "s", kind: "execute", options: [REJECT] })
     expect(res.outcome.outcome).toBe("cancelled")
   })
 
   it("plan mode auto-rejects every request (no execution)", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "plan")
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2028,7 +2136,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("dontAsk mode rejects a tool that is not pre-approved", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "dontAsk", ["Read"])
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2040,7 +2148,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("dontAsk mode rejects everything when no allow-list is configured", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "dontAsk")
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2052,7 +2160,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("dontAsk mode silently approves a pre-approved tool", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "dontAsk", ["Read", "Bash(git*)"])
     // Bare-name match.
     const read = await callPermission(a, {
@@ -2079,7 +2187,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("dontAsk pre-approval still cancels when no allow option is offered", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "dontAsk", ["Read"])
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2092,7 +2200,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("plan/dontAsk cancel when the agent offered no reject option", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "plan")
     const res = await callPermission(a, { sessionId: "s", kind: "execute", options: [ALLOW] })
     expect(res.outcome.outcome).toBe("cancelled")
@@ -2101,7 +2209,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   it.each(["read", "file_read", "write", "file_write", "edit"])(
     "acceptEdits auto-approves the non-destructive kind %s",
     async (kind) => {
-      const a = new AcpClientAdapter()
+      const a = new AcpClientAdapter(acpDeps())
       seedSession(a, "s", "acceptEdits")
       const res = await callPermission(a, { sessionId: "s", kind, options: [ALLOW] })
       expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" })
@@ -2113,7 +2221,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
     // acceptEdits only auto-approves non-destructive kinds, so reading the
     // nested `kind: "write"` proves the handler unwraps `toolCall` (a flat call
     // with no top-level kind would have an undefined kind and stay pending).
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "acceptEdits")
     const res = await callPermission(a, {
       sessionId: "s",
@@ -2124,7 +2232,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("acceptEdits does NOT auto-approve execute — it stays pending for the UI", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "acceptEdits")
     const pending = callPermission(a, { sessionId: "s", kind: "execute", options: [ALLOW, REJECT] })
     const sentinel = Symbol("pending")
@@ -2142,7 +2250,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("resolves an outstanding permission as cancelled when its turn is cancelled", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const session = (
       a as unknown as {
@@ -2163,7 +2271,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("rejects a nested permission request with -32800 when its request is cancelled", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const controller = new AbortController()
     const pending = (
@@ -2189,7 +2297,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("keys concurrent permissions by JSON-RPC id even when tool ids repeat", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const firstController = new AbortController()
     const secondController = new AbortController()
@@ -2212,7 +2320,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 
   it("does not cancel a permission belonging to a session with the same id prefix", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     seedSession(a, "s2", "default")
     const sessions = (a as unknown as { _sessions: Map<string, { status?: string }> })._sessions
@@ -2248,7 +2356,7 @@ describe("AcpClientAdapter — ACP v1.21 terminal authentication", () => {
 
   it("runs terminal auth in the governed PTY and reconnects without calling authenticate", async () => {
     mockIsTauri.mockReturnValue(true)
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const internals = terminalAuthInternals(adapter)
     internals._config = stdioConfig()
     internals._authMethods = [
@@ -2281,7 +2389,7 @@ describe("AcpClientAdapter — ACP v1.21 terminal authentication", () => {
   })
 
   it("can cancel a running terminal authentication", async () => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { terminalAuthState: Record<string, unknown> }).terminalAuthState = {
       methodId: "login",
       terminalId: "terminal-1",
@@ -2297,7 +2405,7 @@ describe("AcpClientAdapter — ACP v1.21 terminal authentication", () => {
 
   function pendingTerminalAuth() {
     mockIsTauri.mockReturnValue(true)
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const internals = terminalAuthInternals(adapter)
     internals._config = stdioConfig()
     internals._authMethods = [{ type: "terminal", id: "login", name: "Login", args: ["auth"] }]
@@ -2383,7 +2491,7 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
 
   it("emits a form request and resolves it through respondToElicitation", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const internals = elicitationInternals(a)
     internals._config = {
@@ -2422,7 +2530,7 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
 
   it("settles the wire request with cancel when the response fails validation", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const internals = elicitationInternals(a)
     internals._config = {
@@ -2457,7 +2565,7 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
   })
 
   it("rejects elicitation when the current host cannot back it", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     elicitationInternals(a)._config = stdioConfig()
     await expect(
       elicitationInternals(a).handleElicitationRequest(
@@ -2475,7 +2583,7 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
   })
 
   it("ignores unknown URL completion ids and emits known completions once", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const internals = elicitationInternals(a)
     const events: ExternalAgentEvent[] = []
@@ -2521,7 +2629,7 @@ describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
         throw new Error("listen boom")
       })
 
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     await expect(a.connect(stdioConfig())).rejects.toThrow(/listen boom/)
 
     // The one listener that did register must have been torn down…
@@ -2534,7 +2642,7 @@ describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
 
   it("clears stale listeners on reconnect-after-error and does not accumulate", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
 
     // Simulate a prior failed connect that left listeners behind.
     const stale = [jest.fn(), jest.fn(), jest.fn()]
@@ -2565,7 +2673,7 @@ describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
   })
 
   it("ignores a throwing unsubscribe and still tears down the rest", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const good = jest.fn()
     setListenerBag(a, [
       () => {
@@ -2581,7 +2689,7 @@ describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
   })
 
   it("disconnect unsubscribes every listener and empties the bag", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const spies = [jest.fn(), jest.fn()]
     setListenerBag(a, [...spies])
     setStatus(a, "connected")
@@ -2597,14 +2705,14 @@ describe("AcpClientAdapter — Tauri listener lifecycle (T1)", () => {
 describe("AcpClientAdapter — terminal/write", () => {
   it("throws outside Tauri", async () => {
     mockIsTauri.mockReturnValue(false)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     await expect(callTerminalWrite(a, "s1", "t1", "echo hi\n")).rejects.toThrow(/Tauri/)
     expect(mockTerminalWrite).not.toHaveBeenCalled()
   })
 
   it("delegates to the native binding inside Tauri", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedTerminal(a, "s1", "t1")
     await expect(callTerminalWrite(a, "s1", "t1", "echo hi\n")).resolves.toBeUndefined()
     expect(mockTerminalWrite).toHaveBeenCalledWith("t1", "echo hi\n")
@@ -2612,7 +2720,7 @@ describe("AcpClientAdapter — terminal/write", () => {
 
   it("rejects a terminal operation from a different ACP session", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedTerminal(a, "owner", "t1")
 
     await expect(
@@ -2625,7 +2733,7 @@ describe("AcpClientAdapter — terminal/write", () => {
 describe("AcpClientAdapter — current terminal wire shape", () => {
   it("rejects direct terminal delegation from a strictly isolated Bot", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     ;(a as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       process: { command: "devin", env: { COGNIA_BOT_ISOLATION: "1" } },
@@ -2643,7 +2751,7 @@ describe("AcpClientAdapter — current terminal wire shape", () => {
   })
   it("converts ACP env entries to the native terminal map", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
 
     await expect(
@@ -2673,7 +2781,7 @@ describe("AcpClientAdapter — current terminal wire shape", () => {
     mockTerminalWaitForExit.mockResolvedValueOnce({
       exitStatus: { exitCode: null, signal: "SIGTERM" },
     })
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedTerminal(a, "s", "terminal-1")
 
     await expect(
@@ -2686,7 +2794,7 @@ describe("AcpClientAdapter — current terminal wire shape", () => {
 
   it("kills owned native terminals when an ACP session closes", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     seedTerminal(a, "s", "terminal-1")
 
@@ -2698,7 +2806,7 @@ describe("AcpClientAdapter — current terminal wire shape", () => {
 
 describe("AcpClientAdapter — session-confined file requests", () => {
   it("passes the session cwd and additional directories to host-confined reads and writes", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const session = (
       a as unknown as {
@@ -2728,7 +2836,7 @@ describe("AcpClientAdapter — session-confined file requests", () => {
   })
 
   it("fails closed when a file request has no known session roots", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
 
     await expect(
       dispatchAgentRequest(a, "fs/read_text_file", { sessionId: "missing", path: "/tmp/x" })
@@ -2739,7 +2847,7 @@ describe("AcpClientAdapter — session-confined file requests", () => {
 describe("AcpClientAdapter — outbound PII gate", () => {
   it("blocks a PII-bearing JSON-RPC payload before it reaches the agent transport", async () => {
     mockIsTauri.mockReturnValue(true)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     ;(a as unknown as { processId: string }).processId = "proc-1"
 
@@ -2759,7 +2867,7 @@ describe("AcpClientAdapter — outbound PII gate", () => {
   })
 
   it("blocks PII hidden in a base64 text attachment before session/prompt", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const sendPromptRequest = jest.fn()
     ;(a as unknown as { _sessions: Map<string, unknown> })._sessions.set("s", {
       id: "s",
@@ -2841,7 +2949,7 @@ describe("AcpClientAdapter — orphaned process reclaim", () => {
       return undefined
     })
 
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     return { adapter, calls, connected: adapter.connect(stdioConfig()) }
   }
 
@@ -2922,7 +3030,7 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
       return undefined
     })
 
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const connected = adapter.connect(config)
     return { adapter, sent, feed, connected }
   }
@@ -3093,7 +3201,7 @@ describe("AcpClientAdapter — protocol version negotiation", () => {
       return undefined
     })
 
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     return { adapter, connected: adapter.connect(stdioConfig()), killed: () => killCalled }
   }
 
@@ -3127,7 +3235,7 @@ describe("AcpClientAdapter — protocol version negotiation", () => {
   })
 
   it("initialize() rejects directly when the negotiated version is unsupported", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     ;(a as unknown as { sendRequest: (m: string) => Promise<unknown> }).sendRequest = jest.fn(
       async () => ({ protocolVersion: 2, agentCapabilities: {}, agentInfo: { name: "x" } })
     )
@@ -3157,7 +3265,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   const internals = (a: AcpClientAdapter) => a as unknown as ReconnectInternals
 
   it("derives reconnect parameters from config.retryConfig", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     internals(a).applyRetryConfig({
       ...stdioConfig(),
       retryConfig: {
@@ -3174,7 +3282,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   })
 
   it("falls back to historical defaults when retryConfig is absent", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     internals(a).applyRetryConfig(stdioConfig())
     expect(internals(a).maxReconnectAttempts).toBe(3)
     expect(internals(a).reconnectDelay).toBe(1000)
@@ -3183,7 +3291,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   })
 
   it("auto-reconnects network transports but not stdio without restartOnCrash", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     for (const transport of ["websocket", "sse", "http"] as const) {
       internals(a)._config = { ...stdioConfig(), transport, process: undefined }
       internals(a).intentionalDisconnect = false
@@ -3200,7 +3308,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   })
 
   it("suppresses auto-reconnect after an intentional disconnect", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     await a.disconnect()
     expect(internals(a).intentionalDisconnect).toBe(true)
@@ -3209,7 +3317,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   })
 
   it("handleProcessExit reconnects a dropped network socket and closes open sessions", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     internals(a)._config = { ...stdioConfig(), transport: "websocket", process: undefined }
     internals(a).intentionalDisconnect = false
     internals(a).reconnectAttempts = 0
@@ -3231,7 +3339,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   it("retries then marks the adapter errored after the final failed attempt", async () => {
     jest.useFakeTimers()
     try {
-      const a = new AcpClientAdapter()
+      const a = new AcpClientAdapter(acpDeps())
       internals(a)._config = stdioConfig()
       internals(a).useExponentialBackoff = false
       internals(a).reconnectDelay = 10
@@ -3250,7 +3358,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   })
 
   it("handleProcessExit does not reconnect after a clean disconnect", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     await a.disconnect()
     internals(a)._config = { ...stdioConfig(), transport: "websocket", process: undefined }
@@ -3264,7 +3372,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   it("uses a flat delay and caps it when exponential backoff is disabled", async () => {
     jest.useFakeTimers()
     try {
-      const a = new AcpClientAdapter()
+      const a = new AcpClientAdapter(acpDeps())
       internals(a)._config = stdioConfig()
       internals(a).useExponentialBackoff = false
       internals(a).reconnectDelay = 400
@@ -3286,7 +3394,7 @@ describe("AcpClientAdapter — reconnection policy", () => {
   it("grows and caps the delay with exponential backoff enabled", async () => {
     jest.useFakeTimers()
     try {
-      const a = new AcpClientAdapter()
+      const a = new AcpClientAdapter(acpDeps())
       internals(a)._config = stdioConfig()
       internals(a).useExponentialBackoff = true
       internals(a).reconnectDelay = 1000
@@ -3325,7 +3433,7 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
       return undefined
     })
 
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     internals(a).processId = "proc-1"
     const socket = { close: jest.fn().mockResolvedValue(undefined) }
@@ -3355,7 +3463,7 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
 
   it("does not let a failing socket close abort the rest of the teardown", async () => {
     mockIsTauri.mockReturnValue(false)
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     const socket = { close: jest.fn().mockRejectedValue(new Error("socket boom")) }
     internals(a).networkSocket = socket
@@ -3382,7 +3490,7 @@ describe("AcpClientAdapter — rapid-crash circuit breaker", () => {
   const breaker = (a: AcpClientAdapter) => a as unknown as BreakerInternals
 
   function networkAdapter(): AcpClientAdapter {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const i = breaker(a)
     i._config = { ...stdioConfig(), transport: "websocket", process: undefined }
     i.intentionalDisconnect = false
@@ -3518,7 +3626,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
       undo: { status: "unsupported" },
     },
   ])("projects $label command capabilities from the runtime fixture", async (fixture) => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     seedSession(adapter, "s1", "default")
     handleUpdate(adapter, "s1", {
       sessionUpdate: "available_commands_update",
@@ -3530,7 +3638,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("maps item plan_update and plan_removed notifications", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const updated = handleUpdate(a, "s1", {
       sessionUpdate: "plan_update",
@@ -3562,7 +3670,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("preserves file and markdown plan updates in session metadata", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const file = handleUpdate(a, "s1", {
       sessionUpdate: "plan_update",
@@ -3594,7 +3702,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("keeps the active item plan when an unrelated identified plan is removed", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const entries = [{ content: "Implement", priority: "high", status: "in_progress" }]
     handleUpdate(a, "s1", {
@@ -3618,7 +3726,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("preserves a legacy active plan when an unrelated identified plan is removed", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const legacyEntries = [{ content: "Legacy", priority: "high", status: "in_progress" }]
     handleUpdate(a, "s1", { sessionUpdate: "plan", entries: legacyEntries })
@@ -3633,7 +3741,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("keeps the latest active item plan when another plan is removed", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const first = [{ content: "First", priority: "medium", status: "pending" }]
     const second = [{ content: "Second", priority: "high", status: "in_progress" }]
@@ -3658,7 +3766,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("maps the canonical agent_thought_chunk to a thinking event", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "agent_thought_chunk",
@@ -3668,7 +3776,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("keeps ACP tool titles separate from presentation metadata and forwards title updates", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     const started = handleUpdate(a, "s1", {
@@ -3719,7 +3827,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("still maps the legacy thought_message_chunk alias", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "thought_message_chunk",
@@ -3729,7 +3837,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("maps the singular config_option_update to a config_options_update event", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "config_option_update",
@@ -3749,7 +3857,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("does not treat a boolean mode-category option as a permission mode", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     handleUpdate(a, "s1", {
@@ -3772,7 +3880,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("records usage_update context occupancy in session metadata (no fabricated token total)", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "usage_update",
@@ -3797,7 +3905,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("gives every agent_message_chunk of a turn the same stable message id", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const first = handleUpdate(a, "s1", {
       sessionUpdate: "agent_message_chunk",
@@ -3818,7 +3926,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("preserves an agent-owned messageId and rich content block", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const event = handleUpdate(a, "s1", {
       sessionUpdate: "agent_message_chunk",
@@ -3845,7 +3953,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("applies preview compaction patch and summary-chunk semantics", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     expect(
@@ -3881,7 +3989,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("ignores preview compaction updates when the negotiated profile disables them", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     ;(a as unknown as { featureProfile: Record<string, unknown> }).featureProfile = {
       preview: { compaction: { advertised: false } },
@@ -3898,13 +4006,13 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("rejects preview provider and NES methods when their host feature is disabled", async () => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     await expect(adapter.listProviders()).rejects.toThrow(/preview feature "providers"/)
     await expect(adapter.startNes({} as never)).rejects.toThrow(/preview feature "nes"/)
   })
 
   it("enforces provider credential confirmation at the final adapter boundary", async () => {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { featureProfile: Record<string, unknown> }).featureProfile = {
       preview: { providers: { advertised: true } },
     }
@@ -3920,7 +4028,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("applies and emits session_info_update title", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
       sessionUpdate: "session_info_update",
@@ -3931,7 +4039,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("applies current_mode_update from the canonical currentModeId field", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     const event = handleUpdate(a, "s1", {
@@ -3947,7 +4055,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("suppresses a republished identical command catalog but emits a changed one", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const commands = [{ name: "compact", description: "Compact context", input: null }]
 
@@ -3976,7 +4084,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("suppresses current_mode_update that republishes the active mode", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     expect(
@@ -3991,7 +4099,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("suppresses an identical config_option republish", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const configOptions = [
       {
@@ -4016,7 +4124,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
   })
 
   it("suppresses session_info_update without a new title", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
 
     expect(
@@ -4044,7 +4152,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
 
 describe("AcpClientAdapter — boolean session config options", () => {
   it("validates and sends the typed boolean set_config_option request", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const option = {
       id: "autoFormat",
@@ -4077,7 +4185,7 @@ describe("AcpClientAdapter — boolean session config options", () => {
 
 describe("AcpClientAdapter — session/close · session/delete · logout gating", () => {
   it("sends strict session/new parameters including empty MCP servers and additional roots", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     setAgentCaps(a, { sessionCapabilities: { additionalDirectories: {} } })
@@ -4105,7 +4213,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("rejects additional roots when the agent does not advertise them", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     setAgentCaps(a, { sessionCapabilities: {} })
@@ -4115,7 +4223,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("normalizes required empty MCP env and header arrays on the wire", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     const spy = jest
@@ -4147,7 +4255,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("rejects empty additional root entries as invalid absolute paths", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     setAgentCaps(a, { sessionCapabilities: { additionalDirectories: {} } })
@@ -4158,7 +4266,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("rejects a relative session cwd before sending an ACP lifecycle request", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     const spy = jest.spyOn(
@@ -4171,7 +4279,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("paginates session/list with a cwd filter and preserves authoritative roots", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setAgentCaps(a, { sessionCapabilities: { list: {} } })
     const spy = jest
       .spyOn(
@@ -4193,7 +4301,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("logout no-ops when the agent does not advertise auth.logout", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const spy = jest
       .spyOn(a as unknown as { sendRequest: (m: string) => Promise<unknown> }, "sendRequest")
       .mockResolvedValue(undefined)
@@ -4203,7 +4311,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("logout sends the RPC when auth.logout is advertised", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     const spy = jest
       .spyOn(a as unknown as { sendRequest: (m: string) => Promise<unknown> }, "sendRequest")
       .mockResolvedValue(undefined)
@@ -4213,7 +4321,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("clears completed terminal authentication only after successful logout", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     ;(a as unknown as { terminalAuthState: Record<string, unknown> }).terminalAuthState = {
       methodId: "login",
       status: "completed",
@@ -4230,7 +4338,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("closeSession sends session/close only when the capability is present", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const spy = jest
       .spyOn(
@@ -4244,7 +4352,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("deleteSession sends session/delete when the capability is present and clears local state", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     const spy = jest
       .spyOn(
@@ -4260,7 +4368,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("rejects native deletion errors without forgetting the session", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     setAgentCaps(a, { sessionCapabilities: { delete: {} } })
     jest
@@ -4274,7 +4382,7 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
   })
 
   it("rejects unadvertised native deletion without forgetting the session", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s1", "default")
     setAgentCaps(a, { sessionCapabilities: {} })
     const spy = jest.spyOn(
@@ -4288,15 +4396,15 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
 })
 
 // ---------------------------------------------------------------------------
-// Subprocess stderr forwarding — routine stderr must not flood the Next dev
-// server's forwarded-console buffer. It is logged at `debug` (below the
-// forwarded warn+ threshold) with each chunk size-bounded, never at `warn`.
+// Subprocess stderr forwarding — routine stderr must not flood the host's
+// log. It is logged at `debug`, never at `warn`; the host logger bounds each
+// entry (the app's `createAgentLogger` truncates every string value).
 // ---------------------------------------------------------------------------
 describe("AcpClientAdapter — stderr forwarding", () => {
-  it("forwards subprocess stderr at debug (not warn) and truncates oversized chunks", async () => {
+  it("forwards subprocess stderr at debug (not warn), raw for the host logger to bound", async () => {
     mockIsTauri.mockReturnValue(true)
-    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
-    const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
+    const debugSpy = jest.spyOn(testLogger, "debug").mockImplementation(() => {})
+    const warnSpy = jest.spyOn(testLogger, "warn").mockImplementation(() => {})
 
     let stdoutCb: ((e: { payload: { agentId: string; data: string } }) => void) | undefined
     let stderrCb: ((e: { payload: { agentId: string; data: string } }) => void) | undefined
@@ -4328,22 +4436,16 @@ describe("AcpClientAdapter — stderr forwarding", () => {
       return undefined
     })
 
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     try {
       await adapter.connect(stdioConfig())
       expect(stderrCb).toBeDefined()
 
-      const huge = "E".repeat(LOG_VALUE_MAX_CHARS + 4096)
+      const huge = "E".repeat(4608)
       stderrCb!({ payload: { agentId: "proc-1", data: huge } })
 
-      expect(debugSpy).toHaveBeenCalledWith("stderr", { data: truncateForLog(huge) })
+      expect(debugSpy).toHaveBeenCalledWith("stderr", { data: huge })
       expect(warnSpy).not.toHaveBeenCalledWith("stderr", expect.anything())
-
-      const forwarded = (
-        debugSpy.mock.calls.find((c) => c[0] === "stderr")?.[1] as { data: string }
-      ).data
-      expect(forwarded.length).toBeLessThan(huge.length)
-      expect(forwarded).toContain("chars truncated")
 
       // stderr from an unrelated process id is ignored.
       debugSpy.mockClear()
@@ -4398,7 +4500,7 @@ describe("AcpClientAdapter — network transports", () => {
   it("dials the WebSocket transport through the proxy-aware socket, carrying the bearer", async () => {
     const socket = { id: "h1", kind: "native", send: jest.fn(), close: jest.fn() }
     mockedCreateSocket.mockResolvedValue(socket)
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
 
     await (
       adapter as unknown as {
@@ -4422,7 +4524,7 @@ describe("AcpClientAdapter — network transports", () => {
       onMessage = options.onMessage
       return { id: "h1", kind: "native", send: jest.fn(), close: jest.fn() }
     })
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const ingest = jest.fn()
     ;(adapter as unknown as { peer?: { ingest: jest.Mock } }).peer = { ingest }
 
@@ -4440,7 +4542,7 @@ describe("AcpClientAdapter — network transports", () => {
     mockedStreamingFetch.mockResolvedValue(
       new Response(sseBody('data: {"a":1}\n\n', 'data: {"b":2}\n\n'), { status: 200 })
     )
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const ingest = jest.fn()
     ;(adapter as unknown as { peer?: { ingest: jest.Mock } }).peer = { ingest }
 
@@ -4464,7 +4566,7 @@ describe("AcpClientAdapter — network transports", () => {
     // `EventSource` reported this as an opaque onerror; the streaming
     // transport can say which status came back.
     mockedStreamingFetch.mockResolvedValue(new Response("nope", { status: 503 }))
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
 
     await expect(
       (
@@ -4477,7 +4579,7 @@ describe("AcpClientAdapter — network transports", () => {
 
   it("fails the connect when the SSE transport itself throws", async () => {
     mockedStreamingFetch.mockRejectedValue(new Error("Proxy stream failed: dns error"))
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
 
     await expect(
       (
@@ -4508,7 +4610,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   }
 
   it("returns a selected reject option and validates session and offered IDs", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const pending = callPermission(a, { sessionId: "s", options: [ALLOW, REJECT] }, undefined, 91)
     await expect(
@@ -4522,7 +4624,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("resolves boolean approval to an offered option and never selects an absent option", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const pending = callPermission(a, { sessionId: "s", options: [ALLOW] }, undefined, 92)
     await a.respondToPermission("s", { requestId: "92", granted: true })
@@ -4534,7 +4636,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("uses advertised grouped model and mode options through the local JSON-RPC transport", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const options = [
       {
@@ -4591,7 +4693,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("retains tool patches until a status-only completion and all output blocks", () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     handleUpdate(a, "s", {
       sessionUpdate: "tool_call",
@@ -4634,7 +4736,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("preserves rich output and isolates tool IDs across sessions", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     seedSession(a, "other", "default")
     const content = [
@@ -4680,7 +4782,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("rejects a denied allow option while leaving the request available for cancellation", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const pending = callPermission(a, { sessionId: "s", options: [ALLOW] }, undefined, 94)
     await expect(
@@ -4694,7 +4796,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("sends reasoning only via an advertised option and accepts the returned full option state", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const option = {
       id: "effort",
@@ -4722,7 +4824,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("honors legacy current mode even when unrelated config options exist", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     setStatus(a, "connected")
     ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
     transport(a, {
@@ -4734,7 +4836,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
   })
 
   it("cancels permissions without prematurely closing the turn", async () => {
-    const a = new AcpClientAdapter()
+    const a = new AcpClientAdapter(acpDeps())
     seedSession(a, "s", "default")
     const session = (a as unknown as { _sessions: Map<string, { status: string }> })._sessions.get(
       "s"
@@ -4759,7 +4861,7 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
 
 describe("DeepSeek Harness ACP capability boundaries", () => {
   function harness() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const internal = adapter as unknown as {
       _config: ExternalAgentConfig
       _connectionStatus: string
@@ -4966,7 +5068,7 @@ describe("AcpClientAdapter — per-turn token usage accounting", () => {
   })
 
   function usageHarness() {
-    const adapter = new AcpClientAdapter()
+    const adapter = new AcpClientAdapter(acpDeps())
     const internal = adapter as unknown as {
       _config: ExternalAgentConfig
       _connectionStatus: string

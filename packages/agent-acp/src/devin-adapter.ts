@@ -11,19 +11,22 @@ import type {
   ExternalAgentExecutionOptions,
   AcpConfigOption,
   AcpElicitationResponse,
-} from "@/types/agent/external-agent"
-import { loggers } from "@cognia/logging"
-import { AcpClientAdapter } from "./acp-client"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
+} from "@cognia/agent-contracts/external-agent"
+import type { AcpClientAdapter } from "./client"
+import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
+import { SILENT_AGENT_LOGGER, type AgentLogger } from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { ACP_PROTOCOL, DEVIN_ACP_EXECUTION_SEMANTICS } from "./manifest"
 import {
   DEVIN_THOUGHT_LEVEL_OPTION_ID,
   devinModelIdForLevel,
   withDevinThoughtLevelOption,
 } from "./devin-model-axis"
-import { findModelConfigOption } from "../../session/session-models"
+import { findModelConfigOption } from "@cognia/agent-runtime-kit/config-options"
 
 export class DevinAcpAdapter extends BaseProtocolAdapter {
-  readonly protocol = "acp"
+  readonly protocol = ACP_PROTOCOL
+  readonly semantics = DEVIN_ACP_EXECUTION_SEMANTICS
   private readonly owners = new Map<string, AcpClientAdapter>()
   private readonly children = new Set<AcpClientAdapter>()
   private readonly disposals = new Map<AcpClientAdapter, Promise<void>>()
@@ -42,9 +45,14 @@ export class DevinAcpAdapter extends BaseProtocolAdapter {
   private sequence = 0
   private stopping?: Promise<void>
 
+  /**
+   * `discovery` is the configuration-wide ACP transport; `createChild` builds
+   * one per conversation over the same host ports.
+   */
   constructor(
-    private readonly discovery = new AcpClientAdapter(),
-    private readonly createChild: () => AcpClientAdapter = () => new AcpClientAdapter()
+    private readonly discovery: AcpClientAdapter,
+    private readonly createChild: () => AcpClientAdapter,
+    private readonly log: AgentLogger = SILENT_AGENT_LOGGER
   ) {
     super()
   }
@@ -309,7 +317,7 @@ export class DevinAcpAdapter extends BaseProtocolAdapter {
     } catch (error) {
       // Keep the failed cleanup handle for disconnect/retry; a failed child
       // must never trigger a reconnect that destroys healthy conversations.
-      loggers.agent.warn("Failed to clean up exited Devin child", { processId, error })
+      this.log.warn("Failed to clean up exited Devin child", { processId, error })
     }
     return sessions
   }

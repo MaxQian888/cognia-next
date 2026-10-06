@@ -6,7 +6,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { AcpClientAdapter } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
+import { createAcpClientAdapter } from "@/lib/ai/agent/external/integrations/acp"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 
 function check(condition: unknown, message: string): asserts condition {
@@ -33,7 +33,7 @@ async function main() {
     retryConfig: { maxRetries: 0, retryDelay: 0, exponentialBackoff: false },
   })
   check(config, "Missing Cline preset")
-  const adapter = new AcpClientAdapter()
+  const adapter = createAcpClientAdapter()
   try {
     selectCliAgentWorkspace(scratch)
     await adapter.connect(config)

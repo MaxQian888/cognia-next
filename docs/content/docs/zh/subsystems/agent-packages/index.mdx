@@ -24,7 +24,8 @@ ADR-0217 把这些代码移到契约之后：包拥有协议、格式和编排�
 @cognia/agent-<integration>    ./manifest, the runtime client(s), ./history when the
         ▲                      runtime keeps its own session store
         │                      (today: agent-dsh, agent-codex, agent-aider,
-        │                      agent-pi, agent-opencode, agent-a2a)
+        │                      agent-pi, agent-opencode, agent-a2a,
+        │                      agent-acp)
 host (app, CLI, headless)      registers integrations, implements the ports, owns policy,
                                PII, sandbox, persistence and the mapping into its own rows
 
@@ -47,10 +48,11 @@ flowchart BT
   pi["@cognia/agent-pi"] --> kit
   opencode["@cognia/agent-opencode"] --> kit
   a2a["@cognia/agent-a2a"] --> kit
+  acp["@cognia/agent-acp"] --> kit
   orch["@cognia/agent-orchestration"]
   subgraph host["应用宿主"]
     manager["ExternalAgentManager<br/>lib/ai/agent/external"]
-    ports["端口实现<br/>process host · file host · PII gate · logger"]
+    ports["端口实现<br/>process host · file host · terminal host · PII gate · logger"]
     team["Agent Team 运行时<br/>lib/ai/agent/team"]
     dexie["dexieTeamRunStore<br/>lib/db/agent-team-runtime.ts"]
   end
@@ -66,6 +68,7 @@ flowchart BT
   manager --> pi
   manager --> opencode
   manager --> a2a
+  manager --> acp
   ports --> contracts
   team --> orch
   dexie --> orch
@@ -78,12 +81,13 @@ flowchart BT
 | 包 | 入口 | 依赖 |
 | --- | --- | --- |
 | `@cognia/agent-contracts` | `./ecosystem`、`./adapter`、`./adapter-extension`、`./semantics`、`./host`、`./history`、`./external-agent`、`./canonical-event`、… | 仅类型依赖 `@agentclientprotocol/sdk` |
-| `@cognia/agent-runtime-kit` | `./base-adapter`、`./json-rpc-peer`、`./history`、`./prompt-gate`、`./elicitation`、`./sse`、`./plugin-compat`、… | contracts |
+| `@cognia/agent-runtime-kit` | `./base-adapter`、`./json-rpc-peer`、`./history`、`./prompt-gate`、`./elicitation`、`./sse`、`./config-options`、`./plugin-compat`、… | contracts |
 | `@cognia/agent-dsh` | `./manifest`、`./sdk-client`、`./transport`、`./managed-launch`、… | contracts、runtime kit |
 | `@cognia/agent-aider` | `./manifest`、`./cli-client`、`./history` | contracts、runtime kit |
 | `@cognia/agent-pi` | `./manifest`、`./rpc-client`、`./rpc-peer`、`./rpc-events`、`./permission`、`./auth` | contracts、runtime kit |
 | `@cognia/agent-opencode` | `./manifest`、`./v2-client`、`./v2-events`、`./v2-launcher`、`./discovery`、`./client` | contracts、runtime kit；peer 依赖 `@opencode/client`、`@opencode-ai/sdk` |
 | `@cognia/agent-a2a` | `./manifest`、`./client` | contracts、runtime kit |
+| `@cognia/agent-acp` | `./manifest`、`./client`、`./devin-adapter`、`./devin-model-axis`、`./registry`、`./wire-codec`、`./feature-profile`、`./permission-input` | contracts、runtime kit、仅类型的 `@agentclientprotocol/sdk` |
 | `@cognia/agent-codex` | `./manifest`、`./app-server-client`、`./history`、`./mcp-config`、… | contracts、runtime kit |
 | `@cognia/agent-orchestration` | `./coordinator`、`./store`、`./memory-store`、`./store-contract`、`./decision-ledger`、`./evidence`、… | 无 |
 
@@ -107,7 +111,7 @@ flowchart BT
 | --- | --- |
 | Agent 身份 | 复用现有来源：`lib/agent-ecosystem`（行由集成 manifest 导出）、`protocol/external-agent-runtimes.json`（运行时与预设）、`ExternalAgentConfig.id`（实例）。没有新增注册表。 |
 | 协议、会话存储格式、执行语义 | 集成包 |
-| 进程平面、工作区文件、网络请求、凭证、审批策略、PII 闸门、诊断脱敏、日志 | 宿主，通过 `@cognia/agent-contracts/host` 中的端口 |
+| 进程平面、工作区文件、宿主终端、网络请求与 WebSocket、凭证、审批策略、PII 闸门、诊断脱敏、日志 | 宿主，通过 `@cognia/agent-contracts/host` 中的端口 |
 | 把中立转录映射为存储消息 | 宿主（`lib/session-import/history-to-stored.ts`） |
 | 团队运行状态 | 宿主的 `TeamRunStore`（应用中为 Dexie）；协调器不持有任何跨重启保留的状态 |
 | 引擎选择 | 宿主进程（`COGNIA_SIDECAR_ENGINES`） |
@@ -124,7 +128,8 @@ flowchart BT
 | Pi | 完成：`@cognia/agent-pi`（RPC 适配器、对端、事件映射、工具表、认证探测），基于进程端口与 `PiHostServices`；声明每会话一个进程的语义，取消为回合级的 `abort`。Pi 会话历史读取器仍在 `lib/session-import` |
 | OpenCode | 完成：`@cognia/agent-opencode`（V2 服务适配器、事件、会话自有的启动器、服务发现；以及 Cognia 不注册的旧版 server 适配器），基于 `AgentFetch`、进程端口与放置策略 |
 | A2A | 完成：`@cognia/agent-a2a`，基于 `AgentFetch`；远程、任务级取消。Cognia 自己的远程宿主运行平面留在应用中（见 ADR-0217 的范围决策） |
-| ACP、Claude Code、Devin、Kimi 以及 ACP 行生态 | 尚未迁移（阶段 3 进行中） |
+| ACP 与 Devin | 完成：`@cognia/agent-acp`（客户端、wire codec、feature profile、permission input、ACP Registry v1、每个会话独占进程的 Devin 适配器），基于进程、文件、终端、fetch 与 WebSocket 端口；声明了回合级的 `session/cancel`，被取消的 ACP 会话会被保留。厂商特例（Devin、Kimi、Goose、Qoder、Cline、经 ACP 的 OpenCode）仍是客户端内部的分支 |
+| ACP 厂商 profile、Claude Code、Kimi 及其他 ACP 行生态 | 尚未完成（阶段 3 进行中） |
 | 由 manifest 生成目录行、CLI 端口注入、移除管理器 `instanceof` | 尚未完成（阶段 3） |
 | 引擎与工具 | 完成：AI SDK 引擎与宿主无需 Claude Agent SDK 即可运行；wire 与共享运行时模块不再引用它，连类型也不引用 |
 | 编排 | 运行状态、账本、协调器、调度与恢复已完成；团队闸门、队友池、波次运行器与合成工作流仍留在应用中（它们以应用的 `AgentTeam` 模型为类型） |
@@ -156,5 +161,6 @@ flowchart BT
 | `pnpm audit:sidecar-architecture` | sidecar 分层；厂商隔离：宿主、AI SDK 引擎与中立工具从不加载 Claude Agent SDK，且只有 Claude 引擎、它的 MCP 适配器和原生 hook 执行器会引用它 |
 | `pnpm sidecar:typecheck`、`pnpm sidecar:test` | 严格的 sidecar 类型；在 SDK 无法解析时启动的宿主能跑完一次 AI SDK 回合，并拒绝仅限 Claude 的工作 |
 | `pnpm audit:external-agent-runtimes` | 运行时与预设目录 |
+| `pnpm check:acp-v1-contract` | 锁定的 ACP v1 schema 与 SDK，以及 ACP 客户端（`packages/agent-acp/src/client.ts`）与 companion 处理器覆盖全部稳定方法 |
 | `lib/workflow/nodes/teams/team-runtime-port.test.ts` | `lib/workflow` 不从 Agent Team 导入任何内容 |
 | `pnpm test` | 包测试套件以就近方式在 Jest 的 `node` 项目中运行；`audit:colocated-tests` 不扫描 `packages/`，因此这条约定靠评审而非闸门维持 |

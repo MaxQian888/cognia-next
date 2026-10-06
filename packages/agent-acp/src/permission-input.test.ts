@@ -1,5 +1,5 @@
-import { deriveAcpPermissionInput } from "./acp-permission-input"
-import type { AcpToolCallContent } from "@/types/agent/external-agent"
+import { deriveAcpPermissionInput } from "./permission-input"
+import type { AcpToolCallContent } from "@cognia/agent-contracts/external-agent"
 
 const text = (value: string): AcpToolCallContent => ({
   type: "content",

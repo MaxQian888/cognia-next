@@ -1,13 +1,11 @@
-jest.mock("./acp-client", () => ({ AcpClientAdapter: class {} }))
-
-import type { AcpClientAdapter } from "./acp-client"
+import type { AcpClientAdapter } from "./client"
 import type {
   AcpConfigOption,
   ExternalAgentConfig,
   ExternalAgentEvent,
   ExternalAgentSession,
-} from "@/types/agent/external-agent"
-import { DevinAcpAdapter } from "./devin-acp-adapter"
+} from "@cognia/agent-contracts/external-agent"
+import { DevinAcpAdapter } from "./devin-adapter"
 
 const config = {
   id: "devin",

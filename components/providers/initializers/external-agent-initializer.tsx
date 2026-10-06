@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
-import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/integrations/acp"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 import { rehydrateExternalAgent } from "@/lib/ai/agent/external/session/rehydrate"

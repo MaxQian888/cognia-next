@@ -248,6 +248,61 @@ const SPECS = {
       export { adapter }
     `,
   },
+  "agent-acp": {
+    entries: [
+      ".",
+      "./manifest",
+      "./client",
+      "./devin-adapter",
+      "./devin-model-axis",
+      "./registry",
+      "./wire-codec",
+      "./feature-profile",
+      "./permission-input",
+    ],
+    dataOnly: ["./manifest"],
+    runtimeModules: ["client", "base-adapter", "json-rpc-peer", "prompt-gate", "sse"],
+    smoke: `
+      import { ACP_EXECUTION_SEMANTICS, DEVIN_ACP_EXECUTION_SEMANTICS } from "@cognia/agent-acp/manifest"
+      import { AcpClientAdapter } from "@cognia/agent-acp/client"
+      import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
+      import { fetchAcpRegistry } from "@cognia/agent-acp/registry"
+      const unavailable = { available: false }
+      const deps = {
+        processHost: unavailable, files: unavailable, terminals: unavailable,
+        requestFetch: async () => new Response("", { status: 404 }),
+        streamFetch: async () => new Response("", { status: 404 }),
+        openWebSocket: async () => { throw new Error("no socket") },
+        hostCapabilities: () => ({ kind: "headless", fs: { read: false, write: false }, terminal: false, terminalAuth: false,
+          elicitation: { form: false, url: false, durableInteraction: false }, preview: {} }),
+        resolveLaunchEnvironment: async (_config, base) => base,
+        approvalPolicy: () => null, toolPreApproval: () => false, outboundGate: () => true,
+        dynamicMcpHost: () => undefined,
+        logger: { debug() {}, info() {}, warn() {}, error() {} },
+      }
+      const adapter = new AcpClientAdapter(deps)
+      if (adapter.semantics !== ACP_EXECUTION_SEMANTICS) throw new Error("semantics")
+      let refused = false
+      try {
+        await adapter.connect({ id: "a", name: "a", protocol: "acp", transport: "stdio", process: { command: "agent" } })
+      } catch (error) { refused = /start a process/.test(String(error)) }
+      if (!refused) throw new Error("connect must refuse without a process host")
+      const devin = new DevinAcpAdapter(adapter, () => new AcpClientAdapter(deps))
+      if (devin.semantics !== DEVIN_ACP_EXECUTION_SEMANTICS) throw new Error("devin semantics")
+      const catalog = { version: "1.0.0", agents: [] }
+      const fetched = await fetchAcpRegistry({ fetcher: async () => new Response(JSON.stringify(catalog), { status: 200 }) })
+      if (fetched.version !== "1.0.0") throw new Error("registry")
+    `,
+    types: `
+      import { AcpClientAdapter, type AcpClientDeps } from "@cognia/agent-acp/client"
+      import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      declare const deps: AcpClientDeps
+      const adapter: ProtocolAdapter = new AcpClientAdapter(deps)
+      const devin: ProtocolAdapter = new DevinAcpAdapter(new AcpClientAdapter(deps), () => new AcpClientAdapter(deps))
+      export { adapter, devin }
+    `,
+  },
   "agent-aider": {
     entries: [".", "./manifest", "./history", "./cli-client"],
     dataOnly: ["./manifest", "./history"],

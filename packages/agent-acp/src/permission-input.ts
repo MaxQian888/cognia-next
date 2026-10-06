@@ -30,7 +30,10 @@
  * allow-list approves.
  */
 
-import type { AcpToolCallContent, AcpToolCallLocation } from "@/types/agent/external-agent"
+import type {
+  AcpToolCallContent,
+  AcpToolCallLocation,
+} from "@cognia/agent-contracts/external-agent"
 
 /** The tool-call fields a permission request may carry, or that were cached for it. */
 export interface AcpPermissionToolCallFields {

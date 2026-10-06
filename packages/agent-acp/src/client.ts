@@ -8,58 +8,49 @@
  * @see https://github.com/zed-industries/claude-code-acp
  */
 
-import {
-  agentInvoke,
-  agentListen,
-  agentReadTextFile,
-  agentWriteTextFile,
-  getAcpHostCapabilities,
-  supportsAgentFs,
-  supportsAgentTerminal,
-  supportsExternalAgents,
-} from "../../agent-transport"
-import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
-import { createPlatformWebSocket, type PlatformWebSocket } from "@/lib/network/platform-websocket"
 import { readServerSentEvents } from "@cognia/agent-runtime-kit/sse"
-import { loggers } from "@cognia/logging"
-import { truncateForLog } from "@cognia/logging/truncate"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import {
-  acpTerminalCreate,
-  cleanupSessionTerminals,
-  acpTerminalKill,
-  acpTerminalOutput,
-  acpTerminalRelease,
-  acpTerminalWaitForExit,
-  acpTerminalWrite,
-} from "@/lib/native/external-agent"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
+import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
+import type {
+  AgentApprovalPolicy,
+  AgentFetch,
+  AgentFileHost,
+  AgentLaunchEnvironmentResolver,
+  AgentLogger,
+  AgentOutboundGate,
+  AgentProcessHost,
+  AgentProcessSpawnSpec,
+  AgentTerminalHost,
+  AgentToolPreApproval,
+  AgentWebSocket,
+  AgentWebSocketFactory,
+} from "@cognia/agent-contracts/host"
+import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+import { ACP_EXECUTION_SEMANTICS, ACP_PROTOCOL, ACP_REMOTE_EXECUTION_SEMANTICS } from "./manifest"
 import {
   JsonRpcPeer,
   JsonRpcMethodError,
   type JsonRpcRequestDeadline,
 } from "@cognia/agent-runtime-kit/json-rpc-peer"
-import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
+import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./wire-codec"
 import {
   normalizeAcpElicitationRequest,
   validateAcpElicitationResponse,
 } from "@cognia/agent-runtime-kit/elicitation"
 import { spawnReclaimingOrphan } from "@cognia/agent-runtime-kit/spawn-reclaim"
-import { buildAgentEnv } from "../../config/env-builder"
 import {
   resolveAcpFeatureProfile,
   type AcpFeatureProfile,
+  type AcpHostCapabilities,
   type AcpPreviewEnablement,
-} from "./acp-feature-profile"
+} from "./feature-profile"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "@cognia/agent-runtime-kit/session-extension-errors"
-import { configuredApprovalPolicy, isToolPreApproved } from "../../policy/tool-preapproval"
-import { deriveAcpPermissionInput } from "./acp-permission-input"
+import { deriveAcpPermissionInput } from "./permission-input"
 import type { ExternalAgentCompactionOptions } from "@cognia/agent-contracts/session-operations"
 import type {
   InitializeRequest as SdkInitializeRequest,
@@ -71,8 +62,6 @@ import type {
   ContentBlock as SdkContentBlock,
   Usage as SdkUsage,
 } from "@agentclientprotocol/sdk"
-
-const log = loggers.agent
 
 /**
  * ACP protocol versions this client implements. The client advertises
@@ -222,7 +211,7 @@ import type {
   ExternalAgentSessionExtensionMethod,
   ExternalAgentSessionExtensionSupport,
   ExternalAgentExtensionSupportStatus,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
 
 /**
  * Cumulative token counters as ACP reports them — `PromptResponse.usage`
@@ -374,17 +363,42 @@ function tokenUsageFromDelta(delta: AcpCumulativeUsage): ExternalAgentTokenUsage
   }
 }
 
-let dynamicMcpHostController: AcpDynamicMcpHostController | undefined
-
 /**
- * Attach the host-owned MCP gateway used by preview ACP-channel MCP servers.
- * Passing `undefined` disables the feature immediately; the client will not
- * advertise or accept dynamic MCP operations without a live controller.
+ * Everything the ACP client reaches outside its own process (ADR-0217). The
+ * host implements each port with its own transport, sandbox and policy;
+ * declaring a need here grants nothing.
  */
-export function setAcpDynamicMcpHostController(
-  controller: AcpDynamicMcpHostController | undefined
-): void {
-  dynamicMcpHostController = controller
+export interface AcpClientDeps {
+  /** Local agents over stdio (line framing). */
+  processHost: AgentProcessHost
+  /** `fs/read_text_file` and `fs/write_text_file`, confined to session roots. */
+  files: AgentFileHost
+  /** `terminal/*` requests and terminal authentication. */
+  terminals: AgentTerminalHost
+  /** Non-streaming HTTP: the health probe and HTTP/SSE message posts. */
+  requestFetch: AgentFetch
+  /** The SSE event stream; the body is read incrementally. */
+  streamFetch: AgentFetch
+  /** WebSocket transport, through the host's proxy policy and auth headers. */
+  openWebSocket: AgentWebSocketFactory
+  /** What this host can offer an ACP agent, read at every feature negotiation. */
+  hostCapabilities: () => AcpHostCapabilities
+  /** The spawn environment (credentials, state root) for a configuration. */
+  resolveLaunchEnvironment: AgentLaunchEnvironmentResolver
+  /** The configuration's own approval lists, asked per permission request. */
+  approvalPolicy: AgentApprovalPolicy
+  /** The session allow-list check for modes that never prompt (`dontAsk`). */
+  toolPreApproval: AgentToolPreApproval
+  /** Every prompt, injected context and outbound frame passes it. */
+  outboundGate: AgentOutboundGate
+  /**
+   * The host-owned MCP gateway for preview ACP-channel MCP servers, read live.
+   * `undefined` disables the feature immediately: the client neither
+   * advertises nor accepts dynamic MCP operations without a controller.
+   */
+  dynamicMcpHost: () => AcpDynamicMcpHostController | undefined
+  /** The host bounds each entry; stderr chunks are passed raw. */
+  logger: AgentLogger
 }
 
 // ============================================================================
@@ -742,7 +756,48 @@ export function buildSpawnArgs(
  * or HTTP/WebSocket (remote agents).
  */
 export class AcpClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "acp"
+  readonly protocol = ACP_PROTOCOL
+
+  private readonly processHost: AgentProcessHost
+  private readonly files: AgentFileHost
+  private readonly terminals: AgentTerminalHost
+  private readonly requestFetch: AgentFetch
+  private readonly streamFetch: AgentFetch
+  private readonly openWebSocket: AgentWebSocketFactory
+  private readonly hostCapabilities: () => AcpHostCapabilities
+  private readonly resolveLaunchEnvironment: AgentLaunchEnvironmentResolver
+  private readonly approvalPolicy: AgentApprovalPolicy
+  private readonly toolPreApproval: AgentToolPreApproval
+  private readonly outboundGate: AgentOutboundGate
+  private readonly dynamicMcpHost: () => AcpDynamicMcpHostController | undefined
+  private readonly log: AgentLogger
+
+  constructor(deps: AcpClientDeps) {
+    super()
+    this.processHost = deps.processHost
+    this.files = deps.files
+    this.terminals = deps.terminals
+    this.requestFetch = deps.requestFetch
+    this.streamFetch = deps.streamFetch
+    this.openWebSocket = deps.openWebSocket
+    this.hostCapabilities = deps.hostCapabilities
+    this.resolveLaunchEnvironment = deps.resolveLaunchEnvironment
+    this.approvalPolicy = deps.approvalPolicy
+    this.toolPreApproval = deps.toolPreApproval
+    this.outboundGate = deps.outboundGate
+    this.dynamicMcpHost = deps.dynamicMcpHost
+    this.log = deps.logger
+  }
+
+  /**
+   * A stdio agent is one process serving every session; a network transport
+   * reaches an agent the host owns no process for.
+   */
+  get semantics(): AgentExecutionSemantics {
+    return this._config && this._config.transport !== "stdio"
+      ? ACP_REMOTE_EXECUTION_SEMANTICS
+      : ACP_EXECUTION_SEMANTICS
+  }
 
   // Shared JSON-RPC framing + request/response correlation (see json-rpc-peer.ts).
   // ACP keeps the `jsonrpc:"2.0"` wire field, so the peer is created with
@@ -750,7 +805,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // inbound handlers are injected when the peer is built in `connect()`.
   private peer?: JsonRpcPeer
   private processId?: string
-  private networkSocket?: PlatformWebSocket
+  private networkSocket?: AgentWebSocket
   /** Aborts the SSE subscription; replaces the old `EventSource` handle. */
   private networkEventAbort?: AbortController
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
@@ -881,7 +936,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const dynamicServers = servers.filter(isAcpChannelMcpServer)
     if (dynamicServers.length === 0) return
     const profile = this.featureProfile ?? this.resolveFeatureProfile()
-    if (!profile.preview.dynamicMcp.advertised || !dynamicMcpHostController) {
+    if (!profile.preview.dynamicMcp.advertised || !this.dynamicMcpHost()) {
       throw new Error(
         "ACP-channel MCP requires the dynamicMcp preview flag and an attached host controller"
       )
@@ -909,7 +964,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   private async cleanupDynamicMcpConnections(sessionId?: string): Promise<void> {
-    const controller = dynamicMcpHostController
+    const controller = this.dynamicMcpHost()
     for (const connection of [...this.dynamicMcpConnections.values()]) {
       if (sessionId && connection.sessionId !== sessionId) continue
       connection.status = "disconnecting"
@@ -920,7 +975,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             { sessionId: connection.sessionId ?? "" }
           )
           .catch((error) =>
-            log.warn("Failed to disconnect ACP-channel MCP connection", {
+            this.log.warn("Failed to disconnect ACP-channel MCP connection", {
               connectionId: connection.connectionId,
               error,
             })
@@ -941,7 +996,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       metadata?.acpPreviewFeatures && typeof metadata.acpPreviewFeatures === "object"
         ? (metadata.acpPreviewFeatures as AcpPreviewEnablement)
         : undefined
-    const host = getAcpHostCapabilities()
+    const host = this.hostCapabilities()
     const botIsolation = this._config?.process?.env?.COGNIA_BOT_ISOLATION === "1"
     const durableInteraction =
       host.elicitation.durableInteraction || metadata?.acpDurableInteractionController === true
@@ -952,7 +1007,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // The native Devin process already runs inside the Bot sandbox. Never
         // delegate commands to the generic host terminal outside that boundary.
         terminal: host.terminal && !botIsolation,
-        fs: { read: supportsAgentFs(), write: supportsAgentFs() },
+        fs: { read: this.files.available, write: this.files.available },
         terminalAuth: host.terminal && !botIsolation && this._config?.transport === "stdio",
         elicitation: {
           form: host.elicitation.form || durableInteraction,
@@ -962,7 +1017,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         preview: {
           ...host.preview,
           providers: host.preview.providers && metadata?.acpProviderController === true,
-          dynamicMcp: host.preview.dynamicMcp && dynamicMcpHostController !== undefined,
+          dynamicMcp: host.preview.dynamicMcp && this.dynamicMcpHost() !== undefined,
           nes: host.preview.nes && metadata?.acpNesController === true,
         },
       },
@@ -1039,7 +1094,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       this.reconnectAttempts = 0
       this.lastConnectedAt = Date.now()
 
-      log.info("Connected to agent", { name: config.name, capabilities: this._capabilities })
+      this.log.info("Connected to agent", { name: config.name, capabilities: this._capabilities })
     } catch (error) {
       // Tear down every transport artifact a partial connect left behind
       // (listeners, child process, sockets, peer, pending requests) so a retry
@@ -1048,7 +1103,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       // "error" so the failure is not mistaken for a clean disconnect.
       await this.teardownTransport()
       this._connectionStatus = "error"
-      log.error("Connection failed", { error })
+      this.log.error("Connection failed", { error })
       throw error
     }
   }
@@ -1075,18 +1130,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async teardownTransport(): Promise<void> {
     this.cleanupListeners()
 
-    if (this.processId && supportsExternalAgents()) {
+    if (this.processId && this.processHost.available) {
       try {
-        await agentInvoke("kill_external_agent", { agentId: this.processId })
+        await this.processHost.kill(this.processId)
       } catch (error) {
-        log.warn("Error killing process", { error })
+        this.log.warn("Error killing process", { error })
       }
     }
 
     if (this.networkSocket) {
       const socket = this.networkSocket
       this.networkSocket = undefined
-      await socket.close().catch((error) => log.warn("Error closing ACP socket", { error }))
+      await socket.close().catch((error) => this.log.warn("Error closing ACP socket", { error }))
     }
     if (this.networkEventAbort) {
       this.networkEventAbort.abort()
@@ -1141,7 +1196,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * (ADR-0059 T-A10; the brain routes through the service-scope RPC arms).
    */
   private async connectViaStdio(config: ExternalAgentConfig): Promise<void> {
-    if (!supportsExternalAgents()) {
+    if (!this.processHost.available) {
       throw new Error(
         "stdio needs a runtime that can start a process: the desktop app, a headless host, or a paired Host that has granted this device Agent Control"
       )
@@ -1159,11 +1214,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     const finalArgs = buildSpawnArgs(config.process)
 
-    // Compose the child-process env. `buildAgentEnv` reuses the Codex
+    // Compose the child-process env. The host's launch resolver reuses the Codex
     // subscription credential (or a discovered codex-cli credential) for
     // the `codex` preset so users don't have to log in twice. User-supplied
     // env vars on the agent config always win.
-    const finalEnv = await buildAgentEnv(config, config.process.env || {})
+    const finalEnv = await this.resolveLaunchEnvironment(config, config.process.env || {})
     if (this.isGooseAgent()) {
       // A saved Goose config may default to auto. session/new must start with
       // approval enabled before the manager applies the requested session mode.
@@ -1176,62 +1231,51 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // restarts. Safe here because `connect()` returns early when already
     // connected, and the stdout/exit listeners below are only armed after this
     // resolves, so the orphan's exit event has nowhere to land.
-    const spawnArgs = {
-      config: {
-        id: config.id,
-        command: config.process.command,
-        args: finalArgs,
-        env: finalEnv,
-        cwd: config.process.cwd,
-      },
+    const spawnSpec: AgentProcessSpawnSpec = {
+      id: config.id,
+      command: config.process.command,
+      args: finalArgs,
+      env: finalEnv,
+      cwd: config.process.cwd,
     }
     this.processId = await spawnReclaimingOrphan({
       id: config.id,
-      spawn: () => agentInvoke<string>("spawn_external_agent", spawnArgs),
-      kill: (id) => agentInvoke("kill_external_agent", { agentId: id }),
-      onReclaim: (id) => log.warn("Reclaiming an orphaned ACP agent process", { id }),
+      spawn: () => this.processHost.spawn(spawnSpec),
+      kill: (id) => this.processHost.kill(id),
+      onReclaim: (id) => this.log.warn("Reclaiming an orphaned ACP agent process", { id }),
     })
 
-    log.info("Spawned process", { processId: this.processId })
+    this.log.info("Spawned process", { processId: this.processId })
 
     // Listen for stdout messages
-    const unlistenStdout = await agentListen<{ agentId: string; data: string }>(
-      "external-agent://stdout",
-      (payload) => {
-        if (payload.agentId === this.processId) {
-          this.peer?.ingest(payload.data)
-        }
+    const unlistenStdout = await this.processHost.onStdoutLine((payload) => {
+      if (payload.processId === this.processId) {
+        this.peer?.ingest(payload.data)
       }
-    )
+    })
     this.unsubscribeFunctions.push(unlistenStdout)
 
     // Listen for stderr messages
-    const unlistenStderr = await agentListen<{ agentId: string; data: string }>(
-      "external-agent://stderr",
-      (payload) => {
-        if (payload.agentId === this.processId) {
-          // Subprocess stderr is routine diagnostic output (progress, banners,
-          // verbose logs), not a warning — and it arrives per-chunk on a
-          // potentially chatty stream. Logging every line at `warn` floods the
-          // Next dev server's forwarded-console buffer (warn+ is forwarded)
-          // until its `join` overflows V8's string cap. Keep it at `debug`
-          // (below the forwarded threshold) and bound each chunk's size.
-          log.debug("stderr", { data: truncateForLog(payload.data) })
-        }
+    const unlistenStderr = await this.processHost.onStderr((payload) => {
+      if (payload.processId === this.processId) {
+        // Subprocess stderr is routine diagnostic output (progress, banners,
+        // verbose logs), not a warning — and it arrives per-chunk on a
+        // potentially chatty stream. Logging every line at `warn` floods the
+        // Next dev server's forwarded-console buffer (warn+ is forwarded)
+        // until its `join` overflows V8's string cap. Keep it at `debug`
+        // (below the forwarded threshold) and bound each chunk's size.
+        this.log.debug("stderr", { data: payload.data })
       }
-    )
+    })
     this.unsubscribeFunctions.push(unlistenStderr)
 
     // Listen for process exit
-    const unlistenExit = await agentListen<{ agentId: string; code: number }>(
-      "external-agent://exit",
-      (payload) => {
-        if (payload.agentId === this.processId) {
-          log.info("Process exited", { code: payload.code })
-          this.handleProcessExit(payload.code)
-        }
+    const unlistenExit = await this.processHost.onExit((payload) => {
+      if (payload.processId === this.processId) {
+        this.log.info("Process exited", { code: payload.code })
+        this.handleProcessExit(payload.code)
       }
-    )
+    })
     this.unsubscribeFunctions.push(unlistenExit)
   }
 
@@ -1249,7 +1293,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Advisory HTTP connectivity check.
     // Some ACP servers do not expose /health but are protocol-valid through initialize.
     try {
-      const response = await proxyFetch(`${config.network.endpoint}/health`, {
+      const response = await this.requestFetch(`${config.network.endpoint}/health`, {
         method: "GET",
         headers: this.buildHeaders(config),
       })
@@ -1262,17 +1306,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       if (!message.includes("404") && !message.includes("405")) {
         throw error
       }
-      log.warn("ACP network health endpoint unavailable; continuing with protocol initialization.")
+      this.log.warn(
+        "ACP network health endpoint unavailable; continuing with protocol initialization."
+      )
     }
 
     if (config.transport === "websocket") {
       const socketUrl = this._rpcEndpoint || config.network.endpoint
-      // `createPlatformWebSocket`, not `new WebSocket`: the bare constructor
+      // The host's socket factory, not `new WebSocket`: the bare constructor
       // cannot carry the bearer / API-key header this agent's config may
       // require, is blocked by the packaged shell's `connect-src`, and dials
       // straight past the configured proxy. It also *fails* rather than
       // connecting direct when the user turned WebSocket proxying off.
-      this.networkSocket = await createPlatformWebSocket(socketUrl, {
+      this.networkSocket = await this.openWebSocket(socketUrl, {
         headers: this.buildHeaders(config),
         onMessage: (data) => this.peer?.ingest(data),
         onClose: () => {
@@ -1286,7 +1332,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       await this.subscribeToEventStream(this._eventsEndpoint, config)
     }
 
-    log.info("Connected to remote agent", {
+    this.log.info("Connected to remote agent", {
       endpoint: config.network.endpoint,
       transport: config.transport,
     })
@@ -1316,7 +1362,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     let response: Response
     try {
-      response = await platformStreamingFetch(endpoint, {
+      response = await this.streamFetch(endpoint, {
         method: "GET",
         headers: { ...this.buildHeaders(config), accept: "text/event-stream" },
         signal: controller.signal,
@@ -1343,7 +1389,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       } catch (error) {
         // An abort is `disconnect()` doing its job, not a fault.
         if (controller.signal.aborted) return
-        log.warn("ACP SSE stream ended with an error", { error })
+        this.log.warn("ACP SSE stream ended with an error", { error })
       } finally {
         if (this.networkEventAbort === controller) this.networkEventAbort = undefined
       }
@@ -1627,7 +1673,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       ...credentials,
     })
 
-    log.info("Authenticated with agent", { method: methodId })
+    this.log.info("Authenticated with agent", { method: methodId })
   }
 
   getTerminalAuthState(): AcpTerminalAuthState | undefined {
@@ -1641,8 +1687,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     this.terminalAuthState = { ...state, status: "cancelled" }
     if (state.terminalId) {
-      await acpTerminalKill(state.terminalId)
-      await acpTerminalRelease(state.terminalId).catch(() => undefined)
+      await this.terminals.kill(state.terminalId)
+      await this.terminals.release(state.terminalId).catch(() => undefined)
     }
   }
 
@@ -1673,27 +1719,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       await this.teardownTransport()
       this._connectionStatus = "disconnected"
       assertNotCancelled()
-      const env = await buildAgentEnv(config, {
+      const env = await this.resolveLaunchEnvironment(config, {
         ...(config.process.env ?? {}),
         ...(method.env ?? {}),
       })
       assertNotCancelled()
-      terminalId = await acpTerminalCreate(
-        `acp-auth:${config.id}`,
-        config.process.command,
-        [...buildSpawnArgs(config.process), ...(method.args ?? [])],
-        config.process.cwd,
-        env,
-        1024 * 1024
-      )
+      terminalId = await this.terminals.create({
+        sessionId: `acp-auth:${config.id}`,
+        command: config.process.command,
+        args: [...buildSpawnArgs(config.process), ...(method.args ?? [])],
+        cwd: config.process.cwd,
+        env: env,
+        outputByteLimit: 1024 * 1024,
+      })
       if (this.terminalAuthState?.status === "cancelled") {
-        await acpTerminalKill(terminalId).catch((error) =>
-          log.warn("Failed to kill cancelled ACP authentication terminal", { error })
-        )
+        await this.terminals
+          .kill(terminalId)
+          .catch((error) =>
+            this.log.warn("Failed to kill cancelled ACP authentication terminal", { error })
+          )
         assertNotCancelled()
       }
       this.terminalAuthState = { methodId: method.id, terminalId, status: "running" }
-      const result = await acpTerminalWaitForExit(terminalId)
+      const result = await this.terminals.waitForExit(terminalId)
       const exitCode = result.exitStatus?.exitCode ?? null
       assertNotCancelled()
       if (exitCode !== 0) {
@@ -1723,9 +1771,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw error
     } finally {
       if (terminalId) {
-        await acpTerminalRelease(terminalId).catch((error) =>
-          log.warn("Failed to release ACP authentication terminal", { error })
-        )
+        await this.terminals
+          .release(terminalId)
+          .catch((error) =>
+            this.log.warn("Failed to release ACP authentication terminal", { error })
+          )
       }
       this.terminalAuthPending = false
     }
@@ -1771,14 +1821,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       try {
         await this.closeSession(session.id)
       } catch (error) {
-        log.warn("Error closing session", { sessionId: session.id, error })
+        this.log.warn("Error closing session", { sessionId: session.id, error })
       }
     }
 
     await this.teardownTransport()
     this._connectionStatus = "disconnected"
 
-    log.info("Disconnected")
+    this.log.info("Disconnected")
   }
 
   private isDshAgent(): boolean {
@@ -1993,7 +2043,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._sessions.set(session.id, session)
     this.registerDynamicMcpServers(session.id, mcpServers)
 
-    log.info("Created session", { sessionId: session.id })
+    this.log.info("Created session", { sessionId: session.id })
     return session
   }
 
@@ -2015,7 +2065,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         await this.sendRequest("session/close", { sessionId })
       } catch (error) {
         // A close failure must not strand local cleanup.
-        log.warn("session/close failed", { sessionId, error })
+        this.log.warn("session/close failed", { sessionId, error })
       }
     }
 
@@ -2040,7 +2090,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._sessions.delete(sessionId)
     this.pendingKimiForkMcp.delete(sessionId)
     this.clearUsageTracking(sessionId)
-    log.info("Closed session", { sessionId })
+    this.log.info("Closed session", { sessionId })
   }
 
   /**
@@ -2093,12 +2143,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   private async cleanupNativeSessionTerminals(sessionId: string): Promise<void> {
-    if (!supportsAgentTerminal()) return
+    if (!this.terminals.available) return
     if (![...this.terminalSessions.values()].includes(sessionId)) return
     try {
-      await cleanupSessionTerminals(sessionId)
+      await this.terminals.closeSession(sessionId)
     } catch (error) {
-      log.warn("Failed to clean up ACP session terminals", { sessionId, error })
+      this.log.warn("Failed to clean up ACP session terminals", { sessionId, error })
     }
   }
 
@@ -2119,7 +2169,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     await this.sendRequest("logout", {})
     this.terminalAuthState = undefined
-    log.info("Logged out of agent")
+    this.log.info("Logged out of agent")
   }
 
   private requirePreviewFeature(feature: "providers" | "nes"): void {
@@ -2227,7 +2277,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`)
     }
-    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+    if (!promptInputPassesGate(message, this.outboundGate, { sessionId })) {
       throw new Error("ACP outbound payload blocked by the PII gate")
     }
     const promptBlocks = buildAcpPromptBlocks(
@@ -2245,7 +2295,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         context &&
         context !== session.metadata?.cogniaSentInstructionContext
       ) {
-        if (!hasNoLeakingPiiDeep(context))
+        if (!this.outboundGate(context))
           throw new Error("ACP outbound payload blocked by the PII gate")
         promptBlocks.unshift({ type: "text", text: `[Cognia task context]\n${context}` })
         session.metadata = { ...session.metadata, cogniaInstructionContext: context }
@@ -2397,7 +2447,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       // request — rethrowing leaves it pending until the 5-minute timeout,
       // so the agent's tool call hangs and the throwing caller kills the
       // turn on top. Cancel is the only honest action left.
-      log.warn("Elicitation response failed schema validation; cancelling", {
+      this.log.warn("Elicitation response failed schema validation; cancelling", {
         requestId: response.requestId,
         error: error instanceof Error ? error.message : String(error),
       })
@@ -2537,7 +2587,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           try {
             await this.cancel(sessionId)
           } catch (cancelError) {
-            log.warn("Failed to cancel a timed-out ACP turn", { sessionId, error: cancelError })
+            this.log.warn("Failed to cancel a timed-out ACP turn", {
+              sessionId,
+              error: cancelError,
+            })
           }
         }
         this.toolCallStates.delete(sessionId)
@@ -2841,7 +2894,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       },
     })
 
-    log.info("Session model changed", { sessionId, modelId })
+    this.log.info("Session model changed", { sessionId, modelId })
   }
 
   /**
@@ -2940,7 +2993,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       })
     }
 
-    log.info("Config option changed", { sessionId, configId, value })
+    this.log.info("Config option changed", { sessionId, configId, value })
     return updatedOptions
   }
 
@@ -3313,7 +3366,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           await this.sendRequest("session/close", { sessionId: session.id })
         }
       } catch (cleanupError) {
-        log.warn("Failed to remove Kimi fork after MCP restoration failure", {
+        this.log.warn("Failed to remove Kimi fork after MCP restoration failure", {
           sessionId: session.id,
           error: cleanupError,
         })
@@ -3593,18 +3646,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     } catch {
       throw new Error("ACP outbound payload is not valid JSON")
     }
-    if (!hasNoLeakingPiiDeep(outboundPayload)) {
+    if (!this.outboundGate(outboundPayload)) {
       throw new Error("ACP outbound payload blocked by the PII gate")
     }
-    if (this._config?.transport === "stdio" && this.processId && supportsExternalAgents()) {
-      await agentInvoke("send_to_external_agent", {
-        agentId: this.processId,
-        message,
-      })
+    if (this._config?.transport === "stdio" && this.processId && this.processHost.available) {
+      await this.processHost.send(this.processId, message)
     } else if (this._config?.transport === "websocket" && this.networkSocket) {
       await this.networkSocket.send(message)
     } else if (this._config?.transport === "http" && this._config.network?.endpoint) {
-      const response = await proxyFetch(
+      const response = await this.requestFetch(
         this._rpcEndpoint || `${this._config.network.endpoint}/message`,
         {
           method: "POST",
@@ -3619,7 +3669,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       const data = await response.text()
       this.peer?.ingest(data)
     } else if (this._config?.transport === "sse" && this._config.network?.endpoint) {
-      const response = await proxyFetch(
+      const response = await this.requestFetch(
         this._rpcEndpoint || `${this._config.network.endpoint}/message`,
         {
           method: "POST",
@@ -3646,7 +3696,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       validateAcpV1Envelope(message)
       return true
     } catch (error) {
-      log.warn("ACP wire validation rejected an inbound envelope", {
+      this.log.warn("ACP wire validation rejected an inbound envelope", {
         adapterId: this._config?.id,
         protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
         strict: this._config?.metadata?.acpStrictValidation === true,
@@ -3752,10 +3802,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
   private assertDynamicMcpController(): AcpDynamicMcpHostController {
     const profile = this.featureProfile ?? this.resolveFeatureProfile()
-    if (!profile.preview.dynamicMcp.advertised || !dynamicMcpHostController) {
+    const controller = this.dynamicMcpHost()
+    if (!profile.preview.dynamicMcp.advertised || !controller) {
       throw new JsonRpcMethodError(-32601, "Dynamic MCP is not enabled by this ACP host")
     }
-    return dynamicMcpHostController
+    return controller
   }
 
   private async handleDynamicMcpConnect(
@@ -3881,7 +3932,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/file-system
    */
   private async handleReadTextFile(params: AcpReadTextFileParams): Promise<{ content: string }> {
-    const fullContent = await agentReadTextFile(
+    const fullContent = await this.files.readText(
       params.path,
       this.getSessionWorkspaceRoots(params.sessionId)
     )
@@ -3903,7 +3954,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/file-system
    */
   private async handleWriteTextFile(params: AcpWriteTextFileParams): Promise<void> {
-    await agentWriteTextFile(
+    await this.files.writeText(
       params.path,
       params.content,
       this.getSessionWorkspaceRoots(params.sessionId)
@@ -4070,7 +4121,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // The configuration's own lists come next (ADR-0216: two configurations of
     // one runtime can differ exactly here). "ask" forces the prompt below past
     // every auto-approval; "approve" approves without one.
-    const configured = configuredApprovalPolicy(this._config ?? undefined, request)
+    const configured = this.approvalPolicy(this._config ?? undefined, request)
     if (configured === "approve" && allowOption) {
       return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
     }
@@ -4089,7 +4140,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (configured !== "ask" && session?.permissionMode === "dontAsk") {
       const preApproved =
         !!allowOption &&
-        isToolPreApproved(
+        this.toolPreApproval(
           this.isGooseAgent() ? request.toolInfo.name : request.title,
           request.rawInput,
           session.allowedTools
@@ -4190,20 +4241,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (this._config?.process?.env?.COGNIA_BOT_ISOLATION === "1") {
       throw new Error("Bot commands must execute inside their isolated agent process")
     }
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
-    const terminalId = await acpTerminalCreate(
-      params.sessionId,
-      params.command,
-      params.args || [],
-      params.cwd,
-      params.env
+    const terminalId = await this.terminals.create({
+      sessionId: params.sessionId,
+      command: params.command,
+      args: params.args || [],
+      cwd: params.cwd,
+      env: params.env
         ? Object.fromEntries(params.env.map(({ name, value }) => [name, value]))
         : undefined,
-      params.outputByteLimit
-    )
+      outputByteLimit: params.outputByteLimit,
+    })
     this.terminalSessions.set(terminalId, params.sessionId)
 
     return { terminalId }
@@ -4222,12 +4273,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async handleTerminalOutput(
     params: AcpTerminalOutputParams
   ): Promise<AcpTerminalOutputResult> {
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    const result = await acpTerminalOutput(params.terminalId)
+    const result = await this.terminals.output(params.terminalId)
     return result
   }
 
@@ -4239,12 +4290,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     sessionId: string
     terminalId: string
   }): Promise<void> {
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    await acpTerminalKill(params.terminalId)
+    await this.terminals.kill(params.terminalId)
   }
 
   /**
@@ -4255,12 +4306,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     sessionId: string
     terminalId: string
   }): Promise<void> {
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    await acpTerminalRelease(params.terminalId)
+    await this.terminals.release(params.terminalId)
     this.terminalSessions.delete(params.terminalId)
   }
 
@@ -4274,12 +4325,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     terminalId: string
     data: string
   }): Promise<void> {
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    await acpTerminalWrite(params.terminalId, params.data)
+    await this.terminals.write(params.terminalId, params.data)
   }
 
   /**
@@ -4291,12 +4342,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     terminalId: string
     timeout?: number
   }): Promise<{ exitCode: number | null; signal: string | null }> {
-    if (!supportsAgentTerminal()) {
+    if (!this.terminals.available) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    const waitResult = await acpTerminalWaitForExit(params.terminalId, params.timeout)
+    const waitResult = await this.terminals.waitForExit(params.terminalId, params.timeout)
     return {
       exitCode: waitResult.exitStatus.exitCode,
       signal: waitResult.exitStatus.signal,
@@ -4318,7 +4369,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         notification.params as unknown as AcpMessageMcpNotification,
         undefined,
         true
-      ).catch((error) => log.warn("ACP-channel MCP notification failed", { error }))
+      ).catch((error) => this.log.warn("ACP-channel MCP notification failed", { error }))
       return
     }
     if (notification.method === "elicitation/complete") {
@@ -4352,7 +4403,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     update: AcpSessionUpdate
   ): ExternalAgentEvent | null {
     if (!update || !update.sessionUpdate) {
-      log.warn("Invalid session/update: missing sessionUpdate field")
+      this.log.warn("Invalid session/update: missing sessionUpdate field")
       return null
     }
 
@@ -4893,11 +4944,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // Same `_`-prefixed extension convention as notification methods:
         // vendor update kinds are optional metadata, not drift to warn on.
         if ((update as AcpSessionUpdate).sessionUpdate?.startsWith("_")) {
-          log.debug("Ignoring extension session update", {
+          this.log.debug("Ignoring extension session update", {
             type: (update as AcpSessionUpdate).sessionUpdate,
           })
         } else {
-          log.warn("Unknown session update type", {
+          this.log.warn("Unknown session update type", {
             type: (update as AcpSessionUpdate).sessionUpdate,
           })
         }
@@ -5087,9 +5138,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // `_cognition.ai/*` (devin) and future vendor methods are optional
         // parallel metadata, not drift. Warn only on unknown STANDARD names.
         if (notification.method.startsWith("_")) {
-          log.debug("Ignoring extension notification", { method: notification.method })
+          this.log.debug("Ignoring extension notification", { method: notification.method })
         } else {
-          log.warn("Unknown notification type", { method: notification.method })
+          this.log.warn("Unknown notification type", { method: notification.method })
         }
         return null
     }
@@ -5137,7 +5188,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         try {
           listener(event)
         } catch (error) {
-          log.error("Event listener error", { error })
+          this.log.error("Event listener error", { error })
         }
       }
     }
@@ -5179,7 +5230,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     if (this.rapidExitCount >= MAX_RAPID_EXITS) {
       this._connectionStatus = "error"
-      log.error("Reconnect circuit breaker tripped after rapid crash loop", {
+      this.log.error("Reconnect circuit breaker tripped after rapid crash loop", {
         rapidExitCount: this.rapidExitCount,
         code,
       })
@@ -5222,15 +5273,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       : this.reconnectDelay
     const delay =
       this.maxReconnectDelay !== undefined ? Math.min(base, this.maxReconnectDelay) : base
-    log.info("Attempting reconnection", { delay, attempt: this.reconnectAttempts })
+    this.log.info("Attempting reconnection", { delay, attempt: this.reconnectAttempts })
 
     await new Promise((resolve) => setTimeout(resolve, delay))
 
     try {
       await this.connect(this._config)
-      log.info("Reconnection successful")
+      this.log.info("Reconnection successful")
     } catch (error) {
-      log.error("Reconnection failed", { error })
+      this.log.error("Reconnection failed", { error })
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.attemptReconnection()
       } else {
@@ -5243,6 +5294,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 /**
  * Create a new ACP client adapter instance
  */
-export function createAcpClient(): AcpClientAdapter {
-  return new AcpClientAdapter()
+export function createAcpClient(deps: AcpClientDeps): AcpClientAdapter {
+  return new AcpClientAdapter(deps)
 }

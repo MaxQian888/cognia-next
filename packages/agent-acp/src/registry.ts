@@ -1,5 +1,5 @@
-import { proxyFetch } from "@/lib/network/proxy-fetch"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { AgentFetch } from "@cognia/agent-contracts/host"
+import type { ExternalAgentConfig } from "@cognia/agent-contracts/external-agent"
 
 export const ACP_REGISTRY_URL =
   "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
@@ -137,16 +137,19 @@ export function validateAcpRegistry(value: unknown): AcpRegistryCatalog {
   return value as unknown as AcpRegistryCatalog
 }
 
-export async function fetchAcpRegistry(
-  options: {
-    fetcher?: typeof fetch
-    fallback?: AcpRegistryCatalog
-    now?: () => number
-  } = {}
-): Promise<AcpRegistryCatalog> {
+/**
+ * Fetch the registry catalog through `fetcher`, the host's HTTP client (Cognia:
+ * its proxy-aware fetch). Revalidates with the cached ETag and serves the
+ * in-process cache for {@link ACP_REGISTRY_CACHE_MS}.
+ */
+export async function fetchAcpRegistry(options: {
+  fetcher: AgentFetch
+  fallback?: AcpRegistryCatalog
+  now?: () => number
+}): Promise<AcpRegistryCatalog> {
   const now = options.now?.() ?? Date.now()
   if (cache && now < cache.expiresAt) return cache.catalog
-  const fetcher = options.fetcher ?? proxyFetch
+  const fetcher = options.fetcher
   const headers: Record<string, string> = { Accept: "application/json" }
   if (cache?.etag) headers["If-None-Match"] = cache.etag
   try {

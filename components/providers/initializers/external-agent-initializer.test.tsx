@@ -18,7 +18,7 @@ interface FakeInstance {
 
 const setAcpDynamicMcpHostControllerMock = jest.fn()
 const dynamicMcpController = { connect: jest.fn(), message: jest.fn(), disconnect: jest.fn() }
-jest.mock("@/lib/ai/agent/external/runtimes/acp/acp-client", () => ({
+jest.mock("@/lib/ai/agent/external/integrations/acp", () => ({
   setAcpDynamicMcpHostController: (...args: unknown[]) =>
     setAcpDynamicMcpHostControllerMock(...args),
 }))

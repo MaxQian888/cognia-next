@@ -40,6 +40,8 @@
       "@cognia/agent-opencode/*": ["packages/agent-opencode/src/*"],
       "@cognia/agent-a2a": ["packages/agent-a2a/src/index.ts"],
       "@cognia/agent-a2a/*": ["packages/agent-a2a/src/*"],
+      "@cognia/agent-acp": ["packages/agent-acp/src/index.ts"],
+      "@cognia/agent-acp/*": ["packages/agent-acp/src/*"],
       "@cognia/agent-codex": ["packages/agent-codex/src/index.ts"],
       "@cognia/agent-codex/*": ["packages/agent-codex/src/*"],
       "@cognia/agent-orchestration": ["packages/agent-orchestration/src/index.ts"],

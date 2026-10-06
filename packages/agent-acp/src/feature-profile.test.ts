@@ -1,4 +1,4 @@
-import { resolveAcpFeatureProfile } from "./acp-feature-profile"
+import { resolveAcpFeatureProfile } from "./feature-profile"
 
 describe("resolveAcpFeatureProfile", () => {
   const desktopHost = {

@@ -20,7 +20,7 @@ import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import { isTauri } from "@/lib/utils"
-import type { AcpHostCapabilities } from "./runtimes/acp/acp-feature-profile"
+import type { AcpHostCapabilities } from "@cognia/agent-acp/feature-profile"
 import { canStartExternalAgentProcess } from "./capability/process-plane"
 import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
 import {

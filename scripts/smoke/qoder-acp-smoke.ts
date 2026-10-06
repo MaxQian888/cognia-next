@@ -8,7 +8,7 @@ import os from "node:os"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { AcpClientAdapter } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
+import { createAcpClientAdapter } from "@/lib/ai/agent/external/integrations/acp"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 
 function check(condition: unknown, message: string): asserts condition {
@@ -35,7 +35,7 @@ async function main() {
     retryConfig: { maxRetries: 0, retryDelay: 0, exponentialBackoff: false },
   })
   check(config, "Missing Qoder preset")
-  const adapter = new AcpClientAdapter()
+  const adapter = createAcpClientAdapter()
   let sessionId: string | undefined
   // The probe must not inherit a credential from the shell's Qoder environment.
   const previousPat = process.env.QODER_PERSONAL_ACCESS_TOKEN

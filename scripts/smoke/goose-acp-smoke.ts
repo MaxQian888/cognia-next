@@ -7,7 +7,7 @@ import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { AcpClientAdapter } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
+import { createAcpClientAdapter } from "@/lib/ai/agent/external/integrations/acp"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import { findRuntimeByPresetId } from "@/lib/ai/agent/external/config/install-catalog"
 import { assessRuntimeVersion } from "@/lib/ai/agent/external/config/runtime-version"
@@ -90,7 +90,7 @@ async function main() {
     timeout: 60_000,
   })
   check(config, "Goose preset is missing")
-  let adapter = new AcpClientAdapter()
+  let adapter = createAcpClientAdapter()
   let sessionId: string | undefined
   const otherSessions: string[] = []
   let stage = "connect"
@@ -206,7 +206,7 @@ async function main() {
     report.list = true
     stage = "reconnect-load"
     await adapter.disconnect()
-    adapter = new AcpClientAdapter()
+    adapter = createAcpClientAdapter()
     await adapter.connect(config)
     await adapter.loadSession(sessionId, { cwd: scratch })
     report.load = true

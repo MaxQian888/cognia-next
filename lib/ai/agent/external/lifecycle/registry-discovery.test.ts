@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-import { resetAcpRegistryCacheForTests, type AcpRegistryAgent } from "../runtimes/acp/acp-registry"
+import { resetAcpRegistryCacheForTests, type AcpRegistryAgent } from "@cognia/agent-acp/registry"
 import {
   classifyRegistryAgent,
   discoverRegistryAgents,

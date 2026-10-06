@@ -52,7 +52,7 @@ import { resolveExternalAgentThinking } from "@/lib/ai/agent/external/session/se
 import { clampThinkingLevel } from "@cognia/agent-pi/rpc-client"
 import { projectAgentLevels, type EffortTier } from "@/lib/ai/thinking-level"
 import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
-import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/integrations/acp"
 import {
   createAgentFromPreset,
   getPresetConfig,

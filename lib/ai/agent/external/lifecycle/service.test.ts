@@ -7,7 +7,7 @@ import type {
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { ExternalAgentLifecycleError } from "@/types/agent/external-agent-lifecycle"
-import { resetAcpRegistryCacheForTests } from "../runtimes/acp/acp-registry"
+import { resetAcpRegistryCacheForTests } from "@cognia/agent-acp/registry"
 
 import {
   ExternalAgentLifecycleService,

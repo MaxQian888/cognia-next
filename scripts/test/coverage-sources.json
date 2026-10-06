@@ -137,7 +137,7 @@
     "!packages/ocr/src/types/platform.ts",
     "!packages/tts/src/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
-    "!lib/ai/agent/external/runtimes/acp/acp-client.ts",
+    "!packages/agent-acp/src/client.ts",
     "!lib/ai/agent/external/manager.ts",
     "!packages/agent-opencode/src/client.ts",
     "!packages/web-search/src/search-type-router.ts",

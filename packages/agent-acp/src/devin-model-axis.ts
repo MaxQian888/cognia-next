@@ -27,8 +27,8 @@
  * they just won't be reachable through a level until they use a known token.
  */
 
-import type { AcpConfigOption, AcpConfigOptionValue } from "@/types/agent/external-agent"
-import { findModelConfigOption, flattenValues } from "../../session/session-models"
+import type { AcpConfigOption, AcpConfigOptionValue } from "@cognia/agent-contracts/external-agent"
+import { findModelConfigOption, flattenValues } from "@cognia/agent-runtime-kit/config-options"
 
 /** Config-option id the synthesized Devin thinking axis answers to. */
 export const DEVIN_THOUGHT_LEVEL_OPTION_ID = "devin.thought_level"

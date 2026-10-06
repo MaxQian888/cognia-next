@@ -66,7 +66,7 @@ import {
   adaptPermissionMode,
   supportedPermissionModes,
 } from "@/lib/ai/agent/external/policy/permission-modes"
-import type { AcpPreviewFeature } from "@/lib/ai/agent/external/runtimes/acp/acp-feature-profile"
+import type { AcpPreviewFeature } from "@cognia/agent-acp/feature-profile"
 import type { AgentReadiness, AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import {
   useExternalAgentStore,

@@ -102,6 +102,8 @@ export interface AgentFetchInit extends RequestInit {
   readTimeout?: number
   /** Refuse private, loopback and link-local targets. */
   blockPrivateHosts?: boolean
+  /** Overall timeout of a non-streaming request. */
+  timeout?: number
 }
 
 /**
@@ -111,6 +113,84 @@ export interface AgentFetchInit extends RequestInit {
  * event stream needs. Integrations never call a global `fetch`.
  */
 export type AgentFetch = (input: Request | URL | string, init?: AgentFetchInit) => Promise<Response>
+
+/** Callbacks and handshake options for one agent WebSocket. */
+export interface AgentWebSocketOptions {
+  /** Handshake headers; a host that cannot send them refuses the connection. */
+  headers?: Record<string, string>
+  /** Handshake subprotocols, in preference order. */
+  protocols?: readonly string[]
+  /** A text frame. */
+  onMessage?: (data: string) => void
+  /** A binary frame. */
+  onBinary?: (data: Uint8Array) => void
+  /** Terminal; `code` and `reason` are null when the peer vanished. */
+  onClose?: (info: { code: number | null; reason: string | null }) => void
+  /** Not terminal on its own; `onClose` always follows. */
+  onError?: (message: string) => void
+}
+
+export interface AgentWebSocket {
+  send(data: string | Uint8Array): Promise<void>
+  close(): Promise<void>
+}
+
+/**
+ * Opens a WebSocket through the host's transport and proxy policy. A bare
+ * `WebSocket` cannot carry auth headers and dials past the configured proxy.
+ */
+export type AgentWebSocketFactory = (
+  url: string,
+  options?: AgentWebSocketOptions
+) => Promise<AgentWebSocket>
+
+/** How a host terminal process ended. */
+export interface AgentTerminalExitStatus {
+  exitCode: number | null
+  signal: string | null
+}
+
+export interface AgentTerminalOutput {
+  output: string
+  truncated: boolean
+  exitStatus: AgentTerminalExitStatus
+  exitCode?: number | null
+}
+
+export interface AgentTerminalExit {
+  exitStatus: AgentTerminalExitStatus
+  exitCode?: number | null
+}
+
+/** A command an agent asks the host to run in a terminal it owns. */
+export interface AgentTerminalCreateRequest {
+  /** The agent session the terminal belongs to; closing it releases them all. */
+  sessionId: string
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  /** Bytes of output the host retains. */
+  outputByteLimit?: number
+}
+
+/**
+ * Host terminals an agent drives (ACP `terminal/*`, terminal authentication).
+ * The host applies its own sandbox and spawn policy to every command.
+ */
+export interface AgentTerminalHost {
+  /** False where this host cannot run terminals (browser, paired device). */
+  readonly available: boolean
+  create(request: AgentTerminalCreateRequest): Promise<string>
+  output(terminalId: string, outputByteLimit?: number): Promise<AgentTerminalOutput>
+  write(terminalId: string, data: string): Promise<void>
+  kill(terminalId: string): Promise<void>
+  /** Free the terminal's resources; it may no longer be addressed. */
+  release(terminalId: string): Promise<void>
+  waitForExit(terminalId: string, timeoutMs?: number): Promise<AgentTerminalExit>
+  /** Kill and release every terminal a session created. */
+  closeSession(sessionId: string): Promise<void>
+}
 
 /**
  * The host's credential redactor for text an integration captured from a
@@ -152,6 +232,17 @@ export type AgentApprovalPolicy = (
   config: ExternalAgentConfig | undefined,
   request: AgentApprovalPolicyRequest
 ) => AgentConfiguredApproval
+
+/**
+ * Whether a session's allow-list (`allowedTools`) pre-approves one call, for
+ * modes that never prompt. Host-owned so allow-list matching is one
+ * implementation across integrations.
+ */
+export type AgentToolPreApproval = (
+  toolName: string | undefined,
+  rawInput: Record<string, unknown> | undefined,
+  allowedTools: string[] | undefined
+) => boolean
 
 /**
  * The host's outbound privacy gate: `true` when `payload` may leave the

@@ -32,8 +32,8 @@ flowchart LR
 
 ## 1. 判断是否需要一个包
 
-- **普通 ACP agent 不需要自己的包**：它只是运行时目录中由 ACP 适配器运行的一行。
-  厂商特例属于 ACP 厂商 profile（阶段 3，尚未抽出）。
+- **普通 ACP agent 不需要自己的包**：它只是运行时目录中由 `@cognia/agent-acp` 的 ACP
+  客户端运行的一行。厂商特例属于 ACP 厂商 profile（阶段 3；目前仍是客户端内部的分支）。
 - **拥有自己协议的运行时**（某种 RPC 方言、SDK、每回合一个 CLI 进程）或**拥有自己
   会话存储的运行时**，才需要一个包。
 
@@ -92,8 +92,12 @@ importer），在根 `tsconfig.json` 中加入 `@cognia/agent-<id>` 的 paths，
 - `AgentFileHost`（`host.ts:81`）：运行时把状态放在工作区文件中时使用。每次读、写、删除都
   要指明允许的根目录；`isWithinRoot` 会在 agent 进程有机会绕过文件平面打开某个路径之前
   拒绝它（例如 Aider 的聊天文件与上下文文件）；
-- 运行时经 HTTP 访问时（OpenCode 服务、A2A 对端）使用 `AgentFetch`：宿主的流式 fetch，
-  而不是全局 fetch；
+- 运行时经 HTTP 访问时（OpenCode 服务、A2A 对端、远程 ACP agent）使用 `AgentFetch`：
+  宿主的流式 fetch，而不是全局 fetch；
+- WebSocket 传输（远程 ACP agent）使用 `AgentWebSocketFactory`：宿主的套接字能携带认证
+  头并遵守代理策略，裸 `WebSocket` 做不到；
+- agent 要求宿主在其拥有的终端里运行命令时（ACP `terminal/*`、终端认证）使用
+  `AgentTerminalHost`；
 - `AgentOutboundGate`：**必需**，适配器发出的每个提示或载荷都要经过它；
 - 只有宿主能回答的问题，用包内定义类型、由宿主实现的运行时专属服务接口来表达（例如 Pi 的
   `PiHostServices`：校验内置扩展、列出已存会话），而不是由包去调用字符串命令；

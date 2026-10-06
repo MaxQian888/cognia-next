@@ -3,7 +3,7 @@ import {
   AcpWireValidationError,
   classifyAcpV1Method,
   validateAcpV1Envelope,
-} from "./acp-wire-codec"
+} from "./wire-codec"
 
 describe("ACP v1 wire codec", () => {
   it("uses the official SDK protocol version and keeps v2 unadvertised", () => {

@@ -1070,6 +1070,22 @@ importers:
         specifier: workspace:*
         version: link:../redact
 
+  packages/agent-acp:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@4.6.5)
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+    devDependencies:
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
+
   packages/agent-aider:
     dependencies:
       '@cognia/agent-contracts':

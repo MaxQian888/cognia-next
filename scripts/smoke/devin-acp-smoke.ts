@@ -11,7 +11,11 @@ import os from "node:os"
 import { spawnSync } from "node:child_process"
 
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { DevinAcpAdapter } from "@/lib/ai/agent/external/runtimes/acp/devin-acp-adapter"
+import type { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
+import {
+  createAcpClientAdapter,
+  createDevinAcpAdapter,
+} from "@/lib/ai/agent/external/integrations/acp"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type {
   AcpMcpServerConfig,
@@ -161,7 +165,7 @@ async function main(): Promise<void> {
     timeout: 60_000,
   })
   check(config, "Devin preset is missing")
-  let adapter = new DevinAcpAdapter()
+  let adapter = createDevinAcpAdapter(createAcpClientAdapter())
   let sessionId: string | undefined
   let otherSessionId: string | undefined
   const firstValue = `session-a-${randomBytes(8).toString("hex")}`
@@ -387,7 +391,7 @@ console.log('BOT_FIXTURE_PASS');\n`
 
     stage = "reconnect-load"
     await adapter.disconnect()
-    adapter = new DevinAcpAdapter()
+    adapter = createDevinAcpAdapter(createAcpClientAdapter())
     await adapter.connect(config)
     await adapter.loadSession(sessionId, { cwd: scratch, mcpServers: [firstServer] })
     check(
