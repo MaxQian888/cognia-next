@@ -9,6 +9,7 @@ jest.mock("@monaco-editor/react", () => ({
 import { loader } from "@monaco-editor/react"
 
 import { Range, Selection, SelectionDirection } from "./monaco-editor-api"
+import storybookConfig from "@/.storybook/main"
 
 const getMonacoInstance = (loader as unknown as { __getMonacoInstance: jest.Mock })
   .__getMonacoInstance
@@ -161,5 +162,22 @@ describe("y-monaco value-member contract", () => {
     // If y-monaco ever moves to the post-`exports` path, the alias in
     // next.config.ts stops matching and this shim goes silently unused.
     expect(source).toContain("monaco-editor/esm/vs/editor/editor.api.js")
+  })
+
+  it("routes Storybook's legacy Monaco import to the same runtime instance", async () => {
+    const finalize = storybookConfig.webpackFinal!
+    const config = await finalize(
+      { mode: "production", resolve: { alias: { existing$: "/existing-module" } } },
+      { configType: "PRODUCTION" } as Parameters<typeof finalize>[1]
+    )
+    expect(config.resolve?.alias).toEqual(
+      expect.objectContaining({
+        existing$: "/existing-module",
+        "monaco-editor/esm/vs/editor/editor.api.js$": path.resolve(
+          process.cwd(),
+          "lib/browser-stubs/monaco-editor-api.ts"
+        ),
+      })
+    )
   })
 })

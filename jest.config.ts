@@ -409,8 +409,17 @@ const projectCommon: Config = {
   // worktree. It also stops the same test being collected and run twice.
   modulePathIgnorePatterns: [
     "<rootDir>/out/",
+    "<rootDir>/storybook-static/",
     "<rootDir>/.next/",
     "<rootDir>/target/",
+    // Build-analysis snapshots are full copies of workspace packages.
+    "<rootDir>/.cache/",
+    // Installed plugin resource copies contain the same package names as their source.
+    "<rootDir>/cli/dist/",
+    "<rootDir>/dist/plugins/",
+    "<rootDir>/src-tauri/resources/plugins/",
+    "<rootDir>/src-tauri/resources/browser-runtime/",
+    "<rootDir>/public/_cognia/builtin-plugins/",
     "<rootDir>/.claude/worktrees/",
     // Untouched upstream snapshot (strict ESM, `.ts` import suffixes, its own
     // `@latexwb/*` package.json names). Keep it out of the haste map and module

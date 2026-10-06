@@ -1,14 +1,22 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "module": "commonjs",
+    // Build/smoke scripts also use ESM; check them without rewriting imports.
+    "module": "preserve",
     "target": "ES2020",
     "esModuleInterop": true,
     "noEmit": false,
     "skipLibCheck": true,
     "isolatedModules": false,
     "jsx": "preserve",
-    "moduleResolution": "node"
+    "moduleResolution": "bundler",
+    "types": ["node", "jest"]
+  },
+  "ts-node": {
+    // The audit CLIs still execute through ts-node's CommonJS loader.
+    "compilerOptions": {
+      "module": "commonjs"
+    }
   },
   "include": ["./**/*.ts"]
 }

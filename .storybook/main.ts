@@ -10,9 +10,9 @@ import type { StorybookConfig } from "@storybook/nextjs"
 // those exactly like `pnpm build` does, so no per-dep stubbing is needed.
 //
 // The webpack framework reads next.config.ts's basics but NOT its custom
-// `webpack()` resolve customizations, so we mirror the two that matter for a
-// browser bundle: Node-only built-ins → false, and the pixi single-file
-// collapse. The only story-specific mock is the LLM-backed follow-ups hook.
+// `webpack()` resolve customizations, so we mirror the browser aliases:
+// Node-only built-ins → false, the pixi single-file collapse, and the shared
+// Monaco runtime. The only story-specific mock is the LLM-backed follow-ups hook.
 
 const NODE_ONLY_MODULES = [
   "dns",
@@ -224,6 +224,12 @@ const config: StorybookConfig = {
       ...Object.fromEntries(NODE_ONLY_SUBPATHS.map((m) => [m, false])),
       // Mirror of next.config.ts:188 — collapse pixi to its single-file dist.
       "pixi.js$": PIXI_PREBUNDLED_ABS,
+      // y-monaco's legacy deep import conflicts with Monaco's exports map.
+      // Reuse the app's adapter to the loaded editor, avoiding a second instance.
+      "monaco-editor/esm/vs/editor/editor.api.js$": path.resolve(
+        process.cwd(),
+        "lib/browser-stubs/monaco-editor-api.ts"
+      ),
       // Replace the LLM-backed follow-ups hook with a controllable mock so the
       // follow-up-suggestions story never calls a model.
       "@/hooks/chat/use-follow-up-suggestions$": FOLLOW_UPS_MOCK,
