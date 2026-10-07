@@ -8,9 +8,10 @@
  * conversation's replies were never kept where the turn ran.
  *
  * The client mints the id and names its choices (workspace, agent, model,
- * provider) as a closed, id-only seed on `session.create`; the Host checks it
- * owns the workspace and agent, then writes its row. Credentials are not part
- * of the seed: each turn carries them on its own direct Agent RPC options.
+ * provider) as a closed, id-only seed on `session.create`; the Host keeps the
+ * workspace and agent only if it owns them (a client's own workspace is
+ * normal), then writes its row. Credentials are not part of the seed: each
+ * turn carries them on its own direct Agent RPC options.
  *
  * Outcomes, from the caller's side:
  * - `host` — the Host created (or already had) the row.

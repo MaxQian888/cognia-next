@@ -315,10 +315,11 @@ export type DiagnosticCode =
   // settings page that could never fix any of them.
   | "workspaceUnavailable"
   /**
-   * A paired Host refused to create the conversation a client started on it:
-   * the workspace or agent it was started with does not exist on that Host,
-   * or the device lacks Agent Control. The chat is not created anywhere, so
-   * this is an event about the attempt, not a state of some conversation.
+   * A paired Host refused to create the conversation a client started on it,
+   * typically because the device lacks Agent Control there (a workspace or
+   * agent the Host does not have is dropped, not refused). The chat is not
+   * created anywhere, so this is an event about the attempt, not a state of
+   * some conversation.
    */
   | "hostSessionRefused"
   /**

@@ -423,7 +423,7 @@
     },
     "hostSessionRefused": {
       "label": "Conversation not created on the host",
-      "hint": "The paired host refused this new chat — its workspace or agent doesn't exist on that host, or this device lacks Agent Control. Pick a workspace and agent the host has, then start the chat again."
+      "hint": "The paired host refused this new chat — usually this device doesn't have Agent Control on that host. Ask the host's owner to grant it, then start the chat again."
     },
     "workspaceUnavailable": {
       "label": "Workspace unavailable",

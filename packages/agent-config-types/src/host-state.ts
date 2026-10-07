@@ -147,14 +147,14 @@ export interface HostStatePromptPreamble {
  * Closed and id-only on purpose: every member names something the Host already
  * owns (a workspace, an agent) or a picker value (model, provider). Credentials
  * travel with each turn's direct Agent RPC options and never ride a replicated
- * action, so there is no key, token, path or prompt here. The Host refuses a
- * workspace or agent it does not have rather than creating a conversation that
- * points at nothing.
+ * action, so there is no key, token, path or prompt here. A workspace or agent
+ * the Host does not have is dropped, not refused: a paired client's own
+ * workspaces are normal, and the Host row must never point at nothing.
  */
 export interface HostStateSessionSeed {
-  /** Owning workspace; must be one of the Host's projects. */
+  /** Owning workspace; kept only when it is one of the Host's projects. */
   projectId?: string
-  /** Agent (character) the conversation runs as; must resolve on the Host. */
+  /** Agent (character) the conversation runs as; kept only when it resolves on the Host. */
   characterId?: string
   /** Composer model pick. */
   model?: string

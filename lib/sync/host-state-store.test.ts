@@ -19,6 +19,7 @@ import {
   commitHostStateRuntimeProjection,
   getHostStateAction,
   getHostStateSnapshot,
+  ownedSessionSeed,
   renewHostStateLease,
   validateHostStateBusinessAction,
 } from "./host-state-store"
@@ -421,28 +422,26 @@ describe("HostState durable store", () => {
       } as never)
     })
 
-    it("refuses a workspace or agent this Host does not own", async () => {
+    it("keeps only the workspace and agent this Host owns, and still admits the create", async () => {
+      await expect(
+        ownedSessionSeed({
+          projectId: "project-browser-only",
+          characterId: "agent-elsewhere",
+          model: "m",
+          provider: "openai",
+        })
+      ).resolves.toEqual({ model: "m", provider: "openai" })
+      await expect(
+        ownedSessionSeed({ projectId: "project-host", characterId: "agent-host" })
+      ).resolves.toEqual({ projectId: "project-host", characterId: "agent-host" })
+      // Nothing the Host owns and no picks: no seed at all, a bare row.
+      await expect(ownedSessionSeed({ projectId: "project-browser-only" })).resolves.toBeUndefined()
+      await expect(ownedSessionSeed(undefined)).resolves.toBeUndefined()
+      // A paired client's own workspace is normal, so it is never a refusal.
       await expect(
         validateHostStateBusinessAction(
           createAction({ kind: "session.create", seed: { projectId: "project-browser-only" } })
         )
-      ).resolves.toMatchObject({ code: "host_state_project_not_found" })
-      await expect(
-        validateHostStateBusinessAction(
-          createAction({ kind: "session.create", seed: { characterId: "agent-elsewhere" } })
-        )
-      ).resolves.toMatchObject({ code: "host_state_character_not_found" })
-      await expect(
-        validateHostStateBusinessAction(
-          createAction({
-            kind: "session.create",
-            seed: { projectId: "project-host", characterId: "agent-host", model: "m" },
-          })
-        )
-      ).resolves.toBeUndefined()
-      // A title-only create from an older client is still admitted.
-      await expect(
-        validateHostStateBusinessAction(createAction({ kind: "session.create", title: "t" }))
       ).resolves.toBeUndefined()
     })
 
@@ -459,6 +458,12 @@ describe("HostState durable store", () => {
             provider: "openai",
           },
         }),
+        sessionSeed: {
+          projectId: "project-host",
+          characterId: "agent-host",
+          model: "gpt-test",
+          provider: "openai",
+        },
         mutation: { kind: "session.renamed", title: "Plan the launch", revision: 1 },
         now: 20,
       })
@@ -471,6 +476,21 @@ describe("HostState durable store", () => {
         providerOverride: "openai",
         createdAt: 20,
       })
+    })
+
+    it("never writes a seed straight from the wire", async () => {
+      await acquireWritableLease()
+      await commitHostStateAction({
+        action: createAction({
+          kind: "session.create",
+          seed: { projectId: "project-browser-only", model: "m" },
+        }),
+        mutation: { kind: "session.renamed", title: "New conversation", revision: 1 },
+        now: 22,
+      })
+      const row = await getDb().sessions.get("session-new")
+      expect(row).not.toHaveProperty("projectId")
+      expect(row).not.toHaveProperty("model")
     })
 
     it("keeps a title-only create to the bare row it always wrote", async () => {

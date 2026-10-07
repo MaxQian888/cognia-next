@@ -56,6 +56,7 @@ import {
   markHostStateDispatch,
   markHostStateSummary,
   renewHostStateLease,
+  ownedSessionSeed,
   validateHostStateBusinessAction,
   type HostStateActionRow,
 } from "./host-state-store"
@@ -1064,8 +1065,13 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         if (action.action.kind === "session.delete" && decision.mutation) {
           decision = await carryOutSessionDelete(action, snapshot.revision, decision)
         }
+        const sessionSeed =
+          action.action.kind === "session.create" && decision.mutation
+            ? await ownedSessionSeed(action.action.seed)
+            : undefined
         const committed = await commitHostStateAction({
           action,
+          ...(sessionSeed ? { sessionSeed } : {}),
           mutation: decision.mutation,
           rejection: decision.rejection,
           runtimeDispatchRequired: requiresRuntimeDispatch(action),

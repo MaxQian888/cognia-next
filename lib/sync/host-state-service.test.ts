@@ -803,6 +803,65 @@ describe("HostStateService", () => {
     expect(publish).not.toHaveBeenCalled()
   })
 
+  it("creates a seeded conversation, keeping only the workspace and agent it owns", async () => {
+    await getDb().projects.put({
+      id: "project-host",
+      name: "Host workspace",
+      roots: [],
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+    } as never)
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 0, heartbeat: false })
+    const create = (sessionId: string, actionId: string, clientSeq: number, projectId: string) =>
+      action(
+        {
+          kind: "session.create",
+          title: "Paired chat",
+          seed: { projectId, characterId: "agent-browser-only", model: "gpt-test" },
+        },
+        {
+          channel: sessionStateChannel(scope.runtimeTargetId, sessionId),
+          sessionId,
+          actionId,
+          clientSeq,
+          baseRevision: undefined,
+        }
+      )
+
+    const response = await service.submit(
+      {
+        ...scope,
+        actions: [
+          create("paired-owned", "create-owned", 1, "project-host"),
+          create("paired-local", "create-local", 2, "project-browser-only"),
+        ],
+      },
+      owner
+    )
+
+    expect(response.results).toEqual([
+      expect.objectContaining({ actionId: "create-owned", outcome: "applied" }),
+      expect.objectContaining({ actionId: "create-local", outcome: "applied" }),
+    ])
+    await expect(getDb().sessions.get("paired-owned")).resolves.toMatchObject({
+      title: "Paired chat",
+      projectId: "project-host",
+      model: "gpt-test",
+    })
+    const local = await getDb().sessions.get("paired-local")
+    expect(local).toMatchObject({ title: "Paired chat", model: "gpt-test" })
+    expect(local).not.toHaveProperty("projectId")
+    expect(local).not.toHaveProperty("characterId")
+  })
+
   it("applies the granted actions of a mixed batch and rejects only the rest", async () => {
     const service = createHostStateService({
       ...scope,

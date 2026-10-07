@@ -270,6 +270,12 @@ export async function renewHostStateLease(input: {
 
 export interface CommitHostStateActionInput {
   action: HostStateAction
+  /**
+   * For a `session.create`: the subset of its seed this Host owns
+   * ({@link ownedSessionSeed}). The projection writes only this, never the
+   * seed as it arrived on the wire; absent means a bare row.
+   */
+  sessionSeed?: HostStateSessionSeed
   mutation?: HostStateMutation
   runtimeDispatchRequired?: boolean
   rejection?: { code: string; message: string; currentRevision?: number }
@@ -507,7 +513,7 @@ export async function commitHostStateAction(
         db.hostStateMeta.put(nextMeta),
         ...(input.rejection || conflict
           ? []
-          : [persistBusinessProjection(db, input.action, event, now)]),
+          : [persistBusinessProjection(db, input.action, event, now, input.sessionSeed)]),
       ])
       return {
         event,
@@ -606,30 +612,33 @@ export async function getHostStateAction(
 }
 
 /**
- * A seed may only name what this Host owns. A paired client's workspace and
- * agent lists are replicas of the Host's, so an id the Host does not have is a
- * stale or foreign pick; creating the row anyway would leave a conversation
- * attributed to nothing on the machine that runs it.
+ * The part of a `session.create` seed this Host owns.
+ *
+ * A paired client's workspaces and agents are often its own (a fresh headless
+ * Host has none at all), so an id the Host does not have is normal, not an
+ * error: refusing it would refuse every new chat. The conversation is created
+ * without that attribution instead, so a Host row never points at nothing.
+ * The composer picks (model, provider) name nothing the Host stores and are
+ * kept. Resolved before the ledger transaction, because agents also resolve
+ * through plugin overlay packs outside Dexie.
  */
-async function validateSessionSeed(
-  seed: HostStateSessionSeed
-): Promise<{ code: string; message: string } | undefined> {
-  if (seed.projectId && !(await getDb().projects.get(seed.projectId))) {
-    return {
-      code: "host_state_project_not_found",
-      message: "The workspace does not exist on this Host.",
-    }
-  }
+export async function ownedSessionSeed(
+  seed: HostStateSessionSeed | undefined
+): Promise<HostStateSessionSeed | undefined> {
+  if (!seed) return undefined
+  const projectOwned = seed.projectId ? Boolean(await getDb().projects.get(seed.projectId)) : false
+  let characterOwned = false
   if (seed.characterId) {
     const { resolveCharacterById } = await import("@/lib/db/characters")
-    if (!(await resolveCharacterById(seed.characterId))) {
-      return {
-        code: "host_state_character_not_found",
-        message: "The agent does not exist on this Host.",
-      }
-    }
+    characterOwned = Boolean(await resolveCharacterById(seed.characterId))
   }
-  return undefined
+  const owned: HostStateSessionSeed = {
+    ...(projectOwned ? { projectId: seed.projectId } : {}),
+    ...(characterOwned ? { characterId: seed.characterId } : {}),
+    ...(seed.model ? { model: seed.model } : {}),
+    ...(seed.provider ? { provider: seed.provider } : {}),
+  }
+  return Object.keys(owned).length > 0 ? owned : undefined
 }
 
 export async function validateHostStateBusinessAction(
@@ -644,14 +653,11 @@ export async function validateHostStateBusinessAction(
   const db = getDb()
   const session = await db.sessions.get(action.sessionId)
   if (action.action.kind === "session.create" || action.action.kind === "session.import") {
-    if (session) {
-      return {
-        code: "host_state_session_exists",
-        message: "The continuation session id already exists.",
-      }
-    }
-    return action.action.kind === "session.create" && action.action.seed
-      ? validateSessionSeed(action.action.seed)
+    return session
+      ? {
+          code: "host_state_session_exists",
+          message: "The continuation session id already exists.",
+        }
       : undefined
   }
   if (!session) {
@@ -899,7 +905,8 @@ async function persistBusinessProjection(
   db: ReturnType<typeof getDb>,
   action: HostStateAction,
   event: HostStateAppliedAction,
-  now: number
+  now: number,
+  sessionSeed?: HostStateSessionSeed
 ): Promise<void> {
   if (event.outcome !== "applied") return
   if (hostStateIntentTargetsSessionIndex(action.action.kind)) {
@@ -922,7 +929,7 @@ async function persistBusinessProjection(
   }
   switch (action.action.kind) {
     case "session.create": {
-      const seed = action.action.seed
+      const seed = sessionSeed
       await db.sessions.add({
         id: action.sessionId,
         title: action.action.title?.trim() || "New conversation",
