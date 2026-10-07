@@ -83,11 +83,33 @@ pub struct EventFrame {
     pub target_device_id: Option<String>,
 }
 
+/// The sidecar's output channel: every turn's frames, whoever started it.
+const SIDECAR_EVENT_CHANNEL: &str = "claude://message";
+
 impl EventFrame {
     pub fn visible_to(&self, device_id: &str) -> bool {
         self.target_device_id
             .as_deref()
             .is_none_or(|target| target == device_id)
+    }
+
+    /// Whether one event-stream connection receives this frame.
+    ///
+    /// A device sees untargeted frames and its own. The loopback brain also
+    /// sees every device's sidecar frames: it is the host's data plane, in the
+    /// place the desktop renderer holds, and Tauri hands that renderer every
+    /// sidecar event. Hiding a paired device's turn from it meant the host
+    /// never kept the reply and never settled the turn's work submission.
+    /// Other device-targeted frames (perf samples, consent asks, OAuth
+    /// callbacks) stay with the device they were addressed to.
+    pub fn visible_to_connection(
+        &self,
+        device_id: &str,
+        scope: super::event_channels::ConnectionScope,
+    ) -> bool {
+        self.visible_to(device_id)
+            || (scope == super::event_channels::ConnectionScope::Service
+                && self.event_type == SIDECAR_EVENT_CHANNEL)
     }
 }
 
@@ -607,6 +629,33 @@ mod tests {
             }
             SubscribeResult::ResyncRequired => panic!("unexpected resync requirement"),
         }
+    }
+
+    #[test]
+    fn the_service_stream_sees_every_device_turn_but_nothing_else_addressed_to_one() {
+        use crate::event_channels::ConnectionScope;
+        let bus = EventBus::new();
+        let turn = bus.publish(
+            "claude://message".into(),
+            json!({
+                "type": "session_ended",
+                "sessionId": "s1",
+                "remoteExecutionContext": {
+                    "requestId": "r1",
+                    "hostId": "h",
+                    "originDeviceId": "device-a",
+                    "sessionId": "s1",
+                    "createdAt": 1
+                }
+            }),
+        );
+        assert!(turn.visible_to_connection("device-a", ConnectionScope::Device));
+        assert!(!turn.visible_to_connection("device-b", ConnectionScope::Device));
+        assert!(turn.visible_to_connection("service", ConnectionScope::Service));
+
+        let perf = bus.publish_ephemeral_to("perf://frame".into(), json!({}), "device-a".into());
+        assert!(!perf.visible_to_connection("service", ConnectionScope::Service));
+        assert!(perf.visible_to_connection("device-a", ConnectionScope::Device));
     }
 
     #[test]

@@ -452,10 +452,19 @@ export async function settleWorkSubmission(
     const db = getDb()
     return db.transaction(
       "rw",
+      // Same closure as the accept transaction, for the same reason: the
+      // injected `writeTranscript` is `commitMessageDelta`'s whole reach.
+      // Without `messageMedia`, `settings` and `projects` the transcript write
+      // threw on any session with no project — every conversation a paired
+      // browser creates on its host — so the settle aborted, the reply was
+      // never kept and the run stayed "running".
       [
         db.messages,
+        db.messageMedia,
         db.messageMediaRefs,
         db.sessions,
+        db.settings,
+        db.projects,
         db.workSubmissions,
         db.executionRuns,
         db.executionRunEvents,

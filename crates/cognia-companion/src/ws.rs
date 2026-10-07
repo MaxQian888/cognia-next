@@ -222,11 +222,38 @@ impl WsPresenceGuard {
 impl Drop for WsPresenceGuard {
     fn drop(&mut self) {
         crate::metrics::ws_client_disconnected();
-        super::admin_lease::revoke_device(&self.device_id);
-        // The ask goes with the leases: a disconnected device must not come
-        // back to an approval granted for a session it no longer holds.
-        super::host_consent::forget_device(&self.device_id);
+        // This socket's own event lease is still registered here (fields drop
+        // after this body), so it is named as the one closing.
+        let closing = self.lease.id().to_owned();
+        release_device_authority_if_disconnected(&self.device_id, |stream| stream.id == closing);
     }
+}
+
+/// Withdraw a device's host-admin leases and open consent asks once it has no
+/// event stream left.
+///
+/// Both are per-device while streams are per-connection. Revoking on every
+/// close meant a reconnecting LAN socket, or a WebRTC channel closing while
+/// the LAN socket stayed up, silently voided the lease the device's durable
+/// queue was still sending with: its next `host_state_submit` was refused as
+/// `interactive_approval_required` and deadlettered, and a paired browser's
+/// new conversation never reached the host. `closing` picks out the streams
+/// being torn down, which may still be registered while their owner drops.
+/// A device that really has gone away still loses its authority, as before.
+pub(crate) fn release_device_authority_if_disconnected(
+    device_id: &str,
+    closing: impl Fn(&super::event_leases::EventStreamLeaseView) -> bool,
+) {
+    let still_connected = super::event_leases::leases_for(device_id)
+        .iter()
+        .any(|stream| !closing(stream));
+    if still_connected {
+        return;
+    }
+    super::admin_lease::revoke_device(device_id);
+    // The ask goes with the leases: a disconnected device must not come back
+    // to an approval granted for a session it no longer holds.
+    super::host_consent::forget_device(device_id);
 }
 
 /// Drive the WebSocket connection for one client.
@@ -275,7 +302,7 @@ async fn handle_socket(
     let visible_replay: Vec<EventFrame> = replay
         .into_iter()
         .filter(|frame| {
-            frame.visible_to(&device_id)
+            frame.visible_to_connection(&device_id, scope)
                 && frame_visible_to_tenant(frame, tenant_id.as_deref())
                 && subscription.allows(&frame.event_type)
         })
@@ -322,7 +349,7 @@ async fn handle_socket(
             result = receiver.recv() => {
                 match result {
                     Ok(frame) => {
-                        if !frame.visible_to(&device_id)
+                        if !frame.visible_to_connection(&device_id, scope)
                             || !frame_visible_to_tenant(&frame, tenant_id.as_deref())
                         {
                             continue;
@@ -560,6 +587,40 @@ mod tests {
     use parking_lot::RwLock;
     use serde_json::{json, Value};
     use std::sync::Arc;
+
+    #[test]
+    fn a_device_keeps_its_admin_lease_until_its_last_event_stream_closes() {
+        use crate::event_leases::{EventStreamLeaseGuard, EventStreamTransport};
+        let device = "device-lease-presence";
+        let lease = crate::admin_lease::issue(device, vec!["host_state_submit".into()], None, true)
+            .expect("issue");
+        let lan = EventStreamLeaseGuard::open(device, EventStreamTransport::Ws);
+        let rtc = EventStreamLeaseGuard::open(device, EventStreamTransport::Rtc);
+
+        // The WebRTC peer goes away while the LAN socket stays up.
+        release_device_authority_if_disconnected(device, |stream| stream.transport == "rtc");
+        drop(rtc);
+        assert!(
+            crate::admin_lease::validate(device, "host_state_submit", Some(&lease.token)).is_ok()
+        );
+
+        // The LAN socket reconnects: a second socket opens before the first closes.
+        let reconnected = EventStreamLeaseGuard::open(device, EventStreamTransport::Ws);
+        let closing = lan.id().to_owned();
+        release_device_authority_if_disconnected(device, |stream| stream.id == closing);
+        drop(lan);
+        assert!(
+            crate::admin_lease::validate(device, "host_state_submit", Some(&lease.token)).is_ok()
+        );
+
+        // The last stream closes: the device's authority goes with it.
+        let closing = reconnected.id().to_owned();
+        release_device_authority_if_disconnected(device, |stream| stream.id == closing);
+        drop(reconnected);
+        assert!(
+            crate::admin_lease::validate(device, "host_state_submit", Some(&lease.token)).is_err()
+        );
+    }
 
     fn test_state_with_bus() -> (super::super::SharedState, Arc<EventBus>) {
         let bus = EventBus::new();

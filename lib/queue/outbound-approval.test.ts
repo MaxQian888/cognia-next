@@ -4,6 +4,7 @@ import {
   DENIED_COOLDOWN_MS,
   ensureOutboundApproval,
   interactiveOutboundCommands,
+  noteOutboundApprovalRefused,
   outboundConsentCode,
   PENDING_NO_CODE,
   clearOutboundApproval,
@@ -402,5 +403,49 @@ describe("the lease is scoped to the runtime target it was minted for", () => {
     await ensureOutboundApproval("host_state_submit", d)
     await ensureOutboundApproval("host_state_submit", d)
     expect(issue).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("noteOutboundApprovalRefused", () => {
+  // The defect: the host voids leases early (a restart drops them all; a
+  // device's go when its last stream closes), but the cache trusted its own
+  // ten-minute expiry. Every retry of the refused row re-sent the dead lease
+  // until the row deadlettered, so a paired browser's new chat never reached
+  // the host.
+  it("drops a lease the host refused so the next pre-flight takes a fresh one", async () => {
+    let minted = 0
+    const d = deps({
+      issueAdminLease: (async (operations: string[]) => ({
+        token: `lease-${++minted}`,
+        operations,
+        expiresAt: clock + 600_000,
+      })) as never,
+    })
+    await ensureOutboundApproval("host_state_submit", d)
+    expect(withOutboundApproval("host_state_submit", {}, d)).toEqual({ adminLease: "lease-1" })
+
+    const refusal = Object.assign(new Error("a current device-bound approval lease is required"), {
+      code: "interactive_approval_required",
+    })
+    expect(noteOutboundApprovalRefused(refusal)).toBe(true)
+    expect(withOutboundApproval("host_state_submit", {}, d)).toEqual({})
+
+    await expect(ensureOutboundApproval("host_state_submit", d)).resolves.toBe("held")
+    expect(withOutboundApproval("host_state_submit", {}, d)).toEqual({ adminLease: "lease-2" })
+  })
+
+  it("recognises the refusal by its message when no code survived the transport", () => {
+    expect(
+      noteOutboundApprovalRefused(new Error("a current device-bound approval lease is required"))
+    ).toBe(true)
+  })
+
+  it("leaves the lease alone for any other failure", async () => {
+    const d = deps()
+    await ensureOutboundApproval("host_state_submit", d)
+    expect(
+      noteOutboundApprovalRefused(new Error("device exceeded the remote execution quota"))
+    ).toBe(false)
+    expect(withOutboundApproval("host_state_submit", {}, d)).toEqual({ adminLease: "lease-1" })
   })
 })

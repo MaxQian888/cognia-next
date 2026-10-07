@@ -11,6 +11,7 @@
 
 import { transport } from "@/lib/tauri"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -99,6 +100,7 @@ export async function resolveAccountEnv(
   if (isStandaloneChatMode()) return {}
   const scopedProvider = subscriptionAccountProviderFor(providerId)
   if (!scopedProvider) return {}
+  if (isCompanionShell()) return {}
   const localAccountId = useAccountStore.getState().unlockedAccountId
   if (!localAccountId) {
     throw new SubscriptionAccountResolutionError(
@@ -169,6 +171,11 @@ export async function resolveAccountEnv(
       err
     )
   }
+}
+
+function isCompanionShell(): boolean {
+  const profile = detectHostProfile()
+  return profile === "mobile-companion" || profile === "cloud-companion"
 }
 
 /**

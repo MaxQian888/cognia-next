@@ -500,6 +500,38 @@ describe("settleWorkSubmission", () => {
     ])
   })
 
+  it("keeps the reply of a conversation that has no project", async () => {
+    // A paired browser creates its conversations on the host without a project
+    // (an unknown workspace id is dropped). The real transcript writer then
+    // resolves the scope project through `settings` and `projects`, which the
+    // settle transaction did not cover: the write threw, the settle aborted,
+    // and the host never kept the reply.
+    const { persistMessages, listMessages } = await import("@/lib/db/messages")
+    await getDb().sessions.put({
+      id: "s-unscoped",
+      title: "Paired",
+      createdAt: NOW,
+      updatedAt: NOW,
+    } as never)
+    await markWorkSubmissionStarted("submission-1", NOW + 1)
+
+    await expect(
+      settleWorkSubmission({
+        submissionId: "submission-1",
+        outcome: "completed",
+        writeTranscript: () =>
+          persistMessages("s-unscoped", [
+            { id: "a-1", role: "assistant", parts: [{ type: "text", text: "kept" }] },
+          ] as never),
+        now: NOW + 5,
+      })
+    ).resolves.toBe(true)
+
+    const kept = await listMessages("s-unscoped")
+    expect(kept.map((message) => message.id)).toEqual(["a-1"])
+    expect((await getDb().executionRuns.get("run-1"))?.status).toBe("completed")
+  })
+
   it("writes the terminal transcript exactly once across duplicate settles", async () => {
     // Four call sites can observe a turn ending; only the winner may write the
     // assistant message.

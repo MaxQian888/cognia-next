@@ -57,6 +57,7 @@ jest.mock("sonner", () => ({
 
 let mockApprovalState: "not-required" | "held" | "blocked" = "not-required"
 const mockClearApproval = jest.fn()
+const mockNoteRefused = jest.fn()
 let mockConsentCode: string | null = null
 let mockHasReporter = false
 const approvalListeners = new Set<() => void>()
@@ -64,6 +65,7 @@ jest.mock("@/lib/queue/outbound-approval", () => ({
   PENDING_NO_CODE: "pending",
   ensureOutboundApproval: async () => mockApprovalState,
   clearOutboundApproval: () => mockClearApproval(),
+  noteOutboundApprovalRefused: (error: unknown) => mockNoteRefused(error),
   withOutboundApproval: (_command: string, payload: unknown) => payload,
   outboundConsentCode: () => mockConsentCode,
   hasOutboundApprovalReporter: () => mockHasReporter,
@@ -727,4 +729,24 @@ describe("reporting a Host that is waiting on a human", () => {
 
     expect(toast.dismiss).toHaveBeenCalledWith("outbound-approval-pending")
   })
+})
+
+it("hands a refused dispatch to the approval gate so the retry re-mints its lease", async () => {
+  render(
+    <CompanionOutboundRunnerProvider
+      platformOverride="web"
+      webCompanionOverride
+      scopeOverride={scope}
+    />
+  )
+  const options = createRunner.mock.calls.at(-1)?.[0] as {
+    dispatcher: { call: (command: string, payload: unknown) => Promise<unknown> }
+  }
+  const refusal = Object.assign(new Error("a current device-bound approval lease is required"), {
+    code: "interactive_approval_required",
+  })
+  transportCall.mockRejectedValueOnce(refusal)
+
+  await expect(options.dispatcher.call("host_state_submit", { actions: [] })).rejects.toBe(refusal)
+  expect(mockNoteRefused).toHaveBeenCalledWith(refusal)
 })

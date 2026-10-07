@@ -202,7 +202,6 @@ impl EventStreamLeaseGuard {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn id(&self) -> &str {
         &self.id
     }

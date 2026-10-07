@@ -15,6 +15,7 @@ import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbo
 import {
   clearOutboundApproval,
   ensureOutboundApproval,
+  noteOutboundApprovalRefused,
   hasOutboundApprovalReporter,
   outboundConsentCode,
   PENDING_NO_CODE,
@@ -62,7 +63,15 @@ const liveDispatcher: OutboundDispatcher = {
     // row into the deadletter lane. All this does is attach what the gate
     // already holds.
     const approved = withOutboundApproval(command, payload)
-    const result = await transport.call(command, approved, options)
+    let result: unknown
+    try {
+      result = await transport.call(command, approved, options)
+    } catch (error) {
+      // A lease the host voided early (restart, last stream closed) must not
+      // ride along on every retry of this row; the next pre-flight re-mints.
+      noteOutboundApprovalRefused(error)
+      throw error
+    }
     if (command === "workflow_trigger_manual") {
       setTimeout(() => {
         void runSyncDown({ only: ["workflowRuns"] }).catch(() => {})

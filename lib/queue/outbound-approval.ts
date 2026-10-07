@@ -209,6 +209,38 @@ export function clearOutboundApproval(): void {
   if (wasWaiting) announce()
 }
 
+/**
+ * Forget the cached lease when the host refused a dispatch for want of one.
+ *
+ * The cache trusts its own expiry, but the host can void a lease sooner: it
+ * keeps leases in memory, so a restart drops every one, and a device loses its
+ * leases when its last event stream closes. A row sent with a dead lease was
+ * retried with that same dead lease until its budget ran out, and deadlettered:
+ * a paired browser's new conversation then never reached the host. Dropping the
+ * cache sends the retry back through {@link ensureOutboundApproval}, which takes
+ * a fresh one. The retry is still an ordinary attempt, so a host that refuses
+ * every new lease too ends deadlettered rather than looping.
+ *
+ * Returns whether `error` was such a refusal.
+ */
+export function noteOutboundApprovalRefused(error: unknown): boolean {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code: unknown }).code)
+      : undefined
+  const detail = error instanceof Error ? error.message : String(error)
+  const refused =
+    code === "interactive_approval_required" ||
+    detail.includes("interactive_approval_required") ||
+    detail.includes("device-bound approval lease")
+  if (!refused) return false
+  if (token) {
+    discardCache()
+    announce()
+  }
+  return true
+}
+
 /** Drop every cached answer and invalidate any request still in flight. */
 function discardCache(): void {
   token = null

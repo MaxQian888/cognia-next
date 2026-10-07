@@ -24,6 +24,11 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
   isStandaloneChatMode: () => standaloneRuntime,
 }))
 
+let hostProfile = "desktop"
+jest.mock("@/lib/platform/capabilities", () => ({
+  detectHostProfile: () => hostProfile,
+}))
+
 let unlockedAccountId: string | null = "local_acct_a"
 /**
  * Makes the store read itself fail. `resolveAccountEnv` calls `getState()`
@@ -50,6 +55,7 @@ beforeEach(() => {
   mockCall.mockReset()
   unlockedAccountId = "local_acct_a"
   standaloneRuntime = false
+  hostProfile = "desktop"
   accountStoreThrows = false
 })
 
@@ -155,6 +161,30 @@ describe("resolveAccountEnv", () => {
 
     await expect(resolveAccountEnv("anthropic", "abc")).resolves.toEqual({})
     expect(mockCall).not.toHaveBeenCalled()
+  })
+
+  it.each(["cloud-companion", "mobile-companion"])(
+    "leaves a %s turn to the paired host's own account instead of calling client-local commands",
+    async (profile) => {
+      hostProfile = profile
+
+      await expect(resolveAccountEnv("anthropic", null)).resolves.toEqual({})
+      await expect(resolveAccountEnv("anthropic", "selected-account")).resolves.toEqual({})
+      expect(mockCall).not.toHaveBeenCalled()
+    }
+  )
+
+  it("still resolves the account on a desktop that drives a remote host", async () => {
+    mockCall.mockResolvedValueOnce([{ key: "CLAUDE_CONFIG_DIR", value: "/synthetic/selected" }])
+
+    await expect(resolveAccountEnv("anthropic", "selected-account")).resolves.toEqual({
+      CLAUDE_CONFIG_DIR: "/synthetic/selected",
+    })
+    expect(mockCall).toHaveBeenCalledWith("claude_env_for_account", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      accountId: "selected-account",
+    })
   })
 
   it("resolves an isolated env for the active account instead of reusing its cached projection", async () => {

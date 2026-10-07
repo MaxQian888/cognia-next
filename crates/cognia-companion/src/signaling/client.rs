@@ -283,8 +283,11 @@ impl PeerState {
     /// The peer is gone: stop the dispatcher, close the peer, forget the
     /// relay path, and release every per-device lease that assumed presence.
     async fn teardown_all(&mut self, device_id: &str) {
-        crate::admin_lease::revoke_device(device_id);
-        crate::host_consent::forget_device(device_id);
+        // Every WebRTC stream of this peer is ending; a LAN socket the device
+        // still holds keeps its leases (see `release_device_authority_if_disconnected`).
+        crate::ws::release_device_authority_if_disconnected(device_id, |stream| {
+            stream.transport == "rtc"
+        });
         self.peer_ice_rx = None;
         self.peer_state_rx = None;
         self.pending_remote_ice.clear();
