@@ -59,6 +59,12 @@ function deferred<T = void>() {
   return { promise, resolve, reject }
 }
 
+/** Pick an account from the name-as-switcher menu in the header. */
+function pickAccount(name: string) {
+  fireEvent.keyDown(screen.getByTestId("account-lock-screen-picker"), { key: "Enter" })
+  fireEvent.click(screen.getByRole("menuitemradio", { name }))
+}
+
 function renderScreen(overrides: Partial<React.ComponentProps<typeof AccountLockScreen>> = {}) {
   const props = {
     accounts: [ALPHA],
@@ -92,13 +98,9 @@ describe("idle state", () => {
       onQuickUnlock: jest.fn(),
     })
     expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: BETA.id },
-    })
+    pickAccount("Beta")
     expect(screen.getByTestId("pin-pad")).toBeInTheDocument()
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: ALPHA.id },
-    })
+    pickAccount("Alpha")
     expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
   })
 
@@ -177,9 +179,7 @@ describe("idle state", () => {
       signal
     )
     expect(signal.aborted).toBe(false)
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: "acct_beta" },
-    })
+    pickAccount("Beta")
     expect(signal.aborted).toBe(true)
     await act(async () => {
       pending.resolve({ ok: false })
@@ -285,13 +285,52 @@ describe("account selection", () => {
   it("hides the picker when there is only one account", () => {
     renderScreen()
     expect(screen.queryByTestId("account-lock-screen-picker")).not.toBeInTheDocument()
+    expect(screen.getByTestId("account-lock-screen-name")).toHaveTextContent("Alpha")
+  })
+
+  it("makes the name the switcher, listing every account with the current one checked", () => {
+    renderScreen({ accounts: [ALPHA, BETA] })
+    const trigger = screen.getByTestId("account-lock-screen-picker")
+    expect(screen.getByTestId("account-lock-screen-name")).toContainElement(trigger)
+    expect(trigger).toHaveAccessibleName("switchAccountTrigger:Alpha")
+    // No separate labelled select below the heading any more.
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+
+    fireEvent.keyDown(trigger, { key: "Enter" })
+    expect(screen.getByText("switchAccountLabel")).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Alpha" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+    expect(screen.getByRole("menuitemradio", { name: "Beta" })).toHaveAttribute(
+      "aria-checked",
+      "false"
+    )
+  })
+
+  it("moves focus to the password after picking an account", async () => {
+    renderScreen({ accounts: [ALPHA, BETA] })
+    pickAccount("Beta")
+    expect(screen.getByTestId("account-lock-screen-picker")).toHaveAccessibleName(
+      "switchAccountTrigger:Beta"
+    )
+    await waitFor(() => expect(screen.getByLabelText("passwordLabel")).toHaveFocus())
+  })
+
+  it("locks the switcher while an unlock is in flight", async () => {
+    const gate = deferred()
+    renderScreen({ accounts: [ALPHA, BETA], onUnlock: jest.fn().mockReturnValue(gate.promise) })
+    fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "secret" } })
+    fireEvent.click(screen.getByTestId("account-lock-screen-submit"))
+    await waitFor(() => expect(screen.getByTestId("account-lock-screen-picker")).toBeDisabled())
+    await act(async () => {
+      gate.resolve()
+    })
   })
 
   it("unlocks whichever account the picker names, not just the active one", async () => {
     const { props } = renderScreen({ accounts: [ALPHA, BETA] })
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: "acct_beta" },
-    })
+    pickAccount("Beta")
     expect(screen.getByText("unlockTitle:Beta")).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "other" } })
@@ -311,9 +350,7 @@ describe("account selection", () => {
     }
     await screen.findByTestId("account-lock-screen-cooldown")
 
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: "acct_beta" },
-    })
+    pickAccount("Beta")
     expect(screen.queryByTestId("account-lock-screen-cooldown")).not.toBeInTheDocument()
   })
 })
@@ -748,9 +785,7 @@ describe("unlock automatically on this device", () => {
     renderScreen({ supportsRememberOnDevice: true, accounts: [REMEMBERED, BETA] })
     expect(screen.getByTestId("account-lock-screen-remember")).toBeChecked()
 
-    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
-      target: { value: "acct_beta" },
-    })
+    pickAccount("Beta")
 
     expect(screen.getByTestId("account-lock-screen-remember")).not.toBeChecked()
   })

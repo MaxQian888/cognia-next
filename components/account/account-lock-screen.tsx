@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl"
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronsUpDownIcon,
   ClipboardIcon,
   EyeIcon,
   EyeOffIcon,
@@ -47,7 +48,13 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { codeOf, type AccountUnlockErrorCode } from "@/lib/accounts/account-unlock-error"
@@ -198,7 +205,9 @@ export function AccountLockScreen({
   const recoveryKeyId = useId()
   const newPasswordId = useId()
   const confirmPasswordId = useId()
-  const accountPickerId = useId()
+  // Set when an account is picked from the menu, so closing it moves focus to
+  // the password instead of back onto the name.
+  const pickedFromMenu = useRef(false)
   const rememberId = useId()
   const passwordRef = useRef<HTMLInputElement>(null)
 
@@ -446,14 +455,80 @@ export function AccountLockScreen({
           {/* The visible heading is the name alone, at a size that reads as the
               point of the screen; the full "Unlock <name>" sentence stays the
               accessible name. Long names wrap (two lines, then ellipsis) and
-              keep the whole name in the tooltip instead of being cut off. */}
+              keep the whole name in the tooltip instead of being cut off.
+              With several accounts the name IS the account switcher (the
+              macOS login window, Google's account chooser): the person reads
+              who they are unlocking and changes it in the same place, instead
+              of a labelled select repeating the heading below it. */}
           <h1
-            className="line-clamp-2 w-full text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
+            className="w-full text-2xl font-semibold tracking-tight"
             title={displayName}
             data-testid="account-lock-screen-name"
           >
             <span className="sr-only">{t("unlockTitle", { name: displayName })}</span>
-            <span aria-hidden="true">{displayName}</span>
+            {accounts.length > 1 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={submitting}
+                  aria-label={t("switchAccountTrigger", { name: displayName })}
+                  data-testid="account-lock-screen-picker"
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-0.5 transition-colors outline-none hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none data-[state=open]:bg-muted/60"
+                >
+                  <span aria-hidden="true" className="line-clamp-2 [overflow-wrap:anywhere]">
+                    {displayName}
+                  </span>
+                  <ChevronsUpDownIcon
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-muted-foreground"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="center"
+                  className="w-64"
+                  onCloseAutoFocus={(event) => {
+                    if (!pickedFromMenu.current) return
+                    pickedFromMenu.current = false
+                    if (!passwordRef.current) return
+                    event.preventDefault()
+                    passwordRef.current.focus()
+                  }}
+                >
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    {t("switchAccountLabel")}
+                  </DropdownMenuLabel>
+                  {accounts.map((candidate) => {
+                    const selected = candidate.id === localAccountId
+                    return (
+                      <DropdownMenuItem
+                        key={candidate.id}
+                        role="menuitemradio"
+                        aria-checked={selected}
+                        className="gap-2.5 py-2"
+                        onSelect={() => {
+                          pickedFromMenu.current = true
+                          setSelectedId(candidate.id)
+                        }}
+                      >
+                        <AvatarBadge
+                          subject={{
+                            name: candidate.displayName,
+                            avatarImageUrl: candidate.avatarDataUrl,
+                          }}
+                          size={28}
+                          textClassName="text-[11px] font-medium"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{candidate.displayName}</span>
+                        {selected && <CheckIcon aria-hidden="true" className="size-4" />}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span aria-hidden="true" className="line-clamp-2 [overflow-wrap:anywhere]">
+                {displayName}
+              </span>
+            )}
           </h1>
         </div>
         <p className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
@@ -461,26 +536,6 @@ export function AccountLockScreen({
           <span className="truncate">{t(runtimeBadgeKey)}</span>
         </p>
       </header>
-
-      {accounts.length > 1 && (
-        <FieldBlock>
-          <Label htmlFor={accountPickerId}>{t("switchAccountLabel")}</Label>
-          <NativeSelect
-            id={accountPickerId}
-            value={localAccountId ?? ""}
-            disabled={submitting}
-            className="h-11 rounded-xl"
-            data-testid="account-lock-screen-picker"
-            onChange={(event) => setSelectedId(event.target.value)}
-          >
-            {accounts.map((candidate) => (
-              <NativeSelectOption key={candidate.id} value={candidate.id}>
-                {candidate.displayName}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </FieldBlock>
-      )}
 
       {autoUnlockFailure && autoUnlockFailure.accountId === localAccountId && !submitting && (
         <Alert role="status" data-testid="account-lock-screen-auto-unlock-failure">
