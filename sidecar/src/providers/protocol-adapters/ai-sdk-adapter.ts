@@ -9,6 +9,7 @@
 // surface; `decideOpenAiEndpointFlavor` is the one decision both the sidecar and
 // the renderer now share.
 import {
+  anthropicSdkBaseURL,
   isGenuineOpenAiEndpoint,
   isResponsesOnlyEndpoint,
   isOpenAiNativeSurface,
@@ -355,7 +356,9 @@ async function buildRawModel({
       const { createAnthropic } = await import("@ai-sdk/anthropic")
       // `headers` = the provider's static customHeaders (settings UI); undefined
       // for most rows. Same treatment as the openai/azure branches.
-      const client = createAnthropic({ apiKey, baseURL, headers })
+      // Settings carry Claude Code's `ANTHROPIC_BASE_URL` root; the SDK client
+      // wants the versioned base (see `anthropicSdkBaseURL`).
+      const client = createAnthropic({ apiKey, baseURL: anthropicSdkBaseURL(baseURL), headers })
       return client(model)
     }
     case "google": {

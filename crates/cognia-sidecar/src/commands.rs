@@ -109,7 +109,14 @@ pub struct SendOptions {
 pub struct ProviderCredentials {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// `baseURL` on the wire, as the renderer and the sidecar spell it. The
+    /// camelCase rename alone yields `baseUrl`, which made serde drop every
+    /// base URL here and send a relay's key to its client's default host.
+    #[serde(
+        rename = "baseURL",
+        alias = "baseUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub base_url: Option<String>,
     /// AI SDK protocol family: one of `"openai"`, `"anthropic"`, `"google"`,
     /// `"mistral"`, `"cohere"`. Required when `provider` is a custom id; for
@@ -1669,6 +1676,36 @@ mod tests {
         assert_eq!(creds.api_flavor.as_deref(), Some("responses"));
         let json = serde_json::to_value(&opts).expect("serialise");
         assert_eq!(json["providerCredentials"]["apiFlavor"], "responses");
+    }
+
+    #[test]
+    fn provider_credentials_base_url_keeps_the_renderer_wire_name() {
+        // The renderer and the sidecar both spell it `baseURL`. Under the
+        // struct's camelCase rename it was `baseUrl`, so serde dropped every
+        // base URL at this boundary: a relay's key then went to the client's
+        // default host (an openai-protocol provider's to api.openai.com).
+        let opts = parse(
+            r#"{
+                "provider": "deepseek-anthropic",
+                "model": "deepseek-v4-flash",
+                "providerCredentials": {
+                    "apiKey": "relay-key",
+                    "baseURL": "https://api.deepseek.com/anthropic",
+                    "protocol": "anthropic"
+                }
+            }"#,
+        );
+        let creds = opts.provider_credentials.as_ref().expect("creds present");
+        assert_eq!(
+            creds.base_url.as_deref(),
+            Some("https://api.deepseek.com/anthropic")
+        );
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert_eq!(
+            json["providerCredentials"]["baseURL"],
+            "https://api.deepseek.com/anthropic"
+        );
+        assert!(json["providerCredentials"].get("baseUrl").is_none());
     }
 
     #[test]

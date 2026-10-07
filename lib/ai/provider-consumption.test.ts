@@ -304,6 +304,34 @@ describe("resolveFeatureProvider — explicit provider", () => {
     expect(r.protocol).toBe("anthropic")
   })
 
+  it.each([
+    ["deepseek-anthropic", "https://api.deepseek.com/anthropic"],
+    ["kimi-coding", "https://api.kimi.com/coding/"],
+  ])(
+    "dispatches the Claude-protocol relay %s with its catalog protocol when no override is stored",
+    (providerId, baseURL) => {
+      const relay: ProviderSettingsSnapshot = {
+        defaultProvider: providerId,
+        // What the AI Connections pane stores for a pasted key: no apiProtocol.
+        providers: { [providerId]: { enabled: true, apiKey: "sk-relay" } },
+        customProviders: [],
+      }
+      const r = resolveFeatureProvider(
+        {
+          featureId: "f",
+          routeProfile: "general-text",
+          selectionMode: "explicit-provider",
+          providerId,
+          fallbackMode: "none",
+        },
+        relay
+      ) as ResolvedProvider
+      expect(r.kind).toBe("resolved")
+      expect(r.protocol).toBe("anthropic")
+      expect(r.baseURL).toBe(baseURL)
+    }
+  )
+
   it("forwards a custom provider's apiFlavor onto the resolution", () => {
     const flavored: ProviderSettingsSnapshot = {
       defaultProvider: "az",

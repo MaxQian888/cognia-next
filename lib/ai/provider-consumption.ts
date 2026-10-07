@@ -59,6 +59,7 @@ import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
 // it — see sidecar/src/providers/provider-protocol.ts).
 import {
+  anthropicSdkBaseURL,
   resolveProviderProtocol,
   normalizeProtocol,
   decideOpenAiEndpointFlavor,
@@ -377,8 +378,13 @@ function resolveOne(
   // (the Settings UI writes custom credentials to `customProviders`); the
   // `providerSettings` entry is only a fallback shadow. Built-ins keep the
   // `providerSettings`-first order. Blank strings never win (see pickNonEmpty).
+  // An unset override means the catalog's fixed protocol for the id. The
+  // shared id table only covers the ids the sidecar derives on its own, so
+  // reading it first sent every Claude-protocol relay (DeepSeek, Kimi, GLM,
+  // MiniMax, … "(Claude)") out as "openai".
   const protocol: ResolvedProvider["protocol"] = normalizeProtocol(
     (custom ? (custom.protocol ?? builtin?.apiProtocol) : builtin?.apiProtocol) ??
+      getBuiltInProviderCatalogEntry(providerId)?.protocol ??
       resolveProviderProtocol(providerId) ??
       "openai"
   ) as ResolvedProvider["protocol"]
@@ -593,7 +599,8 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
 
   switch (protocol) {
     case "anthropic":
-      return createAnthropic(settings)
+      // Same root-vs-versioned base translation the sidecar applies.
+      return createAnthropic({ ...settings, baseURL: anthropicSdkBaseURL(settings.baseURL) })
     case "google":
       return createGoogle(settings)
     case "cohere":

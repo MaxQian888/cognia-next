@@ -172,6 +172,30 @@ export function isGenuineOpenAiEndpoint(baseURL?: string | null): boolean {
 }
 
 /**
+ * The base URL the AI SDK's Anthropic client wants for an Anthropic-compatible
+ * endpoint.
+ *
+ * Provider settings carry it the way Claude Code reads `ANTHROPIC_BASE_URL`: a
+ * root that Claude Code extends with `/v1/messages` (every "(Claude)" relay in
+ * the catalog: `https://api.kimi.com/coding/`, `https://openrouter.ai/api`, …).
+ * `createAnthropic` instead appends `/messages` to a base that already names the
+ * version, so handing it the root posted to `/coding/messages` and 404'd. A base
+ * that already ends in `/v1` is left alone; a missing one keeps the SDK default.
+ */
+export function anthropicSdkBaseURL(baseURL?: string | null): string | undefined {
+  if (!baseURL || typeof baseURL !== "string" || !baseURL.trim()) return undefined
+  const trimmed = baseURL.trim()
+  try {
+    const url = new URL(trimmed)
+    const path = url.pathname.replace(/\/+$/, "")
+    if (/\/v1$/i.test(path)) return `${url.origin}${path}${url.search}`
+    return `${url.origin}${path}/v1${url.search}`
+  } catch {
+    return trimmed
+  }
+}
+
+/**
  * The Codex ChatGPT-login backend (`chatgpt.com` / `chat.openai.com`) serves the
  * Responses API only — `/chat/completions` is removed there. Its host isn't
  * `*.openai.com`, so `isGenuineOpenAiEndpoint` would misroute it to Chat

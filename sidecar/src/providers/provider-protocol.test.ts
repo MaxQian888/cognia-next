@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { LOCAL_PROVIDER_NAMES } from "../../../packages/provider-types/src/local-provider.ts"
 import {
+  anthropicSdkBaseURL,
   BUILTIN_PROTOCOL_NAMES,
   PROVIDER_PROTOCOL,
   RESPONSES_ONLY_PROVIDERS,
@@ -184,4 +185,25 @@ test("RESPONSES_ONLY_PROVIDERS is exactly the id-based Responses override (codex
     decideOpenAiEndpointFlavor({ providerId: "codex", baseURL: "https://relay.example" }),
     "responses"
   )
+})
+
+test("anthropicSdkBaseURL turns a Claude Code ANTHROPIC_BASE_URL root into the SDK's versioned base", () => {
+  // Catalog relays store the root Claude Code extends with /v1/messages.
+  assert.equal(
+    anthropicSdkBaseURL("https://api.kimi.com/coding/"),
+    "https://api.kimi.com/coding/v1"
+  )
+  assert.equal(
+    anthropicSdkBaseURL("https://api.deepseek.com/anthropic"),
+    "https://api.deepseek.com/anthropic/v1"
+  )
+  assert.equal(anthropicSdkBaseURL("https://openrouter.ai/api"), "https://openrouter.ai/api/v1")
+  assert.equal(anthropicSdkBaseURL("https://api.siliconflow.cn"), "https://api.siliconflow.cn/v1")
+  // Already versioned: untouched apart from a trailing slash.
+  assert.equal(anthropicSdkBaseURL("https://api.anthropic.com/v1"), "https://api.anthropic.com/v1")
+  assert.equal(anthropicSdkBaseURL("https://relay.test/x/V1/"), "https://relay.test/x/V1")
+  // No base keeps the SDK default; a non-URL is passed through for the SDK to report.
+  assert.equal(anthropicSdkBaseURL(undefined), undefined)
+  assert.equal(anthropicSdkBaseURL("   "), undefined)
+  assert.equal(anthropicSdkBaseURL("not a url"), "not a url")
 })
