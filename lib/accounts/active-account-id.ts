@@ -12,7 +12,7 @@
  * question about the local database name.
  */
 
-import { ACCOUNT_DB_PREFIX } from "@/lib/accounts/account-db"
+import { ACCOUNT_DB_PREFIX, ENCRYPTED_ACCOUNT_DB_SUFFIX } from "@/lib/accounts/account-db"
 import { getDb } from "@/lib/db/schema"
 
 /** Account id assumed when the runtime predates multi-account databases. */
@@ -22,7 +22,15 @@ export function getActiveAccountId(): string {
   try {
     const name = getDb().name
     if (name.startsWith(ACCOUNT_DB_PREFIX)) {
-      const scoped = name.slice(ACCOUNT_DB_PREFIX.length)
+      // The PHYSICAL name: `<id>`, `<id>-encrypted-v1`, or
+      // `<id>-target-<target>-encrypted-v1`. The encryption suffix used to stay
+      // on, so an encrypted account (every desktop one) answered
+      // `<id>-encrypted-v1` and missed everything stored under its real id,
+      // its sign-in session first.
+      let scoped = name.slice(ACCOUNT_DB_PREFIX.length)
+      if (scoped.endsWith(ENCRYPTED_ACCOUNT_DB_SUFFIX)) {
+        scoped = scoped.slice(0, -ENCRYPTED_ACCOUNT_DB_SUFFIX.length)
+      }
       const targetSeparator = scoped.indexOf("-target-")
       return targetSeparator === -1 ? scoped : scoped.slice(0, targetSeparator)
     }

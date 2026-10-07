@@ -126,8 +126,11 @@ export function accountDatabaseName(localAccountId: string): string {
   return `${ACCOUNT_DB_PREFIX}${assertAccountId(localAccountId)}`
 }
 
+/** Appended to an account's database name once its content is encrypted. */
+export const ENCRYPTED_ACCOUNT_DB_SUFFIX = "-encrypted-v1"
+
 export function encryptedAccountDatabaseName(localAccountId: string): string {
-  return `${accountDatabaseName(localAccountId)}-encrypted-v1`
+  return `${accountDatabaseName(localAccountId)}${ENCRYPTED_ACCOUNT_DB_SUFFIX}`
 }
 
 export class LocalAccountRegistry {

@@ -30,6 +30,16 @@ describe("getActiveAccountId", () => {
     expect(getActiveAccountId()).toBe("acct_1")
   })
 
+  it("drops the encryption suffix, so an encrypted account keeps its real id", () => {
+    mockDbName = "cognia-account-acct_1-encrypted-v1"
+    expect(getActiveAccountId()).toBe("acct_1")
+  })
+
+  it("drops both the target and the encryption suffix", () => {
+    mockDbName = "cognia-account-acct_1-target-headless_primary-encrypted-v1"
+    expect(getActiveAccountId()).toBe("acct_1")
+  })
+
   it("falls back to the default for a pre-multi-account database name", () => {
     mockDbName = "cognia"
     delete process.env.COGNIA_LOCAL_ACCOUNT_ID
