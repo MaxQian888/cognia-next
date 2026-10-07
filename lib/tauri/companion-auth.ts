@@ -354,14 +354,25 @@ export async function fetchCompanionAuthConfig(
       ...(options.signal ? { signal: options.signal } : {}),
     })
   )
+  return parseCompanionAuthConfig(body)
+}
+
+/**
+ * Check a `/api/auth/config` body, however it was read: over HTTP, or from the
+ * desktop's own server in-process (`companion_local_auth_config`).
+ */
+export function parseCompanionAuthConfig(body: unknown): CompanionAuthConfig {
+  const record = (body ?? {}) as Record<string, unknown>
   if (
-    (body.deploymentMode !== "single-user" && body.deploymentMode !== "multi-tenant") ||
-    typeof body.hostId !== "string" ||
-    !isSignalingConfig(body.signaling)
+    typeof body !== "object" ||
+    body === null ||
+    (record.deploymentMode !== "single-user" && record.deploymentMode !== "multi-tenant") ||
+    typeof record.hostId !== "string" ||
+    !isSignalingConfig(record.signaling)
   ) {
     throw new Error("companion auth config response is malformed")
   }
-  return body as unknown as CompanionAuthConfig
+  return body as CompanionAuthConfig
 }
 
 function validateRegistrationContext(

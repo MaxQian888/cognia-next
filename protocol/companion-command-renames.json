@@ -793,6 +793,9 @@
     "companion_list_workers": {
       "to": "companion.worker.list"
     },
+    "companion_local_auth_config": {
+      "to": "companion.local_auth_config.get"
+    },
     "companion_mdns_browse": {
       "to": "companion.mdns.browse"
     },

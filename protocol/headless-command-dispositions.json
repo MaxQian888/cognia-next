@@ -410,6 +410,7 @@
         "companion_desktop_write_response",
         "companion_get_tls_fingerprint",
         "companion_list_devices",
+        "companion_local_auth_config",
         "companion_mdns_browse",
         "companion_mdns_start",
         "companion_mdns_status",

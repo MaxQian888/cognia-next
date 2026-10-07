@@ -1317,6 +1317,22 @@ pub fn companion_get_tls_fingerprint(app_handle: tauri::AppHandle) -> Result<Str
     ensure_tls_fingerprint(&app_handle)
 }
 
+/// This desktop's own `/api/auth/config`, read in-process for deployment
+/// discovery: the webview cannot fetch the listener (HTTPS with a self-signed
+/// certificate that only the phone's native stack can pin). Refused while the
+/// companion server is stopped, exactly as the route would be unreachable.
+#[tauri::command]
+pub fn companion_local_auth_config(
+    state: State<'_, CompanionServerState>,
+) -> Result<serde_json::Value, String> {
+    let shared = state
+        .shared
+        .read()
+        .clone()
+        .ok_or_else(|| "the companion server is not running".to_string())?;
+    cognia_companion::api::local_auth_config(&shared)
+}
+
 /// Diagnostics: where the companion TLS cert + key live on disk. Used by
 /// the Settings → Companion advanced view so a user can inspect / rotate
 /// the cert without grepping app-data paths by hand.

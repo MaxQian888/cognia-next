@@ -4558,6 +4558,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "companion_local_auth_config",
+      "resource": "companion.local_auth_config",
+      "verb": "get",
+      "arm": "companion_local_auth_config",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "companion_mdns_browse",
       "resource": "companion.mdns",
       "verb": "browse",

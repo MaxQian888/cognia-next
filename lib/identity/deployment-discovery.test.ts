@@ -36,7 +36,7 @@ describe("resolveDiscoverySource", () => {
         profile: "desktop",
         deploymentSource: () => null,
       })
-    ).resolves.toEqual({ baseUrl: "http://127.0.0.1:7890" })
+    ).resolves.toEqual({ baseUrl: "https://127.0.0.1:7890", local: true })
     expect(localTransport.call).toHaveBeenCalledWith("companion_server_status", {})
     expect(transport.call).not.toHaveBeenCalled()
   })
@@ -66,7 +66,7 @@ describe("resolveDiscoverySource", () => {
         profile: "desktop",
         serverStatus: async () => ({ running: true, boundPort: 7890 }),
       })
-    ).toEqual({ baseUrl: "http://127.0.0.1:7890" })
+    ).toEqual({ baseUrl: "https://127.0.0.1:7890", local: true })
     expect(
       await resolveDiscoverySource({
         profile: "desktop",
@@ -230,7 +230,7 @@ describe("discoverDeployment", () => {
     const result = await discoverDeployment({
       profile: "desktop",
       serverStatus: async () => ({ running: true, boundPort: 1 }),
-      fetchConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
+      localConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
       official: () => null,
     })
     expect(result).toEqual({ status: "none", reason: "single-user" })
@@ -244,7 +244,7 @@ describe("discoverDeployment", () => {
         await discoverDeployment({
           profile: "desktop",
           serverStatus: async () => ({ running: true, boundPort: 1 }),
-          fetchConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
+          localConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
           official: () => official,
         })
       ).toEqual({ status: "official", deployment: official, reason: "single-user" })
@@ -278,7 +278,7 @@ describe("discoverDeployment", () => {
         await discoverDeployment({
           profile: "desktop",
           serverStatus: async () => ({ running: true, boundPort: 1 }),
-          fetchConfig: async () => MULTI,
+          localConfig: async () => MULTI,
           official: () => official,
         })
       ).toMatchObject({ status: "ready" })
@@ -286,7 +286,7 @@ describe("discoverDeployment", () => {
         await discoverDeployment({
           profile: "desktop",
           serverStatus: async () => ({ running: true, boundPort: 1 }),
-          fetchConfig: async () => {
+          localConfig: async () => {
             throw new Error("connect ECONNREFUSED")
           },
           official: () => official,
@@ -316,14 +316,14 @@ describe("discoverDeployment", () => {
     const result = await discoverDeployment({
       profile: "desktop",
       serverStatus: async () => ({ running: true, boundPort: 1 }),
-      fetchConfig: async () => {
+      localConfig: async () => {
         throw new Error("fetch failed")
       },
     })
     expect(result).toEqual({
       status: "unavailable",
       reason: "unreachable",
-      baseUrl: "http://127.0.0.1:1",
+      baseUrl: "https://127.0.0.1:1",
       message: "fetch failed",
     })
   })
@@ -419,6 +419,67 @@ describe("discoverDeployment", () => {
         fetchConfig: async () => MULTI,
       })
       expect(result).toMatchObject({ status: "ready", baseUrl: "https://192.168.1.4:27890" })
+    })
+  })
+
+  // Its listener is HTTPS with a self-signed certificate the webview refuses,
+  // so the desktop never fetches its own server: it used to ask at http://,
+  // fail every time, and never reach the official account.
+  describe("the desktop's own server", () => {
+    const LOCAL_SINGLE_USER = {
+      configVersion: 4,
+      deploymentMode: "single-user",
+      hostId: "host-1",
+      oidc: null,
+      signaling: { url: "wss://signaling.example/signaling", iceServers: [] },
+    }
+
+    it("is read in-process, never over HTTP", async () => {
+      ;(localTransport.call as jest.Mock).mockImplementation(async (command: string) =>
+        command === "companion_server_status"
+          ? { running: true, boundPort: 27890 }
+          : LOCAL_SINGLE_USER
+      )
+      const fetchConfig = jest.fn()
+      const official = officialDeployment({})!
+      await expect(
+        discoverDeployment({
+          profile: "desktop",
+          deploymentSource: () => null,
+          fetchConfig,
+          official: () => official,
+        })
+      ).resolves.toEqual({ status: "official", deployment: official, reason: "single-user" })
+      expect(localTransport.call).toHaveBeenCalledWith("companion_local_auth_config", {})
+      expect(fetchConfig).not.toHaveBeenCalled()
+    })
+
+    it("refuses a malformed in-process answer like a fetched one", async () => {
+      ;(localTransport.call as jest.Mock).mockImplementation(async (command: string) =>
+        command === "companion_server_status" ? { running: true, boundPort: 27890 } : {}
+      )
+      await expect(
+        discoverDeployment({ profile: "desktop", deploymentSource: () => null })
+      ).resolves.toMatchObject({
+        status: "unavailable",
+        reason: "malformed",
+        baseUrl: "https://127.0.0.1:27890",
+      })
+    })
+
+    it("still asks a deployment the profile chose over HTTP", async () => {
+      const localConfig = jest.fn()
+      const fetchConfig = jest.fn().mockResolvedValue(MULTI)
+      await expect(
+        discoverDeployment({
+          profile: "desktop",
+          deploymentSource: () => ({ baseUrl: "https://cloud.example", fingerprint: "cd" }),
+          fetchConfig,
+          localConfig,
+        })
+      ).resolves.toMatchObject({ status: "ready", baseUrl: "https://cloud.example" })
+      expect(fetchConfig).toHaveBeenCalledWith("https://cloud.example", "cd")
+      expect(localConfig).not.toHaveBeenCalled()
     })
   })
 

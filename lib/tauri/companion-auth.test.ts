@@ -10,6 +10,7 @@ import {
   devicePlatformLabel,
   fetchCompanionAuthConfig,
   issueSocketTicket,
+  parseCompanionAuthConfig,
   registerCompanionDevice,
   registerCompanionWorker,
   type AuthFetcher,
@@ -519,6 +520,30 @@ describe("signaling transport in the auth config", () => {
     await expect(
       fetchCompanionAuthConfig("http://127.0.0.1:27891", undefined, fetcherFor(undefined))
     ).rejects.toThrow(/malformed/)
+  })
+})
+
+// The desktop reads its own server's config in-process and checks it with the
+// same rules a fetched one gets.
+describe("parseCompanionAuthConfig", () => {
+  const valid = {
+    deploymentMode: "single-user",
+    hostId: "host-1",
+    signaling: { url: "wss://host.test/signaling", iceServers: [] },
+  }
+
+  it("accepts a well-formed config as is", () => {
+    expect(parseCompanionAuthConfig(valid)).toBe(valid)
+  })
+
+  it.each([
+    ["null", null],
+    ["a string", "single-user"],
+    ["an unknown mode", { ...valid, deploymentMode: "solo" }],
+    ["a missing host id", { ...valid, hostId: undefined }],
+    ["no signaling block", { ...valid, signaling: undefined }],
+  ])("refuses %s", (_label, body) => {
+    expect(() => parseCompanionAuthConfig(body)).toThrow(/malformed/)
   })
 })
 

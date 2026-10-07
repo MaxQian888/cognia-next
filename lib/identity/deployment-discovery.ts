@@ -9,9 +9,13 @@
  * deployment before it has paired with anything. Without one, which host to
  * ask depends on the shape this client runs in (`detectHostProfile`):
  *
- * - desktop: its own companion server, on the loopback port it is bound to,
- *   and the build-time server URL when that server is stopped. A stopped
- *   server with no build-time URL means there is nothing to discover.
+ * - desktop: its own companion server, and the build-time server URL when
+ *   that server is stopped. A stopped server with no build-time URL means
+ *   there is nothing to discover. The own server is read in-process
+ *   (`companion_local_auth_config`), never over HTTP: its listener is HTTPS
+ *   with a self-signed certificate, which the webview refuses and only the
+ *   phone's native stack can pin. Asking it at `http://` used to fail every
+ *   time, so a desktop never reached the official account below.
  * - cloud companion / mobile companion: the paired host, whose base URL and
  *   TLS fingerprint the companion config already holds.
  * - web standalone: the build-time server URL, if the bundle was built with
@@ -59,6 +63,7 @@ import {
   authConfigSocialProviders,
   authConfigWebOrigin,
   fetchCompanionAuthConfig,
+  parseCompanionAuthConfig,
   type CompanionAuthConfig,
 } from "@/lib/tauri/companion-auth"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
@@ -125,6 +130,8 @@ export type ReadyDeployment = Extract<DeploymentDiscovery, { status: "ready" }>
 export interface DiscoverySource {
   baseUrl: string
   fingerprint?: string
+  /** The desktop's own server: read in-process, not over HTTP. */
+  local?: true
 }
 
 export interface DiscoverDeploymentDeps {
@@ -140,6 +147,8 @@ export interface DiscoverDeploymentDeps {
   serverStatus?: () => Promise<{ running: boolean; boundPort?: number | null }>
   buildTimeUrl?: () => string | null
   fetchConfig?: (baseUrl: string, fingerprint?: string) => Promise<CompanionAuthConfig>
+  /** The desktop's own server's configuration. Defaults to the Tauri command. */
+  localConfig?: () => Promise<CompanionAuthConfig>
   /** The official account this build offers. Defaults to the build's own. */
   official?: () => OfficialDeployment | null
   /** `false` reports `none` where the official account would be offered. */
@@ -154,6 +163,11 @@ async function desktopServerStatus(): Promise<{ running: boolean; boundPort?: nu
     "companion_server_status",
     {}
   )
+}
+
+async function desktopLocalAuthConfig(): Promise<CompanionAuthConfig> {
+  const { localTransport: transport } = await import("@/lib/tauri")
+  return parseCompanionAuthConfig(await transport.call<unknown>("companion_local_auth_config", {}))
 }
 
 function sameOriginHost(): string | null {
@@ -198,7 +212,10 @@ async function resolveSourceWithOrigin(
     case "desktop": {
       const status = await (deps.serverStatus ?? desktopServerStatus)()
       if (status.running && status.boundPort) {
-        return { source: { baseUrl: `http://127.0.0.1:${status.boundPort}` }, pairing: null }
+        return {
+          source: { baseUrl: `https://127.0.0.1:${status.boundPort}`, local: true },
+          pairing: null,
+        }
       }
       const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
       return built ? { source: { baseUrl: built }, pairing: null } : { none: "server-stopped" }
@@ -273,7 +290,9 @@ export async function discoverDeployment(
     const fetchConfig = deps.fetchConfig ?? fetchCompanionAuthConfig
     let config: CompanionAuthConfig
     try {
-      config = await fetchConfig(source.baseUrl, source.fingerprint)
+      config = source.local
+        ? await (deps.localConfig ?? desktopLocalAuthConfig)()
+        : await fetchConfig(source.baseUrl, source.fingerprint)
     } catch (error) {
       // See "A paired Host this build can only reach over the relay" above.
       if (pairing && isPinningUnavailable(error) && pairingHasRelayRoom(pairing)) {

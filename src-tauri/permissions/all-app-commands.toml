@@ -274,6 +274,7 @@ commands.allow = [
   "companion_list_device_grants",
   "companion_list_devices",
   "companion_list_workers",
+  "companion_local_auth_config",
   "companion_mdns_browse",
   "companion_mdns_start",
   "companion_mdns_status",

@@ -235,6 +235,33 @@ async fn auth_config_handler(
     plane: Option<Extension<super::server::TransportPlane>>,
     headers: HeaderMap,
 ) -> Response {
+    // Absent only for a router built outside a listener (the unit tests), where
+    // the TLS plane is the historical behaviour to preserve.
+    let plane = plane.map_or(super::server::TransportPlane::Tls, |Extension(kind)| kind);
+    match auth_config_payload(&state, &headers, plane) {
+        Ok(config) => Json(config).into_response(),
+        Err(message) => store_unavailable_error(message).into_response(),
+    }
+}
+
+/// This host's public sign-in configuration, read in-process.
+///
+/// The desktop's own webview cannot ask its listener for `/api/auth/config`:
+/// the listener speaks HTTPS with a self-signed certificate, and only the
+/// phone's native HTTP stack can pin it. Deployment discovery on the desktop
+/// therefore reads the same answer through a Tauri command, as a request on
+/// the TLS plane with no proxy in front would see it.
+pub fn local_auth_config(state: &SharedState) -> Result<Value, String> {
+    let config = auth_config_payload(state, &HeaderMap::new(), super::server::TransportPlane::Tls)
+        .map_err(str::to_string)?;
+    serde_json::to_value(config).map_err(|error| format!("auth config: {error}"))
+}
+
+fn auth_config_payload(
+    state: &SharedState,
+    headers: &HeaderMap,
+    plane: super::server::TransportPlane,
+) -> Result<AuthConfigResponse, &'static str> {
     let mode = deployment_mode();
     let host_id = super::healthz::derive_server_id(&state.secret.read());
     let oidc = if mode == DeploymentMode::MultiTenant {
@@ -248,10 +275,7 @@ async fn auth_config_handler(
                     Ok(kind) => kind,
                     Err(message) => {
                         tracing::error!("{message}");
-                        return store_unavailable_error(
-                            "multi-tenant browser authentication is not fully configured",
-                        )
-                        .into_response();
+                        return Err("multi-tenant browser authentication is not fully configured");
                     }
                 };
                 let mut scopes = vec!["openid".to_string(), "offline_access".to_string()];
@@ -277,23 +301,15 @@ async fn auth_config_handler(
                     issuer_kind,
                 })
             }
-            _ => {
-                return store_unavailable_error(
-                    "multi-tenant browser authentication is not fully configured",
-                )
-                .into_response()
-            }
+            _ => return Err("multi-tenant browser authentication is not fully configured"),
         }
     } else {
         None
     };
-    // Absent only for a router built outside a listener (the unit tests), where
-    // the TLS plane is the historical behaviour to preserve.
-    let plane = plane.map_or(super::server::TransportPlane::Tls, |Extension(kind)| kind);
-    let signaling_url = resolve_public_signaling_url(&headers, plane, || {
+    let signaling_url = resolve_public_signaling_url(headers, plane, || {
         super::signaling::installed_signaling_url()
     });
-    Json(AuthConfigResponse {
+    Ok(AuthConfigResponse {
         config_version: AUTH_CONFIG_VERSION,
         deployment_mode: match mode {
             DeploymentMode::SingleUser => "single-user",
@@ -316,7 +332,6 @@ async fn auth_config_handler(
             non_empty_env(ENV_WEB_ORIGIN),
         ),
     })
-    .into_response()
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -3371,6 +3386,31 @@ mod tests {
             serde_json::json!(["web-popup", "native-loopback", "deep-link"])
         );
         assert!(value.get("collaboration").is_none());
+    }
+
+    // The desktop reads its own configuration in-process because its webview
+    // cannot fetch the self-signed listener; that answer must be the one a
+    // client asking the TLS listener directly gets.
+    #[tokio::test]
+    async fn the_in_process_auth_config_matches_the_route() {
+        use tower::ServiceExt as _;
+
+        let state = test_state();
+        let local = local_auth_config(&state).expect("local auth config");
+        let response = get(auth_config_handler)
+            .with_state(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/auth/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await, local);
+        assert_eq!(local["configVersion"], AUTH_CONFIG_VERSION);
+        assert!(local["hostId"].is_string());
     }
 
     /// The token response is the device handshake (ADR-0175): it names the

@@ -1285,6 +1285,7 @@ pub fn run() {
             companion_api::ws_worker::companion_wake_worker,
             wake_on_lan::wake_paired_host,
             companion_api::commands::companion_get_tls_fingerprint,
+            companion_api::commands::companion_local_auth_config,
             companion_api::commands::companion_tls_paths,
             companion_api::commands::companion_mdns_start,
             companion_api::commands::companion_mdns_stop,
