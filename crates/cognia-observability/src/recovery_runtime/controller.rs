@@ -57,6 +57,8 @@ impl RecoveryBoot {
 /// an older snapshot cannot overwrite a newer one. No `.await` holds the guard.
 pub struct RecoveryController {
     state: Mutex<RecoveryStateV1>,
+    /// Serializes saves, so the state lock is never held across disk I/O.
+    save_turn: Mutex<()>,
     store: Option<RecoveryStore>,
     writer: Option<ObservabilityWriter>,
     build_id: String,
@@ -83,6 +85,7 @@ impl RecoveryController {
         let build_id = build_id.into();
         Self {
             state: Mutex::new(RecoveryStateV1::new(&build_id)),
+            save_turn: Mutex::new(()),
             store: None,
             writer: None,
             build_id,
@@ -116,6 +119,7 @@ impl RecoveryController {
 
         let controller = Self {
             state: Mutex::new(state),
+            save_turn: Mutex::new(()),
             store: Some(store),
             writer,
             build_id,
@@ -150,15 +154,24 @@ impl RecoveryController {
     /// Write the current state to disk. Best-effort: a failed save is logged
     /// and the in-memory state stands, because refusing to boot over a disk
     /// error would be a worse outcome than a lost failure count.
+    ///
+    /// The state lock is held only to copy the state. Saving under it made
+    /// every reader (each recovery IPC, the boot gate) wait on the disk, and a
+    /// slow flush at startup stalled them for seconds. Saves take turns, and
+    /// each copies the state when its turn comes, so the last save always
+    /// writes the newest state.
     fn persist(&self) {
         let Some(store) = &self.store else {
             return;
         };
-        self.with_state(|state| {
-            if let Err(error) = store.save(state) {
-                log::warn!("recovery: persisting state failed: {error}");
-            }
-        });
+        let _turn = self
+            .save_turn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = self.with_state(|state| state.clone());
+        if let Err(error) = store.save(&state) {
+            log::warn!("recovery: persisting state failed: {error}");
+        }
     }
 
     /// Emit one V1 lifecycle event describing a transition.
@@ -392,6 +405,7 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let controller = std::sync::Arc::new(RecoveryController {
             state: Mutex::new(RecoveryStateV1::new("build-1")),
+            save_turn: Mutex::new(()),
             store: Some(RecoveryStore::new(dir.path())),
             writer: None,
             build_id: "build-1".into(),
@@ -421,6 +435,39 @@ mod tests {
             .expect("store")
             .load("build-1", now_ms());
         assert_eq!(recovered, latest);
+    }
+
+    // A save waiting for (or doing) disk I/O must not hold the state lock:
+    // readers are every recovery IPC and the boot gate.
+    #[test]
+    fn reads_do_not_wait_for_a_save_in_progress() {
+        let dir = TempDir::new().expect("tempdir");
+        let controller = std::sync::Arc::new(controller(&dir, "build-1"));
+        let turn = controller.save_turn.lock().expect("turn");
+        let writer = {
+            let controller = controller.clone();
+            std::thread::spawn(move || {
+                controller.record_renderer_heartbeat();
+            })
+        };
+        // The heartbeat has updated the state and is now queued behind the
+        // held save turn; a read still answers straight away.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !controller.snapshot().renderer_alive {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "read blocked by a pending save"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        drop(turn);
+        writer.join().expect("writer");
+        let recovered = controller
+            .store
+            .as_ref()
+            .expect("store")
+            .load("build-1", now_ms());
+        assert_eq!(recovered, controller.snapshot());
     }
 
     #[test]

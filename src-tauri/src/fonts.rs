@@ -44,8 +44,18 @@ where
 
 /// Enumerate installed font families with a monospaced flag. Sorted by
 /// family name, one entry per family.
+///
+/// Async on purpose: a synchronous command runs on the main thread, and
+/// scanning every installed font took about two seconds there at startup,
+/// freezing the window and every synchronous IPC with it.
 #[tauri::command]
-pub fn os_list_fonts() -> Vec<SystemFont> {
+pub async fn os_list_fonts() -> Result<Vec<SystemFont>, String> {
+    tokio::task::spawn_blocking(list_system_fonts)
+        .await
+        .map_err(|error| format!("font scan task failed: {error}"))
+}
+
+fn list_system_fonts() -> Vec<SystemFont> {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
     let faces = db.faces().filter_map(|face| {

@@ -24,6 +24,20 @@ use super::RecoveryController;
 /// `AppHandle` use.
 type Controller<'a> = State<'a, Arc<RecoveryController>>;
 
+/// Run a controller transition on the blocking pool: each one saves the state
+/// to disk, and on the async workers a burst of them at startup (one per
+/// subsystem probe, plus heartbeats) held up every other async command while
+/// the disk was slow to flush.
+async fn on_blocking_pool<T: Send + 'static>(
+    controller: &Controller<'_>,
+    transition: impl FnOnce(&RecoveryController) -> T + Send + 'static,
+) -> Result<T, String> {
+    let controller = Arc::clone(controller.inner());
+    tokio::task::spawn_blocking(move || transition(&controller))
+        .await
+        .map_err(|error| format!("recovery task failed: {error}"))
+}
+
 /// Parse a wire subsystem name. Unknown names are rejected rather than mapped
 /// to a default: silently recovering the wrong subsystem is worse than an error.
 fn parse_subsystem(value: &str) -> Result<RecoverySubsystem, String> {
@@ -149,7 +163,10 @@ pub async fn recovery_checkpoint_record(
     reason_code: Option<String>,
 ) -> Result<RecoveryStateV1, String> {
     let subsystem = parse_subsystem(&subsystem)?;
-    Ok(controller.record_checkpoint(subsystem, success, reason_code))
+    on_blocking_pool(&controller, move |controller| {
+        controller.record_checkpoint(subsystem, success, reason_code)
+    })
+    .await
 }
 
 /// Retry a subsystem, or accept keeping it disabled. Both outcomes are audited
@@ -181,9 +198,14 @@ pub async fn recovery_retry(
         }
         RecoveryRetryAction::Retry => {
             prepare_retry(action, subsystem, reason).await?;
-            controller.retry(subsystem)
+            on_blocking_pool(&controller, move |controller| controller.retry(subsystem)).await?
         }
-        RecoveryRetryAction::KeepDisabled => controller.keep_disabled(subsystem),
+        RecoveryRetryAction::KeepDisabled => {
+            on_blocking_pool(&controller, move |controller| {
+                controller.keep_disabled(subsystem)
+            })
+            .await?
+        }
     })
 }
 
@@ -205,7 +227,7 @@ fn validate_unlock_scope(subsystem: RecoverySubsystem) -> Result<(), String> {
 /// complained.
 #[tauri::command]
 pub async fn recovery_heartbeat(controller: Controller<'_>) -> Result<RecoveryStateV1, String> {
-    Ok(controller.record_renderer_heartbeat())
+    on_blocking_pool(&controller, RecoveryController::record_renderer_heartbeat).await
 }
 
 #[cfg(test)]

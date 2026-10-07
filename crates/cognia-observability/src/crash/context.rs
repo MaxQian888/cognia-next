@@ -9,7 +9,7 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex, OnceLock};
 
 /// Max breadcrumbs retained — a small ring, oldest dropped first.
 const MAX_BREADCRUMBS: usize = 50;
@@ -84,13 +84,134 @@ pub fn publish_to_monitor() {
     }
 }
 
+/// Wakes the one thread that forwards the context to the crash monitor.
+///
+/// Forwarding used to happen inline: every breadcrumb serialized the whole
+/// context and wrote it to the monitor's socket from the async command that
+/// pushed it. The renderer pushes dozens at startup and the monitor drains its
+/// socket slowly (a debug build especially), so once the buffer filled every
+/// async worker sat in `writev` and all IPC stalled for up to a minute. Now a
+/// push only records that there is something new; one background thread sends
+/// the latest context. A burst costs a few sends, and a slow monitor holds up
+/// nothing but that thread.
+struct ForwardSignal {
+    pending: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl ForwardSignal {
+    const fn new() -> Self {
+        Self {
+            pending: Mutex::new(false),
+            wake: Condvar::new(),
+        }
+    }
+
+    /// Note that the context changed. Never waits on a send.
+    fn raise(&self) {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *pending = true;
+        self.wake.notify_one();
+    }
+
+    /// Block until the context changed, and claim that change. Every raise
+    /// made after this returns is answered by a later send.
+    fn wait(&self) {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !*pending {
+            pending = self
+                .wake
+                .wait(pending)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        *pending = false;
+    }
+}
+
+static FORWARD: ForwardSignal = ForwardSignal::new();
+
 fn forward_to_monitor() {
-    publish_to_monitor();
+    FORWARD.raise();
+    static FORWARDER: OnceLock<()> = OnceLock::new();
+    FORWARDER.get_or_init(|| {
+        let spawned = std::thread::Builder::new()
+            .name("crash-context-forward".into())
+            .spawn(|| loop {
+                FORWARD.wait();
+                publish_to_monitor();
+            });
+        if let Err(error) = spawned {
+            // Native-crash reports then carry the context from the last
+            // explicit `publish_to_monitor` only; panics are unaffected.
+            log::warn!("crash: context forwarder thread failed to start: {error}");
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn forwarder(signal: &'static ForwardSignal, send_time: Duration) -> Arc<AtomicUsize> {
+        let sends = Arc::new(AtomicUsize::new(0));
+        let counted = sends.clone();
+        std::thread::spawn(move || loop {
+            signal.wait();
+            counted.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(send_time);
+        });
+        sends
+    }
+
+    fn settle(sends: &AtomicUsize) -> usize {
+        let mut last = sends.load(Ordering::SeqCst);
+        loop {
+            std::thread::sleep(Duration::from_millis(150));
+            let now = sends.load(Ordering::SeqCst);
+            if now == last {
+                return now;
+            }
+            last = now;
+        }
+    }
+
+    #[test]
+    fn a_burst_of_pushes_never_waits_and_coalesces_into_a_few_sends() {
+        let signal: &'static ForwardSignal = Box::leak(Box::new(ForwardSignal::new()));
+        let sends = forwarder(signal, Duration::from_millis(50));
+        let started = Instant::now();
+        for _ in 0..1_000 {
+            signal.raise();
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "raising waited on a send"
+        );
+        let total = settle(&sends);
+        assert!((1..=3).contains(&total), "{total} sends for one burst");
+    }
+
+    #[test]
+    fn a_change_made_during_a_send_is_sent_afterwards() {
+        let signal: &'static ForwardSignal = Box::leak(Box::new(ForwardSignal::new()));
+        let sends = forwarder(signal, Duration::from_millis(100));
+        signal.raise();
+        while sends.load(Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The first send is in progress; this change must not be lost.
+        signal.raise();
+        assert_eq!(settle(&sends), 2);
+    }
 
     fn crumb(msg: &str) -> Breadcrumb {
         Breadcrumb {

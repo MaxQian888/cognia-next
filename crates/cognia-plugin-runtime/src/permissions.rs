@@ -18,6 +18,20 @@ use tauri::State;
 use super::{PermissionGrant, PluginError, PluginRuntimeState, Result};
 
 const HOST_STATE_DIR: &str = ".host-state";
+
+/// Run ledger work on the blocking pool. A grant fsyncs the ledger while it
+/// holds the global `permissions` lock, and the renderer mirrors every
+/// enabled plugin's declared permissions at startup (well over a hundred
+/// calls). On the async workers that stalled every other async command for
+/// 10–50 s whenever the disk was slow to flush.
+#[cfg(feature = "tauri-host")]
+async fn on_blocking_pool<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| PluginError::Internal(format!("permission ledger task failed: {error}")))?
+}
 const ACCOUNT_STATE_DIR: &str = "accounts";
 const LEDGER_FILE: &str = "permissions.json";
 
@@ -162,6 +176,19 @@ pub fn grant_permission_for_state(
         Some(grants) => grants.clone(),
         None => read_ledger(state, &plugin_id)?,
     };
+    // Re-granting what is already recorded changes nothing, so it writes
+    // nothing: the renderer re-mirrors every declared permission each time a
+    // plugin is enabled, and a rewrite plus fsync per call is what made it
+    // expensive. The original grant (and its `granted_at`) stands.
+    if let Some(existing) = next.iter().find(|existing| {
+        existing.permission == grant.permission
+            && existing.granted_by == grant.granted_by
+            && existing.expires_at == grant.expires_at
+    }) {
+        let existing = existing.clone();
+        all.insert(plugin_id, next);
+        return Ok(existing);
+    }
     next.retain(|existing| existing.permission != permission);
     next.push(grant.clone());
     write_ledger(state, &plugin_id, &next)?;
@@ -196,7 +223,11 @@ pub async fn plugin_permission_grant(
     granted_by: String,
     expires_at: Option<String>,
 ) -> Result<PermissionGrant> {
-    grant_permission_for_state(&state, plugin_id, permission, granted_by, expires_at)
+    let state = state.inner().clone();
+    on_blocking_pool(move || {
+        grant_permission_for_state(&state, plugin_id, permission, granted_by, expires_at)
+    })
+    .await
 }
 
 #[cfg(feature = "tauri-host")]
@@ -205,7 +236,8 @@ pub async fn plugin_permission_list(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
 ) -> Result<Vec<PermissionGrant>> {
-    list_permissions_for_state(&state, plugin_id)
+    let state = state.inner().clone();
+    on_blocking_pool(move || list_permissions_for_state(&state, plugin_id)).await
 }
 
 /// Host-neutral permission-ledger read shared by Tauri and `cognia-server`.
@@ -235,7 +267,8 @@ pub async fn plugin_permission_revoke(
     plugin_id: String,
     permission: String,
 ) -> Result<()> {
-    revoke_permission_for_state(&state, plugin_id, permission)
+    let state = state.inner().clone();
+    on_blocking_pool(move || revoke_permission_for_state(&state, plugin_id, permission)).await
 }
 
 #[cfg(test)]
@@ -285,6 +318,97 @@ mod tests {
         grants.retain(|g| g.permission != "filesystem:read");
         write_ledger(&state, "demo", &grants).unwrap();
         assert!(read_ledger(&state, "demo").unwrap().is_empty());
+    }
+
+    fn ledger_mtime(state: &PluginRuntimeState, plugin_id: &str) -> std::time::SystemTime {
+        let dir = open_ledger_dir(state, plugin_id, false).unwrap().unwrap();
+        dir.metadata(LEDGER_FILE)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .into_std()
+    }
+
+    #[test]
+    fn regranting_an_identical_grant_writes_nothing_and_keeps_the_original() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let first = grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "manifest".into(),
+            None,
+        )
+        .unwrap();
+        let written = ledger_mtime(&state, "demo");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let again = grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "manifest".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(again.granted_at, first.granted_at);
+        assert_eq!(ledger_mtime(&state, "demo"), written);
+        assert_eq!(read_ledger(&state, "demo").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_cold_start_regrant_still_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "manifest".into(),
+            None,
+        )
+        .unwrap();
+        let written = ledger_mtime(&state, "demo");
+        state.permissions.write().clear();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "manifest".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ledger_mtime(&state, "demo"), written);
+        assert_eq!(state.permissions.read().get("demo").map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn a_changed_grant_is_still_rewritten() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "manifest".into(),
+            None,
+        )
+        .unwrap();
+        let by_user = grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "user".into(),
+            None,
+        )
+        .unwrap();
+        let ledger = read_ledger(&state, "demo").unwrap();
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].granted_by, "user");
+        assert_eq!(ledger[0].granted_at, by_user.granted_at);
     }
 
     #[test]

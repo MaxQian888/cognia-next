@@ -196,12 +196,22 @@ pub async fn plugin_python_initialize_for_state(
         *state.event_sink.write() = Some(event_sink);
     }
     state.ensure_sweep_started(std::time::Duration::from_secs(60));
-    // The probe runs subprocesses synchronously — keep it off the async core.
-    let interpreter =
-        tokio::task::spawn_blocking(move || discover_interpreter(python_path.as_deref()))
-            .await
-            .map_err(|e| PluginError::Internal(format!("probe task panicked: {e}")))?;
-    apply_initialize(state, interpreter)
+    // The probe runs subprocesses and the host script is a disk write: keep
+    // both off the async core, where a slow disk at startup used to hold up
+    // every other async command.
+    let python_dir = state.python_dir.clone();
+    let host_script = state.host_script_path();
+    let interpreter = tokio::task::spawn_blocking(move || -> Result<Option<Interpreter>> {
+        let interpreter = discover_interpreter(python_path.as_deref());
+        if interpreter.is_some() {
+            write_host_script(&python_dir, &host_script)?;
+        }
+        Ok(interpreter)
+    })
+    .await
+    .map_err(|e| PluginError::Internal(format!("probe task panicked: {e}")))??;
+    record_interpreter(state, interpreter);
+    Ok(())
 }
 
 #[cfg(feature = "tauri-host")]
@@ -958,10 +968,22 @@ pub fn plugin_python_list_for_state(state: &PythonRuntimeState) -> Vec<String> {
 /// Store the probe outcome. `None` (no usable interpreter) is a supported
 /// configuration: warn once and report `available: false` — never an error.
 fn apply_initialize(state: &PythonRuntimeState, interpreter: Option<Interpreter>) -> Result<()> {
+    if interpreter.is_some() {
+        write_host_script(&state.python_dir, &state.host_script_path())?;
+    }
+    record_interpreter(state, interpreter);
+    Ok(())
+}
+
+fn write_host_script(python_dir: &std::path::Path, host_script: &std::path::Path) -> Result<()> {
+    fs::create_dir_all(python_dir)?;
+    fs::write(host_script, rendered_host_script())?;
+    Ok(())
+}
+
+fn record_interpreter(state: &PythonRuntimeState, interpreter: Option<Interpreter>) {
     match interpreter {
         Some(interp) => {
-            fs::create_dir_all(&state.python_dir)?;
-            fs::write(state.host_script_path(), rendered_host_script())?;
             log::info!(
                 "python runtime initialized: {} ({})",
                 interp.argv_prefix.join(" "),
@@ -976,7 +998,6 @@ fn apply_initialize(state: &PythonRuntimeState, interpreter: Option<Interpreter>
             *state.interpreter.write() = None;
         }
     }
-    Ok(())
 }
 
 fn runtime_info_inner(state: &PythonRuntimeState) -> PythonRuntimeInfo {

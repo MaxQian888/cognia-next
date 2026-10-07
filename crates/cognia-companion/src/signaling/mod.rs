@@ -849,8 +849,12 @@ pub mod commands {
         devices: Vec<DeviceRegistration>,
     ) -> Result<(), String> {
         if let Some(store) = super::registration_store::installed() {
-            store
-                .replace_all(&devices, super::now_ms())
+            // A SQLite write under the store's mutex: keep it off the async
+            // workers, which a slow disk at startup otherwise stalls.
+            let rows = devices.clone();
+            tokio::task::spawn_blocking(move || store.replace_all(&rows, super::now_ms()))
+                .await
+                .map_err(|error| format!("signaling registration task failed: {error}"))?
                 .map_err(|error| error.to_string())?;
         }
         hub.sync_devices(devices);

@@ -34,7 +34,11 @@ pub async fn fleet_monitor_stop() -> Result<FleetMonitorStatus, String> {
 /// Full snapshot for island mount (before the first `fleet://update`).
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn fleet_get_snapshot() -> Result<FleetSnapshot, String> {
-    Ok(runtime().snapshot())
+    // The first call builds the runtime, which reads its recovery state from
+    // disk; that happens during startup, so it stays off the async workers.
+    tokio::task::spawn_blocking(|| runtime().snapshot())
+        .await
+        .map_err(|error| format!("fleet snapshot task failed: {error}"))
 }
 
 /// Brain-side disposable projection of a durable AgentTeam child. The child

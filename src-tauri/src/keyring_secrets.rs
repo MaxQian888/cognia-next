@@ -20,8 +20,24 @@ pub struct SecretStoreInput {
 /// Legacy input name retained for source compatibility.
 pub type KeyringInput = SecretStoreInput;
 
+/// Run secret-store work on the blocking pool. A write encrypts and fsyncs the
+/// whole store under its global lock, and every read waits on that lock; on
+/// the async workers a burst of them at startup stalled every other async
+/// command whenever the disk was slow to flush.
+async fn on_blocking_pool<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("secret-store task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn secret_store_get(input: SecretStoreInput) -> Result<Option<String>, String> {
+    on_blocking_pool(move || read_with_legacy_webhook_secret(&input)).await
+}
+
+fn read_with_legacy_webhook_secret(input: &SecretStoreInput) -> Result<Option<String>, String> {
     let current = get(&input.namespace, &input.key)?;
     if current.is_some() || input.namespace != "webhooks" || input.key != "standard-signing-secret"
     {
@@ -42,14 +58,13 @@ pub async fn secret_store_get(input: SecretStoreInput) -> Result<Option<String>,
 pub async fn secret_store_set(input: SecretStoreInput) -> Result<(), String> {
     let value = input
         .value
-        .as_deref()
         .ok_or_else(|| "secret-store set: value is required".to_string())?;
-    set(&input.namespace, &input.key, value)
+    on_blocking_pool(move || set(&input.namespace, &input.key, &value)).await
 }
 
 #[tauri::command]
 pub async fn secret_store_delete(input: SecretStoreInput) -> Result<(), String> {
-    clear(&input.namespace, &input.key)
+    on_blocking_pool(move || clear(&input.namespace, &input.key)).await
 }
 
 /// Deprecated wire alias for pre-secret-store clients.

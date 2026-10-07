@@ -228,6 +228,13 @@ impl SecretStore {
     /// raw keyring `set_password`); subsystems keep their own validation.
     fn set(&mut self, service: &str, account: &str, value: &str) -> Result<(), String> {
         let key = composite(service, account);
+        // Writing the value already stored rewrites and fsyncs the whole
+        // encrypted blob under the global lock for nothing; callers re-save
+        // unchanged secrets routinely at startup.
+        if self.cache.get(&key).map(String::as_str) == Some(value) {
+            self.legacy_reads.remove(&key);
+            return Ok(());
+        }
         let previous = self.cache.insert(key.clone(), value.to_string());
         if let Err(error) = self.persist() {
             match previous {
@@ -1567,6 +1574,35 @@ mod tests {
         assert!(list_accounts("inventory-other").unwrap().is_empty());
         delete("inventory-test", "custom:one").unwrap();
         delete("inventory-test/nested", "custom:two").unwrap();
+    }
+
+    #[test]
+    fn setting_an_unchanged_value_does_not_rewrite_the_store() {
+        let path = tmp_path();
+        let mut s = SecretStore::open(path.clone(), [7u8; 32]).unwrap();
+        s.set("com.cognia.gateway", "bearer-token", "tok-1")
+            .unwrap();
+        let written = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        s.set("com.cognia.gateway", "bearer-token", "tok-1")
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            written
+        );
+
+        s.set("com.cognia.gateway", "bearer-token", "tok-2")
+            .unwrap();
+        assert_ne!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            written
+        );
+        let reopened = SecretStore::open(path, [7u8; 32]).unwrap();
+        assert_eq!(
+            reopened.peek("com.cognia.gateway", "bearer-token"),
+            Some("tok-2".to_string())
+        );
     }
 
     #[test]

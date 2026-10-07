@@ -30,7 +30,13 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
 /// cheap probe shows "Active".
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn sandbox_health_check() -> Result<crate::sandbox::types::ProbeReport, String> {
-    Ok(current_backend().probe_confinement().await)
+    // The probe mixes blocking filesystem setup with the confined runs; the
+    // renderer asks for it at startup, so it runs on a blocking thread rather
+    // than holding an async worker while the disk is slow.
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || runtime.block_on(current_backend().probe_confinement()))
+        .await
+        .map_err(|error| format!("sandbox probe task failed: {error}"))
 }
 
 /// The plugin that owns every sandboxed tool. `sandbox_exec` is reachable only
