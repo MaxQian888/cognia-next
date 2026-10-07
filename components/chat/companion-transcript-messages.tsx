@@ -10,7 +10,7 @@ import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { useCharacters } from "@/lib/data-hooks/context"
-import { transport } from "@/lib/tauri/transport-instance"
+import { onTransportChange, transport } from "@/lib/tauri/transport-instance"
 import { TranscriptTimelineSurface } from "./transcript-timeline-surface"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
@@ -18,7 +18,11 @@ import type { MessageDisplayPreferences } from "@/types/appearance"
 
 type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
-const companionTranscriptSource = createRemoteTranscriptSource(transport)
+// Resolved per call: a browser that pairs after this module loaded swaps the
+// transport, and a captured instance would keep reading the pre-pairing stub.
+const companionTranscriptSource = createRemoteTranscriptSource(() => transport, {
+  onTransportChange,
+})
 
 /** Keep only the unfinished tail beside folded, host-projected history. */
 export function selectActiveTurnMessages(messages: UIMessage[], status: ChatStatus): UIMessage[] {

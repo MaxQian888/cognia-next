@@ -267,6 +267,25 @@ describe("publishTranscriptRevision", () => {
     window.removeEventListener("transcript://revision", listener)
   })
 
+  // The defect: only Tauri was tried, so the headless brain — which keeps a
+  // paired browser's replies — never told that browser its transcript moved.
+  it("publishes through the headless brain's host-event publisher", async () => {
+    const { setHostEventPublisher } = await import("@/lib/companion/host-event-publisher")
+    const publisher = jest.fn()
+    const release = setHostEventPublisher(publisher)
+    try {
+      await publishTranscriptRevision("s1", 6)
+    } finally {
+      release()
+    }
+
+    expect(publisher).toHaveBeenCalledWith("transcript://revision", {
+      sessionId: "s1",
+      revision: 6,
+    })
+    expect(emit).not.toHaveBeenCalled()
+  })
+
   it("forwards the bounded revision envelope through Tauri", async () => {
     ;(isTauri as jest.Mock).mockReturnValueOnce(true)
 

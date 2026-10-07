@@ -31,6 +31,60 @@ describe("remote transcript source", () => {
     expect(listener).toHaveBeenCalledWith(4)
   })
 
+  // The defect: the callers built their source at module load and captured the
+  // transport of that moment. A browser that paired afterwards still read the
+  // web stub, so the timeline failed (`no_host_transport`) and a reply kept on
+  // the host never appeared until a reload.
+  it("reads through whichever transport is current and follows a swap", async () => {
+    const stub = {
+      call: jest.fn(async () => {
+        throw Object.assign(new Error("tauri-only command from web mode"), {
+          code: "no_host_transport",
+        })
+      }),
+      subscribe: jest.fn(() => jest.fn()),
+    }
+    const unsubscribeHost = jest.fn()
+    let hostRevision: ((event: { sessionId?: string; revision?: number }) => void) | undefined
+    const host = {
+      call: jest.fn(async (command: string) =>
+        command === "transcript_capabilities"
+          ? transcriptCapabilitiesV1()
+          : { items: [], revision: 2, hasMore: false }
+      ),
+      subscribe: jest.fn((_event: string, next: unknown) => {
+        hostRevision = next as typeof hostRevision
+        return unsubscribeHost
+      }),
+    }
+    let active: typeof stub | typeof host = stub
+    let swapped: (() => void) | undefined
+    const source = createRemoteTranscriptSource(() => active as never, {
+      onTransportChange: (handler) => {
+        swapped = handler
+        return () => {
+          swapped = undefined
+        }
+      },
+    })
+    const listener = jest.fn()
+    const unsubscribe = source.subscribeRevision?.("s1", listener)
+    await expect(source.capabilities()).rejects.toMatchObject({ code: "no_host_transport" })
+
+    active = host
+    swapped?.()
+    await expect(
+      source.timeline({ sessionId: "s1", direction: "backward" })
+    ).resolves.toMatchObject({ revision: 2 })
+    expect(host.call).toHaveBeenCalledWith("transcript_capabilities", {})
+    hostRevision?.({ sessionId: "s1", revision: 2 })
+    expect(listener).toHaveBeenCalledWith(2)
+
+    unsubscribe?.()
+    expect(unsubscribeHost).toHaveBeenCalled()
+    expect(swapped).toBeUndefined()
+  })
+
   it("uses the transcript RPCs when the host advertises the capability", async () => {
     const capabilities = transcriptCapabilitiesV1()
     const call = jest.fn(async (name: string) => {

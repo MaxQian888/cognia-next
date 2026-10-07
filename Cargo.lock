@@ -2138,6 +2138,7 @@ dependencies = [
  "cognia-problem",
  "cognia-sandbox-pool",
  "cognia-secrets",
+ "cognia-sidecar",
  "cognia-signaling-core",
  "cognia-tenant-auth",
  "cognia-terminal",

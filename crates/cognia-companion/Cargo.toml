@@ -68,6 +68,7 @@ cognia-power = { path = "../cognia-power" }
 cognia-problem = { path = "../cognia-problem", features = ["axum"] }
 cognia-sandbox-pool = { path = "../cognia-sandbox-pool" }
 cognia-secrets = { path = "../cognia-secrets" }
+cognia-sidecar = { path = "../cognia-sidecar" }
 cognia-signaling-core = { path = "../../services/signaling-server/core" }
 cognia-tenant-auth = { path = "../cognia-tenant-auth" }
 cognia-terminal = { path = "../cognia-terminal" }

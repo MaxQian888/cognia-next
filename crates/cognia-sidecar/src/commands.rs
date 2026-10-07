@@ -610,6 +610,31 @@ pub fn is_allowed_control_method(method: &str) -> bool {
     )
 }
 
+/// The allowlisted control methods that only read a live session's state.
+///
+/// A host charges a paired device's calls to a per-device bucket, and the
+/// read-only bucket is the wide one. `claude_session_control` is a single
+/// command whose methods do either, so its manifest entry is `side-effect`
+/// and every call used to draw on the 10-token mutating bucket — including
+/// the capability probes a chat issues around each turn, which left the
+/// turn's own writes refused with `rate_limited`. These methods change
+/// nothing, so they are charged as reads.
+pub fn is_read_only_control_method(method: &str) -> bool {
+    matches!(
+        method,
+        "accountInfo"
+            | "backgroundTasks"
+            | "getContextUsage"
+            | "initializationResult"
+            | "mcpServerStatus"
+            | "readFile"
+            | "runtimeStatus"
+            | "supportedAgents"
+            | "supportedCommands"
+            | "supportedModels"
+    )
+}
+
 /// Build the `control` JSON line written to the sidecar stdin. Pure so it is
 /// unit-testable without a running sidecar.
 fn build_session_control_payload(
@@ -1297,6 +1322,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn read_only_control_methods_are_allowed_and_change_nothing() {
+        for m in [
+            "accountInfo",
+            "backgroundTasks",
+            "getContextUsage",
+            "initializationResult",
+            "mcpServerStatus",
+            "readFile",
+            "runtimeStatus",
+            "supportedAgents",
+            "supportedCommands",
+            "supportedModels",
+        ] {
+            assert!(is_allowed_control_method(m), "{m} must be allowlisted");
+            assert!(is_read_only_control_method(m), "{m} only reads");
+        }
+        for m in [
+            "setModel",
+            "setPermissionMode",
+            "steer",
+            "stopTask",
+            "rewindFiles",
+            "reinitialize",
+            "updateSettings",
+            "close",
+        ] {
+            assert!(!is_read_only_control_method(m), "{m} changes the session");
+        }
+    }
     #[test]
     fn builds_session_control_payload_with_params() {
         let p = build_session_control_payload(

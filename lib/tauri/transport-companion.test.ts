@@ -2407,6 +2407,40 @@ describe("subscribe() — resync_required", () => {
   })
 })
 
+describe("subscribe() — resync after a Host restart", () => {
+  // The defect: a cursor kept for a channel with no handler (a default-on
+  // frame nobody listens to) survived the resync at the old Host process's
+  // numbering. The reconnect asked the restarted bus for that seq, it
+  // answered resync_required again, and the event stream never recovered.
+  it("drops every old cursor so the reconnect resumes on the new bus", async () => {
+    const resolver = jest.fn(async () => {})
+    const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
+    await setConfig()
+    transport = new CompanionTransport()
+    transport.subscribe("claude://message", jest.fn())
+
+    const ws1 = MockWebSocket.lastInstance!
+    ws1.triggerOpen()
+    ws1.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 40, payload: "x", ts_ms: 0 })
+    )
+    // A default-on channel this client never subscribed a handler for.
+    ws1.triggerMessage(
+      JSON.stringify({ type: "sync://invalidate", seq: 900, payload: {}, ts_ms: 0 })
+    )
+
+    // The Host restarted: its new bus is at 3.
+    ws1.triggerMessage(JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 3 }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(resolver).toHaveBeenCalledTimes(1)
+    const ws2 = MockWebSocket.instances[1]
+    expect(ws2.url).toContain("since=3")
+    expect(ws2.url).not.toContain("since=900")
+    removeResolver()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // WebSocket reconnect
 // ---------------------------------------------------------------------------
@@ -2939,7 +2973,7 @@ describe("isOnConnectedLan()", () => {
 })
 
 describe("call() — LAN-first gate", () => {
-  it.each(["rate_limited", "INVALID_PARAMS", "device_revoked"])(
+  it.each(["INVALID_PARAMS", "device_revoked"])(
     "preserves RTC host refusal %s without an HTTPS retry",
     async (code) => {
       await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
@@ -2955,6 +2989,70 @@ describe("call() — LAN-first gate", () => {
       expect(fetchSpy).not.toHaveBeenCalled()
     }
   )
+
+  // A quota refusal is answered before the Host dispatches anything, so the
+  // transport waits the interval out and asks again on the same carrier —
+  // for a mutating, non-idempotent command too — instead of failing a chat
+  // turn that merely outran the per-device bucket. Never via HTTPS.
+  it("waits out an RTC quota refusal and repeats the call on the same carrier", async () => {
+    jest.useFakeTimers()
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    const refusal = Object.assign(new Error("retry_after_seconds=2"), {
+      code: "rate_limited",
+      retryAfterMs: 2_000,
+    })
+    fakeRtc.call.mockRejectedValueOnce(refusal).mockResolvedValueOnce({ sent: true })
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    const pending = transport.call("agent_send", { sessionId: "s1", prompt: "hi" })
+    await jest.advanceTimersByTimeAsync(1_999)
+    expect(fakeRtc.call).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    await expect(pending).resolves.toEqual({ sent: true })
+    expect(fakeRtc.call).toHaveBeenCalledTimes(2)
+    // Same request both times: the key the first round minted is reused.
+    const keys = fakeRtc.call.mock.calls.map(
+      (call: unknown[]) => (call[2] as { idempotencyKey?: string }).idempotencyKey
+    )
+    expect(keys[0]).toBeDefined()
+    expect(keys[1]).toBe(keys[0])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("stops waiting after a few rounds and hands the caller the refusal", async () => {
+    jest.useFakeTimers()
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    const refusal = Object.assign(new Error("retry_after_seconds=1"), {
+      code: "rate_limited",
+      retryAfterMs: 1_000,
+    })
+    fakeRtc.call.mockRejectedValue(refusal)
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    const pending = transport.call("agent_send", { sessionId: "s1", prompt: "hi" })
+    const settled = pending.catch((error: unknown) => error)
+    await jest.runAllTimersAsync()
+    expect(await settled).toBe(refusal)
+    expect(fakeRtc.call).toHaveBeenCalledTimes(4)
+  })
+
+  it("does not sit through a quota wait longer than a call should block", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    const refusal = Object.assign(new Error("retry_after_seconds=60"), {
+      code: "rate_limited",
+      retryAfterMs: 60_000,
+    })
+    fakeRtc.call.mockRejectedValueOnce(refusal)
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    await expect(transport.call("claude_sidecar_status")).rejects.toBe(refusal)
+    expect(fakeRtc.call).toHaveBeenCalledTimes(1)
+  })
 
   it("does not route local RTC overload through HTTPS", async () => {
     await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })

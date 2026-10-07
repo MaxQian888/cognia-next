@@ -85,20 +85,37 @@ async function loadLegacyMessages(
  * timeouts, stale revisions, authorization failures, and server errors remain
  * visible to the controller instead of triggering an unbounded legacy read.
  */
-export function createRemoteTranscriptSource(transport: Transport): TranscriptSource {
-  let capabilityState: TranscriptCapabilitiesV1 | null | undefined
+export interface RemoteTranscriptSourceOptions {
+  /**
+   * Tell the source the transport was replaced, so a live revision
+   * subscription moves to the new one. Pairs with a `transport` resolver.
+   */
+  onTransportChange?: (handler: () => void) => () => void
+}
+
+export function createRemoteTranscriptSource(
+  transport: Transport | (() => Transport),
+  options: RemoteTranscriptSourceOptions = {}
+): TranscriptSource {
+  // Resolved per call, not captured. Both callers build their source at module
+  // load, when a browser that pairs later still holds the web stub: every read
+  // then failed with `no_host_transport` ("Retry transcript"), and the revision
+  // subscription listened to the stub, so a reply kept on the host never showed
+  // up until a reload rebuilt the module.
+  const current = typeof transport === "function" ? transport : () => transport
+  // The capability answer belongs to the transport (host) that gave it.
+  const capabilityState = new WeakMap<Transport, TranscriptCapabilitiesV1 | null>()
 
   const capabilities = async (): Promise<TranscriptCapabilitiesV1 | null> => {
-    if (capabilityState !== undefined) return capabilityState
+    const target = current()
+    if (capabilityState.has(target)) return capabilityState.get(target) ?? null
     try {
-      capabilityState = await transport.call<TranscriptCapabilitiesV1>(
-        "transcript_capabilities",
-        {}
-      )
-      return capabilityState
+      const answer = await target.call<TranscriptCapabilitiesV1>("transcript_capabilities", {})
+      capabilityState.set(target, answer)
+      return answer
     } catch (error) {
       if (!isMethodNotFound(error)) throw error
-      capabilityState = null
+      capabilityState.set(target, null)
       return null
     }
   }
@@ -106,25 +123,35 @@ export function createRemoteTranscriptSource(transport: Transport): TranscriptSo
   return {
     capabilities,
     subscribeRevision(sessionId, listener) {
-      return transport.subscribe<{ sessionId?: string; revision?: number }>(
-        "transcript://revision",
-        (event) => {
-          if (event.sessionId !== sessionId || typeof event.revision !== "number") return
-          listener(event.revision)
-        }
-      )
+      const listen = () =>
+        current().subscribe<{ sessionId?: string; revision?: number }>(
+          "transcript://revision",
+          (event) => {
+            if (event.sessionId !== sessionId || typeof event.revision !== "number") return
+            listener(event.revision)
+          }
+        )
+      let unsubscribe = listen()
+      const stopFollowing = options.onTransportChange?.(() => {
+        unsubscribe()
+        unsubscribe = listen()
+      })
+      return () => {
+        stopFollowing?.()
+        unsubscribe()
+      }
     },
     async timeline(request) {
       const supported = await capabilities()
       if (supported) {
-        return transport.call<SessionTimelinePage>("session_timeline", {
+        return current().call<SessionTimelinePage>("session_timeline", {
           session_id: request.sessionId,
           direction: request.direction,
           cursor: request.cursor,
           limit: request.limit,
         })
       }
-      const rows = await loadLegacyMessages(transport, request.sessionId)
+      const rows = await loadLegacyMessages(current(), request.sessionId)
       const items = projectTranscriptTimeline({
         sessionId: request.sessionId,
         revision: 0,
@@ -139,7 +166,7 @@ export function createRemoteTranscriptSource(transport: Transport): TranscriptSo
         // The wire pages by pageSize/pageToken and answers the page envelope
         // (ADR-0175 B3). The transcript protocol keeps its own cursor words,
         // so the token rides in `nextCursor` and comes back as `cursor`.
-        const page = await transport.call<
+        const page = await current().call<
           Page<SessionTurnMessagesPage["messages"][number]> &
             Pick<
               SessionTurnMessagesPage,
@@ -163,7 +190,7 @@ export function createRemoteTranscriptSource(transport: Transport): TranscriptSo
           hasMore: Boolean(page.nextPageToken),
         }
       }
-      const rows = await loadLegacyMessages(transport, request.sessionId)
+      const rows = await loadLegacyMessages(current(), request.sessionId)
       const messages = rows.filter(
         (message) => message.turnKey === request.turnKey || `turn:${message.id}` === request.turnKey
       )

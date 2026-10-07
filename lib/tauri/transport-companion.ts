@@ -564,6 +564,12 @@ type Handler<T = unknown> = (payload: T) => void
 const WS_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000] as const
 
 const HTTP_MAX_ATTEMPTS = 3
+/** Extra rounds a call may spend waiting out a Host quota refusal. */
+const QUOTA_MAX_EXTRA_ROUNDS = 3
+/** Longest Host-requested wait worth sitting through inside one call. */
+const QUOTA_MAX_WAIT_MS = 5_000
+/** Floor for a wait: the Host rounds its seconds down, so `0` means "soon". */
+const QUOTA_MIN_WAIT_MS = 250
 const HTTP_BACKOFF_BASE_MS = 250
 const HTTP_BACKOFF_CAP_MS = 2_000
 const HTTP_RETRY_AFTER_CAP_MS = 30_000
@@ -983,6 +989,9 @@ export class CompanionTransport implements Transport {
         )
       }, timeoutMs)
     })
+    // One key for every round below: a request the Host refused for quota
+    // never ran, and a later round that does run is still the same request.
+    const mintedKey = crypto.randomUUID()
     const execute = async (): Promise<T> => {
       // ADR-0021 — route through the WebRTC DataChannel when it is open,
       // UNLESS we're on a connected LAN (mDNS HTTPS+WS is preferred when
@@ -995,9 +1004,7 @@ export class CompanionTransport implements Transport {
       // the HTTPS fallback. If the DataChannel write reached the server and ran
       // before the channel hard-failed, the fallback request carrying the same
       // key lets the server dedupe instead of double-executing the command.
-      const idempotencyKey = isReadOnly
-        ? undefined
-        : (options?.idempotencyKey ?? crypto.randomUUID())
+      const idempotencyKey = isReadOnly ? undefined : (options?.idempotencyKey ?? mintedKey)
       const retryable =
         descriptor?.operation === "read" ||
         (descriptor?.idempotency === "required" && idempotencyKey !== undefined)
@@ -1090,8 +1097,27 @@ export class CompanionTransport implements Transport {
         }
       }
     }
+    // A quota refusal is answered before the Host dispatches anything, so it
+    // is safe to repeat for every command, not only the idempotent ones the
+    // HTTP layer retries. Without this a chat turn, which issues a burst of
+    // mutating calls (workspace bundle, leases, the send itself), failed
+    // outright the moment it outran the per-device bucket, although the Host
+    // had said exactly how long to wait. Bounded: only short waits that fit
+    // the call's deadline, and only a few rounds.
+    const executeWithinQuota = async (): Promise<T> => {
+      for (let round = 0; ; round++) {
+        try {
+          return await execute()
+        } catch (error) {
+          const wait = quotaWaitMs(error)
+          if (wait === null || round >= QUOTA_MAX_EXTRA_ROUNDS || Date.now() + wait >= deadlineAt)
+            throw error
+          await sleep(wait, signal)
+        }
+      }
+    }
     try {
-      return await Promise.race([execute(), expired])
+      return await Promise.race([executeWithinQuota(), expired])
     } finally {
       clearTimeout(timer)
     }
@@ -2290,6 +2316,14 @@ export class CompanionTransport implements Transport {
         if (!Number.isSafeInteger(cursor) || (cursor as number) < 0) {
           throw new Error("resync notice omitted a valid cursor")
         }
+        // The notice's cursor replaces every cursor we hold, as the RTC
+        // transport's resync does. Setting it only for the channels with a
+        // handler left the entries of channels that had none (default-on
+        // frames nobody listens to) or no longer have one at the old Host
+        // process's numbering. After a Host restart `globalMaxSeq` then asked
+        // the new bus for a seq it had never issued, it answered
+        // `resync_required` again, and the stream never came back.
+        this.highestSeq.clear()
         for (const event of this.channelHandlers.keys()) {
           this.highestSeq.set(event, cursor as number)
         }
@@ -2495,6 +2529,26 @@ export class CompanionTransport implements Transport {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+/**
+ * How long to wait before repeating a call the Host refused for quota, or
+ * null when `error` is no such refusal or asks for a wait too long to sit
+ * through inside one call (the caller then gets the error and its
+ * `retryAfterMs`, as before).
+ */
+function quotaWaitMs(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null
+  const { code, retryable, retryAfterMs } = error as {
+    code?: unknown
+    retryable?: unknown
+    retryAfterMs?: unknown
+  }
+  if (code !== "rate_limited" || retryable === false) return null
+  const asked =
+    typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) ? retryAfterMs : 1_000
+  if (asked > QUOTA_MAX_WAIT_MS) return null
+  return Math.max(QUOTA_MIN_WAIT_MS, asked)
+}
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

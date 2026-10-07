@@ -1024,10 +1024,27 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 // only; the push sanitizer strips the audience before it
                 // transits a provider.
                 "companion://needs-input",
+                // A transcript the brain wrote moved (a reply it kept for a
+                // paired client's turn). Session id + revision only — see
+                // `transcript_revision_envelope` — so clients refetch through
+                // `session_timeline` instead of waiting for a reload.
+                TRANSCRIPT_REVISION_TOPIC,
             ];
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();
             match (topic, event) {
+                (Some(TRANSCRIPT_REVISION_TOPIC), Some(event)) => {
+                    match transcript_revision_envelope(&event) {
+                        Some(envelope) => {
+                            state
+                                .event_bus
+                                .publish(TRANSCRIPT_REVISION_TOPIC.to_string(), envelope);
+                        }
+                        None => log::warn!(
+                            "companion-api ws-bridge: bad transcript revision payload"
+                        ),
+                    }
+                }
                 (Some(topic), Some(event)) if ALLOWED_TOPICS.contains(&topic) => {
                     state.event_bus.publish(topic.to_string(), event);
                 }
@@ -1069,6 +1086,32 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
             log::warn!("companion-api ws-bridge: unknown respond command {other:?}, ignoring");
         }
     }
+}
+
+const TRANSCRIPT_REVISION_TOPIC: &str = "transcript://revision";
+
+/// The only fields a brain-published `transcript://revision` frame may carry.
+///
+/// The channel is documented as content-free (`event_channels.rs`), and this
+/// keeps it so whatever the brain sends: a session id and a revision number,
+/// plus the runtime generation and database name a destructive invalidation
+/// names. Anything else is dropped; a frame without a session id or revision
+/// is refused.
+fn transcript_revision_envelope(event: &Value) -> Option<Value> {
+    let session_id = event
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())?;
+    let revision = event.get("revision").and_then(Value::as_u64)?;
+    let mut envelope = serde_json::Map::new();
+    envelope.insert("sessionId".into(), Value::String(session_id.to_string()));
+    envelope.insert("revision".into(), Value::from(revision));
+    for key in ["runtimeGeneration", "databaseName"] {
+        if let Some(value) = event.get(key).and_then(Value::as_str) {
+            envelope.insert(key.into(), Value::String(value.to_string()));
+        }
+    }
+    Some(Value::Object(envelope))
 }
 
 // ---------------------------------------------------------------------------
@@ -1881,6 +1924,42 @@ mod tests {
                 json!({ "topic": topic, "event": { "id": "opaque" } }),
             );
             assert!(seen(topic), "expected {topic} to be allowed");
+        }
+
+        // A transcript revision is published with its identity fields only.
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({
+                "topic": "transcript://revision",
+                "event": { "sessionId": "s1", "revision": 4, "parts": [{ "text": "secret" }] }
+            }),
+        );
+        match state.event_bus.subscribe(Some(0), 0) {
+            super::super::event_bus::SubscribeResult::Ok { replay, .. } => {
+                let frame = replay
+                    .iter()
+                    .find(|frame| frame.event_type == "transcript://revision")
+                    .expect("transcript revision published");
+                assert_eq!(frame.payload, json!({ "sessionId": "s1", "revision": 4 }));
+            }
+            _ => panic!("replay from seq 0 must be available in-test"),
+        }
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({ "topic": "transcript://revision", "event": { "sessionId": "s2" } }),
+        );
+        match state.event_bus.subscribe(Some(0), 0) {
+            super::super::event_bus::SubscribeResult::Ok { replay, .. } => assert_eq!(
+                replay
+                    .iter()
+                    .filter(|frame| frame.event_type == "transcript://revision")
+                    .count(),
+                1,
+                "a revision frame without a revision is refused"
+            ),
+            _ => panic!("replay from seq 0 must be available in-test"),
         }
 
         // Not on the allowlist → dropped, not published.

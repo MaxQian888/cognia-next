@@ -868,9 +868,11 @@ async function resolveHostStateService(
       const publish = bridge
         ? (name: string, args: Record<string, unknown>) => bridge.invoke(name, args)
         : (name: string, args: Record<string, unknown>) => invoke(name, args)
+      // The CLI bridge is a desktop server; a headless host (the `bridge`
+      // case) has none, and every event logged an "unknown respond command".
       const outcomes = await Promise.allSettled([
         publish("companion_host_state_publish", { topic, event }),
-        publish("cli_bridge_host_state_publish", { event }),
+        ...(bridge ? [] : [publish("cli_bridge_host_state_publish", { event })]),
       ])
       if (outcomes.every((outcome) => outcome.status === "rejected")) {
         throw new Error("host_state_event_publisher_unavailable")

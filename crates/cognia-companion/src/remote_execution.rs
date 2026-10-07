@@ -310,6 +310,28 @@ pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_li
     }
 }
 
+/// [`rate_limit_class`] for one concrete request.
+///
+/// `claude_session_control` is one manifest entry for every SDK control
+/// method, so its descriptor alone says `side-effect`. A read-only method
+/// (the capability probes a chat issues around each turn) is charged to the
+/// read bucket instead, which keeps those probes from spending the 10-token
+/// mutating bucket the turn's own writes need.
+pub(super) fn request_rate_limit_class(
+    descriptor: &CommandDescriptor,
+    args: &Value,
+) -> super::rate_limit::RequestClass {
+    if descriptor.name == "claude_session_control"
+        && args
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(cognia_sidecar::commands::is_read_only_control_method)
+    {
+        return super::rate_limit::RequestClass::ReadOnly;
+    }
+    rate_limit_class(descriptor)
+}
+
 /// The answer for a name the contract does not serve. A name the rename
 /// table knows is 410 `command_renamed` with the replacement in
 /// `details.replacement` (ADR-0175). Any other name is 404 `unknown_command`.
@@ -386,7 +408,7 @@ async fn execute_inner(
         // moves on, so the tail tables ended up silently EMPTY, and the
         // `host_feature_manifest` refresh that follows was refused too, leaving
         // a correctly-paired client stuck on "the Host didn't come online".
-        let class = rate_limit_class(descriptor);
+        let class = request_rate_limit_class(descriptor, &request.args);
         if let super::rate_limit::RateLimitDecision::Reject { retry_after } = state
             .rate_limiter
             .check_class(&request.principal.device_id, class)
@@ -1071,6 +1093,38 @@ mod tests {
                 RequestClass::Mutating
             );
         }
+    }
+
+    #[test]
+    fn session_control_probes_draw_on_the_read_bucket_and_controls_do_not() {
+        use super::super::rate_limit::RequestClass;
+        let descriptor =
+            super::super::command_manifest::descriptor("claude_session_control").unwrap();
+        for method in ["getContextUsage", "supportedCommands", "mcpServerStatus"] {
+            assert_eq!(
+                request_rate_limit_class(descriptor, &json!({ "method": method })),
+                RequestClass::ReadOnly,
+                "{method}"
+            );
+        }
+        for args in [
+            json!({ "method": "setModel" }),
+            json!({ "method": "steer" }),
+            json!({}),
+            json!({ "method": 7 }),
+        ] {
+            assert_eq!(
+                request_rate_limit_class(descriptor, &args),
+                RequestClass::Mutating,
+                "{args}"
+            );
+        }
+        // Every other command keeps its manifest classification whatever its args say.
+        let send = super::super::command_manifest::descriptor("agent_send").unwrap();
+        assert_eq!(
+            request_rate_limit_class(send, &json!({ "method": "getContextUsage" })),
+            rate_limit_class(send)
+        );
     }
 
     #[test]

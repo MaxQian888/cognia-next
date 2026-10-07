@@ -1,4 +1,5 @@
 import { isTauri } from "@/lib/platform/detect"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import { createMutex, type Mutex } from "@cognia/primitives"
 import type { MessagePersistOptions } from "@/lib/db/messages"
 
@@ -267,14 +268,10 @@ export async function publishTranscriptRevision(
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(TRANSCRIPT_REVISION_EVENT, { detail: payload }))
   }
-  if (!isTauri()) return
-  try {
-    const moduleId = "@tauri-apps/api/event"
-    const event = (await import(/* webpackIgnore: true */ moduleId)) as {
-      emit: (name: string, value: unknown) => Promise<void>
-    }
-    await event.emit(TRANSCRIPT_REVISION_EVENT, payload)
-  } catch {
-    // Best effort: persisted revision remains authoritative for reconnect.
-  }
+  // The host-neutral publisher: Tauri `emit` on the desktop, the bridge route
+  // in the headless brain. Emitting through Tauri alone meant a headless host
+  // never told paired clients that a transcript moved, so a reply it kept for
+  // a paired browser appeared there only after a reload. Best effort either
+  // way: the persisted revision stays authoritative for reconnect.
+  await publishHostEvent(TRANSCRIPT_REVISION_EVENT, payload)
 }

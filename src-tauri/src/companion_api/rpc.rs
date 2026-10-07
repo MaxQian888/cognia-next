@@ -2707,7 +2707,15 @@ pub async fn rpc_handler(
             "plugin_media_read_chunk" | "plugin_media_close_transfer"
         ) {
             crate::companion_api::rate_limit::RequestClass::MediaTransfer
-        } else if is_read_only {
+        } else if is_read_only
+            || (name == "claude_session_control"
+                && args
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .is_some_and(cognia_sidecar::commands::is_read_only_control_method))
+        {
+            // A read-only SDK control method is charged as a read, the same
+            // rule `remote_execution::request_rate_limit_class` applies.
             crate::companion_api::rate_limit::RequestClass::ReadOnly
         } else {
             crate::companion_api::rate_limit::RequestClass::Mutating

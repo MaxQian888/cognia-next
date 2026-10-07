@@ -36,12 +36,15 @@ import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
 import { SessionMediaProvider } from "@/hooks/chat/session-media-provider"
 import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { transport } from "@/lib/tauri"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import { getSession } from "@/lib/db/sessions"
 import { useCompanionFusionRuns } from "@/components/router-fusion/companion/use-companion-fusion-runs"
 import { CompanionFusionRunList } from "@/components/router-fusion/companion/companion-fusion-run-view"
 
-const remoteTranscriptSource = createRemoteTranscriptSource(transport)
+// Resolved per call: a browser that pairs after this module loaded swaps the
+// transport, and a captured instance would keep reading the pre-pairing stub.
+const remoteTranscriptSource = createRemoteTranscriptSource(() => transport, { onTransportChange })
 
 export interface RemoteSessionDetailProps {
   sessionId: string
