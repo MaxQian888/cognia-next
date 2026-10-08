@@ -95,6 +95,18 @@ const OPTIONAL_SERVER_PACKAGES = ["langfuse"]
 const PIXI_PREBUNDLED_ABS = path.resolve(process.cwd(), "node_modules/pixi.js/dist/pixi.mjs")
 const FOLLOW_UPS_MOCK = path.resolve(process.cwd(), "hooks/chat/use-follow-up-suggestions.mock.ts")
 
+// `@storybook/nextjs` 10.6's App Router mock predates Next 16.4's
+// `LayoutRouterContext.parentRenderTree`, so `useRouter()` in the framework's
+// own RedirectBoundary crashes every story. Its imports of the router-context
+// module are redirected to a shim that fills the field in; see the shim.
+const APP_ROUTER_CONTEXT_REQUEST =
+  /^next\/dist\/shared\/lib\/app-router-context\.shared-runtime(\.js)?$/
+const STORYBOOK_NEXTJS_DIST = /[\\/]@storybook[\\/]nextjs[\\/]dist[\\/]/
+const LAYOUT_ROUTER_CONTEXT_SHIM = path.resolve(
+  process.cwd(),
+  ".storybook/next-layout-router-context.tsx"
+)
+
 const config: StorybookConfig = {
   framework: {
     name: "@storybook/nextjs",
@@ -194,6 +206,26 @@ const config: StorybookConfig = {
       }
     }
     walkRules(cfg.module?.rules as unknown[] | undefined)
+
+    // Swap the framework's router-context import for the shim. This runs in
+    // `beforeResolve`, on the raw request, because the framework also aliases
+    // bare `next` to an absolute directory — a `resolve.alias` keyed on the
+    // specifier would never see it again after that rewrite. Scoped by issuer
+    // so the shim's own import (and every app import) gets Next's real module.
+    cfg.plugins.push({
+      apply(compiler) {
+        compiler.hooks.normalModuleFactory.tap("CogniaLayoutRouterContextShim", (factory) => {
+          factory.hooks.beforeResolve.tap("CogniaLayoutRouterContextShim", (data) => {
+            if (
+              APP_ROUTER_CONTEXT_REQUEST.test(data.request) &&
+              STORYBOOK_NEXTJS_DIST.test(data.contextInfo.issuer ?? "")
+            ) {
+              data.request = LAYOUT_ROUTER_CONTEXT_SHIM
+            }
+          })
+        })
+      },
+    })
 
     // Memory/disk bounds for the fsCache enabled above. Without these the
     // filesystem cache is unbounded in both directions: the on-disk pack
