@@ -71,6 +71,32 @@ describe("StorageManager.getStats", () => {
 })
 
 describe("StorageManager.getHealth", () => {
+  it("derives health from a supplied snapshot without another database walk", async () => {
+    const stats = await StorageManager.getStats()
+    const read = jest
+      .spyOn(StorageManager, "getStats")
+      .mockRejectedValue(new Error("unexpected read"))
+    try {
+      await expect(StorageManager.getHealth(stats)).resolves.toEqual(
+        __TESTING__.computeHealth(stats)
+      )
+      expect(read).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it("still reads fresh stats for standalone health calls", async () => {
+    const stats = await StorageManager.getStats()
+    const read = jest.spyOn(StorageManager, "getStats").mockResolvedValue(stats)
+    try {
+      await expect(StorageManager.getHealth()).resolves.toEqual(__TESTING__.computeHealth(stats))
+      expect(read).toHaveBeenCalledTimes(1)
+    } finally {
+      read.mockRestore()
+    }
+  })
+
   it("returns healthy when usage is under the warning threshold", async () => {
     const health = await StorageManager.getHealth()
     expect(health.status).toBe("healthy")

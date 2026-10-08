@@ -208,9 +208,8 @@ export class StorageManagerImpl {
     }
   }
 
-  async getHealth(): Promise<StorageHealth> {
-    const stats = await this.getStats()
-    return computeHealth(stats)
+  async getHealth(stats?: StorageStats): Promise<StorageHealth> {
+    return computeHealth(stats ?? (await this.getStats()))
   }
 
   async clearAllCogniaData(): Promise<void> {

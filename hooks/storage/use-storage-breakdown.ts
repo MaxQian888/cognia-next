@@ -38,10 +38,8 @@ export function useStorageBreakdown(
   // subsequent refreshes the previous data stays visible underneath.
   const refresh = useCallback(async () => {
     try {
-      const [nextStats, nextHealth] = await Promise.all([
-        StorageManager.getStats(),
-        StorageManager.getHealth(),
-      ])
+      const nextStats = await StorageManager.getStats()
+      const nextHealth = await StorageManager.getHealth(nextStats)
       setStats(nextStats)
       setHealth(nextHealth)
       setError(null)
@@ -50,14 +48,18 @@ export function useStorageBreakdown(
     }
   }, [])
 
-  // Initial fetch. Structured as Promise.all().then() (not async/await)
+  // Initial fetch. Structured as a promise chain (not async/await)
   // because the React Compiler's `set-state-in-effect` lint rule flags
   // synchronous `setState` calls inside an effect body — the same pattern
   // used by `hooks/data/use-storage-stats.ts` for its quota fetch.
   useEffect(() => {
     let cancelled = false
-    Promise.all([StorageManager.getStats(), StorageManager.getHealth()])
-      .then(([nextStats, nextHealth]) => {
+    StorageManager.getStats()
+      .then(async (nextStats) => ({
+        nextStats,
+        nextHealth: await StorageManager.getHealth(nextStats),
+      }))
+      .then(({ nextStats, nextHealth }) => {
         if (cancelled) return
         setStats(nextStats)
         setHealth(nextHealth)

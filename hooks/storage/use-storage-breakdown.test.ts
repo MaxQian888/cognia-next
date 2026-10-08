@@ -2,7 +2,7 @@ import "fake-indexeddb/auto"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useStorageBreakdown } from "./use-storage-breakdown"
 import { appendBackupHistory } from "@/lib/db/backup-history"
-import { StorageManager } from "@/lib/storage"
+import { StorageManager, type StorageStats } from "@/lib/storage"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 
 beforeEach(async () => {
@@ -13,6 +13,26 @@ beforeEach(async () => {
 })
 
 describe("useStorageBreakdown", () => {
+  it("walks once and derives health from that exact snapshot on mount and refresh", async () => {
+    const read = jest.spyOn(StorageManager, "getStats")
+    const health = jest.spyOn(StorageManager, "getHealth")
+    const { result, unmount } = renderHook(() => useStorageBreakdown())
+    try {
+      await waitFor(() => expect(result.current.isLoading).toBe(false))
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(health).toHaveBeenLastCalledWith(result.current.stats)
+      read.mockClear()
+      health.mockClear()
+      await act(async () => result.current.refresh())
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(health).toHaveBeenLastCalledWith(result.current.stats)
+    } finally {
+      unmount()
+      read.mockRestore()
+      health.mockRestore()
+    }
+  })
+
   it("loads stats + health on mount", async () => {
     const { result } = renderHook(() => useStorageBreakdown())
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -78,5 +98,88 @@ describe("useStorageBreakdown", () => {
     const { result } = renderHook(() => useStorageBreakdown())
     await waitFor(() => expect(result.current.error?.message).toBe("boom"))
     spy.mockRestore()
+  })
+
+  it("keeps previous data and loading state when a refresh fails", async () => {
+    const { result, unmount } = renderHook(() => useStorageBreakdown())
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const previousStats = result.current.stats
+    const previousHealth = result.current.health
+    const read = jest
+      .spyOn(StorageManager, "getStats")
+      .mockRejectedValueOnce(new Error("refresh failed"))
+    try {
+      await act(async () => result.current.refresh())
+      expect(result.current.stats).toBe(previousStats)
+      expect(result.current.health).toBe(previousHealth)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.error?.message).toBe("refresh failed")
+    } finally {
+      unmount()
+      read.mockRestore()
+    }
+  })
+
+  it("ignores an initial result after unmount", async () => {
+    const stats = await StorageManager.getStats()
+    let finish!: (value: StorageStats) => void
+    const pending = new Promise<StorageStats>((resolve) => {
+      finish = resolve
+    })
+    const read = jest.spyOn(StorageManager, "getStats").mockReturnValue(pending)
+    let renders = 0
+    const { unmount } = renderHook(() => {
+      renders += 1
+      return useStorageBreakdown()
+    })
+    const before = renders
+    unmount()
+    try {
+      await act(async () => {
+        finish(stats)
+        await pending
+      })
+      expect(renders).toBe(before)
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it("preserves completion-order updates for overlapping refreshes", async () => {
+    const { result, unmount } = renderHook(() => useStorageBreakdown())
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const initial = result.current.stats!
+    const older = { ...initial, generatedAt: initial.generatedAt + 1 }
+    const newer = { ...initial, generatedAt: initial.generatedAt + 2 }
+    let finishOlder!: (value: StorageStats) => void
+    let finishNewer!: (value: StorageStats) => void
+    const first = new Promise<StorageStats>((resolve) => {
+      finishOlder = resolve
+    })
+    const second = new Promise<StorageStats>((resolve) => {
+      finishNewer = resolve
+    })
+    const read = jest
+      .spyOn(StorageManager, "getStats")
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second)
+    try {
+      const firstRefresh = result.current.refresh()
+      const secondRefresh = result.current.refresh()
+      expect(result.current.isLoading).toBe(false)
+      await act(async () => {
+        finishNewer(newer)
+        await secondRefresh
+      })
+      expect(result.current.stats).toBe(newer)
+      await act(async () => {
+        finishOlder(older)
+        await firstRefresh
+      })
+      expect(result.current.stats).toBe(older)
+    } finally {
+      unmount()
+      read.mockRestore()
+    }
   })
 })
