@@ -183,15 +183,27 @@ pub fn chunk_replay(frames: Vec<EventFrame>) -> Vec<Vec<EventFrame>> {
 /// The discriminator cannot collide with a channel name — real channels always
 /// contain `://`.
 pub fn encode_ws_batch(batch: &[EventFrame]) -> Result<String, serde_json::Error> {
+    // Borrow frames directly: constructing a Value envelope first clones the
+    // complete payload tree for every subscriber and replay batch.
+    #[derive(serde::Serialize)]
+    struct BatchEnvelope<'a> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        channel: &'a str,
+        seq_from: u64,
+        seq_to: u64,
+        frames: &'a [EventFrame],
+    }
+
     match batch {
         [single] => serde_json::to_string(single),
-        _ => serde_json::to_string(&serde_json::json!({
-            "type": "event_batch",
-            "channel": batch.first().map(|f| f.event_type.as_str()).unwrap_or(""),
-            "seq_from": batch.first().map(|f| f.seq).unwrap_or(0),
-            "seq_to": batch.last().map(|f| f.seq).unwrap_or(0),
-            "frames": batch,
-        })),
+        _ => serde_json::to_string(&BatchEnvelope {
+            kind: "event_batch",
+            channel: batch.first().map(|f| f.event_type.as_str()).unwrap_or(""),
+            seq_from: batch.first().map(|f| f.seq).unwrap_or(0),
+            seq_to: batch.last().map(|f| f.seq).unwrap_or(0),
+            frames: batch,
+        }),
     }
 }
 
@@ -207,6 +219,82 @@ mod tests {
             payload: json!({ "seq": seq }),
             ts_ms: 0,
             target_device_id: None,
+        }
+    }
+
+    fn benchmark_frames(count: usize, text_bytes: usize) -> Vec<EventFrame> {
+        (0..count)
+            .map(|index| EventFrame {
+                event_type: if index / 128 % 2 == 0 {
+                    "claude://message"
+                } else {
+                    "agent://message"
+                }
+                .into(),
+                seq: index as u64 + 1,
+                payload: json!({
+                    "sessionId": "session-benchmark",
+                    "delta": { "text": "x".repeat(text_bytes), "unicode": "同步🙂",
+                        "escaped": "quote\"\n\\", "done": false, "extra": null },
+                    "index": index,
+                }),
+                ts_ms: 1_700_000_000_000 + index as i64 * 10,
+                target_device_id: Some("private-device".into()),
+            })
+            .collect()
+    }
+
+    fn batch_and_encode(frames: &[EventFrame], live: bool) -> (usize, usize) {
+        let batches = if live {
+            let mut batcher = EventBatcher::new();
+            let start = Instant::now();
+            let mut batches = Vec::new();
+            for (index, frame) in frames.iter().enumerate() {
+                batches.extend(batcher.push(
+                    frame.clone(),
+                    start + Duration::from_millis(index as u64 * 10),
+                ));
+            }
+            batches.extend(batcher.drain());
+            batches
+        } else {
+            chunk_replay(frames.to_vec())
+        };
+        let bytes = batches
+            .iter()
+            .map(|batch| std::hint::black_box(encode_ws_batch(batch).unwrap()).len())
+            .sum();
+        (batches.len(), bytes)
+    }
+
+    /// Manual CPU experiment; no timing assertion runs in CI. See the dated
+    /// event-batching experiment contract for fixtures and acceptance rules.
+    #[test]
+    #[ignore = "manual release benchmark; prints 12 raw samples per workload"]
+    fn benchmark_batching_and_encoding() {
+        for (name, frames, live) in [
+            ("replay_1024", benchmark_frames(1024, 256), false),
+            ("live_6000", benchmark_frames(6000, 256), true),
+            ("large_replay_128", benchmark_frames(128, 16 * 1024), false),
+        ] {
+            for sample in 0..14 {
+                let started = std::time::Instant::now();
+                let mut totals = (0, 0);
+                for _ in 0..20 {
+                    let result = std::hint::black_box(batch_and_encode(&frames, live));
+                    totals.0 += result.0;
+                    totals.1 += result.1;
+                }
+                let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+                if sample >= 2 {
+                    println!(
+                        "BENCH {name} {} {elapsed:.6} {} {}",
+                        sample - 2,
+                        totals.0,
+                        totals.1
+                    );
+                }
+            }
         }
     }
 
@@ -396,6 +484,35 @@ mod tests {
         assert_eq!(v["frames"][1]["seq"], 9);
         // Inner frames keep the plain shape so a client can reuse its handler.
         assert_eq!(v["frames"][0]["type"], "claude://message");
+    }
+
+    #[test]
+    fn ws_encoding_preserves_nested_payloads_and_hides_routing_metadata() {
+        let mut frames = benchmark_frames(3, 256);
+        frames[0].payload["numbers"] = json!([u64::MAX, i64::MIN, 1.25]);
+        for batch in [&frames[..0], &frames[..1], &frames[..2], &frames[..]] {
+            let expected = match batch {
+                [single] => serde_json::to_value(single).unwrap(),
+                _ => json!({
+                    "type": "event_batch",
+                    "channel": batch.first().map(|f| f.event_type.as_str()).unwrap_or(""),
+                    "seq_from": batch.first().map(|f| f.seq).unwrap_or(0),
+                    "seq_to": batch.last().map(|f| f.seq).unwrap_or(0),
+                    "frames": batch,
+                }),
+            };
+            let encoded = encode_ws_batch(batch).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
+                expected
+            );
+            assert_eq!(
+                encoded.len(),
+                serde_json::to_string(&expected).unwrap().len()
+            );
+            assert!(!encoded.contains("private-device"));
+            assert!(!encoded.contains("target_device_id"));
+        }
     }
 
     /// ADR-0127 §5: at 100 tok/s the wire sees ≥ 80 % fewer sends.
