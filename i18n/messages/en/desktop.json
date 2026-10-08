@@ -19,6 +19,8 @@
       "jobs": "Running jobs",
       "layoutControls": "Views menu",
       "navArrows": "Back / forward",
+      "network": "Network speed & latency",
+      "nextRun": "Next scheduled run",
       "notifications": "Notifications",
       "panelToggle": "Panel toggle",
       "perf": "Performance monitor",
@@ -29,6 +31,7 @@
       "secondarySidebarToggle": "Secondary Side Bar toggle",
       "sync": "Sync status",
       "terminal": "Terminal",
+      "todayUsage": "Today's usage",
       "usage": "Usage & limits",
       "workspace": "Workspace"
     },
@@ -855,7 +858,46 @@
     "terminalRunning": "Terminal panel — a session is running",
     "terminalToggle": "Toggle terminal panel",
     "usage": "Usage & limits",
-    "usageOpen": "Open usage & limits"
+    "usageOpen": "Open usage & limits",
+    "today": {
+      "label": "Today's usage: {summary}",
+      "summary": "{tokens} tokens",
+      "summaryWithCost": "{tokens} tokens, {cost}",
+      "title": "Today on this device",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "sessions": "Conversations",
+      "turns": "Turns",
+      "topModel": "Top model",
+      "none": "—",
+      "open": "Open usage"
+    },
+    "nextRun": {
+      "label": "Next scheduled run: {name}, {when}"
+    },
+    "network": {
+      "label": "Network: download {down}, upload {up}, latency {latency}",
+      "title": "Network",
+      "download": "Download",
+      "upload": "Upload",
+      "interfaces": "Counting {names}",
+      "latency": "Latency",
+      "measuring": "Measuring…",
+      "unreachable": "Unreachable",
+      "targetProvider": "Round trip to {host} ({provider})",
+      "targetRelay": "Round trip to {host} (Cognia relay)",
+      "noTarget": "Nothing to measure latency against.",
+      "routeDirect": "Direct connection",
+      "routeProxy": "Through proxy {proxy}",
+      "connect": "Opening a connection",
+      "average": "Average",
+      "jitter": "Jitter",
+      "best": "Best",
+      "worst": "Worst",
+      "loss": "Failed",
+      "samples": "Probes",
+      "settings": "Network settings"
+    }
   },
   "titleBar": {
     "alwaysOnTop": "Always on top",

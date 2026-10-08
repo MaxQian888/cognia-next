@@ -52,7 +52,7 @@ describe("bar item catalogs", () => {
 
   it("marks only the natively-backed status segments desktop-only", () => {
     const desktopOnly = STATUS_BAR_ITEMS.filter((m) => m.desktopOnly).map((m) => m.id)
-    expect(desktopOnly.sort()).toEqual(["perf", "sync", "terminal", "usage"])
+    expect(desktopOnly.sort()).toEqual(["network", "perf", "sync", "terminal", "usage"])
   })
 
   it("has no desktop-only title-bar items", () => {

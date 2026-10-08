@@ -177,7 +177,13 @@ describe("BarCustomizer", () => {
     })
     const saved = lastSaved("statusBarLayout")
     // `sync` moved to the head of the visible list…
-    expect(saved.order.slice(0, 4)).toEqual(["sync", "connectivity", "executionHost", "branch"])
+    expect(saved.order.slice(0, 5)).toEqual([
+      "sync",
+      "connectivity",
+      "network",
+      "executionHost",
+      "branch",
+    ])
     // …and the hidden `perf` kept the slot it already held.
     expect(saved.order.indexOf("perf")).toBe(DEFAULT_STATUS_BAR_LAYOUT.order.indexOf("perf"))
     expect(saved.hidden).toEqual(["terminal", "perf"])

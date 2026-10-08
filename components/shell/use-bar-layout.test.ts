@@ -39,6 +39,7 @@ describe("useBarLayout — resolution", () => {
     const { result } = renderHook(() => useBarLayout("status"))
     expect(ids(result.current.resolved.zones.start)).toEqual([
       "connectivity",
+      "network",
       "executionHost",
       "branch",
       "sync",
@@ -56,6 +57,8 @@ describe("useBarLayout — resolution", () => {
     const { result } = renderHook(() => useBarLayout("status"))
     expect(ids(result.current.resolved.zones.start)).toEqual([
       "branch",
+      // Added after this layout was stored: it surfaces in canonical order.
+      "network",
       "executionHost",
       "sync",
       "terminal",

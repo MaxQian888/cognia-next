@@ -62,17 +62,25 @@ describe("resolveBarLayout", () => {
 
   it("buckets the shipped default into zones, perf hidden", () => {
     const resolved = resolveBarLayout(catalog, DEFAULT_STATUS_BAR_LAYOUT)
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "executionHost", "branch", "sync"])
+    expect(ids(resolved.zones.start)).toEqual([
+      "connectivity",
+      "network",
+      "executionHost",
+      "branch",
+      "sync",
+    ])
     expect(ids(resolved.zones.end)).toEqual([
       "notifications",
       "attention",
       "jobs",
       "agentThreads",
+      "todayUsage",
       "usage",
       "accountStatus",
       "runStatus",
     ])
-    expect(ids(resolved.zones.center)).toEqual([])
+    // The flexible middle carries the next scheduled run (self-hiding).
+    expect(ids(resolved.zones.center)).toEqual(["nextRun"])
     expect(ids(resolved.hidden)).toEqual(["terminal", "perf"])
   })
 
@@ -85,6 +93,7 @@ describe("resolveBarLayout", () => {
       "sync",
       "branch",
       "connectivity",
+      "network",
       "executionHost",
       "terminal",
     ])
@@ -99,6 +108,7 @@ describe("resolveBarLayout", () => {
     })
     expect(ids(resolved.zones.start)).toEqual([
       "connectivity",
+      "network",
       "executionHost",
       "branch",
       "sync",
@@ -106,7 +116,11 @@ describe("resolveBarLayout", () => {
     ])
     expect(ids(resolved.zones.end)[0]).toBe("runStatus")
     // …and the customizer list reads in exactly the render sequence.
-    expect(ids(resolved.order)).toEqual([...ids(resolved.zones.start), ...ids(resolved.zones.end)])
+    expect(ids(resolved.order)).toEqual([
+      ...ids(resolved.zones.start),
+      ...ids(resolved.zones.center),
+      ...ids(resolved.zones.end),
+    ])
   })
 
   it("keeps a hidden item's slot in the order list", () => {
@@ -115,7 +129,13 @@ describe("resolveBarLayout", () => {
       hidden: ["branch"],
     })
     expect(ids(resolved.order)).toContain("branch")
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "executionHost", "sync", "terminal"])
+    expect(ids(resolved.zones.start)).toEqual([
+      "connectivity",
+      "network",
+      "executionHost",
+      "sync",
+      "terminal",
+    ])
   })
 
   it("surfaces a catalog item the stored order never mentioned", () => {

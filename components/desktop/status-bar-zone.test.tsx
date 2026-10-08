@@ -21,6 +21,15 @@ jest.mock("@/components/desktop/status-bar-perf", () => ({
 jest.mock("@/components/desktop/status-bar-usage", () => ({
   StatusBarUsage: () => <div data-testid="seg-usage" />,
 }))
+jest.mock("@/components/desktop/status-bar-network", () => ({
+  StatusBarNetwork: () => <div data-testid="seg-network" />,
+}))
+jest.mock("@/components/desktop/status-bar-today", () => ({
+  StatusBarToday: () => <div data-testid="seg-todayUsage" />,
+}))
+jest.mock("@/components/desktop/status-bar-next-run", () => ({
+  StatusBarNextRun: () => <div data-testid="seg-nextRun" />,
+}))
 jest.mock("@/components/desktop/status-bar-run-state", () => ({
   StatusBarRunState: () => <div data-testid="seg-runStatus" />,
 }))

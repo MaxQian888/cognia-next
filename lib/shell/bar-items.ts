@@ -9,8 +9,10 @@
 
 import {
   ActivityIcon,
+  ArrowDownUpIcon,
   BellIcon,
   BotIcon,
+  CalendarClockIcon,
   ChevronsLeftRightIcon,
   CircleDotIcon,
   CommandIcon,
@@ -61,6 +63,7 @@ export const BAR_ITEM_ICONS: Record<string, LucideIcon> = {
   layoutControls: LayoutDashboardIcon,
   // Status bar
   connectivity: WifiIcon,
+  network: ArrowDownUpIcon,
   executionHost: ServerIcon,
   terminal: TerminalIcon,
   branch: GitBranchIcon,
@@ -69,6 +72,8 @@ export const BAR_ITEM_ICONS: Record<string, LucideIcon> = {
   attention: TriangleAlertIcon,
   jobs: ListChecksIcon,
   agentThreads: BotIcon,
+  nextRun: CalendarClockIcon,
+  todayUsage: ActivityIcon,
   perf: GaugeIcon,
   usage: ActivityIcon,
   accountStatus: UserRoundIcon,

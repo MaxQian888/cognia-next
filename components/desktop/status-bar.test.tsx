@@ -71,6 +71,22 @@ jest.mock("@/components/attention/attention-panel", () => ({
   AttentionPanel: () => <button data-testid="status-attention">Attention</button>,
 }))
 
+// Covered by their own suites. Stubbed to render nothing because that IS
+// their default state — "today" waits for a turn, "next run" for an active
+// schedule — and the chrome-budget assertion below measures the default bar.
+jest.mock("@/components/desktop/status-bar-today", () => ({
+  StatusBarToday: () => null,
+}))
+// Unlike the two above it is a permanent desktop readout once the first
+// counter read lands, so it is stubbed as the control it is and counts
+// toward the budget.
+jest.mock("@/components/desktop/status-bar-network", () => ({
+  StatusBarNetwork: () => <button type="button" data-testid="status-network" />,
+}))
+jest.mock("@/components/desktop/status-bar-next-run", () => ({
+  StatusBarNextRun: () => null,
+}))
+
 // New optional segments — covered by their own suites; stub them so the
 // status-bar test focuses on layout + gating.
 jest.mock("@/components/desktop/status-bar-connectivity", () => ({

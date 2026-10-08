@@ -132,6 +132,10 @@ export const TITLE_BAR_ITEMS: readonly BarItemMeta[] = [
  */
 export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
   { id: "connectivity", bar: "status", zone: "start", i18nKey: "connectivity" },
+  // Live speed and latency (`lib/network/net-meter.ts`), beside connectivity
+  // because it is the measured half of the same question. Desktop-only: the
+  // counters and the probe are native commands a browser does not have.
+  { id: "network", bar: "status", zone: "start", i18nKey: "network", desktopOnly: true },
   // Which machine this window's `target: "execution"` calls land on. Beside
   // connectivity because it is the same class of fact (where am I talking to),
   // and `minWidth: "lg"` so a narrow window drops it rather than overflowing
@@ -163,6 +167,12 @@ export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
     desktopOnly: true,
     defaultHidden: true,
   },
+  // The soonest local schedule and when it fires. The bar's flexible middle:
+  // it is the one segment with a name of variable length in it, and the centre
+  // can give it room without shoving the edge clusters. Renders nothing while
+  // no schedule is active, so it costs the default bar no width, and drops
+  // itself below `lg` (in the component — the status zone has no `minWidth`).
+  { id: "nextRun", bar: "status", zone: "center", i18nKey: "nextRun" },
   { id: "notifications", bar: "status", zone: "end", i18nKey: "notifications" },
   { id: "attention", bar: "status", zone: "end", i18nKey: "attention" },
   { id: "jobs", bar: "status", zone: "end", i18nKey: "jobs" },
@@ -180,6 +190,10 @@ export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
     desktopOnly: true,
     defaultHidden: true,
   },
+  // Today's tokens / cost from `sessionUsage` — every surface, every provider,
+  // where `usage` only knows plan quotas. Beside it because the two answer
+  // "how much" from opposite ends; renders nothing until today has a turn.
+  { id: "todayUsage", bar: "status", zone: "end", i18nKey: "todayUsage" },
   { id: "usage", bar: "status", zone: "end", i18nKey: "usage", desktopOnly: true },
   { id: "accountStatus", bar: "status", zone: "end", i18nKey: "accountStatus" },
   { id: "runStatus", bar: "status", zone: "end", i18nKey: "runStatus" },

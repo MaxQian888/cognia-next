@@ -129,8 +129,15 @@ export const CHROME_BUDGET = {
    * `components/desktop/status-bar.tsx`. The live bar sits one below this: its
    * test stubs `AttentionPanel` as a plain button, while the real one renders
    * nothing until something is actually pending.
+   *
+   * 9 → 10: the network readout (`network` — live download / upload speed and
+   * the round trip to the model provider). It is the one segment that is
+   * measured rather than reported, it answers "is it me or the model?" before
+   * anyone opens a settings page, and it was asked for by name. Its siblings
+   * added at the same time (`todayUsage`, `nextRun`) self-hide when empty and
+   * cost the default bar nothing.
    */
-  statusBar: 9,
+  statusBar: 10,
   /**
    * `components/shell/guild-rail.tsx` — no teams, no plugin view containers.
    *

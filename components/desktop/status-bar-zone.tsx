@@ -16,11 +16,14 @@ import { AccountBarButton } from "@/components/account/account-bar-button"
 import { AttentionPanel } from "@/components/attention/attention-panel"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectivity"
+import { StatusBarNetwork } from "@/components/desktop/status-bar-network"
+import { StatusBarNextRun } from "@/components/desktop/status-bar-next-run"
 import { StatusBarExecutionHost } from "@/components/devices/execution-host-switcher"
 import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
 import { StatusBarRunState } from "@/components/desktop/status-bar-run-state"
 import { StatusBarSync } from "@/components/desktop/status-bar-sync"
 import { StatusBarTerminal } from "@/components/desktop/status-bar-terminal"
+import { StatusBarToday } from "@/components/desktop/status-bar-today"
 import { StatusBarUsage } from "@/components/desktop/status-bar-usage"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
@@ -44,6 +47,8 @@ function StatusBarSegment({ id }: { id: string }) {
   switch (id) {
     case "connectivity":
       return <StatusBarConnectivity />
+    case "network":
+      return <StatusBarNetwork />
     case "executionHost":
       return <StatusBarExecutionHost />
     case "branch":
@@ -52,6 +57,8 @@ function StatusBarSegment({ id }: { id: string }) {
       return <StatusBarSync />
     case "terminal":
       return <StatusBarTerminal />
+    case "nextRun":
+      return <StatusBarNextRun />
     case "notifications":
       return <NotificationBell />
     case "attention":
@@ -62,6 +69,8 @@ function StatusBarSegment({ id }: { id: string }) {
       return <AgentThreadBrowser />
     case "perf":
       return <StatusBarPerf />
+    case "todayUsage":
+      return <StatusBarToday />
     case "usage":
       return <StatusBarUsage />
     case "accountStatus":

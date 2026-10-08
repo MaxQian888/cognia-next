@@ -19,6 +19,8 @@
       "jobs": "运行中的任务",
       "layoutControls": "视图菜单",
       "navArrows": "前进 / 后退",
+      "network": "网速与延迟",
+      "nextRun": "下一次定时运行",
       "notifications": "通知",
       "panelToggle": "底部面板开关",
       "perf": "性能监视",
@@ -29,6 +31,7 @@
       "secondarySidebarToggle": "右侧栏开关",
       "sync": "同步状态",
       "terminal": "终端",
+      "todayUsage": "今日用量",
       "usage": "用量与额度",
       "workspace": "工作区"
     },
@@ -855,7 +858,46 @@
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
     "usage": "用量与额度",
-    "usageOpen": "打开用量与额度"
+    "usageOpen": "打开用量与额度",
+    "today": {
+      "label": "今日用量：{summary}",
+      "summary": "{tokens} tokens",
+      "summaryWithCost": "{tokens} tokens，{cost}",
+      "title": "本设备今日",
+      "tokens": "Tokens",
+      "cost": "费用",
+      "sessions": "对话",
+      "turns": "轮次",
+      "topModel": "最常用模型",
+      "none": "—",
+      "open": "查看用量"
+    },
+    "nextRun": {
+      "label": "下一次定时运行：{name}，{when}"
+    },
+    "network": {
+      "label": "网络：下载 {down}，上传 {up}，延迟 {latency}",
+      "title": "网络",
+      "download": "下载",
+      "upload": "上传",
+      "interfaces": "统计网卡：{names}",
+      "latency": "延迟",
+      "measuring": "测量中…",
+      "unreachable": "不可达",
+      "targetProvider": "到 {host}（{provider}）的往返时间",
+      "targetRelay": "到 {host}（Cognia 中继）的往返时间",
+      "noTarget": "没有可测量延迟的目标。",
+      "routeDirect": "直连",
+      "routeProxy": "经代理 {proxy}",
+      "connect": "建立连接耗时",
+      "average": "平均",
+      "jitter": "抖动",
+      "best": "最低",
+      "worst": "最高",
+      "loss": "失败",
+      "samples": "探测次数",
+      "settings": "网络设置"
+    }
   },
   "titleBar": {
     "alwaysOnTop": "置顶窗口",
