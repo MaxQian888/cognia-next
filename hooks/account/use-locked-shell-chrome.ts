@@ -15,12 +15,23 @@
 
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
+import { readAccountTheme } from "@/lib/appearance/lock-screen-preferences"
 
 import { readPaintedShellColors } from "@/lib/appearance/shell-sync"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
 import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
+
+/** Restore the selected account's mode before its database can be opened. */
+export function useLockedAccountTheme(accountId: string | null): void {
+  const { theme, setTheme } = useTheme()
+  const savedTheme = readAccountTheme(accountId)
+  useIsomorphicLayoutEffect(() => {
+    if (savedTheme && savedTheme !== theme) setTheme(savedTheme)
+  }, [savedTheme, theme, setTheme])
+}
 
 export function useLockedShellChrome(): void {
   const { resolvedTheme } = useTheme()

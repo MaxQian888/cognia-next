@@ -6,11 +6,18 @@ import { renderHook, waitFor } from "@testing-library/react"
 
 let mockResolvedTheme: string | undefined = "dark"
 let mockMobile = true
+const mockSetTheme = jest.fn()
 const mockRegister = jest.fn()
 const mockStatusBar = jest.fn()
 const mockNavBar = jest.fn()
 
-jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: mockResolvedTheme }) }))
+jest.mock("next-themes", () => ({
+  useTheme: () => ({
+    resolvedTheme: mockResolvedTheme,
+    theme: mockResolvedTheme,
+    setTheme: mockSetTheme,
+  }),
+}))
 jest.mock("@/lib/capacitor/_shared", () => ({ isMobile: () => mockMobile }))
 jest.mock("@/lib/capacitor/register-plugins", () => ({
   registerNativePlugins: () => mockRegister(),
@@ -22,14 +29,27 @@ jest.mock("@/lib/capacitor/navigation-bar", () => ({
   syncWithTheme: (...args: unknown[]) => mockNavBar(...args),
 }))
 
-import { useLockedShellChrome } from "./use-locked-shell-chrome"
+import { useLockedAccountTheme, useLockedShellChrome } from "./use-locked-shell-chrome"
+import { writeAccountTheme } from "@/lib/appearance/lock-screen-preferences"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  window.localStorage.clear()
   mockResolvedTheme = "dark"
   mockMobile = true
   mockRegister.mockResolvedValue({ kind: "registered", registered: [], available: [] })
   document.documentElement.style.setProperty("--background", "#1c1c1f")
+})
+
+it("does not override the current mode for an account without a cached preference", () => {
+  renderHook(() => useLockedAccountTheme("unseen"))
+  expect(mockSetTheme).not.toHaveBeenCalled()
+})
+
+it("does not reapply an already matching account mode", () => {
+  writeAccountTheme("alpha", "dark")
+  renderHook(() => useLockedAccountTheme("alpha"))
+  expect(mockSetTheme).not.toHaveBeenCalled()
 })
 
 afterEach(() => {

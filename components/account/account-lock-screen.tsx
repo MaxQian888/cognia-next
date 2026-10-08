@@ -76,6 +76,7 @@ import type { AutoUnlockFailure, UnlockAccountOptions } from "@/stores/account/a
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { usePlatform } from "@/hooks/use-platform"
+import { useLockedAccountTheme } from "@/hooks/account/use-locked-shell-chrome"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 import { QuickUnlockPanel } from "./quick-unlock/quick-unlock-panel"
@@ -254,6 +255,7 @@ export function AccountLockScreen({
     [accounts, selectedId]
   )
   const localAccountId = account?.id ?? null
+  useLockedAccountTheme(localAccountId)
   const displayName = account?.displayName ?? t("unknownAccount")
   // The device-managed workspace has no password anyone typed: the secret
   // store opens it, so the form asks for nothing and just opens it.

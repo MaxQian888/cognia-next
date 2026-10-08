@@ -3,6 +3,13 @@ import { useSettingsStore } from "@/stores/settings"
 import { SettingsSyncProvider } from "./settings-sync-provider"
 import { applyZoom } from "@/lib/tauri/webview-zoom"
 import { getPetWindowRole } from "@/lib/pet/window-role"
+import { readAccountTheme } from "@/lib/appearance/lock-screen-preferences"
+
+let mockAccountId: string | null = "acct_alpha"
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (s: { unlockedAccountId: string | null }) => unknown) =>
+    selector({ unlockedAccountId: mockAccountId }),
+}))
 
 const mockSetTheme = jest.fn()
 jest.mock("next-themes", () => ({
@@ -38,6 +45,8 @@ function setLoadedSettings(over: Record<string, unknown> = {}): void {
 describe("SettingsSyncProvider", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAccountId = "acct_alpha"
+    window.localStorage.clear()
     getPetWindowRoleMock.mockReturnValue("main")
     useSettingsStore.setState({ settings: null, loaded: false })
     document.documentElement.style.fontSize = ""
@@ -47,6 +56,7 @@ describe("SettingsSyncProvider", () => {
   it("does nothing until settings are loaded", () => {
     render(<SettingsSyncProvider>child</SettingsSyncProvider>)
     expect(mockSetTheme).not.toHaveBeenCalled()
+    expect(readAccountTheme("acct_alpha")).toBeNull()
     expect(applyZoomMock).not.toHaveBeenCalled()
   })
 
@@ -56,6 +66,24 @@ describe("SettingsSyncProvider", () => {
     await waitFor(() => expect(mockSetTheme).toHaveBeenCalledWith("dark"))
     expect(document.documentElement.style.fontSize).toBe("16px")
     expect(applyZoomMock).toHaveBeenCalledWith(1.5)
+    expect(readAccountTheme("acct_alpha")).toBe("dark")
+  })
+
+  it("keeps each account's mode separate, including follow-system", () => {
+    setLoadedSettings({ theme: "dark" })
+    const { rerender } = render(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    mockAccountId = "acct_beta"
+    act(() => setLoadedSettings({ theme: "system" }))
+    rerender(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    expect(readAccountTheme("acct_alpha")).toBe("dark")
+    expect(readAccountTheme("acct_beta")).toBe("system")
+  })
+
+  it("does not cache unscoped settings as an account preference", () => {
+    mockAccountId = null
+    setLoadedSettings()
+    render(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    expect(readAccountTheme("acct_alpha")).toBeNull()
   })
 
   it("sets the reduce-motion attribute only when enabled", async () => {

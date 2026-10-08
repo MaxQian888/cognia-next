@@ -5,11 +5,47 @@ import {
   DEFAULT_MIRRORED_PREFERENCES,
   readLockScreenPreferences,
   writeLockScreenPreferences,
+  readAccountTheme,
+  writeAccountTheme,
 } from "./lock-screen-preferences"
 import { DEFAULT_LOCK_SCREEN } from "@/types/appearance/lock-screen"
 
 beforeEach(() => {
   localStorage.clear()
+})
+
+describe("account theme mirror", () => {
+  it("keeps light, dark, and system preferences isolated by account", () => {
+    writeAccountTheme("alpha", "dark")
+    writeAccountTheme("beta", "light")
+    writeAccountTheme("gamma", "system")
+    expect(readAccountTheme("alpha")).toBe("dark")
+    expect(readAccountTheme("beta")).toBe("light")
+    expect(readAccountTheme("gamma")).toBe("system")
+    expect(readAccountTheme("unknown")).toBeNull()
+    expect(readAccountTheme(null)).toBeNull()
+  })
+
+  it("ignores invalid cached modes", () => {
+    localStorage.setItem("cognia-account-alpha:theme", "invalid")
+    expect(readAccountTheme("alpha")).toBeNull()
+  })
+
+  it("tolerates unavailable storage", () => {
+    const read = jest.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    const write = jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    try {
+      expect(readAccountTheme("alpha")).toBeNull()
+      expect(() => writeAccountTheme("alpha", "dark")).not.toThrow()
+    } finally {
+      read.mockRestore()
+      write.mockRestore()
+    }
+  })
 })
 
 describe("lock screen preference mirror", () => {

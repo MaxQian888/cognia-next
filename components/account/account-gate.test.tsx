@@ -6,6 +6,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import type { AccountStoreState } from "@/stores/account/account-store"
 
+const mockSetTheme = jest.fn()
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: "light", resolvedTheme: "light", setTheme: mockSetTheme }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, string>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
@@ -734,6 +739,14 @@ describe("device-managed workspace screen", () => {
       </AccountGate>
     )
   }
+
+  it("restores the device account's saved dark mode before opening it", () => {
+    localStorage.setItem("cognia-account-acct_desktop_local_workspace:theme", "dark")
+    setGateState({ accounts: [device], activeAccountId: device.id, locked: true })
+    renderGate()
+    expect(mockSetTheme).toHaveBeenCalledWith("dark")
+    localStorage.removeItem("cognia-account-acct_desktop_local_workspace:theme")
+  })
 
   it("says the workspace is locked, not that it failed, when nothing went wrong", () => {
     setGateState({ accounts: [device], activeAccountId: device.id, locked: true })

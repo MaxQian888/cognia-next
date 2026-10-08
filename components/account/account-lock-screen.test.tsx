@@ -8,6 +8,14 @@ import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/
 import { AccountUnlockError } from "@/lib/accounts/account-unlock-error"
 import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 
+let mockTheme = "light"
+const mockSetTheme = jest.fn((theme: string) => {
+  mockTheme = theme
+})
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: mockTheme, setTheme: mockSetTheme }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
@@ -79,12 +87,29 @@ function renderScreen(overrides: Partial<React.ComponentProps<typeof AccountLock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockTheme = "light"
   window.localStorage.clear()
   mockNativeMobile = false
   mockReadNative.mockReset()
 })
 
 describe("idle state", () => {
+  it("uses the selected account's light/dark preference before unlocking", () => {
+    localStorage.setItem("cognia-account-acct_alpha:theme", "dark")
+    localStorage.setItem("cognia-account-acct_beta:theme", "light")
+    renderScreen({ accounts: [ALPHA, BETA] })
+    expect(mockSetTheme).toHaveBeenLastCalledWith("dark")
+
+    pickAccount("Beta")
+    expect(mockSetTheme).toHaveBeenLastCalledWith("light")
+  })
+
+  it("preserves follow-system mode on the unlock screen", () => {
+    localStorage.setItem("cognia-account-acct_alpha:theme", "system")
+    renderScreen()
+    expect(mockSetTheme).toHaveBeenCalledWith("system")
+  })
+
   it("uses the selected account's supported unlock methods when switching accounts", () => {
     mockNativeMobile = true
     renderScreen({

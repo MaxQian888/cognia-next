@@ -29,7 +29,10 @@ import {
   usesBrowserVault,
 } from "@/stores/account/account-store"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { useLockedShellChrome } from "@/hooks/account/use-locked-shell-chrome"
+import {
+  useLockedAccountTheme,
+  useLockedShellChrome,
+} from "@/hooks/account/use-locked-shell-chrome"
 import { AccountLockScreen } from "./account-lock-screen"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 
@@ -336,7 +339,7 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
     const credentialStoreBlocked =
       visibleError !== null && classifySecretStoreError(visibleError) !== null
     return (
-      <GateShell footer={readShareAsGuestAction}>
+      <GateShell footer={readShareAsGuestAction} accountId={targetAccount.id}>
         <section
           className="flex w-full max-w-sm flex-col gap-4"
           data-testid="account-device-workspace"
@@ -409,7 +412,16 @@ async function resetRefusedLocalDatabase(): Promise<void> {
   window.location.reload()
 }
 
-function GateShell({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
+function GateShell({
+  children,
+  footer,
+  accountId = null,
+}: {
+  children: ReactNode
+  footer?: ReactNode
+  accountId?: string | null
+}) {
+  useLockedAccountTheme(accountId)
   useLockedShellChrome()
   return (
     <main

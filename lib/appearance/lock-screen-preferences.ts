@@ -31,8 +31,30 @@ import {
   isLockScreenBackdrop,
   type LockScreenSettings,
 } from "@/types/appearance/lock-screen"
+import type { AppTheme } from "@cognia/agent-config-types"
 
 const STORAGE_KEY = "cognia.lock-screen.appearance.v1"
+
+/** Only the non-secret mode is cached; the account database stays locked. */
+export function readAccountTheme(accountId: string | null): AppTheme | null {
+  if (!accountId || typeof window === "undefined") return null
+  try {
+    const value = window.localStorage.getItem(`cognia-account-${accountId}:theme`)
+    return value === "light" || value === "dark" || value === "system" ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function writeAccountTheme(accountId: string, theme: AppTheme): void {
+  if (!accountId || typeof window === "undefined") return
+  try {
+    // The existing account-data purge removes this account-prefixed key.
+    window.localStorage.setItem(`cognia-account-${accountId}:theme`, theme)
+  } catch {
+    // A disabled/full cache must not prevent opening the account.
+  }
+}
 
 export interface MirroredLockScreenPreferences {
   settings: LockScreenSettings

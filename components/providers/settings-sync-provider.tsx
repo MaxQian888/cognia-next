@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
+import { useAccountStore } from "@/stores/account/account-store"
+import { writeAccountTheme } from "@/lib/appearance/lock-screen-preferences"
 import type { AppFontScale, AppTheme } from "@cognia/agent-config-types"
 import { applyZoom, DEFAULT_ZOOM } from "@/lib/tauri/webview-zoom"
 import { getPetWindowRole } from "@/lib/pet/window-role"
@@ -30,6 +32,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
   const { setTheme } = useTheme()
   const settings = useSettingsStore((s) => s.settings)
   const loaded = useSettingsStore((s) => s.loaded)
+  const accountId = useAccountStore((s) => s.unlockedAccountId)
   // Flattened to scalars so the effect's deps cover exactly the four fields it
   // applies — keying on the whole `settings` object re-fired every write on
   // any unrelated save, and each re-fire ended in a Tauri `setZoom` IPC that
@@ -60,6 +63,10 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
     if (!ready) return
     if (typeof document === "undefined") return
 
+    // next-themes' shared key may describe a different account. Keep this
+    // account's canonical choice readable before the next unlock.
+    if (accountId) writeAccountTheme(accountId, theme)
+
     if (theme !== lastTheme.current) {
       lastTheme.current = theme
       setThemeRef.current(theme)
@@ -86,7 +93,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
       lastZoom.current = webviewZoom
       void applyZoom(webviewZoom)
     }
-  }, [ready, theme, fontScale, reduceMotion, webviewZoom])
+  }, [ready, accountId, theme, fontScale, reduceMotion, webviewZoom])
 
   return <>{children}</>
 }
