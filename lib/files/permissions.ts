@@ -125,6 +125,22 @@ export function isPathWithinRoot(target: string, root: string): boolean {
   return isWithinRoot(target, root)
 }
 
+/**
+ * `target`'s path relative to `root` (forward slashes), or null when it is
+ * outside it or IS it. Sliced from the *normalized* pair, never the raw
+ * strings: an agent reports `C:\\repo\\a.ts` while a root may be recorded as
+ * `C:/repo/`, and hand-rolled separator matching disagreed with the
+ * containment test above in exactly that case. Resolve a relative path
+ * against the root first (`resolveLinkPath`); this one only compares.
+ */
+export function relativePathWithinRoot(target: string, root: string): string | null {
+  if (!isWithinRoot(target, root)) return null
+  const base = normalizeFsPath(root)
+  const full = normalizeFsPath(target)
+  const rel = full.slice(base.endsWith("/") ? base.length : base.length + 1)
+  return rel || null
+}
+
 function isWithinRoot(target: string, root: string): boolean {
   const t = forCompare(normalizeFsPath(target))
   const r = forCompare(normalizeFsPath(root))

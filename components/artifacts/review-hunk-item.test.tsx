@@ -27,6 +27,21 @@ const item = (over: Partial<CanvasReviewItem> = {}): CanvasReviewItem => ({
 })
 
 describe("ReviewHunkItem", () => {
+  it("turns the line range into a reveal button when the diff can be scrolled to it", () => {
+    const onReveal = jest.fn()
+    const hunk = item()
+    render(
+      <ReviewHunkItem item={hunk} onAccept={jest.fn()} onReject={jest.fn()} onReveal={onReveal} />
+    )
+    fireEvent.click(screen.getByTestId("review-hunk-reveal"))
+    expect(onReveal).toHaveBeenCalledWith(hunk)
+  })
+
+  it("keeps the line range as plain text without a reveal target", () => {
+    render(<ReviewHunkItem item={item()} onAccept={jest.fn()} onReject={jest.fn()} />)
+    expect(screen.queryByTestId("review-hunk-reveal")).toBeNull()
+  })
+
   it("renders the change type label and the line range", () => {
     render(<ReviewHunkItem item={item()} onAccept={jest.fn()} onReject={jest.fn()} />)
     expect(screen.getByText("hunkReplace")).toBeInTheDocument()

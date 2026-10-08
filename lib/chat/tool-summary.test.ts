@@ -71,6 +71,25 @@ describe("summarizeToolCall", () => {
     expect(summarizeToolCall(tool("tool-Write", { file_path: "/p/q.md" })).iconKey).toBe("write")
   })
 
+  it("names the files an apply_patch touches by basename", () => {
+    const patch = [
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      "--- /dev/null",
+      "+++ b/lib/n.ts",
+      "@@ -0,0 +1 @@",
+      "+x",
+    ].join("\n")
+    expect(summarizeToolCall(tool("tool-apply_patch", { patch }))).toEqual({
+      name: "apply_patch",
+      target: "a.ts, n.ts",
+      iconKey: "edit",
+    })
+  })
+
   it("uses the command for Bash", () => {
     const s = summarizeToolCall(tool("tool-Bash", { command: "pnpm test --run" }))
     expect(s).toMatchObject({ name: "Bash", target: "pnpm test --run", iconKey: "terminal" })

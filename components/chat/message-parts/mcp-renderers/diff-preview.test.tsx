@@ -1,64 +1,73 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
+// jsdom has no layout: render every virtual row and record the count.
+const virtualCounts: number[] = []
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => {
+    virtualCounts.push(count)
+    return {
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, index) => ({ index, key: index, start: index * 20 })),
+      getTotalSize: () => count * 20,
+      measureElement: jest.fn(),
+      scrollToIndex: jest.fn(),
+    }
+  },
+}))
 
 import { DiffPreview } from "./diff-preview"
 
+function types() {
+  return screen.getAllByTestId("line-diff-line").map((l) => l.getAttribute("data-type"))
+}
+
+beforeEach(() => {
+  virtualCounts.length = 0
+})
+
 describe("DiffPreview", () => {
-  it("renders removed lines then added lines", () => {
-    render(<DiffPreview oldText={"a\nb"} newText={"c"} />)
-    const removed = screen.getAllByTestId("diff-removed")
-    const added = screen.getAllByTestId("diff-added")
-    expect(removed).toHaveLength(2)
-    expect(added).toHaveLength(1)
-    expect(removed[0]).toHaveTextContent("- a")
-    expect(added[0]).toHaveTextContent("+ c")
+  it("diffs the two snippets line by line instead of listing both whole", () => {
+    render(<DiffPreview oldText={"keep\nold\ntail"} newText={"keep\nnew\ntail"} />)
+    expect(types()).toEqual(["unchanged", "removed", "added", "unchanged"])
   })
 
-  it("omits the removed block for pure additions (write preview)", () => {
+  it("shows a pure addition (write preview) as additions only", () => {
     render(<DiffPreview oldText="" newText={"line1\nline2"} />)
-    expect(screen.queryAllByTestId("diff-removed")).toHaveLength(0)
-    expect(screen.getAllByTestId("diff-added")).toHaveLength(2)
+    expect(types()).toEqual(["added", "added"])
   })
 
-  it("omits the added block for pure removals", () => {
+  it("shows a pure removal as removals only", () => {
     render(<DiffPreview oldText="gone" newText="" />)
-    expect(screen.getAllByTestId("diff-removed")).toHaveLength(1)
-    expect(screen.queryAllByTestId("diff-added")).toHaveLength(0)
+    expect(types()).toEqual(["removed"])
   })
 
-  it("highlights the intraline changed run on a same-index modification (gap5)", () => {
+  it("emphasises the changed run of an edited line", () => {
     render(<DiffPreview oldText="const a = 1" newText="const a = 2" />)
-    const intraline = screen.getAllByTestId("diff-intraline")
-    // one emphasized run on the removed side ("1") + one on the added side ("2")
+    const intraline = screen.getAllByTestId("line-diff-intraline")
     expect(intraline.map((n) => n.textContent)).toEqual(["1", "2"])
-    // the shared prefix is NOT emphasized
-    expect(screen.getByTestId("diff-removed")).toHaveTextContent("const a = 1")
   })
 
-  it("does not emphasize anything for a pure addition (no counterpart line)", () => {
-    render(<DiffPreview oldText="" newText="brand new" />)
-    expect(screen.queryAllByTestId("diff-intraline")).toHaveLength(0)
+  it("keeps a sign-only gutter: snippet line numbers would mislead", () => {
+    render(<DiffPreview oldText="a" newText="b" />)
+    expect(screen.getAllByTestId("line-diff-line")[0]).not.toHaveTextContent("1")
   })
 
-  it("clamps a large diff behind a show-all note", () => {
-    const oldText = Array.from({ length: 300 }, (_, i) => `old ${i}`).join("\n")
-    render(<DiffPreview oldText={oldText} newText="" />)
-    expect(screen.getAllByTestId("diff-removed")).toHaveLength(120)
-    const note = screen.getByTestId("diff-preview-clamped")
-    expect(note).toHaveTextContent("Showing the first 120 of 300")
-    fireEvent.click(screen.getByTestId("diff-preview-clamped-show-all"))
-    expect(screen.getAllByTestId("diff-removed")).toHaveLength(300)
-    expect(screen.queryByTestId("diff-preview-clamped")).not.toBeInTheDocument()
+  it("virtualizes a large payload instead of clamping it", () => {
+    const newText = Array.from({ length: 5000 }, (_, i) => `new ${i}`).join("\n")
+    render(<DiffPreview oldText="" newText={newText} />)
+    expect(virtualCounts.at(-1)).toBe(5000)
+    expect(screen.getByTestId("diff-preview-lines")).toHaveAttribute("data-wrap", "true")
   })
 
-  it("clamps the added side independently of the removed side", () => {
-    const newText = Array.from({ length: 200 }, (_, i) => `new ${i}`).join("\n")
-    render(<DiffPreview oldText="one" newText={newText} />)
-    expect(screen.getAllByTestId("diff-added")).toHaveLength(120)
-    expect(screen.getByTestId("diff-preview-clamped")).toHaveTextContent(
-      "Showing the first 121 of 201"
-    )
+  it("renders nothing for two empty payloads", () => {
+    const { container } = render(<DiffPreview oldText="" newText="" />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

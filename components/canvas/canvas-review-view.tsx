@@ -12,7 +12,9 @@
  * footer, with a stale banner when the buffer moved out from under the proposal.
  */
 
+import { useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
+import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,9 +23,17 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { computeDiff, computeDiffStats, getMonacoLanguage } from "@/lib/artifacts"
+import {
+  computeDiff,
+  computeDiffStats,
+  getMonacoLanguage,
+  newLineForOldLine,
+} from "@/lib/artifacts"
+import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
 import { cn } from "@/lib/utils"
+import { LineDiffView, type LineDiffViewHandle } from "@/components/diff/line-diff-view"
 import { ReviewHunkItem } from "@/components/artifacts/review-hunk-item"
+import type { CanvasReviewItem } from "@/types"
 
 const DiffEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
   ssr: false,
@@ -56,12 +66,42 @@ export function CanvasReviewView({ documentId, panelMode, className }: CanvasRev
   const applyCanvasReview = useArtifactStore((state) => state.applyCanvasReview)
   const rejectCanvasReview = useArtifactStore((state) => state.rejectCanvasReview)
   const proposeCanvasReview = useArtifactStore((state) => state.proposeCanvasReview)
+  const diffEditorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
+  const lineDiffRef = useRef<LineDiffViewHandle | null>(null)
+
+  // Same single memoised diff as ArtifactReviewView: stats and the phone's
+  // inline view share it, and hunk toggles re-render without re-diffing.
+  const originalContent = review?.originalContent
+  const proposedContent = review?.proposedContent
+  const diff = useMemo(
+    () =>
+      originalContent === undefined || proposedContent === undefined
+        ? null
+        : computeDiff(originalContent, proposedContent),
+    [originalContent, proposedContent]
+  )
+  const mobile = panelMode === "mobile"
+
+  const revealItem = useCallback(
+    (item: CanvasReviewItem) => {
+      if (mobile) {
+        lineDiffRef.current?.revealLine({ side: "old", line: item.range.startLine })
+        return
+      }
+      const modified = diffEditorRef.current?.getModifiedEditor()
+      if (!modified || !diff) return
+      const line = newLineForOldLine(diff, item.range.startLine)
+      modified.revealLineInCenter(line)
+      modified.setPosition({ lineNumber: line, column: 1 })
+    },
+    [diff, mobile]
+  )
 
   if (!review) {
     return null
   }
 
-  const stats = computeDiffStats(computeDiff(review.originalContent, review.proposedContent))
+  const stats = computeDiffStats(diff ?? [])
   const acceptedCount = review.items.filter((item) => item.status === "accepted").length
   const total = review.items.length
   const isStale = review.isStale === true
@@ -97,22 +137,31 @@ export function CanvasReviewView({ documentId, panelMode, className }: CanvasRev
 
       {/* Diff surface */}
       <div className="min-h-0 flex-1">
-        {panelMode === "mobile" ? (
-          <InlineReviewDiff
-            oldContent={review.originalContent}
-            newContent={review.proposedContent}
+        {mobile ? (
+          <LineDiffView
+            ref={lineDiffRef}
+            lines={diff ?? []}
+            wrap
+            aria-label={t("title")}
+            data-testid="canvas-review-inline-diff"
           />
         ) : (
           <DiffEditor
             height="100%"
             language={language}
             theme={themeId}
-            onMount={(_editor, monaco) => registerMonaco(monaco)}
+            onMount={(editor, monaco) => {
+              diffEditorRef.current = editor
+              guardDiffEditorModelDisposal(editor)
+              registerMonaco(monaco)
+            }}
             original={review.originalContent}
             modified={review.proposedContent}
             options={{
               readOnly: true,
               renderSideBySide: true,
+              useInlineViewWhenSpaceIsLimited: true,
+              hideUnchangedRegions: { enabled: true },
               automaticLayout: true,
               wordWrap: "on",
               scrollBeyondLastLine: false,
@@ -135,7 +184,7 @@ export function CanvasReviewView({ documentId, panelMode, className }: CanvasRev
         {total === 0 ? (
           <p className="px-3 pb-3 text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <ScrollArea className="max-h-[260px]">
+          <ScrollArea className="max-h-[min(260px,35dvh)]">
             <div className="space-y-2 px-3 pb-3">
               {review.items.map((item) => (
                 <ReviewHunkItem
@@ -144,6 +193,7 @@ export function CanvasReviewView({ documentId, panelMode, className }: CanvasRev
                   disabled={isStale}
                   onAccept={(itemId) => setReviewItemStatus(documentId, itemId, "accepted")}
                   onReject={(itemId) => setReviewItemStatus(documentId, itemId, "rejected")}
+                  onReveal={revealItem}
                 />
               ))}
             </div>
@@ -175,30 +225,5 @@ export function CanvasReviewView({ documentId, panelMode, className }: CanvasRev
         </Button>
       </div>
     </div>
-  )
-}
-
-function InlineReviewDiff({ oldContent, newContent }: { oldContent: string; newContent: string }) {
-  const diff = computeDiff(oldContent, newContent)
-  return (
-    <ScrollArea className="h-full">
-      <pre className="p-2 font-mono text-xs">
-        {diff.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              "px-1",
-              line.type === "added" && "bg-green-500/10 text-green-700 dark:text-green-300",
-              line.type === "removed" && "bg-red-500/10 text-red-700 dark:text-red-300"
-            )}
-          >
-            <span className="select-none opacity-50">
-              {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
-            </span>{" "}
-            {line.content}
-          </div>
-        ))}
-      </pre>
-    </ScrollArea>
   )
 }

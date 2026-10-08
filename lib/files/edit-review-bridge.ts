@@ -5,7 +5,7 @@
 // project-file review-request signal; no new diff UI.
 
 import { getSession } from "@/lib/db/sessions"
-import { isPathWithinRoot, normalizeFsPath } from "@/lib/files/permissions"
+import { relativePathWithinRoot } from "@/lib/files/permissions"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { resolveLinkPath } from "@/lib/terminal/terminal-links"
 import { resolveSessionExecutionRoot } from "@/lib/workspace/session-root"
@@ -57,15 +57,7 @@ async function locateInSessionRoot(
   const { root } = resolveSessionExecutionRoot(session, useProjectStore.getState().projects)
   if (!root) return null
 
-  const absolutePath = resolveLinkPath(root, path)
-  if (!isPathWithinRoot(absolutePath, root)) return null
-  // Slice the *normalized* pair, never the raw strings: an agent reports
-  // `C:\repo\a.ts` while a root may be recorded as `C:/repo/`, and hand-rolled
-  // separator matching here disagreed with the shared containment test in
-  // exactly the way its own doc warns a third copy would.
-  const base = normalizeFsPath(root)
-  const target = normalizeFsPath(absolutePath)
-  const relPath = target.slice(base.endsWith("/") ? base.length : base.length + 1)
+  const relPath = relativePathWithinRoot(resolveLinkPath(root, path), root)
   return relPath ? { root, relPath } : null
 }
 

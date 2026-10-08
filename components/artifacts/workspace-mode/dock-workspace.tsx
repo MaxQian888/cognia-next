@@ -7,7 +7,6 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
 import { CodeServerWebPane } from "@/components/editor/project/code-server-web-pane"
@@ -18,15 +17,14 @@ import {
   ProjectEditorFileWorkbench,
   useProjectEditorWorkbench,
 } from "@/components/editor/project/project-editor-workbench"
-import { ChangesView } from "@/components/source-control/changes-view"
 import { useChatStore } from "@/stores/chat"
-import { DiffPane } from "@/components/source-control/diff-pane"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { getSession } from "@/lib/db/sessions"
 import { useCodeServerSupported } from "@/hooks/codeserver/use-code-server-supported"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { refreshGitStatus } from "@/lib/git/load"
+import { resolveReviewSide } from "@/lib/git/diff-presentation"
 import { isTauri } from "@/lib/tauri"
 import { listTaskRuns, listTaskWorkspaces } from "@/lib/task-workspace/client"
 import { cn } from "@/lib/utils"
@@ -41,6 +39,8 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { TaskResourcesPanel } from "./task-resources-panel"
 import { WorkspaceFilePreview } from "./workspace-file-preview"
+import { WorkspaceReview } from "./workspace-review"
+import { changedPathCount } from "@/lib/git/conversation-scope"
 
 interface DockWorkspaceProps {
   activeSessionId: string | null
@@ -192,7 +192,6 @@ function WorkspaceEditorBody({
   const addContextSelection = useChatStore((state) => state.addContextSelection)
   const [surface, setSurface] = useState<"file" | "review">("file")
   const [scope, setScope] = useState<"task" | "workspace">("task")
-  const [mobileReviewPane, setMobileReviewPane] = useState<"changes" | "diff">("changes")
   /**
    * The file a reveal asked a phone to show. Mobile only: the desktop dock
    * opens the editable editor directly, while a phone gets the focused
@@ -206,6 +205,11 @@ function WorkspaceEditorBody({
     column?: number
   } | null>(null)
   const processedRequest = useRef<string | null>(null)
+  /** The last review reveal that named a file; opens its diff (WorkspaceReview `focus`). */
+  const [reviewFocus, setReviewFocus] = useState<{
+    id: string
+    file: { path: string; staged: boolean }
+  } | null>(null)
   // Any editor open has to land on a surface the user can see. Task scope
   // replaces the editor with the task ledger, so an open that only flipped the
   // Editor/Review switch — a chat file link, a terminal path, a search hit —
@@ -338,21 +342,17 @@ function WorkspaceEditorBody({
   const hasReview = gitRootDir === rootPath && repoState?.isRepo === true
   // Distinct paths across every group — a file staged and then edited again
   // is one change to review, not two.
-  const changeCount = useMemo(
-    () =>
-      status
-        ? new Set([...status.staged, ...status.changes, ...status.merge].map((f) => f.path)).size
-        : 0,
-    [status]
-  )
+  const changeCount = useMemo(() => changedPathCount(status), [status])
   const refresh = useCallback(() => refreshGitStatus(rootPath), [rootPath])
   const gitActions = useGitActions(refresh)
+  const reviewSelection = useMemo(
+    () => (selectedPath ? { path: selectedPath, staged: selectedStaged } : null),
+    [selectedPath, selectedStaged]
+  )
   const selectReviewFile = useCallback(
-    (path: string, staged: boolean) => {
-      selectFile(path, staged)
-      if (layout === "mobile") setMobileReviewPane("diff")
-    },
-    [layout, selectFile]
+    (file: { path: string; staged: boolean } | null) =>
+      selectFile(file?.path ?? null, file?.staged ?? false),
+    [selectFile]
   )
 
   useEffect(() => {
@@ -370,7 +370,11 @@ function WorkspaceEditorBody({
     }
     processedRequest.current = request.id
     if (request.kind === "review") {
-      if (request.relPath) selectFile(request.relPath, false)
+      // The side that holds the change: a file that is only staged has an
+      // empty working-tree diff, and asking for that one opened a blank pane.
+      // The review surface then opens straight into this file's diff.
+      const side = request.relPath ? resolveReviewSide(status, request.relPath) : null
+      if (side) selectFile(side.path, side.staged)
       // Always target the review surface. `visibleSurface` below falls back to
       // the file surface until git status hydrates, then flips to review once
       // `hasReview` resolves — so a review reveal fired before git finished
@@ -379,6 +383,7 @@ function WorkspaceEditorBody({
       // synchronously inside the effect body.
       queueMicrotask(() => {
         if (processedRequest.current === request.id) {
+          if (side) setReviewFocus({ id: request.id, file: side })
           setSurface("review")
           // The review surface lives under workspace scope; left on the task
           // ledger the reveal would select a file in a pane nobody can see.
@@ -434,57 +439,46 @@ function WorkspaceEditorBody({
     engine,
     selectRoot,
     selectFile,
+    status,
     gotoLine,
     clearRequest,
   ])
 
   const visibleSurface = hasReview ? surface : "file"
-  const reviewEmpty = (
-    <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
-      {t("reviewEmpty")}
-    </div>
-  )
-  const changesPane = status ? (
-    <ChangesView
-      variant="review"
-      rootDir={rootPath}
-      actions={gitActions}
-      status={status}
-      committing={committing}
-      selectedPath={selectedPath}
-      onSelectFile={selectReviewFile}
-      density={layout === "mobile" ? "touch" : "compact"}
-    />
-  ) : (
-    reviewEmpty
-  )
-  const diffPane = selectedPath ? (
-    <DiffPane
-      rootDir={rootPath}
-      path={selectedPath}
-      staged={selectedStaged}
-      actions={gitActions}
-      density={layout === "mobile" ? "touch" : "compact"}
-      // The chat could already send the user here (the Edit/Write review
-      // bridge, the workspace-changes card), but nothing could carry a change
-      // back — reading that the assistant got a file wrong meant re-describing
-      // it by hand. Staged as a chip rather than sent outright so the user
-      // still writes the message that goes with it.
-      onSendToChat={({ path, diffText }) =>
-        addContextSelection({
-          kind: "file",
-          relPath: path,
-          title: path.split("/").pop() ?? path,
-          snapshot: diffText,
-          comment: "",
-        })
-      }
-    />
-  ) : (
-    reviewEmpty
+  // The chat could already send the user here (the Edit/Write review bridge,
+  // the workspace-changes card), but nothing could carry a change back —
+  // reading that the assistant got a file wrong meant re-describing it by
+  // hand. Staged as a chip rather than sent outright so the user still writes
+  // the message that goes with it.
+  const sendDiffToChat = useCallback(
+    ({ path, diffText }: { path: string; diffText: string }) =>
+      addContextSelection({
+        kind: "file",
+        relPath: path,
+        title: path.split("/").pop() ?? path,
+        snapshot: diffText,
+        comment: "",
+      }),
+    [addContextSelection]
   )
 
   const touch = layout === "mobile"
+  // From a diff to the file itself, on the editor surface and at the change.
+  // Pro IDE takes the open when it is the mounted engine, like any reveal.
+  const openReviewFileInEditor = useCallback(
+    (path: string, line?: number) => {
+      if (engine === "codeserver") {
+        showFileSurface()
+        void codeServerClient
+          .driveOpen(rootPath, joinProjectPath(rootPath, path), line, 1)
+          .catch(() => codeServerClient.openFile(rootPath, path, line, 1).catch(() => {}))
+        return
+      }
+      // gotoLine runs the workbench's beforeOpen, which is showFileSurface.
+      gotoLine(path, line)
+    },
+    [engine, gotoLine, rootPath, showFileSurface]
+  )
   const openPreviewInEditor = useCallback(() => {
     if (!mobilePreview) return
     gotoLine(mobilePreview.relPath, mobilePreview.line, mobilePreview.column)
@@ -728,54 +722,19 @@ function WorkspaceEditorBody({
 
           {visibleSurface === "review" && hasReview ? (
             <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
-              {touch ? (
-                <div className="flex h-full min-h-0 flex-col">
-                  <div
-                    className="grid shrink-0 grid-cols-2 border-b bg-background/95 p-1"
-                    data-testid="workspace-mobile-review-tabs"
-                  >
-                    <button
-                      type="button"
-                      data-testid="workspace-mobile-review-changes"
-                      aria-pressed={mobileReviewPane === "changes"}
-                      className={cn(
-                        "min-h-11 rounded-md px-3 text-sm",
-                        mobileReviewPane === "changes" ? "bg-accent" : "text-muted-foreground"
-                      )}
-                      onClick={() => setMobileReviewPane("changes")}
-                    >
-                      {t("reviewChanges")}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="workspace-mobile-review-diff"
-                      aria-pressed={mobileReviewPane === "diff"}
-                      className={cn(
-                        "min-h-11 rounded-md px-3 text-sm",
-                        mobileReviewPane === "diff" ? "bg-accent" : "text-muted-foreground"
-                      )}
-                      onClick={() => setMobileReviewPane("diff")}
-                    >
-                      {t("reviewDiff")}
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1">
-                    {mobileReviewPane === "changes" ? changesPane : diffPane}
-                  </div>
-                </div>
-              ) : status ? (
-                <ResizablePanelGroup orientation="horizontal" className="h-full">
-                  <ResizablePanel id="workspace-review-changes" defaultSize="38%" minSize="25%">
-                    {changesPane}
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel id="workspace-review-diff" defaultSize="62%" minSize="35%">
-                    {diffPane}
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              ) : (
-                reviewEmpty
-              )}
+              <WorkspaceReview
+                rootPath={rootPath}
+                sessionId={sessionId}
+                status={status}
+                actions={gitActions}
+                committing={committing}
+                selected={reviewSelection}
+                onSelect={selectReviewFile}
+                layout={layout}
+                onSendToChat={sendDiffToChat}
+                onOpenInEditor={openReviewFileInEditor}
+                focus={reviewFocus}
+              />
             </div>
           ) : null}
         </>

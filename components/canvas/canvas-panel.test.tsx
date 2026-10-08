@@ -111,6 +111,12 @@ jest.mock("@monaco-editor/react", () => ({
   },
 }))
 
+// The review view's DiffEditor shares the single editor stub above, which is
+// a code editor, not a diff editor; the dispose-order guard needs the latter.
+jest.mock("@/lib/canvas/monaco-diff-disposal", () => ({
+  guardDiffEditorModelDisposal: jest.fn(),
+}))
+
 // next-themes calls useTheme which expects a provider; stub it out.
 jest.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),

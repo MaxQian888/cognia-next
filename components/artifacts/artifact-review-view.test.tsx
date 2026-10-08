@@ -22,9 +22,40 @@ jest.mock("@/stores/project/project-store", () => ({
 jest.mock("next/dynamic", () => ({
   __esModule: true,
   default: () => {
-    const DiffEditorStub = ({ original, modified }: { original: string; modified: string }) => (
-      <div data-testid="diff-editor" data-original={original} data-modified={modified} />
-    )
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useEffect } = require("react") as typeof import("react")
+    const DiffEditorStub = ({
+      original,
+      modified,
+      options,
+      onMount,
+    }: {
+      original: string
+      modified: string
+      options?: Record<string, unknown>
+      onMount?: (editor: unknown, monaco: unknown) => void
+    }) => {
+      // Hand the view a fake diff editor so hunk reveals can be observed.
+      useEffect(() => {
+        onMount?.(
+          {
+            getModel: () => null,
+            setModel: () => {},
+            getModifiedEditor: () =>
+              (globalThis as { __modifiedEditor?: unknown }).__modifiedEditor,
+          },
+          {}
+        )
+      }, [onMount])
+      return (
+        <div
+          data-testid="diff-editor"
+          data-original={original}
+          data-modified={modified}
+          data-options={JSON.stringify(options ?? {})}
+        />
+      )
+    }
     DiffEditorStub.displayName = "DiffEditorStub"
     return DiffEditorStub
   },
@@ -90,6 +121,36 @@ describe("ArtifactReviewView", () => {
     render(<ArtifactReviewView artifact={a} panelMode="mobile" />)
     expect(screen.queryByTestId("diff-editor")).not.toBeInTheDocument()
     expect(screen.getByTestId("artifact-review-view")).toBeInTheDocument()
+    // The virtualized line diff, wrapped for a narrow screen.
+    expect(screen.getByTestId("artifact-review-inline-diff")).toHaveAttribute("data-wrap", "true")
+  })
+
+  it("folds unchanged regions and adapts to narrow space in the Monaco diff", () => {
+    const a = seedArtifact()
+    act(() => {
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    })
+    render(<ArtifactReviewView artifact={a} panelMode="desktop" />)
+    const options = JSON.parse(screen.getByTestId("diff-editor").getAttribute("data-options")!)
+    expect(options.hideUnchangedRegions).toEqual({ enabled: true })
+    expect(options.useInlineViewWhenSpaceIsLimited).toBe(true)
+    expect(options.renderSideBySide).toBe(true)
+  })
+
+  it("reveals a hunk in the modified editor from its line range", () => {
+    const modified = { revealLineInCenter: jest.fn(), setPosition: jest.fn() }
+    ;(globalThis as { __modifiedEditor?: unknown }).__modifiedEditor = modified
+    const a = seedArtifact()
+    act(() => {
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+    })
+    render(<ArtifactReviewView artifact={a} panelMode="desktop" />)
+    const reveals = screen.getAllByTestId("review-hunk-reveal")
+    // Second hunk replaces line 4 ("d" → "D").
+    fireEvent.click(reveals[reveals.length - 1])
+    expect(modified.revealLineInCenter).toHaveBeenCalledWith(4)
+    expect(modified.setPosition).toHaveBeenCalledWith({ lineNumber: 4, column: 1 })
+    delete (globalThis as { __modifiedEditor?: unknown }).__modifiedEditor
   })
 
   it("apply is disabled until a hunk is accepted, then applies accepted hunks", () => {

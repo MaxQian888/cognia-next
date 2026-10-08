@@ -1833,6 +1833,16 @@
       "lineCount": "{count} 行",
       "title": "写入",
       "truncated": "预览已截断 — 完整内容已写入磁盘。"
+    },
+    "applyPatch": {
+      "change": {
+        "added": "新增",
+        "deleted": "删除",
+        "renamed": "重命名",
+        "modified": "修改"
+      },
+      "binary": "二进制文件，无文本差异",
+      "noTextChanges": "无文本改动（仅重命名或权限变更）"
     }
   },
   "mcpContent": {
@@ -2220,7 +2230,10 @@
       "copy": "复制",
       "defaultName": "diff",
       "splitView": "分栏视图",
-      "unifiedView": "统一视图"
+      "unifiedView": "统一视图",
+      "fileCount": "{count} 个文件",
+      "binary": "二进制文件，无文本差异",
+      "noTextChanges": "无文本改动（仅重命名或权限变更）"
     },
     "errorBoundary": {
       "retry": "重试",
@@ -2714,7 +2727,8 @@
       "computer": "界面操作",
       "workflow": "工作流",
       "think": "思考",
-      "video": "视频"
+      "video": "视频",
+      "patch": "补丁"
     },
     "copyTarget": "复制目标",
     "copyCommand": "复制命令",

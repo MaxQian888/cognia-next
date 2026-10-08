@@ -10,7 +10,9 @@
  * a stale banner offers re-diff or discard.
  */
 
+import { useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
+import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,10 +21,16 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { computeDiff, computeDiffStats, getMonacoLanguage } from "@/lib/artifacts"
-import { cn } from "@/lib/utils"
+import {
+  computeDiff,
+  computeDiffStats,
+  getMonacoLanguage,
+  newLineForOldLine,
+} from "@/lib/artifacts"
+import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
+import { LineDiffView, type LineDiffViewHandle } from "@/components/diff/line-diff-view"
 import { ReviewHunkItem } from "./review-hunk-item"
-import type { Artifact } from "@/types"
+import type { Artifact, CanvasReviewItem } from "@/types"
 
 const DiffEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
   ssr: false,
@@ -51,6 +59,38 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
   const applyArtifactReview = useArtifactStore((state) => state.applyArtifactReview)
   const rejectArtifactReview = useArtifactStore((state) => state.rejectArtifactReview)
   const proposeArtifactUpdate = useArtifactStore((state) => state.proposeArtifactUpdate)
+  const diffEditorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
+  const lineDiffRef = useRef<LineDiffViewHandle | null>(null)
+
+  // One diff per proposal, not per render: the stats and the phone's inline
+  // view both read it, and a hunk toggle re-renders this whole surface.
+  const originalContent = review?.originalContent
+  const proposedContent = review?.proposedContent
+  const diff = useMemo(
+    () =>
+      originalContent === undefined || proposedContent === undefined
+        ? null
+        : computeDiff(originalContent, proposedContent),
+    [originalContent, proposedContent]
+  )
+  const mobile = panelMode === "mobile"
+
+  // Hunk ranges are on the original side; the modified side is the one both
+  // the split and the inline Monaco layouts keep on screen.
+  const revealItem = useCallback(
+    (item: CanvasReviewItem) => {
+      if (mobile) {
+        lineDiffRef.current?.revealLine({ side: "old", line: item.range.startLine })
+        return
+      }
+      const modified = diffEditorRef.current?.getModifiedEditor()
+      if (!modified || !diff) return
+      const line = newLineForOldLine(diff, item.range.startLine)
+      modified.revealLineInCenter(line)
+      modified.setPosition({ lineNumber: line, column: 1 })
+    },
+    [diff, mobile]
+  )
 
   // No proposal pending. This panel is permanently registered on the artifact
   // surface, so the Review activity can be reached at any time — returning null
@@ -69,7 +109,7 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
     )
   }
 
-  const stats = computeDiffStats(computeDiff(review.originalContent, review.proposedContent))
+  const stats = computeDiffStats(diff ?? [])
   const acceptedCount = review.items.filter((item) => item.status === "accepted").length
   const total = review.items.length
   const isStale = review.isStale === true
@@ -104,22 +144,35 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
 
       {/* Diff surface */}
       <div className="min-h-0 flex-1">
-        {panelMode === "mobile" ? (
-          <InlineReviewDiff
-            oldContent={review.originalContent}
-            newContent={review.proposedContent}
+        {mobile ? (
+          <LineDiffView
+            ref={lineDiffRef}
+            lines={diff ?? []}
+            wrap
+            aria-label={t("title")}
+            data-testid="artifact-review-inline-diff"
           />
         ) : (
           <DiffEditor
             height="100%"
             language={getMonacoLanguage(artifact.language || "plaintext")}
             theme={themeId}
-            onMount={(_editor, monaco) => registerMonaco(monaco)}
+            onMount={(editor, monaco) => {
+              diffEditorRef.current = editor
+              guardDiffEditorModelDisposal(editor)
+              registerMonaco(monaco)
+            }}
             original={review.originalContent}
             modified={review.proposedContent}
             options={{
               readOnly: true,
               renderSideBySide: panelMode !== "tablet",
+              // A narrow dock still gets a readable diff: Monaco drops to the
+              // inline layout below its breakpoint instead of two slivers.
+              useInlineViewWhenSpaceIsLimited: true,
+              // Long proposals fold their untouched stretches so the reviewer
+              // reads the changes, not the file; each fold expands in place.
+              hideUnchangedRegions: { enabled: true },
               automaticLayout: true,
               wordWrap: "on",
               scrollBeyondLastLine: false,
@@ -142,7 +195,7 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
         {total === 0 ? (
           <p className="px-3 pb-3 text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <ScrollArea className="max-h-[260px]">
+          <ScrollArea className="max-h-[min(260px,35dvh)]">
             <div className="space-y-2 px-3 pb-3">
               {review.items.map((item) => (
                 <ReviewHunkItem
@@ -151,6 +204,7 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
                   disabled={isStale}
                   onAccept={(itemId) => setReviewItemStatus(artifact.id, itemId, "accepted")}
                   onReject={(itemId) => setReviewItemStatus(artifact.id, itemId, "rejected")}
+                  onReveal={revealItem}
                 />
               ))}
             </div>
@@ -182,30 +236,5 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
         </Button>
       </div>
     </div>
-  )
-}
-
-function InlineReviewDiff({ oldContent, newContent }: { oldContent: string; newContent: string }) {
-  const diff = computeDiff(oldContent, newContent)
-  return (
-    <ScrollArea className="h-full">
-      <pre className="p-2 font-mono text-xs">
-        {diff.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              "px-1",
-              line.type === "added" && "bg-green-500/10 text-green-700 dark:text-green-300",
-              line.type === "removed" && "bg-red-500/10 text-red-700 dark:text-red-300"
-            )}
-          >
-            <span className="select-none opacity-50">
-              {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
-            </span>{" "}
-            {line.content}
-          </div>
-        ))}
-      </pre>
-    </ScrollArea>
   )
 }

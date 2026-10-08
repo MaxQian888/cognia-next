@@ -12,6 +12,7 @@
  * the web `ToolUIPart` shape (string output, MCP content-block arrays, objects).
  */
 
+import { parseUnifiedPatch } from "@/lib/git/unified-patch"
 import { stripReadLineNumbers } from "./read-line-numbers"
 import { normalizeToolName, type ToolPartLike } from "./tool-summary"
 
@@ -25,7 +26,15 @@ export type ToolResultDescriptor =
   | { kind: "error"; preview: string; tone: "error" }
 
 /** Diff-style tools whose +/− line counts come from the *input*. */
-const DIFF_TOOLS = new Set(["edit", "write", "multiedit", "multi_edit", "str_replace", "create"])
+const DIFF_TOOLS = new Set([
+  "edit",
+  "write",
+  "multiedit",
+  "multi_edit",
+  "str_replace",
+  "create",
+  "apply_patch",
+])
 
 /** Count lines in a block of text; an empty string is zero lines (not one). */
 function countLines(text: string): number {
@@ -88,6 +97,16 @@ export function diffCounts(
   if (lower === "write" || lower === "create") {
     const content = asString(input.content) ?? asString(input.new_string) ?? ""
     return { added: countLines(content), removed: 0 }
+  }
+  if (lower === "apply_patch") {
+    const patch = asString(input.patch)
+    let added = 0
+    let removed = 0
+    for (const file of patch ? parseUnifiedPatch(patch) : []) {
+      added += file.added
+      removed += file.removed
+    }
+    return { added, removed }
   }
   if (lower === "multiedit" || lower === "multi_edit") {
     let added = 0

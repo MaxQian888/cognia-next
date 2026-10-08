@@ -63,6 +63,24 @@ describe("diffCounts", () => {
     expect(diffCounts("write", { content: "l1\nl2" })).toEqual({ added: 2, removed: 0 })
   })
 
+  it("counts the parsed hunks of an apply_patch across every file", () => {
+    const patch = [
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,2 +1,2 @@",
+      " keep",
+      "-a",
+      "+b",
+      "--- /dev/null",
+      "+++ b/n.ts",
+      "@@ -0,0 +1,2 @@",
+      "+x",
+      "+y",
+    ].join("\n")
+    expect(diffCounts("apply_patch", { patch })).toEqual({ added: 3, removed: 1 })
+    expect(diffCounts("apply_patch", {})).toEqual({ added: 0, removed: 0 })
+  })
+
   it("treats an empty string as zero lines", () => {
     expect(diffCounts("edit", { old_string: "", new_string: "" })).toEqual({ added: 0, removed: 0 })
   })

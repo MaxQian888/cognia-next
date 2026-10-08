@@ -45,6 +45,19 @@ describe("<ToolDecisionContent />", () => {
     expect(screen.getByText(/ls -la/)).toBeInTheDocument()
   })
 
+  it("renders an apply_patch as its files' diffs before it is allowed to land", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "mcp__cognia-tools__apply_patch",
+          input: { patch: ["--- a/x.ts", "+++ b/x.ts", "@@ -1 +1 @@", "-a", "+b"].join("\n") },
+        })}
+      />
+    )
+    expect(screen.getByTestId("approval-apply-patch-preview")).toBeInTheDocument()
+    expect(screen.getByText("x.ts")).toBeInTheDocument()
+  })
+
   it("renders an edit as a diff", () => {
     render(
       <ToolDecisionContent

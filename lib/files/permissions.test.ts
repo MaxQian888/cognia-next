@@ -3,6 +3,7 @@ import {
   normalizeFsPath,
   isMutatingOperation,
   isPathWithinRoot,
+  relativePathWithinRoot,
   defaultFilePolicy,
 } from "@/lib/files/permissions"
 import type { FileAccessPolicy } from "@/types/files"
@@ -219,6 +220,21 @@ describe("defaultFilePolicy", () => {
     const p = defaultFilePolicy(["/a"], { readOnly: true, maxBytes: 99 })
     expect(p.readOnly).toBe(true)
     expect(p.maxBytes).toBe(99)
+  })
+})
+
+describe("relativePathWithinRoot", () => {
+  it("returns the forward-slashed path under the root", () => {
+    expect(relativePathWithinRoot("/repo/src/a.ts", "/repo")).toBe("src/a.ts")
+    expect(relativePathWithinRoot("/repo/src/a.ts", "/repo/")).toBe("src/a.ts")
+    expect(relativePathWithinRoot("C:\\repo\\a.ts", "C:/repo/")).toBe("a.ts")
+  })
+
+  it("is null outside the root, for the root itself, and through `..`", () => {
+    expect(relativePathWithinRoot("/other/a.ts", "/repo")).toBeNull()
+    expect(relativePathWithinRoot("/repo", "/repo")).toBeNull()
+    expect(relativePathWithinRoot("/repo/../etc/passwd", "/repo")).toBeNull()
+    expect(relativePathWithinRoot("/repository/a.ts", "/repo")).toBeNull()
   })
 })
 

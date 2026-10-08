@@ -3,18 +3,21 @@
 /**
  * PanelVersionHistory - Version history panel for ArtifactPanel.
  *
- * cognia-next ships a simpler diff view than upstream Cognia: an inline
- * `<pre>` block backed by `lib/artifacts/diff.computeDiff` — no separate
- * version-diff-view component.
+ * "Compare" on a version opens an inline, virtualized `LineDiffView` backed by
+ * `lib/artifacts/diff.computeDiff`, folded around the changes and sized to its
+ * content up to a fixed cap. It compares with the current version by default;
+ * the picker in its header compares with any other saved version instead,
+ * always older → newer whichever side was picked first.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { History, Save, RotateCcw, GitCompareArrows } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { computeDiff, computeDiffStats } from "@/lib/artifacts"
-import { cn } from "@/lib/utils"
+import { LineDiffView } from "@/components/diff/line-diff-view"
 import type { Artifact, ArtifactVersion } from "@/types"
 
 interface PanelVersionHistoryProps {
@@ -22,48 +25,72 @@ interface PanelVersionHistoryProps {
   onVersionRestored?: () => void
 }
 
+/** The other side of a comparison: the live artifact, or a saved version. */
+const CURRENT = "current"
+
+interface CompareSide {
+  label: string
+  content: string
+  /** Version number; the live artifact sorts after every saved version. */
+  order: number
+}
+
 function InlineDiff({
-  oldContent,
-  newContent,
-  oldLabel,
-  newLabel,
+  base,
+  against,
+  againstValue,
+  options,
+  onAgainstChange,
+  pickerLabel,
 }: {
-  oldContent: string
-  newContent: string
-  oldLabel: string
-  newLabel: string
+  base: CompareSide
+  against: CompareSide
+  againstValue: string
+  options: { value: string; label: string }[]
+  onAgainstChange: (value: string) => void
+  pickerLabel: string
 }) {
-  const diff = computeDiff(oldContent, newContent)
-  const stats = computeDiffStats(diff)
+  // Older on the left whichever side the reader picked first.
+  const [older, newer] = base.order <= against.order ? [base, against] : [against, base]
+  // Re-diffed only when a side changes, not on every re-render of the list
+  // (the artifact store notifies on every edit while this panel is open).
+  const diff = useMemo(
+    () => computeDiff(older.content, newer.content),
+    [older.content, newer.content]
+  )
+  const stats = useMemo(() => computeDiffStats(diff), [diff])
 
   return (
-    <div className="rounded-md border bg-card text-xs">
-      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span>
-          {oldLabel} → {newLabel}
-        </span>
-        <span>
+    <div className="overflow-hidden rounded-md border bg-card text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
+        <span className="shrink-0">{base.label}</span>
+        <span aria-hidden>↔</span>
+        <NativeSelect
+          size="sm"
+          value={againstValue}
+          onChange={(e) => onAgainstChange(e.target.value)}
+          aria-label={pickerLabel}
+          className="h-7 text-[11px] sm:h-6"
+          wrapperClassName="min-w-0 max-w-full"
+          data-testid="version-compare-against"
+        >
+          {options.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {option.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <span className="ml-auto shrink-0 tabular-nums" data-testid="version-compare-stats">
           <span className="text-green-600 dark:text-green-400">+{stats.added}</span>{" "}
           <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
         </span>
       </div>
-      <pre className="max-h-[240px] overflow-auto p-2 font-mono">
-        {diff.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              "px-1",
-              line.type === "added" && "bg-green-500/10 text-green-700 dark:text-green-300",
-              line.type === "removed" && "bg-red-500/10 text-red-700 dark:text-red-300"
-            )}
-          >
-            <span className="select-none opacity-50">
-              {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
-            </span>{" "}
-            {line.content}
-          </div>
-        ))}
-      </pre>
+      <LineDiffView
+        lines={diff}
+        maxHeight={240}
+        aria-label={`${older.label} → ${newer.label}`}
+        data-testid="version-inline-diff"
+      />
     </div>
   )
 }
@@ -76,8 +103,30 @@ export function PanelVersionHistory({ artifact, onVersionRestored }: PanelVersio
 
   const versions: ArtifactVersion[] = getArtifactVersions(artifact.id)
   const [diffVersionId, setDiffVersionId] = useState<string | null>(null)
+  // What the open comparison compares against: the current version, or the
+  // id of another saved version.
+  const [against, setAgainst] = useState<string>(CURRENT)
 
   const diffVersion = diffVersionId ? versions.find((v) => v.id === diffVersionId) : null
+  const currentSide: CompareSide = useMemo(
+    () => ({
+      label: `v${artifact.version} (${t("currentVersion")})`,
+      content: artifact.content,
+      order: Number.POSITIVE_INFINITY,
+    }),
+    [artifact.version, artifact.content, t]
+  )
+  const sideOf = useCallback(
+    (version: ArtifactVersion): CompareSide => ({
+      label: version.changeDescription
+        ? `v${version.version} · ${version.changeDescription}`
+        : `v${version.version}`,
+      content: version.content,
+      order: version.version,
+    }),
+    []
+  )
+  const againstVersion = against === CURRENT ? null : versions.find((v) => v.id === against)
 
   const handleSaveVersion = useCallback(() => {
     saveArtifactVersion(artifact.id, t("manualSave", { version: artifact.version }))
@@ -94,6 +143,7 @@ export function PanelVersionHistory({ artifact, onVersionRestored }: PanelVersio
 
   const toggleDiff = useCallback((versionId: string) => {
     setDiffVersionId((prev) => (prev === versionId ? null : versionId))
+    setAgainst(CURRENT)
   }, [])
 
   return (
@@ -131,7 +181,9 @@ export function PanelVersionHistory({ artifact, onVersionRestored }: PanelVersio
                     size="sm"
                     className="h-6 text-xs"
                     onClick={() => toggleDiff(version.id)}
-                    title={t("compareWithCurrent")}
+                    title={t("compareVersion")}
+                    aria-label={t("compareVersion")}
+                    aria-pressed={diffVersionId === version.id}
                   >
                     <GitCompareArrows className="h-3 w-3" />
                   </Button>
@@ -149,10 +201,17 @@ export function PanelVersionHistory({ artifact, onVersionRestored }: PanelVersio
               {diffVersionId === version.id && diffVersion && (
                 <div className="px-4 pb-3">
                   <InlineDiff
-                    oldContent={diffVersion.content}
-                    newContent={artifact.content}
-                    oldLabel={`v${diffVersion.version}`}
-                    newLabel={`v${artifact.version} (${t("currentVersion")})`}
+                    base={sideOf(diffVersion)}
+                    against={againstVersion ? sideOf(againstVersion) : currentSide}
+                    againstValue={againstVersion ? againstVersion.id : CURRENT}
+                    options={[
+                      { value: CURRENT, label: currentSide.label },
+                      ...versions
+                        .filter((v) => v.id !== diffVersion.id)
+                        .map((v) => ({ value: v.id, label: sideOf(v).label })),
+                    ]}
+                    onAgainstChange={setAgainst}
+                    pickerLabel={t("compareAgainst")}
                   />
                 </div>
               )}

@@ -1833,6 +1833,16 @@
       "lineCount": "{count} lines",
       "title": "Write",
       "truncated": "Preview truncated — full content is written to disk."
+    },
+    "applyPatch": {
+      "change": {
+        "added": "New",
+        "deleted": "Deleted",
+        "renamed": "Renamed",
+        "modified": "Modified"
+      },
+      "binary": "Binary file — no text diff",
+      "noTextChanges": "No text changes (rename or mode only)"
     }
   },
   "mcpContent": {
@@ -2220,7 +2230,10 @@
       "copy": "Copy",
       "defaultName": "diff",
       "splitView": "Split view",
-      "unifiedView": "Unified view"
+      "unifiedView": "Unified view",
+      "fileCount": "{count, plural, one {# file} other {# files}}",
+      "binary": "Binary file — no text diff",
+      "noTextChanges": "No text changes (rename or mode only)"
     },
     "errorBoundary": {
       "retry": "Retry",
@@ -2714,7 +2727,8 @@
       "computer": "Computer",
       "workflow": "Workflow",
       "think": "Think",
-      "video": "Video"
+      "video": "Video",
+      "patch": "Patch"
     },
     "copyTarget": "Copy target",
     "copyCommand": "Copy command",

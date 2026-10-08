@@ -6,7 +6,7 @@
  * store mutators.
  */
 
-import { render, screen, act } from "@testing-library/react"
+import { render, screen, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // Keep the artifact store light: stub plugin hooks + project store.
@@ -34,9 +34,40 @@ jest.mock("@/stores/settings", () => {
 jest.mock("next/dynamic", () => ({
   __esModule: true,
   default: () => {
-    const DiffEditorStub = ({ original, modified }: { original: string; modified: string }) => (
-      <div data-testid="diff-editor" data-original={original} data-modified={modified} />
-    )
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useEffect } = require("react") as typeof import("react")
+    const DiffEditorStub = ({
+      original,
+      modified,
+      options,
+      onMount,
+    }: {
+      original: string
+      modified: string
+      options?: Record<string, unknown>
+      onMount?: (editor: unknown, monaco: unknown) => void
+    }) => {
+      // Hand the view a fake diff editor so hunk reveals can be observed.
+      useEffect(() => {
+        onMount?.(
+          {
+            getModel: () => null,
+            setModel: () => {},
+            getModifiedEditor: () =>
+              (globalThis as { __modifiedEditor?: unknown }).__modifiedEditor,
+          },
+          {}
+        )
+      }, [onMount])
+      return (
+        <div
+          data-testid="diff-editor"
+          data-original={original}
+          data-modified={modified}
+          data-options={JSON.stringify(options ?? {})}
+        />
+      )
+    }
     DiffEditorStub.displayName = "DiffEditorStub"
     return DiffEditorStub
   },
@@ -97,6 +128,19 @@ describe("CanvasReviewView", () => {
     const id = seedReview()
     render(<CanvasReviewView documentId={id} panelMode="mobile" />)
     expect(screen.queryByTestId("diff-editor")).not.toBeInTheDocument()
+    expect(screen.getByTestId("canvas-review-inline-diff")).toHaveAttribute("data-wrap", "true")
+  })
+
+  it("reveals a hunk in the modified editor and folds unchanged regions", () => {
+    const modified = { revealLineInCenter: jest.fn(), setPosition: jest.fn() }
+    ;(globalThis as { __modifiedEditor?: unknown }).__modifiedEditor = modified
+    const id = seedReview()
+    render(<CanvasReviewView documentId={id} panelMode="desktop" />)
+    const options = JSON.parse(screen.getByTestId("diff-editor").getAttribute("data-options")!)
+    expect(options.hideUnchangedRegions).toEqual({ enabled: true })
+    fireEvent.click(screen.getAllByTestId("review-hunk-reveal")[0])
+    expect(modified.revealLineInCenter).toHaveBeenCalledWith(1)
+    delete (globalThis as { __modifiedEditor?: unknown }).__modifiedEditor
   })
 
   it("applies accepted hunks through applyCanvasReview when Apply is clicked", async () => {

@@ -9,7 +9,6 @@
   "beforeEdit": "Before edit",
   "cancel": "Cancel",
   "code": "Code",
-  "compareWithCurrent": "Compare with current version",
   "createArtifact": "Create Artifact",
   "currentVersion": "Current version",
   "defaultTitles": {
@@ -121,6 +120,7 @@
     "reject": "Reject",
     "rejectAll": "Reject all",
     "removeSelectionAria": "Remove selection {title}",
+    "revealInDiff": "Show lines {range} in the diff",
     "selectionChipCommentLabel": "{title} · comment",
     "selectionChipEntityLabel": "{kind}: {title}",
     "selectionChipExcerptAcrossLabel": "{derivation, select, summary {Summary} explanation {Explanation} translation {Translation} other {Quote}}: {title} · {count} messages",
@@ -219,9 +219,14 @@
     },
     "mobileTitle": "Workspace",
     "review": "Review",
+    "reviewBack": "Back to changed files",
     "reviewChanges": "Changes",
-    "reviewDiff": "Diff",
     "reviewEmpty": "Select a changed file to review its diff",
+    "reviewFileNav": "Changed file navigation",
+    "reviewFilePosition": "{index}/{total}",
+    "reviewFilePositionLabel": "File {index} of {total}",
+    "reviewNextFile": "Next file (Alt+↓)",
+    "reviewPrevFile": "Previous file (Alt+↑)",
     "reviewWithCount": "Review, {count, plural, one {# changed file} other {# changed files}}",
     "scopeLabel": "Workspace scope",
     "surfaceLabel": "Workspace view",
@@ -311,6 +316,19 @@
     "unavailable": {
       "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
       "title": "Workspace is unavailable"
+    },
+    "reviewScope": {
+      "label": "Which changes to list",
+      "all": "All",
+      "allLabel": "All changes in the working tree ({count})",
+      "conversation": "This chat",
+      "conversationLabel": "Files this conversation changed ({count})",
+      "baseline": "Files this conversation edited. Diffs still compare with the last commit, so they include any other edits to the same files.",
+      "commitIncludesHidden": "{count, plural, one {Commit also includes # staged file not listed here.} other {Commit also includes # staged files not listed here.}}",
+      "empty": "This conversation hasn't changed any files in this repository yet.",
+      "loading": "Looking up what this conversation changed…"
     }
-  }
+  },
+  "compareVersion": "Compare this version",
+  "compareAgainst": "Compare with"
 }

@@ -6,6 +6,7 @@
  * `iconKey` to a concrete lucide icon and renders the status glyph.
  */
 
+import { parseUnifiedPatch, patchFilePath } from "@/lib/git/unified-patch"
 import type { DynamicToolUIPart, ToolUIPart } from "ai"
 
 export type ToolPartLike = ToolUIPart | DynamicToolUIPart
@@ -136,6 +137,7 @@ const ICON_BY_NAME: Record<string, ToolIconKey> = {
   write: "write",
   edit: "edit",
   multiedit: "edit",
+  apply_patch: "edit",
   notebookedit: "notebook",
   bash: "terminal",
   shell: "terminal",
@@ -242,6 +244,15 @@ export function summarizeToolCall(part: ToolPartLike): ToolSummary {
         const firstPath = asString((input.changes[0] as { path?: unknown } | undefined)?.path)
         if (firstPath) target = basename(firstPath)
       }
+    } else if (lower === "apply_patch") {
+      const patch = asString(input.patch)
+      const names = patch
+        ? parseUnifiedPatch(patch)
+            .map(patchFilePath)
+            .filter((p): p is string => Boolean(p))
+            .map(basename)
+        : []
+      if (names.length > 0) target = names.join(", ")
     } else if (lower === "notebookedit") {
       const fp = asString(input.notebook_path) ?? asString(input.file_path)
       if (fp) target = basename(fp)

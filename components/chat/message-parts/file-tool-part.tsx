@@ -2,7 +2,7 @@
 
 /**
  * FileToolPart — a file-oriented tool call (Read / Write / Edit / MultiEdit /
- * Grep / Glob / LS / NotebookEdit) rendered as a single inline row in the
+ * apply_patch / Grep / Glob / LS / NotebookEdit) rendered as a single inline row in the
  * message stream, matching `TerminalToolPart`'s language: breathing status
  * dot, coloured verb, mono target (truncated), result meta, hover-revealed
  * copy / workbench actions, and a chevron that expands into the payload —
@@ -52,10 +52,15 @@ import { GrepCard } from "@/components/chat/message-parts/mcp-renderers/grep-car
 import { GlobCard } from "@/components/chat/message-parts/mcp-renderers/glob-card"
 import { LsCard } from "@/components/chat/message-parts/mcp-renderers/ls-card"
 import { NotebookEditCard } from "@/components/chat/message-parts/mcp-renderers/notebook-edit-card"
+import {
+  ApplyPatchCard,
+  applyPatchFiles,
+} from "@/components/chat/message-parts/mcp-renderers/apply-patch-card"
+import { patchFilePath } from "@/lib/git/unified-patch"
 import { WorkbenchReviewButton } from "@/components/chat/message-parts/mcp-renderers/workbench-review-button"
 import { cn } from "@/lib/utils"
 
-export type FileToolKind = "read" | "write" | "edit" | "grep" | "glob" | "ls" | "notebook"
+export type FileToolKind = "read" | "write" | "edit" | "patch" | "grep" | "glob" | "ls" | "notebook"
 
 /** Canonical kind per (namespace-folded, lower-cased) tool name. */
 const KIND_BY_NAME: Record<string, FileToolKind> = {
@@ -64,6 +69,8 @@ const KIND_BY_NAME: Record<string, FileToolKind> = {
   edit: "edit",
   multiedit: "edit",
   multi_edit: "edit",
+  apply_patch: "patch",
+  applypatch: "patch",
   grep: "grep",
   glob: "glob",
   ls: "ls",
@@ -86,6 +93,7 @@ const VERB_CLASS: Record<FileToolKind, string> = {
   read: "text-sky-600 dark:text-sky-400",
   write: "text-emerald-600 dark:text-emerald-400",
   edit: "text-amber-600 dark:text-amber-400",
+  patch: "text-amber-600 dark:text-amber-400",
   grep: "text-violet-600 dark:text-violet-400",
   glob: "text-violet-600 dark:text-violet-400",
   ls: "text-muted-foreground",
@@ -118,6 +126,16 @@ export function describeFileToolTarget(part: ToolUIPart, kind: FileToolKind): Fi
     case "notebook": {
       const path = asString(input.notebook_path) ?? asString(input.file_path)
       return { target: path, path }
+    }
+    case "patch": {
+      // One file: the row is that file, review button and all. Several: the
+      // row names them all and each file's section in the body carries its
+      // own review button.
+      const paths = applyPatchFiles(input)
+        .map(patchFilePath)
+        .filter((p): p is string => Boolean(p))
+      if (paths.length === 1) return { target: paths[0], path: paths[0] }
+      return { target: paths.length > 0 ? paths.join(", ") : undefined }
     }
     case "grep": {
       // The body no longer echoes the query — the row target carries the
@@ -175,6 +193,17 @@ function fileToolResultMeta(
     case "edit": {
       const n = Array.isArray(input.edits) ? input.edits.length : input.old_string ? 1 : 0
       return n > 0 ? t("result.edits", { count: n }) : null
+    }
+    case "patch": {
+      const files = applyPatchFiles(input)
+      if (files.length === 0) return null
+      let added = 0
+      let removed = 0
+      for (const file of files) {
+        added += file.added
+        removed += file.removed
+      }
+      return `${t("result.files", { count: files.length })} · ${t("result.diff", { added, removed })}`
     }
     case "grep": {
       const list = parsed?.matches ?? parsed?.lines ?? parsed?.files
@@ -255,6 +284,7 @@ const BODY_BY_KIND: Record<FileToolKind, BodyComponent> = {
   read: ReadCard,
   write: WriteCard,
   edit: EditCard,
+  patch: ApplyPatchCard,
   grep: GrepCard,
   glob: GlobCard,
   ls: LsCard,
@@ -349,7 +379,7 @@ export const FileToolPart = memo(function FileToolPart({
   }, [part, kind, tFlow])
 
   const copyValue = info.path ?? info.target
-  const writable = kind === "write" || kind === "edit"
+  const writable = kind === "write" || kind === "edit" || kind === "patch"
   const statusKey: Record<ToolUIPart["state"], string> = {
     "input-streaming": "pending",
     "input-available": "running",

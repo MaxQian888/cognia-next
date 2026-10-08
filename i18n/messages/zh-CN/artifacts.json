@@ -9,7 +9,6 @@
   "beforeEdit": "编辑前",
   "cancel": "取消",
   "code": "代码",
-  "compareWithCurrent": "与当前版本对比",
   "createArtifact": "创建 Artifact",
   "currentVersion": "当前版本",
   "defaultTitles": {
@@ -121,6 +120,7 @@
     "reject": "拒绝",
     "rejectAll": "全部拒绝",
     "removeSelectionAria": "移除选区 {title}",
+    "revealInDiff": "在差异中定位第 {range} 行",
     "selectionChipCommentLabel": "{title} · 批注",
     "selectionChipEntityLabel": "{kind}：{title}",
     "selectionChipExcerptAcrossLabel": "{derivation, select, summary {总结} explanation {解释} translation {译文} other {摘录}}：{title} · {count} 条消息",
@@ -219,9 +219,14 @@
     },
     "mobileTitle": "工作区",
     "review": "审阅",
+    "reviewBack": "返回改动文件列表",
     "reviewChanges": "改动",
-    "reviewDiff": "差异",
     "reviewEmpty": "请选择一个改动文件以审阅差异",
+    "reviewFileNav": "改动文件导航",
+    "reviewFilePosition": "{index}/{total}",
+    "reviewFilePositionLabel": "第 {index} 个文件，共 {total} 个",
+    "reviewNextFile": "下一个文件（Alt+↓）",
+    "reviewPrevFile": "上一个文件（Alt+↑）",
     "reviewWithCount": "审阅，{count} 个已更改文件",
     "scopeLabel": "工作区范围",
     "surfaceLabel": "工作区视图",
@@ -311,6 +316,19 @@
     "unavailable": {
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",
       "title": "工作区不可用"
+    },
+    "reviewScope": {
+      "label": "列出哪些改动",
+      "all": "全部",
+      "allLabel": "工作区的全部改动（{count}）",
+      "conversation": "本对话",
+      "conversationLabel": "本对话改动的文件（{count}）",
+      "baseline": "本对话编辑过的文件。差异仍与上次提交比较，因此也包含这些文件中的其他改动。",
+      "commitIncludesHidden": "提交还会包含 {count} 个此处未列出的已暂存文件。",
+      "empty": "本对话尚未改动此仓库中的任何文件。",
+      "loading": "正在查找本对话改动的文件…"
     }
-  }
+  },
+  "compareVersion": "比较此版本",
+  "compareAgainst": "比较对象"
 }

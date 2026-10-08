@@ -21,6 +21,12 @@ interface ReviewHunkItemProps {
   onReject: (id: string) => void
   /** Disable the controls (e.g. while the proposal is stale). */
   disabled?: boolean
+  /**
+   * Scroll the diff above to this hunk. The list sits under the diff and is a
+   * fraction of its height, so without it a reviewer reading "Lines 212-230"
+   * had to scroll a long proposal by hand to find what they were deciding on.
+   */
+  onReveal?: (item: CanvasReviewItem) => void
   className?: string
 }
 
@@ -41,6 +47,7 @@ export const ReviewHunkItem = memo(function ReviewHunkItem({
   onAccept,
   onReject,
   disabled,
+  onReveal,
   className,
 }: ReviewHunkItemProps) {
   const t = useTranslations("artifacts.review")
@@ -71,9 +78,22 @@ export const ReviewHunkItem = memo(function ReviewHunkItem({
             <Badge variant="outline" className="text-[10px]">
               {t(CHANGE_LABEL_KEYS[item.changeType])}
             </Badge>
-            <span className="text-[10px] text-muted-foreground">
-              {t("lines")} {rangeLabel}
-            </span>
+            {onReveal ? (
+              <button
+                type="button"
+                className="rounded-sm text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => onReveal(item)}
+                aria-label={t("revealInDiff", { range: rangeLabel })}
+                title={t("revealInDiff", { range: rangeLabel })}
+                data-testid="review-hunk-reveal"
+              >
+                {t("lines")} {rangeLabel}
+              </button>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">
+                {t("lines")} {rangeLabel}
+              </span>
+            )}
           </div>
         </div>
       </div>

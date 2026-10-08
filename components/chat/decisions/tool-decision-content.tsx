@@ -21,6 +21,10 @@ import { useTranslations } from "next-intl"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { DiffPreview } from "@/components/chat/message-parts/mcp-renderers/diff-preview"
 import {
+  PatchFilesPreview,
+  applyPatchFiles,
+} from "@/components/chat/message-parts/mcp-renderers/apply-patch-card"
+import {
   isScheduleApprovalTool,
   ScheduledTaskApprovalPreview,
 } from "@/components/chat/decisions/scheduled-task-approval-preview"
@@ -236,6 +240,17 @@ export function ToolInputPreview({ approval }: { approval: PendingApproval }) {
         ))}
       </div>
     )
+  }
+
+  if (name === "apply_patch" && typeof input.patch === "string") {
+    const files = applyPatchFiles(input)
+    if (files.length > 0) {
+      return (
+        <div data-testid="approval-apply-patch-preview">
+          <PatchFilesPreview files={files} />
+        </div>
+      )
+    }
   }
 
   if ((name === "write" || name === "Write") && typeof input.content === "string") {

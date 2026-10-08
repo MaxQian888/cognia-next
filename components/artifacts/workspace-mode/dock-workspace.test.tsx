@@ -317,6 +317,12 @@ jest.mock("@/stores/git/git-store", () => ({
   useGitStore: (selector: (state: Record<string, unknown>) => unknown) => selector(gitState),
 }))
 jest.mock("@/hooks/git/use-git-actions", () => ({ useGitActions: () => ({}) }))
+jest.mock("@/components/source-control/commit-box", () => ({
+  CommitBox: () => <div data-testid="review-commit-box" />,
+}))
+jest.mock("@/hooks/git/use-conversation-changed-paths", () => ({
+  useConversationChangedPaths: () => ({ paths: new Set<string>(), ready: true }),
+}))
 jest.mock("@/lib/git/load", () => ({ refreshGitStatus: jest.fn() }))
 jest.mock("@/components/source-control/changes-view", () => ({
   ChangesView: ({
@@ -334,8 +340,31 @@ jest.mock("@/components/source-control/changes-view", () => ({
   ),
 }))
 jest.mock("@/components/source-control/diff-pane", () => ({
-  DiffPane: ({ density }: { density?: string }) => (
-    <div data-testid="review-diff" data-density={density} />
+  DiffPane: ({
+    density,
+    path,
+    staged,
+    leading,
+    onOpenInEditor,
+    reviewDefaultCollapsed,
+  }: {
+    density?: string
+    path: string
+    staged: boolean
+    leading?: React.ReactNode
+    onOpenInEditor?: (path: string, line?: number) => void
+    reviewDefaultCollapsed?: boolean
+  }) => (
+    <div
+      data-testid="review-diff"
+      data-density={density}
+      data-path={path}
+      data-staged={String(staged)}
+      data-review-collapsed={String(Boolean(reviewDefaultCollapsed))}
+    >
+      {leading}
+      <button data-testid="review-diff-open" onClick={() => onOpenInEditor?.(path, 12)} />
+    </div>
   ),
 }))
 
@@ -530,6 +559,9 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("workspace-surface-review")).toHaveAttribute("data-state", "on")
     expect(screen.getByTestId("workspace-surface-file")).toHaveAttribute("data-state", "off")
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
+    // The dock's conversation scopes the review and commits from under the list.
+    expect(screen.getByTestId("workspace-review-scope")).toBeInTheDocument()
+    expect(screen.getByTestId("review-commit-box")).toBeInTheDocument()
     expect(screen.getByTestId("review-diff")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).not.toBeVisible()
   })
@@ -909,7 +941,7 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("workspace-file-layout")).not.toBeVisible()
   })
 
-  it("uses a single-column Changes/Diff review flow on mobile", async () => {
+  it("reviews one pane at a time on mobile: the list, then a file's diff with a way back", async () => {
     act(() => {
       useArtifactDockLayoutStore.getState().revealWorkspaceReview({
         sessionId: "session-1",
@@ -919,16 +951,87 @@ describe("DockWorkspace", () => {
 
     render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
 
-    expect(await screen.findByTestId("workspace-mobile-review-tabs")).toBeInTheDocument()
+    const review = await screen.findByTestId("workspace-review")
+    expect(review).toHaveAttribute("data-layout", "stacked")
+    // A leftover selection is not a request to read it: the list comes first.
+    expect(review).toHaveAttribute("data-pane", "list")
     expect(screen.getByTestId("review-changes")).toHaveAttribute("data-density", "touch")
     expect(screen.queryByTestId("review-diff")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("review-changes"))
-    expect(screen.getByTestId("review-diff")).toHaveAttribute("data-density", "touch")
-    fireEvent.click(screen.getByTestId("workspace-mobile-review-diff"))
-    expect(screen.getByTestId("review-diff")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("workspace-mobile-review-changes"))
+    expect(gitState.selectFile).toHaveBeenCalledWith("src/a.ts", false)
+    const diff = screen.getByTestId("review-diff")
+    expect(diff).toHaveAttribute("data-density", "touch")
+    // Little height on a phone: the hunk review list starts folded.
+    expect(diff).toHaveAttribute("data-review-collapsed", "true")
+    expect(screen.queryByTestId("review-changes")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-review-back"))
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
+    expect(screen.queryByTestId("review-diff")).not.toBeInTheDocument()
+  })
+
+  it("opens a revealed file straight into its diff on mobile", async () => {
+    gitState = {
+      ...gitState,
+      selectedPath: "src/edited.ts",
+      status: { staged: [], changes: [{ path: "src/edited.ts" }], merge: [] },
+    }
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/edited.ts",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+    expect(await screen.findByTestId("review-diff")).toHaveAttribute("data-path", "src/edited.ts")
+    expect(screen.getByTestId("workspace-review")).toHaveAttribute("data-pane", "detail")
+    expect(screen.getByTestId("workspace-review-back")).toBeInTheDocument()
+  })
+
+  it("reveals a file that is only staged on its staged side", async () => {
+    gitState = {
+      ...gitState,
+      status: { staged: [{ path: "src/staged.ts" }], changes: [], merge: [] },
+    }
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/staged.ts",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    await screen.findByTestId("workspace-review-layout")
+    expect(gitState.selectFile).toHaveBeenCalledWith("src/staged.ts", true)
+  })
+
+  it("opens a reviewed file in the editor at the change", async () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+      })
+    })
+    render(<DockWorkspace activeSessionId="session-1" />)
+    await screen.findByTestId("workspace-review-layout")
+
+    const goto = jest.fn()
+    window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, goto)
+    fireEvent.click(screen.getByTestId("review-diff-open"))
+    await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+    await waitFor(() =>
+      expect(goto).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: { relPath: "src/a.ts", line: 12, column: 1 } })
+      )
+    )
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, goto)
+    expect(screen.getByTestId("workspace-surface-file")).toHaveAttribute("data-state", "on")
   })
 
   it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {

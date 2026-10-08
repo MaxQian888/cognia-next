@@ -198,6 +198,38 @@ describe("FileToolPart row", () => {
     expect(screen.getByTestId("workbench-review").getAttribute("data-path")).toBe("a.ts")
   })
 
+  it("renders apply_patch as a patch row: files + counts meta, one-file review, diff body", () => {
+    const patch = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1 +1 @@", "-a", "+b"].join("\n")
+    expect(fileToolKind({ type: "tool-apply_patch" })).toBe("patch")
+    expect(fileToolKind({ type: "tool-mcp__cognia-tools__apply_patch" })).toBe("patch")
+    render(<FileToolPart part={part("tool-apply_patch", { input: { patch } })} sessionId="s1" />)
+    expect(screen.getByTestId("file-tool-part")).toHaveAttribute("data-kind", "patch")
+    expect(screen.getByText("verb.patch")).toBeInTheDocument()
+    expect(screen.getByTestId("file-tool-meta")).toHaveTextContent(
+      'result.files:{"count":1} · result.diff:{"added":1,"removed":1}'
+    )
+    expect(screen.getByTestId("workbench-review")).toHaveAttribute("data-path", "src/a.ts")
+    fireEvent.click(screen.getByRole("button", { name: /rowAria/ }))
+    expect(screen.getByTestId("mcp-apply-patch-card")).toBeInTheDocument()
+  })
+
+  it("names every file of a multi-file patch and leaves review to the body", () => {
+    const patch = [
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      "--- /dev/null",
+      "+++ b/b.ts",
+      "@@ -0,0 +1 @@",
+      "+c",
+    ].join("\n")
+    render(<FileToolPart part={part("tool-apply_patch", { input: { patch } })} sessionId="s1" />)
+    expect(screen.getByTestId("file-tool-part")).toHaveTextContent("a.ts, b.ts")
+    expect(screen.queryByTestId("workbench-review")).toBeNull()
+  })
+
   it("shows match/file counts for the search tools", () => {
     const { unmount } = render(
       <FileToolPart

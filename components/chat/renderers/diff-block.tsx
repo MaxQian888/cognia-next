@@ -1,70 +1,34 @@
 "use client"
 
-import { useState, memo, useCallback, useMemo } from "react"
+/**
+ * DiffBlock — a ```diff code block (and the tool / remote-session bodies that
+ * hand it a patch), in the shared rich-block frame.
+ *
+ * Parsing is `parseUnifiedPatch` and drawing is `LineDiffView`: the same
+ * parser an agent's `apply_patch` call renders through and the same
+ * virtualized view the dock uses for git hunks. Before, this block carried a
+ * parser and two `<table>` renderers of its own that mounted one row per line,
+ * so a pasted lockfile diff mounted thousands of rows inside a message.
+ *
+ * A patch that spans several files shows one section per file, each with its
+ * path and counts; unified / split is one toggle for the whole block.
+ */
+
+import { memo, useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Columns, FileDiff, Minus, Plus, Rows } from "lucide-react"
 import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { cn } from "@/lib/utils"
 import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
 import { RichBlockFrame } from "@/components/chat/renderers/rich-block/rich-block-frame"
+import { LineDiffView } from "@/components/diff/line-diff-view"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@cognia/logging"
-import { computeIntralineDiff, type IntralineSegment } from "@/lib/chat/intraline-diff"
+import { gitHunksToDiffRows } from "@/lib/git/diff-presentation"
+import { parseUnifiedPatch, patchFilePath, type PatchFile } from "@/lib/git/unified-patch"
 
-interface DiffLine {
-  type: "add" | "remove" | "context" | "info"
-  content: string
-  oldLineNumber?: number
-  newLineNumber?: number
-  /** Word/char-level segments, set on a remove→add modification pair. */
-  segments?: IntralineSegment[]
-}
-
-/** Render a line's intraline segments (changed runs emphasized) or plain text. */
-function IntralineContent({
-  segments,
-  content,
-  emphasis,
-}: {
-  segments: IntralineSegment[] | undefined
-  content: string
-  emphasis: string
-}) {
-  if (!segments) return <>{content}</>
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.kind === "equal" ? (
-          <span key={i}>{seg.value}</span>
-        ) : (
-          <span key={i} className={cn("rounded-sm", emphasis)} data-testid="diff-intraline">
-            {seg.value}
-          </span>
-        )
-      )}
-    </>
-  )
-}
-
-/**
- * Attach intraline segments to each remove line immediately followed by an add
- * line (a single-line modification). Best-effort: only the adjacent pair is
- * annotated, so multi-line edits highlight at their boundary and degrade to
- * whole-line color elsewhere.
- */
-function annotateIntraline(lines: DiffLine[]): DiffLine[] {
-  const out = lines.map((l) => ({ ...l }))
-  for (let i = 0; i < out.length - 1; i++) {
-    if (out[i].type === "remove" && out[i + 1].type === "add") {
-      const d = computeIntralineDiff(out[i].content, out[i + 1].content)
-      if (d) {
-        out[i].segments = d.removed
-        out[i + 1].segments = d.added
-      }
-    }
-  }
-  return out
-}
+/** Tallest a single file's diff grows inside a message before it scrolls. */
+export const DIFF_BLOCK_MAX_HEIGHT = 480
 
 interface DiffBlockProps {
   content: string
@@ -73,6 +37,21 @@ interface DiffBlockProps {
   filename?: string
   oldFilename?: string
   newFilename?: string
+}
+
+function Counts({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="flex items-center gap-2 tabular-nums">
+      <span className="flex items-center gap-0.5 text-success">
+        <Plus className="size-3" />
+        {added}
+      </span>
+      <span className="flex items-center gap-0.5 text-destructive">
+        <Minus className="size-3" />
+        {removed}
+      </span>
+    </span>
+  )
 }
 
 export const DiffBlock = memo(function DiffBlock({
@@ -86,21 +65,28 @@ export const DiffBlock = memo(function DiffBlock({
   const [viewMode, setViewMode] = useState<"unified" | "split">("unified")
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
-  const parsedDiff = useMemo(() => annotateIntraline(parseDiff(content)), [content])
+  const files = useMemo(() => parseUnifiedPatch(content), [content])
+  const stats = useMemo(() => {
+    let added = 0
+    let removed = 0
+    for (const file of files) {
+      added += file.added
+      removed += file.removed
+    }
+    return { added, removed }
+  }, [files])
 
   const handleCopy = useCallback(async () => {
     await copy(content)
   }, [content, copy])
 
-  const stats = useMemo(() => {
-    let additions = 0
-    let deletions = 0
-    for (const line of parsedDiff) {
-      if (line.type === "add") additions++
-      if (line.type === "remove") deletions++
-    }
-    return { additions, deletions }
-  }, [parsedDiff])
+  const single = files.length <= 1
+  const label =
+    filename ||
+    oldFilename ||
+    newFilename ||
+    (single && files[0] ? patchFilePath(files[0]) : null) ||
+    (single ? t("defaultName") : t("fileCount", { count: files.length }))
 
   // The shared block frame (ADR-0218); it also brings the rich-controls
   // reveal this toolbar used to lack.
@@ -109,23 +95,8 @@ export const DiffBlock = memo(function DiffBlock({
       kind="diff"
       className={className}
       icon={<FileDiff />}
-      label={
-        <span className="font-mono">
-          {filename || oldFilename || newFilename || t("defaultName")}
-        </span>
-      }
-      meta={
-        <span className="flex items-center gap-2 tabular-nums">
-          <span className="flex items-center gap-0.5 text-success">
-            <Plus className="size-3" />
-            {stats.additions}
-          </span>
-          <span className="flex items-center gap-0.5 text-destructive">
-            <Minus className="size-3" />
-            {stats.deletions}
-          </span>
-        </span>
-      }
+      label={<span className="font-mono">{label}</span>}
+      meta={<Counts added={stats.added} removed={stats.removed} />}
       actions={
         <>
           <RichBlockAction
@@ -149,214 +120,72 @@ export const DiffBlock = memo(function DiffBlock({
           </RichBlockAction>
         </>
       }
-      bodyClassName="overflow-x-auto bg-muted/30"
+      bodyClassName="bg-muted/30"
     >
-      {viewMode === "unified" ? (
-        <UnifiedDiffView lines={parsedDiff} />
+      {files.length === 0 ? (
+        // Not a diff after all: show what was written rather than nothing.
+        <pre className="overflow-x-auto px-3 py-2 font-mono text-xs" data-testid="diff-block-raw">
+          {content}
+        </pre>
       ) : (
-        <SplitDiffView lines={parsedDiff} />
+        <div className="divide-y divide-border/60">
+          {files.map((file, i) => (
+            <DiffBlockFile
+              key={i}
+              file={file}
+              layout={viewMode}
+              showHeader={!single}
+              label={label}
+              emptyLabel={file.binary ? t("binary") : t("noTextChanges")}
+            />
+          ))}
+        </div>
       )}
     </RichBlockFrame>
   )
 })
 
-const UnifiedDiffView = memo(function UnifiedDiffView({ lines }: { lines: DiffLine[] }) {
+const DiffBlockFile = memo(function DiffBlockFile({
+  file,
+  layout,
+  showHeader,
+  label,
+  emptyLabel,
+}: {
+  file: PatchFile
+  layout: "unified" | "split"
+  showHeader: boolean
+  label: string
+  /** Shown instead of lines: a binary file, or a rename / mode change only. */
+  emptyLabel: string
+}) {
+  const rows = useMemo(() => gitHunksToDiffRows(file.hunks), [file.hunks])
+  const path = patchFilePath(file)
   return (
-    <table className="w-full text-xs font-mono">
-      <tbody>
-        {lines.map((line, index) => (
-          <tr
-            key={index}
-            className={cn(
-              line.type === "add" && "bg-success/10",
-              line.type === "remove" && "bg-destructive/10",
-              line.type === "info" && "bg-info/10"
-            )}
-          >
-            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
-              {line.oldLineNumber || ""}
-            </td>
-            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
-              {line.newLineNumber || ""}
-            </td>
-            <td className="w-4 text-center select-none">
-              {line.type === "add" && <span className="text-success">+</span>}
-              {line.type === "remove" && <span className="text-destructive">-</span>}
-              {line.type === "info" && <span className="text-info">@</span>}
-            </td>
-            <td
-              className={cn(
-                "px-2 py-0.5 whitespace-pre",
-                line.type === "add" && "text-success",
-                line.type === "remove" && "text-destructive",
-                line.type === "info" && "text-info font-semibold"
-              )}
-            >
-              <IntralineContent
-                segments={line.segments}
-                content={line.content}
-                emphasis={line.type === "add" ? "bg-success/25" : "bg-destructive/20"}
-              />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <section data-testid="diff-block-file" data-change={file.change}>
+      {showHeader ? (
+        <header className="flex items-center gap-2 bg-muted/50 px-2 py-1 text-[11px]">
+          <span className="min-w-0 flex-1 truncate font-mono" title={path ?? undefined}>
+            {file.change === "renamed" && file.oldPath && file.newPath
+              ? `${file.oldPath} → ${file.newPath}`
+              : path}
+          </span>
+          <Counts added={file.added} removed={file.removed} />
+        </header>
+      ) : null}
+      {file.binary || rows.length === 0 ? (
+        <p className="px-3 py-1.5 text-xs text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <LineDiffView
+          rows={rows}
+          layout={layout}
+          maxHeight={DIFF_BLOCK_MAX_HEIGHT}
+          aria-label={path ?? label}
+          data-testid="diff-block-lines"
+        />
+      )}
+    </section>
   )
 })
-
-const SplitDiffView = memo(function SplitDiffView({ lines }: { lines: DiffLine[] }) {
-  const pairs = useMemo(() => {
-    const result: { left?: DiffLine; right?: DiffLine }[] = []
-    let i = 0
-
-    while (i < lines.length) {
-      const line = lines[i]
-
-      if (line.type === "context" || line.type === "info") {
-        result.push({ left: line, right: line })
-        i++
-      } else if (line.type === "remove") {
-        const nextLine = lines[i + 1]
-        if (nextLine?.type === "add") {
-          result.push({ left: line, right: nextLine })
-          i += 2
-        } else {
-          result.push({ left: line, right: undefined })
-          i++
-        }
-      } else if (line.type === "add") {
-        result.push({ left: undefined, right: line })
-        i++
-      } else {
-        i++
-      }
-    }
-
-    return result
-  }, [lines])
-
-  return (
-    <table className="w-full text-xs font-mono">
-      <tbody>
-        {pairs.map((pair, index) => (
-          <tr key={index}>
-            <td
-              className={cn(
-                "w-1/2 border-r border-border/60",
-                pair.left?.type === "remove" && "bg-destructive/10",
-                pair.left?.type === "info" && "bg-info/10"
-              )}
-            >
-              <div className="flex">
-                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
-                  {pair.left?.oldLineNumber || ""}
-                </span>
-                <span className="w-4 text-center select-none">
-                  {pair.left?.type === "remove" && <span className="text-destructive">-</span>}
-                  {pair.left?.type === "info" && <span className="text-info">@</span>}
-                </span>
-                <span
-                  className={cn(
-                    "flex-1 px-2 py-0.5 whitespace-pre",
-                    pair.left?.type === "remove" && "text-destructive",
-                    pair.left?.type === "info" && "text-info font-semibold"
-                  )}
-                >
-                  <IntralineContent
-                    segments={pair.left?.segments}
-                    content={pair.left?.content ?? ""}
-                    emphasis="bg-destructive/20"
-                  />
-                </span>
-              </div>
-            </td>
-
-            <td
-              className={cn(
-                "w-1/2",
-                pair.right?.type === "add" && "bg-success/10",
-                pair.right?.type === "info" && "bg-info/10"
-              )}
-            >
-              <div className="flex">
-                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
-                  {pair.right?.newLineNumber || ""}
-                </span>
-                <span className="w-4 text-center select-none">
-                  {pair.right?.type === "add" && <span className="text-success">+</span>}
-                  {pair.right?.type === "info" && <span className="text-info">@</span>}
-                </span>
-                <span
-                  className={cn(
-                    "flex-1 px-2 py-0.5 whitespace-pre",
-                    pair.right?.type === "add" && "text-success",
-                    pair.right?.type === "info" && "text-info font-semibold"
-                  )}
-                >
-                  <IntralineContent
-                    segments={pair.right?.segments}
-                    content={pair.right?.content ?? ""}
-                    emphasis="bg-success/25"
-                  />
-                </span>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-})
-
-function parseDiff(content: string): DiffLine[] {
-  const lines = content.split("\n")
-  const result: DiffLine[] = []
-  let oldLineNum = 0
-  let newLineNum = 0
-
-  for (const line of lines) {
-    const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (hunkMatch) {
-      oldLineNum = parseInt(hunkMatch[1], 10)
-      newLineNum = parseInt(hunkMatch[2], 10)
-      result.push({ type: "info", content: line })
-      continue
-    }
-
-    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("diff ")) {
-      continue
-    }
-
-    if (line.startsWith("+")) {
-      result.push({
-        type: "add",
-        content: line.slice(1),
-        newLineNumber: newLineNum++,
-      })
-      continue
-    }
-
-    if (line.startsWith("-")) {
-      result.push({
-        type: "remove",
-        content: line.slice(1),
-        oldLineNumber: oldLineNum++,
-      })
-      continue
-    }
-
-    if (line.startsWith(" ") || line === "") {
-      result.push({
-        type: "context",
-        content: line.slice(1) || "",
-        oldLineNumber: oldLineNum++,
-        newLineNumber: newLineNum++,
-      })
-    }
-  }
-
-  return result
-}
 
 export default DiffBlock
