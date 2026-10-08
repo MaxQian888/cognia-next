@@ -168,6 +168,8 @@ export function GitSection() {
     prefs,
     setDiffView,
     setIgnoreWhitespace,
+    setCollapseUnchanged,
+    setDiffWordWrap,
     setConfirmDiscard,
     setConfirmForcePush,
     setSmartCommit,
@@ -370,6 +372,20 @@ export function GitSection() {
             description={t("panel.ignoreWhitespace.description")}
             checked={prefs.ignoreWhitespace}
             onCheckedChange={(v) => void setIgnoreWhitespace(v)}
+          />
+          <SwitchRow
+            id="git-collapse-unchanged"
+            label={t("panel.collapseUnchanged.label")}
+            description={t("panel.collapseUnchanged.description")}
+            checked={prefs.collapseUnchanged}
+            onCheckedChange={(v) => void setCollapseUnchanged(v)}
+          />
+          <SwitchRow
+            id="git-diff-word-wrap"
+            label={t("panel.diffWordWrap.label")}
+            description={t("panel.diffWordWrap.description")}
+            checked={prefs.diffWordWrap}
+            onCheckedChange={(v) => void setDiffWordWrap(v)}
           />
 
           <Separator />

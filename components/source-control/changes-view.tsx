@@ -8,26 +8,41 @@
  * as the row moving from Changes to Staged rather than two lists redrawing.
  * Only below `ROW_MOTION_LIMIT` files and never under reduced motion: a
  * 2,000-file checkout after a branch switch must not animate 2,000 heights.
+ *
+ * Above that limit the list is also virtualized: group headers and rows are
+ * flattened into one windowed list, so a status refresh — which lands on every
+ * agent write — renders the rows on screen, not two thousand context-menu
+ * roots.
  */
 
-import { Fragment, useState, type ReactNode } from "react"
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react"
 import { CheckIcon, MinusIcon, Trash2Icon } from "lucide-react"
 import { MOBILE_EASE, MOBILE_DURATION } from "@/lib/ui/motion"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
-import type { GitStatus, GitStatusGroup } from "@/types/git"
+import type { GitFileChange, GitStatus, GitStatusGroup } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
-import { ChangeGroup } from "./change-group"
+import { ChangeGroup, type GroupAction } from "./change-group"
 import { ChangeItem } from "./change-item"
 import { CommitBox } from "./commit-box"
 import { DiscardConfirmDialog } from "./discard-confirm-dialog"
 
-/** Above this many changed files, rows render without enter/exit motion. */
+/** Above this many changed files, rows render without enter/exit motion, windowed. */
 export const ROW_MOTION_LIMIT = 150
+
+/** Row height estimates for the windowed list; real heights are measured. */
+const ESTIMATED_ROW_HEIGHT = { compact: 24, touch: 44 } as const
+
+type FlatEntry =
+  | { kind: "group"; group: GitStatusGroup; count: number }
+  | { kind: "row"; group: GitStatusGroup; change: GitFileChange }
+
+const GROUP_ORDER: readonly GitStatusGroup[] = ["merge", "staged", "changes"]
 
 /**
  * Height + fade. `overflow` is hidden only while the height moves and released
@@ -141,6 +156,88 @@ export function ChangesView({
   const reduceMotion = useReducedMotion()
   const animateRows = !reduceMotion && total <= ROW_MOTION_LIMIT
 
+  const groupActions = (group: GitStatusGroup): GroupAction[] => {
+    if (group === "staged") {
+      return [
+        {
+          key: "unstage-all",
+          label: t("actions.unstageAll"),
+          icon: <MinusIcon className="size-3" />,
+          onClick: () => void actions.unstage(status.staged.map((c) => c.path)),
+          disabled: !can("git_unstage"),
+        },
+      ]
+    }
+    if (group === "changes") {
+      return [
+        {
+          key: "stage-all",
+          label: t("actions.stageAll"),
+          icon: <CheckIcon className="size-3" />,
+          onClick: () => void actions.stage(status.changes.map((c) => c.path)),
+          disabled: !can("git_stage"),
+        },
+        {
+          key: "discard-all",
+          label: t("actions.discardAll"),
+          icon: <Trash2Icon className="size-3" />,
+          destructive: true,
+          onClick: () => requestDiscard({ kind: "all", includeUntracked: true }),
+          disabled: !can("git_discard_all"),
+        },
+      ]
+    }
+    return []
+  }
+
+  const renderItem = (group: GitStatusGroup, c: GitFileChange) => {
+    const shared = {
+      change: c,
+      selected: selectedPath === c.path,
+      onSelect: () => onSelectFile(c.path, group === "staged"),
+      onCopyPath: () => copyPath(c.path),
+      onViewHistory: onViewHistory ? () => onViewHistory(c.path) : undefined,
+      onViewBlame: onViewBlame ? () => onViewBlame(c.path) : undefined,
+      density,
+    }
+    if (group === "merge") return <ChangeItem {...shared} />
+    if (group === "staged") {
+      return (
+        <ChangeItem
+          {...shared}
+          onUnstage={can("git_unstage") ? () => void actions.unstage([c.path]) : undefined}
+          onRestore={onRestore ? () => onRestore(c.path) : undefined}
+        />
+      )
+    }
+    return (
+      <ChangeItem
+        {...shared}
+        onStage={can("git_stage") ? () => void actions.stage([c.path]) : undefined}
+        onDiscard={
+          can("git_discard") ? () => requestDiscard({ kind: "file", path: c.path }) : undefined
+        }
+        onRestore={onRestore ? () => onRestore(c.path) : undefined}
+        onAddToGitignore={can("git_ignore_add") ? () => void actions.ignoreAdd(c.path) : undefined}
+      />
+    )
+  }
+
+  const groupHeader = (group: GitStatusGroup, children: ReactNode) => (
+    <ChangeGroup
+      group={group}
+      count={status[group].length}
+      expanded={isExpanded(group)}
+      onToggle={() => toggleGroup(group)}
+      density={density}
+      actions={groupActions(group)}
+    >
+      {children}
+    </ChangeGroup>
+  )
+
+  const windowed = total > ROW_MOTION_LIMIT
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="changes-view">
       {variant === "panel" && (
@@ -151,141 +248,50 @@ export function ChangesView({
           actions={actions}
         />
       )}
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-1 px-1 pb-4">
-          {status.merge.length > 0 && (
-            <ChangeGroup
-              group="merge"
-              count={status.merge.length}
-              expanded={isExpanded("merge")}
-              onToggle={() => toggleGroup("merge")}
-              density={density}
-            >
-              <ChangeRows
-                animate={animateRows}
-                rows={status.merge.map((c) => ({
-                  key: `merge:${c.path}`,
-                  node: (
-                    <ChangeItem
-                      change={c}
-                      selected={selectedPath === c.path}
-                      onSelect={() => onSelectFile(c.path, false)}
-                      onCopyPath={() => copyPath(c.path)}
-                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                      density={density}
+      {windowed ? (
+        <WindowedChanges
+          status={status}
+          expandedGroups={expandedGroups}
+          density={density}
+          renderHeader={(group) => groupHeader(group, null)}
+          renderItem={renderItem}
+        />
+      ) : (
+        // `!block`: Radix wraps the viewport's children in a `display:table`
+        // div that grows to the longest path, so on a phone (and a 480px dock)
+        // rows ran off the right edge with their Stage / Discard buttons.
+        <ScrollArea
+          className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
+          data-testid="changes-scroll"
+        >
+          <div className="flex flex-col gap-1 px-1 pb-4">
+            {GROUP_ORDER.map((group) =>
+              status[group].length > 0 ? (
+                <Fragment key={group}>
+                  {groupHeader(
+                    group,
+                    <ChangeRows
+                      animate={animateRows}
+                      rows={status[group].map((c) => ({
+                        key: `${group}:${c.path}`,
+                        node: renderItem(group, c),
+                      }))}
                     />
-                  ),
-                }))}
-              />
-            </ChangeGroup>
-          )}
+                  )}
+                </Fragment>
+              ) : null
+            )}
 
-          {status.staged.length > 0 && (
-            <ChangeGroup
-              group="staged"
-              count={status.staged.length}
-              expanded={isExpanded("staged")}
-              onToggle={() => toggleGroup("staged")}
-              density={density}
-              actions={[
-                {
-                  key: "unstage-all",
-                  label: t("actions.unstageAll"),
-                  icon: <MinusIcon className="size-3" />,
-                  onClick: () => void actions.unstage(status.staged.map((c) => c.path)),
-                  disabled: !can("git_unstage"),
-                },
-              ]}
-            >
-              <ChangeRows
-                animate={animateRows}
-                rows={status.staged.map((c) => ({
-                  key: `staged:${c.path}`,
-                  node: (
-                    <ChangeItem
-                      change={c}
-                      selected={selectedPath === c.path}
-                      onSelect={() => onSelectFile(c.path, true)}
-                      onUnstage={
-                        can("git_unstage") ? () => void actions.unstage([c.path]) : undefined
-                      }
-                      onCopyPath={() => copyPath(c.path)}
-                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                      onRestore={onRestore ? () => onRestore(c.path) : undefined}
-                      density={density}
-                    />
-                  ),
-                }))}
-              />
-            </ChangeGroup>
-          )}
-
-          {status.changes.length > 0 && (
-            <ChangeGroup
-              group="changes"
-              count={status.changes.length}
-              expanded={isExpanded("changes")}
-              onToggle={() => toggleGroup("changes")}
-              density={density}
-              actions={[
-                {
-                  key: "stage-all",
-                  label: t("actions.stageAll"),
-                  icon: <CheckIcon className="size-3" />,
-                  onClick: () => void actions.stage(status.changes.map((c) => c.path)),
-                  disabled: !can("git_stage"),
-                },
-                {
-                  key: "discard-all",
-                  label: t("actions.discardAll"),
-                  icon: <Trash2Icon className="size-3" />,
-                  destructive: true,
-                  onClick: () => requestDiscard({ kind: "all", includeUntracked: true }),
-                  disabled: !can("git_discard_all"),
-                },
-              ]}
-            >
-              <ChangeRows
-                animate={animateRows}
-                rows={status.changes.map((c) => ({
-                  key: `changes:${c.path}`,
-                  node: (
-                    <ChangeItem
-                      change={c}
-                      selected={selectedPath === c.path}
-                      onSelect={() => onSelectFile(c.path, false)}
-                      onStage={can("git_stage") ? () => void actions.stage([c.path]) : undefined}
-                      onDiscard={
-                        can("git_discard")
-                          ? () => requestDiscard({ kind: "file", path: c.path })
-                          : undefined
-                      }
-                      onCopyPath={() => copyPath(c.path)}
-                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                      onRestore={onRestore ? () => onRestore(c.path) : undefined}
-                      onAddToGitignore={
-                        can("git_ignore_add") ? () => void actions.ignoreAdd(c.path) : undefined
-                      }
-                      density={density}
-                    />
-                  ),
-                }))}
-              />
-            </ChangeGroup>
-          )}
-
-          {!hasChanges && (
-            <Empty className="mt-8 border-0" data-testid="no-changes">
-              <EmptyHeader>
-                <EmptyDescription>{t("emptyState.noChanges")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-        </div>
-      </ScrollArea>
+            {!hasChanges && (
+              <Empty className="mt-8 border-0" data-testid="no-changes">
+                <EmptyHeader>
+                  <EmptyDescription>{t("emptyState.noChanges")}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </div>
+        </ScrollArea>
+      )}
 
       <DiscardConfirmDialog
         open={pendingDiscard !== null}
@@ -298,6 +304,84 @@ export function ChangesView({
           setPendingDiscard(null)
         }}
       />
+    </div>
+  )
+}
+
+/**
+ * The windowed list: Merge / Staged / Changes headers and their rows (rows of
+ * a collapsed group left out) flattened into one virtualizer. Rows are
+ * measured, so a wrapped path or a touch-height row never overlaps its
+ * neighbour.
+ */
+function WindowedChanges({
+  status,
+  expandedGroups,
+  density,
+  renderHeader,
+  renderItem,
+}: {
+  status: GitStatus
+  expandedGroups: Record<GitStatusGroup, boolean>
+  density: "compact" | "touch"
+  renderHeader: (group: GitStatusGroup) => ReactNode
+  renderItem: (group: GitStatusGroup, change: GitFileChange) => ReactNode
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const entries = useMemo<FlatEntry[]>(() => {
+    const out: FlatEntry[] = []
+    for (const group of GROUP_ORDER) {
+      const changes = status[group]
+      if (changes.length === 0) continue
+      out.push({ kind: "group", group, count: changes.length })
+      if (!expandedGroups[group]) continue
+      for (const change of changes) out.push({ kind: "row", group, change })
+    }
+    return out
+  }, [status, expandedGroups])
+
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) =>
+      entries[index]?.kind === "group"
+        ? density === "touch"
+          ? 44
+          : 28
+        : ESTIMATED_ROW_HEIGHT[density],
+    overscan: 12,
+    getItemKey: (index) => {
+      const entry = entries[index]
+      if (!entry) return index
+      return entry.kind === "group" ? `group:${entry.group}` : `${entry.group}:${entry.change.path}`
+    },
+  })
+
+  return (
+    <div
+      ref={scrollRef}
+      className="min-h-0 flex-1 overflow-y-auto px-1 pb-4"
+      data-testid="changes-windowed"
+    >
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const entry = entries[item.index]
+          if (!entry) return null
+          return (
+            <div
+              key={item.key}
+              ref={virtualizer.measureElement}
+              data-index={item.index}
+              className="absolute left-0 w-full"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              {entry.kind === "group"
+                ? renderHeader(entry.group)
+                : renderItem(entry.group, entry.change)}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

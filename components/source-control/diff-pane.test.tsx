@@ -1,5 +1,13 @@
-jest.mock("@/lib/git/commands", () => ({ gitDiffFile: jest.fn() }))
+jest.mock("@/lib/git/commands", () => ({ gitDiffFile: jest.fn(), gitReadBlobAtRef: jest.fn() }))
+let mockFsBackend = true
+jest.mock("@/lib/files/workspace-backend", () => ({ hasWorkspaceFsBackend: () => mockFsBackend }))
+jest.mock("@/lib/files/workspace-fs", () => ({
+  readWorkspaceFile: jest.fn(),
+  writeWorkspaceFile: jest.fn(),
+}))
+jest.mock("@/lib/files/project-editor-bridge", () => ({ notifyProjectFileSaved: jest.fn() }))
 let mockSettings: unknown = { gitSettings: {} }
+let mockSaveResult: string | null = null
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (sel: (s: unknown) => unknown) => sel({ settings: mockSettings }),
 }))
@@ -26,17 +34,64 @@ jest.mock("./diff-viewer", () => ({
   DiffViewer: ({
     diff,
     hunkActions,
+    toolbarStart,
+    toolbarEnd,
+    onOpenLine,
+    edit,
+    onLoadOmitted,
+    onCurrentChange,
   }: {
-    diff: unknown
+    diff: { newContent?: string; oldContent?: string; contentOmitted?: boolean } | null
     hunkActions?: { icon: string; onClick: (h: unknown) => void }[]
+    toolbarStart?: React.ReactNode
+    toolbarEnd?: React.ReactNode
+    onOpenLine?: (line: number) => void
+    edit?: { draftKey: string; save: (c: string, e: string | null) => Promise<string> }
+    onLoadOmitted?: () => Promise<void>
+    onCurrentChange?: (i: number) => void
   }) => (
-    <div data-testid="diff-viewer-stub" data-has-diff={diff ? "yes" : "no"}>
+    <div
+      data-testid="diff-viewer-stub"
+      data-has-diff={diff ? "yes" : "no"}
+      data-edit-key={edit?.draftKey ?? ""}
+      data-old={diff?.oldContent ?? ""}
+      data-new={diff?.newContent ?? ""}
+      data-omitted={String(Boolean(diff?.contentOmitted))}
+    >
+      {edit ? (
+        <>
+          <button
+            data-testid="stub-save"
+            onClick={() => void edit.save("mine\n", "disk\n").then((r) => (mockSaveResult = r))}
+          />
+          <button
+            data-testid="stub-save-force"
+            onClick={() => void edit.save("mine\n", null).then((r) => (mockSaveResult = r))}
+          />
+        </>
+      ) : null}
+      {onLoadOmitted ? (
+        <button data-testid="stub-load-omitted" onClick={() => void onLoadOmitted()} />
+      ) : null}
+      {onCurrentChange ? (
+        <button data-testid="stub-current-0" onClick={() => onCurrentChange(0)} />
+      ) : null}
+      <div data-testid="stub-toolbar-start">{toolbarStart}</div>
+      <div data-testid="stub-toolbar-end">{toolbarEnd}</div>
+      {onOpenLine ? (
+        <button data-testid="stub-open-line" onClick={() => onOpenLine(7)}>
+          open
+        </button>
+      ) : null}
       {(hunkActions ?? []).map((a) => (
         <button key={a.icon} data-testid={`stub-hunk-${a.icon}`} onClick={() => a.onClick(hunk)}>
           {a.icon}
         </button>
       ))}
     </div>
+  ),
+  DiffToolbar: ({ start }: { start?: React.ReactNode }) => (
+    <div data-testid="pending-toolbar">{start}</div>
   ),
   DiffLoading: () => <div data-testid="diff-loading-stub" />,
 }))
@@ -401,5 +456,212 @@ describe("DiffPane", () => {
     expect(screen.queryByTestId("stub-hunk-stage")).not.toBeInTheDocument()
     expect(screen.queryByTestId("stub-hunk-discard")).not.toBeInTheDocument()
     expect(screen.getByTestId("apply-accepted")).toBeDisabled()
+  })
+})
+
+describe("DiffPane toolbar", () => {
+  const withLines: GitHunk = {
+    ...hunk,
+    lines: [
+      { kind: "del", content: "a\n" },
+      { kind: "add", content: "b\n" },
+      { kind: "add", content: "c\n" },
+    ],
+  }
+
+  it("names the file, its folder and its counts beside the host's leading controls", async () => {
+    gitDiffFileMock.mockResolvedValue({
+      path: "src/lib/a.ts",
+      oldContent: "",
+      newContent: "",
+      hunks: [withLines],
+      isBinary: false,
+    })
+    render(
+      <DiffPane
+        rootDir="/r"
+        path="src/lib/a.ts"
+        staged={false}
+        actions={makeActions()}
+        leading={<button data-testid="host-back">back</button>}
+      />
+    )
+    await screen.findByTestId("diff-viewer-stub")
+    const start = screen.getByTestId("stub-toolbar-start")
+    expect(start).toContainElement(screen.getByTestId("host-back"))
+    const identity = screen.getByTestId("diff-file-identity")
+    expect(identity).toHaveTextContent("a.ts")
+    expect(identity).toHaveTextContent("src/lib")
+    expect(identity).toHaveAttribute("title", "src/lib/a.ts")
+    expect(screen.getByTestId("diff-file-stats")).toHaveTextContent("+2 -1")
+  })
+
+  it("keeps the leading controls on screen while the first diff loads", () => {
+    gitDiffFileMock.mockReturnValue(new Promise(() => {}))
+    render(
+      <DiffPane
+        rootDir="/r"
+        path="a.ts"
+        staged={false}
+        actions={makeActions()}
+        leading={<button data-testid="host-back">back</button>}
+      />
+    )
+    expect(screen.getByTestId("pending-toolbar")).toContainElement(screen.getByTestId("host-back"))
+    // No counts for a file that has not loaded.
+    expect(screen.queryByTestId("diff-file-stats")).toBeNull()
+  })
+
+  it("opens the file in the host editor at the line the viewer names", async () => {
+    const onOpenInEditor = jest.fn()
+    render(
+      <DiffPane
+        rootDir="/r"
+        path="a.ts"
+        staged={false}
+        actions={makeActions()}
+        onOpenInEditor={onOpenInEditor}
+      />
+    )
+    await screen.findByTestId("diff-viewer-stub")
+    fireEvent.click(screen.getByTestId("stub-open-line"))
+    expect(onOpenInEditor).toHaveBeenLastCalledWith("a.ts", 7)
+  })
+
+  it("offers no editor jump without a host editor", async () => {
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await screen.findByTestId("diff-viewer-stub")
+    expect(screen.queryByTestId("stub-open-line")).toBeNull()
+  })
+
+  it("starts the review list collapsed when the host asks for it", async () => {
+    render(
+      <DiffPane
+        rootDir="/r"
+        path="a.ts"
+        staged={false}
+        actions={makeActions()}
+        reviewDefaultCollapsed
+      />
+    )
+    expect(await screen.findByTestId("hunk-review-list")).toHaveAttribute("data-collapsed", "true")
+  })
+})
+
+describe("DiffPane editing and whole-file loading", () => {
+  const { readWorkspaceFile, writeWorkspaceFile } = jest.requireMock(
+    "@/lib/files/workspace-fs"
+  ) as {
+    readWorkspaceFile: jest.Mock
+    writeWorkspaceFile: jest.Mock
+  }
+  const { notifyProjectFileSaved } = jest.requireMock("@/lib/files/project-editor-bridge") as {
+    notifyProjectFileSaved: jest.Mock
+  }
+  const { gitReadBlobAtRef } = jest.requireMock("@/lib/git/commands") as {
+    gitReadBlobAtRef: jest.Mock
+  }
+
+  beforeEach(() => {
+    mockFsBackend = true
+    mockSaveResult = null
+    readWorkspaceFile.mockReset()
+    writeWorkspaceFile.mockReset().mockResolvedValue(undefined)
+    notifyProjectFileSaved.mockReset()
+    gitReadBlobAtRef.mockReset()
+  })
+
+  it("lets the reader edit a working-tree diff, keyed per repository and file", async () => {
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await screen.findByTestId("stub-save")
+    expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-edit-key", "/r\u0000a.ts")
+  })
+
+  it("offers no editing for a staged diff, on touch, without a filesystem, or when the host says no", async () => {
+    const { rerender } = render(
+      <DiffPane rootDir="/r" path="a.ts" staged actions={makeActions()} />
+    )
+    await screen.findByTestId("diff-viewer-stub")
+    expect(screen.queryByTestId("stub-save")).toBeNull()
+    rerender(
+      <DiffPane rootDir="/r" path="a.ts" staged={false} density="touch" actions={makeActions()} />
+    )
+    await screen.findByTestId("diff-viewer-stub")
+    expect(screen.queryByTestId("stub-save")).toBeNull()
+    rerender(
+      <DiffPane rootDir="/r" path="a.ts" staged={false} editable={false} actions={makeActions()} />
+    )
+    expect(screen.queryByTestId("stub-save")).toBeNull()
+    mockFsBackend = false
+    rerender(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    expect(screen.queryByTestId("stub-save")).toBeNull()
+  })
+
+  it("saves only over the disk text the edit started from, then tells open editors", async () => {
+    readWorkspaceFile.mockResolvedValue("disk\n")
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("stub-save"))
+    })
+    await waitFor(() => expect(mockSaveResult).toBe("saved"))
+    expect(writeWorkspaceFile).toHaveBeenCalledWith("/r", "a.ts", "mine\n")
+    expect(notifyProjectFileSaved).toHaveBeenCalledWith("/r/a.ts")
+  })
+
+  it("reports a conflict without writing when the disk moved on, and overwrites when told to", async () => {
+    readWorkspaceFile.mockResolvedValue("someone else's\n")
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("stub-save"))
+    })
+    await waitFor(() => expect(mockSaveResult).toBe("conflict"))
+    expect(writeWorkspaceFile).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stub-save-force"))
+    })
+    await waitFor(() => expect(mockSaveResult).toBe("saved"))
+    expect(writeWorkspaceFile).toHaveBeenCalledWith("/r", "a.ts", "mine\n")
+  })
+
+  it("rebuilds an omitted diff's texts from the working file and its hunks", async () => {
+    gitDiffFileMock.mockResolvedValue({
+      path: "a.ts",
+      oldContent: "",
+      newContent: "",
+      contentOmitted: true,
+      isBinary: false,
+      hunks: [
+        {
+          header: "@@ -1 +1 @@",
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          patch: "P",
+          lines: [
+            { kind: "del", content: "old\n" },
+            { kind: "add", content: "new\n" },
+          ],
+        },
+      ],
+    })
+    readWorkspaceFile.mockResolvedValue("new\n")
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("stub-load-omitted"))
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-omitted", "false")
+    )
+    expect(readWorkspaceFile).toHaveBeenCalledWith("/r", "a.ts")
+    expect(gitReadBlobAtRef).not.toHaveBeenCalled()
+    expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-old", "old\n")
+    expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-new", "new\n")
+  })
+
+  it("offers whole-file loading only for an omitted diff", async () => {
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await screen.findByTestId("diff-viewer-stub")
+    expect(screen.queryByTestId("stub-load-omitted")).toBeNull()
   })
 })

@@ -1,0 +1,18 @@
+{
+  "label": "Line diff",
+  "showUnchanged": "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}",
+  "openAtLine": "Open file at line {line}",
+  "added": "Added",
+  "removed": "Removed",
+  "find": {
+    "label": "Find in diff",
+    "placeholder": "Find",
+    "next": "Next match (Enter)",
+    "prev": "Previous match (Shift+Enter)",
+    "close": "Close find (Esc)",
+    "count": "{current}/{total}",
+    "none": "No results",
+    "open": "Find in diff"
+  },
+  "clipped": "{count, plural, one {… # more character} other {… # more characters}}"
+}

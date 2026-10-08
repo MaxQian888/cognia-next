@@ -2,6 +2,7 @@
 import { act, renderHook } from "@testing-library/react"
 import {
   GIT_BOUNDS,
+  diffEditKey,
   useGitBranchInfo,
   useGitBusy,
   useGitConflicts,
@@ -51,6 +52,22 @@ function worktree(path: string, branch: string | null, locked = false): GitWorkt
 }
 
 describe("git-store", () => {
+  it("keeps unsaved diff edits per repository and file, in memory only", () => {
+    const key = diffEditKey("/r", "a.ts")
+    expect(key).toBe("/r\u0000a.ts")
+    useGitStore.getState().setDiffEdit(key, { content: "mine", base: "disk" })
+    useGitStore.getState().setDiffEdit(diffEditKey("/other", "a.ts"), { content: "x", base: "y" })
+    expect(useGitStore.getState().diffEdits[key]).toEqual({ content: "mine", base: "disk" })
+    const before = useGitStore.getState()
+    useGitStore.getState().setDiffEdit(diffEditKey("/r", "missing.ts"), null)
+    // Clearing what is not there changes nothing.
+    expect(useGitStore.getState()).toBe(before)
+    useGitStore.getState().setDiffEdit(key, null)
+    expect(useGitStore.getState().diffEdits[key]).toBeUndefined()
+    expect(Object.keys(useGitStore.getState().diffEdits)).toHaveLength(1)
+    useGitStore.setState({ diffEdits: {} })
+  })
+
   it("setRootDir clears transient state when path changes", () => {
     act(() => {
       useGitStore.getState().setStatus(sampleStatus)

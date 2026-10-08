@@ -73,6 +73,8 @@ describe("useSourceControlPrefs", () => {
     const { result } = renderHook(() => useSourceControlPrefs())
     await act(async () => {
       await result.current.setIgnoreWhitespace(true)
+      await result.current.setCollapseUnchanged(false)
+      await result.current.setDiffWordWrap(true)
       await result.current.setConfirmDiscard(false)
       await result.current.setConfirmForcePush(false)
       await result.current.setSmartCommit(true)
@@ -85,6 +87,8 @@ describe("useSourceControlPrefs", () => {
     })
     expect(lastSaved()?.gitSettings?.panel).toMatchObject({
       ignoreWhitespace: true,
+      collapseUnchanged: false,
+      diffWordWrap: true,
       confirmDiscard: false,
       confirmForcePush: false,
       smartCommit: true,

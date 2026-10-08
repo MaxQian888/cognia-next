@@ -5,6 +5,8 @@ import { DEFAULT_SOURCE_CONTROL_PANEL_PREFS } from "@/lib/git/panel-prefs"
 const setters = {
   setDiffView: jest.fn(),
   setIgnoreWhitespace: jest.fn(),
+  setCollapseUnchanged: jest.fn(),
+  setDiffWordWrap: jest.fn(),
   setBranchSort: jest.fn(),
   setDefaultTimelineView: jest.fn(),
   reset: jest.fn(),
@@ -37,6 +39,15 @@ describe("SourceControlViewSettings", () => {
     render(<SourceControlViewSettings />)
     await user.click(screen.getByLabelText("Ignore whitespace"))
     expect(setters.setIgnoreWhitespace).toHaveBeenCalledWith(true)
+  })
+
+  it("toggles collapsing unchanged regions and word wrap", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlViewSettings />)
+    await user.click(screen.getByLabelText("Collapse unchanged regions"))
+    expect(setters.setCollapseUnchanged).toHaveBeenCalledWith(false)
+    await user.click(screen.getByLabelText("Wrap long lines"))
+    expect(setters.setDiffWordWrap).toHaveBeenCalledWith(true)
   })
 
   it("sets the branch sort mode", async () => {

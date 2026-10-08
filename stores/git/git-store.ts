@@ -131,6 +131,17 @@ function withoutWorkingDiffs(
   return { diffCache, diffCacheOrder: kept }
 }
 
+/** Unsaved text typed into a working-tree diff, and the disk text it started from. */
+export interface DiffEditDraft {
+  content: string
+  base: string
+}
+
+/** Store key for {@link GitState.diffEdits}. */
+export function diffEditKey(rootDir: string, path: string): string {
+  return `${rootDir}\u0000${path}`
+}
+
 export interface GitState {
   // --- repo binding ---
   rootDir: string | null
@@ -152,6 +163,17 @@ export interface GitState {
 
   // --- expanded groups (persisted) ---
   expandedGroups: Record<GitStatusGroup, boolean>
+
+  // --- unsaved edits made in a diff's modified side ---
+  /**
+   * Keyed by `diffEditKey(rootDir, path)`. `base` is the disk text the edit
+   * started from: the viewer keeps showing it to Monaco while `content` is
+   * unsaved, so a diff refresh never replaces the buffer, and a `base` that no
+   * longer matches the disk is how it knows the file moved on underneath.
+   * In memory only: survives switching files and leaving the review, not a
+   * reload.
+   */
+  diffEdits: Record<string, DiffEditDraft>
 
   // --- commit box ---
   commitDraft: Record<string, string> // rootDir -> message (persisted)
@@ -210,6 +232,8 @@ export interface GitState {
   cacheDiff: (key: string, diff: GitDiff) => void
   getCachedDiff: (key: string) => GitDiff | undefined
   invalidateDiff: (key: string) => void
+  /** Record unsaved diff edits for `key`, or clear them with `null`. */
+  setDiffEdit: (key: string, draft: DiffEditDraft | null) => void
   toggleGroup: (group: GitStatusGroup) => void
   setCommitDraft: (rootDir: string, message: string) => void
   setAmend: (amend: boolean) => void
@@ -241,6 +265,7 @@ export const useGitStore = create<GitState>()(
       selectedCommit: null,
       diffCache: {},
       diffCacheOrder: [],
+      diffEdits: {},
       expandedGroups: { ...DEFAULT_EXPANDED },
       commitDraft: {},
       commitAmend: false,
@@ -331,6 +356,17 @@ export const useGitStore = create<GitState>()(
         set((s) => ({
           expandedGroups: { ...s.expandedGroups, [group]: !s.expandedGroups[group] },
         })),
+
+      setDiffEdit: (key, draft) =>
+        set((s) => {
+          if (draft === null) {
+            if (!(key in s.diffEdits)) return s
+            const next = { ...s.diffEdits }
+            delete next[key]
+            return { diffEdits: next }
+          }
+          return { diffEdits: { ...s.diffEdits, [key]: draft } }
+        }),
 
       setCommitDraft: (rootDir, message) =>
         set((s) => ({ commitDraft: { ...s.commitDraft, [rootDir]: message } })),

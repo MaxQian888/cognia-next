@@ -3,6 +3,11 @@
 /**
  * Commit message box + split commit button. The dropdown offers amend, commit
  * & push, commit & sync, and a sign-off toggle (VSCode parity).
+ *
+ * `compact` is the dock review's footer: the message box is one line until
+ * it is focused or holds a message, so the list above keeps its height, and
+ * `density="touch"` sizes every control for a finger (and the text at 16px,
+ * which keeps iOS from zooming into the field).
  */
 
 import { useCallback, useRef, useState } from "react"
@@ -27,19 +32,33 @@ import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-hi
 import { GIT_DEFAULTS, useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { PostCommitAction } from "@/lib/git/panel-prefs"
+import { cn } from "@/lib/utils"
 import { GitIdentityDialog } from "./git-identity-dialog"
 
 interface CommitBoxProps {
   rootDir: string
   stagedCount: number
   committing: boolean
+  /** One line until focused or filled (the dock review's footer). */
+  compact?: boolean
+  density?: "compact" | "touch"
   actions: Pick<UseGitActionsResult, "commit" | "push" | "sync" | "stage"> &
     Partial<Pick<UseGitActionsResult, "can">>
 }
 
-export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitBoxProps) {
+export function CommitBox({
+  rootDir,
+  stagedCount,
+  committing,
+  actions,
+  compact = false,
+  density = "compact",
+}: CommitBoxProps) {
   const t = useTranslations("sourceControl")
+  const [focused, setFocused] = useState(false)
+  const touch = density === "touch"
   const draft = useGitStore((s) => s.commitDraft[rootDir] ?? "")
+  const collapsed = compact && !focused && draft === ""
   const setCommitDraft = useGitStore((s) => s.setCommitDraft)
   const amend = useGitStore((s) => s.commitAmend)
   const setAmend = useGitStore((s) => s.setAmend)
@@ -137,11 +156,20 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
           }
           handleHistoryArrowKey(e, history, (v) => setCommitDraft(rootDir, v))
         }}
-        rows={GIT_DEFAULTS.commitBoxRows}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        rows={collapsed ? 1 : GIT_DEFAULTS.commitBoxRows}
         placeholder={t("commit.placeholder")}
         aria-label={t("commit.placeholder")}
-        className="resize-none text-sm"
+        className={cn(
+          "resize-none",
+          touch ? "text-base" : "text-sm",
+          // One fixed line while collapsed; the base field grows with content.
+          collapsed && "[field-sizing:fixed] min-h-0 py-1.5",
+          collapsed && (touch ? "h-11" : "h-8")
+        )}
         data-testid="commit-message"
+        data-expanded={collapsed ? "false" : "true"}
       />
       <div className="flex items-stretch gap-px">
         {aiEnabled && (
@@ -150,7 +178,7 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
               <Button
                 variant="outline"
                 size="sm"
-                className="px-2"
+                className={cn("px-2", touch && "h-11 min-w-11")}
                 disabled={ai.generating || stagedCount === 0}
                 aria-label={t("commit.autoGenerateAI")}
                 onClick={() => void ai.generate()}
@@ -167,7 +195,7 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
           </Tooltip>
         )}
         <Button
-          className="flex-1 gap-1.5"
+          className={cn("flex-1 gap-1.5", touch && "h-11")}
           size="sm"
           disabled={!canCommit}
           onClick={() => void doCommit()}
@@ -180,7 +208,7 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
           <DropdownMenuTrigger asChild>
             <Button
               size="sm"
-              className="px-1.5"
+              className={cn("px-1.5", touch && "h-11 min-w-11")}
               aria-label={t("commit.more")}
               data-testid="commit-more"
             >

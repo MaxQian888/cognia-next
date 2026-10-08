@@ -1,3 +1,24 @@
+const mockVirtualCounts: number[] = []
+// jsdom has no layout: render every windowed entry and record the count.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => {
+    mockVirtualCounts.push(count)
+    return {
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, index) => ({
+          index,
+          key: index,
+          start: index * 24,
+          size: 24,
+          end: (index + 1) * 24,
+          lane: 0,
+        })),
+      getTotalSize: () => count * 24,
+      measureElement: () => {},
+    }
+  },
+}))
+
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { ChangesView, ROW_MOTION_LIMIT } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
@@ -361,12 +382,36 @@ describe("ChangesView", () => {
         })),
       }
       const actions = makeActions()
+      mockVirtualCounts.length = 0
       renderView(actions, many)
       expect(screen.queryByTestId("change-row-motion")).not.toBeInTheDocument()
+      // Windowed: one header plus every row go through the virtualizer.
+      expect(screen.getByTestId("changes-windowed")).toBeInTheDocument()
+      expect(mockVirtualCounts.at(-1)).toBe(ROW_MOTION_LIMIT + 2)
       expect(screen.getByText("f0.ts")).toBeInTheDocument()
       expect(screen.getByText(`f${ROW_MOTION_LIMIT}.ts`)).toBeInTheDocument()
       fireEvent.click(screen.getByTestId(`stage-f${ROW_MOTION_LIMIT}.ts`))
       expect(actions.stage).toHaveBeenCalledWith([`f${ROW_MOTION_LIMIT}.ts`])
+      // Group actions still work from the windowed header.
+      fireEvent.click(screen.getByTestId("group-action-changes-stage-all"))
+      expect(actions.stage).toHaveBeenLastCalledWith(many.changes.map((c) => c.path))
+      // Collapsing the group leaves only its header in the window.
+      fireEvent.click(screen.getByTestId("group-toggle-changes"))
+      expect(mockVirtualCounts.at(-1)).toBe(1)
+      expect(screen.queryByText("f0.ts")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("group-toggle-changes"))
+    })
+
+    it("keeps small lists out of the window", () => {
+      renderView(makeActions())
+      expect(screen.queryByTestId("changes-windowed")).not.toBeInTheDocument()
+    })
+
+    it("keeps rows to the pane's width instead of the longest path's", () => {
+      renderView(makeActions())
+      expect(screen.getByTestId("changes-scroll")).toHaveClass(
+        "[&_[data-slot=scroll-area-viewport]>div]:!block"
+      )
     })
 
     it("renders plain rows under reduced motion, and they still act", () => {

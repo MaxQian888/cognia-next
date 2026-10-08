@@ -2,9 +2,14 @@
 
 /**
  * Review list beside the diff viewer: accept / reject / comment per hunk, with
- * decisions persisted (content-addressed, so they survive a re-diff) and an
- * "Apply accepted" action that stages the accepted hunks through the existing
+ * decisions persisted (content-addressed, so they survive a re-diff) and a
+ * "Stage accepted" action that stages the accepted hunks through the existing
  * git stage path. Working-tree (unstaged) files only.
+ *
+ * Bound to the viewer rather than beside it: each item carries the viewer's
+ * own hunk actions (`hunkActions`, the same list its navigator acts with),
+ * follows the change the reader is on (`currentIndex`), and reveals its hunk
+ * in the viewer (`onReveal`) instead of drawing the lines a second time.
  */
 
 import { useCallback, useMemo, useState } from "react"
@@ -27,6 +32,7 @@ import type { GitActionResult } from "@/hooks/git/use-git-actions"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { cn } from "@/lib/utils"
 import type { GitDiff, GitFileChange } from "@/types/git"
+import type { HunkAction } from "./hunk-actions"
 import { HunkReviewItem } from "./hunk-review-item"
 
 interface Props {
@@ -43,6 +49,12 @@ interface Props {
   /** Toggle the collapsed/expanded state (owned by the parent DiffPane). */
   onToggleCollapse?: () => void
   density?: "compact" | "touch"
+  /** The viewer's hunk actions, offered on each item too. */
+  hunkActions?: HunkAction[]
+  /** The hunk the viewer's reader is on, `-1` for none. */
+  currentIndex?: number
+  /** Bring a hunk into view in the viewer. */
+  onReveal?: (index: number) => void
 }
 
 export function HunkReviewList({
@@ -55,6 +67,9 @@ export function HunkReviewList({
   collapsed = false,
   onToggleCollapse,
   density = "compact",
+  hunkActions,
+  currentIndex = -1,
+  onReveal,
 }: Props) {
   const t = useTranslations("sourceControl.review")
   const [applying, setApplying] = useState(false)
@@ -219,6 +234,9 @@ export function HunkReviewList({
               ai={d?.ai}
               onDecision={handleDecision}
               onComment={handleComment}
+              actions={hunkActions}
+              onReveal={onReveal}
+              current={index === currentIndex}
               disabled={applying}
               density={density}
             />

@@ -124,9 +124,39 @@
   "diff": {
     "binary": "二进制文件 — 不显示差异",
     "hunkCount": "{count, plural, other {# 个差异块}}",
-    "jumpToHunk": "跳转到第 {line} 行的差异块",
+    "large": {
+      "banner": "差异较大，已用轻量视图显示以保持面板流畅。",
+      "loadFull": "加载完整差异",
+      "omitted": "此文件过大，未完整传输，仅显示改动的片段。",
+      "loadOmitted": "加载完整文件",
+      "loadOmittedFailed": "无法加载完整文件，读取差异后它可能已被修改。仅显示改动的片段。"
+    },
     "loading": "正在加载差异…",
-    "selectFile": "选择一个文件以查看其更改"
+    "nav": {
+      "actionsLabel": "当前改动的操作",
+      "label": "改动导航",
+      "next": "下一处改动（Alt+F5）",
+      "position": "{current}/{total}",
+      "positionLabel": "第 {current} 处改动，共 {total} 处",
+      "prev": "上一处改动（Shift+Alt+F5）"
+    },
+    "openAtChange": "在此改动处打开文件",
+    "selectFile": "选择一个文件以查看其更改",
+    "view": {
+      "label": "差异视图选项"
+    },
+    "find": "在差异中查找 (Ctrl/⌘+F)",
+    "edit": {
+      "label": "未保存的修改",
+      "save": "保存 (Ctrl/⌘+S)",
+      "saveShort": "保存",
+      "revert": "放弃未保存的修改",
+      "conflict": "开始编辑后，磁盘上的文件已被修改。要用你的版本覆盖吗？",
+      "diskMoved": "编辑期间磁盘上的文件已被修改。保存时会先询问是否覆盖。",
+      "failed": "文件保存失败，你的修改仍保留在此。",
+      "overwrite": "覆盖",
+      "discard": "放弃我的修改"
+    }
   },
   "discard": {
     "confirmAction": "放弃",
@@ -266,7 +296,7 @@
         "warning": "警告"
       }
     },
-    "applyAccepted": "应用 {count} 个已接受",
+    "applyAccepted": "暂存 {count} 个已接受",
     "collapse": "折叠审阅",
     "comment": "块评论",
     "commentPlaceholder": "对此块留个备注…",
@@ -275,7 +305,7 @@
     "reject": "拒绝此块",
     "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",
     "title": "审阅代码块",
-    "viewChanges": "查看更改"
+    "showInDiff": "在差异中显示"
   },
   "roots": {
     "primary": "主",
@@ -428,11 +458,13 @@
       "default": "默认",
       "name": "名称（A–Z）"
     },
+    "collapseUnchanged": "折叠未改动区域",
     "diffMode": {
       "inline": "内联",
       "sideBySide": "并排"
     },
     "diffView": "差异视图",
+    "diffWordWrap": "长行自动换行",
     "ignoreWhitespace": "忽略空白",
     "label": "视图设置",
     "reset": "恢复默认",

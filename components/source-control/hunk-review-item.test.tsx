@@ -95,3 +95,40 @@ describe("HunkReviewItem", () => {
     expect(screen.queryByTestId("hunk-ai-finding")).not.toBeInTheDocument()
   })
 })
+
+describe("HunkReviewItem bound to the diff", () => {
+  it("offers the viewer's own hunk actions on the item", async () => {
+    const user = userEvent.setup()
+    const stage = jest.fn()
+    const discard = jest.fn()
+    setup({
+      actions: [
+        { icon: "stage", label: "Stage Hunk", onClick: stage },
+        { icon: "discard", label: "Discard Hunk", onClick: discard },
+      ],
+    })
+    await user.click(screen.getByRole("button", { name: "Stage Hunk" }))
+    expect(stage).toHaveBeenCalledWith(hunk)
+    await user.click(screen.getByTestId("hunk-review-discard"))
+    expect(discard).toHaveBeenCalledWith(hunk)
+  })
+
+  it("reveals its hunk in the diff instead of drawing the lines again", async () => {
+    const user = userEvent.setup()
+    const onReveal = jest.fn()
+    setup({ onReveal })
+    expect(screen.queryByText("added")).toBeNull()
+    await user.click(screen.getByTestId("hunk-reveal"))
+    expect(onReveal).toHaveBeenCalledWith(2)
+  })
+
+  it("marks and scrolls to the hunk the reader is on in the diff", () => {
+    const scrollIntoView = jest.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    setup({ current: true })
+    const item = screen.getByTestId("hunk-review-item")
+    expect(item).toHaveAttribute("data-current", "true")
+    expect(item).toHaveAttribute("aria-current", "true")
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" })
+  })
+})

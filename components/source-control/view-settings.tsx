@@ -23,6 +23,8 @@ export function SourceControlViewSettings() {
     prefs,
     setDiffView,
     setIgnoreWhitespace,
+    setCollapseUnchanged,
+    setDiffWordWrap,
     setBranchSort,
     setDefaultTimelineView,
     isDefault,
@@ -60,6 +62,28 @@ export function SourceControlViewSettings() {
           id="sc-ignore-whitespace"
           checked={prefs.ignoreWhitespace}
           onCheckedChange={(checked) => void setIgnoreWhitespace(checked)}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor="sc-collapse-unchanged" className="text-xs font-normal">
+          {t("viewSettings.collapseUnchanged")}
+        </Label>
+        <Switch
+          id="sc-collapse-unchanged"
+          checked={prefs.collapseUnchanged}
+          onCheckedChange={(checked) => void setCollapseUnchanged(checked)}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor="sc-diff-word-wrap" className="text-xs font-normal">
+          {t("viewSettings.diffWordWrap")}
+        </Label>
+        <Switch
+          id="sc-diff-word-wrap"
+          checked={prefs.diffWordWrap}
+          onCheckedChange={(checked) => void setDiffWordWrap(checked)}
         />
       </div>
 

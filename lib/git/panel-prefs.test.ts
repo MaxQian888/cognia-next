@@ -8,6 +8,16 @@ import {
 } from "./panel-prefs"
 
 describe("resolveSourceControlPanelPrefs", () => {
+  it("collapses unchanged regions and leaves wrapping off by default", () => {
+    expect(DEFAULT_SOURCE_CONTROL_PANEL_PREFS.collapseUnchanged).toBe(true)
+    expect(DEFAULT_SOURCE_CONTROL_PANEL_PREFS.diffWordWrap).toBe(false)
+    // Installs that stored prefs before these knobs existed get the defaults.
+    expect(resolveSourceControlPanelPrefs({ diffView: "inline" })).toMatchObject({
+      collapseUnchanged: true,
+      diffWordWrap: false,
+    })
+  })
+
   it("returns a fresh copy of the defaults for undefined / null", () => {
     expect(resolveSourceControlPanelPrefs(undefined)).toEqual(DEFAULT_SOURCE_CONTROL_PANEL_PREFS)
     expect(resolveSourceControlPanelPrefs(null)).toEqual(DEFAULT_SOURCE_CONTROL_PANEL_PREFS)
@@ -62,11 +72,15 @@ describe("resolveSourceControlPanelPrefs", () => {
   it("preserves explicit boolean values including false", () => {
     const resolved = resolveSourceControlPanelPrefs({
       ignoreWhitespace: true,
+      collapseUnchanged: false,
+      diffWordWrap: true,
       confirmForcePush: false,
       smartCommit: true,
       autoFetch: true,
     })
     expect(resolved.ignoreWhitespace).toBe(true)
+    expect(resolved.collapseUnchanged).toBe(false)
+    expect(resolved.diffWordWrap).toBe(true)
     expect(resolved.confirmForcePush).toBe(false)
     expect(resolved.smartCommit).toBe(true)
     expect(resolved.autoFetch).toBe(true)
@@ -95,6 +109,12 @@ describe("isDefaultSourceControlPanelPrefs", () => {
   it("is false once any knob differs", () => {
     expect(
       isDefaultSourceControlPanelPrefs(resolveSourceControlPanelPrefs({ diffView: "inline" }))
+    ).toBe(false)
+    expect(
+      isDefaultSourceControlPanelPrefs(resolveSourceControlPanelPrefs({ collapseUnchanged: false }))
+    ).toBe(false)
+    expect(
+      isDefaultSourceControlPanelPrefs(resolveSourceControlPanelPrefs({ diffWordWrap: true }))
     ).toBe(false)
     expect(
       isDefaultSourceControlPanelPrefs(

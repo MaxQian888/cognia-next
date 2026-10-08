@@ -43,6 +43,10 @@
       "label": "分支排序",
       "name": "名称（A–Z）"
     },
+    "collapseUnchanged": {
+      "description": "在差异视图中折叠改动之间未变化的内容，每处折叠都可以就地展开。",
+      "label": "折叠未改动区域"
+    },
     "confirmDiscard": {
       "description": "丢弃工作区更改前先询问。",
       "label": "放弃前确认"
@@ -56,6 +60,10 @@
       "inline": "内联",
       "label": "差异视图",
       "sideBySide": "并排"
+    },
+    "diffWordWrap": {
+      "description": "长行自动换行，而不是横向滚动。",
+      "label": "差异中长行自动换行"
     },
     "fetchPrune": {
       "description": "移除远程已不存在的远程跟踪引用。",

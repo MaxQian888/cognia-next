@@ -74,6 +74,41 @@ beforeEach(() => {
 })
 
 describe("CommitBox", () => {
+  it("stays one line in compact mode until focused or filled", () => {
+    render(
+      <CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} compact />
+    )
+    const box = screen.getByTestId("commit-message")
+    expect(box).toHaveAttribute("data-expanded", "false")
+    expect(box).toHaveAttribute("rows", "1")
+    fireEvent.focus(box)
+    expect(box).toHaveAttribute("data-expanded", "true")
+    fireEvent.blur(box)
+    expect(box).toHaveAttribute("data-expanded", "false")
+    fireEvent.change(box, { target: { value: "fix: y" } })
+    expect(box).toHaveAttribute("data-expanded", "true")
+  })
+
+  it("is always expanded outside compact mode", () => {
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-message")).toHaveAttribute("data-expanded", "true")
+  })
+
+  it("sizes its controls for touch", () => {
+    render(
+      <CommitBox
+        rootDir="/r"
+        stagedCount={1}
+        committing={false}
+        actions={makeActions()}
+        density="touch"
+      />
+    )
+    expect(screen.getByTestId("commit-button")).toHaveClass("h-11")
+    expect(screen.getByTestId("commit-more")).toHaveClass("h-11")
+    expect(screen.getByTestId("commit-message")).toHaveClass("text-base")
+  })
+
   it("disables commit with no message and no staged files", () => {
     render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={makeActions()} />)
     expect(screen.getByTestId("commit-button")).toBeDisabled()

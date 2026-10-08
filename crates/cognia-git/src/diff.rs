@@ -18,6 +18,43 @@ use super::types::{GitDiff, GitDiffLine, GitFileChange, GitFileStatus, GitHunk, 
 
 const CONTEXT_LINES: u32 = 3;
 
+/// Combined byte size of the two full texts above which a file diff ships only
+/// its hunks. Both texts cross IPC on every read and are then handed to a
+/// Monaco DiffEditor that re-diffs them on the UI thread; a regenerated lock
+/// file or bundle of tens of megabytes stalled the dock for seconds to show a
+/// change the hunks already describe completely.
+pub const FULL_CONTENT_CAP: usize = 4 * 1024 * 1024;
+
+/// The one place a [`GitDiff`] is assembled: binary files carry nothing, and
+/// text past [`FULL_CONTENT_CAP`] keeps its hunks but drops the full texts.
+fn assemble(
+    path: &str,
+    old_content: String,
+    new_content: String,
+    hunks: Vec<GitHunk>,
+    is_binary: bool,
+) -> GitDiff {
+    if is_binary {
+        return GitDiff {
+            path: norm(path),
+            old_content: String::new(),
+            new_content: String::new(),
+            hunks: Vec::new(),
+            is_binary,
+            content_omitted: false,
+        };
+    }
+    let content_omitted = old_content.len() + new_content.len() > FULL_CONTENT_CAP;
+    GitDiff {
+        path: norm(path),
+        old_content: if content_omitted { String::new() } else { old_content },
+        new_content: if content_omitted { String::new() } else { new_content },
+        hunks,
+        is_binary,
+        content_omitted,
+    }
+}
+
 fn norm(path: &str) -> String {
     path.replace('\\', "/")
 }
@@ -159,21 +196,7 @@ fn file_diff_for(repo: &Repository, path: &str, staged: bool) -> Result<GitDiff>
     };
 
     let (_, hunks, is_binary) = extract_hunks(&diff)?;
-    Ok(GitDiff {
-        path: norm(path),
-        old_content: if is_binary {
-            String::new()
-        } else {
-            old_content
-        },
-        new_content: if is_binary {
-            String::new()
-        } else {
-            new_content
-        },
-        hunks: if is_binary { Vec::new() } else { hunks },
-        is_binary,
-    })
+    Ok(assemble(path, old_content, new_content, hunks, is_binary))
 }
 
 /// Diff of `path` in `sha` against its first parent (for the Timeline view).
@@ -198,21 +221,7 @@ pub fn commit_file_diff(repo_path: &str, sha: &str, path: &str) -> Result<GitDif
         .unwrap_or_default();
     let new_content = tree_blob_text(&repo, &new_tree, path).unwrap_or_default();
 
-    Ok(GitDiff {
-        path: norm(path),
-        old_content: if is_binary {
-            String::new()
-        } else {
-            old_content
-        },
-        new_content: if is_binary {
-            String::new()
-        } else {
-            new_content
-        },
-        hunks: if is_binary { Vec::new() } else { hunks },
-        is_binary,
-    })
+    Ok(assemble(path, old_content, new_content, hunks, is_binary))
 }
 
 /// List the files changed by `sha` (vs first parent) for the commit-detail view.
@@ -299,21 +308,7 @@ pub fn diff_refs_file(repo_path: &str, base: &str, target: &str, path: &str) -> 
     let old_content = tree_blob_text(&repo, &old_tree, path).unwrap_or_default();
     let new_content = tree_blob_text(&repo, &new_tree, path).unwrap_or_default();
 
-    Ok(GitDiff {
-        path: norm(path),
-        old_content: if is_binary {
-            String::new()
-        } else {
-            old_content
-        },
-        new_content: if is_binary {
-            String::new()
-        } else {
-            new_content
-        },
-        hunks: if is_binary { Vec::new() } else { hunks },
-        is_binary,
-    })
+    Ok(assemble(path, old_content, new_content, hunks, is_binary))
 }
 
 fn tree_blob_text(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<String> {
@@ -435,6 +430,42 @@ mod tests {
         assert!(d.hunks[0].patch.contains("+fresh"));
         assert_eq!(d.new_content, "fresh\ncontent\n");
         let _ = tmp;
+    }
+
+    #[test]
+    fn oversized_diff_ships_hunks_without_full_texts() {
+        let (tmp, repo) = init_committed();
+        // One changed line inside a file whose two sides exceed the cap.
+        let filler: String = "x".repeat(120);
+        let body: String = (0..20_000).map(|i| format!("{i} {filler}\n")).collect();
+        fs::write(tmp.path().join("big.txt"), &body).unwrap();
+        commit_all(&repo, "big");
+        fs::write(tmp.path().join("big.txt"), body.replacen("10 x", "10 CHANGED x", 1)).unwrap();
+        assert!(body.len() * 2 > FULL_CONTENT_CAP);
+
+        let d = file_diff_for(&repo, "big.txt", false).unwrap();
+        assert!(d.content_omitted);
+        assert!(d.old_content.is_empty() && d.new_content.is_empty());
+        assert_eq!(d.hunks.len(), 1);
+        assert!(d.hunks[0].patch.contains("+10 CHANGED"));
+        let _ = tmp;
+    }
+
+    #[test]
+    fn small_diff_keeps_full_texts() {
+        let (tmp, repo) = init_committed();
+        fs::write(tmp.path().join("a.txt"), "line1\nCHANGED\nline3\n").unwrap();
+        let d = file_diff_for(&repo, "a.txt", false).unwrap();
+        assert!(!d.content_omitted);
+        assert!(!d.old_content.is_empty());
+        let _ = tmp;
+    }
+
+    #[test]
+    fn content_omitted_serializes_camel_case() {
+        let d = assemble("a.txt", String::new(), String::new(), Vec::new(), false);
+        let json = serde_json::to_value(&d).unwrap();
+        assert_eq!(json["contentOmitted"], serde_json::Value::Bool(false));
     }
 
     #[test]

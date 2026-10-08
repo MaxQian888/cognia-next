@@ -135,6 +135,26 @@ describe("GitSection", () => {
     )
   })
 
+  it("saves the diff folding and wrapping prefs", () => {
+    render(<GitSection />)
+    fireEvent.click(screen.getByLabelText(/^Collapse unchanged regions/i))
+    expect(save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          panel: expect.objectContaining({ collapseUnchanged: false }),
+        }),
+      })
+    )
+    fireEvent.click(screen.getByLabelText(/^Wrap long lines in diffs/i))
+    expect(save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          panel: expect.objectContaining({ diffWordWrap: true }),
+        }),
+      })
+    )
+  })
+
   it("shows the interval input only when auto-fetch is enabled", () => {
     const { rerender } = render(<GitSection />)
     expect(screen.queryByTestId("git-auto-fetch-interval")).not.toBeInTheDocument()

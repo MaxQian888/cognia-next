@@ -31,14 +31,23 @@ jest.mock("./hunk-review-item", () => ({
     index,
     decision,
     onDecision,
+    current,
+    actions,
+    onReveal,
   }: {
     index: number
     decision: string
     onDecision: (i: number, d: string) => void
+    current?: boolean
+    actions?: { icon: string }[]
+    onReveal?: (i: number) => void
   }) => (
     <button
       data-testid={`item-${index}`}
       data-decision={decision}
+      data-current={current ? "true" : "false"}
+      data-actions={(actions ?? []).map((a) => a.icon).join(",")}
+      data-reveal={onReveal ? "yes" : "no"}
       onClick={() => onDecision(index, "accepted")}
     >
       hunk {index}
@@ -91,6 +100,25 @@ describe("HunkReviewList", () => {
     expect(screen.getByTestId("item-0")).toBeInTheDocument()
     expect(screen.getByTestId("item-1")).toBeInTheDocument()
     expect(screen.getByTestId("accepted-count")).toHaveTextContent('"accepted":0,"total":2')
+  })
+
+  it("follows the viewer: its current hunk, its actions and its reveal", () => {
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a"), hunk(5, "b")])}
+        onStagePatch={jest.fn()}
+        onInvalidate={jest.fn()}
+        hunkActions={[{ icon: "stage", label: "Stage", onClick: jest.fn() }]}
+        currentIndex={1}
+        onReveal={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("item-0")).toHaveAttribute("data-current", "false")
+    expect(screen.getByTestId("item-1")).toHaveAttribute("data-current", "true")
+    expect(screen.getByTestId("item-1")).toHaveAttribute("data-actions", "stage")
+    expect(screen.getByTestId("item-1")).toHaveAttribute("data-reveal", "yes")
   })
 
   it("persists a decision and reflects it in the accepted count", async () => {

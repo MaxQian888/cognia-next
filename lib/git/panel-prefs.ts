@@ -36,6 +36,10 @@ export interface SourceControlPanelPrefs {
   diffView: DiffViewMode
   /** Monaco `ignoreTrimWhitespace` — hide whitespace-only changes. */
   ignoreWhitespace: boolean
+  /** Monaco `hideUnchangedRegions` — fold untouched stretches between changes. */
+  collapseUnchanged: boolean
+  /** Soft-wrap long lines in the diff instead of scrolling sideways. */
+  diffWordWrap: boolean
 
   // --- Guardrails ---
   /** Confirm before discarding a file's / all working-tree changes. */
@@ -68,6 +72,8 @@ export interface SourceControlPanelPrefs {
 export type PartialSourceControlPanelPrefs = Partial<{
   diffView: string
   ignoreWhitespace: boolean
+  collapseUnchanged: boolean
+  diffWordWrap: boolean
   confirmDiscard: boolean
   confirmForcePush: boolean
   smartCommit: boolean
@@ -84,6 +90,10 @@ export type PartialSourceControlPanelPrefs = Partial<{
 export const DEFAULT_SOURCE_CONTROL_PANEL_PREFS: SourceControlPanelPrefs = {
   diffView: "sideBySide",
   ignoreWhitespace: false,
+  // On by default: in a dock-width pane the changes are the point, and every
+  // fold expands in place.
+  collapseUnchanged: true,
+  diffWordWrap: false,
   confirmDiscard: true,
   confirmForcePush: true,
   smartCommit: false,
@@ -123,6 +133,8 @@ export function resolveSourceControlPanelPrefs(
   return {
     diffView: oneOf<DiffViewMode>(raw.diffView, DIFF_VIEW_MODES, d.diffView),
     ignoreWhitespace: raw.ignoreWhitespace ?? d.ignoreWhitespace,
+    collapseUnchanged: raw.collapseUnchanged ?? d.collapseUnchanged,
+    diffWordWrap: raw.diffWordWrap ?? d.diffWordWrap,
     confirmDiscard: raw.confirmDiscard ?? d.confirmDiscard,
     confirmForcePush: raw.confirmForcePush ?? d.confirmForcePush,
     smartCommit: raw.smartCommit ?? d.smartCommit,
@@ -149,6 +161,8 @@ export function isDefaultSourceControlPanelPrefs(prefs: SourceControlPanelPrefs)
   return (
     prefs.diffView === d.diffView &&
     prefs.ignoreWhitespace === d.ignoreWhitespace &&
+    prefs.collapseUnchanged === d.collapseUnchanged &&
+    prefs.diffWordWrap === d.diffWordWrap &&
     prefs.confirmDiscard === d.confirmDiscard &&
     prefs.confirmForcePush === d.confirmForcePush &&
     prefs.smartCommit === d.smartCommit &&

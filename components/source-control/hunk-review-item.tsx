@@ -1,23 +1,30 @@
 "use client"
 
 /**
- * One hunk in the source-control review list: a collapsible diff preview plus
- * Accept / Reject toggles and an optional comment. Decisions are advisory UI
- * state (persisted in the diff-review store) until the user applies them.
+ * One hunk in the source-control review list: Accept / Reject toggles, an
+ * optional comment, and the same direct actions (Stage / Discard) the diff
+ * toolbar offers for the change the reader is on — one list of actions, two
+ * places to reach it, never two meanings. Decisions are advisory UI state
+ * (persisted in the diff-review store) until the user stages the accepted
+ * ones; a direct action applies now.
+ *
+ * The hunk's lines are not drawn here. They are in the diff right above, and
+ * "Show in diff" takes the reader there; the item the reader is on in the
+ * diff is marked and scrolled into view, so list and diff stay one place.
  * UX adapted from `components/artifacts/review-hunk-item.tsx`, driven by the
  * Rust-parsed {@link GitHunk}.
  */
 
-import { memo, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Check, ChevronDown, MessageSquarePlus, SparklesIcon, X } from "lucide-react"
+import { Check, LocateFixedIcon, MessageSquarePlus, SparklesIcon, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import type { GitHunk, HunkAiFinding, HunkFindingSeverity } from "@/types/git"
 import type { HunkDecision } from "@/lib/git/hunk-review"
+import { HUNK_ACTION_ICON, type HunkAction } from "./hunk-actions"
 
 interface Props {
   hunk: GitHunk
@@ -27,17 +34,15 @@ interface Props {
   ai?: HunkAiFinding
   onDecision: (index: number, decision: HunkDecision) => void
   onComment: (index: number, comment: string) => void
+  /** Stage / Unstage / Discard — the same actions as the diff's navigator. */
+  actions?: HunkAction[]
+  /** Bring this hunk into view in the diff. */
+  onReveal?: (index: number) => void
+  /** The diff's reader is on this hunk. */
+  current?: boolean
   disabled?: boolean
   density?: "compact" | "touch"
 }
-
-const LINE_CLASS: Record<string, string> = {
-  add: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  del: "bg-red-500/10 text-red-700 dark:text-red-300",
-  context: "text-muted-foreground",
-}
-
-const LINE_PREFIX: Record<string, string> = { add: "+", del: "-", context: " " }
 
 /** Severity → border/text accent for the AI finding banner. */
 const SEVERITY_CLASS: Record<HunkFindingSeverity, string> = {
@@ -54,30 +59,60 @@ export const HunkReviewItem = memo(function HunkReviewItem({
   ai,
   onDecision,
   onComment,
+  actions = [],
+  onReveal,
+  current = false,
   disabled,
   density = "compact",
 }: Props) {
   const t = useTranslations("sourceControl.review")
-  const [open, setOpen] = useState(false)
   const [commenting, setCommenting] = useState(Boolean(comment))
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  // Follow the diff: the hunk the reader moved to scrolls into the list.
+  useEffect(() => {
+    if (current) rootRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [current])
+  const touchTarget = density === "touch" && "h-11 min-w-11"
 
   // Toggling an already-set decision clears it back to undecided.
   const toggle = (next: HunkDecision) => onDecision(index, decision === next ? "undecided" : next)
 
   return (
     <div
+      ref={rootRef}
       data-testid="hunk-review-item"
       data-decision={decision}
+      data-current={current ? "true" : undefined}
+      aria-current={current ? "true" : undefined}
       className={cn(
         "space-y-2 rounded-lg border bg-card p-3 transition-all",
-        decision === "accepted" && "border-emerald-500/40",
-        decision === "rejected" && "border-red-500/40 opacity-80"
+        decision === "accepted" && "border-success/40",
+        decision === "rejected" && "border-destructive/40 opacity-80",
+        current && "ring-1 ring-primary/60"
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate font-mono text-xs text-muted-foreground" title={hunk.header}>
-          {t("hunkLabel", { line: hunk.newStart })}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        {onReveal ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-auto min-w-0 justify-start gap-1 px-1 py-0.5 font-mono text-xs text-muted-foreground hover:text-foreground",
+              density === "touch" && "min-h-11 px-2"
+            )}
+            title={`${t("showInDiff")} · ${hunk.header}`}
+            onClick={() => onReveal(index)}
+            data-testid="hunk-reveal"
+          >
+            <LocateFixedIcon className="size-3 shrink-0" />
+            <span className="truncate">{t("hunkLabel", { line: hunk.newStart })}</span>
+          </Button>
+        ) : (
+          <span className="truncate font-mono text-xs text-muted-foreground" title={hunk.header}>
+            {t("hunkLabel", { line: hunk.newStart })}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
@@ -86,7 +121,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             aria-pressed={decision === "accepted"}
             aria-label={t("accept")}
             disabled={disabled}
-            className={cn(density === "touch" && "h-11 min-w-11")}
+            className={cn(touchTarget)}
             onClick={() => toggle("accepted")}
             data-testid="hunk-accept"
           >
@@ -99,7 +134,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             aria-pressed={decision === "rejected"}
             aria-label={t("reject")}
             disabled={disabled}
-            className={cn(density === "touch" && "h-11 min-w-11")}
+            className={cn(touchTarget)}
             onClick={() => toggle("rejected")}
             data-testid="hunk-reject"
           >
@@ -111,12 +146,35 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             variant="ghost"
             aria-label={t("addComment")}
             disabled={disabled}
-            className={cn(density === "touch" && "h-11 min-w-11")}
+            className={cn(touchTarget)}
             onClick={() => setCommenting((v) => !v)}
             data-testid="hunk-comment-toggle"
           >
             <MessageSquarePlus className="size-3.5" />
           </Button>
+          {actions.length > 0 ? (
+            <div className="ml-0.5 flex items-center gap-0.5 border-l pl-1">
+              {actions.map((action) => {
+                const Icon = HUNK_ACTION_ICON[action.icon]
+                return (
+                  <Button
+                    key={action.icon}
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={action.label}
+                    title={action.label}
+                    disabled={disabled}
+                    className={cn(touchTarget)}
+                    onClick={() => action.onClick(hunk)}
+                    data-testid={`hunk-review-${action.icon}`}
+                  >
+                    <Icon className="size-3.5" />
+                  </Button>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -136,32 +194,6 @@ export const HunkReviewItem = memo(function HunkReviewItem({
           </div>
         </div>
       )}
-
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-auto justify-start gap-1 px-0 py-0 text-[11px] text-muted-foreground",
-              density === "touch" && "min-h-11 px-2"
-            )}
-          >
-            <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
-            {t("viewChanges")}
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <pre className="mt-1.5 max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] leading-relaxed">
-            {hunk.lines.map((line, i) => (
-              <div key={i} className={LINE_CLASS[line.kind] ?? "text-muted-foreground"}>
-                {(LINE_PREFIX[line.kind] ?? " ") + line.content}
-              </div>
-            ))}
-          </pre>
-        </CollapsibleContent>
-      </Collapsible>
 
       {commenting && (
         <Textarea

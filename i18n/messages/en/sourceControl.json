@@ -124,9 +124,39 @@
   "diff": {
     "binary": "Binary file — diff not shown",
     "hunkCount": "{count, plural, one {# hunk} other {# hunks}}",
-    "jumpToHunk": "Jump to hunk at line {line}",
+    "large": {
+      "banner": "Large diff — shown in the lightweight view to keep the pane responsive.",
+      "loadFull": "Load full diff",
+      "omitted": "This file is too large to send in full — showing its changed hunks.",
+      "loadOmitted": "Load whole file",
+      "loadOmittedFailed": "Couldn't load the whole file — it may have changed since the diff was read. Showing its changed hunks."
+    },
     "loading": "Loading diff…",
-    "selectFile": "Select a file to view its changes"
+    "nav": {
+      "actionsLabel": "Actions for this change",
+      "label": "Change navigation",
+      "next": "Next change (Alt+F5)",
+      "position": "{current}/{total}",
+      "positionLabel": "Change {current} of {total}",
+      "prev": "Previous change (Shift+Alt+F5)"
+    },
+    "openAtChange": "Open the file at this change",
+    "selectFile": "Select a file to view its changes",
+    "view": {
+      "label": "Diff view options"
+    },
+    "find": "Find in diff (Ctrl/⌘+F)",
+    "edit": {
+      "label": "Unsaved edits",
+      "save": "Save (Ctrl/⌘+S)",
+      "saveShort": "Save",
+      "revert": "Discard unsaved edits",
+      "conflict": "The file changed on disk since you started editing. Overwrite it with your version?",
+      "diskMoved": "The file changed on disk while you were editing. Saving will ask before overwriting it.",
+      "failed": "Couldn't save the file. Your edits are still here.",
+      "overwrite": "Overwrite",
+      "discard": "Discard my edits"
+    }
   },
   "discard": {
     "confirmAction": "Discard",
@@ -266,7 +296,7 @@
         "warning": "Warning"
       }
     },
-    "applyAccepted": "Apply {count} accepted",
+    "applyAccepted": "Stage {count} accepted",
     "collapse": "Collapse review",
     "comment": "Hunk comment",
     "commentPlaceholder": "Leave a note on this hunk…",
@@ -275,7 +305,7 @@
     "reject": "Reject hunk",
     "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
     "title": "Review hunks",
-    "viewChanges": "View changes"
+    "showInDiff": "Show in diff"
   },
   "roots": {
     "primary": "primary",
@@ -428,11 +458,13 @@
       "default": "Default",
       "name": "Name (A–Z)"
     },
+    "collapseUnchanged": "Collapse unchanged regions",
     "diffMode": {
       "inline": "Inline",
       "sideBySide": "Side by side"
     },
     "diffView": "Diff view",
+    "diffWordWrap": "Wrap long lines",
     "ignoreWhitespace": "Ignore whitespace",
     "label": "View settings",
     "reset": "Reset to defaults",

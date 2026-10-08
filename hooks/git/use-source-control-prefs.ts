@@ -32,6 +32,8 @@ export interface UseSourceControlPrefs {
   prefs: SourceControlPanelPrefs
   setDiffView: (mode: DiffViewMode) => Promise<void>
   setIgnoreWhitespace: (ignore: boolean) => Promise<void>
+  setCollapseUnchanged: (collapse: boolean) => Promise<void>
+  setDiffWordWrap: (wrap: boolean) => Promise<void>
   setConfirmDiscard: (confirm: boolean) => Promise<void>
   setConfirmForcePush: (confirm: boolean) => Promise<void>
   setSmartCommit: (enabled: boolean) => Promise<void>
@@ -77,6 +79,14 @@ export function useSourceControlPrefs(): UseSourceControlPrefs {
   )
   const setIgnoreWhitespace = useCallback(
     async (ignoreWhitespace: boolean) => persist({ ...prefs, ignoreWhitespace }),
+    [prefs, persist]
+  )
+  const setCollapseUnchanged = useCallback(
+    async (collapseUnchanged: boolean) => persist({ ...prefs, collapseUnchanged }),
+    [prefs, persist]
+  )
+  const setDiffWordWrap = useCallback(
+    async (diffWordWrap: boolean) => persist({ ...prefs, diffWordWrap }),
     [prefs, persist]
   )
   const setConfirmDiscard = useCallback(
@@ -126,6 +136,8 @@ export function useSourceControlPrefs(): UseSourceControlPrefs {
     prefs,
     setDiffView,
     setIgnoreWhitespace,
+    setCollapseUnchanged,
+    setDiffWordWrap,
     setConfirmDiscard,
     setConfirmForcePush,
     setSmartCommit,

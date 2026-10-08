@@ -1,0 +1,18 @@
+{
+  "label": "逐行差异",
+  "showUnchanged": "显示 {count} 行未改动内容",
+  "openAtLine": "在第 {line} 行打开文件",
+  "added": "新增",
+  "removed": "删除",
+  "find": {
+    "label": "在差异中查找",
+    "placeholder": "查找",
+    "next": "下一个匹配 (Enter)",
+    "prev": "上一个匹配 (Shift+Enter)",
+    "close": "关闭查找 (Esc)",
+    "count": "{current}/{total}",
+    "none": "无结果",
+    "open": "在差异中查找"
+  },
+  "clipped": "…另有 {count} 个字符"
+}

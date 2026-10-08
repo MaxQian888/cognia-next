@@ -43,6 +43,10 @@
       "label": "Branch order",
       "name": "Name (A–Z)"
     },
+    "collapseUnchanged": {
+      "description": "Fold the untouched stretches between changes in a diff. Each fold expands in place.",
+      "label": "Collapse unchanged regions"
+    },
     "confirmDiscard": {
       "description": "Ask before throwing away working-tree changes.",
       "label": "Confirm before discarding"
@@ -56,6 +60,10 @@
       "inline": "Inline",
       "label": "Diff view",
       "sideBySide": "Side by side"
+    },
+    "diffWordWrap": {
+      "description": "Soft-wrap long lines instead of scrolling sideways.",
+      "label": "Wrap long lines in diffs"
     },
     "fetchPrune": {
       "description": "Remove remote-tracking refs that no longer exist on the remote.",

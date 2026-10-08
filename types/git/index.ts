@@ -60,6 +60,14 @@ export interface GitDiff {
   newContent: string
   hunks: GitHunk[]
   isBinary: boolean
+  /**
+   * The two sides together exceeded the host's full-text cap
+   * (`FULL_CONTENT_CAP` in `crates/cognia-git/src/diff.rs`), so `oldContent` /
+   * `newContent` are empty and only the hunks were sent. Optional because
+   * client-built diffs (agent runs, delegate patches, editor compare) never
+   * set it.
+   */
+  contentOmitted?: boolean
   /** Resolved client-side from the path extension (not sent by Rust). */
   language?: string | null
 }

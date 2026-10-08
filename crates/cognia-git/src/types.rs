@@ -102,12 +102,18 @@ pub struct GitHunk {
 #[serde(rename_all = "camelCase")]
 pub struct GitDiff {
     pub path: String,
-    /// Full original-side text for the Monaco DiffEditor.
+    /// Full original-side text for the Monaco DiffEditor. Empty when
+    /// `content_omitted` (or binary).
     pub old_content: String,
-    /// Full modified-side text for the Monaco DiffEditor.
+    /// Full modified-side text for the Monaco DiffEditor. Empty when
+    /// `content_omitted` (or binary).
     pub new_content: String,
     pub hunks: Vec<GitHunk>,
     pub is_binary: bool,
+    /// Both sides together exceeded `diff::FULL_CONTENT_CAP`, so the full texts
+    /// were left out and only the hunks travel. Every hunk (with its stageable
+    /// patch) is still present; the client renders them without Monaco.
+    pub content_omitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
