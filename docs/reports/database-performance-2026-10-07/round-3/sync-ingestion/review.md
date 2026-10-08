@@ -1,0 +1,10 @@
+# Independent notification-query review — 2026-10-08
+
+Scope: read-only review of the HEAD-relative changes to `lib/db/notifications.ts` and its co-located test. Also inspected the existing schema and the notification agent's native-IDB harness/results. No actionable findings.
+
+- The single-state path uses the already existing `[readState+createdAt]` index. Within a fixed readState, descending compound order is descending createdAt and descending primary key for ties, matching the old reversed createdAt index after the same predicate. Inclusive minKey/maxKey bounds preserve supported numeric timestamps, including negative values; tests also cover infinities and legacy Date keys.
+- The existing predicate and limit remain unchanged. Source, snooze, includeDone conflicts, empty states and zero/negative limits have explicit added tests. Default/multiple-state calls keep the old path. No write/schema/account-routing changes enter this diff.
+- `round-3/notifications/baseline-correctness.json` and `correctness.json` both record eight filter checks and four native liveQuery emissions. The harness checks a row entering the selected state, an in-range title change and that row leaving the state. This covers the principal observability risk from narrowing an index range. Full-row hashes match across all performance fixtures.
+- The measured implementation uses real middleware and the actual metadata-only notification policy. The archived-tab fixture uses the current 500-row retention cap and 100-row limit. The report correctly limits its 5.20 to 0.50 ms result to the storage API; sequential timings are explicitly disclosed. Small timings and the unchanged default path are guardrails, not independent speedup claims.
+
+Validation boundary: this review does not rerun the other agent's benchmark or claim real rendered UI/device validation. Root performs combined green checks after exclusive timing completes. The added tests are co-located, and the optimized path is called by the existing archived-notification flow.

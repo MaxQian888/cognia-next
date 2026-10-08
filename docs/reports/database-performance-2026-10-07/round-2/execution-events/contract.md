@@ -1,0 +1,21 @@
+# Execution-event batch experiment — 2026-10-07
+
+User path: workflow/plan/goal bridges persist a batch of semantic execution events, update the replayable run snapshot, and touch notification projection work in one transaction. Primary metric is complete `runEventJournal.appendBatch` duration, not an isolated array algorithm or UI paint.
+
+Hypothesis: decrypting the full event journal for every batch entry dominates replay catch-up. A transaction-attempt-local history array can reuse the first canonical read and fetch only each new stored event while preserving the same reducer calls, run updates, deduplication, terminal fences and notification touches. If a new sequence is not strictly after the cached tail, reload canonical index order. No cross-call cache, schema change or fewer required writes.
+
+Workloads: (1) stress 500 existing events + 100 appended; (2) ordinary 20 existing + 2 appended (bridges commonly send two); (3) small zero existing + one appended. Seed event payloads include 512 text characters and ten step IDs. Identical fixture reset outside each sample. Actual encrypted IndexedDB in isolated Chromium 151, actual Dexie 4.4.6 constructor defaults and AES-256-GCM middleware, complete execution-runs module imported with only the DB activation/reopen service injected; actual reducer/redactor/notification work writer. Production/minified esbuild bundle. No application profile data or live network.
+
+Machine: Apple M4 Pro 14 cores, 48 GiB, macOS 26.5.2. No power/thermal control, same browser session and agent-coordinated exclusive measurement lane. Warmup 2, measured samples 12 each, compare median and MAD. Retain only if primary median improves >=10% and delta >2*max(MAD). Ordinary/small regression guardrail <=max(10% baseline,1ms). Every sample must have identical event IDs/order, reducer snapshot, currentRevision and desired notification sequence. Peak JS/native crypto heap is not claimed; retain O(history+batch) only inside the transaction attempt, no storage growth.
+
+Baseline before source edit. Saved complete baseline source and bundle hash; final candidate uses same command/fixture. Baseline/after call the actual `runEventJournal.appendBatch` export. Existing schema/reopen retry integration is exercised by unit tests, not timed. Notification identity is fixed/primed in the harness; no external notifications are sent.
+
+Correctness gates: mixed explicit-ID/sourceEventId duplicates, duplicate+new order, terminal-midbatch all-or-nothing rollback including notification work, canonical ordering with preexisting sequence conflicts/gaps, account/target retry fence, no cache surviving transaction retry or failure. Focused execution-runs/reducer/bridge regression suites, lint/diff checks. Native Tauri/Capacitor/UI/network remain unverified.
+
+Side effects: owned report files, bundles under `/tmp/cognia-execution-events-perf`, localhost server 8937, isolated browser/database. No production DB migration or generated application assets. Source ownership only execution-runs.ts/test.ts. Benchmark raw evidence and reproducible harness remain in this directory.
+
+## Owning-policy correction — 2026-10-08
+
+The initial hypothesis assumed these journals were encrypted. Inspection following the locked-cipher smoke shows the actual `content-protection-baseline.json` and `policyForTable` classify `executionRuns`, `executionRunEvents` and `notificationProjectionWork` as **metadata-only**. The real encryption middleware was installed in both measured variants but correctly passes these tables through. Therefore the experiment measures repeated IndexedDB retrieval/structured-clone deserialization, not AES decryption. Keep the actual production policy; do not force encryption to manufacture a workload. The local history-reuse hypothesis and fixed measurements still apply, with this attribution corrected.
+
+The initial lock-rejection smoke assumption failed and is saved as `locked-smoke-assumption-failed.json`. Compare native baseline/after lock behavior explicitly; accepting a direct journal write with the cipher locked is pre-existing metadata-only repository behavior, not proof that an application-level account lock is bypassed. App runtime activation/authorization gates are not part of this DB fixture. No security-policy source changes are made.

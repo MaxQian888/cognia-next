@@ -1,0 +1,14 @@
+# Native append dispatch experiment — 2026-10-07
+
+- User path: a Claude SDK mirror/import batch enters the existing Rust host-RPC dispatcher and is committed to the SQLite transcript mirror. This is not the canonical Dexie chat or an end-to-end provider resume measurement.
+- Hypothesis: `run("append")` makes an unnecessary second deep clone of every JSON entry even though `SessionStore::append` borrows a slice. Removing that clone reduces committed-batch latency without changing state.
+- Primary metric: milliseconds for the actual dispatch `run` function through the real production SQLite append and response construction, 20,000 entries × 4,096-byte content. Guardrails: 100-entry and one-entry batches, replay, transcript equality, process peak RSS, unchanged database/WAL size.
+- Fixture: fresh temporary APFS SQLite files per sample, production `SessionStore::open`, WAL and `synchronous=FULL` unchanged. Content synthetic, each entry has a unique UUID; SQLite and production dispatch code are real. Baseline/candidate fixture inputs are identical. All writes finish and acknowledged entry counts are checked. No application database is opened.
+- Build: isolated Rust release binaries from frozen owning modules and workspace dependency lock, same profile (thin LTO, one codegen unit). Copied source is an evidence fixture, not a separate implementation. No build in the timed interval.
+- Cache: warm OS cache; one full warmup per cohort; no cache deletion. Two AB/BA cohorts, five measured samples per cohort, ten samples per variant and workload.
+- Decision: retain only if large-batch median improves ≥10% and absolute delta exceeds twice the larger MAD. One-/100-entry append and replay must not regress >10% beyond twice MAD. Peak process RSS must not grow >10%; transcript, replay idempotency, scopes and complete commit semantics must agree.
+- Side effects: disposable Cargo build tree, disposable synthetic database files, and evidence in this directory. No production source edits before evidence passes; afterwards only `crates/cognia-agent-state/src/agent_session_store/dispatch.rs` and its in-file tests.
+- Scope limits: no Tauri/WebView IPC serialization, network, provider, browser, mobile, physical disk failure, or power-loss claim. The outer `params.clone()` needed to own `spawn_blocking` input stays included in real production and excluded symmetrically from this measured inner dispatch seam.
+- Correctness: frozen production module suites plus replay and input-preservation regression. No wall-clock threshold in CI. Run `cargo test -p cognia-agent-state --lib` if dependency build fits; isolated release source suite is the minimum owning-code evidence.
+
+Exact runnable command and environment are recorded by `measure.py`; machine-readable raw timings, medians/MAD, sizes, RSS and frozen source hashes are retained in `results.json` and cohort logs. Measurements wait for peer benchmark lanes to be idle.

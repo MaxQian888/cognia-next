@@ -1,0 +1,16 @@
+# HostState recovery channel discovery experiment — 2026-10-07
+
+Before production edits or timing, register the following experiment.
+
+- User path / primary: discover durable session channels, then read every channel through the actual `getHostStateSnapshot`, as `settleOrphanedTurns` does on recovery. Primary milliseconds for this complete recovery-read boundary on 1,000 channels with 16KiB drafts. This intentionally heavy long-draft fixture is ~16MiB of draft text; it is not called typical startup.
+- Attribution: `listHostStateSessionChannels` elapsed time alone. Guardrails: complete read boundary for 20 and 100 channels with 512-byte drafts; no regression >10% beyond noise. Empty and mixed channel catalog behavior is a correctness guard.
+- Cause: `hostStateChannels.toArray()` hydrates all states solely to extract the inline primary key `channel`. Reading `toCollection().primaryKeys()` avoids hydration and keeps primary-key order. Same exact channel regex; inline key and `row.channel` are the same IndexedDB schema field. No schema or pending-summary selection changes.
+- Platform: installed headless Chromium via agent-browser, real IndexedDB/WebCrypto, minified esbuild production-mode bundle of actual owning functions. Native data schema copied exactly for the four tables used by snapshot transactions. Production content-protection catalog and encrypted-content middleware determine encryption (never force a table to be encrypted for benchmark gains).
+- Data: disposable database per fixture; 20/100/1,000 session channel rows plus session-index and deliberately non-session channels. Existing durable channel state is read without alteration. No provider/network/user DB access. Known deterministic host generation and cut sequence.
+- Timing: same database/input/browser per pair, alternate AB/BA; two warmups per variant then 15 samples per variant/fixture. No compile or seed timing included; warm IndexedDB/OS cache; no cache deletion. Measurements only under root-granted exclusive timing lane.
+- Acceptance: large complete recovery-read median ≥10% faster and delta >2×larger MAD. Smaller read boundary no >10% regression beyond noise. Listing-only gain does not rescue a failed primary. No authoritative p95 from this sample count.
+- Correctness: exact ordered channels, exact snapshot payload equality and host generation/cut sequence, unchanged row counts/content. Test non-session/malformed-channel filtering, encoded session ids, empty table, insertion/deletion observation, and no row-value query in discovery. Co-located production tests if retained.
+- Allowed changes: `lib/sync/host-state-store.ts`, its existing co-located test, this report directory, one owned `/tmp` bundle/server and browser session. No source edit before evidence. Browser probes are test artifacts, not product modules.
+- Scope limits: this is the recovery discovery/snapshot-read segment, not lease acquisition/reprojection, pending dispatch, orphan mutation commits, complete service startup, renderer UI, Tauri or mobile. Other paths still perform their required work.
+
+Actual function dependencies outside the measured path may be replaced by throwing build-only sentinels; any accidental call fails the experiment instead of using fake timing. The owning source and source hashes are retained.

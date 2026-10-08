@@ -1,0 +1,11 @@
+# Storage metadata research — 2026-10-08
+
+Candidate: `useStorageBreakdown` issues `getStats()` and `getHealth()` concurrently, while `getHealth()` calls `getStats()` again. Both initial mount and refresh hydrate, decrypt and size every table twice. Runtime consumers: settings DataOverviewTab (30-second polling), MaintenanceTab, and mobile useStorageOverview. Current source comment claiming a single walk is inaccurate.
+
+Proposed source scope: `lib/storage/storage-manager.ts` and `hooks/storage/use-storage-breakdown.ts`, with existing co-located tests. Let getHealth optionally consume the fresh stats snapshot; no-argument callers retain their existing fresh read. Hook performs one stats read, derives health from that exact snapshot, and preserves async cancellation/error/loading/polling behavior. No shared cache, schema change, approximate counts, or skipped table work.
+
+Proposed primary: native IndexedDB complete hook mount to committed stats+health on a retained-history fixture; manual refresh is a guardrail alongside small datasets. Production minified React+manager+encryption policies. Include real navigator storage estimate and actual browser branch of vector size adapter (0 outside Tauri); do not claim native-vector or whole-page latency. Require15paired samples with2warmups, median improvement>=10% and delta>2maxMAD; exact category/count/size/health output and single-walk/fresh-after-write tests. Fix fixture before any timing.
+
+Other inspected areas: stored-bytes.ts is a pure binary-shape adapter, no DB calls; usage.ts must return its backup rows, so summing them is not avoidable metadata work; agent-traces has bounded indexed reads, while aggregateStatsBySession lacks runtime caller evidence; background task recovery full scan has lease and isLive callback equivalence concerns; knowledge-base source deletion/revision selection couples ownership/ACL and durable retrieval pointers. No candidate changes or timing yet.
+
+Relevant context: ADR-0001 documents the existing backup/data domain; no storage-breakdown-specific ADR was found in the targeted ADR inventory. Current source and runtime consumers are direct evidence for the duplicated read. Tests already cover per-table read failure, quota fallback, health thresholds, refresh after writes, polling and manager rejection.

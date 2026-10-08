@@ -1,0 +1,7 @@
+# Queue-summary counts experiment — 2026-10-08
+
+Distinct hypothesis after rejected materialization experiment: offline queue summary only needs five counts. Keep listByStatus unchanged, extract its exact scoped status collection into one private helper, add countByStatus calling .count(), and use it for getQueueSummary. Cursor filtering remains for scoped reads, but no result array/sort. Without a scope, native indexed count can skip payload reads entirely. Reuse existing module; no schema.
+
+Primary: completion latency of the five exact status-count API calls and summary object assembly matching getQueueSummary. Baseline actual listByStatus calls + lengths; result actual countByStatus calls. Cases small10, typical1000, stress5000, foreign-heavy5000 (1% current account), no-scope5000. Queue metadata-only under real governance policy, actual middleware installed, native Chromium IndexedDB, 1KiB payload/job; same deterministic fixture as prior experiment. 2 warmups +15 samples each, alternating paired order. Baseline measured before source edit. No user data/network.
+
+Success: stress median saving >=10% and >2maxMAD. Small/foreign/no-scope guardrails must not regress both >10% and >2maxMAD. Exact expected summaries and unchanged database count for every sample. Record extent (max ~6.3MB) and structural no-materialization/sort contract; no measured heap or UI/network claim. No persistent cache or data/ordering semantics change. Root grants exclusive timing. Source/tests limited to db mobile-outbound-queue and queue outbound-queue.

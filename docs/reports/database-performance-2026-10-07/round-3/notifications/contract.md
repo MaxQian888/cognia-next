@@ -1,0 +1,13 @@
+# Archived notification query experiment — 2026-10-08
+
+User path: opening the Notification Center's archived tab invokes `listNotifications({includeDone:true,readStates:["done"],limit:100})` in `notification-center.tsx:loadDone`. Measure the complete repository call until all rows resolve; no React paint claim. ADR-0042 already defines `[readState+createdAt]`, while the current query scans all states through `createdAt` and filters client-side.
+
+Hypothesis: use the existing compound index for exactly one requested read state; preserve the same predicate, ascending timestamp domain, reverse timestamp/primary-key order and limit behavior. Default/multiple-state calls keep their old path. No schema, data mutation, cache, redaction, retention, coalescing or routing changes. Ownership only notifications.ts/test.ts plus this directory.
+
+Actual storage policy: `notifications` is metadata-only in the current content-protection baseline. Install the real middleware/cipher but do not force encryption. Complete actual module imported with only getDb redirected to an isolated synthetic DB, matching current notification indexes. Dexie4.4.6 defaults, Chromium151 native IndexedDB, production/minified esbuild. Apple M4 Pro14cores/48GiB/macOS26.5.2; no thermal/power controls; root grants exclusive timing lane.
+
+Primary fixture:500 rows (default retention cap),25 older archived records and475 newer active rows,512-character bodies; archived tab limit100. Guardrails:500 half-archived;500 all-archived;20rows withone archived; active-feed hydration query onprimaryfixture with hideSnoozedAfter fixed. Each fixture seeded before timing,2warmups+12samples. Same database and browser conditions before/after; no app caches deleted. Compare median/MAD; retain only primary gain>=10% AND delta>2*maxMAD. Guardrails may not regress by>max(10%baseline,1ms). Exact returned array SHA256 and independently derived IDs/order must match across variants.
+
+Correctness: ties in createdAt sorted by reversed primary key; negative timestamps included; readState/includeDone conflict; source/snooze/empty/multiple-state filters; limited and unlimited calls; liveQuery emits after state/title changes. Focused repository/store/UI regression tests and browser native parity. No wall-clock CI gates. Peak heap unmeasured; candidate returns same row count and scans fewer nonmatching records, no new retained collection or persistent state.
+
+Baseline source snapshot before edit. Side effects: report artifacts, temporary bundles /tmp/cognia-notifications-perf, isolated browser/database, localhost8938. No production user records or generated app assets. Tauri/Capacitor hardware/fullUI/network unverified.

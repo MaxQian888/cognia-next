@@ -1,0 +1,10 @@
+# Independent workflow-query review — 2026-10-08
+
+Read-only review scope: HEAD-relative changes in `lib/db/workflows.ts` and `lib/db/workflows.test.ts`, existing schema, active caller and native evidence in `round-4/history/`. No actionable findings.
+
+- The existing `[workflowId+status]` equality index selects exactly the same truthy workflow/status subset as the old broad status query plus filter. Both equality scans order by the primary key within that subset, so the unchanged stable descending startedAt sort preserves ties and missing/legacy timestamp behavior. The unchanged predicate retains the exact `acknowledgedAt === undefined` requirement, excluding null and zero.
+- Undefined/empty workflow IDs retain the global status path; missing workflow IDs return no matches. Added tests pin the indexed path plus same-time ordering, negative/missing timestamps, acknowledgement quirks and absent/empty scope. No schema, write or retention change is present.
+- `DeadLetterPanel` calls `listDeadLetters(workflowId)` from `useLiveQuery`, so the changed branch is reachable. Both archived native correctness results show five expected emissions for a run entering failure, encrypted error changes, workflow-scope departure and acknowledgement removal, plus initial state. Locked-cipher reads still reject.
+- The benchmark AST-extracts the exact exported function, whose only external runtime dependency is injected getDb. It installs actual encrypted-content policy, cipher and production indexes. Full-row hashes agree across all five fixed fixtures, including scoped/global/missing scope. The large primary gain corresponds to avoiding decryption of other workflows' failure snapshots, while small and all-one-workflow regressions are explicitly reported within the preregistered absolute allowance.
+
+This review inspects the other agent's source and saved evidence without rerunning its benchmark. It does not establish UI rendering or packaged desktop/mobile behavior. Root coordinates final regression checks.
