@@ -19,6 +19,10 @@ jest.mock("@cognia/logging", () => ({
       warn: (...args: unknown[]) => logWarn(...args),
       error: (...args: unknown[]) => logError(...args),
     },
+    // `window-controls` (the shared fullscreen tracker) logs under the shell.
+    shell: {
+      child: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+    },
     // Pulled in transitively by the plugin extension slot → agent-team-store,
     // which calls `loggers.agent.child(...)` at module load.
     agent: {
@@ -487,6 +491,38 @@ test("hides menubar and window controls on Mac (system menu owns them)", async (
   await waitFor(() => expect(screen.queryByLabelText("desktop.titleBar.minimize")).toBeNull())
   expect(screen.queryByLabelText("desktop.titleBar.close")).toBeNull()
   expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
+})
+
+test("reserves room for the macOS traffic lights in a normal window", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar")).toHaveClass("pl-22"))
+})
+
+test("drops the traffic-light reserve in macOS native fullscreen and restores it on exit", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  const callbacks: Array<() => Promise<void>> = []
+  onResized.mockImplementation(async (cb: () => Promise<void>) => {
+    callbacks.push(cb)
+    return () => {}
+  })
+  isFullscreen.mockResolvedValue(true)
+  render(<TitleBar />)
+  // Hidden buttons, so no blank band in front of the app icon. (The bar is
+  // `pl-2` before the platform resolves too, so wait for the probe first.)
+  await waitFor(() => expect(isFullscreen).toHaveBeenCalled())
+  await act(async () => {})
+  expect(screen.getByTestId("title-bar")).toHaveClass("pl-2")
+  expect(screen.getByTestId("title-bar")).not.toHaveClass("pl-22")
+
+  isFullscreen.mockResolvedValue(false)
+  await waitFor(() => expect(callbacks.length).toBeGreaterThan(0))
+  await act(async () => {
+    for (const cb of callbacks) await cb()
+  })
+  await waitFor(() => expect(screen.getByTestId("title-bar")).toHaveClass("pl-22"))
 })
 
 test("logs a structured warning when Tauri window setup fails", async () => {

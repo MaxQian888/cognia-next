@@ -89,6 +89,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/title-bar-zone"
 import { GoMenuItems } from "@/components/desktop/go-menu-items"
+import { useNativeFullscreen } from "@/components/desktop/window-controls"
 import { DROPDOWN_MENU_KIT, MENUBAR_MENU_KIT } from "@/components/shared/menu-kit"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 import { useBarLayout } from "@/components/shell/use-bar-layout"
@@ -375,6 +376,12 @@ export function TitleBar() {
     recordNavigation(pathname)
   }, [pathname])
 
+  // macOS hides the traffic lights in native fullscreen, so the leading
+  // reserve below has to go with them — kept, it was an 88px blank in front of
+  // the app icon. `platform` is only set inside Tauri, so this is false (and
+  // subscribes to nothing) in the web shell.
+  const macFullscreen = useNativeFullscreen(platform.includes("mac"))
+
   if (!mounted) return null
 
   /**
@@ -403,8 +410,10 @@ export function TitleBar() {
   // and the bar has one of each), so it projects nothing — but it still sits
   // under the end zone, which has to span it the way it already spans the rail.
   const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarEffPx : 0
-  // Must match the header's `pl-22` / `pl-2` below.
-  const barPaddingLeftPx = isMac ? 88 : 8
+  // Room for the overlay traffic lights — none while they are hidden in
+  // fullscreen. Must match the header's `pl-22` / `pl-2` below.
+  const reserveTrafficLights = isMac && !macFullscreen
+  const barPaddingLeftPx = reserveTrafficLights ? 88 : 8
   const columnStartPx = projected.start
     ? Math.max(0, railLeftPx + sidebarEffPx - barPaddingLeftPx - leftChromePx)
     : 0
@@ -741,9 +750,11 @@ export function TitleBar() {
           // not the 10 that parked them against the window's top edge.
           // Horizontally the cluster ends around 72px, so `pl-22` (88px) is
           // what keeps the app icon off the green button instead of the 80px
-          // that left them nearly touching.
+          // that left them nearly touching. In native fullscreen the buttons
+          // are gone (they ride in with the menu bar on hover, over the
+          // content), so the bar starts at the edge like Windows/Linux.
           "relative flex h-[var(--chrome-h)] shrink-0 items-center bg-muted/40 text-xs select-none",
-          isMac ? "pl-22" : "pl-2"
+          reserveTrafficLights ? "pl-22" : "pl-2"
         )}
       >
         <div ref={leftChromeRef} className="flex items-center gap-1">

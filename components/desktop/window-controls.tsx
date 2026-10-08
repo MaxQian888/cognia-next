@@ -41,6 +41,7 @@ type WindowApi = {
   toggleMaximize: () => Promise<void>
   close: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  isFullscreen?: () => Promise<boolean>
   onResized: (cb: () => void) => Promise<() => void>
 }
 
@@ -50,12 +51,73 @@ async function getWin(): Promise<WindowApi> {
 }
 
 /**
- * - `"none"` — no window to control (web shell). Draw nothing, reserve nothing.
+ * - `"none"` — nothing to draw, nothing to reserve: the web shell, or macOS in
+ *   native fullscreen, where the traffic lights are hidden (they only slide in
+ *   with the menu bar while the pointer is at the top edge, over the content).
  * - `"traffic-lights"` — macOS draws the buttons itself, over the content.
  *   Reserve ~80px on the leading edge or your own content lands under them.
  * - `"buttons"` — Windows/Linux under Tauri. `WindowControls` renders here.
  */
 export type WindowChromeMode = "none" | "traffic-lights" | "buttons"
+
+/**
+ * Whether the current window is in native fullscreen, tracked live.
+ *
+ * Tauri has no dedicated fullscreen event, but entering or leaving it always
+ * resizes the window, so every `onResized` re-reads `isFullscreen()`. Only
+ * subscribes while `enabled` — the one consumer that needs it is the macOS
+ * traffic-light reserve, which a fullscreen window must drop or it leaves an
+ * 88px blank where the (now hidden) buttons used to sit.
+ */
+export function useNativeFullscreen(enabled: boolean): boolean {
+  const [fullscreen, setFullscreen] = useState(false)
+
+  useEffect(() => {
+    if (!enabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFullscreen(false)
+      return
+    }
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    void (async () => {
+      try {
+        const win = await getWin()
+        if (typeof win.isFullscreen !== "function") return
+        const read = win.isFullscreen.bind(win)
+        const initial = await read()
+        if (cancelled) return
+        setFullscreen(initial)
+        const dispose = await win.onResized(async () => {
+          try {
+            const next = await read()
+            if (!cancelled) setFullscreen(next)
+          } catch (err) {
+            log.warn("fullscreen read failed", {
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        })
+        // Unmounted while the registration was in flight: release it now.
+        if (cancelled) {
+          safeUnlisten(dispose)
+          return
+        }
+        unlisten = dispose
+      } catch (err) {
+        log.warn("fullscreen tracking setup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })()
+    return () => {
+      cancelled = true
+      safeUnlisten(unlisten)
+    }
+  }, [enabled])
+
+  return fullscreen
+}
 
 export function useWindowChromeMode(): WindowChromeMode {
   // Starts at `"none"` so the static-export HTML and the first hydration pass
@@ -68,7 +130,8 @@ export function useWindowChromeMode(): WindowChromeMode {
     setMode(navigator.platform.toLowerCase().includes("mac") ? "traffic-lights" : "buttons")
   }, [])
 
-  return mode
+  const fullscreen = useNativeFullscreen(mode === "traffic-lights")
+  return mode === "traffic-lights" && fullscreen ? "none" : mode
 }
 
 /**

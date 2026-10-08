@@ -28,9 +28,17 @@ const minimize = jest.fn().mockResolvedValue(undefined)
 const toggleMaximize = jest.fn().mockResolvedValue(undefined)
 const close = jest.fn().mockResolvedValue(undefined)
 const isMaximized = jest.fn().mockResolvedValue(false)
+const isFullscreen = jest.fn().mockResolvedValue(false)
 const onResized = jest.fn().mockResolvedValue(() => {})
 jest.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ minimize, toggleMaximize, close, isMaximized, onResized }),
+  getCurrentWindow: () => ({
+    minimize,
+    toggleMaximize,
+    close,
+    isMaximized,
+    isFullscreen,
+    onResized,
+  }),
 }))
 
 import { WindowControls, useWindowChromeMode } from "./window-controls"
@@ -48,6 +56,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(false)
   isMaximized.mockResolvedValue(false)
+  isFullscreen.mockResolvedValue(false)
+  onResized.mockResolvedValue(() => {})
 })
 
 describe("useWindowChromeMode", () => {
@@ -63,6 +73,60 @@ describe("useWindowChromeMode", () => {
     setPlatform("MacIntel")
     render(<Mode />)
     await waitFor(() => expect(screen.getByTestId("mode")).toHaveTextContent("traffic-lights"))
+  })
+
+  it("reports no chrome in macOS native fullscreen, where the traffic lights are hidden", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("MacIntel")
+    isFullscreen.mockResolvedValue(true)
+    render(<Mode />)
+    await waitFor(() => expect(screen.getByTestId("mode")).toHaveTextContent("none"))
+  })
+
+  it("follows fullscreen transitions through resize events", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("MacIntel")
+    let resized: (() => Promise<void>) | undefined
+    onResized.mockImplementation(async (cb: () => Promise<void>) => {
+      resized = cb
+      return () => {}
+    })
+    render(<Mode />)
+    await waitFor(() => expect(screen.getByTestId("mode")).toHaveTextContent("traffic-lights"))
+    await waitFor(() => expect(resized).toBeDefined())
+
+    isFullscreen.mockResolvedValue(true)
+    await act(async () => {
+      await resized?.()
+    })
+    expect(screen.getByTestId("mode")).toHaveTextContent("none")
+
+    isFullscreen.mockResolvedValue(false)
+    await act(async () => {
+      await resized?.()
+    })
+    expect(screen.getByTestId("mode")).toHaveTextContent("traffic-lights")
+  })
+
+  it("keeps the reserve when the fullscreen probe fails", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("MacIntel")
+    isFullscreen.mockRejectedValue(new Error("no window"))
+    render(<Mode />)
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith("fullscreen tracking setup failed", {
+        error: "no window",
+      })
+    )
+    expect(screen.getByTestId("mode")).toHaveTextContent("traffic-lights")
+  })
+
+  it("never asks about fullscreen off macOS", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    render(<Mode />)
+    await waitFor(() => expect(screen.getByTestId("mode")).toHaveTextContent("buttons"))
+    expect(isFullscreen).not.toHaveBeenCalled()
   })
 
   it("reports buttons on Windows/Linux, where the app draws the only controls there are", async () => {
