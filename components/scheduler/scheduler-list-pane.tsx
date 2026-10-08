@@ -173,6 +173,7 @@ export function SchedulerListPane({
           ) : null}
         </InputGroup>
         <SchedulerFilterBar
+          className="px-0 pb-0"
           status={filter.filter.status}
           onStatusChange={filter.setStatus}
           statusCounts={filter.facets.statusCounts}

@@ -50,6 +50,9 @@ jest.mock("@/hooks/ui/use-resizable-layout", () => ({
   useResizableLayout: (key: string) => mockUseResizableLayout(key),
 }))
 
+const mockCollapse = jest.fn()
+const mockResize = jest.fn()
+
 // Stub react-resizable-panels wrapper — the real Group measures the DOM which
 // jsdom can't satisfy. Render panels as plain divs, forwarding test hooks.
 jest.mock("@/components/ui/resizable", () => ({
@@ -57,16 +60,27 @@ jest.mock("@/components/ui/resizable", () => ({
     children,
     defaultLayout,
     onLayoutChanged,
+    className,
   }: {
     children: React.ReactNode
+    className?: string
     defaultLayout?: Record<string, number>
     onLayoutChanged?: (next: Record<string, number>) => void
   }) => (
-    <div data-testid="resizable-group" data-default-layout={JSON.stringify(defaultLayout ?? null)}>
+    <div
+      className={className}
+      data-testid="resizable-group"
+      data-default-layout={JSON.stringify(defaultLayout ?? null)}
+    >
       <button
         type="button"
         data-testid="mock-layout-change"
         onClick={() => onLayoutChanged?.({ "scheduler-list": 30, "scheduler-detail": 70 })}
+      />
+      <button
+        type="button"
+        data-testid="mock-drag-collapse"
+        onClick={() => onLayoutChanged?.({ "scheduler-list": 0, "scheduler-detail": 100 })}
       />
       {children}
     </div>
@@ -85,20 +99,33 @@ jest.mock("@/components/ui/resizable", () => ({
     minSize?: number | string
     maxSize?: number | string
     [k: string]: unknown
-  }) => (
+  }) => {
+    const panelRef = rest.panelRef as { current: unknown } | undefined
+    if (panelRef) panelRef.current = { collapse: mockCollapse, resize: mockResize }
+    return (
+      <div
+        className={className}
+        data-testid={rest["data-testid"] as string}
+        data-collapsed={rest["data-collapsed"] as string | undefined}
+        data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+        data-min-size={minSize === undefined ? undefined : String(minSize)}
+        data-max-size={maxSize === undefined ? undefined : String(maxSize)}
+      >
+        {children}
+      </div>
+    )
+  },
+  ResizableHandle: ({
+    className,
+    onPointerDownCapture,
+    onKeyDownCapture,
+  }: React.HTMLAttributes<HTMLDivElement>) => (
     <div
+      data-testid="resizable-handle"
       className={className}
-      data-testid={rest["data-testid"] as string}
-      data-collapsed={rest["data-collapsed"] as string | undefined}
-      data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
-      data-min-size={minSize === undefined ? undefined : String(minSize)}
-      data-max-size={maxSize === undefined ? undefined : String(maxSize)}
-    >
-      {children}
-    </div>
-  ),
-  ResizableHandle: ({ className }: { className?: string }) => (
-    <div data-testid="resizable-handle" className={className} />
+      onPointerDownCapture={onPointerDownCapture}
+      onKeyDownCapture={onKeyDownCapture}
+    />
   ),
 }))
 
@@ -156,6 +183,7 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof SchedulerShe
 describe("SchedulerShell", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    window.localStorage.removeItem(SCHEDULER_LIST_COLLAPSED_KEY)
     mockBreakpoint.mockReturnValue("desktop")
     mockUseResizableLayout.mockReturnValue({
       defaultLayout: undefined,
@@ -180,12 +208,24 @@ describe("SchedulerShell", () => {
       const percent = /^\d+(\.\d+)?%$/
       const list = screen.getByTestId("scheduler-list-pane")
       const detail = screen.getByTestId("scheduler-detail-pane")
-      expect(list.dataset.defaultSize).toMatch(percent)
-      // The list's floor is pixels: a percent floor crushed it on a laptop.
-      expect(list.dataset.minSize).toBe("280px")
+      expect(list.dataset.defaultSize).toBe("15rem")
+      // The floor follows the settings sidebar, never a percentage of the window.
+      expect(list.dataset.minSize).toBe("15rem")
       expect(list.dataset.maxSize).toMatch(percent)
       expect(detail.dataset.defaultSize).toMatch(percent)
       expect(detail.dataset.minSize).toMatch(percent)
+    })
+
+    it("keeps list and detail DOM mounted through collapse and expand", () => {
+      renderShell({ detail: <input aria-label="Draft" defaultValue="keep me" /> })
+      const list = screen.getByTestId("sidebar-content")
+      const draft = screen.getByRole("textbox", { name: "Draft" })
+      fireEvent.change(draft, { target: { value: "unfinished edit" } })
+      fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+      expect(screen.getByTestId("sidebar-content")).toBe(list)
+      expect(screen.getByRole("textbox", { name: "Draft" })).toBe(draft)
+      fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+      expect(draft).toHaveValue("unfinished edit")
     })
 
     it("persists the split through useResizableLayout('scheduler-panels')", () => {
@@ -237,24 +277,48 @@ describe("SchedulerShell", () => {
 
         const list = screen.getByTestId("scheduler-list-pane")
         expect(list.dataset.collapsed).toBe("true")
-        expect(list.dataset.defaultSize).toBe("0%")
-        expect(list.dataset.minSize).toBe("0%")
+        expect(mockCollapse).toHaveBeenCalledTimes(1)
+        expect(list.dataset.minSize).toBe("15rem")
+        expect(screen.getByTestId("sidebar-content").parentElement).toHaveAttribute("inert")
         // Handle disappears so no phantom drag affordance remains.
         expect(screen.getByTestId("resizable-handle").className).toContain("hidden")
         // Collapsed flag persists for the next mount.
         expect(window.localStorage.getItem(SCHEDULER_LIST_COLLAPSED_KEY)).toBe("1")
       })
 
-      it("expands back to percent sizes on a second toggle", () => {
+      it("expands back to the settings width on a second toggle", () => {
         renderShell()
         fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
         fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
 
         const list = screen.getByTestId("scheduler-list-pane")
         expect(list.dataset.collapsed).toBeUndefined()
-        expect(list.dataset.defaultSize).toMatch(/^\d+(\.\d+)?%$/)
+        expect(mockResize).toHaveBeenLastCalledWith("15rem")
+        expect(screen.getByTestId("sidebar-content").parentElement).not.toHaveAttribute("inert")
         expect(list.dataset.minSize).not.toBe("0%")
         expect(window.localStorage.getItem(SCHEDULER_LIST_COLLAPSED_KEY)).toBe("0")
+      })
+
+      it("animates toggles but stops animating before a resize gesture", () => {
+        renderShell()
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        expect(screen.getByTestId("resizable-group").className).toContain("transition-[flex-grow]")
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        fireEvent.pointerDown(screen.getByTestId("resizable-handle"))
+        expect(screen.getByTestId("resizable-group").className).not.toContain(
+          "transition-[flex-grow]"
+        )
+      })
+
+      it("tracks collapse from the resize handle without losing the saved split", () => {
+        renderShell()
+        fireEvent.click(screen.getByTestId("mock-layout-change"))
+        fireEvent.click(screen.getByTestId("mock-drag-collapse"))
+        expect(screen.getByTestId("sidebar-provider").dataset.open).toBe("false")
+        expect(mockOnLayoutChanged).toHaveBeenCalledTimes(1)
+        expect(window.localStorage.getItem(SCHEDULER_LIST_COLLAPSED_KEY)).toBe("1")
+        fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
+        expect(mockResize).toHaveBeenLastCalledWith("30%")
       })
 
       it("restores the collapsed state from localStorage on mount", () => {
@@ -271,23 +335,17 @@ describe("SchedulerShell", () => {
         expect(mockOnLayoutChanged).toHaveBeenCalledTimes(1)
 
         fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
-        // The group remounts collapsed with an all-or-nothing layout override…
-        expect(screen.getByTestId("resizable-group").dataset.defaultLayout).toBe(
-          JSON.stringify({ "scheduler-list": 0, "scheduler-detail": 100 })
-        )
-        // …and layout writes are swallowed while collapsed.
+        // Layout writes are swallowed while collapsed.
         fireEvent.click(screen.getByTestId("mock-layout-change"))
         expect(mockOnLayoutChanged).toHaveBeenCalledTimes(1)
       })
 
-      it("re-seeds the expanded group with the last settled split, not the mount seed", () => {
+      it("restores the last settled split without remounting the group", () => {
         renderShell()
         fireEvent.click(screen.getByTestId("mock-layout-change"))
         fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
         fireEvent.click(screen.getByTestId("mock-sidebar-toggle"))
-        expect(screen.getByTestId("resizable-group").dataset.defaultLayout).toBe(
-          JSON.stringify({ "scheduler-list": 30, "scheduler-detail": 70 })
-        )
+        expect(mockResize).toHaveBeenLastCalledWith("30%")
       })
     })
   })

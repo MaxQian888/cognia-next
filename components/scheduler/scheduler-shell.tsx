@@ -25,6 +25,8 @@
  */
 
 import { useCallback, useRef, useState } from "react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { useTranslations } from "next-intl"
 
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
@@ -38,16 +40,9 @@ export const SCHEDULER_PANEL_STORAGE_KEY = "scheduler-panels"
 /** localStorage key for the persisted desktop list-panel collapsed flag. */
 export const SCHEDULER_LIST_COLLAPSED_KEY = "scheduler-list-collapsed"
 
-const PANEL_DEFAULTS = { list: 26, detail: 74 } as const
-/**
- * The list's floor is in pixels, not percent. At 16% of a 1100px window behind
- * the app rail the pane was ~170px wide: the status control read "A. 3",
- * "Act… 1" and every task name truncated after one word. 280px is what the
- * search box, the three-way status control and the filter button need side
- * by side; the ceiling stays relative so a wide monitor can give the list
- * more room.
- */
-const PANEL_BOUNDS = { listMinPx: 280, listMax: 45, detailMin: 40 } as const
+// Match SettingsShell's navigation width, including the user's font scale.
+const LIST_WIDTH = "15rem"
+const PANEL_BOUNDS = { listMax: 45, detailMin: 40 } as const
 
 function readCollapsedFlag(): boolean {
   if (typeof window === "undefined") return false
@@ -84,31 +79,44 @@ export interface SchedulerShellProps {
 function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShellProps) {
   const t = useTranslations("scheduler")
   const { defaultLayout, onLayoutChanged } = useResizableLayout(SCHEDULER_PANEL_STORAGE_KEY)
-  // Seed once at mount; the panel group owns live sizes thereafter. The last
-  // settled (expanded) layout is mirrored into a ref so a collapse → expand
-  // round-trip restores the split the user dragged during this session, not
-  // the stale mount-time seed.
-  const [initialLayout] = useState<Record<string, number> | undefined>(() => defaultLayout)
-  const liveLayoutRef = useRef<Layout | undefined>(initialLayout)
-  // Render-safe snapshot of the last settled split — refreshed from the ref
-  // inside the toggle handler (refs must not be read during render).
-  const [expandedSeedLayout, setExpandedSeedLayout] = useState<Layout | undefined>(initialLayout)
+  const [initialCollapsed] = useState(readCollapsedFlag)
+  const [initialLayout] = useState(() =>
+    initialCollapsed ? { "scheduler-list": 0, "scheduler-detail": 100 } : defaultLayout
+  )
+  const liveLayoutRef = useRef<Layout | undefined>(defaultLayout)
+  const listPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const [isListCollapsed, setIsListCollapsed] = useState(initialCollapsed)
+  const previousCollapsedRef = useRef(initialCollapsed)
+  const [animateToggle, setAnimateToggle] = useState(false)
 
-  // The header's SidebarTrigger (and the provider's built-in Ctrl/Cmd+B
-  // shortcut) drive this controlled flag; the list panel collapses to 0%.
-  const [isListCollapsed, setIsListCollapsed] = useState<boolean>(() => readCollapsedFlag())
   const handleSidebarOpenChange = useCallback((open: boolean) => {
+    setAnimateToggle(true)
     setIsListCollapsed(!open)
     writeCollapsedFlag(!open)
-    // Expanding: re-seed the remounted group with the split the user last
-    // dragged during this session instead of the stale mount-time seed.
-    if (open) setExpandedSeedLayout(liveLayoutRef.current)
   }, [])
+
+  // Keep the group and its children mounted: changing a key loses scroll,
+  // focus and detail state, and gives the browser no geometry to interpolate.
+  useIsomorphicLayoutEffect(() => {
+    if (previousCollapsedRef.current === isListCollapsed) return
+    previousCollapsedRef.current = isListCollapsed
+    const panel = listPanelRef.current
+    if (isListCollapsed) panel?.collapse()
+    else {
+      const saved = liveLayoutRef.current?.["scheduler-list"]
+      panel?.resize(saved && saved > 0 ? `${saved}%` : LIST_WIDTH)
+    }
+  }, [isListCollapsed])
 
   const handleLayoutChanged = useCallback(
     (next: Layout) => {
-      // Never persist the collapsed (0%) layout — it would corrupt the
-      // restored split when the panel expands again.
+      // Dragging past the minimum can also collapse the panel. Keep the
+      // trigger and persisted flag in sync, but never save the zero split.
+      if (next["scheduler-list"] === 0) {
+        setIsListCollapsed(true)
+        writeCollapsedFlag(true)
+        return
+      }
       if (isListCollapsed) return
       liveLayoutRef.current = next
       onLayoutChanged(next)
@@ -128,23 +136,30 @@ function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShell
       className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden"
     >
       <ResizablePanelGroup
-        // Panel sizes are only read at mount — remount the group when the
-        // collapsed flag flips (same pattern as canvas-shell.tsx).
-        key={isListCollapsed ? "list-collapsed" : "list-expanded"}
         orientation="horizontal"
-        className="min-h-0 flex-1"
-        defaultLayout={
-          isListCollapsed ? { "scheduler-list": 0, "scheduler-detail": 100 } : expandedSeedLayout
-        }
+        className={cn(
+          "min-h-0 flex-1",
+          // v4 sizes the outer [data-panel] elements; className on Panel
+          // styles its inner scroller. Only toggles animate, never dragging.
+          animateToggle &&
+            "[&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-200 [&>[data-panel]]:ease-out"
+        )}
+        onTransitionEnd={(event) => {
+          if (event.propertyName === "flex-grow") setAnimateToggle(false)
+        }}
+        defaultLayout={initialLayout}
         onLayoutChanged={handleLayoutChanged}
       >
         <ResizablePanel
           id="scheduler-list"
+          panelRef={listPanelRef}
+          groupResizeBehavior="preserve-pixel-size"
           collapsible
           collapsedSize="0%"
-          defaultSize={isListCollapsed ? "0%" : `${PANEL_DEFAULTS.list}%`}
-          minSize={isListCollapsed ? "0%" : `${PANEL_BOUNDS.listMinPx}px`}
+          defaultSize={initialCollapsed ? "0%" : LIST_WIDTH}
+          minSize={LIST_WIDTH}
           maxSize={`${PANEL_BOUNDS.listMax}%`}
+          style={{ overflow: "hidden" }}
           className={cn(
             "flex flex-col overflow-hidden text-sidebar-foreground",
             // The sidebar tint, as glass inside a wallpaper (see globals.css
@@ -155,16 +170,25 @@ function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShell
           data-testid="scheduler-list-pane"
           data-collapsed={isListCollapsed || undefined}
         >
-          {sidebar("content")}
+          <div
+            className="flex h-full min-h-0 min-w-[15rem] flex-col"
+            inert={isListCollapsed}
+            aria-hidden={isListCollapsed || undefined}
+          >
+            {sidebar("content")}
+          </div>
         </ResizablePanel>
         <ResizableHandle
           withHandle
+          onPointerDownCapture={() => setAnimateToggle(false)}
+          onKeyDownCapture={() => setAnimateToggle(false)}
           aria-label={t("resize.listHandle")}
           className={cn(isListCollapsed && "hidden")}
         />
         <ResizablePanel
           id="scheduler-detail"
-          defaultSize={`${PANEL_DEFAULTS.detail}%`}
+          defaultSize="100%"
+          style={{ overflow: "hidden" }}
           minSize={`${PANEL_BOUNDS.detailMin}%`}
           className="flex min-w-0 flex-col overflow-hidden"
           data-testid="scheduler-detail-pane"
@@ -193,6 +217,7 @@ export function SchedulerShell(props: SchedulerShellProps) {
   return (
     <SidebarProvider
       defaultOpen={false}
+      style={{ "--sidebar-width": LIST_WIDTH } as React.CSSProperties}
       data-bg-target="chat"
       className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden"
     >

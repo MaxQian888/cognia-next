@@ -43,6 +43,17 @@ describe("SchedulerFilterBar", () => {
     expect(screen.getByTestId("scheduler-status-filter-paused")).toHaveTextContent("2")
   })
 
+  it("keeps all status counts and the kind filter available at the compact sidebar width", () => {
+    renderBar({
+      statusCounts: { all: 120, active: 108, paused: 12 },
+      selectedKinds: new Set(["app"]),
+    })
+    expect(screen.getByTestId("scheduler-status-filter-all")).toHaveTextContent("120")
+    expect(screen.getByTestId("scheduler-status-filter-active")).toHaveTextContent("108")
+    expect(screen.getByTestId("scheduler-status-filter-paused")).toHaveTextContent("12")
+    expect(screen.getByTestId("scheduler-kind-filter-menu")).toHaveAccessibleName("Filter by type")
+  })
+
   it("marks the current status bucket as pressed", () => {
     renderBar({ status: "paused" })
     expect(screen.getByTestId("scheduler-status-filter-paused")).toHaveAttribute("data-state", "on")

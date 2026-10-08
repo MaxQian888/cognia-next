@@ -85,7 +85,7 @@ export function SchedulerFilterBar({
   return (
     <div
       data-testid="scheduler-filter-bar"
-      className={cn("flex items-center gap-1.5 px-3 pb-2", className)}
+      className={cn("flex items-center gap-1 px-2 pb-2", className)}
     >
       <ToggleGroup
         type="single"
@@ -109,7 +109,7 @@ export function SchedulerFilterBar({
             // `flex-auto`, not `flex-1`: equal thirds cut "Paused 1" to
             // "Paus…" while "All 3" had room to spare. Sized by label, all
             // three fit the rail.
-            className="h-7 min-w-0 flex-auto gap-1 px-2 text-[11px] data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+            className="h-7 min-w-0 flex-auto gap-1 px-1.5 text-[11px] data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
           >
             <span className="truncate">{statusLabel[key]}</span>
             <span className="shrink-0 tabular-nums text-[10px] opacity-70">
@@ -123,12 +123,12 @@ export function SchedulerFilterBar({
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
-            size="sm"
+            size="icon-sm"
             data-testid="scheduler-kind-filter-menu"
             data-active={hasMenuFilters || undefined}
             aria-label={t("filterBar.kindMenu")}
             className={cn(
-              "relative h-7 shrink-0 px-2",
+              "relative size-7 shrink-0",
               hasMenuFilters && "border-primary/30 bg-primary/10 text-primary"
             )}
           >
@@ -136,7 +136,7 @@ export function SchedulerFilterBar({
             {hasMenuFilters && (
               <span
                 data-testid="scheduler-kind-filter-count"
-                className="tabular-nums text-[10px] font-medium"
+                className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium text-primary-foreground tabular-nums"
               >
                 {pinnedCount}
               </span>

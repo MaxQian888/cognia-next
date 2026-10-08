@@ -111,6 +111,20 @@ describe("SchedulerListPane", () => {
     expect(p.onClearChecks).toHaveBeenCalled()
   })
 
+  it("clears a search without changing the active status filter", () => {
+    const p = props({
+      filter: filterState({
+        filter: { search: "night", status: "paused", kinds: [], loopOnly: false },
+      }),
+    })
+    render(<SchedulerListPane {...p} />)
+    expect(screen.getByTestId("scheduler-search")).toHaveValue("night")
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }))
+    expect(p.filter.setSearch).toHaveBeenCalledWith("")
+    expect(p.filter.setStatus).not.toHaveBeenCalled()
+    expect(screen.getByTestId("filter-bar")).toHaveAttribute("data-status", "paused")
+  })
+
   it("names the sources that failed and says how much a filter hides", () => {
     const p = props({
       items: [item("a")],
