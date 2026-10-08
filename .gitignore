@@ -285,3 +285,15 @@ packages/agent-host-*/integrity.json
 /plugins/pi-latex-workbench/vendor/.latexwb/
 /plugins/pi-latex-workbench/vendor/.latexwb-materialize/
 /plugins/pi-latex-workbench/.latexwb/
+
+# Performance-investigation evidence under docs/reports/*-performance-*/. Only
+# the written reports (`*.md`) are source; the raw runs beside them (gate logs,
+# metrics/raw JSON, `*.ts.txt` source snapshots, benchmark harnesses, patches)
+# are per-machine scratch that a report's own commands regenerate.
+/docs/reports/*-performance-*/**
+!/docs/reports/*-performance-*/**/
+!/docs/reports/*-performance-*/**/*.md
+
+# Encrypted data backups (`.cbk`) exported while testing backup/restore. They
+# carry account data and never belong in the repository.
+*.cbk
