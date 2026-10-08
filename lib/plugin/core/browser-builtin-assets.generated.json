@@ -1302,6 +1302,8 @@
               "--warning-foreground": "#171006",
               "--info": "#70B7D6",
               "--info-foreground": "#07131A",
+              "--link": "#58C6D5",
+              "--mark": "#F5A524",
               "--sidebar": "#0B0E10",
               "--sidebar-foreground": "#E7E8E4",
               "--sidebar-primary": "#F5A524",
@@ -1365,6 +1367,8 @@
               "--warning-foreground": "#FFFFFF",
               "--info": "#176987",
               "--info-foreground": "#FFFFFF",
+              "--link": "#086D7A",
+              "--mark": "#F2B33D",
               "--sidebar": "#E5E5DF",
               "--sidebar-foreground": "#202428",
               "--sidebar-primary": "#8A4700",
@@ -1716,14 +1720,14 @@
       "path": "builtin://cognia-arknights-theme",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-arknights-theme/34665c55bfb9649c2cdb3326f71f2c4ce51828639f4c1c24d5a9660fcf31223f.cjs",
-        "sha256": "34665c55bfb9649c2cdb3326f71f2c4ce51828639f4c1c24d5a9660fcf31223f",
+        "url": "/_cognia/builtin-plugins/cognia-arknights-theme/3afad6e14d0d2482f8fe3b757db78eb25a0dd2ab08cf2784a85336d96616d5c1.cjs",
+        "sha256": "3afad6e14d0d2482f8fe3b757db78eb25a0dd2ab08cf2784a85336d96616d5c1",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-arknights-theme/resources/",
         "entryHashes": {
-          "dist/index.js": "34665c55bfb9649c2cdb3326f71f2c4ce51828639f4c1c24d5a9660fcf31223f"
+          "dist/index.js": "3afad6e14d0d2482f8fe3b757db78eb25a0dd2ab08cf2784a85336d96616d5c1"
         }
       }
     },
