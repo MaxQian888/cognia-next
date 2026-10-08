@@ -112,6 +112,28 @@ describe("useProvisioningOffer", () => {
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.candidates).toEqual([])
+    // …and says the empty offer is a failed look, not a finding about the repository.
+    expect(result.current.failed).toBe(true)
+  })
+
+  it("reports a successful look as not failed, even when it finds nothing", async () => {
+    const { result } = renderHook(() =>
+      useProvisioningOffer("p1", "/repos/app", deps({ listRoot: async () => [] }))
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.failed).toBe(false)
+    expect(result.current.unavailable).toBeNull()
+  })
+
+  it("lists nothing where this runtime cannot list files, and says why", async () => {
+    const injected = deps({
+      readGate: { available: false, reason: "Pair a host to read files." },
+    })
+    const { result } = renderHook(() => useProvisioningOffer("p1", "/repos/app", injected))
+    expect(result.current.unavailable).toBe("Pair a host to read files.")
+    expect(result.current.loading).toBe(false)
+    await Promise.resolve()
+    expect(injected.listRoot).not.toHaveBeenCalled()
   })
 
   it("ignores a decision when the workspace is unknown", async () => {

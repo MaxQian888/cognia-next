@@ -4278,7 +4278,8 @@
     "beforeEdit": "编辑前",
     "cancel": "取消",
     "code": "代码",
-    "compareWithCurrent": "与当前版本对比",
+    "compareAgainst": "比较对象",
+    "compareVersion": "比较此版本",
     "createArtifact": "创建 Artifact",
     "currentVersion": "当前版本",
     "defaultTitles": {
@@ -4390,6 +4391,7 @@
       "reject": "拒绝",
       "rejectAll": "全部拒绝",
       "removeSelectionAria": "移除选区 {title}",
+      "revealInDiff": "在差异中定位第 {range} 行",
       "selectionChipCommentLabel": "{title} · 批注",
       "selectionChipEntityLabel": "{kind}：{title}",
       "selectionChipExcerptAcrossLabel": "{derivation, select, summary {总结} explanation {解释} translation {译文} other {摘录}}：{title} · {count} 条消息",
@@ -4488,9 +4490,25 @@
       },
       "mobileTitle": "工作区",
       "review": "审阅",
+      "reviewBack": "返回改动文件列表",
       "reviewChanges": "改动",
-      "reviewDiff": "差异",
       "reviewEmpty": "请选择一个改动文件以审阅差异",
+      "reviewFileNav": "改动文件导航",
+      "reviewFilePosition": "{index}/{total}",
+      "reviewFilePositionLabel": "第 {index} 个文件，共 {total} 个",
+      "reviewNextFile": "下一个文件（Alt+↓）",
+      "reviewPrevFile": "上一个文件（Alt+↑）",
+      "reviewScope": {
+        "all": "全部",
+        "allLabel": "工作区的全部改动（{count}）",
+        "baseline": "本对话编辑过的文件。差异仍与上次提交比较，因此也包含这些文件中的其他改动。",
+        "commitIncludesHidden": "提交还会包含 {count} 个此处未列出的已暂存文件。",
+        "conversation": "本对话",
+        "conversationLabel": "本对话改动的文件（{count}）",
+        "empty": "本对话尚未改动此仓库中的任何文件。",
+        "label": "列出哪些改动",
+        "loading": "正在查找本对话改动的文件…"
+      },
       "reviewWithCount": "审阅，{count} 个已更改文件",
       "scopeLabel": "工作区范围",
       "surfaceLabel": "工作区视图",
@@ -8556,6 +8574,16 @@
       ]
     },
     "mcp": {
+      "applyPatch": {
+        "binary": "二进制文件，无文本差异",
+        "change": {
+          "added": "新增",
+          "deleted": "删除",
+          "modified": "修改",
+          "renamed": "重命名"
+        },
+        "noTextChanges": "无文本改动（仅重命名或权限变更）"
+      },
       "computerUse": {
         "actionFallback": "操作",
         "frameAlt": "{tool} 画面",
@@ -9008,8 +9036,11 @@
         "defaultSummary": "详情"
       },
       "diff": {
+        "binary": "二进制文件，无文本差异",
         "copy": "复制",
         "defaultName": "diff",
+        "fileCount": "{count} 个文件",
+        "noTextChanges": "无文本改动（仅重命名或权限变更）",
         "splitView": "分栏视图",
         "unifiedView": "统一视图"
       },
@@ -9597,6 +9628,7 @@
         "grep": "搜索",
         "ls": "列目录",
         "notebook": "编辑笔记本",
+        "patch": "补丁",
         "plan": "计划",
         "query": "查询",
         "read": "读取",
@@ -13624,6 +13656,7 @@
     },
     "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
     "detail": {
+      "backToList": "返回设备列表",
       "drawerTitle": "设备详情",
       "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
       "noSelectionTitle": "未选择设备",
@@ -13733,6 +13766,7 @@
       "filterAria": "按设备类型筛选",
       "filterAttention": "需要处理",
       "label": "设备列表",
+      "loading": "正在加载设备…",
       "searchAria": "按名称、地址或平台搜索设备",
       "searchPlaceholder": "搜索设备"
     },
@@ -14484,6 +14518,24 @@
         "title": "正在以默认设置运行"
       }
     }
+  },
+  "diffView": {
+    "added": "新增",
+    "clipped": "…另有 {count} 个字符",
+    "find": {
+      "close": "关闭查找 (Esc)",
+      "count": "{current}/{total}",
+      "label": "在差异中查找",
+      "next": "下一个匹配 (Enter)",
+      "none": "无结果",
+      "open": "在差异中查找",
+      "placeholder": "查找",
+      "prev": "上一个匹配 (Shift+Enter)"
+    },
+    "label": "逐行差异",
+    "openAtLine": "在第 {line} 行打开文件",
+    "removed": "删除",
+    "showUnchanged": "显示 {count} 行未改动内容"
   },
   "discover": {
     "activeFilters": {
@@ -20095,7 +20147,10 @@
       },
       "agentsWorkingShow": "查看正在工作的 Agent",
       "environments": "环境",
+      "environmentsAddFolder": "添加文件夹",
       "environmentsAttention": "仓库的工作区配置需要你确认",
+      "environmentsNoFolderBody": "工作树、智能体分支和环境初始化都基于文件夹。添加一个文件夹后即可在这里设置。",
+      "environmentsNoFolderTitle": "这个工作区还没有文件夹",
       "environmentsOpen": "打开环境标签页",
       "issueSummary": "议题",
       "manage": "管理工作区",
@@ -32070,6 +32125,10 @@
       "description": "先执行初始化脚本，再由独立的小型 Agent 修复失败。所有就绪检查通过后才会启动完整 Agent。",
       "enabled": "使用 Bootstrap Agent 初始化环境",
       "endpointPath": "Chat Completions 路径",
+      "groupConnection": "模型连接",
+      "groupGeneration": "生成参数",
+      "groupLimits": "限制",
+      "groupTask": "任务",
       "maxContextBytes": "上下文消息上限（字节）",
       "maxOutputBytes": "工具输出上限（字节）",
       "maxResponseBytes": "模型响应上限（字节）",
@@ -32169,6 +32228,7 @@
       "systemPrompt": "自定义系统提示词（可选）",
       "task": "初始化任务",
       "temperature": "Temperature",
+      "title": "引导智能体",
       "toolEditor": "启用编辑器工具",
       "toolShell": "启用 Shell 工具",
       "topP": "Top P",
@@ -32194,16 +32254,50 @@
     "bypass": "仅本次跳过",
     "create": "新建环境",
     "default": "设为项目默认环境",
+    "defaultBadge": "默认",
+    "defaultHint": "此工作区的会话默认使用它，除非另行选择。",
     "delete": "删除环境",
+    "deleteBody": "它的初始化脚本、动作、变量和钥匙串引用会从此设备上移除，钥匙串中的条目本身不受影响。此操作无法撤销。",
+    "deleteCancel": "取消",
+    "deleteFailed": "无法删除环境：{message}",
+    "deleteTitle": "删除“{name}”？",
     "deleted": "环境已删除。",
     "description": "在项目根目录或其托管 Worktree 中运行可重复的本地初始化。",
+    "disabledBadge": "已停用",
+    "discard": "放弃更改",
+    "discardBody": "对“{name}”的修改尚未保存，将会丢失。",
+    "discardConfirm": "放弃",
+    "discardTitle": "放弃未保存的更改？",
+    "editorEmptyBody": "从列表中选择一个环境，或新建一个。",
     "enabled": "已启用",
+    "enabledHint": "关闭后，初始化和动作都会被跳过并直接报告成功。",
     "failure": "环境命令失败：{message}",
+    "initStatus": {
+      "bypassed": "已跳过",
+      "cancelled": "已取消",
+      "failed": "失败",
+      "never": "从未运行",
+      "running": "运行中",
+      "succeeded": "成功"
+    },
+    "keepEditing": "继续编辑",
+    "lastRun": "上次初始化：{status} · {time}",
+    "lastRunNever": "此工作区尚未运行过初始化。",
     "linux": "Linux 脚本",
+    "listEmptyBody": "新建一个环境，在智能体开始工作前先运行初始化。",
+    "listEmptyTitle": "还没有环境",
+    "listLabel": "此工作区中的环境",
+    "listTitle": "环境",
+    "loadFailed": "无法加载环境：{message}",
+    "loadingList": "正在加载环境…",
     "macos": "macOS 脚本",
     "name": "环境名称",
+    "nameRequired": "填写环境名称后才能保存。",
+    "newUnsaved": "新环境，尚未保存",
     "none": "不使用环境",
     "osOverrides": "操作系统专用脚本",
+    "osOverridesCount": "{count, plural, =0 {未设置} other {已设置 # 个}}",
+    "osOverridesHint": "在对应的操作系统上，这里的脚本会替代上方脚本运行。",
     "outcome": {
       "fallback": {
         "bundleUnavailable": "没有可用的 Agent 运行时包，本次运行改用标准执行路径。",
@@ -32263,6 +32357,7 @@
       "description": "工作树初始只有 Git 跟踪的文件。以下是这个仓库看起来还需要的东西。",
       "empty": "这个仓库没有可建议的项。",
       "evidence": "依据：{names}",
+      "failed": "无法查看该文件夹的内容，因此暂时没有建议。",
       "pendingTitle": "建议",
       "pnpm": {
         "available": "此机器上的 pnpm 可以让每个工作树拥有自己的 node_modules，并从磁盘上的同一个存储链接过去——比共享更快，且不会写进你的检出。执行一次以下命令，然后重新打开本卡片：",
@@ -32270,12 +32365,14 @@
         "enabled": "pnpm 的全局虚拟存储已开启，工作树无需共享你的 node_modules 也能快速安装。"
       },
       "remove": "停用",
+      "retry": "重试",
       "risk": {
         "copiedSecret": "{path} 含有凭据。每个工作树都会在磁盘上得到一份副本。",
         "sharedBuildDir": "工作树与你的检出共享这个构建目录，特性不同的分支会互相覆盖重建。",
         "sharedInstall": "工作树与你的检出共享这个目录。安装了不同依赖的任务会改变你正在使用的内容。"
       },
-      "title": "工作树供给"
+      "title": "工作树供给",
+      "unavailable": "这里没有建议：此设备无法查看该文件夹的内容。"
     },
     "remove": "移除",
     "repoConfig": {
@@ -32288,6 +32385,39 @@
       "declaredSetup": "初始化",
       "declaredVariables": "变量（{count}）",
       "description": "仓库可以在 .cognia/workspace.json 中携带初始化步骤、动作与变量，随仓库共享给每一个打开它的人。",
+      "diff": {
+        "currentFull": "它现在请求的全部内容",
+        "empty": "它请求的内容没有变化，只是文件的排版变了。",
+        "field": {
+          "action": "动作“{subject}”",
+          "base": "工作树基线",
+          "cacheLink": "缓存链接",
+          "capability": "建议的能力 {subject}",
+          "environment": "运行环境配置块",
+          "execution": "运行位置",
+          "include": "复制到每个工作树",
+          "requiredSecret": "所需密钥",
+          "root": "额外根目录",
+          "setup": "初始化脚本",
+          "setupOs": "{os} 上的初始化脚本",
+          "sparsePath": "稀疏检出路径",
+          "variable": "变量 {subject}"
+        },
+        "kind": {
+          "added": "新增",
+          "changed": "修改",
+          "removed": "移除"
+        },
+        "noPrevious": "这次批准发生在 Cognia 开始保存批准内容之前，因此没有可对比的旧版本。下方列出了它现在请求的全部内容。",
+        "off": "关闭",
+        "on": "开启",
+        "os": {
+          "linux": "Linux",
+          "macos": "macOS",
+          "windows": "Windows"
+        },
+        "title": "自你批准以来的变化"
+      },
       "diffCurrent": "仓库中当前的",
       "diffPrevious": "先前批准的",
       "executionLocal": "工作区目录",
@@ -32323,9 +32453,13 @@
         "unapproved": "等待你复核。在此之前只运行本设备自己的配置。"
       },
       "title": "来自仓库",
+      "unavailable": "此设备无法读取。",
       "untrustedHint": "信任此工作区后，它才能携带初始化配置。"
     },
+    "repoReplacesActions": "仓库中已批准的 .cognia/workspace.json 提供了动作，应用期间这里的动作不会运行。",
+    "repoReplacesSetup": "仓库中已批准的 .cognia/workspace.json 提供了初始化脚本，应用期间这里的脚本不会运行。",
     "retry": "重试初始化",
+    "retryLoad": "重试",
     "runAction": "运行{name}",
     "runSetup": "运行初始化",
     "runtime": {
@@ -32407,6 +32541,7 @@
       },
       "save": "保存运行环境",
       "saved": "运行环境已保存。",
+      "savedSeparately": "单独保存",
       "sidecar": "浏览器边车",
       "sidecarDormant": "该主机暂不启动浏览器边车；此设置会保留，待支持后生效。",
       "size": "规格",
@@ -32469,6 +32604,9 @@
     "status": "上次初始化：{status}",
     "success": "环境命令已完成。",
     "title": "项目环境",
+    "unnamed": "未命名环境",
+    "unsaved": "有未保存的更改",
+    "unsavedBadge": "未保存",
     "variableName": "变量名",
     "variableValue": "明文值",
     "variables": "非敏感变量",
@@ -48493,6 +48631,10 @@
           "label": "分支排序",
           "name": "名称（A–Z）"
         },
+        "collapseUnchanged": {
+          "description": "在差异视图中折叠改动之间未变化的内容，每处折叠都可以就地展开。",
+          "label": "折叠未改动区域"
+        },
         "confirmDiscard": {
           "description": "丢弃工作区更改前先询问。",
           "label": "放弃前确认"
@@ -48506,6 +48648,10 @@
           "inline": "内联",
           "label": "差异视图",
           "sideBySide": "并排"
+        },
+        "diffWordWrap": {
+          "description": "长行自动换行，而不是横向滚动。",
+          "label": "差异中长行自动换行"
         },
         "fetchPrune": {
           "description": "移除远程已不存在的远程跟踪引用。",
@@ -51872,10 +52018,40 @@
     },
     "diff": {
       "binary": "二进制文件 — 不显示差异",
+      "edit": {
+        "conflict": "开始编辑后，磁盘上的文件已被修改。要用你的版本覆盖吗？",
+        "discard": "放弃我的修改",
+        "diskMoved": "编辑期间磁盘上的文件已被修改。保存时会先询问是否覆盖。",
+        "failed": "文件保存失败，你的修改仍保留在此。",
+        "label": "未保存的修改",
+        "overwrite": "覆盖",
+        "revert": "放弃未保存的修改",
+        "save": "保存 (Ctrl/⌘+S)",
+        "saveShort": "保存"
+      },
+      "find": "在差异中查找 (Ctrl/⌘+F)",
       "hunkCount": "{count, plural, other {# 个差异块}}",
-      "jumpToHunk": "跳转到第 {line} 行的差异块",
+      "large": {
+        "banner": "差异较大，已用轻量视图显示以保持面板流畅。",
+        "loadFull": "加载完整差异",
+        "loadOmitted": "加载完整文件",
+        "loadOmittedFailed": "无法加载完整文件，读取差异后它可能已被修改。仅显示改动的片段。",
+        "omitted": "此文件过大，未完整传输，仅显示改动的片段。"
+      },
       "loading": "正在加载差异…",
-      "selectFile": "选择一个文件以查看其更改"
+      "nav": {
+        "actionsLabel": "当前改动的操作",
+        "label": "改动导航",
+        "next": "下一处改动（Alt+F5）",
+        "position": "{current}/{total}",
+        "positionLabel": "第 {current} 处改动，共 {total} 处",
+        "prev": "上一处改动（Shift+Alt+F5）"
+      },
+      "openAtChange": "在此改动处打开文件",
+      "selectFile": "选择一个文件以查看其更改",
+      "view": {
+        "label": "差异视图选项"
+      }
     },
     "discard": {
       "confirmAction": "放弃",
@@ -52015,7 +52191,7 @@
           "warning": "警告"
         }
       },
-      "applyAccepted": "应用 {count} 个已接受",
+      "applyAccepted": "暂存 {count} 个已接受",
       "collapse": "折叠审阅",
       "comment": "块评论",
       "commentPlaceholder": "对此块留个备注…",
@@ -52023,8 +52199,8 @@
       "hunkLabel": "块 @ 第 {line} 行",
       "reject": "拒绝此块",
       "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",
-      "title": "审阅代码块",
-      "viewChanges": "查看更改"
+      "showInDiff": "在差异中显示",
+      "title": "审阅代码块"
     },
     "roots": {
       "primary": "主",
@@ -52177,11 +52353,13 @@
         "default": "默认",
         "name": "名称（A–Z）"
       },
+      "collapseUnchanged": "折叠未改动区域",
       "diffMode": {
         "inline": "内联",
         "sideBySide": "并排"
       },
       "diffView": "差异视图",
+      "diffWordWrap": "长行自动换行",
       "ignoreWhitespace": "忽略空白",
       "label": "视图设置",
       "reset": "恢复默认",

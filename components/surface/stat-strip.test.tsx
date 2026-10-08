@@ -39,9 +39,14 @@ describe("StatStrip", () => {
    * The responsive step has to name the pane. An interpolated container name
    * emits no class at all, so the strip would simply stop reflowing.
    */
+  /**
+   * A device record on a phone is ~340px wide; three stacked full-width rows
+   * there cost a third of the first screen, so its three cells sit side by
+   * side from a narrow pane up, with labels that wrap rather than truncate.
+   */
   it("reflows against whichever pane owns it", () => {
     render(<StatStrip stats={[stat("a"), stat("b"), stat("c")]} pane="device-pane" />)
-    expect(screen.getByTestId("stat-strip").className).toContain("@lg/device-pane:grid-cols-3")
+    expect(screen.getByTestId("stat-strip").className).toContain("@2xs/device-pane:grid-cols-3")
   })
 
   /**

@@ -20,6 +20,12 @@
  * The rail is a list of buttons, so Tab reaches it once and the arrow keys
  * move through it, the way every other list in the app moves. Selecting a row
  * moves focus with it, so the next arrow press continues from there.
+ *
+ * While the first read is in flight the rail says so with placeholder rows
+ * under whatever is already known (this machine is always known). Without
+ * them a slow host read looked like a finished fleet of one, and a filter
+ * that matched nothing yet said "No device matches" about rows that had not
+ * arrived.
  */
 
 import { useMemo, useRef, type KeyboardEvent, type ReactNode } from "react"
@@ -27,6 +33,7 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Empty,
   EmptyContent,
@@ -35,6 +42,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { rowNeedsAttention } from "@/lib/devices/build-device-rows"
 import type { DeviceKind, DeviceRow } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
@@ -107,8 +115,29 @@ export function nextRowRef(
   }
 }
 
+/** Two placeholder rows in the shape of `DeviceRowButton`, announced once. */
+function LoadingRows() {
+  const t = useTranslations("devices.listPane")
+  return (
+    <div role="status" className="space-y-0.5 px-1" data-testid="device-list-loading">
+      <span className="sr-only">{t("loading")}</span>
+      {[0, 1].map((index) => (
+        <div key={index} aria-hidden className="flex items-start gap-2.5 px-1.5 py-2">
+          <Skeleton className="mt-0.5 size-4 rounded-control" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export interface DeviceListPaneProps {
   rows: readonly DeviceRow[]
+  /** The first read is still in flight: rows may be only what is known locally. */
+  loading?: boolean
   selectedRef: string | null
   search: string
   kindFilter: DeviceKindFilter
@@ -126,6 +155,7 @@ export interface DeviceListPaneProps {
 
 export function DeviceListPane({
   rows,
+  loading = false,
   selectedRef,
   search,
   kindFilter,
@@ -140,6 +170,9 @@ export function DeviceListPane({
 }: DeviceListPaneProps) {
   const t = useTranslations("devices")
   const list = useRef<HTMLDivElement>(null)
+  // Most reads settle within a frame (the Dexie mirror answers first), so the
+  // placeholders only appear for a wait the eye would actually notice.
+  const showLoading = useDeferredLoading(loading)
 
   const visible = useMemo(
     () => filterDeviceRows(rows, search, kindFilter, attentionOnly),
@@ -257,8 +290,12 @@ export function DeviceListPane({
 
       {notices ? <div className="shrink-0 space-y-2 border-b p-2.5">{notices}</div> : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {visible.length === 0 ? (
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5" aria-busy={loading || undefined}>
+        {visible.length === 0 && loading ? (
+          showLoading ? (
+            <LoadingRows />
+          ) : null
+        ) : visible.length === 0 ? (
           <Empty className="border-none">
             <EmptyHeader>
               <EmptyTitle className="text-sm">{t("listPane.emptyTitle")}</EmptyTitle>
@@ -304,9 +341,10 @@ export function DeviceListPane({
                 </div>
               </section>
             ))}
+            {showLoading ? <LoadingRows /> : null}
           </div>
         )}
-        {footer ? <div className="p-1.5 pt-3">{footer}</div> : null}
+        {footer && !loading ? <div className="p-1.5 pt-3">{footer}</div> : null}
       </div>
     </div>
   )

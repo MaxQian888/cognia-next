@@ -75,7 +75,8 @@
     "emptyFiltered": "No device matches the current search or filter.",
     "label": "Device list",
     "filterAttention": "Needs attention",
-    "clearFilters": "Clear filters"
+    "clearFilters": "Clear filters",
+    "loading": "Loading devices…"
   },
   "row": {
     "needsAttention": "Needs attention"
@@ -260,7 +261,8 @@
     "noSelectionTitle": "No device selected",
     "noSelectionBody": "Pick a device from the list to see what it can do.",
     "drawerTitle": "Device details",
-    "sectionNavAria": "Jump to a section"
+    "sectionNavAria": "Jump to a section",
+    "backToList": "Back to all devices"
   },
   "access": {
     "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",

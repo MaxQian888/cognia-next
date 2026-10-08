@@ -71,4 +71,19 @@ describe("DeviceSection", () => {
     )
     expect(screen.getByTestId("device-section-identity").className).not.toContain("col-span")
   })
+
+  /**
+   * Every section describes the same machine, so none is framed as an object
+   * of its own: the masthead is the frame, the sections are its chapters.
+   */
+  it("renders as a frameless chapter, not a raised card", () => {
+    render(
+      <DeviceSection id="identity" title="Identity">
+        <p>body</p>
+      </DeviceSection>
+    )
+    const section = screen.getByTestId("device-section-identity")
+    expect(section).toHaveAttribute("data-variant", "sheet")
+    expect(section).not.toHaveAttribute("data-surface-layer")
+  })
 })

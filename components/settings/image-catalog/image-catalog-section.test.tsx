@@ -330,4 +330,23 @@ describe("ImageCatalogSection", () => {
     expect(screen.getByRole("button", { name: "Revoke Node 22" })).toBeDisabled()
     expect(screen.getByRole("button", { name: en.reload })).toBeDisabled()
   })
+
+  /**
+   * One page, not six stacked Cards: the images and the deployment facts are
+   * frameless chapters, and nothing on the page draws a Card of its own.
+   */
+  it("lays the catalog out as chapters rather than stacked cards", () => {
+    render(<ImageCatalogSection />)
+    const page = screen.getByTestId("image-catalog-section")
+    expect(page.querySelector('[data-slot="card"]')).toBeNull()
+    for (const id of ["entries", "facts", "sizes", "egress", "bundle"]) {
+      expect(screen.getByTestId(`image-catalog-section-${id}`)).toHaveAttribute(
+        "data-variant",
+        "sheet"
+      )
+    }
+    expect(screen.getByRole("complementary", { name: en.facts.title })).toContainElement(
+      screen.getByTestId("image-catalog-facts")
+    )
+  })
 })

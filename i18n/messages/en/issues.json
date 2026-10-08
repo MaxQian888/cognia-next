@@ -407,7 +407,10 @@
     "openIssuesOpen": "Open the issue board",
     "projectsOpen": "Open projects",
     "environmentsOpen": "Open the Environments tab",
-    "environmentsAttention": "The repository's workspace config needs your decision"
+    "environmentsAttention": "The repository's workspace config needs your decision",
+    "environmentsNoFolderTitle": "This workspace has no folder yet",
+    "environmentsNoFolderBody": "Worktrees, agent branches and environment setup all start from a folder. Add one to set them up here.",
+    "environmentsAddFolder": "Add a folder"
   },
   "labels": {
     "title": "Labels",

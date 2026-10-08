@@ -9,6 +9,14 @@
  * Lifecycle needs the desktop shell, because Docker orchestration is Rust and
  * the `cua_sandbox_*` commands are client-local. Off the desktop every action
  * is disabled with that as the stated reason, rather than hidden.
+ *
+ * `framed` decides who owns the frame. In Settings the registry is a section
+ * of its own and draws its Card. The device console embeds the same registry
+ * as one chapter of a machine's record, whose heading already names it, so it
+ * renders bare there: a Card inside a titled section is two headers and two
+ * borders for one thing. Row layout sizes off the registry's own width
+ * (`@container/sandbox-registry`), not the viewport, because the two hosts
+ * give it very different widths on the same monitor.
  */
 
 import { useState } from "react"
@@ -22,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
+import { cn } from "@/lib/utils"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
 import { hasSandboxAdapter } from "@/lib/sandbox/adapter-registry"
@@ -62,7 +71,15 @@ export function sandboxConnectionSummary(connection: SandboxConnectionRow): stri
   }
 }
 
-export function SandboxConnectionsTab() {
+export interface SandboxConnectionsTabProps {
+  /**
+   * Draw the registry's own Card, title and description (Settings). `false`
+   * when the host already titles it, as the device console's section does.
+   */
+  framed?: boolean
+}
+
+export function SandboxConnectionsTab({ framed = true }: SandboxConnectionsTabProps = {}) {
   const t = useTranslations("automation.sandboxConnections")
   const { connections, create, remove, provision, start, suspend, resume, stop, refreshHealth } =
     useSandboxConnections()
@@ -127,22 +144,27 @@ export function SandboxConnectionsTab() {
     setAdding(false)
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {connections.length === 0 && !adding ? (
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        ) : null}
+  const content = (
+    <div className="@container/sandbox-registry space-y-4">
+      {framed ? null : (
+        <p className="text-[11px] leading-snug text-muted-foreground">{t("description")}</p>
+      )}
+      {connections.length === 0 && !adding ? (
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      ) : null}
 
-        <ul className="space-y-2">
+      {connections.length > 0 ? (
+        <ul
+          className={framed ? "space-y-2" : "divide-y border-y"}
+          data-testid="sandbox-connection-list"
+        >
           {connections.map((conn) => (
             <li
               key={conn.id}
-              className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
+              className={cn(
+                "flex flex-col gap-3 @md/sandbox-registry:flex-row @md/sandbox-registry:items-center @md/sandbox-registry:justify-between",
+                framed ? "rounded-md border p-3" : "py-2.5"
+              )}
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -178,7 +200,7 @@ export function SandboxConnectionsTab() {
               <Button
                 size="sm"
                 variant="outline"
-                className="shrink-0"
+                className="shrink-0 self-start @md/sandbox-registry:self-auto"
                 data-testid={`sandbox-manage-${conn.id}`}
                 onClick={() => setSelectedId(conn.id)}
               >
@@ -188,99 +210,104 @@ export function SandboxConnectionsTab() {
             </li>
           ))}
         </ul>
+      ) : null}
 
-        {adding ? (
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="space-y-1">
-              <Label htmlFor="cua-name">{t("name")}</Label>
-              <Input id="cua-name" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="cua-image">{t("image")}</Label>
-              <Input id="cua-image" value={image} onChange={(e) => setImage(e.target.value)} />
-              <p className="text-xs text-muted-foreground">{t("imageHelp")}</p>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="cua-host">{t("host")}</Label>
-              <Input id="cua-host" value={host} onChange={(e) => setHost(e.target.value)} />
-            </div>
-
-            <div className="space-y-3 rounded-md border border-dashed p-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{t("policyTitle")}</p>
-                <p className="text-xs text-muted-foreground">{t("policyFrozen")}</p>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="cua-network">{t("networkMode")}</Label>
-                <Input
-                  id="cua-network"
-                  value={networkMode}
-                  placeholder={
-                    /* i18n-exempt: the literal value Docker accepts for --network, not prose */ "none"
-                  }
-                  onChange={(e) => setNetworkMode(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">{t("networkModeHelp")}</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cua-cpus">{t("cpus")}</Label>
-                  <Input
-                    id="cua-cpus"
-                    value={cpus}
-                    placeholder="1.5"
-                    onChange={(e) => setCpus(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">{t("cpusHelp")}</p>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cua-memory">{t("memoryMb")}</Label>
-                  <Input
-                    id="cua-memory"
-                    inputMode="numeric"
-                    value={memoryMb}
-                    placeholder="2048"
-                    onChange={(e) => setMemoryMb(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cua-mount-host">{t("workspaceHostPath")}</Label>
-                  <Input
-                    id="cua-mount-host"
-                    value={workspaceHostPath}
-                    onChange={(e) => setWorkspaceHostPath(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cua-mount-container">{t("workspaceContainerPath")}</Label>
-                  <Input
-                    id="cua-mount-container"
-                    value={workspaceContainerPath}
-                    onChange={(e) => setWorkspaceContainerPath(e.target.value)}
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("workspaceMountHelp")}</p>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setAdding(false)}>
-                {t("cancel")}
-              </Button>
-              <Button onClick={onCreate} disabled={!name.trim()}>
-                {t("save")}
-              </Button>
-            </div>
+      {adding ? (
+        <div
+          className={cn("space-y-3", framed ? "rounded-md border p-3" : "border-t pt-3")}
+          data-testid="sandbox-add-form"
+        >
+          <div className="space-y-1">
+            <Label htmlFor="cua-name">{t("name")}</Label>
+            <Input id="cua-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-        ) : (
-          <Button variant="outline" onClick={() => setAdding(true)}>
-            <PlusIcon className="mr-2 size-4" />
-            {t("addConnection")}
-          </Button>
-        )}
-      </CardContent>
+          <div className="space-y-1">
+            <Label htmlFor="cua-image">{t("image")}</Label>
+            <Input id="cua-image" value={image} onChange={(e) => setImage(e.target.value)} />
+            <p className="text-xs text-muted-foreground">{t("imageHelp")}</p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="cua-host">{t("host")}</Label>
+            <Input id="cua-host" value={host} onChange={(e) => setHost(e.target.value)} />
+          </div>
+
+          {/* The frozen policy is one group, set off by a rule at its edge
+              rather than a box inside the form's box. */}
+          <div className="space-y-3 border-l-2 pl-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">{t("policyTitle")}</p>
+              <p className="text-xs text-muted-foreground">{t("policyFrozen")}</p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cua-network">{t("networkMode")}</Label>
+              <Input
+                id="cua-network"
+                value={networkMode}
+                placeholder={
+                  /* i18n-exempt: the literal value Docker accepts for --network, not prose */ "none"
+                }
+                onChange={(e) => setNetworkMode(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t("networkModeHelp")}</p>
+            </div>
+            <div className="grid gap-3 @md/sandbox-registry:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="cua-cpus">{t("cpus")}</Label>
+                <Input
+                  id="cua-cpus"
+                  value={cpus}
+                  placeholder="1.5"
+                  onChange={(e) => setCpus(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">{t("cpusHelp")}</p>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cua-memory">{t("memoryMb")}</Label>
+                <Input
+                  id="cua-memory"
+                  inputMode="numeric"
+                  value={memoryMb}
+                  placeholder="2048"
+                  onChange={(e) => setMemoryMb(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 @md/sandbox-registry:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="cua-mount-host">{t("workspaceHostPath")}</Label>
+                <Input
+                  id="cua-mount-host"
+                  value={workspaceHostPath}
+                  onChange={(e) => setWorkspaceHostPath(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cua-mount-container">{t("workspaceContainerPath")}</Label>
+                <Input
+                  id="cua-mount-container"
+                  value={workspaceContainerPath}
+                  onChange={(e) => setWorkspaceContainerPath(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("workspaceMountHelp")}</p>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setAdding(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={onCreate} disabled={!name.trim()}>
+              {t("save")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="outline" size={framed ? "default" : "sm"} onClick={() => setAdding(true)}>
+          <PlusIcon className="mr-2 size-4" />
+          {t("addConnection")}
+        </Button>
+      )}
 
       <SandboxConnectionSheet
         connection={selected}
@@ -293,6 +320,18 @@ export function SandboxConnectionsTab() {
         onError={(message) => toast.error(message)}
         onDeleted={(id) => setSelectedId((current) => (current === id ? null : current))}
       />
+    </div>
+  )
+
+  if (!framed) return content
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("title")}</CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent>{content}</CardContent>
     </Card>
   )
 }

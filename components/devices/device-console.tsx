@@ -209,6 +209,7 @@ export function DeviceConsole() {
         content: (
           <DeviceListPane
             rows={rows}
+            loading={loading}
             selectedRef={selectedRef}
             search={search}
             kindFilter={kindFilter}

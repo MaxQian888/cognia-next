@@ -515,6 +515,24 @@ describe("WorkspaceOverview", () => {
     await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.queryByTestId("project-environment-manager-stub")).not.toBeInTheDocument()
   })
+
+  /**
+   * Everything on this tab hangs off a folder. A workspace without one used to
+   * show a lone "unavailable" box over an empty pane; it now says why, and
+   * opens the one editor that adds a folder.
+   */
+  it("explains a workspace with no folder and offers to add one", async () => {
+    const user = userEvent.setup()
+    storeState = { activeProjectId: "w1", projects: [{ id: "w1", name: "Default", roots: [] }] }
+    render(<ControlledOverview />)
+    await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
+    const state = screen.getByTestId("workspace-environments-no-folder")
+    expect(state).toHaveTextContent("workspace.environmentsNoFolderTitle")
+    expect(screen.queryByTestId("workspace-environments-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-environment-manager-stub")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "workspace.environmentsAddFolder" }))
+    expect(pickerActions.manage).toHaveBeenCalledWith("w1")
+  })
 })
 
 describe("WorkspaceOverview tab addressing", () => {

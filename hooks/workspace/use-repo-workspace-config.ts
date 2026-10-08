@@ -13,9 +13,22 @@
  * It re-reads after approving rather than assuming success: the file can change
  * between the render and the click, and silently approving a digest the user
  * never looked at is the whole thing this gate exists to prevent.
+ *
+ * It does not try a read this runtime cannot make. A browser with no paired
+ * host has no filesystem to read `.cognia/workspace.json` from; trying anyway
+ * produced an "invalid: tauri-only command" verdict, which read as a broken
+ * repository and lit the Environments tab's attention dot. The read is gated
+ * per command (`useWorkspaceCommandGate`, as the worktree list is), and a
+ * refusal is `unavailable` with the sentence that says why, not a verdict
+ * about the file.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+
+import {
+  useWorkspaceCommandGate,
+  type WorkspaceCommandGate,
+} from "@/hooks/workspace/use-workspace-command-gate"
 
 import {
   approveWorkspaceConfig as persistApproval,
@@ -29,6 +42,7 @@ import {
   type EvaluateWorkspaceConfigDeps,
   type WorkspaceConfigVerdict,
 } from "@/lib/project-environment/workspace-config-trust"
+import type { WorkspaceRepositoryConfigV1 } from "@/lib/project-environment/workspace-config"
 import { declaredWorkspaceOf, seedDeclarations } from "@/lib/workspace/repo-declared"
 import { isTauri } from "@/lib/tauri"
 import type { Project } from "@/types"
@@ -37,6 +51,12 @@ import { useSettingsStore } from "@/stores/settings"
 
 export interface RepoWorkspaceConfigState {
   verdict: WorkspaceConfigVerdict
+  /**
+   * Why the file cannot be read from this runtime, or null when it can. While
+   * set, `verdict` is a placeholder (`absent`) that says nothing about the
+   * repository, and nothing was read.
+   */
+  unavailable: string | null
   loading: boolean
   approving: boolean
   /** Absolute path the approval is recorded against, or null. */
@@ -47,7 +67,9 @@ export interface RepoWorkspaceConfigState {
 }
 
 export interface UseRepoWorkspaceConfigDeps extends Partial<EvaluateWorkspaceConfigDeps> {
-  approve: (path: string, digest: string) => Promise<boolean>
+  approve: (path: string, digest: string, config?: WorkspaceRepositoryConfigV1) => Promise<boolean>
+  /** Whether this runtime can read the file. Production asks the command gate. */
+  readGate: WorkspaceCommandGate
   /** The trust row, for the declarations already offered on this device. */
   trustRecord: (path: string) => Promise<TrustedWorkspace | undefined>
   /** Persist the seeded set. Written together with the workspace change. */
@@ -74,6 +96,9 @@ export function useRepoWorkspaceConfig(
 
   const [nonce, setNonce] = useState(0)
   const approvalKey = useMemo(() => approvalKeyFor(project), [project])
+  const gate = useWorkspaceCommandGate()
+  const readGate = deps?.readGate ?? gate("fs_read_workspace_file")
+  const unavailable = readGate.available ? null : readGate.reason
 
   // Everything the verdict depends on, as one string. The read is asynchronous,
   // so `loading` is derived from "the settled answer is for a different key"
@@ -96,6 +121,9 @@ export function useRepoWorkspaceConfig(
   const [approving, setApproving] = useState(false)
 
   useEffect(() => {
+    // Nothing to read from here. `unavailable` already says so; returning
+    // without a setState keeps this effect off the cascading-render path.
+    if (unavailable !== null) return
     let cancelled = false
     void evaluateWorkspaceConfig(
       {
@@ -128,11 +156,11 @@ export function useRepoWorkspaceConfig(
     // `deps` is a test seam and stable in production; including it would make
     // an inline object re-read on every render. `requestKey` covers the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey])
+  }, [requestKey, unavailable])
 
   const fresh = settled?.key === requestKey
-  const verdict = fresh ? settled.verdict : LOADING
-  const loading = !fresh
+  const verdict = unavailable === null && fresh ? settled.verdict : LOADING
+  const loading = unavailable === null && !fresh
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
@@ -141,7 +169,9 @@ export function useRepoWorkspaceConfig(
     setApproving(true)
     try {
       const persist = deps?.approve ?? persistApproval
-      await persist(approvalKey, verdict.digest)
+      // The content goes with the digest, so the next change can be shown
+      // as a change against exactly what was approved here.
+      await persist(approvalKey, verdict.digest, verdict.config)
       // Approval is the moment the user says yes to THIS content, so it is also
       // the moment the repository's non-script declarations take effect. Seeded
       // once and recorded, so removing a seeded root or clearing a seeded
@@ -173,5 +203,5 @@ export function useRepoWorkspaceConfig(
     }
   }, [verdict, approvalKey, project, deps])
 
-  return { verdict, loading, approving, approvalKey, approve, refresh }
+  return { verdict, unavailable, loading, approving, approvalKey, approve, refresh }
 }

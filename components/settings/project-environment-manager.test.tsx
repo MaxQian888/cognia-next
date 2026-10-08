@@ -14,11 +14,31 @@ jest.mock("@/lib/project-environment/executor", () => ({
   executeProjectEnvironment: (...args: unknown[]) => executeMock(...args),
 }))
 const updateProjectMock = jest.fn()
+let mockDefaultEnvironmentId: string | undefined
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: Object.assign(
-    (selector: (state: unknown) => unknown) => selector({ projects: [{ id: "project-1" }] }),
+    (selector: (state: unknown) => unknown) =>
+      selector({ projects: [{ id: "project-1", defaultEnvironmentId: mockDefaultEnvironmentId }] }),
     { getState: () => ({ updateProject: updateProjectMock }) }
   ),
+}))
+
+// The repository section has its own suite. Here the verdict is a lever: the
+// editor has to say what an approved `.cognia/workspace.json` replaces.
+let mockVerdict: unknown = { kind: "absent" }
+jest.mock("@/hooks/workspace/use-repo-workspace-config", () => ({
+  useRepoWorkspaceConfig: () => ({
+    verdict: mockVerdict,
+    unavailable: null,
+    loading: false,
+    approving: false,
+    approvalKey: null,
+    approve: jest.fn(),
+    refresh: jest.fn(),
+  }),
+}))
+jest.mock("./project-environment-provisioning", () => ({
+  ProjectEnvironmentProvisioning: () => <div data-testid="provisioning-probe" />,
 }))
 
 // The runtime panel has its own suite. Here it is a probe: which row the
@@ -63,6 +83,8 @@ beforeEach(() => {
   deleteMock.mockReset().mockResolvedValue(undefined)
   executeMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
   updateProjectMock.mockReset()
+  mockDefaultEnvironmentId = undefined
+  mockVerdict = { kind: "absent" }
   runtimeProps.length = 0
   poolHost = true
   gatedOn.length = 0
@@ -519,4 +541,264 @@ it("shows translated bootstrap budget validation before saving", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save environment" }))
   expect(await screen.findByText(/Use whole numbers: 1–256 steps/)).toBeInTheDocument()
   expect(putMock).not.toHaveBeenCalled()
+})
+
+describe("the environment list and the editor's guard rails", () => {
+  const stored = (overrides: Record<string, unknown> = {}) => ({
+    id: "env-1",
+    projectId: "project-1",
+    name: "Node",
+    isEnabled: true,
+    setupScript: { default: "pnpm install" },
+    actions: [],
+    variables: {},
+    keyringReferences: [],
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  })
+  const render2 = () =>
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+
+  it("lists every environment with its default and disabled state", async () => {
+    mockDefaultEnvironmentId = "env-1"
+    listMock.mockResolvedValue([
+      stored(),
+      stored({ id: "env-2", name: "Python", isEnabled: false }),
+    ])
+    render2()
+    const first = await screen.findByTestId("project-environment-row-env-1")
+    expect(first).toHaveTextContent("Node")
+    expect(first).toHaveTextContent("Default")
+    expect(first).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("project-environment-row-env-2")).toHaveTextContent("Disabled")
+  })
+
+  /**
+   * Picking another environment used to replace the working copy without a
+   * word, so an afternoon's setup script was one stray click from gone.
+   */
+  it("asks before another environment replaces unsaved edits", async () => {
+    listMock.mockResolvedValue([stored(), stored({ id: "env-2", name: "Python" })])
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.change(screen.getByLabelText("Environment name"), { target: { value: "Edited" } })
+    expect(screen.getByTestId("project-environment-unsaved")).toHaveTextContent("Unsaved changes")
+
+    fireEvent.click(screen.getByTestId("project-environment-row-env-2"))
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved changes?")
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(screen.getByLabelText("Environment name")).toHaveValue("Edited")
+
+    fireEvent.click(screen.getByTestId("project-environment-row-env-2"))
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.getByLabelText("Environment name")).toHaveValue("Python"))
+  })
+
+  it("switches without asking when nothing is unsaved", async () => {
+    listMock.mockResolvedValue([stored(), stored({ id: "env-2", name: "Python" })])
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.click(screen.getByTestId("project-environment-row-env-2"))
+    expect(await screen.findByDisplayValue("Python")).toBeInTheDocument()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("reverts the working copy to what is stored", async () => {
+    listMock.mockResolvedValue([stored()])
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.change(screen.getByLabelText("Environment name"), { target: { value: "Edited" } })
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }))
+    expect(screen.getByLabelText("Environment name")).toHaveValue("Node")
+    expect(screen.queryByTestId("project-environment-unsaved")).not.toBeInTheDocument()
+  })
+
+  it("lists a definition that was never saved, and marks it", async () => {
+    render2()
+    await waitFor(() => expect(listMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: /New environment/ }))
+    const rows = await screen.findByTestId("project-environment-list")
+    expect(rows).toHaveTextContent("Untitled environment")
+    expect(rows).toHaveTextContent("Unsaved")
+    expect(screen.getByTestId("project-environment-unsaved")).toHaveTextContent(
+      "Give the environment a name to save it."
+    )
+  })
+
+  /** A reload behind the editor (here, the project default moving) keeps edits. */
+  it("keeps unsaved edits through a background reload", async () => {
+    listMock.mockResolvedValue([stored(), stored({ id: "env-2", name: "Python" })])
+    const { rerender } = render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.change(screen.getByLabelText("Environment name"), { target: { value: "Edited" } })
+
+    mockDefaultEnvironmentId = "env-2"
+    rerender(
+      <ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />
+    )
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText("Environment name")).toHaveValue("Edited")
+  })
+
+  it("asks before deleting, and deletes nothing when cancelled", async () => {
+    listMock.mockResolvedValue([stored()])
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Delete “Node”?")
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(deleteMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
+    const confirm = await screen.findByRole("alertdialog")
+    fireEvent.click(
+      Array.from(confirm.querySelectorAll("button")).find(
+        (button) => button.textContent === "Delete environment"
+      )!
+    )
+    await waitFor(() => expect(deleteMock).toHaveBeenCalledWith("env-1"))
+  })
+
+  it("reports a failed delete instead of leaving the panel disabled", async () => {
+    listMock.mockResolvedValue([stored()])
+    deleteMock.mockRejectedValueOnce(new Error("disk full"))
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
+    const confirm = await screen.findByRole("alertdialog")
+    fireEvent.click(
+      Array.from(confirm.querySelectorAll("button")).find(
+        (button) => button.textContent === "Delete environment"
+      )!
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not delete the environment: disk full"
+    )
+    expect(screen.getByRole("button", { name: "Save environment" })).toBeEnabled()
+  })
+
+  it("reports a setup run that throws instead of leaving the panel disabled", async () => {
+    listMock.mockResolvedValue([stored()])
+    executeMock.mockRejectedValueOnce(new Error("spawn failed"))
+    render2()
+    await screen.findByDisplayValue("Node")
+    fireEvent.click(screen.getByRole("button", { name: "Run setup" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("spawn failed")
+    expect(screen.getByRole("button", { name: "Run setup" })).toBeEnabled()
+  })
+
+  it("states a failed load and reads again on retry", async () => {
+    listMock.mockRejectedValueOnce(new Error("blocked")).mockResolvedValue([stored()])
+    render2()
+    expect(await screen.findByTestId("project-environment-list-error")).toHaveTextContent(
+      "Could not load environments: blocked"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    expect(await screen.findByDisplayValue("Node")).toBeInTheDocument()
+  })
+
+  it("shows when setup last ran, and why it failed", async () => {
+    listMock.mockResolvedValue([
+      stored({
+        lastInitialization: {
+          status: "failed",
+          scope: "local",
+          executionRoot: "/repo",
+          startedAt: 1,
+          completedAt: 2,
+          error: "exit 1: pnpm not found",
+        },
+      }),
+    ])
+    render2()
+    const lastRun = await screen.findByTestId("project-environment-last-run")
+    expect(lastRun).toHaveTextContent("Last setup: failed")
+    expect(lastRun).toHaveTextContent("exit 1: pnpm not found")
+    expect(screen.getByRole("button", { name: "Retry setup" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Bypass once" })).toBeInTheDocument()
+  })
+
+  it("titles the runtime section with what it promises", async () => {
+    listMock.mockResolvedValue([stored()])
+    render2()
+    await screen.findByDisplayValue("Node")
+    const section = screen.getByTestId("project-environment-section-runtime")
+    expect(section).toHaveTextContent("Runtime environment")
+    expect(section).toHaveTextContent("Built-in agents are not affected")
+    expect(section).toHaveTextContent("Saved separately")
+  })
+})
+
+describe("an approved repository configuration", () => {
+  const config = {
+    version: 1,
+    roots: [],
+    defaults: { execution: "local", base: { kind: "head" } },
+    setup: { default: "make setup", byOs: {} },
+    actions: [],
+    variables: { SHARED: "repo", ONLY_REPO: "x" },
+    sparsePaths: [],
+    cacheLinks: [],
+    include: [],
+    requiredSecrets: ["NPM_TOKEN", "GH_TOKEN"],
+    capabilities: {},
+  }
+
+  /**
+   * `mergeWorkspaceConfig` replaces the local setup script and actions with
+   * the repository's. The editor kept offering both as if they would run.
+   */
+  it("says the repository's setup and actions replace this device's", async () => {
+    mockVerdict = { kind: "approved", digest: "d", config }
+    listMock.mockResolvedValue([
+      {
+        id: "env-1",
+        projectId: "project-1",
+        name: "Node",
+        isEnabled: true,
+        setupScript: { default: "" },
+        actions: [],
+        variables: { SHARED: "mine" },
+        keyringReferences: [{ variable: "NPM_TOKEN", keyringRef: "npm:token" }],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+    expect(screen.getByTestId("project-environment-repo-replaces-setup")).toBeInTheDocument()
+    expect(screen.getByTestId("project-environment-repo-replaces-actions")).toBeInTheDocument()
+    expect(screen.getByTestId("project-environment-overridden-variables")).toHaveTextContent(
+      "Your local values win for: SHARED"
+    )
+    expect(screen.getByTestId("project-environment-missing-secrets")).toHaveTextContent(
+      "Not bound yet: GH_TOKEN"
+    )
+  })
+
+  it("says nothing of the sort while the configuration is not applied", async () => {
+    mockVerdict = { kind: "unapproved", digest: "d", config }
+    listMock.mockResolvedValue([
+      {
+        id: "env-1",
+        projectId: "project-1",
+        name: "Node",
+        isEnabled: true,
+        setupScript: { default: "" },
+        actions: [],
+        variables: { SHARED: "mine" },
+        keyringReferences: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+    await screen.findByDisplayValue("Node")
+    expect(screen.queryByTestId("project-environment-repo-replaces-setup")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-environment-missing-secrets")).not.toBeInTheDocument()
+  })
 })

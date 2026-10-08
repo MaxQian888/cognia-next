@@ -81,7 +81,7 @@ import type {
   WorkspaceEnvironmentAction,
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
-import { ConsoleSection } from "@/components/surface/console-section"
+import { ConsoleSection, type ConsoleSectionVariant } from "@/components/surface/console-section"
 import { Surface } from "@/components/surface/surface"
 import { formatBytes } from "@/lib/agent/utils"
 import { useSessionStore } from "@/stores/chat/session-store"
@@ -95,6 +95,12 @@ import { useWorkspaceActionController } from "@/hooks/use-workspace-action-contr
 
 export interface WorkspaceEnvironmentListProps {
   presentation?: "page" | "sheet"
+  /**
+   * On the page, whether the list's section is a framed card (default) or a
+   * frameless chapter. The Environments tab uses chapters: every section on
+   * it describes the same workspace's environments.
+   */
+  sectionVariant?: ConsoleSectionVariant
   rootDir?: string
   /**
    * Scope the inventory to one Workspace. Rows this project does not own are
@@ -253,6 +259,7 @@ interface RowAction {
 /** Canonical Registry + Git environment inventory, reusable in page and sheet containers. */
 export function WorkspaceEnvironmentList({
   presentation = "page",
+  sectionVariant = "card",
   rootDir,
   projectId,
   refreshKey = 0,
@@ -1062,8 +1069,16 @@ export function WorkspaceEnvironmentList({
 
   // ------------------------------------------------------------------- content
 
+  // On the page the empty state sits inside a console card, so a hairline
+  // frame marks where the table would be. In a sheet (and in the device
+  // record, which embeds this list as one chapter) there is no card around
+  // it: a framed 250px box there was a card drawn inside the section, so it
+  // is a short, frameless statement instead.
+  const emptyFrame =
+    presentation === "page" && sectionVariant === "card" ? "border" : "border-none p-4 md:p-6"
+
   const content = !canList ? (
-    <Empty className="border" data-testid="workspace-environments-unavailable">
+    <Empty className={emptyFrame} data-testid="workspace-environments-unavailable">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <LockIcon aria-hidden />
@@ -1087,7 +1102,7 @@ export function WorkspaceEnvironmentList({
         the way to clear it. One shared empty state told the reader to create a
         worktree when they had ten and had simply mistyped a branch name.
       */
-    <Empty className="border">
+    <Empty className={emptyFrame}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           {filtering ? <SearchIcon aria-hidden /> : <BoxesIcon aria-hidden />}
@@ -1405,6 +1420,7 @@ export function WorkspaceEnvironmentList({
           // test asserts against the wrapper it did not mean.
           idPrefix="workspace-section"
           pane="workspace-pane"
+          variant={sectionVariant}
           icon={BoxesIcon}
           title={t("title")}
           description={t("description")}

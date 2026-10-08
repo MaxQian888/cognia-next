@@ -407,7 +407,10 @@
     "openIssuesOpen": "打开议题看板",
     "projectsOpen": "打开项目",
     "environmentsOpen": "打开环境标签页",
-    "environmentsAttention": "仓库的工作区配置需要你确认"
+    "environmentsAttention": "仓库的工作区配置需要你确认",
+    "environmentsNoFolderTitle": "这个工作区还没有文件夹",
+    "environmentsNoFolderBody": "工作树、智能体分支和环境初始化都基于文件夹。添加一个文件夹后即可在这里设置。",
+    "environmentsAddFolder": "添加文件夹"
   },
   "labels": {
     "title": "标签",

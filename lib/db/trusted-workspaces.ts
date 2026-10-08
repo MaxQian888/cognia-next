@@ -7,6 +7,7 @@
 // remembered per absolute path, revocable from settings.
 
 import { isValidImageDigest } from "@/lib/project-environment/image-reference"
+import type { WorkspaceRepositoryConfigV1 } from "@/lib/project-environment/workspace-config"
 import type { DeclarationFile, PinnedImage } from "@/types/sandbox/environment-spec"
 
 import { getDb } from "./schema"
@@ -61,6 +62,15 @@ export interface TrustedWorkspace {
   /** Wall-clock millis of that approval. */
   approvedConfigAt?: number
   /**
+   * The parsed configuration that digest was taken over, kept so a later
+   * change can be shown as a change ("the setup script now also runs
+   * `curl …`") rather than as a second copy of the whole file the user must
+   * compare from memory. Non-indexed and optional, so no schema version bump;
+   * an approval recorded before this field existed simply has no previous
+   * version to compare against, and the panel says so.
+   */
+  approvedConfig?: WorkspaceRepositoryConfigV1
+  /**
    * Declarations from that configuration already OFFERED on this device —
    * `cap:<kind>:<id>` and `root:<declaredId>` (see `lib/workspace/repo-declared`).
    *
@@ -89,17 +99,34 @@ export async function getTrustedWorkspace(path: string): Promise<TrustedWorkspac
  * root. No-op for a root that is not trusted: approving a configuration inside
  * an untrusted checkout would create a grant the trust gate never sanctioned.
  */
-export async function approveWorkspaceConfig(path: string, digest: string): Promise<boolean> {
+export async function approveWorkspaceConfig(
+  path: string,
+  digest: string,
+  config?: WorkspaceRepositoryConfigV1
+): Promise<boolean> {
   if (!path || !digest) return false
   const key = normalize(path)
   const row = await getDb().trustedWorkspaces.get(key)
   if (!row) return false
+  // Without the content, drop any older copy rather than keep one that no
+  // longer matches the digest beside it: a stale "previous version" would
+  // show a change against something the user never approved.
+  const { approvedConfig: _stale, ...rest } = row
   await getDb().trustedWorkspaces.put({
-    ...row,
+    ...rest,
     approvedConfigDigest: digest,
     approvedConfigAt: Date.now(),
+    ...(config ? { approvedConfig: config } : {}),
   })
   return true
+}
+
+/** The configuration approved for this root, when it was recorded with its content. */
+export async function getApprovedWorkspaceConfig(
+  path: string
+): Promise<WorkspaceRepositoryConfigV1 | undefined> {
+  if (!path) return undefined
+  return (await getDb().trustedWorkspaces.get(normalize(path)))?.approvedConfig
 }
 
 /**

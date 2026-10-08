@@ -170,7 +170,8 @@ function renderPanel(over: Partial<Parameters<typeof ProjectEnvironmentRuntime>[
 describe("ProjectEnvironmentRuntime", () => {
   it("limits the runtime selection's promise to external agents in both locales", () => {
     renderPanel()
-    expect(screen.getByText(en.runtime.description)).toBeInTheDocument()
+    // The description is the manager's section heading now (asserted in its
+    // suite); the panel itself carries the opt-in that makes the promise.
     expect(screen.getByText(en.runtime.optIn)).toBeInTheDocument()
     expect(en.runtime.description).toContain("Built-in agents are not affected")
     expect(en.runtime.optIn).toContain("external agents")

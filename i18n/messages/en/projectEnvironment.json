@@ -89,7 +89,10 @@
       "sharedBuildDir": "Worktrees share this build directory with your checkout, so branches with different features rebuild over each other.",
       "sharedInstall": "Worktrees share this directory with your checkout. A task that installs different dependencies changes what you are working in."
     },
-    "title": "Worktree provisioning"
+    "title": "Worktree provisioning",
+    "unavailable": "No suggestions here: this device cannot look inside the folder.",
+    "failed": "Couldn't look inside this folder, so nothing is suggested yet.",
+    "retry": "Try again"
   },
   "remove": "Remove",
   "repoConfig": {
@@ -137,7 +140,41 @@
       "unapproved": "Waiting for your review. Until then only this device's own setup runs."
     },
     "title": "From the repository",
-    "untrustedHint": "Trust this workspace to let it ship setup."
+    "untrustedHint": "Trust this workspace to let it ship setup.",
+    "diff": {
+      "title": "What changed since you approved it",
+      "noPrevious": "This approval was recorded before Cognia kept a copy of what was approved, so there is no earlier version to compare against. Everything it asks for now is listed below.",
+      "empty": "Nothing it asks for is different; only the file's layout changed.",
+      "currentFull": "Everything it asks for now",
+      "kind": {
+        "added": "Added",
+        "removed": "Removed",
+        "changed": "Changed"
+      },
+      "field": {
+        "setup": "Setup script",
+        "setupOs": "Setup script on {os}",
+        "action": "Action “{subject}”",
+        "variable": "Variable {subject}",
+        "requiredSecret": "Required secret",
+        "root": "Extra root",
+        "execution": "Runs in",
+        "base": "Worktree base",
+        "capability": "Suggested capability {subject}",
+        "cacheLink": "Cache link",
+        "include": "Copied into each worktree",
+        "sparsePath": "Sparse checkout path",
+        "environment": "Runtime environment block"
+      },
+      "os": {
+        "macos": "macOS",
+        "windows": "Windows",
+        "linux": "Linux"
+      },
+      "on": "on",
+      "off": "off"
+    },
+    "unavailable": "Not read on this device."
   },
   "retry": "Retry setup",
   "runAction": "Run {name}",
@@ -262,7 +299,8 @@
       "desktopRequired": "Open this project in the desktop app to access authenticated container ports.",
       "open": "Open",
       "close": "Close connection"
-    }
+    },
+    "savedSeparately": "Saved separately"
   },
   "save": "Save environment",
   "saved": "Environment saved.",
@@ -431,6 +469,51 @@
     "autoCompact": "Automatically compact context",
     "pruneToolResults": "Prune older tool results",
     "reuseInputs": "Bootstrap reuse inputs (one per line)",
-    "reuseOutputs": "Bootstrap required outputs (one per line)"
-  }
+    "reuseOutputs": "Bootstrap required outputs (one per line)",
+    "title": "Bootstrap Agent",
+    "groupConnection": "Model connection",
+    "groupGeneration": "Generation",
+    "groupTask": "Task",
+    "groupLimits": "Limits"
+  },
+  "listTitle": "Environments",
+  "listLabel": "Environments in this workspace",
+  "listEmptyTitle": "No environments yet",
+  "listEmptyBody": "Create one to run setup before agents start working here.",
+  "loadingList": "Loading environments…",
+  "loadFailed": "Could not load environments: {message}",
+  "retryLoad": "Try again",
+  "unnamed": "Untitled environment",
+  "unsavedBadge": "Unsaved",
+  "defaultBadge": "Default",
+  "disabledBadge": "Disabled",
+  "enabledHint": "When off, setup and actions are skipped and report success.",
+  "defaultHint": "Sessions in this workspace use it unless they pick another.",
+  "osOverridesCount": "{count, plural, =0 {none set} one {# set} other {# set}}",
+  "osOverridesHint": "On that operating system, a script here runs instead of the one above.",
+  "repoReplacesSetup": "The repository's approved .cognia/workspace.json supplies the setup script, so this one does not run while it is applied.",
+  "repoReplacesActions": "The repository's approved .cognia/workspace.json supplies the actions, so these do not run while it is applied.",
+  "lastRun": "Last setup: {status} · {time}",
+  "lastRunNever": "Setup has not run in this workspace yet.",
+  "initStatus": {
+    "never": "never run",
+    "running": "running",
+    "succeeded": "succeeded",
+    "failed": "failed",
+    "bypassed": "bypassed",
+    "cancelled": "cancelled"
+  },
+  "unsaved": "Unsaved changes",
+  "newUnsaved": "New environment — not saved yet",
+  "discard": "Discard changes",
+  "discardTitle": "Discard unsaved changes?",
+  "discardBody": "Your edits to “{name}” have not been saved and will be lost.",
+  "keepEditing": "Keep editing",
+  "discardConfirm": "Discard",
+  "deleteTitle": "Delete “{name}”?",
+  "deleteBody": "Its setup script, actions, variables and keyring references are removed from this device. The keyring entries themselves are not touched. This cannot be undone.",
+  "deleteCancel": "Cancel",
+  "deleteFailed": "Could not delete the environment: {message}",
+  "editorEmptyBody": "Pick an environment from the list, or create one.",
+  "nameRequired": "Give the environment a name to save it."
 }

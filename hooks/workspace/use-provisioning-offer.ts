@@ -22,9 +22,23 @@
  * `provisioningFromConsent` rebuilds the payload from the stored ids alone, so
  * opening a worktree costs no listing and no process spawn. This hook exists
  * for the moment a person is looking at the card.
+ *
+ * # "Nothing to suggest" is a finding, not a fallback
+ *
+ * A listing that failed and a repository that needs nothing used to render
+ * the same sentence, "Nothing to suggest for this repository", which is a
+ * claim about the repository that nothing had checked. The two are now told
+ * apart: a runtime that cannot list files at all is `unavailable` (with the
+ * reason, from the same per-command gate the worktree list uses) and lists
+ * nothing; a listing that was tried and failed is `failed`, with a retry.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+
+import {
+  useWorkspaceCommandGate,
+  type WorkspaceCommandGate,
+} from "@/hooks/workspace/use-workspace-command-gate"
 
 import {
   EMPTY_CONSENT,
@@ -49,6 +63,10 @@ export interface ProvisioningOfferState {
   pnpm: PnpmVirtualStore
   /** True while there is no probe result for the current root. */
   loading: boolean
+  /** Why this runtime cannot list the root, or null when it can. Nothing is probed while set. */
+  unavailable: string | null
+  /** The listing was tried and failed, so the empty offer says nothing about the repository. */
+  failed: boolean
   decide: (ids: readonly string[], accept: boolean) => void
   refresh: () => void
 }
@@ -57,6 +75,8 @@ export interface UseProvisioningOfferDeps {
   listRoot: (root: string, includeIgnored: boolean) => Promise<ProbeEntry[]>
   probePnpm: (root: string) => Promise<PnpmVirtualStore>
   applyToWorkspace: (projectId: string, patch: Partial<Project>) => void
+  /** Whether this runtime can list the root. Production asks the command gate. */
+  readGate?: WorkspaceCommandGate
 }
 
 const DEFAULT_DEPS: UseProvisioningOfferDeps = {
@@ -74,6 +94,7 @@ interface Probed {
   key: string
   candidates: ProvisioningCandidate[]
   pnpm: PnpmVirtualStore
+  failed: boolean
 }
 
 export function useProvisioningOffer(
@@ -92,22 +113,28 @@ export function useProvisioningOffer(
   const root = executionRoot?.trim() ?? ""
   const requestKey = `${root}|${nonce}`
   const [settled, setSettled] = useState<Probed | null>(null)
+  const gate = useWorkspaceCommandGate()
+  const readGate = deps?.readGate ?? gate("fs_list_workspace_dir")
+  const unavailable = readGate.available ? null : readGate.reason
 
   useEffect(() => {
-    // No root means nothing to probe. Returning without a setState keeps the
-    // effect out of the cascading-render path the lint rule guards; `loading`
-    // below reads the same "no root" condition directly.
-    if (!root) return
+    // No root, or no way to list it, means nothing to probe. Returning without
+    // a setState keeps the effect out of the cascading-render path the lint
+    // rule guards; `loading` below reads the same conditions directly.
+    if (!root || unavailable !== null) return
     let cancelled = false
     const resolved: UseProvisioningOfferDeps = { ...DEFAULT_DEPS, ...deps }
     void (async () => {
       // A failed listing means "we know nothing", not "there is nothing to
       // provision" — but there is no honest proposal to make from it either,
       // so the card falls back to the empty state rather than guessing.
-      const [all, visible] = await Promise.all([
-        resolved.listRoot(root, true).catch(() => [] as ProbeEntry[]),
-        resolved.listRoot(root, false).catch(() => [] as ProbeEntry[]),
-      ])
+      let failed = false
+      const listed = (includeIgnored: boolean) =>
+        resolved.listRoot(root, includeIgnored).catch(() => {
+          failed = true
+          return [] as ProbeEntry[]
+        })
+      const [all, visible] = await Promise.all([listed(true), listed(false)])
       const visibleNames = new Set(visible.map((entry) => entry.name))
       const ignored = all
         .filter((entry) => !visibleNames.has(entry.name))
@@ -116,8 +143,9 @@ export function useProvisioningOffer(
       if (cancelled) return
       setSettled({
         key: requestKey,
-        candidates: inferProvisioning({ entries: all, ignored, pnpm }),
+        candidates: failed ? [] : inferProvisioning({ entries: all, ignored, pnpm }),
         pnpm,
+        failed,
       })
     })()
     return () => {
@@ -126,7 +154,7 @@ export function useProvisioningOffer(
     // `deps` is a test seam and stable in production; an inline object would
     // re-probe on every render. `requestKey` covers what actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey, root])
+  }, [requestKey, root, unavailable])
 
   const settledForKey = settled?.key === requestKey ? settled : null
   const candidates = settledForKey?.candidates ?? []
@@ -150,7 +178,9 @@ export function useProvisioningOffer(
     pending: pendingCandidates(candidates, consent),
     consent,
     pnpm,
-    loading: Boolean(root) && !settledForKey,
+    loading: Boolean(root) && unavailable === null && !settledForKey,
+    unavailable,
+    failed: settledForKey?.failed ?? false,
     decide,
     refresh,
   }

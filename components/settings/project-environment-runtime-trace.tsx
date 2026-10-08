@@ -13,7 +13,6 @@
  * shown on the run itself (`SandboxPlacementBadge`), and the card says so.
  */
 
-import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
 import { BanIcon, BoxIcon, CircleSlashIcon, TriangleAlertIcon } from "lucide-react"
 
@@ -62,7 +61,7 @@ function Step({ step }: { step: EnvironmentResolutionStep }) {
   return (
     <li
       className={cn(
-        "text-[10px]",
+        "text-[11px]",
         step.outcome === "skipped" ? "text-muted-foreground line-through" : "text-foreground"
       )}
       data-outcome={step.outcome}
@@ -81,12 +80,14 @@ export function ProjectEnvironmentRuntimeTrace({ preview, catalog }: Props) {
   const notices = preview.kind === "off" ? [] : preview.notices
 
   return (
-    <Surface
-      className="space-y-2 rounded-md border bg-background/40 p-3"
+    // A sub-block of the runtime section, under a rule: it is that section's
+    // answer to "what would a run get", not a card of its own.
+    <div
+      className="space-y-2 border-t pt-3"
       data-testid="project-environment-runtime-trace"
       data-outcome={preview.kind}
     >
-      <p className="text-xs font-medium">{t("preview.title")}</p>
+      <h4 className="text-xs font-medium">{t("preview.title")}</h4>
 
       {preview.kind === "off" ? (
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -117,13 +118,13 @@ export function ProjectEnvironmentRuntimeTrace({ preview, catalog }: Props) {
       {notices.length > 0 ? (
         <ul className="space-y-0.5" data-testid="runtime-trace-notices">
           {notices.map((notice) => (
-            <li key={notice.code} className="text-[10px] text-amber-600 dark:text-amber-500">
+            <li key={notice.code} className="text-[11px] text-amber-600 dark:text-amber-500">
               {tOutcome(NOTICE_KEYS[notice.code], outcomeMessageValues(notice.detail))}
             </li>
           ))}
         </ul>
       ) : null}
-    </Surface>
+    </div>
   )
 }
 
@@ -153,23 +154,23 @@ function PlacedSummary({
         <BoxIcon className="mt-px size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
         <span className="min-w-0 break-all">{t("preview.placed", { image })}</span>
       </p>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[11px] text-muted-foreground">
         {t("preview.requestedTier", { tier: t(`tier.${spec.isolation.minimum}`) })}
       </p>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[11px] text-muted-foreground">
         {t("preview.size", { size: size?.label ?? spec.sizeClassId })}
       </p>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[11px] text-muted-foreground">
         {declared && declaredName
           ? declared.from === "image"
             ? t("preview.imageUser", { user: declaredName })
             : t("preview.declaredUser", { user: declaredName })
           : t("preview.tierDefaultUser")}
       </p>
-      <p className="text-[10px] text-muted-foreground">{t("preview.actualNote")}</p>
+      <p className="text-[11px] text-muted-foreground">{t("preview.actualNote")}</p>
       {steps.length > 0 ? (
         <div>
-          <p className="text-[10px] font-medium text-muted-foreground">{t("trace.title")}</p>
+          <p className="text-[11px] font-medium text-muted-foreground">{t("trace.title")}</p>
           <ol
             className="mt-0.5 list-inside list-decimal space-y-0.5"
             data-testid="runtime-trace-steps"

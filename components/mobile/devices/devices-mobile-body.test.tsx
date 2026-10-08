@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { DeviceRow } from "@/lib/devices/types"
@@ -47,6 +47,16 @@ jest.mock("@/components/devices/add-host-sheet", () => ({
 jest.mock("@/components/devices/execution-host-switcher", () => ({
   ExecutionHostChip: () => <div data-testid="mobile-execution-host" />,
 }))
+let syncIncoming: unknown[] = []
+jest.mock("@/stores/account-sync/account-sync-store", () => ({
+  useAccountSyncStore: (selector: (state: { incoming: unknown[] }) => unknown) =>
+    selector({ incoming: syncIncoming }),
+}))
+let syncEnabled = false
+jest.mock("@/lib/account-sync/feature-flag", () => ({ accountSyncEnabled: () => syncEnabled }))
+jest.mock("@/components/account/sync/sync-approval-fleet-notice", () => ({
+  SyncApprovalFleetNotice: () => <div data-testid="sync-approval-fleet-notice" />,
+}))
 
 import { DevicesMobileBody } from "./devices-mobile-body"
 
@@ -81,6 +91,8 @@ beforeEach(() => {
   searchParams = new URLSearchParams()
   needsAttention = 0
   hostUnreachable = false
+  syncIncoming = []
+  syncEnabled = false
   push.mockClear()
   replace.mockClear()
 })
@@ -100,17 +112,47 @@ it("gives the screen a way back to the hub that opened it", () => {
   expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
 })
 
-it("opens the detail drawer on tap and shows the tapped device", async () => {
+/**
+ * A full-screen page pushed over the list, not a 72vh drawer: the record gets
+ * the whole screen, and the list underneath is kept but taken out of reach.
+ */
+it("pushes the tapped device's page over the list", async () => {
   render(<DevicesMobileBody />)
   await userEvent.click(screen.getByTestId("device-row-device:a"))
   expect(await screen.findByTestId("mobile-detail")).toHaveTextContent("device:a")
+  expect(screen.getByTestId("mobile-device-detail-page")).toBeInTheDocument()
+  expect(screen.queryByTestId("responsive-detail-drawer")).toBeNull()
+  // Still mounted (scroll, search and filters survive), but inert while covered.
+  expect(screen.getByTestId("mobile-devices-list-screen")).toHaveAttribute("inert")
+})
+
+it("returns to the list from the page's back button", async () => {
+  render(<DevicesMobileBody />)
+  await userEvent.click(screen.getByTestId("device-row-device:a"))
+  await userEvent.click(await screen.findByTestId("mobile-device-detail-back"))
+  expect(screen.queryByTestId("mobile-device-detail-page")).toBeNull()
+  expect(screen.getByTestId("mobile-devices-list-screen")).not.toHaveAttribute("inert")
+})
+
+/**
+ * The page owns a history entry, so the system back (Android's button, the
+ * browser's) pops the page instead of leaving `/devices`.
+ */
+it("closes the page on a history pop, as the system back does", async () => {
+  render(<DevicesMobileBody />)
+  await userEvent.click(screen.getByTestId("device-row-device:a"))
+  expect(await screen.findByTestId("mobile-device-detail-page")).toBeInTheDocument()
+  act(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  })
+  expect(screen.queryByTestId("mobile-device-detail-page")).toBeNull()
 })
 
 /**
  * Selection is persisted (it is what the desktop reopens on), so deriving the
- * drawer's open state from it would pop a sheet every time the user returns.
+ * page's open state from it would push it every time the user returns.
  */
-it("does not reopen the drawer from a persisted selection", () => {
+it("does not reopen the page from a persisted selection", () => {
   useDeviceConsoleStore.setState({ ...initial, selectedRef: "device:a" }, true)
   render(<DevicesMobileBody />)
   expect(screen.queryByTestId("mobile-detail")).toBeNull()
@@ -144,8 +186,17 @@ it("keeps pairing reachable however large the fleet is", async () => {
   expect(push).toHaveBeenCalledWith("/pair")
 })
 
+/** The desktop offers SSH hosts from its header; the phone's grow menu does too. */
+it("offers adding an SSH host from the grow menu", async () => {
+  const user = userEvent.setup()
+  render(<DevicesMobileBody />)
+  await user.click(screen.getByTestId("mobile-devices-add"))
+  await user.click(screen.getByTestId("mobile-devices-add-ssh-host"))
+  expect(push).toHaveBeenCalledWith(expect.stringContaining("/settings"))
+})
+
 /** ⌘K and Settings hand a device over as a link; it used to open a list. */
-it("opens the linked device's drawer from a ?device= link", async () => {
+it("opens the linked device's page from a ?device= link", async () => {
   searchParams = new URLSearchParams("device=device:a")
   render(<DevicesMobileBody />)
   expect(await screen.findByTestId("mobile-detail")).toHaveTextContent("device:a")
@@ -161,6 +212,20 @@ it("states the fleet notices the desktop states", () => {
   hostUnreachable = true
   render(<DevicesMobileBody />)
   expect(screen.getByTestId("device-host-unreachable")).toBeInTheDocument()
+})
+
+it("states a waiting sync approval, as the desktop rail does", () => {
+  syncIncoming = [{ id: "incoming-1" }]
+  syncEnabled = true
+  render(<DevicesMobileBody />)
+  expect(screen.getByTestId("sync-approval-fleet-notice")).toBeInTheDocument()
+})
+
+it("says nothing about sync approvals in a build without account sync", () => {
+  syncIncoming = [{ id: "incoming-1" }]
+  syncEnabled = false
+  render(<DevicesMobileBody />)
+  expect(screen.queryByTestId("sync-approval-fleet-notice")).toBeNull()
 })
 
 it("turns the attention count into the filter for what it counted", async () => {

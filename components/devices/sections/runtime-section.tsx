@@ -22,18 +22,19 @@
  * The sandbox registry itself is the existing settings surface, embedded
  * rather than reimplemented, so the two cannot drift.
  *
- * Four cards rather than one: tiers are a short list, the registry is a table,
- * and routing is a pair of controls. Carding them separately is what lets the
+ * Four sections rather than one: tiers are a short list, the registry is a
+ * table, and routing is a pair of controls. Separate sections are what let the
  * short ones sit beside each other instead of stacking a screen apart, and
  * each is exported on its own so `lib/devices/section-plan.ts` can place it
- * per kind. A surface this kind cannot host has no card here at all: the plan
- * states its reason once, in the not-applicable record, rather than as a card
- * frame around one sentence.
+ * per kind. A surface this kind cannot host has no section here at all: the
+ * plan states its reason once, in the not-applicable record, rather than as a
+ * heading over one sentence.
  */
 
 import { useCallback, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ContainerIcon,
   FolderTreeIcon,
   GavelIcon,
   LayersIcon,
@@ -282,12 +283,9 @@ function HostProbeResult({ probe }: { probe: ReturnType<typeof useHostProbe>["st
       {probe.environments.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("runtime.probeEmpty")}</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="divide-y border-y">
           {probe.environments.map((env) => (
-            <li
-              key={env.environmentId}
-              className="flex items-baseline gap-2 rounded-md border px-2 py-1.5 text-xs"
-            >
+            <li key={env.environmentId} className="flex items-baseline gap-2 py-1.5 text-xs">
               <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{env.path}</span>
               {env.branch ? (
                 <span className="shrink-0 text-muted-foreground">{env.branch}</span>
@@ -424,12 +422,13 @@ function MachineSummary({
 /**
  * The machine registry, with the fleet-level count above it.
  *
- * The registry is already a titled Card of its own, so it *is* the section
- * here rather than sitting inside a second one: nesting them would give the
- * reader two headers and two borders for one thing. The wrapper carries the
- * `device-section-sandbox` anchor every other card gets from `DeviceSection`,
- * so the jump navigation can land on it. Nothing renders for a kind that
- * hosts no sandboxes; the plan says why in the not-applicable record.
+ * One chapter like every other: the section heading names it, and the
+ * registry is embedded bare (`framed={false}`). It used to be the settings
+ * Card dropped into the dashboard as-is, so it was the one section with a
+ * second title and a frame of its own, a card inside the grid of cards. The
+ * `device-section-sandbox` anchor comes from `DeviceSection` like every other
+ * section's, so the jump navigation lands on it. Nothing renders for a kind
+ * that hosts no sandboxes; the plan says why in the not-applicable record.
  */
 export function SandboxSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
@@ -465,17 +464,15 @@ export function SandboxSection({ row }: { row: DeviceRow }) {
   if (row.runtime.sandbox.support !== "supported") return null
 
   return (
-    <div
-      id="device-section-sandbox"
-      className="min-w-0 scroll-mt-3 space-y-2 @3xl/device-pane:col-span-2"
-      data-testid="device-sandbox"
-    >
-      <MachineSummary
-        connections={row.runtime.sandbox.connections}
-        onOpenShell={onOpenShell}
-        shellAvailable={shellAvailable}
-      />
-      <SandboxConnectionsTab />
-    </div>
+    <DeviceSection id="sandbox" title={t("runtime.sandbox")} icon={ContainerIcon} wide>
+      <div className="space-y-4" data-testid="device-sandbox">
+        <MachineSummary
+          connections={row.runtime.sandbox.connections}
+          onOpenShell={onOpenShell}
+          shellAvailable={shellAvailable}
+        />
+        <SandboxConnectionsTab framed={false} />
+      </div>
+    </DeviceSection>
   )
 }

@@ -87,6 +87,12 @@ export type WorkspaceConfigVerdict =
       digest: string
       approvedDigest?: string
       config: WorkspaceRepositoryConfigV1
+      /**
+       * The configuration behind `approvedDigest`, when the approval recorded
+       * it. Lets the panel show what changed instead of the whole file again.
+       * Absent on first sight, and for approvals made before content was kept.
+       */
+      approvedConfig?: WorkspaceRepositoryConfigV1
     }
   /** Present, valid, and approved at this exact content. */
   | { kind: "approved"; digest: string; config: WorkspaceRepositoryConfigV1 }
@@ -154,6 +160,8 @@ export interface EvaluateWorkspaceConfigDeps {
     opts: { enabled: boolean; onWeb: boolean }
   ) => Promise<boolean>
   approvedDigestFor: (path: string) => Promise<string | undefined>
+  /** The configuration recorded with that approval, if it was. */
+  approvedConfigFor: (path: string) => Promise<WorkspaceRepositoryConfigV1 | undefined>
 }
 
 /**
@@ -172,6 +180,10 @@ const DEFAULT_DEPS: EvaluateWorkspaceConfigDeps = {
   approvedDigestFor: async (path) => {
     const { getTrustedWorkspace } = await import("@/lib/db/trusted-workspaces")
     return (await getTrustedWorkspace(path))?.approvedConfigDigest
+  },
+  approvedConfigFor: async (path) => {
+    const { getApprovedWorkspaceConfig } = await import("@/lib/db/trusted-workspaces")
+    return getApprovedWorkspaceConfig(path)
   },
 }
 
@@ -235,11 +247,16 @@ export async function evaluateWorkspaceConfig(
     ? await resolved.approvedDigestFor(key).catch(() => undefined)
     : undefined
   if (approvedDigest && approvedDigest === digest) return { kind: "approved", digest, config }
+  // Only a change has a previous version worth reading, and only when the
+  // approval kept it (see `TrustedWorkspace.approvedConfig`).
+  const approvedConfig =
+    approvedDigest && key ? await resolved.approvedConfigFor(key).catch(() => undefined) : undefined
   return {
     kind: "unapproved",
     digest,
     config,
     ...(approvedDigest ? { approvedDigest } : {}),
+    ...(approvedConfig ? { approvedConfig } : {}),
   }
 }
 

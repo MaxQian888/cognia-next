@@ -13,7 +13,6 @@
  * after approval reads as "changed", and needs approving again.
  */
 
-import { Surface } from "@/components/surface/surface"
 import { useMemo } from "react"
 import { builtEnvironmentDeclaration } from "@/lib/project-environment/devcontainer"
 import { useTranslations } from "next-intl"
@@ -89,13 +88,14 @@ export function ProjectEnvironmentRuntimeDeclaration({
       : undefined
 
   return (
-    <Surface
-      className="space-y-2 rounded-md border bg-background/40 p-3"
+    // A sub-block of the runtime section, under a rule, like the preview above it.
+    <div
+      className="space-y-2 border-t pt-3"
       data-testid="project-environment-runtime-declaration"
       data-state={current ? "approved" : stale ? "changed" : declaration.kind}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-xs font-medium">
+        <h4 className="flex items-center gap-1.5 text-xs font-medium">
           {declaration.kind === "restricted" ? (
             <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
           ) : current ? (
@@ -104,13 +104,13 @@ export function ProjectEnvironmentRuntimeDeclaration({
             <FileWarningIcon className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
           )}
           {t("title")}
-        </p>
+        </h4>
         {current ? (
-          <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+          <Badge variant="outline" className="shrink-0 text-[11px] font-normal">
             {t("approved")}
           </Badge>
         ) : declaration.kind === "declared" ? (
-          <Badge variant="secondary" className="shrink-0 text-[10px] font-normal">
+          <Badge variant="secondary" className="shrink-0 text-[11px] font-normal">
             {t("pending")}
           </Badge>
         ) : null}
@@ -120,7 +120,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
         <>
           <p className="text-[11px] text-muted-foreground">{t("none")}</p>
           {files && files.searched.length > 0 ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {t("searched", { paths: files.searched.join(", ") })}
             </p>
           ) : null}
@@ -141,7 +141,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
             // devcontainer spec's and the code names exactly what was refused.
             <li
               key={`${problem.field}-${index}`}
-              className="font-mono text-[10px] text-muted-foreground"
+              className="font-mono text-[11px] text-muted-foreground"
             >
               {problem.field}: {problem.code}
             </li>
@@ -161,7 +161,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
                   : "",
             })}
           </p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             {t("details", {
               env: Object.keys(displayed?.containerEnv ?? {}).length,
               ports: displayed?.forwardPorts.length ?? 0,
@@ -169,13 +169,13 @@ export function ProjectEnvironmentRuntimeDeclaration({
             })}
           </p>
           {displayed?.user?.name ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {t("user", { user: displayed.user.name })}
             </p>
           ) : null}
           {declaration.declaration.build ? (
             <div className="space-y-1.5">
-              <p className="text-[10px] text-muted-foreground">{t("buildHint")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("buildHint")}</p>
               {build ? (
                 <p role="status" className="text-[11px]">
                   {t(`buildStatus.${build.status}`)}
@@ -187,7 +187,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
                 </p>
               ) : null}
               {build?.record ? (
-                <p className="break-all font-mono text-[10px]">{build.record.imageId}</p>
+                <p className="break-all font-mono text-[11px]">{build.record.imageId}</p>
               ) : null}
               {effective && !effective.ok ? (
                 <ul role="alert" className="text-[11px] text-destructive">
@@ -236,7 +236,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
             </div>
           ) : null}
           {declaration.notices.length || effective?.notices.length ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {t("ignoredFields", {
                 fields: [
                   ...new Set(
@@ -252,18 +252,17 @@ export function ProjectEnvironmentRuntimeDeclaration({
             <p className="text-[11px] text-amber-600 dark:text-amber-500">{t("changed")}</p>
           ) : null}
           {current ? (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {t("approvedBy", { who: current.approverUserId })}
             </p>
           ) : canApprove ? (
             <>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground">
                 {t(declaration.declaration.build ? "approveBuildHint" : "approveHint")}
               </p>
               <Button
                 size="sm"
                 variant="outline"
-                className="w-full"
                 disabled={
                   busy ||
                   (Boolean(declaration.declaration.build) &&
@@ -285,7 +284,7 @@ export function ProjectEnvironmentRuntimeDeclaration({
         <ul className="space-y-1" data-testid="runtime-declaration-approvals">
           {active.map((record) => (
             <li key={record.id} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground">
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
                 {record.path} · {record.declarationDigest.slice(0, 12)}
               </span>
               <Button
@@ -301,6 +300,6 @@ export function ProjectEnvironmentRuntimeDeclaration({
           ))}
         </ul>
       ) : null}
-    </Surface>
+    </div>
   )
 }

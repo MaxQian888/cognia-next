@@ -1,7 +1,13 @@
 "use client"
 
 /**
- * One card in the device dashboard.
+ * One chapter of the device dashboard.
+ *
+ * Chapters, not cards: every section here describes the same machine, and a
+ * grid of eleven framed panels read as eleven objects, with more border and
+ * fill on screen than data. They are now the frameless `sheet` variant (a
+ * heading over a hairline rule), so the masthead is the only frame and the
+ * sections read as one record under it.
  *
  * The frame itself now lives in `components/surface/console-section.tsx`:
  * nothing about it was device-specific, and `/workspace` was building the same
@@ -33,5 +39,5 @@ export interface DeviceSectionProps {
 }
 
 export function DeviceSection(props: DeviceSectionProps) {
-  return <ConsoleSection {...props} pane="device-pane" idPrefix="device-section" />
+  return <ConsoleSection {...props} pane="device-pane" idPrefix="device-section" variant="sheet" />
 }

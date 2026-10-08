@@ -172,3 +172,27 @@ test("renders imported cloud and Lume config without exposing unsupported action
     expect(button).toBeDisabled()
   }
 })
+
+test("draws its own Card title in Settings", () => {
+  renderTab()
+  expect(screen.getByText(en.automation.sandboxConnections.title)).toBeInTheDocument()
+})
+
+/**
+ * The device console titles the registry with its own section heading, so the
+ * embedded copy draws no second title and no Card around itself — while rows,
+ * the add flow and Manage behave exactly as they do in Settings.
+ */
+test("renders bare inside a host that already titles it", () => {
+  connections = [dockerRow()]
+  render(
+    <NextIntlClientProvider locale="en" messages={en as Record<string, unknown>}>
+      <SandboxConnectionsTab framed={false} />
+    </NextIntlClientProvider>
+  )
+  expect(screen.queryByText(en.automation.sandboxConnections.title)).not.toBeInTheDocument()
+  expect(screen.getByText(en.automation.sandboxConnections.description)).toBeInTheDocument()
+  expect(screen.queryByText("home")).toBeInTheDocument()
+  expect(document.querySelector('[data-slot="card"]')).toBeNull()
+  expect(screen.getByTestId("sandbox-manage-c1")).toBeInTheDocument()
+})

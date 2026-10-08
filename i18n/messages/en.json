@@ -4278,7 +4278,8 @@
     "beforeEdit": "Before edit",
     "cancel": "Cancel",
     "code": "Code",
-    "compareWithCurrent": "Compare with current version",
+    "compareAgainst": "Compare with",
+    "compareVersion": "Compare this version",
     "createArtifact": "Create Artifact",
     "currentVersion": "Current version",
     "defaultTitles": {
@@ -4390,6 +4391,7 @@
       "reject": "Reject",
       "rejectAll": "Reject all",
       "removeSelectionAria": "Remove selection {title}",
+      "revealInDiff": "Show lines {range} in the diff",
       "selectionChipCommentLabel": "{title} · comment",
       "selectionChipEntityLabel": "{kind}: {title}",
       "selectionChipExcerptAcrossLabel": "{derivation, select, summary {Summary} explanation {Explanation} translation {Translation} other {Quote}}: {title} · {count} messages",
@@ -4488,9 +4490,25 @@
       },
       "mobileTitle": "Workspace",
       "review": "Review",
+      "reviewBack": "Back to changed files",
       "reviewChanges": "Changes",
-      "reviewDiff": "Diff",
       "reviewEmpty": "Select a changed file to review its diff",
+      "reviewFileNav": "Changed file navigation",
+      "reviewFilePosition": "{index}/{total}",
+      "reviewFilePositionLabel": "File {index} of {total}",
+      "reviewNextFile": "Next file (Alt+↓)",
+      "reviewPrevFile": "Previous file (Alt+↑)",
+      "reviewScope": {
+        "all": "All",
+        "allLabel": "All changes in the working tree ({count})",
+        "baseline": "Files this conversation edited. Diffs still compare with the last commit, so they include any other edits to the same files.",
+        "commitIncludesHidden": "{count, plural, one {Commit also includes # staged file not listed here.} other {Commit also includes # staged files not listed here.}}",
+        "conversation": "This chat",
+        "conversationLabel": "Files this conversation changed ({count})",
+        "empty": "This conversation hasn't changed any files in this repository yet.",
+        "label": "Which changes to list",
+        "loading": "Looking up what this conversation changed…"
+      },
       "reviewWithCount": "Review, {count, plural, one {# changed file} other {# changed files}}",
       "scopeLabel": "Workspace scope",
       "surfaceLabel": "Workspace view",
@@ -8556,6 +8574,16 @@
       ]
     },
     "mcp": {
+      "applyPatch": {
+        "binary": "Binary file — no text diff",
+        "change": {
+          "added": "New",
+          "deleted": "Deleted",
+          "modified": "Modified",
+          "renamed": "Renamed"
+        },
+        "noTextChanges": "No text changes (rename or mode only)"
+      },
       "computerUse": {
         "actionFallback": "action",
         "frameAlt": "{tool} frame",
@@ -9008,8 +9036,11 @@
         "defaultSummary": "Details"
       },
       "diff": {
+        "binary": "Binary file — no text diff",
         "copy": "Copy",
         "defaultName": "diff",
+        "fileCount": "{count, plural, one {# file} other {# files}}",
+        "noTextChanges": "No text changes (rename or mode only)",
         "splitView": "Split view",
         "unifiedView": "Unified view"
       },
@@ -9597,6 +9628,7 @@
         "grep": "Grep",
         "ls": "LS",
         "notebook": "NotebookEdit",
+        "patch": "Patch",
         "plan": "Plan",
         "query": "Query",
         "read": "Read",
@@ -13624,6 +13656,7 @@
     },
     "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
     "detail": {
+      "backToList": "Back to all devices",
       "drawerTitle": "Device details",
       "noSelectionBody": "Pick a device from the list to see what it can do.",
       "noSelectionTitle": "No device selected",
@@ -13733,6 +13766,7 @@
       "filterAria": "Filter by device kind",
       "filterAttention": "Needs attention",
       "label": "Device list",
+      "loading": "Loading devices…",
       "searchAria": "Search devices by name, address or platform",
       "searchPlaceholder": "Search devices"
     },
@@ -14484,6 +14518,24 @@
         "title": "Running on default settings"
       }
     }
+  },
+  "diffView": {
+    "added": "Added",
+    "clipped": "{count, plural, one {… # more character} other {… # more characters}}",
+    "find": {
+      "close": "Close find (Esc)",
+      "count": "{current}/{total}",
+      "label": "Find in diff",
+      "next": "Next match (Enter)",
+      "none": "No results",
+      "open": "Find in diff",
+      "placeholder": "Find",
+      "prev": "Previous match (Shift+Enter)"
+    },
+    "label": "Line diff",
+    "openAtLine": "Open file at line {line}",
+    "removed": "Removed",
+    "showUnchanged": "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
   },
   "discover": {
     "activeFilters": {
@@ -20095,7 +20147,10 @@
       },
       "agentsWorkingShow": "Show which agents are working",
       "environments": "Environments",
+      "environmentsAddFolder": "Add a folder",
       "environmentsAttention": "The repository's workspace config needs your decision",
+      "environmentsNoFolderBody": "Worktrees, agent branches and environment setup all start from a folder. Add one to set them up here.",
+      "environmentsNoFolderTitle": "This workspace has no folder yet",
       "environmentsOpen": "Open the Environments tab",
       "issueSummary": "Issues",
       "manage": "Manage workspace",
@@ -32070,6 +32125,10 @@
       "description": "Run the setup script first, then let a small standalone Agent repair failures. The full Agent starts only after every readiness check passes.",
       "enabled": "Use a bootstrap Agent for initialization",
       "endpointPath": "Chat completion path",
+      "groupConnection": "Model connection",
+      "groupGeneration": "Generation",
+      "groupLimits": "Limits",
+      "groupTask": "Task",
       "maxContextBytes": "Context message limit (bytes)",
       "maxOutputBytes": "Tool output limit (bytes)",
       "maxResponseBytes": "Model response limit (bytes)",
@@ -32169,6 +32228,7 @@
       "systemPrompt": "Custom system prompt (optional)",
       "task": "Initialization task",
       "temperature": "Temperature",
+      "title": "Bootstrap Agent",
       "toolEditor": "Enable editor tool",
       "toolShell": "Enable shell tool",
       "topP": "Top P",
@@ -32194,16 +32254,50 @@
     "bypass": "Bypass once",
     "create": "New environment",
     "default": "Use as project default",
+    "defaultBadge": "Default",
+    "defaultHint": "Sessions in this workspace use it unless they pick another.",
     "delete": "Delete environment",
+    "deleteBody": "Its setup script, actions, variables and keyring references are removed from this device. The keyring entries themselves are not touched. This cannot be undone.",
+    "deleteCancel": "Cancel",
+    "deleteFailed": "Could not delete the environment: {message}",
+    "deleteTitle": "Delete “{name}”?",
     "deleted": "Environment deleted.",
     "description": "Run repeatable local setup in this project root or its managed Worktree.",
+    "disabledBadge": "Disabled",
+    "discard": "Discard changes",
+    "discardBody": "Your edits to “{name}” have not been saved and will be lost.",
+    "discardConfirm": "Discard",
+    "discardTitle": "Discard unsaved changes?",
+    "editorEmptyBody": "Pick an environment from the list, or create one.",
     "enabled": "Enabled",
+    "enabledHint": "When off, setup and actions are skipped and report success.",
     "failure": "Environment command failed: {message}",
+    "initStatus": {
+      "bypassed": "bypassed",
+      "cancelled": "cancelled",
+      "failed": "failed",
+      "never": "never run",
+      "running": "running",
+      "succeeded": "succeeded"
+    },
+    "keepEditing": "Keep editing",
+    "lastRun": "Last setup: {status} · {time}",
+    "lastRunNever": "Setup has not run in this workspace yet.",
     "linux": "Linux script",
+    "listEmptyBody": "Create one to run setup before agents start working here.",
+    "listEmptyTitle": "No environments yet",
+    "listLabel": "Environments in this workspace",
+    "listTitle": "Environments",
+    "loadFailed": "Could not load environments: {message}",
+    "loadingList": "Loading environments…",
     "macos": "macOS script",
     "name": "Environment name",
+    "nameRequired": "Give the environment a name to save it.",
+    "newUnsaved": "New environment — not saved yet",
     "none": "No environment",
     "osOverrides": "OS-specific overrides",
+    "osOverridesCount": "{count, plural, =0 {none set} one {# set} other {# set}}",
+    "osOverridesHint": "On that operating system, a script here runs instead of the one above.",
     "outcome": {
       "fallback": {
         "bundleUnavailable": "No agent bundle is available, so this run is using the standard execution path.",
@@ -32263,6 +32357,7 @@
       "description": "A worktree starts with only the files Git tracks. These are the things this repository looks like it also needs.",
       "empty": "Nothing to suggest for this repository.",
       "evidence": "Found: {names}",
+      "failed": "Couldn't look inside this folder, so nothing is suggested yet.",
       "pendingTitle": "Suggested",
       "pnpm": {
         "available": "pnpm here can give every worktree its own node_modules linked from one store on disk — faster than sharing, and nothing writes into your checkout. Run this once, then reopen this card:",
@@ -32270,12 +32365,14 @@
         "enabled": "pnpm's global virtual store is on, so worktrees install fast without sharing your node_modules."
       },
       "remove": "Stop using",
+      "retry": "Try again",
       "risk": {
         "copiedSecret": "{path} holds credentials. Each worktree gets its own copy on disk.",
         "sharedBuildDir": "Worktrees share this build directory with your checkout, so branches with different features rebuild over each other.",
         "sharedInstall": "Worktrees share this directory with your checkout. A task that installs different dependencies changes what you are working in."
       },
-      "title": "Worktree provisioning"
+      "title": "Worktree provisioning",
+      "unavailable": "No suggestions here: this device cannot look inside the folder."
     },
     "remove": "Remove",
     "repoConfig": {
@@ -32288,6 +32385,39 @@
       "declaredSetup": "Setup",
       "declaredVariables": "Variables ({count})",
       "description": "Setup steps, actions and variables a repository can ship in .cognia/workspace.json, shared with everyone who opens it.",
+      "diff": {
+        "currentFull": "Everything it asks for now",
+        "empty": "Nothing it asks for is different; only the file's layout changed.",
+        "field": {
+          "action": "Action “{subject}”",
+          "base": "Worktree base",
+          "cacheLink": "Cache link",
+          "capability": "Suggested capability {subject}",
+          "environment": "Runtime environment block",
+          "execution": "Runs in",
+          "include": "Copied into each worktree",
+          "requiredSecret": "Required secret",
+          "root": "Extra root",
+          "setup": "Setup script",
+          "setupOs": "Setup script on {os}",
+          "sparsePath": "Sparse checkout path",
+          "variable": "Variable {subject}"
+        },
+        "kind": {
+          "added": "Added",
+          "changed": "Changed",
+          "removed": "Removed"
+        },
+        "noPrevious": "This approval was recorded before Cognia kept a copy of what was approved, so there is no earlier version to compare against. Everything it asks for now is listed below.",
+        "off": "off",
+        "on": "on",
+        "os": {
+          "linux": "Linux",
+          "macos": "macOS",
+          "windows": "Windows"
+        },
+        "title": "What changed since you approved it"
+      },
       "diffCurrent": "In the repository now",
       "diffPrevious": "Previously approved",
       "executionLocal": "the workspace folder",
@@ -32323,9 +32453,13 @@
         "unapproved": "Waiting for your review. Until then only this device's own setup runs."
       },
       "title": "From the repository",
+      "unavailable": "Not read on this device.",
       "untrustedHint": "Trust this workspace to let it ship setup."
     },
+    "repoReplacesActions": "The repository's approved .cognia/workspace.json supplies the actions, so these do not run while it is applied.",
+    "repoReplacesSetup": "The repository's approved .cognia/workspace.json supplies the setup script, so this one does not run while it is applied.",
     "retry": "Retry setup",
+    "retryLoad": "Try again",
     "runAction": "Run {name}",
     "runSetup": "Run setup",
     "runtime": {
@@ -32407,6 +32541,7 @@
       },
       "save": "Save runtime environment",
       "saved": "Runtime environment saved.",
+      "savedSeparately": "Saved separately",
       "sidecar": "Browser sidecar",
       "sidecarDormant": "Not started by this host yet; the setting is kept for when it is.",
       "size": "Size",
@@ -32469,6 +32604,9 @@
     "status": "Last initialization: {status}",
     "success": "Environment command completed.",
     "title": "Project environment",
+    "unnamed": "Untitled environment",
+    "unsaved": "Unsaved changes",
+    "unsavedBadge": "Unsaved",
     "variableName": "Variable name",
     "variableValue": "Plain value",
     "variables": "Non-sensitive variables",
@@ -48493,6 +48631,10 @@
           "label": "Branch order",
           "name": "Name (A–Z)"
         },
+        "collapseUnchanged": {
+          "description": "Fold the untouched stretches between changes in a diff. Each fold expands in place.",
+          "label": "Collapse unchanged regions"
+        },
         "confirmDiscard": {
           "description": "Ask before throwing away working-tree changes.",
           "label": "Confirm before discarding"
@@ -48506,6 +48648,10 @@
           "inline": "Inline",
           "label": "Diff view",
           "sideBySide": "Side by side"
+        },
+        "diffWordWrap": {
+          "description": "Soft-wrap long lines instead of scrolling sideways.",
+          "label": "Wrap long lines in diffs"
         },
         "fetchPrune": {
           "description": "Remove remote-tracking refs that no longer exist on the remote.",
@@ -51872,10 +52018,40 @@
     },
     "diff": {
       "binary": "Binary file — diff not shown",
+      "edit": {
+        "conflict": "The file changed on disk since you started editing. Overwrite it with your version?",
+        "discard": "Discard my edits",
+        "diskMoved": "The file changed on disk while you were editing. Saving will ask before overwriting it.",
+        "failed": "Couldn't save the file. Your edits are still here.",
+        "label": "Unsaved edits",
+        "overwrite": "Overwrite",
+        "revert": "Discard unsaved edits",
+        "save": "Save (Ctrl/⌘+S)",
+        "saveShort": "Save"
+      },
+      "find": "Find in diff (Ctrl/⌘+F)",
       "hunkCount": "{count, plural, one {# hunk} other {# hunks}}",
-      "jumpToHunk": "Jump to hunk at line {line}",
+      "large": {
+        "banner": "Large diff — shown in the lightweight view to keep the pane responsive.",
+        "loadFull": "Load full diff",
+        "loadOmitted": "Load whole file",
+        "loadOmittedFailed": "Couldn't load the whole file — it may have changed since the diff was read. Showing its changed hunks.",
+        "omitted": "This file is too large to send in full — showing its changed hunks."
+      },
       "loading": "Loading diff…",
-      "selectFile": "Select a file to view its changes"
+      "nav": {
+        "actionsLabel": "Actions for this change",
+        "label": "Change navigation",
+        "next": "Next change (Alt+F5)",
+        "position": "{current}/{total}",
+        "positionLabel": "Change {current} of {total}",
+        "prev": "Previous change (Shift+Alt+F5)"
+      },
+      "openAtChange": "Open the file at this change",
+      "selectFile": "Select a file to view its changes",
+      "view": {
+        "label": "Diff view options"
+      }
     },
     "discard": {
       "confirmAction": "Discard",
@@ -52015,7 +52191,7 @@
           "warning": "Warning"
         }
       },
-      "applyAccepted": "Apply {count} accepted",
+      "applyAccepted": "Stage {count} accepted",
       "collapse": "Collapse review",
       "comment": "Hunk comment",
       "commentPlaceholder": "Leave a note on this hunk…",
@@ -52023,8 +52199,8 @@
       "hunkLabel": "Hunk @ line {line}",
       "reject": "Reject hunk",
       "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
-      "title": "Review hunks",
-      "viewChanges": "View changes"
+      "showInDiff": "Show in diff",
+      "title": "Review hunks"
     },
     "roots": {
       "primary": "primary",
@@ -52177,11 +52353,13 @@
         "default": "Default",
         "name": "Name (A–Z)"
       },
+      "collapseUnchanged": "Collapse unchanged regions",
       "diffMode": {
         "inline": "Inline",
         "sideBySide": "Side by side"
       },
       "diffView": "Diff view",
+      "diffWordWrap": "Wrap long lines",
       "ignoreWhitespace": "Ignore whitespace",
       "label": "View settings",
       "reset": "Reset to defaults",

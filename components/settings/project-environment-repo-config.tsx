@@ -12,15 +12,29 @@
  * because "Approve" is meaningless next to a filename. The counts are the
  * shape; the setup script is the part that actually runs, so it is shown
  * verbatim rather than summarized.
+ *
+ * Two layers: `ProjectEnvironmentRepoConfigView` renders a verdict it is
+ * handed, and `ProjectEnvironmentRepoConfig` reads one itself. The environment
+ * manager uses the view, because it needs the same verdict to tell its editor
+ * what the repository replaces, and reading it twice would be two reads of one
+ * file that could disagree. Neither draws a frame: the host's section heading
+ * names it.
  */
 
 import { useTranslations } from "next-intl"
-import { CheckIcon, FileWarningIcon, ShieldAlertIcon } from "lucide-react"
+import { CheckIcon, CircleSlashIcon, FileWarningIcon, ShieldAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useRepoWorkspaceConfig } from "@/hooks/workspace/use-repo-workspace-config"
+import {
+  useRepoWorkspaceConfig,
+  type RepoWorkspaceConfigState,
+} from "@/hooks/workspace/use-repo-workspace-config"
 import type { WorkspaceRepositoryConfigV1 } from "@/lib/project-environment/workspace-config"
+import {
+  diffWorkspaceConfig,
+  type WorkspaceConfigChange,
+} from "@/lib/project-environment/workspace-config-diff"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -54,13 +68,13 @@ function Declared({ config }: { config: WorkspaceRepositoryConfigV1 }) {
     <div className="space-y-2" data-testid="repo-config-declared">
       {setup ? (
         <div>
-          <p className="text-[10px] font-medium text-muted-foreground">{t("declaredSetup")}</p>
-          <pre className="mt-1 max-h-32 overflow-auto rounded bg-background/70 p-2 font-mono text-[10px] leading-relaxed">
+          <p className="text-[11px] font-medium text-muted-foreground">{t("declaredSetup")}</p>
+          <pre className="mt-1 max-h-40 overflow-auto rounded-control bg-muted/60 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
             {setup}
           </pre>
         </div>
       ) : null}
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-[11px] text-muted-foreground">
         {t("declaredExecution")}:{" "}
         {config.defaults.execution === "worktree" ? t("executionWorktree") : t("executionLocal")}
       </p>
@@ -74,7 +88,7 @@ function Declared({ config }: { config: WorkspaceRepositoryConfigV1 }) {
         </div>
       ) : null}
       {config.requiredSecrets.length ? (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground">
           {t("requiredSecrets", { names: config.requiredSecrets.join(", ") })}
         </p>
       ) : null}
@@ -82,69 +96,227 @@ function Declared({ config }: { config: WorkspaceRepositoryConfigV1 }) {
   )
 }
 
-export function ProjectEnvironmentRepoConfig({ projectId, executionRoot, deps }: Props) {
-  const t = useTranslations("projectEnvironment.repoConfig")
-  const { verdict, loading, approving, approve } = useRepoWorkspaceConfig(
-    projectId,
-    executionRoot,
-    deps
+const KIND_TONE: Record<WorkspaceConfigChange["kind"], string> = {
+  added: "text-emerald-700 dark:text-emerald-400",
+  removed: "text-destructive",
+  changed: "text-amber-700 dark:text-amber-400",
+}
+
+/**
+ * One value of a change: the approved one or the current one, verbatim.
+ *
+ * Filled, not framed: a script needs a ground to be read on, and a border
+ * here would be a box inside a list inside a section.
+ */
+function ChangeValue({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+      </p>
+      <pre
+        className={cn(
+          "mt-0.5 max-h-40 overflow-auto rounded-control px-2 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all",
+          tone
+        )}
+      >
+        {value}
+      </pre>
+    </div>
   )
+}
+
+/**
+ * What changed since the approved version, one row per thing that can run or
+ * take effect, each with the approved and the current value side by side
+ * (stacked on a narrow pane). The review question is "what is different",
+ * and the whole current file answered it only for a reader with the old one
+ * memorised.
+ */
+function ConfigChanges({
+  previous,
+  current,
+}: {
+  previous: WorkspaceRepositoryConfigV1
+  current: WorkspaceRepositoryConfigV1
+}) {
+  const t = useTranslations("projectEnvironment.repoConfig")
+  const changes = diffWorkspaceConfig(previous, current)
+  const display = (change: WorkspaceConfigChange, value: string) =>
+    change.field === "execution"
+      ? value === "worktree"
+        ? t("executionWorktree")
+        : t("executionLocal")
+      : change.field === "capability"
+        ? t(value === "on" ? "diff.on" : "diff.off")
+        : value
+  const label = (change: WorkspaceConfigChange) =>
+    change.field === "setupOs"
+      ? t("diff.field.setupOs", {
+          os: t(`diff.os.${change.subject as "macos" | "windows" | "linux"}`),
+        })
+      : t(`diff.field.${change.field}`, { subject: change.subject ?? "" })
+
+  return (
+    <div className="@container/repo-diff space-y-2" data-testid="repo-config-changes">
+      <p className="text-xs font-medium">{t("diff.title")}</p>
+      {changes.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">{t("diff.empty")}</p>
+      ) : (
+        <ul className="divide-y border-y">
+          {changes.map((change) => (
+            <li
+              key={change.id}
+              className="space-y-1.5 py-2"
+              data-testid={`repo-config-change-${change.id}`}
+              data-kind={change.kind}
+            >
+              <p className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                <span className="min-w-0 break-words font-medium">{label(change)}</span>
+                <span className={cn("text-[11px]", KIND_TONE[change.kind])}>
+                  {t(`diff.kind.${change.kind}`)}
+                </span>
+              </p>
+              <div className="grid gap-2 @md/repo-diff:grid-cols-2">
+                {change.before !== undefined ? (
+                  <ChangeValue
+                    label={t("diffPrevious")}
+                    value={display(change, change.before)}
+                    tone={
+                      change.kind === "removed"
+                        ? "bg-destructive/10 text-destructive line-through decoration-destructive/40"
+                        : "bg-muted/60"
+                    }
+                  />
+                ) : null}
+                {change.after !== undefined ? (
+                  <ChangeValue
+                    label={t("diffCurrent")}
+                    value={display(change, change.after)}
+                    tone={change.kind === "added" ? "bg-emerald-500/10" : "bg-amber-500/10"}
+                  />
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+export function ProjectEnvironmentRepoConfig({ projectId, executionRoot, deps }: Props) {
+  const state = useRepoWorkspaceConfig(projectId, executionRoot, deps)
+  return <ProjectEnvironmentRepoConfigView state={state} />
+}
+
+export function ProjectEnvironmentRepoConfigView({ state }: { state: RepoWorkspaceConfigState }) {
+  const t = useTranslations("projectEnvironment.repoConfig")
+  const { verdict, loading, approving, approve, unavailable } = state
+
+  // Not a verdict about the repository: this runtime has no way to read the
+  // file, and saying "could not be read" here made a healthy repository look
+  // broken. The reason is the gate's own sentence.
+  if (unavailable !== null) {
+    return (
+      <div
+        className="space-y-2.5"
+        data-testid="project-environment-repo-config"
+        data-state="unavailable"
+      >
+        <p className="text-[11px] leading-snug text-muted-foreground">{t("description")}</p>
+        <p
+          className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground"
+          data-testid="repo-config-status"
+        >
+          <CircleSlashIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+          <span className="min-w-0">
+            {t("unavailable")} {unavailable}
+          </span>
+        </p>
+      </div>
+    )
+  }
 
   // Two states share `unapproved` and read very differently to a user: never
   // seen, versus edited since you said yes.
   const changed = verdict.kind === "unapproved" && Boolean(verdict.approvedDigest)
   const statusKey = changed ? "changed" : verdict.kind
   const tone =
-    verdict.kind === "approved"
+    verdict.kind === "approved" || verdict.kind === "absent"
       ? "text-muted-foreground"
-      : verdict.kind === "absent"
-        ? "text-muted-foreground"
-        : "text-amber-600 dark:text-amber-500"
+      : "text-amber-700 dark:text-amber-400"
 
   return (
     <div
-      className="space-y-2 rounded-md border bg-background/40 p-3"
+      className="space-y-2.5"
       data-testid="project-environment-repo-config"
       data-state={loading ? "loading" : statusKey}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-xs font-medium">
-            {verdict.kind === "restricted" ? (
-              <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
-            ) : verdict.kind === "approved" ? (
-              <CheckIcon className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-500" />
-            ) : verdict.kind === "absent" ? null : (
-              <FileWarningIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
-            )}
-            {t("title")}
-          </p>
-          <p className="text-[10px] text-muted-foreground">{t("description")}</p>
-        </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">{t("description")}</p>
+
+      {/* The verdict leads, with the icon that says which kind of news it is. */}
+      <p
+        className={cn("flex items-start gap-1.5 text-xs leading-snug", tone)}
+        data-testid="repo-config-status"
+      >
+        {verdict.kind === "restricted" ? (
+          <ShieldAlertIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+        ) : verdict.kind === "approved" ? (
+          <CheckIcon
+            aria-hidden
+            className="mt-px size-3.5 shrink-0 text-emerald-600 dark:text-emerald-500"
+          />
+        ) : verdict.kind === "absent" ? null : (
+          <FileWarningIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+        )}
+        <span className="min-w-0 break-words">
+          {verdict.kind === "invalid"
+            ? t("status.invalid", { message: `${verdict.field}: ${verdict.message}` })
+            : t(`status.${statusKey}`)}
+        </span>
         {verdict.kind === "approved" ? (
-          <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+          <Badge variant="outline" className="ml-auto shrink-0 text-[10px] font-normal">
             {t("approved")}
           </Badge>
         ) : null}
-      </div>
-
-      <p className={cn("text-[11px]", tone)} data-testid="repo-config-status">
-        {verdict.kind === "invalid"
-          ? t("status.invalid", { message: `${verdict.field}: ${verdict.message}` })
-          : t(`status.${statusKey}`)}
       </p>
 
       {verdict.kind === "restricted" ? (
-        <p className="text-[10px] text-muted-foreground">{t("untrustedHint")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("untrustedHint")}</p>
       ) : null}
 
       {verdict.kind === "unapproved" ? (
         <>
-          <Declared config={verdict.config} />
+          {changed ? (
+            verdict.approvedConfig ? (
+              <ConfigChanges previous={verdict.approvedConfig} current={verdict.config} />
+            ) : (
+              <p
+                className="text-[11px] leading-snug text-muted-foreground"
+                data-testid="repo-config-no-previous"
+              >
+                {t("diff.noPrevious")}
+              </p>
+            )
+          ) : null}
+          {changed && verdict.approvedConfig ? (
+            // The full current file is still there for a reviewer who wants
+            // it, folded under the changes rather than competing with them.
+            <details className="group/full">
+              <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                {t("diff.currentFull")}
+              </summary>
+              <div className="mt-2">
+                <Declared config={verdict.config} />
+              </div>
+            </details>
+          ) : (
+            <Declared config={verdict.config} />
+          )}
           <Button
             size="sm"
             variant="outline"
-            className="w-full"
             disabled={approving}
             onClick={() => void approve()}
             data-testid="repo-config-approve"

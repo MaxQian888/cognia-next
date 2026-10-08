@@ -46,6 +46,7 @@ import {
   ArrowUpRightIcon,
   ChevronsUpDownIcon,
   FolderIcon,
+  FolderPlusIcon,
   GitBranchIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -60,6 +61,14 @@ import { ConsoleSection } from "@/components/surface/console-section"
 import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
@@ -610,47 +619,88 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
 
         <TabsContent
           value="environments"
-          className={cn(
-            "mt-0 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6",
-            TAB_ENTER
-          )}
+          className={cn("mt-0 flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-4", TAB_ENTER)}
           data-testid="workspace-environments"
         >
-          {/* Scoped to this Workspace. It used to list every environment on the
-              machine, which on a laptop with several checked-out projects read
-              as "this workspace owns all of these". Rows it does not own stay
-              one click away. */}
-          <WorkspaceEnvironmentList
-            projectId={workspaceId ?? undefined}
-            // The tab listed every environment and could create none: the only
-            // creation entry in the app was inside the Source Control sheet.
-            rootDir={primaryRoot}
-            showCreate
-          />
-
           {/*
-            What isolated runs left behind. Branches outlive the directories
-            above them, so after a run settles this is the only trace of what it
-            did. It lived in a tab of the retired `/agent-teams/workspace`,
-            where it was scoped to one squad's working directory rather than to
-            the repository the branches actually pile up in.
+            One subject, so chapters rather than cards: every section on this
+            tab describes this workspace's environments (the worktrees it has,
+            the branches its runs left, and the rules that produce both), so
+            they read as one record under the tab, the way the device record
+            does. The Overview tab, whose sections are unrelated, keeps cards.
           */}
-          <AgentBranchesSection {...(primaryRoot ? { rootDir: primaryRoot } : {})} />
+          {workspace && !primaryRoot ? (
+            /*
+              Everything below hangs off a folder: the worktree inventory is
+              scoped to it, branches are read from it, and the repository's
+              setup and the environment rules run in it. A workspace without
+              one used to show a lone "unavailable" box over an empty pane,
+              with nothing to say why or what to do. This says both, and the
+              way out is the one editor workspace roots have.
+            */
+            <Empty className="border-none" data-testid="workspace-environments-no-folder">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderPlusIcon aria-hidden />
+                </EmptyMedia>
+                <EmptyTitle>{t("workspace.environmentsNoFolderTitle")}</EmptyTitle>
+                <EmptyDescription>{t("workspace.environmentsNoFolderBody")}</EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button size="sm" onClick={openManage} disabled={!workspace}>
+                  <FolderPlusIcon aria-hidden className="size-3.5" />
+                  {t("workspace.environmentsAddFolder")}
+                </Button>
+              </EmptyContent>
+            </Empty>
+          ) : (
+            <>
+              {/* Scoped to this Workspace. It used to list every environment on the
+                  machine, which on a laptop with several checked-out projects read
+                  as "this workspace owns all of these". Rows it does not own stay
+                  one click away. */}
+              <WorkspaceEnvironmentList
+                projectId={workspaceId ?? undefined}
+                // The tab listed every environment and could create none: the only
+                // creation entry in the app was inside the Source Control sheet.
+                rootDir={primaryRoot}
+                showCreate
+                sectionVariant="sheet"
+              />
 
-          {/*
-            How this workspace's environments get provisioned, and what the repo
-            itself declares. Both were reachable only from chat, through the
-            session settings sheet, so the page about the workspace could show
-            you the worktrees and not the rules that produce them. One
-            component, a second door, not a second editor.
-          */}
-          {workspaceId && primaryRoot ? (
-            <ProjectEnvironmentManager
-              projectId={workspaceId}
-              executionRoot={primaryRoot}
-              scope="managedWorktree"
-            />
-          ) : null}
+              {/*
+                What isolated runs left behind. Branches outlive the directories
+                above them, so after a run settles this is the only trace of what it
+                did. It lived in a tab of the retired `/agent-teams/workspace`,
+                where it was scoped to one squad's working directory rather than to
+                the repository the branches actually pile up in.
+              */}
+              <AgentBranchesSection
+                {...(primaryRoot ? { rootDir: primaryRoot } : {})}
+                variant="sheet"
+              />
+
+              {/*
+                How this workspace's environments get provisioned, and what the repo
+                itself declares. Both were reachable only from chat, through the
+                session settings sheet, so the page about the workspace could show
+                you the worktrees and not the rules that produce them. One
+                component, a second door, not a second editor.
+              */}
+              {workspaceId && primaryRoot ? (
+                <ProjectEnvironmentManager
+                  projectId={workspaceId}
+                  executionRoot={primaryRoot}
+                  scope="managedWorktree"
+                />
+              ) : null}
+              {/* The bottom gutter as an element, not `pb-*`: a sticky child
+                  stops at the scroll container's padding edge, so padding here
+                  left a strip of the form showing under the environment
+                  editor's pinned action bar. */}
+              <div aria-hidden className="-mt-8 h-6 shrink-0" />
+            </>
+          )}
         </TabsContent>
 
         <TabsContent

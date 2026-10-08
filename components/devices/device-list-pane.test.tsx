@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { DeviceRow } from "@/lib/devices/types"
@@ -279,5 +279,44 @@ describe("DeviceListPane — slots", () => {
     expect(rows.compareDocumentPosition(screen.getByTestId("footer"))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
+  })
+})
+
+describe("DeviceListPane — first read", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  /**
+   * A slow host read must not read as a finished fleet of one, nor as
+   * "nothing matches" about rows that have not arrived yet.
+   */
+  it("holds placeholders under the known rows while the first read is in flight", () => {
+    jest.useFakeTimers()
+    renderPane({ rows: [LOCAL], loading: true })
+    // Under the anti-flicker delay nothing extra is drawn…
+    expect(screen.queryByTestId("device-list-loading")).not.toBeInTheDocument()
+    act(() => {
+      jest.advanceTimersByTime(250)
+    })
+    // …past it the rail says it is still reading, below what is known.
+    expect(screen.getByTestId("device-list-loading")).toHaveTextContent("Loading devices…")
+    expect(screen.getByTestId("device-row-local")).toBeInTheDocument()
+  })
+
+  it("does not claim an empty result while rows are still arriving", () => {
+    jest.useFakeTimers()
+    renderPane({ rows: [], loading: true })
+    expect(screen.queryByText("No devices")).not.toBeInTheDocument()
+    act(() => {
+      jest.advanceTimersByTime(250)
+    })
+    expect(screen.getByTestId("device-list-loading")).toBeInTheDocument()
+    expect(screen.queryByText("No devices")).not.toBeInTheDocument()
+  })
+
+  it("draws no placeholders once the read has settled", () => {
+    renderPane({ rows: [LOCAL], loading: false })
+    expect(screen.queryByTestId("device-list-loading")).not.toBeInTheDocument()
   })
 })

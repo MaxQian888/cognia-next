@@ -787,6 +787,22 @@ describe("WorkspaceEnvironmentList — what this device may not do", () => {
     expect(refresh).toBeDisabled()
     expect(refresh.querySelector("svg")).not.toHaveClass("animate-spin")
   })
+
+  /**
+   * In a sheet, or the device record that embeds this list as a chapter, there
+   * is no card around the list, so the empty state is not framed as one.
+   * On the page it sits inside a console card and keeps its hairline.
+   */
+  it("frames the unavailable state only where a card surrounds it", () => {
+    mockDenied = { task_workspace_environment_list: "This host doesn't offer this." }
+    const { unmount } = render(<WorkspaceEnvironmentList rootDir="/repo" presentation="sheet" />)
+    expect(screen.getByTestId("workspace-environments-unavailable")).toHaveClass("border-none")
+    unmount()
+
+    render(<WorkspaceEnvironmentList rootDir="/repo" presentation="page" />)
+    expect(screen.getByTestId("workspace-environments-unavailable")).not.toHaveClass("border-none")
+    expect(screen.getByTestId("workspace-environments-unavailable")).toHaveClass("border")
+  })
 })
 
 it("formats last use against an explicit shared clock", async () => {

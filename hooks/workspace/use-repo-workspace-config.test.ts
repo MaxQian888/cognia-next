@@ -67,7 +67,35 @@ describe("useRepoWorkspaceConfig", () => {
     await act(async () => {
       await result.current.approve()
     })
-    expect(approve).toHaveBeenCalledWith("/repos/app", digest)
+    // The content goes with the digest, so a later change can be shown as one.
+    expect(approve).toHaveBeenCalledWith(
+      "/repos/app",
+      digest,
+      parseWorkspaceConfig(JSON.stringify(CONFIG))
+    )
+  })
+
+  /**
+   * A browser with no paired host cannot read the file. Trying produced an
+   * "invalid" verdict that read as a broken repository; it now reads nothing
+   * and says why.
+   */
+  it("reads nothing where this runtime cannot read files, and says why", async () => {
+    const readFile = jest.fn(async () => JSON.stringify(CONFIG))
+    const { result } = renderHook(() =>
+      useRepoWorkspaceConfig(
+        "p1",
+        "/repos/app",
+        deps({ readFile, readGate: { available: false, reason: "Pair a host to read files." } })
+      )
+    )
+    expect(result.current.unavailable).toBe("Pair a host to read files.")
+    expect(result.current.loading).toBe(false)
+    expect(result.current.verdict.kind).toBe("absent")
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(readFile).not.toHaveBeenCalled()
   })
 
   it("re-reads after approving instead of assuming it worked", async () => {

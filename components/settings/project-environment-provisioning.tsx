@@ -23,14 +23,25 @@
  * so and stops proposing the share. The command is shown, not run: it edits a
  * machine-wide config that affects every project on this computer, which is not
  * ours to change from a settings panel.
+ *
+ * It is one chapter of the environment manager (`ProjectEnvironmentSection`),
+ * and its suggestions are rows in hairline-divided lists, not a bordered box
+ * per suggestion inside a bordered card.
  */
 
 import { useTranslations } from "next-intl"
-import { CheckIcon, CopyIcon, HardDriveIcon, KeyRoundIcon, LinkIcon } from "lucide-react"
+import {
+  CheckIcon,
+  CircleSlashIcon,
+  CopyIcon,
+  HardDriveIcon,
+  KeyRoundIcon,
+  LinkIcon,
+  RotateCcwIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Surface } from "@/components/surface/surface"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { useProvisioningOffer } from "@/hooks/workspace/use-provisioning-offer"
 import {
@@ -38,6 +49,8 @@ import {
   PNPM_GLOBAL_STORE_COMMAND,
   type ProvisioningCandidate,
 } from "@/lib/workspace/provisioning-inference"
+
+import { ProjectEnvironmentSection } from "./project-environment-section"
 
 interface Props {
   projectId: string
@@ -57,34 +70,31 @@ function CandidateRow({
   const t = useTranslations("projectEnvironment.provisioning")
   const Icon = candidate.kind === "cacheLink" ? LinkIcon : KeyRoundIcon
   return (
-    <div
-      className="flex items-start justify-between gap-2 rounded border bg-background/70 p-2"
+    <li
+      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 py-2"
       data-testid={`provisioning-candidate-${candidate.id}`}
     >
-      <div className="min-w-0 space-y-1">
-        <p className="flex items-center gap-1.5 font-mono text-[11px]">
-          <Icon className="size-3 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1 basis-56 space-y-0.5">
+        <p className="flex items-start gap-1.5 font-mono text-[11px] break-all">
+          <Icon aria-hidden className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           {t(`candidate.${candidate.kind}`, { path: candidate.path })}
         </p>
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[11px] leading-snug text-muted-foreground">
           {t(`risk.${candidate.riskKey}`, { path: candidate.path })}
         </p>
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground/80">
           {t("evidence", { names: candidate.evidence.join(", ") })}
         </p>
       </div>
       <div className="flex shrink-0 gap-1">{children}</div>
-    </div>
+    </li>
   )
 }
 
 export function ProjectEnvironmentProvisioning({ projectId, executionRoot, deps }: Props) {
   const t = useTranslations("projectEnvironment.provisioning")
-  const { candidates, pending, consent, pnpm, loading, decide } = useProvisioningOffer(
-    projectId,
-    executionRoot,
-    deps
-  )
+  const { candidates, pending, consent, pnpm, loading, decide, unavailable, failed, refresh } =
+    useProvisioningOffer(projectId, executionRoot, deps)
   const { copied, copy } = useCopy()
 
   const accepted = new Set(consent.accepted)
@@ -96,132 +106,171 @@ export function ProjectEnvironmentProvisioning({ projectId, executionRoot, deps 
   )
 
   return (
-    <Surface
-      layer="raised"
-      className="space-y-2 rounded-md border p-3"
-      data-testid="project-environment-provisioning"
-      data-state={loading ? "loading" : candidates.length ? "offered" : "empty"}
+    <ProjectEnvironmentSection
+      id="provisioning"
+      title={t("title")}
+      icon={HardDriveIcon}
+      meta={active.length > 0 ? active.length : undefined}
     >
-      <div className="min-w-0">
-        <p className="flex items-center gap-1.5 text-xs font-medium">
-          <HardDriveIcon className="size-3.5 shrink-0" />
-          {t("title")}
-        </p>
-        <p className="text-[10px] text-muted-foreground">{t("description")}</p>
+      <div
+        className="space-y-3"
+        data-testid="project-environment-provisioning"
+        data-state={
+          unavailable !== null
+            ? "unavailable"
+            : loading
+              ? "loading"
+              : failed
+                ? "failed"
+                : candidates.length
+                  ? "offered"
+                  : "empty"
+        }
+      >
+        <p className="text-[11px] leading-snug text-muted-foreground">{t("description")}</p>
+
+        {pnpm === "enabled" ? (
+          <p className="text-[11px] text-muted-foreground" data-testid="provisioning-pnpm">
+            {t("pnpm.enabled")}
+          </p>
+        ) : pnpm === "available" ? (
+          // A rule at its edge, not a dashed box: it is an aside to this
+          // section, not a second card inside it.
+          <div className="space-y-1.5 border-l-2 pl-3" data-testid="provisioning-pnpm">
+            <p className="text-[11px] leading-snug text-muted-foreground">{t("pnpm.available")}</p>
+            <div className="flex items-center gap-1">
+              <code className="min-w-0 flex-1 truncate rounded-control bg-muted/60 px-1.5 py-1 font-mono text-[11px]">
+                {PNPM_GLOBAL_STORE_COMMAND}
+              </code>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                onClick={() => void copy(PNPM_GLOBAL_STORE_COMMAND)}
+                aria-label={t("pnpm.copy")}
+              >
+                {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Three different empties: this device cannot look, the look
+            failed, or it looked and found nothing. Only the last is a
+            statement about the repository. */}
+        {unavailable !== null ? (
+          <p
+            className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground"
+            data-testid="provisioning-unavailable"
+          >
+            <CircleSlashIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+            <span className="min-w-0">
+              {t("unavailable")} {unavailable}
+            </span>
+          </p>
+        ) : !loading && failed ? (
+          <div className="space-y-1.5" data-testid="provisioning-failed">
+            <p className="text-xs text-amber-700 dark:text-amber-400">{t("failed")}</p>
+            <Button size="sm" variant="outline" className="h-7" onClick={refresh}>
+              <RotateCcwIcon className="size-3.5" />
+              {t("retry")}
+            </Button>
+          </div>
+        ) : !loading && !candidates.length ? (
+          <p className="text-xs text-muted-foreground" data-testid="provisioning-empty">
+            {t("empty")}
+          </p>
+        ) : null}
+
+        {pending.length ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-medium text-muted-foreground">{t("pendingTitle")}</p>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-[11px]"
+                onClick={() =>
+                  decide(
+                    pending.map((candidate) => candidate.id),
+                    true
+                  )
+                }
+                data-testid="provisioning-accept-all"
+              >
+                {t("acceptAll")}
+              </Button>
+            </div>
+            <ul className="divide-y border-y">
+              {pending.map((candidate) => (
+                <CandidateRow key={candidate.id} candidate={candidate}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => decide([candidate.id], true)}
+                  >
+                    {t("accept")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => decide([candidate.id], false)}
+                  >
+                    {t("decline")}
+                  </Button>
+                </CandidateRow>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {active.length ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <p className="text-[11px] font-medium text-muted-foreground">{t("activeTitle")}</p>
+              <Badge variant="secondary" className="text-[10px] font-normal">
+                {active.length}
+              </Badge>
+            </div>
+            <ul className="divide-y border-y">
+              {active.map((candidate) => (
+                <CandidateRow key={candidate.id} candidate={candidate}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => decide([candidate.id], false)}
+                  >
+                    {t("remove")}
+                  </Button>
+                </CandidateRow>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {declined.length ? (
+          <div className="space-y-1.5" data-testid="provisioning-declined">
+            <p className="text-[11px] font-medium text-muted-foreground">{t("declinedTitle")}</p>
+            <ul className="divide-y border-y">
+              {declined.map((candidate) => (
+                <CandidateRow key={candidate.id} candidate={candidate}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => decide([candidate.id], true)}
+                  >
+                    {t("accept")}
+                  </Button>
+                </CandidateRow>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
-
-      {pnpm === "enabled" ? (
-        <p className="text-[10px] text-muted-foreground" data-testid="provisioning-pnpm">
-          {t("pnpm.enabled")}
-        </p>
-      ) : pnpm === "available" ? (
-        <div className="space-y-1 rounded border border-dashed p-2" data-testid="provisioning-pnpm">
-          <p className="text-[10px] text-muted-foreground">{t("pnpm.available")}</p>
-          <div className="flex items-center gap-1">
-            <code className="min-w-0 flex-1 truncate rounded bg-background/70 px-1.5 py-1 font-mono text-[10px]">
-              {PNPM_GLOBAL_STORE_COMMAND}
-            </code>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 shrink-0 px-2 text-[10px]"
-              onClick={() => void copy(PNPM_GLOBAL_STORE_COMMAND)}
-              aria-label={t("pnpm.copy")}
-            >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {!loading && !candidates.length ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="provisioning-empty">
-          {t("empty")}
-        </p>
-      ) : null}
-
-      {pending.length ? (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-medium text-muted-foreground">{t("pendingTitle")}</p>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[10px]"
-              onClick={() =>
-                decide(
-                  pending.map((candidate) => candidate.id),
-                  true
-                )
-              }
-              data-testid="provisioning-accept-all"
-            >
-              {t("acceptAll")}
-            </Button>
-          </div>
-          {pending.map((candidate) => (
-            <CandidateRow key={candidate.id} candidate={candidate}>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => decide([candidate.id], true)}
-              >
-                {t("accept")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => decide([candidate.id], false)}
-              >
-                {t("decline")}
-              </Button>
-            </CandidateRow>
-          ))}
-        </div>
-      ) : null}
-
-      {active.length ? (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <p className="text-[10px] font-medium text-muted-foreground">{t("activeTitle")}</p>
-            <Badge variant="secondary" className="text-[10px] font-normal">
-              {active.length}
-            </Badge>
-          </div>
-          {active.map((candidate) => (
-            <CandidateRow key={candidate.id} candidate={candidate}>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => decide([candidate.id], false)}
-              >
-                {t("remove")}
-              </Button>
-            </CandidateRow>
-          ))}
-        </div>
-      ) : null}
-
-      {declined.length ? (
-        <div className="space-y-1.5" data-testid="provisioning-declined">
-          <p className="text-[10px] font-medium text-muted-foreground">{t("declinedTitle")}</p>
-          {declined.map((candidate) => (
-            <CandidateRow key={candidate.id} candidate={candidate}>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => decide([candidate.id], true)}
-              >
-                {t("accept")}
-              </Button>
-            </CandidateRow>
-          ))}
-        </div>
-      ) : null}
-    </Surface>
+    </ProjectEnvironmentSection>
   )
 }

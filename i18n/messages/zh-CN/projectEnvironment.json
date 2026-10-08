@@ -89,7 +89,10 @@
       "sharedBuildDir": "工作树与你的检出共享这个构建目录，特性不同的分支会互相覆盖重建。",
       "sharedInstall": "工作树与你的检出共享这个目录。安装了不同依赖的任务会改变你正在使用的内容。"
     },
-    "title": "工作树供给"
+    "title": "工作树供给",
+    "unavailable": "这里没有建议：此设备无法查看该文件夹的内容。",
+    "failed": "无法查看该文件夹的内容，因此暂时没有建议。",
+    "retry": "重试"
   },
   "remove": "移除",
   "repoConfig": {
@@ -137,7 +140,41 @@
       "unapproved": "等待你复核。在此之前只运行本设备自己的配置。"
     },
     "title": "来自仓库",
-    "untrustedHint": "信任此工作区后，它才能携带初始化配置。"
+    "untrustedHint": "信任此工作区后，它才能携带初始化配置。",
+    "diff": {
+      "title": "自你批准以来的变化",
+      "noPrevious": "这次批准发生在 Cognia 开始保存批准内容之前，因此没有可对比的旧版本。下方列出了它现在请求的全部内容。",
+      "empty": "它请求的内容没有变化，只是文件的排版变了。",
+      "currentFull": "它现在请求的全部内容",
+      "kind": {
+        "added": "新增",
+        "removed": "移除",
+        "changed": "修改"
+      },
+      "field": {
+        "setup": "初始化脚本",
+        "setupOs": "{os} 上的初始化脚本",
+        "action": "动作“{subject}”",
+        "variable": "变量 {subject}",
+        "requiredSecret": "所需密钥",
+        "root": "额外根目录",
+        "execution": "运行位置",
+        "base": "工作树基线",
+        "capability": "建议的能力 {subject}",
+        "cacheLink": "缓存链接",
+        "include": "复制到每个工作树",
+        "sparsePath": "稀疏检出路径",
+        "environment": "运行环境配置块"
+      },
+      "os": {
+        "macos": "macOS",
+        "windows": "Windows",
+        "linux": "Linux"
+      },
+      "on": "开启",
+      "off": "关闭"
+    },
+    "unavailable": "此设备无法读取。"
   },
   "retry": "重试初始化",
   "runAction": "运行{name}",
@@ -262,7 +299,8 @@
       "desktopRequired": "请在桌面应用中打开此项目，以访问需要认证的容器端口。",
       "open": "打开",
       "close": "关闭连接"
-    }
+    },
+    "savedSeparately": "单独保存"
   },
   "save": "保存环境",
   "saved": "环境已保存。",
@@ -431,6 +469,51 @@
     "autoCompact": "自动压缩上下文",
     "pruneToolResults": "裁剪较早的工具结果",
     "reuseInputs": "初始化复用的输入文件（每行一个）",
-    "reuseOutputs": "初始化必需的输出路径（每行一个）"
-  }
+    "reuseOutputs": "初始化必需的输出路径（每行一个）",
+    "title": "引导智能体",
+    "groupConnection": "模型连接",
+    "groupGeneration": "生成参数",
+    "groupTask": "任务",
+    "groupLimits": "限制"
+  },
+  "listTitle": "环境",
+  "listLabel": "此工作区中的环境",
+  "listEmptyTitle": "还没有环境",
+  "listEmptyBody": "新建一个环境，在智能体开始工作前先运行初始化。",
+  "loadingList": "正在加载环境…",
+  "loadFailed": "无法加载环境：{message}",
+  "retryLoad": "重试",
+  "unnamed": "未命名环境",
+  "unsavedBadge": "未保存",
+  "defaultBadge": "默认",
+  "disabledBadge": "已停用",
+  "enabledHint": "关闭后，初始化和动作都会被跳过并直接报告成功。",
+  "defaultHint": "此工作区的会话默认使用它，除非另行选择。",
+  "osOverridesCount": "{count, plural, =0 {未设置} other {已设置 # 个}}",
+  "osOverridesHint": "在对应的操作系统上，这里的脚本会替代上方脚本运行。",
+  "repoReplacesSetup": "仓库中已批准的 .cognia/workspace.json 提供了初始化脚本，应用期间这里的脚本不会运行。",
+  "repoReplacesActions": "仓库中已批准的 .cognia/workspace.json 提供了动作，应用期间这里的动作不会运行。",
+  "lastRun": "上次初始化：{status} · {time}",
+  "lastRunNever": "此工作区尚未运行过初始化。",
+  "initStatus": {
+    "never": "从未运行",
+    "running": "运行中",
+    "succeeded": "成功",
+    "failed": "失败",
+    "bypassed": "已跳过",
+    "cancelled": "已取消"
+  },
+  "unsaved": "有未保存的更改",
+  "newUnsaved": "新环境，尚未保存",
+  "discard": "放弃更改",
+  "discardTitle": "放弃未保存的更改？",
+  "discardBody": "对“{name}”的修改尚未保存，将会丢失。",
+  "keepEditing": "继续编辑",
+  "discardConfirm": "放弃",
+  "deleteTitle": "删除“{name}”？",
+  "deleteBody": "它的初始化脚本、动作、变量和钥匙串引用会从此设备上移除，钥匙串中的条目本身不受影响。此操作无法撤销。",
+  "deleteCancel": "取消",
+  "deleteFailed": "无法删除环境：{message}",
+  "editorEmptyBody": "从列表中选择一个环境，或新建一个。",
+  "nameRequired": "填写环境名称后才能保存。"
 }

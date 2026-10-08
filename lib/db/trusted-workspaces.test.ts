@@ -3,6 +3,7 @@
 import {
   approveEnvironmentDeclaration,
   approveWorkspaceConfig,
+  getApprovedWorkspaceConfig,
   getTrustedWorkspace,
   isWorkspaceTrusted,
   listTrustedWorkspaces,
@@ -153,5 +154,42 @@ describe("environment declaration approval", () => {
     await revokeWorkspaceTrust("/repo")
     await trustWorkspace("/repo")
     expect((await getTrustedWorkspace("/repo"))?.approvedEnvironment).toBeUndefined()
+  })
+})
+
+describe("approveWorkspaceConfig — the approved content", () => {
+  const config = {
+    version: 1 as const,
+    roots: [],
+    defaults: { execution: "local" as const, base: { kind: "head" } as never },
+    setup: { default: "pnpm install", byOs: {} },
+    actions: [],
+    variables: {},
+    sparsePaths: [],
+    cacheLinks: [],
+    include: [],
+    requiredSecrets: [],
+    capabilities: {},
+  }
+
+  /** Kept so a later change reads as a change, not as a second whole file. */
+  it("stores the configuration beside its digest", async () => {
+    await trustWorkspace("/repo")
+    expect(await approveWorkspaceConfig("/repo", "d".repeat(64), config)).toBe(true)
+    expect(await getApprovedWorkspaceConfig("/repo/")).toEqual(config)
+  })
+
+  /** A copy that no longer matches the digest would show a change against nothing approved. */
+  it("drops an older copy when approved without content", async () => {
+    await trustWorkspace("/repo")
+    await approveWorkspaceConfig("/repo", "d".repeat(64), config)
+    await approveWorkspaceConfig("/repo", "e".repeat(64))
+    expect(await getApprovedWorkspaceConfig("/repo")).toBeUndefined()
+    expect((await getTrustedWorkspace("/repo"))?.approvedConfigDigest).toBe("e".repeat(64))
+  })
+
+  it("records nothing for an untrusted root", async () => {
+    expect(await approveWorkspaceConfig("/repo", "d".repeat(64), config)).toBe(false)
+    expect(await getApprovedWorkspaceConfig("/repo")).toBeUndefined()
   })
 })

@@ -26,6 +26,7 @@ const FACT_COLUMNS: Record<ConsolePaneName, string> = {
   "console-pane": "@sm/console-card:grid-cols-2 @3xl/console-card:grid-cols-3",
   "device-pane": "@sm/device-card:grid-cols-2 @3xl/device-card:grid-cols-3",
   "workspace-pane": "@sm/workspace-card:grid-cols-2 @3xl/workspace-card:grid-cols-3",
+  "environment-pane": "@sm/environment-card:grid-cols-2 @3xl/environment-card:grid-cols-3",
 }
 
 /**

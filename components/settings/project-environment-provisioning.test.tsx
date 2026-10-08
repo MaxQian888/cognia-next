@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { Project } from "@/types"
@@ -147,5 +147,37 @@ describe("ProjectEnvironmentProvisioning", () => {
   it("says the boring thing when there is nothing to suggest", async () => {
     renderCard({ listRoot: async () => [{ name: "README.md", isDir: false }] })
     await waitFor(() => expect(screen.getByTestId("provisioning-empty")).toBeInTheDocument())
+  })
+
+  /**
+   * A failed look is not a finding: "nothing to suggest" claimed the
+   * repository needs nothing when nothing had been checked.
+   */
+  it("says a failed look failed, and looks again on request", async () => {
+    let calls = 0
+    const listRoot = jest.fn(async () => {
+      calls += 1
+      if (calls <= 2) throw new Error("EACCES")
+      return [{ name: "node_modules", isDir: true }]
+    })
+    renderCard({ listRoot })
+    await waitFor(() => expect(screen.getByTestId("provisioning-failed")).toBeInTheDocument())
+    expect(screen.queryByTestId("provisioning-empty")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(screen.queryByTestId("provisioning-failed")).not.toBeInTheDocument())
+    expect(listRoot.mock.calls.length).toBeGreaterThan(2)
+  })
+
+  it("says this device cannot look, and makes no claim about the repository", () => {
+    const listRoot = jest.fn(async () => [])
+    renderCard({
+      listRoot,
+      readGate: { available: false, reason: "Pair a host to read files." },
+    })
+    expect(screen.getByTestId("provisioning-unavailable")).toHaveTextContent(
+      "Pair a host to read files."
+    )
+    expect(screen.queryByTestId("provisioning-empty")).not.toBeInTheDocument()
+    expect(listRoot).not.toHaveBeenCalled()
   })
 })

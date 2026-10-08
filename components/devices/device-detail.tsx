@@ -1,19 +1,26 @@
 "use client"
 
 /**
- * The detail pane: one device, one continuous dashboard.
+ * The detail pane: one device, one continuous record.
  *
  * There are no tabs. Five of them meant every question cost a click and hid
- * that most answers are two lines long. As one scroll the sections are cards
- * in a grid, so the short ones sit beside each other and the wide ones
- * (matrices, registries) take the full width, and nothing is behind a click.
+ * that most answers are two lines long. As one scroll the sections are
+ * chapters laid out in a grid, so the short ones sit beside each other and the
+ * wide ones (matrices, registries) take the full width, and nothing is behind
+ * a click.
+ *
+ * They are chapters, not cards (`DeviceSection` is the frameless `sheet`
+ * variant): every section describes the same machine, so the masthead is the
+ * one frame and each section is a heading over a hairline rule. A grid of
+ * eleven framed, raised panels put more border and fill on screen than data,
+ * and read as eleven objects rather than one.
  *
  * What goes in the grid, and in what order, is `planDeviceSections`: per kind,
- * task-first, with half-width cards kept in pairs and every card that would
- * only have said "not here" folded into one record at the end. This file maps
- * the plan's ids to components and nothing else, so the order is decided in
- * one pure, tested place, and the jump strip in the masthead lists exactly the
- * cards the grid rendered.
+ * task-first, with half-width sections kept in pairs and every section that
+ * would only have said "not here" folded into one record at the end. This file
+ * maps the plan's ids to components and nothing else, so the order is decided
+ * in one pure, tested place, and the jump strip in the masthead lists exactly
+ * the sections the grid rendered.
  *
  * Layout rules carried over from `components/settings/mcp/mcp-panel.tsx` and
  * `@container/memory-pane`:
@@ -63,14 +70,14 @@ import {
 } from "./sections/runtime-section"
 import { WanSection } from "./sections/wan-section"
 
-/** The DOM id every card carries, from `DeviceSection` (`idPrefix`). */
+/** The DOM id every section carries, from `DeviceSection` (`idPrefix`). */
 export function deviceSectionAnchor(id: string): string {
   return `device-section-${id}`
 }
 
 /**
- * The jump strip's label for each card: its own title, so the chip and the
- * card it lands on read the same.
+ * The jump strip's label for each section: its own title, so the chip and the
+ * section it lands on read the same.
  */
 const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   ssh: "ssh.title",
@@ -227,8 +234,8 @@ export function DeviceDetail({
         <DeviceSectionNav items={navItems} activeAnchor={activeId} onJump={scrollTo} />
       </DeviceHero>
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-        {/* Device-wide alerts sit above the grid, not inside a card: they are
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pt-3.5 pb-8">
+        {/* Device-wide alerts sit above the grid, not inside a section: they are
             about the machine, not about one of the questions asked below. The
             connection error is said here once; the masthead states the
             handshake, and repeating the verbatim error there was the same
@@ -246,14 +253,16 @@ export function DeviceDetail({
           </Alert>
         ) : null}
 
-        <DeviceStatSummary row={row} className="mb-3.5" />
+        <DeviceStatSummary row={row} className="mb-6" />
 
-        {/* `items-start` so a short card keeps its own height instead of being
-            stretched to match the tall one beside it — equal-height rows of
-            mostly empty card is the classic dashboard-grid failure. Pairing
-            the half-width cards is the plan's job (`packHalfSections`), which
-            keeps reading order and visual order the same. */}
-        <div className="grid items-start gap-3.5 @3xl/device-pane:grid-cols-2">
+        {/* `items-start` so a short chapter keeps its own height instead of
+            being stretched to match the tall one beside it. Pairing the
+            half-width chapters is the plan's job (`packHalfSections`), which
+            keeps reading order and visual order the same. Without frames the
+            gutters are what separate sections, so they are wider than a card
+            grid's: a column gap the eye reads as a boundary, and a row gap
+            that gives each heading rule room above it. */}
+        <div className="grid items-start gap-x-8 gap-y-7 @3xl/device-pane:grid-cols-2">
           {plan.sections.map((section) => (
             <PlannedSection key={section.id} id={section.id} row={row} actions={actions} />
           ))}

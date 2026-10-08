@@ -33,7 +33,7 @@ import { useTranslations } from "next-intl"
 import { GitBranchIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { ConsoleSection } from "@/components/surface/console-section"
+import { ConsoleSection, type ConsoleSectionVariant } from "@/components/surface/console-section"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,9 +73,14 @@ export { AGENT_BRANCH_PREFIX } from "@/lib/git/branch-placement"
 export interface AgentBranchesSectionProps {
   /** The repository to read. Absent while the workspace has no root yet. */
   rootDir?: string
+  /**
+   * Framed card (default) or a frameless chapter, for a host whose sections
+   * are all chapters of one subject (the Environments tab).
+   */
+  variant?: ConsoleSectionVariant
 }
 
-export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
+export function AgentBranchesSection({ rootDir, variant = "card" }: AgentBranchesSectionProps) {
   const t = useTranslations("workspace.agentBranches")
   const gate = useWorkspaceCommandGate()
   const [branches, setBranches] = useState<GitBranch[]>([])
@@ -158,6 +163,7 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
       id="agent-branches"
       pane="workspace-pane"
       idPrefix="workspace-section"
+      variant={variant}
       icon={GitBranchIcon}
       title={t("title")}
       description={t("description")}

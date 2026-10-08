@@ -106,4 +106,42 @@ describe("ConsoleSection", () => {
     expect(section).toHaveAttribute("data-surface-layer", "raised")
     expect(section).toHaveAttribute("data-elevation", "1")
   })
+
+  /**
+   * The sheet variant is a chapter of one subject: no raised tier, no frame,
+   * and the anchors, heading and wide span behave exactly as the card's do,
+   * so a jump strip built for cards lands on chapters unchanged.
+   */
+  it("renders a frameless chapter for the sheet variant", () => {
+    render(
+      <ConsoleSection
+        id="routing"
+        title="Routing"
+        meta="2/3"
+        variant="sheet"
+        pane="device-pane"
+        idPrefix="device-section"
+        wide
+      >
+        <p>body</p>
+      </ConsoleSection>
+    )
+    const section = screen.getByTestId("device-section-routing")
+    expect(section).toHaveAttribute("id", "device-section-routing")
+    expect(section).toHaveAttribute("data-variant", "sheet")
+    expect(section).not.toHaveAttribute("data-surface-layer")
+    expect(section.className).not.toMatch(/(^|\s)border(\s|$)/)
+    expect(section.className).toContain("@3xl/device-pane:col-span-2")
+    expect(screen.getByRole("heading", { name: "Routing" })).toBeInTheDocument()
+    expect(screen.getByText("2/3")).toBeInTheDocument()
+  })
+
+  it("defaults to the framed card variant", () => {
+    render(
+      <ConsoleSection id="roots" title="Roots">
+        <p>body</p>
+      </ConsoleSection>
+    )
+    expect(screen.getByTestId("console-section-roots")).toHaveAttribute("data-variant", "card")
+  })
 })

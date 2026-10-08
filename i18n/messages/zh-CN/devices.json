@@ -75,7 +75,8 @@
     "emptyFiltered": "没有设备符合当前的搜索或筛选条件。",
     "label": "设备列表",
     "filterAttention": "需要处理",
-    "clearFilters": "清除筛选"
+    "clearFilters": "清除筛选",
+    "loading": "正在加载设备…"
   },
   "row": {
     "needsAttention": "需要关注"
@@ -260,7 +261,8 @@
     "noSelectionTitle": "未选择设备",
     "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
     "drawerTitle": "设备详情",
-    "sectionNavAria": "跳转到分区"
+    "sectionNavAria": "跳转到分区",
+    "backToList": "返回设备列表"
   },
   "access": {
     "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",

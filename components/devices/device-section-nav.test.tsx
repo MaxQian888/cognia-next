@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { DeviceSectionNav } from "./device-section-nav"
+import { DeviceSectionNav, overflowEdges } from "./device-section-nav"
 
 const ITEMS = [
   { anchor: "device-section-access", label: "Access" },
@@ -61,5 +61,46 @@ describe("DeviceSectionNav", () => {
     )
     // Right edge 240, less the 100px it can show, plus breathing room.
     expect(strip.scrollLeft).toBe(148)
+  })
+
+  /**
+   * The scrollbar is hidden, so a strip that runs past the pane edge has to
+   * say so itself: the edge with chips beyond it fades, and only that edge.
+   */
+  it("marks the edge that hides chips once the strip is scrolled", () => {
+    render(<DeviceSectionNav items={ITEMS} activeAnchor={null} onJump={jest.fn()} />)
+    const strip = screen.getByRole("navigation").firstElementChild as HTMLElement
+    Object.defineProperty(strip, "clientWidth", { configurable: true, value: 100 })
+    Object.defineProperty(strip, "scrollWidth", { configurable: true, value: 300 })
+
+    strip.scrollLeft = 0
+    fireEvent.scroll(strip)
+    expect(strip).toHaveAttribute("data-overflow-end", "true")
+    expect(strip).not.toHaveAttribute("data-overflow-start")
+
+    strip.scrollLeft = 200
+    fireEvent.scroll(strip)
+    expect(strip).toHaveAttribute("data-overflow-start", "true")
+    expect(strip).not.toHaveAttribute("data-overflow-end")
+  })
+})
+
+describe("overflowEdges", () => {
+  it("reports neither edge for a strip that fits", () => {
+    expect(overflowEdges({ scrollLeft: 0, scrollWidth: 100, clientWidth: 100 })).toEqual({
+      start: false,
+      end: false,
+    })
+  })
+
+  it("reports both edges mid-scroll, with a pixel of subpixel slack at each end", () => {
+    expect(overflowEdges({ scrollLeft: 50, scrollWidth: 300, clientWidth: 100 })).toEqual({
+      start: true,
+      end: true,
+    })
+    expect(overflowEdges({ scrollLeft: 199.5, scrollWidth: 300, clientWidth: 100 })).toEqual({
+      start: true,
+      end: false,
+    })
   })
 })

@@ -31,7 +31,9 @@ const deactivate = jest.fn()
 const writeAuthority = jest.fn()
 
 jest.mock("@/components/settings/automation/sandbox-connections-tab", () => ({
-  SandboxConnectionsTab: () => <div data-testid="sandbox-connections-tab" />,
+  SandboxConnectionsTab: ({ framed }: { framed?: boolean }) => (
+    <div data-testid="sandbox-connections-tab" data-framed={String(framed ?? true)} />
+  ),
 }))
 
 jest.mock("@/components/workspace/workspace-environment-list", () => ({
@@ -165,10 +167,18 @@ describe("RuntimeSection — sandbox", () => {
     expect(screen.queryByTestId("device-sandbox")).not.toBeInTheDocument()
   })
 
-  /** The registry is not a `DeviceSection`, so it carries the anchor itself. */
-  it("gives the embedded registry the anchor the jump strip lands on", () => {
+  /**
+   * The registry is a chapter like every other: the section supplies the
+   * heading and the anchor the jump strip lands on, and the embedded settings
+   * registry renders bare rather than as a Card inside the section.
+   */
+  it("titles the registry as a section and embeds it without its own frame", () => {
     render(<SandboxSection row={row()} />)
-    expect(screen.getByTestId("device-sandbox")).toHaveAttribute("id", "device-section-sandbox")
+    const section = screen.getByTestId("device-section-sandbox")
+    expect(section).toHaveAttribute("id", "device-section-sandbox")
+    expect(section).toContainElement(screen.getByTestId("device-sandbox"))
+    expect(screen.getByRole("heading", { name: "Sandbox connections" })).toBeInTheDocument()
+    expect(screen.getByTestId("sandbox-connections-tab")).toHaveAttribute("data-framed", "false")
   })
 })
 

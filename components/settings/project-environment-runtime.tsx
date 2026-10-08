@@ -23,9 +23,18 @@
  *
  * The browser sidecar is a fourth: the spec carries it, and the Docker driver
  * does not start one yet.
+ *
+ * # Layout
+ *
+ * No frame and no heading of its own: the environment manager's "Runtime
+ * environment" section names it and says it saves separately. Inside, the
+ * five choices are a field grid that goes two-up when the section is wide
+ * enough (`@container/environment-card`), and the preview, ports and
+ * declaration are sub-blocks under a rule rather than three more bordered
+ * boxes inside a bordered card. Its own save sits at its own end, labelled as
+ * the runtime's, so it is not mistaken for the editor's.
  */
 
-import { Surface } from "@/components/surface/surface"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
@@ -154,29 +163,20 @@ export function ProjectEnvironmentRuntime({
 
   if (!environment) {
     return (
-      <Surface
-        className="rounded-md border bg-background/40 p-3"
-        data-testid="project-environment-runtime"
-      >
-        <p className="text-xs font-medium">{t("title")}</p>
-        <p className="text-[10px] text-muted-foreground">{t("noEnvironment")}</p>
-      </Surface>
+      <div data-testid="project-environment-runtime">
+        <p className="text-xs text-muted-foreground">{t("noEnvironment")}</p>
+      </div>
     )
   }
 
   const available = new Set(driver?.availableTiers ?? [])
 
   return (
-    <Surface
-      className="space-y-3 rounded-md border bg-background/40 p-3"
+    <div
+      className="space-y-4"
       data-testid="project-environment-runtime"
       data-pool={state.loading ? "loading" : state.poolEnabled ? "on" : "off"}
     >
-      <div>
-        <p className="text-xs font-medium">{t("title")}</p>
-        <p className="text-[10px] text-muted-foreground">{t("description")}</p>
-      </div>
-
       {state.loading ? (
         <p role="status" className="text-[11px] text-muted-foreground">
           {t("loading")}
@@ -187,7 +187,7 @@ export function ProjectEnvironmentRuntime({
         <div role="status" className="space-y-1" data-testid="runtime-pool-off">
           <p className="text-[11px] text-muted-foreground">{t("poolOff")}</p>
           {state.saved ? (
-            <p className="text-[10px] text-muted-foreground">{t("poolOffKept")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("poolOffKept")}</p>
           ) : null}
         </div>
       ) : null}
@@ -199,7 +199,7 @@ export function ProjectEnvironmentRuntime({
       ) : null}
 
       {driver ? (
-        <div className="space-y-0.5 text-[10px] text-muted-foreground" data-testid="runtime-driver">
+        <div className="space-y-0.5 text-[11px] text-muted-foreground" data-testid="runtime-driver">
           <p>{t("driver", { driver: driver.driver })}</p>
           {driver.reachable ? (
             <p>
@@ -220,7 +220,7 @@ export function ProjectEnvironmentRuntime({
           <Label htmlFor={`${environment.id}-runtime-opt-in`} className="text-xs">
             {t("optIn")}
           </Label>
-          <p className="text-[10px] text-muted-foreground">{t("optInHint")}</p>
+          <p className="text-[11px] text-muted-foreground">{t("optInHint")}</p>
         </div>
         <Switch
           id={`${environment.id}-runtime-opt-in`}
@@ -234,7 +234,10 @@ export function ProjectEnvironmentRuntime({
       </div>
 
       {draft ? (
-        <div className="space-y-3" data-testid="runtime-selection">
+        <div
+          className="grid gap-x-4 gap-y-3 border-l-2 pl-3 @xl/environment-card:grid-cols-2"
+          data-testid="runtime-selection"
+        >
           <Field label={t("source")} id={`${environment.id}-runtime-source`}>
             <Select
               value={draft.source.kind === "catalog" ? draft.source.catalogEntryId : AUTO}
@@ -248,7 +251,11 @@ export function ProjectEnvironmentRuntime({
                 })
               }
             >
-              <SelectTrigger id={`${environment.id}-runtime-source`} aria-label={t("source")}>
+              <SelectTrigger
+                id={`${environment.id}-runtime-source`}
+                aria-label={t("source")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -281,7 +288,11 @@ export function ProjectEnvironmentRuntime({
                 update({ sizeClassId: value === DEFAULT ? undefined : value })
               }
             >
-              <SelectTrigger id={`${environment.id}-runtime-size`} aria-label={t("size")}>
+              <SelectTrigger
+                id={`${environment.id}-runtime-size`}
+                aria-label={t("size")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -313,7 +324,11 @@ export function ProjectEnvironmentRuntime({
                 update({ lifecycle: value === "ephemeral" ? "ephemeral" : undefined })
               }
             >
-              <SelectTrigger id={`${environment.id}-runtime-lifecycle`} aria-label={t("lifecycle")}>
+              <SelectTrigger
+                id={`${environment.id}-runtime-lifecycle`}
+                aria-label={t("lifecycle")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -336,7 +351,11 @@ export function ProjectEnvironmentRuntime({
                 })
               }
             >
-              <SelectTrigger id={`${environment.id}-runtime-isolation`} aria-label={t("isolation")}>
+              <SelectTrigger
+                id={`${environment.id}-runtime-isolation`}
+                aria-label={t("isolation")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -367,7 +386,11 @@ export function ProjectEnvironmentRuntime({
                   })
                 }}
               >
-                <SelectTrigger id={`${environment.id}-runtime-bundle`} aria-label={t("bundle")}>
+                <SelectTrigger
+                  id={`${environment.id}-runtime-bundle`}
+                  aria-label={t("bundle")}
+                  className="w-full min-w-0"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -382,11 +405,11 @@ export function ProjectEnvironmentRuntime({
                 </SelectContent>
               </Select>
             ) : (
-              <p className="text-[10px] text-muted-foreground">{t("bundleNone")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("bundleNone")}</p>
             )}
           </Field>
 
-          <div className="space-y-1.5" data-testid="runtime-egress">
+          <div className="space-y-1.5 @xl/environment-card:col-span-2" data-testid="runtime-egress">
             <p className="text-xs">{t("egress")}</p>
             <label className="flex items-center gap-2 text-[11px]">
               <Checkbox
@@ -416,7 +439,7 @@ export function ProjectEnvironmentRuntime({
                   </label>
                 ))
               : null}
-            <p className="text-[10px] text-amber-600 dark:text-amber-500" data-dormant="egress">
+            <p className="text-[11px] text-amber-700 dark:text-amber-400" data-dormant="egress">
               {t("egressNotEnforced")}
             </p>
           </div>
@@ -439,7 +462,10 @@ export function ProjectEnvironmentRuntime({
             onChange={(checked) => update({ localContainer: checked || undefined })}
           />
 
-          <p className="text-[10px] text-muted-foreground" data-dormant="credentials">
+          <p
+            className="text-[11px] text-muted-foreground @xl/environment-card:col-span-2"
+            data-dormant="credentials"
+          >
             {t("credentials")}
           </p>
         </div>
@@ -448,38 +474,43 @@ export function ProjectEnvironmentRuntime({
       <ProjectEnvironmentRuntimeTrace preview={state.preview} catalog={catalog} />
 
       {state.ports && state.ports.length > 0 ? (
-        <div className="space-y-2 rounded-md border p-3">
-          <p className="text-xs font-medium">{t("ports.title")}</p>
+        <div className="space-y-2 border-t pt-3" data-testid="runtime-ports">
+          <h4 className="text-xs font-medium">{t("ports.title")}</h4>
           {!state.portsAvailable ? (
-            <p className="text-xs text-muted-foreground">{t("ports.desktopRequired")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("ports.desktopRequired")}</p>
           ) : null}
-          {state.ports.map((port) => (
-            <div key={port.path} className="flex items-center justify-between gap-2">
-              <span className="text-xs">
-                {port.label ? `${port.label} · ${port.port}` : port.port}
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={state.busy || !state.portsAvailable}
-                  onClick={() => void state.openPort(port)}
-                >
-                  {t("ports.open")}
-                </Button>
-                {state.openedPorts?.[port.path] ? (
+          <ul className="divide-y border-y">
+            {state.ports.map((port) => (
+              <li
+                key={port.path}
+                className="flex flex-wrap items-center justify-between gap-2 py-1.5"
+              >
+                <span className="min-w-0 break-all text-xs">
+                  {port.label ? `${port.label} · ${port.port}` : port.port}
+                </span>
+                <div className="flex shrink-0 gap-1">
                   <Button
                     size="sm"
-                    variant="ghost"
-                    disabled={state.busy}
-                    onClick={() => void state.closePort(port.path)}
+                    variant="outline"
+                    disabled={state.busy || !state.portsAvailable}
+                    onClick={() => void state.openPort(port)}
                   >
-                    {t("ports.close")}
+                    {t("ports.open")}
                   </Button>
-                ) : null}
-              </div>
-            </div>
-          ))}
+                  {state.openedPorts?.[port.path] ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={state.busy}
+                      onClick={() => void state.closePort(port.path)}
+                    >
+                      {t("ports.close")}
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -496,20 +527,23 @@ export function ProjectEnvironmentRuntime({
         onRevoke={(id) => void state.revoke(id)}
       />
 
-      {saved ? (
-        <p role="status" className="text-xs text-emerald-600">
-          {t("saved")}
-        </p>
-      ) : null}
-      <Button
-        size="sm"
-        disabled={state.busy || state.loading}
-        onClick={() => void state.save()}
-        data-testid="runtime-save"
-      >
-        {t("save")}
-      </Button>
-    </Surface>
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+        {saved ? (
+          <p role="status" className="mr-auto text-xs text-emerald-600 dark:text-emerald-400">
+            {t("saved")}
+          </p>
+        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={state.busy || state.loading}
+          onClick={() => void state.save()}
+          data-testid="runtime-save"
+        >
+          {t("save")}
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -538,12 +572,12 @@ function Field({
   children: React.ReactNode
 }) {
   return (
-    <div className="space-y-1">
+    <div className="min-w-0 space-y-1">
       <Label htmlFor={id} className="text-xs">
         {label}
       </Label>
       {children}
-      {hint ? <p className="text-[10px] text-muted-foreground">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
   )
 }
@@ -564,12 +598,15 @@ function Toggle({
   onChange(checked: boolean): void
 }) {
   return (
-    <div className="flex items-start justify-between gap-3" data-dormant={dormant}>
+    <div
+      className="flex items-start justify-between gap-3 @xl/environment-card:col-span-2"
+      data-dormant={dormant}
+    >
       <div className="min-w-0">
         <Label htmlFor={id} className="text-xs">
           {label}
         </Label>
-        <p className="text-[10px] text-amber-600 dark:text-amber-500">{hint}</p>
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">{hint}</p>
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
