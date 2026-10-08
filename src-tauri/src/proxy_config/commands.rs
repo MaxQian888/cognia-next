@@ -9,6 +9,10 @@
 //! - `proxy_test` — issue a one-off request through the *current* config
 //!   and report status + latency.
 //! - `proxy_get_active` — debug aid; returns the live config snapshot.
+//! - `network_interface_counters` / `network_latency_probe` — the status
+//!   bar's live network readout (`cognia_net::net_meter`): cumulative
+//!   interface byte counters, and a connection-reusing round-trip probe that
+//!   goes through the same live policy as every other request here.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -183,6 +187,44 @@ pub async fn proxy_test(input: ProxyTestInput) -> Result<ProxyTestResult, String
             route: Some(route),
         },
     })
+}
+
+// ---------------------------------------------------------------------------
+// Live network meter — the status bar's speed / latency readout.
+// ---------------------------------------------------------------------------
+
+/// Cumulative receive / transmit bytes over the machine's physical
+/// interfaces. The renderer samples twice and divides by the interval.
+#[tauri::command]
+pub async fn network_interface_counters() -> Result<cognia_net::net_meter::NetworkCounters, String>
+{
+    // A handful of syscalls, but blocking ones: keep them off the async
+    // workers that carry IPC.
+    tokio::task::spawn_blocking(cognia_net::net_meter::read_interface_counters)
+        .await
+        .map_err(|error| format!("interface counter read failed: {error}"))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NetworkLatencyProbeInput {
+    pub url: String,
+    #[serde(default, rename = "timeoutMs")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// One HTTP round trip to `url` through the live proxy policy, on the shared
+/// prober's kept-alive connection.
+#[tauri::command]
+pub async fn network_latency_probe(
+    input: NetworkLatencyProbeInput,
+) -> Result<cognia_net::net_meter::LatencySample, String> {
+    let timeout = input
+        .timeout_ms
+        .map(Duration::from_millis)
+        .unwrap_or(cognia_net::net_meter::DEFAULT_PROBE_TIMEOUT);
+    Ok(cognia_net::net_meter::shared_latency_probe()
+        .probe(&input.url, timeout)
+        .await)
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +512,28 @@ mod tests {
         .unwrap();
         assert!(!result.ok);
         assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn network_interface_counters_reports_counted_interfaces() {
+        let counters = network_interface_counters().await.unwrap();
+        assert!(counters.at_ms > 0);
+        let rx: u64 = counters.interfaces.iter().map(|i| i.rx_bytes).sum();
+        assert_eq!(rx, counters.rx_bytes);
+    }
+
+    #[tokio::test]
+    async fn network_latency_probe_reports_an_unreachable_target() {
+        apply_current(ProxyConfig::default()).unwrap();
+        let sample = network_latency_probe(NetworkLatencyProbeInput {
+            url: "http://127.0.0.1:1/".into(),
+            timeout_ms: Some(500),
+        })
+        .await
+        .unwrap();
+        assert!(!sample.ok);
+        assert!(sample.error.is_some());
+        assert_eq!(sample.host, "127.0.0.1");
     }
 
     #[tokio::test]

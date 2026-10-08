@@ -41,8 +41,9 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 rustls-native-certs.workspace = true
 # join_all over the detect-stage probe futures.
 futures-util = { workspace = true }
-# Proxy-client detection: process snapshot + per-client config-file discovery.
-sysinfo = { workspace = true, features = ["system"] }
+# Proxy-client detection: process snapshot + per-client config-file discovery;
+# `network` for `net_meter`'s interface byte counters.
+sysinfo = { workspace = true, features = ["system", "network"] }
 dirs.workspace = true
 regex.workspace = true
 

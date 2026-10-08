@@ -1322,6 +1322,8 @@ pub fn run() {
             proxy_config::commands::proxy_detect,
             proxy_config::commands::proxy_identify_clash,
             proxy_config::commands::proxy_test,
+            proxy_config::commands::network_interface_counters,
+            proxy_config::commands::network_latency_probe,
             proxy_config::commands::proxy_http_request,
             proxy_config::commands::proxy_http_cancel,
             proxy_config::stream::proxy_http_stream_open,

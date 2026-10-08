@@ -19,6 +19,8 @@
 //!   hatch delivers nothing at all rather than merely delivering it late.
 //! - [`outbound_pii`] — fail-closed PII detection for text crossing native
 //!   network boundaries.
+//! - [`net_meter`] — interface byte counters and a connection-reusing HTTP
+//!   latency probe for the desktop status bar's network readout.
 //! - [`egress`] — pure allowlist/destination checks and the never-exceptable
 //!   cloud metadata endpoints, shared by every egress filter.
 
@@ -27,6 +29,7 @@ pub mod http_client;
 pub mod http_download;
 pub mod inbound_policy;
 pub mod ndjson_stream;
+pub mod net_meter;
 pub mod outbound_pii;
 pub mod proxy_config;
 pub mod request_cancellation;

@@ -657,6 +657,8 @@ commands.allow = [
   "native_logging_get_log_directory",
   "native_logging_get_readiness",
   "native_logging_open_log_directory",
+  "network_interface_counters",
+  "network_latency_probe",
   "ocr_cancel_model_download",
   "ocr_download_model",
   "ocr_extract_native",
