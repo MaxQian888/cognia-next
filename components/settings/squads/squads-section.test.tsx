@@ -22,6 +22,12 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
   purgeAgentTeam: jest.fn(async () => undefined),
 }))
 
+// Cold-load detection has its own suite; here it is posed directly.
+let mockHydrating = false
+jest.mock("@/hooks/squads/use-squad-definitions-hydrating", () => ({
+  useSquadDefinitionsHydrating: () => mockHydrating,
+}))
+
 // The template gallery is a whole surface of its own with a store, a plugin
 // registry and a router push; this suite is about the library around it.
 jest.mock("@/components/settings/agent/agent-team-templates-section", () => ({
@@ -47,6 +53,7 @@ function seed(teams: AgentTeam[]) {
 }
 
 beforeEach(() => {
+  mockHydrating = false
   replaceMock.mockClear()
   searchString = ""
   seed([squad("a", "Alpha"), squad("b", "Bravo")])
@@ -138,5 +145,34 @@ describe("SquadsSection", () => {
     // Onto the neighbour, not onto a pane addressing something that is gone.
     // `deleteTeam` is async, so the move lands a tick after the click.
     await waitFor(() => expect(replaceMock.mock.calls.at(-1)?.[0]).toContain("squadTab=squad%3Ab"))
+  })
+
+  /** Settings configures, `/squads` runs: the pane links back to what it is doing. */
+  it("links the open Squad to its live view, with its status beside the name", () => {
+    searchString = "section=squads&squadTab=squad:b"
+    seed([{ ...squad("a", "Alpha") }, { ...squad("b", "Bravo"), status: "executing" } as AgentTeam])
+    render(<SquadsSection />)
+    expect(screen.getByTestId("squad-detail-open-live")).toHaveAttribute("href", "/squads?id=b")
+    expect(screen.getByText("Executing")).toBeInTheDocument()
+  })
+
+  it("offers no live view on the template gallery", () => {
+    searchString = "section=squads&squadTab=templates"
+    render(<SquadsSection />)
+    expect(screen.queryByTestId("squad-detail-open-live")).not.toBeInTheDocument()
+  })
+
+  /**
+   * On a cold load the store is empty while Dexie still holds the Squads. The
+   * pane used to resolve to the gallery and crossfade to the first Squad.
+   */
+  it("shows neither the gallery nor an empty claim while definitions load", () => {
+    mockHydrating = true
+    seed([])
+    render(<SquadsSection />)
+    expect(screen.queryByTestId("templates-gallery")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("squad-detail")).not.toBeInTheDocument()
+    expect(screen.getByTestId("squads-nav-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("squads-nav-empty")).not.toBeInTheDocument()
   })
 })

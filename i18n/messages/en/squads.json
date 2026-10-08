@@ -13,8 +13,6 @@
     "title": "Built-in teams"
   },
   "fleet": {
-    "boardUnselectedDescription": "A board belongs to one Squad. Choose one from the list to see its tasks.",
-    "boardUnselectedTitle": "Pick a Squad",
     "clearFilters": "Clear filters",
     "configure": "Configure this Squad",
     "control": {
@@ -64,14 +62,11 @@
       "label": "Narrow the list",
       "all": "All",
       "waiting": "Needs you",
-      "live": "Working"
+      "live": "Working",
+      "countAria": "{label}, {count}"
     },
-    "inspectorLabel": "Squad detail",
     "manageAction": "Manage Squads",
     "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
-    "mobile": {
-      "configureHint": "Roster, governance and auto-compose are edited in Settings, under Configure this Squad."
-    },
     "newSquadName": "New Squad",
     "noMatchesDescription": "Widen the filter or clear the search to see the rest.",
     "noMatchesTitle": "No Squads match",
@@ -84,18 +79,34 @@
     },
     "railLabel": "Squad list",
     "search": "Search Squads",
-    "stats": {
-      "waiting": "Needs you",
-      "working": "Working"
-    },
     "summary": "{total, plural, =1 {1 Squad} other {# Squads}} · {live, plural, =0 {idle} other {# working}}",
     "tabs": {
       "board": "Board",
       "runs": "Runs",
-      "squads": "Squads"
+      "squads": "Squads",
+      "overview": "Overview",
+      "allRuns": "All runs"
     },
     "title": "Squads",
-    "waiting": "Needs you"
+    "waiting": "Needs you",
+    "composeCta": "Compose from an objective",
+    "onboarding": {
+      "description": "A Squad is a lead and its teammates taking one objective to done inside a repository. Start an empty one and staff it, or describe the objective and let Cognia propose the roster.",
+      "descriptionWithBuiltIns": "A Squad is a lead and its teammates taking one objective to done inside a repository. Start an empty one and staff it, or describe the objective and let Cognia propose the roster. {count, plural, =1 {The built-in team in the list is} other {The # built-in teams in the list are}} ready to use in chat right now."
+    },
+    "allRuns": {
+      "title": "Runs across every Squad",
+      "description": "Pick a Squad in the list for its overview, controls and board."
+    },
+    "detail": {
+      "back": "Back to Squads",
+      "waitingCount": "{count, plural, =1 {1 needs you} other {# need you}}",
+      "openTasks": "{count, plural, =1 {1 open task} other {# open tasks}}",
+      "cannotStart": "Can't start yet: {reason}",
+      "missingTitle": "Squad unavailable",
+      "missingDescription": "It was deleted, perhaps in another window, or this link is out of date.",
+      "backToAll": "Show all Squads"
+    }
   },
   "readiness": {
     "title": "Readiness",
@@ -127,6 +138,40 @@
     "errors": {
       "noWorkspaceRoot": "The active workspace has no root directory to bind.",
       "bindFailed": "Could not save the binding."
+    }
+  },
+  "overview": {
+    "needsYou": {
+      "title": "Needs you",
+      "asked": "Asked {when}",
+      "answer": "Answer"
+    },
+    "latestRun": {
+      "title": "Latest run",
+      "none": "No runs yet. Start the Squad above, or hand it a conversation from the composer.",
+      "open": "Open run",
+      "started": "Started",
+      "duration": "Duration",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "unknown": "Not recorded"
+    },
+    "tasks": {
+      "title": "Tasks",
+      "openBoard": "Open board",
+      "none": "No tasks yet. The lead adds them when a run plans its work, or add your own on the board.",
+      "groups": {
+        "open": "Open",
+        "active": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "failed": "Failed"
+      }
+    },
+    "roster": {
+      "title": "Roster",
+      "edit": "Edit roster",
+      "none": "No members yet."
     }
   }
 }

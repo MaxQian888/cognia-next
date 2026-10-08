@@ -26,8 +26,8 @@ ADR-0140 移除了 `/agent-teams/workspace` 工作区。小队作为对话的执
 
 | 旧工作区标签页 | 现在在哪 |
 | --- | --- |
-| Overview、运行控制 | `/squads`，检视面板里的 `TeamRunControls` |
-| Tasks（看板） | `/squads` 的 Board 标签页 |
+| Overview、运行控制 | `/squads`，选中小队的页眉（`TeamRunControls`）与 Overview 标签页 |
+| Tasks（看板） | `/squads`，选中小队的 Board 标签页 |
 | Chat | 对话本身，通过组合器上的执行器芯片 |
 | Activity、operations、consensus | `/agent-runs` 运行详情里的小队标签页 |
 | Members，以及九个治理小节 | 设置里 Squads 的详情面板 |
@@ -48,15 +48,18 @@ ADR-0140 移除了 `/agent-teams/workspace` 工作区。小队作为对话的执
 
 ### 详情面板
 
-`squad-detail-panel.tsx` 按顺序渲染：
+`squad-detail-panel.tsx` 渲染一个 `SettingsStack`，由发丝线分隔的若干带标题 `SettingsBlock` 组成，没有任何卡片或描边框，按使用顺序排列：
 
-1. **名称** 与 **描述**，延迟输入，在失焦时经 `updateTeam` 提交。空名称会被拒绝。
-2. **成员**，整块挂载 `components/agent/workspace/members` 的 `AgentTeamMembers`。这是真正的花名册编辑器，不是只读列表。
-3. 一个位于 `agent.team.panel` 扩展点的**插件槽位**。它声明的宿主以前是工作区 overview，而那个宿主没人渲染，于是注册进来的东西悄无声息地从来没有出现过。
-4. **Made from a template**，即下文的溯源区块。
-5. **Reuse this squad**，即下文的派生动作。
-6. 一个**危险区**，Delete Squad 藏在确认对话框后面。
-7. **Advanced governance**，一个折叠组整块挂载 `AgentTeamSettings`，而不是在导航条里再摆九行。
+1. **基本信息**：**名称** 与 **描述**，延迟输入，在失焦时经 `updateTeam` 提交。空名称会被拒绝。
+2. **成员**，整块挂载 `components/agent/workspace/members` 的 `AgentTeamMembers`。这是真正的花名册编辑器，不是只读列表：一条发丝线分隔的列表，队长在前，每行按花名册自身宽度（`@container/roster`）而不是窗口宽度重排。任何成员都可以从其菜单设为队长（`setSquadLead`，同时交换 `leadId` 与双方角色）；小队处于规划、执行或暂停状态时该操作锁定，并在菜单项里写明原因，因为持久运行会在启动时快照 `leadId`。该区块带有 `data-setting-id="squad-roster"`，`?focus=squad-roster` 会直接落到这里。
+3. **就绪状态**，即 `SquadReadinessCard`。其中的「添加成员」在这里会就地打开花名册的添加对话框（`onAddTeammate`），因为从设置跳到设置只会重新加载这个窗格。
+4. 一个位于 `agent.team.panel` 扩展点的**插件槽位**。它声明的宿主以前是工作区 overview，而那个宿主没人渲染，于是注册进来的东西悄无声息地从来没有出现过。没有插件贡献时它不占位置。
+5. **Made from a template**，即下文的溯源区块。
+6. **Reuse this squad**，即下文的派生动作。复制完成后直接打开副本（`onOpenSquad`）。
+7. **Advanced governance**，一个折叠区块整块挂载 `AgentTeamSettings`，而不是在导航条里再摆九行。
+8. **删除这个小队**，放在最后，藏在确认对话框后面。
+
+窗格页眉写出小队名称和状态，并用 **查看动态** 链接到 `/squads?id=`，回到这个小队正在做的事。冷启动时，在小队定义进入 store 之前（`useSquadDefinitionsHydrating`），列表栏显示骨架、窗格保持空白，而不是先打开模板画廊再淡入切到第一个小队。
 
 ### 溯源：这支小队从哪来
 
@@ -129,15 +132,21 @@ flowchart TD
 
 `app/squads/page.tsx` 在宽布局下渲染 `SquadFleetConsole`，在紧凑布局下渲染 `SquadsMobileBody`。它刻意只管运行面，因为一切关于*配置*小队的事情都住在设置里。
 
-深链接以 `?id=` 到达，从来不是 `[id]`。本应用以静态导出发布，由 Tauri 和 Capacitor 消费，那里运行期根本不存在动态段。`use-squad-route-state.ts` 拥有五个参数：`?id=`、`?run=`（运行页签里打开的执行运行，与 `/agent-runs?run=` 同一个 id 空间）、`?tab=`（`squads`、`runs`、`board` 之一）、`?q=` 和 `?filter=`（`all`、`waiting`、`live` 之一）。取默认值时参数会从 URL 中消失，每一次写入都是带 `scroll: false` 的 `router.replace`。
+深链接以 `?id=` 到达，从来不是 `[id]`。本应用以静态导出发布，由 Tauri 和 Capacitor 消费，那里运行期根本不存在动态段。`use-squad-route-state.ts` 拥有六个参数：`?id=`、`?run=`（运行页签里打开的执行运行，与 `/agent-runs?run=` 同一个 id 空间）、`?status=`（运行页签的状态分组）、`?tab=`（`overview`、`squads`、`runs`、`board` 之一）、`?q=` 和 `?filter=`（`all`、`waiting`、`live` 之一）。每一次写入都是带 `scroll: false` 的 `router.replace`。实际显示哪个标签页由 `resolveSquadTab` 决定：选中小队时提供 Overview、Runs、Board，默认落在 Overview；未选中时宽屏显示所有小队的运行，手机显示列表或所有小队的运行。切换小队会清掉 `?run=`，`runHref` 生成指向运行页签中某次运行的真实链接。
 
-桌面控制台由一个列表窗格、一个带两个标签页的中栏和一个检视面板构成。
+桌面控制台只有两栏：一个列表栏，加一个中栏，中栏要么是某个小队自己的视图，要么是所有小队的运行。右侧不再有检视面板。它曾经在运行驾驶舱自带的列表和详情旁边再加第四栏，结果每一栏都放不下自己的内容。
 
-- **Runs** 内嵌渲染规范的 `AgentRunsPanel`，钉住 `kind = team` 与选中的小队（ADR-0169）。与 `/agent-runs` 同样的行、同样的详情窗格、同样的 `allowedActions` 和同样的审批表单。退役的指挥中心与逐小队运行列表，连同各自的历史查询，已经不在。
-- **Board** 为选中的小队渲染 `AgentTeamTasks`，未选中时给出明确的空状态。
-- **检视面板**显示名称和描述，然后是 `TeamRunControls`（启动、以 ultracode 启动、暂停、恢复、停止，启动按钮被第一个就绪阻塞项禁用），再往下是列出每个阻塞项及其清除动作的 `SquadReadinessCard`，最后是回到设置的「Configure this Squad」链接。中止已删除：可见的破坏性动作只有停止，而且是终态。
+- **列表栏**（`SquadListPane`，`variant="rail"`）是直接铺在列表栏底色上的扁平行，筛选切换自带计数，内置团队折叠在下方的分组里。在 `md` 与 `lg` 之间，外壳会把它移进一个 sheet，选中一项即自动关闭。
+- 选中小队时，中栏是 `SquadDetailView`。它的**页眉**（`SquadMasthead`，仍为 `data-testid="squad-fleet-inspector"`）显示名称、状态、成员数和描述，然后是 `TeamRunControls`（启动、以 Ultracode 启动、暂停、恢复、停止）和 **配置这个小队**。启动按钮被禁用时，原因会直接写在下面，因为按钮的 `title` 在触屏上看不到。启动被拒绝时显示原因、授权码、Host 返回的阻塞项，以及会重放同一次启动的重试按钮。这些控制由 `useSquadRunControl` 驱动，底层是 `useSquadLatestRun`。
+- **Overview**（`SquadOverview`）是按分诊顺序、以发丝线分隔的若干段：**等你答复**（未处理的审阅，每条都是带着运行打开的 Runs 链接）、小队受阻时排在最前的**就绪状态**、**最近一次运行**（目标、状态、开始时间、耗时、token 与费用；在宿主上取自持久记录，在配对设备上取自 `latestSnapshot.usage`——持久派发每次汇总运行用量时，`reportTeamRunUsage` 会写入一条 summary 可见性的 `usage.reported` 日志事件）、**任务**（看板折算为待开始、进行中、受阻、已完成、失败）和**成员**。宽屏下，已就绪的就绪状态与成员会移到侧栏。
+- **Runs** 内嵌渲染规范的 `AgentRunsPanel`，钉住 `kind = team` 与选中的小队（ADR-0169）。与 `/agent-runs` 同样的行、同样的详情窗格、同样的 `allowedActions` 和同样的审批表单。它的标签上带有未处理审阅的数量。
+- **Board** 为选中的小队渲染 `AgentTeamTasks`。
+- 链接指向的小队已不存在时，会明确说明（「小队不可用」）并提供返回入口；仍在从 Dexie 加载的小队则在到达前不显示任何内容（`useSelectedSquad`）。
+- 未选中时中栏是所有小队的运行；一个小队都没有时，中栏是唯一的空状态，提供 **新建小队** 和 **按目标编排**，列表栏只用一行说明列表为空。中止已删除：可见的破坏性动作只有停止，而且是终态。
 
-头部提供 **Manage Squads**（就是设置深链接）以及在存在舰队快照时通向 `/fleet` 的 **Live host activity**。手机端在三个标签页下渲染同样这些部件，检视面板放在一个 sheet 里。
+头部提供 **新建小队**、**按目标编排**（`AutoComposeDialog`）、**管理小队**（设置深链接），以及在存在舰队快照时通向 `/fleet` 的 **宿主实时活动**。
+
+手机端（`SquadsMobileBody`）有两层。未选中时是列表（`variant="page"`：铺在壁纸上的一整块分组表面）和所有小队的运行。选中小队后，同一个 `SquadDetailView` 全屏替换列表，页眉带返回按钮。过去它在列表上弹出一个抽屉，而页面上的 Runs 和 Board 标签页仍然绑定在一个屏幕上无处可见的小队上。
 
 ## `/agent-runs`
 

@@ -10,9 +10,35 @@ jest.mock("@/hooks/squads/use-squad-readiness", () => ({
   useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
 }))
 jest.mock("@/components/squads/squad-readiness-card", () => ({
-  SquadReadinessCard: ({ squadId }: { squadId: string }) => (
-    <div data-testid="squad-readiness" data-squad={squadId} />
+  SquadReadinessCard: ({
+    squadId,
+    onAddTeammate,
+  }: {
+    squadId: string
+    onAddTeammate?: () => void
+  }) => (
+    <div data-testid="squad-readiness" data-squad={squadId}>
+      {onAddTeammate ? (
+        <button type="button" onClick={onAddTeammate}>
+          readiness-add-teammate
+        </button>
+      ) : null}
+    </div>
   ),
+}))
+jest.mock("./squad-derive-actions", () => ({
+  SquadDeriveActions: ({ onDuplicated }: { onDuplicated?: (id: string) => void }) => (
+    <section data-testid="squad-derive">
+      {onDuplicated ? (
+        <button type="button" onClick={() => onDuplicated("copy-1")}>
+          duplicate-stub
+        </button>
+      ) : null}
+    </section>
+  ),
+}))
+jest.mock("./squad-template-provenance", () => ({
+  SquadTemplateProvenance: () => <section data-testid="squad-provenance" />,
 }))
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -35,8 +61,18 @@ jest.mock("@/components/agent/workspace/settings", () => ({
  * mounted rather than a read-only list. `members.test.tsx` covers the editor.
  */
 jest.mock("@/components/agent/workspace/members", () => ({
-  AgentTeamMembers: ({ team, leadId }: { team: { id: string }; leadId: string }) => (
-    <div data-testid="agent-team-members">{`${team.id}/${leadId}`}</div>
+  AgentTeamMembers: ({
+    team,
+    leadId,
+    addOpen,
+  }: {
+    team: { id: string }
+    leadId: string
+    addOpen?: boolean
+  }) => (
+    <div data-testid="agent-team-members" data-add-open={String(Boolean(addOpen))}>
+      {`${team.id}/${leadId}`}
+    </div>
   ),
 }))
 
@@ -153,7 +189,7 @@ describe("SquadDetailPanel advanced governance", () => {
    */
   it("carries the governance sections the retired workspace owned", async () => {
     render(<SquadDetailPanel squadId="squad-1" />)
-    await userEvent.click(screen.getByTestId("squad-advanced-toggle"))
+    await userEvent.click(screen.getByRole("button", { name: /advanced/ }))
     expect(screen.getByTestId("agent-team-settings")).toHaveTextContent("squad-1")
   })
 
@@ -170,7 +206,64 @@ describe("SquadDetailPanel advanced governance", () => {
   it("is the one delete path for a squad", async () => {
     render(<SquadDetailPanel squadId="squad-1" />)
     expect(screen.getByTestId("squad-delete")).toBeInTheDocument()
-    await userEvent.click(screen.getByTestId("squad-advanced-toggle"))
+    await userEvent.click(screen.getByRole("button", { name: /advanced/ }))
     expect(screen.getAllByTestId("squad-delete")).toHaveLength(1)
+  })
+})
+
+describe("SquadDetailPanel layout", () => {
+  /**
+   * One stack of titled blocks in the order of use, with the irreversible
+   * action last. Delete used to sit above the advanced settings, mid-page.
+   */
+  it("orders the blocks by use and ends with the danger zone", () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    const order = [
+      "squad-detail-general",
+      "squad-detail-roster",
+      "squad-detail-readiness",
+      "squad-provenance",
+      "squad-derive",
+      "squad-advanced",
+      "squad-detail-danger",
+    ].map((id) => screen.getByTestId(id))
+    for (let i = 1; i < order.length; i += 1) {
+      expect(
+        order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+  })
+
+  /** Every block on one ground: no bordered box, no card inside the pane. */
+  it("frames no block of its own", () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    for (const id of ["squad-detail-readiness", "squad-detail-danger"]) {
+      expect(screen.getByTestId(id).className).not.toMatch(/\bborder\b/)
+    }
+  })
+
+  /** `?focus=squad-roster` from `/squads` lands on the roster itself. */
+  it("anchors the roster for a focus deep link", () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    expect(screen.getByTestId("squad-detail-roster")).toHaveAttribute(
+      "data-setting-id",
+      "squad-roster"
+    )
+  })
+
+  /** The roster is on this pane, so the fix happens here rather than via a link. */
+  it("opens the add-teammate dialog in place from the readiness blocker", async () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    expect(screen.getByTestId("agent-team-members")).toHaveAttribute("data-add-open", "false")
+    await userEvent.click(screen.getByRole("button", { name: "readiness-add-teammate" }))
+    expect(screen.getByTestId("agent-team-members")).toHaveAttribute("data-add-open", "true")
+  })
+
+  /** A duplicate lands on its copy, which is what the reader asked for. */
+  it("opens the copy after a duplicate", async () => {
+    const onOpenSquad = jest.fn()
+    render(<SquadDetailPanel squadId="squad-1" onOpenSquad={onOpenSquad} />)
+    await userEvent.click(screen.getByRole("button", { name: "duplicate-stub" }))
+    expect(onOpenSquad).toHaveBeenCalledWith("copy-1")
   })
 })

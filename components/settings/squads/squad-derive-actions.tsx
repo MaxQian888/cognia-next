@@ -28,6 +28,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { CopyIcon, LayoutTemplateIcon } from "lucide-react"
 
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -157,10 +158,13 @@ export function SquadDeriveActions({
   }
 
   return (
-    <section className={className} data-testid="squad-derive">
-      <p className="text-xs font-medium">{t("title")}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      className={className}
+      testid="squad-derive"
+    >
+      <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={openCopy} data-testid="squad-duplicate">
           <CopyIcon className="mr-1.5 size-3.5" />
           {t("duplicate")}
@@ -176,7 +180,7 @@ export function SquadDeriveActions({
         </Button>
       </div>
       {message ? (
-        <p className="mt-2 text-xs text-muted-foreground" data-testid="squad-derive-message">
+        <p className="text-xs text-muted-foreground" data-testid="squad-derive-message">
           {message}
         </p>
       ) : null}
@@ -309,6 +313,6 @@ export function SquadDeriveActions({
             .finally(() => setBusy(false))
         }}
       />
-    </section>
+    </SettingsBlock>
   )
 }

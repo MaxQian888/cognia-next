@@ -2,6 +2,7 @@ import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { ownsDispatchAttempt, planDispatchAttempt } from "@cognia/agent-orchestration/replay"
 import { recordRunUsage } from "@cognia/agent-orchestration/usage"
+import { reportTeamRunUsage } from "@/lib/execution/agent-team-bridge"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { AgentTeamSideEffect } from "@/types/agent/agent-team-runtime"
 import { createEvidenceBundle } from "@cognia/agent-orchestration/evidence"
@@ -719,7 +720,13 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         },
       })
       if (!completed) throw new Error("Child control changed during completion")
-      await recordRunUsage(store, input.runId, completedAt)
+      // The total goes to the durable record, then to the execution run's
+      // remote-safe snapshot, which is the half a paired device can read.
+      await reportTeamRunUsage(
+        input.runId,
+        await recordRunUsage(store, input.runId, completedAt),
+        completedAt
+      )
       for (const receiptId of pendingSteeringIds) {
         await store.updateSteeringReceipt(receiptId, "applied", completedAt)
       }
@@ -784,7 +791,11 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         if (needsInput) {
           await parkRun("uncertain_side_effect", failedAt)
         }
-        await recordRunUsage(store, input.runId, failedAt)
+        await reportTeamRunUsage(
+          input.runId,
+          await recordRunUsage(store, input.runId, failedAt),
+          failedAt
+        )
       } finally {
         detachControl?.()
         detachControl = undefined

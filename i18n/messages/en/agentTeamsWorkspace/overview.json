@@ -22,10 +22,10 @@
     "ultracodeOn": "ultracode on"
   },
   "runtime": "Runtime",
-  "startTeam": "Run team",
-  "startTeamUltracode": "Run with ultracode",
+  "startTeam": "Start",
+  "startTeamUltracode": "Start with ultracode",
   "status": "Status",
-  "stopTeam": "Cancel team",
+  "stopTeam": "Stop",
   "tasksProgress": "Tasks done",
   "teammates": "Teammates",
   "tokenInput": "Prompt",

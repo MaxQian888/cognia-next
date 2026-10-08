@@ -3461,15 +3461,21 @@
     "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
     "listTitle": "Agent Teams",
     "members": {
+      "actionsFor": "Actions for {name}",
       "addMember": "Add teammate",
       "addMemberTitle": "Add new teammate",
       "cancel": "Cancel",
       "configOverrides": "Configuration overrides",
       "configure": "Configure",
+      "count": "{count, plural, =0 {No members} =1 {1 member} other {# members}}",
       "description": "Description",
       "descriptionPlaceholder": "What does this teammate do?",
       "empty": "No members yet.",
       "lead": "Lead",
+      "leadChanged": "{name} now leads this Squad.",
+      "leadLocked": "The lead can't change while a run is live or paused. Stop the run first.",
+      "leadLockedShort": "Locked while a run is live or paused",
+      "makeLead": "Make lead",
       "model": "Model",
       "name": "Name",
       "namePlaceholder": "e.g., Security Reviewer",
@@ -3625,10 +3631,10 @@
         "ultracodeOn": "ultracode on"
       },
       "runtime": "Runtime",
-      "startTeam": "Run team",
-      "startTeamUltracode": "Run with ultracode",
+      "startTeam": "Start",
+      "startTeamUltracode": "Start with ultracode",
       "status": "Status",
-      "stopTeam": "Cancel team",
+      "stopTeam": "Stop",
       "tasksProgress": "Tasks done",
       "teammates": "Teammates",
       "tokenInput": "Prompt",
@@ -48726,6 +48732,7 @@
       },
       "detail": {
         "advanced": "Advanced governance",
+        "advancedDescription": "Governance, budgets, review and delivery policies. Changes save as you make them.",
         "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
         "dangerTitle": "Delete this Squad",
         "deleteAction": "Delete Squad",
@@ -48734,12 +48741,14 @@
         "deleteTitle": "Delete {name}?",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "What is this Squad for?",
-        "memberCount": "{count, plural, =0 {none} =1 {1 member} other {# members}}",
+        "generalTitle": "General",
         "missingDescription": "It was deleted, perhaps in another window. Pick another from the list.",
         "missingTitle": "Squad unavailable",
         "nameLabel": "Name",
-        "noMembersDescription": "Add teammates from a template, or from the Squad's own run surface.",
-        "noMembersTitle": "No members yet",
+        "openLive": "View activity",
+        "readinessDescription": "What this Squad needs bound before it can run.",
+        "readinessTitle": "Readiness",
+        "rosterDescription": "The lead plans and reviews; teammates take the tasks. Each teammate can run on its own runtime.",
         "rosterLabel": "Members"
       },
       "nav": {
@@ -52301,9 +52310,12 @@
       "title": "Built-in teams"
     },
     "fleet": {
-      "boardUnselectedDescription": "A board belongs to one Squad. Choose one from the list to see its tasks.",
-      "boardUnselectedTitle": "Pick a Squad",
+      "allRuns": {
+        "description": "Pick a Squad in the list for its overview, controls and board.",
+        "title": "Runs across every Squad"
+      },
       "clearFilters": "Clear filters",
+      "composeCta": "Compose from an objective",
       "configure": "Configure this Squad",
       "control": {
         "awaitingProjection": "Waiting for the Host run to sync…",
@@ -52345,24 +52357,34 @@
       "createCta": "New Squad",
       "defaultLeadName": "Team Lead",
       "description": "What every Squad is doing right now.",
+      "detail": {
+        "back": "Back to Squads",
+        "backToAll": "Show all Squads",
+        "cannotStart": "Can't start yet: {reason}",
+        "missingDescription": "It was deleted, perhaps in another window, or this link is out of date.",
+        "missingTitle": "Squad unavailable",
+        "openTasks": "{count, plural, =1 {1 open task} other {# open tasks}}",
+        "waitingCount": "{count, plural, =1 {1 needs you} other {# need you}}"
+      },
       "emptyDescription": "Make one here, then hand a conversation to it from the composer.",
       "emptyDescriptionWithBuiltIns": "Make one here, then hand a conversation to it from the composer. {count, plural, =1 {The built-in team below is} other {The # built-in teams below are}} ready to use right now.",
       "emptyTitle": "No Squads yet",
       "filters": {
         "all": "All",
+        "countAria": "{label}, {count}",
         "label": "Narrow the list",
         "live": "Working",
         "waiting": "Needs you"
       },
-      "inspectorLabel": "Squad detail",
       "manageAction": "Manage Squads",
       "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
-      "mobile": {
-        "configureHint": "Roster, governance and auto-compose are edited in Settings, under Configure this Squad."
-      },
       "newSquadName": "New Squad",
       "noMatchesDescription": "Widen the filter or clear the search to see the rest.",
       "noMatchesTitle": "No Squads match",
+      "onboarding": {
+        "description": "A Squad is a lead and its teammates taking one objective to done inside a repository. Start an empty one and staff it, or describe the objective and let Cognia propose the roster.",
+        "descriptionWithBuiltIns": "A Squad is a lead and its teammates taking one objective to done inside a repository. Start an empty one and staff it, or describe the objective and let Cognia propose the roster. {count, plural, =1 {The built-in team in the list is} other {The # built-in teams in the list are}} ready to use in chat right now."
+      },
       "openFleet": "Live host activity",
       "palette": {
         "meta": "Squad control",
@@ -52372,18 +52394,50 @@
       },
       "railLabel": "Squad list",
       "search": "Search Squads",
-      "stats": {
-        "waiting": "Needs you",
-        "working": "Working"
-      },
       "summary": "{total, plural, =1 {1 Squad} other {# Squads}} · {live, plural, =0 {idle} other {# working}}",
       "tabs": {
+        "allRuns": "All runs",
         "board": "Board",
+        "overview": "Overview",
         "runs": "Runs",
         "squads": "Squads"
       },
       "title": "Squads",
       "waiting": "Needs you"
+    },
+    "overview": {
+      "latestRun": {
+        "cost": "Cost",
+        "duration": "Duration",
+        "none": "No runs yet. Start the Squad above, or hand it a conversation from the composer.",
+        "open": "Open run",
+        "started": "Started",
+        "title": "Latest run",
+        "tokens": "Tokens",
+        "unknown": "Not recorded"
+      },
+      "needsYou": {
+        "answer": "Answer",
+        "asked": "Asked {when}",
+        "title": "Needs you"
+      },
+      "roster": {
+        "edit": "Edit roster",
+        "none": "No members yet.",
+        "title": "Roster"
+      },
+      "tasks": {
+        "groups": {
+          "active": "In progress",
+          "blocked": "Blocked",
+          "done": "Done",
+          "failed": "Failed",
+          "open": "Open"
+        },
+        "none": "No tasks yet. The lead adds them when a run plans its work, or add your own on the board.",
+        "openBoard": "Open board",
+        "title": "Tasks"
+      }
     },
     "readiness": {
       "actions": {

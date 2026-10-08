@@ -61,6 +61,14 @@ export interface TemplateInstanceCardProps {
   onDetach: (instanceId: string) => void
   onRebind?: (instanceId: string, definitionId: string, version: string) => void
   busy?: boolean
+  /**
+   * `card` frames the instance, right in the Studio's Instances tab where it
+   * sits in a list of peers. `flat` drops the frame for a host that already
+   * gives it a titled section: in Settings → Squads the provenance block is
+   * one chapter of the Squad's page, and a card there was a box in a section
+   * on a pane.
+   */
+  variant?: "card" | "flat"
 }
 
 export function TemplateInstanceCard({
@@ -73,6 +81,7 @@ export function TemplateInstanceCard({
   onDetach,
   onRebind,
   busy = false,
+  variant = "card",
 }: TemplateInstanceCardProps) {
   const t = useTranslations("templateStudio")
   const current = instance.source.version
@@ -88,89 +97,104 @@ export function TemplateInstanceCard({
       !(target.id === instance.source.definitionId && target.version === instance.source.version)
   )
 
-  return (
-    <Card data-testid={`template-instance-${instance.id}`}>
-      <CardHeader>
-        <CardTitle className="text-base">{title ?? instance.source.definitionId}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm text-muted-foreground">
-        {summary ?? <p>{current ?? t("status.draft")}</p>}
-        <p>{t("instances.resources", { count: instance.resources.length })}</p>
-        {detached ? <Badge variant="outline">{t("instances.detached")}</Badge> : null}
-        {instance.sourceUnavailableAt ? (
-          <Badge variant="outline">{t("instances.sourceUnavailable")}</Badge>
-        ) : null}
-        {!detached ? (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            {newer.length > 0 ? (
-              <Select
-                onValueChange={(version) => onPlanUpdate(instance.id, version)}
-                disabled={busy}
-              >
-                <SelectTrigger
-                  className="h-8 w-44"
-                  aria-label={t("instances.updateTo")}
-                  data-testid={`template-instance-update-${instance.id}`}
-                >
-                  <SelectValue placeholder={t("instances.updateTo")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {newer.map((version) => (
-                    <SelectItem key={version} value={version}>
-                      {version}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <span className="text-xs">{t("instances.upToDate")}</span>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={() => onDetach(instance.id)}
-              disabled={busy}
-              data-testid={`template-instance-detach-${instance.id}`}
-            >
-              {t("instances.detach")}
-            </Button>
-          </div>
-        ) : null}
-        {/* `rebindSource` had no caller at all, so an instance whose package was
-            removed, or one deliberately detached, was stuck in that state
-            forever. It also clears both marks, which is what makes it the way
-            back rather than a second kind of detach. */}
-        {orphaned && onRebind && reboundCandidates.length > 0 ? (
-          <div className="pt-1">
-            <Select
-              onValueChange={(value) => {
-                const [id, version] = value.split("@@")
-                onRebind(instance.id, id, version)
-              }}
-              disabled={busy}
-            >
+  const titleText = title ?? instance.source.definitionId
+  const content = (
+    <>
+      {summary ?? <p>{current ?? t("status.draft")}</p>}
+      <p>{t("instances.resources", { count: instance.resources.length })}</p>
+      {detached ? <Badge variant="outline">{t("instances.detached")}</Badge> : null}
+      {instance.sourceUnavailableAt ? (
+        <Badge variant="outline">{t("instances.sourceUnavailable")}</Badge>
+      ) : null}
+      {!detached ? (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {newer.length > 0 ? (
+            <Select onValueChange={(version) => onPlanUpdate(instance.id, version)} disabled={busy}>
               <SelectTrigger
-                className="h-8 w-full"
-                aria-label={t("instances.rebindTo")}
-                data-testid={`template-instance-rebind-${instance.id}`}
+                className="h-8 w-44"
+                aria-label={t("instances.updateTo")}
+                data-testid={`template-instance-update-${instance.id}`}
               >
-                <SelectValue placeholder={t("instances.rebindTo")} />
+                <SelectValue placeholder={t("instances.updateTo")} />
               </SelectTrigger>
               <SelectContent>
-                {reboundCandidates.map((target) => (
-                  <SelectItem
-                    key={`${target.id}@${target.version}`}
-                    value={`${target.id}@@${target.version}`}
-                  >
-                    {target.name} {target.version}
+                {newer.map((version) => (
+                  <SelectItem key={version} value={version}>
+                    {version}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        ) : null}
-      </CardContent>
+          ) : (
+            <span className="text-xs">{t("instances.upToDate")}</span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => onDetach(instance.id)}
+            disabled={busy}
+            data-testid={`template-instance-detach-${instance.id}`}
+          >
+            {t("instances.detach")}
+          </Button>
+        </div>
+      ) : null}
+      {/* `rebindSource` had no caller at all, so an instance whose package was
+            removed, or one deliberately detached, was stuck in that state
+            forever. It also clears both marks, which is what makes it the way
+            back rather than a second kind of detach. */}
+      {orphaned && onRebind && reboundCandidates.length > 0 ? (
+        <div className="pt-1">
+          <Select
+            onValueChange={(value) => {
+              const [id, version] = value.split("@@")
+              onRebind(instance.id, id, version)
+            }}
+            disabled={busy}
+          >
+            <SelectTrigger
+              className="h-8 w-full"
+              aria-label={t("instances.rebindTo")}
+              data-testid={`template-instance-rebind-${instance.id}`}
+            >
+              <SelectValue placeholder={t("instances.rebindTo")} />
+            </SelectTrigger>
+            <SelectContent>
+              {reboundCandidates.map((target) => (
+                <SelectItem
+                  key={`${target.id}@${target.version}`}
+                  value={`${target.id}@@${target.version}`}
+                >
+                  {target.name} {target.version}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+    </>
+  )
+
+  if (variant === "flat") {
+    return (
+      <div
+        className="space-y-2 text-sm text-muted-foreground"
+        data-testid={`template-instance-${instance.id}`}
+        data-variant="flat"
+      >
+        <p className="font-medium text-foreground">{titleText}</p>
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <Card data-testid={`template-instance-${instance.id}`} data-variant="card">
+      <CardHeader>
+        <CardTitle className="text-base">{titleText}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm text-muted-foreground">{content}</CardContent>
     </Card>
   )
 }

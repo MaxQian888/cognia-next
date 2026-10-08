@@ -22,10 +22,10 @@
     "ultracodeOn": "ultracode 开启"
   },
   "runtime": "运行时",
-  "startTeam": "启动团队",
-  "startTeamUltracode": "以 Ultracode 运行",
+  "startTeam": "启动",
+  "startTeamUltracode": "以 Ultracode 启动",
   "status": "状态",
-  "stopTeam": "取消团队",
+  "stopTeam": "停止",
   "tasksProgress": "任务完成",
   "teammates": "成员",
   "tokenInput": "输入",

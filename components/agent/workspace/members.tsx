@@ -3,7 +3,14 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
-import { MoreHorizontalIcon, PlusIcon, Settings2Icon, Trash2Icon, UsersIcon } from "lucide-react"
+import {
+  CrownIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  Settings2Icon,
+  Trash2Icon,
+  UsersIcon,
+} from "lucide-react"
 
 import {
   MOBILE_SPRING,
@@ -14,7 +21,6 @@ import {
 } from "@/lib/ui/motion"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badge"
 import { PrStatusBadge } from "./pr-status-badge"
@@ -85,6 +91,14 @@ export interface AgentTeamMembersProps {
   leadId: string
   /** Legacy entry point: pass `team` instead. Kept for prop-back-compat. */
   teamId?: string
+  /**
+   * Controls the "Add teammate" dialog from outside. Settings passes these so
+   * the readiness blocker that asks for a teammate can open the dialog in
+   * place, instead of linking to the pane it is already on. Omit both to let
+   * the roster own the dialog, which is every other host.
+   */
+  addOpen?: boolean
+  onAddOpenChange?: (open: boolean) => void
 }
 
 export function AgentTeamMembers({
@@ -92,6 +106,8 @@ export function AgentTeamMembers({
   teammates,
   leadId,
   teamId: legacyTeamId,
+  addOpen: controlledAddOpen,
+  onAddOpenChange,
 }: AgentTeamMembersProps) {
   const teamId = team?.id ?? legacyTeamId ?? ""
   const t = useTranslations("agentTeamsWorkspace.members")
@@ -106,7 +122,12 @@ export function AgentTeamMembers({
   const removeTeammate = useAgentTeamStore((s) => s.removeTeammate)
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
 
-  const [addOpen, setAddOpen] = useState(false)
+  const [ownAddOpen, setOwnAddOpen] = useState(false)
+  const addOpen = controlledAddOpen ?? ownAddOpen
+  const setAddOpen = (open: boolean) => {
+    if (controlledAddOpen === undefined) setOwnAddOpen(open)
+    onAddOpenChange?.(open)
+  }
   const [removing, setRemoving] = useState<AgentTeammate | null>(null)
   const [configuring, setConfiguring] = useState<AgentTeammate | null>(null)
 
@@ -157,6 +178,22 @@ export function AgentTeamMembers({
     })
   }
 
+  const setSquadLead = useAgentTeamStore((s) => s.setSquadLead)
+  const teamStatus = useAgentTeamStore((s) => s.teams[teamId]?.status)
+  // Mirrors the store's own refusal, so the menu says so before the click
+  // rather than after it.
+  const leadLocked =
+    teamStatus === "planning" || teamStatus === "executing" || teamStatus === "paused"
+
+  const handleMakeLead = (m: AgentTeammate) => {
+    const result = setSquadLead(teamId, m.id)
+    if (result.ok) {
+      toast.success(t("leadChanged", { name: m.name }))
+    } else if (result.reason === "run_active") {
+      toast.error(t("leadLocked"))
+    }
+  }
+
   const handleRemove = (m: AgentTeammate) => {
     removeTeammate(m.id)
     toast.success(t("removed", { name: m.name }))
@@ -183,43 +220,41 @@ export function AgentTeamMembers({
     )
   }
 
+  // One list, lead first, rows split by hairlines. Each member used to be its
+  // own Card in a grid keyed to the WINDOW (`sm:grid-cols-2 xl:grid-cols-3`),
+  // so inside Settings' ~500px detail pane on a wide monitor the grid laid
+  // three cards into room for one and every runtime select was crushed. The
+  // row now reflows off the roster's own width (`@container/roster`).
+  const ordered = lead ? [lead, ...workers] : workers
+
   return (
-    <div className="space-y-4" data-testid="workspace-members">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">
-          {t("title")} · {teammates.length}
+    <div className="@container/roster space-y-2" data-testid="workspace-members">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground" data-testid="workspace-members-count">
+          {t("count", { count: teammates.length })}
         </p>
-        <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setAddOpen(true)}
+          data-testid="workspace-members-add"
+        >
           <PlusIcon className="mr-2 size-3.5" />
           {t("addMember")}
         </Button>
       </div>
 
-      {/* Lead */}
-      {lead && (
-        <Card className="p-3" data-testid={`member-${lead.id}`}>
-          <MemberRow
-            member={lead}
-            teamId={teamId}
-            isLead
-            onRemove={() => setRemoving(lead)}
-            onConfigure={() => setConfiguring(lead)}
-            onRuntimeChange={(r) => handleRuntimeChange(lead, r)}
-          />
-        </Card>
-      )}
-
-      {/* Workers */}
-      {workers.length > 0 && (
-        <motion.div
-          className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start"
-          variants={STAGGER_CONTAINER}
-          initial="initial"
-          animate="animate"
-        >
-          <AnimatePresence initial={false}>
-            {workers.map((m) => (
-              <motion.div
+      <motion.ul
+        className="divide-y divide-border/60"
+        variants={STAGGER_CONTAINER}
+        initial="initial"
+        animate="animate"
+      >
+        <AnimatePresence initial={false}>
+          {ordered.map((m) => {
+            const isLead = m.id === leadId
+            return (
+              <motion.li
                 key={m.id}
                 layout
                 variants={childVariants}
@@ -227,22 +262,27 @@ export function AgentTeamMembers({
                 animate="animate"
                 exit="exit"
                 transition={layoutTransition}
+                className="py-3 first:pt-1"
+                data-testid={`member-${m.id}`}
+                data-role={isLead ? "lead" : "teammate"}
               >
-                <Card className="p-3" data-testid={`member-${m.id}`}>
-                  <MemberRow
-                    member={m}
-                    teamId={teamId}
-                    onRemove={() => setRemoving(m)}
-                    onConfigure={() => setConfiguring(m)}
-                    onRuntimeChange={(r) => handleRuntimeChange(m, r)}
-                    onConfigPinChange={(id) => handleConfigPinChange(m, id)}
-                  />
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </motion.div>
-      )}
+                <MemberRow
+                  member={m}
+                  teamId={teamId}
+                  isLead={isLead}
+                  onRemove={() => setRemoving(m)}
+                  onConfigure={() => setConfiguring(m)}
+                  {...(isLead
+                    ? {}
+                    : { onMakeLead: () => handleMakeLead(m), makeLeadDisabled: leadLocked })}
+                  onRuntimeChange={(r) => handleRuntimeChange(m, r)}
+                  {...(isLead ? {} : { onConfigPinChange: (id) => handleConfigPinChange(m, id) })}
+                />
+              </motion.li>
+            )
+          })}
+        </AnimatePresence>
+      </motion.ul>
 
       {configuring && team ? (
         <TeammateConfigDialog
@@ -295,6 +335,8 @@ function MemberRow({
   isLead,
   onRemove,
   onConfigure,
+  onMakeLead,
+  makeLeadDisabled = false,
   onRuntimeChange,
   onConfigPinChange,
 }: {
@@ -303,6 +345,10 @@ function MemberRow({
   isLead?: boolean
   onRemove: () => void
   onConfigure: () => void
+  /** Hand this member the lead. Absent for the lead itself. */
+  onMakeLead?: () => void
+  /** A run is live or paused, so the lead is locked until it ends. */
+  makeLeadDisabled?: boolean
   onRuntimeChange: (runtime: TeammateRuntime) => void
   /** Pin (or clear) the exact external-agent config. Absent for the lead. */
   onConfigPinChange?: (configId: string | undefined) => void
@@ -317,68 +363,79 @@ function MemberRow({
     <div className="flex items-start gap-3">
       <AgentTeamAvatar
         subject={member}
-        className="size-9 rounded-full bg-primary/10 ring-1 ring-inset ring-primary/10"
+        className="size-9 shrink-0 rounded-full bg-primary/10 ring-1 ring-inset ring-primary/10"
       />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-medium">{member.name}</p>
-          <Badge variant={isLead ? "default" : "outline"} className="text-[10px]">
-            {isLead ? t("lead") : t("teammate")}
-          </Badge>
-          {statusCfg && (
-            <StatusBadge
-              value={statusCfg.labelKey ?? member.status}
-              labelNamespace="agentTeam.teammateStatus"
-              pulse={member.status === "executing" || member.status === "planning"}
-              className="text-[10px]"
-              data-testid={`member-${member.id}-status`}
-            />
+      <div className="min-w-0 flex-1 @2xl/roster:flex @2xl/roster:items-start @2xl/roster:gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium">{member.name}</p>
+            <Badge variant={isLead ? "default" : "outline"} className="text-[10px]">
+              {isLead ? t("lead") : t("teammate")}
+            </Badge>
+            {statusCfg && (
+              <StatusBadge
+                value={statusCfg.labelKey ?? member.status}
+                labelNamespace="agentTeam.teammateStatus"
+                pulse={member.status === "executing" || member.status === "planning"}
+                className="text-[10px]"
+                data-testid={`member-${member.id}-status`}
+              />
+            )}
+            {prRow && <PrStatusBadge status={prRow.derivedStatus} prUrl={prRow.prUrl} />}
+            <RuntimeBadge runtime={runtime} />
+          </div>
+          {member.description && (
+            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
+              {member.description}
+            </p>
           )}
-          {prRow && <PrStatusBadge status={prRow.derivedStatus} prUrl={prRow.prUrl} />}
-          <RuntimeBadge runtime={runtime} />
+          {member.config?.specialization && (
+            <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {member.config.specialization}
+            </span>
+          )}
         </div>
-        {member.description && (
-          <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{member.description}</p>
-        )}
-        {member.config?.specialization && (
-          <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {member.config.specialization}
-          </span>
-        )}
-        <div className="mt-2 flex items-center gap-2">
-          <Label className="text-[10px] text-muted-foreground">{t("runtime")}</Label>
-          <Select value={runtime} onValueChange={(v) => onRuntimeChange(v as TeammateRuntime)}>
-            <SelectTrigger
-              className="h-7 w-full max-w-[12rem] text-xs sm:w-36"
-              data-testid={`runtime-select-${member.id}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RUNTIME_OPTIONS.map((r) => (
-                <SelectItem key={r} value={r} className="text-xs">
-                  {tRuntime(runtimeLabelKey(r))}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="mt-2 shrink-0 space-y-1.5 @2xl/roster:mt-0 @2xl/roster:w-56">
+          <div className="flex items-center gap-2">
+            <Label className="text-[10px] text-muted-foreground">{t("runtime")}</Label>
+            <Select value={runtime} onValueChange={(v) => onRuntimeChange(v as TeammateRuntime)}>
+              <SelectTrigger
+                className="h-7 w-full max-w-[12rem] text-xs"
+                data-testid={`runtime-select-${member.id}`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RUNTIME_OPTIONS.map((r) => (
+                  <SelectItem key={r} value={r} className="text-xs">
+                    {tRuntime(runtimeLabelKey(r))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {onConfigPinChange && runtime !== "claude" ? (
+            <ExternalAgentConfigPinField
+              compact
+              className="max-w-[16rem]"
+              triggerClassName="h-7"
+              presetId={runtime}
+              presetLabel={tRuntime(runtimeLabelKey(runtime))}
+              value={member.config.externalAgentConfigId}
+              onChange={onConfigPinChange}
+              data-testid={`config-pin-${member.id}`}
+            />
+          ) : null}
         </div>
-        {onConfigPinChange && runtime !== "claude" ? (
-          <ExternalAgentConfigPinField
-            compact
-            className="mt-1.5 max-w-[16rem]"
-            triggerClassName="h-7"
-            presetId={runtime}
-            presetLabel={tRuntime(runtimeLabelKey(runtime))}
-            value={member.config.externalAgentConfigId}
-            onChange={onConfigPinChange}
-            data-testid={`config-pin-${member.id}`}
-          />
-        ) : null}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-7 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0"
+            aria-label={t("actionsFor", { name: member.name })}
+          >
             <MoreHorizontalIcon className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
@@ -387,6 +444,25 @@ function MemberRow({
             <Settings2Icon className="mr-2 size-3.5" />
             {t("configure")}
           </DropdownMenuItem>
+          {onMakeLead ? (
+            <DropdownMenuItem
+              onClick={onMakeLead}
+              disabled={makeLeadDisabled}
+              className="flex-col items-start gap-0.5"
+              data-testid={`make-lead-${member.id}`}
+            >
+              <span className="flex items-center">
+                <CrownIcon className="mr-2 size-3.5" />
+                {t("makeLead")}
+              </span>
+              {/* Said in the item, not a tooltip, which no touch screen shows. */}
+              {makeLeadDisabled ? (
+                <span className="pl-5.5 text-[11px] text-muted-foreground">
+                  {t("leadLockedShort")}
+                </span>
+              ) : null}
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuSeparator />
           {!isLead && (
             <DropdownMenuItem className="text-destructive" onClick={onRemove}>

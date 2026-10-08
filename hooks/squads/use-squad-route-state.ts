@@ -26,8 +26,41 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { COCKPIT_STATUS_GROUPS, type CockpitStatusGroup } from "@/lib/execution/cockpit-model"
 
-export const SQUAD_TABS = ["squads", "runs", "board"] as const
+export const SQUAD_TABS = ["overview", "squads", "runs", "board"] as const
 export type SquadFleetTab = (typeof SQUAD_TABS)[number]
+
+/** The tabs a selected Squad's own view offers, in order. */
+export const SQUAD_DETAIL_TABS = ["overview", "runs", "board"] as const
+export type SquadDetailTab = (typeof SQUAD_DETAIL_TABS)[number]
+
+/**
+ * Which tab a surface actually shows for what the URL names.
+ *
+ * One function rather than a ternary per host, because the answer depends on
+ * two things the URL alone cannot say: whether a Squad is selected, and
+ * whether the surface is a phone.
+ *
+ *  - A selected Squad has its own view with Overview / Runs / Board, and lands
+ *    on Overview: that is the Squad's home, the one place its controls,
+ *    readiness, roster and latest result sit together.
+ *  - With nothing selected, a wide pane has one thing to show, every Squad's
+ *    runs, because the list is already on screen in the rail. A Board with no
+ *    Squad would be a tab whose only content is "pick one".
+ *  - With nothing selected, a phone has the list itself and every Squad's runs.
+ *
+ * A tab the current context does not offer resolves to that context's landing
+ * tab instead of selecting a tab with no trigger and no content.
+ */
+export function resolveSquadTab(
+  tab: SquadFleetTab | undefined,
+  context: { selected: boolean; compact: boolean }
+): SquadFleetTab {
+  if (context.selected) {
+    return tab && (SQUAD_DETAIL_TABS as readonly string[]).includes(tab) ? tab : "overview"
+  }
+  if (!context.compact) return "runs"
+  return tab === "runs" ? "runs" : "squads"
+}
 
 /**
  * The one facet a Squad list actually holds.
@@ -55,12 +88,21 @@ export interface SquadRouteState {
    * clickable, counted, and inert.
    */
   runStatus: CockpitStatusGroup | "all"
-  /** `undefined` when the URL names none, so each surface can pick its own landing tab. */
+  /**
+   * `undefined` when the URL names none. Read it through {@link resolveSquadTab},
+   * which knows what each surface lands on.
+   */
   tab: SquadFleetTab | undefined
   query: string
   filter: SquadFilter
   /** Whether the list is narrowed at all, for a badge and for the empty copy. */
   narrowed: boolean
+  /**
+   * A real address for one run in this Squad's Runs tab, keeping everything
+   * else on the URL. A link rather than a callback, so "Open run" and
+   * "Review" can be opened in a new window or copied like any other link.
+   */
+  runHref: (runId: string) => string
   setSelectedId: (id: string | undefined) => void
   setRunId: (runId: string | undefined) => void
   setRunStatus: (group: CockpitStatusGroup | "all") => void
@@ -95,30 +137,53 @@ export function useSquadRouteState(): SquadRouteState {
     [router, pathname, searchParams]
   )
 
+  const runHref = useCallback(
+    (target: string) => {
+      const next = new URLSearchParams(searchParams?.toString() ?? "")
+      next.set("tab", "runs")
+      next.set("run", target)
+      return `${pathname}?${next.toString()}`
+    },
+    [pathname, searchParams]
+  )
+
   const filter = oneOf(searchParams?.get("filter") ?? null, SQUAD_FILTERS) ?? "all"
   const query = searchParams?.get("q") ?? ""
   const runStatus =
     oneOf(searchParams?.get("status") ?? null, COCKPIT_STATUS_GROUPS) ?? ("all" as const)
 
+  const selectedId = searchParams?.get("id") ?? undefined
+  const tab = oneOf(searchParams?.get("tab") ?? null, SQUAD_TABS)
+  const runId = searchParams?.get("run") ?? undefined
+
   return useMemo(
     () => ({
-      selectedId: searchParams?.get("id") ?? undefined,
-      runId: searchParams?.get("run") ?? undefined,
+      selectedId,
+      runId,
       runStatus,
-      tab: oneOf(searchParams?.get("tab") ?? null, SQUAD_TABS),
+      tab,
       query,
       filter,
       narrowed: filter !== "all" || query.trim().length > 0,
-      setSelectedId: (id) => setParams({ id }),
+      runHref,
+      // An open run belongs to the Squad it was opened under, so it never
+      // survives a change of Squad. The tab does survive a move from one Squad
+      // to another (reading two Squads' boards in turn is a real workflow), but
+      // arriving from the list, or going back to it, starts from the landing
+      // tab rather than from wherever the previous view was left.
+      setSelectedId: (id) =>
+        setParams({ id, run: undefined, tab: id && selectedId ? tab : undefined }),
       setRunId: (runId) => setParams({ run: runId }),
       setRunStatus: (group) => setParams({ status: group === "all" ? undefined : group }),
-      // `runs` is the wide-pane default, so naming it in the URL would be
-      // noise. Every other tab is worth linking to.
-      setTab: (tab) => setParams({ tab: tab === "runs" ? undefined : tab }),
+      // Always named. Which tab is the default depends on the surface and on
+      // the selection (`resolveSquadTab`), so no one value is safe to elide:
+      // dropping `runs` used to be right when Runs was every wide pane's
+      // landing tab, and would now send a selected Squad back to Overview.
+      setTab: (next) => setParams({ tab: next }),
       setQuery: (value) => setParams({ q: value || undefined }),
       setFilter: (value) => setParams({ filter: value === "all" ? undefined : value }),
       clearFilters: () => setParams({ q: undefined, filter: undefined }),
     }),
-    [searchParams, setParams, query, filter, runStatus]
+    [setParams, runHref, selectedId, runId, tab, query, filter, runStatus]
   )
 }

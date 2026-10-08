@@ -24,5 +24,11 @@
   "specialization": "Specialization",
   "specializationPlaceholder": "e.g., security, testing",
   "teammate": "Teammate",
-  "title": "Team Members"
+  "title": "Team Members",
+  "count": "{count, plural, =0 {No members} =1 {1 member} other {# members}}",
+  "actionsFor": "Actions for {name}",
+  "makeLead": "Make lead",
+  "leadChanged": "{name} now leads this Squad.",
+  "leadLocked": "The lead can't change while a run is live or paused. Stop the run first.",
+  "leadLockedShort": "Locked while a run is live or paused"
 }

@@ -1,5 +1,6 @@
 import {
   FALLBACK_SQUAD_PANEL,
+  SQUAD_ROSTER_SETTING_ID,
   parseSquadPanelId,
   resolveSquadPanel,
   squadPanelForFocusId,
@@ -64,5 +65,17 @@ describe("squadPanelForFocusId", () => {
   it("claims nothing it does not own", () => {
     expect(squadPanelForFocusId(null)).toBeNull()
     expect(squadPanelForFocusId("provider-default-model")).toBeNull()
+  })
+})
+
+describe("SQUAD_ROSTER_SETTING_ID", () => {
+  /** `?focus=` only accepts plain control ids; anything else is dropped silently. */
+  it("is a control id the settings focus hook will accept", () => {
+    expect(SQUAD_ROSTER_SETTING_ID).toMatch(/^[a-z0-9-]+$/i)
+  })
+
+  /** Focusing the roster must not also switch the pane away from the Squad. */
+  it("does not resolve to a static panel", () => {
+    expect(squadPanelForFocusId(SQUAD_ROSTER_SETTING_ID)).toBeNull()
   })
 })

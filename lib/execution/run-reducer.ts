@@ -10,6 +10,7 @@ import type {
   RunProjectionSnapshot,
   RunStepSnapshot,
   RunStepStatus,
+  RunUsageSnapshot,
   RunVerificationSummary,
 } from "@/types/execution/run"
 import {
@@ -412,6 +413,38 @@ function rollingActivities(activities: Map<string, RunActivitySnapshot>): {
   }
 }
 
+/**
+ * A usage report's payload as a snapshot, or `undefined` when it is not one.
+ *
+ * Every count must be a finite, non-negative number. A payload that fails that
+ * is dropped whole rather than half-read, so a malformed report can never
+ * replace a good total with zeros.
+ */
+export function usageFrom(payload: Record<string, unknown>): RunUsageSnapshot | undefined {
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+  const promptTokens = count(payload.promptTokens)
+  const completionTokens = count(payload.completionTokens)
+  const totalTokens = count(payload.totalTokens)
+  const wallTimeMs = count(payload.wallTimeMs)
+  if (
+    promptTokens === undefined ||
+    completionTokens === undefined ||
+    totalTokens === undefined ||
+    wallTimeMs === undefined
+  ) {
+    return undefined
+  }
+  const costUsd = count(payload.costUsd)
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    ...(costUsd !== undefined ? { costUsd } : {}),
+    wallTimeMs,
+  }
+}
+
 /** Fold a semantic event journal into the compact, platform-neutral IM snapshot. */
 export function reduceRunEvents(
   run: ExecutionRun,
@@ -445,6 +478,7 @@ export function reduceRunEvents(
   let waitingReason: string | undefined
   let pendingInterrupt: RunProjectionSnapshot["pendingInterrupt"]
   let teamId: string | undefined
+  let usage: RunUsageSnapshot | undefined
   const artifacts: RunProjectionSnapshot["artifacts"] = []
 
   for (const event of events) {
@@ -454,6 +488,8 @@ export function reduceRunEvents(
     if (event.type === "run.started" && run.kind === "team") {
       teamId = stringValue(event.payload.teamId) ?? teamId
     }
+    // Last report wins: each one is the run's running total, not a delta.
+    if (event.type === "usage.reported") usage = usageFrom(event.payload) ?? usage
     upsertActivity(activities, event)
     const nextStatus = eventStatus(event.type)
     if (nextStatus && !TERMINAL.has(status)) {
@@ -635,6 +671,7 @@ export function reduceRunEvents(
     ...(waitingReason ? { waitingReason } : {}),
     ...(pendingInterrupt ? { pendingInterrupt } : {}),
     ...(teamId ? { teamId } : {}),
+    ...(usage ? { usage } : {}),
     artifacts,
     allowedActions: allowedActions(status, run.kind, pendingInterrupt !== undefined, {
       alreadyRetried: run.retry !== undefined,

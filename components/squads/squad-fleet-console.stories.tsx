@@ -72,6 +72,7 @@ function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
     query: "",
     filter: "all",
     narrowed: false,
+    runHref: (runId) => `/squads?tab=runs&run=${encodeURIComponent(runId)}`,
     setSelectedId: () => undefined,
     setRunId: () => undefined,
     setRunStatus: () => undefined,
@@ -92,7 +93,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "The `/squads` fleet: what every Squad is doing now, plus the controls that act on several at once. Runtime only — configuring a Squad is Settings' job, and the inspector links there rather than growing a second editor. The centre pane is the live command centre, which needs Dexie, so it renders empty here.",
+          "The `/squads` fleet: every Squad in the rail, and in the centre either one Squad's own view (masthead with its controls, then Overview / Runs / Board) or every Squad's runs. Runtime only — configuring a Squad is Settings' job, and the masthead links there rather than growing a second editor. Runs and readiness read Dexie, so they render empty here.",
       },
     },
   },
@@ -144,8 +145,11 @@ export const TaskBoard: Story = {
   ],
 }
 
-/** The board belongs to one Squad, so it asks for one first. */
-export const BoardWithoutSelection: Story = {
+/**
+ * Nothing selected: the centre is every Squad's runs. A `?tab=board` link with
+ * no Squad lands here too, rather than on a board asking for one.
+ */
+export const AllRuns: Story = {
   args: { route: route({ tab: "board" }) },
   decorators: [
     (Story) => {
@@ -155,7 +159,7 @@ export const BoardWithoutSelection: Story = {
   ],
 }
 
-/** With one selected, the right pane opens on its runs. */
+/** With one selected, the centre becomes that Squad's view, opening on its Overview. */
 export const SquadSelected: Story = {
   args: { route: route({ selectedId: "research" }) },
   decorators: [
@@ -166,7 +170,7 @@ export const SquadSelected: Story = {
   ],
 }
 
-/** Nothing to fly yet — says where Squads come from. */
+/** Nothing to fly yet — the centre offers both ways to make one. */
 export const EmptyFleet: Story = {
   decorators: [
     (Story) => {

@@ -10,7 +10,7 @@ import {
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import type { AgentTeamRunRecord } from "@/types/agent/agent-team-runtime"
-import type { RunEventType } from "@/types/execution/run"
+import type { RunEventType, RunUsageSnapshot } from "@/types/execution/run"
 
 import { ensureConnectorRunBinding } from "./agent-state-bridge"
 
@@ -125,6 +125,47 @@ export async function reopenTeamExecutionRun(sourceRunId: string, ts = Date.now(
       )
     )
     .catch(() => undefined)
+}
+
+/**
+ * Put a Squad run's spend on its execution run, where a paired device can read
+ * it.
+ *
+ * The full tally lives on the durable record (`agentTeamRuns`), which stays on
+ * the executing host because it also carries the run's launch constraints. The
+ * execution run is the remote-safe projection that does sync, so the numbers a
+ * phone needs to say how a run went travel as a summary-visibility event and
+ * land on `latestSnapshot.usage` through the reducer.
+ *
+ * Only an existing execution run is reported on: a usage report must never be
+ * what creates one. Failures are swallowed, because a lost report costs a
+ * number on a screen and a thrown one would fail the dispatch that spent it.
+ */
+export async function reportTeamRunUsage(
+  sourceRunId: string,
+  usage: RunUsageSnapshot,
+  ts: number
+): Promise<void> {
+  const runId = agentTeamExecutionRunId(sourceRunId)
+  try {
+    if (!(await getExecutionRun(runId))) return
+    await runEventJournal.append(
+      runId,
+      semanticRunEvent(
+        "usage.reported",
+        {
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          ...(usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {}),
+          wallTimeMs: usage.wallTimeMs,
+        },
+        { ts, visibility: "summary", sourceEventId: `agent-team:${sourceRunId}:usage:${ts}` }
+      )
+    )
+  } catch {
+    // See the doc comment: a usage report is never worth failing a dispatch.
+  }
 }
 
 export async function ensureAgentTeamExecutionRun(sourceRun: AgentTeamRunRecord): Promise<string> {

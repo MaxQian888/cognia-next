@@ -113,6 +113,7 @@ export function SquadTemplateProvenance({
       ) : instance ? (
         <>
           <TemplateInstanceCard
+            variant="flat"
             instance={instance}
             title={
               instance.source.version

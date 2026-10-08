@@ -1,4 +1,4 @@
-import { reduceRunEvents } from "./run-reducer"
+import { reduceRunEvents, usageFrom } from "./run-reducer"
 import { __resetRunRetryHandlersForTesting, registerRunRetryHandler } from "./run-retry-registry"
 import type { ExecutionRun, ExecutionRunKind, RunEvent } from "@/types/execution/run"
 
@@ -745,4 +745,68 @@ it("removes stale review prompts when the run terminates", () => {
   expect(snapshot.pendingInterrupt).toBeUndefined()
   expect(snapshot.waitingReason).toBeUndefined()
   expect(snapshot.allowedActions).not.toContain("approve")
+})
+
+describe("usage", () => {
+  const counts = { promptTokens: 10, completionTokens: 5, totalTokens: 15, wallTimeMs: 60 }
+
+  it("carries the latest report onto the snapshot, each one a running total", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({ type: "run.started", seq: 1 }),
+      event({ type: "usage.reported", seq: 2, payload: counts }),
+      event({
+        type: "usage.reported",
+        seq: 3,
+        payload: { ...counts, totalTokens: 40, costUsd: 0.02 },
+      }),
+    ])
+    expect(snapshot.usage).toEqual({ ...counts, totalTokens: 40, costUsd: 0.02 })
+  })
+
+  it("has no usage until one is reported", () => {
+    const snapshot = reduceRunEvents(baseRun, [event({ type: "run.started", seq: 1 })])
+    expect(snapshot.usage).toBeUndefined()
+  })
+
+  /** A malformed report must not replace a good total with zeros. */
+  it("keeps the last good total over a malformed report", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({ type: "usage.reported", seq: 1, payload: counts }),
+      event({ type: "usage.reported", seq: 2, payload: { ...counts, totalTokens: "lots" } }),
+    ])
+    expect(snapshot.usage).toEqual(counts)
+  })
+
+  it("ignores a private report", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({ type: "usage.reported", seq: 1, payload: counts, visibility: "private" }),
+    ])
+    expect(snapshot.usage).toBeUndefined()
+  })
+
+  it("adds nothing to the activity timeline", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({ type: "usage.reported", seq: 1, payload: counts }),
+    ])
+    expect(snapshot.activities).toEqual([])
+  })
+
+  describe("usageFrom", () => {
+    it("reads every count and an optional cost", () => {
+      expect(usageFrom({ ...counts, costUsd: 0.5 })).toEqual({ ...counts, costUsd: 0.5 })
+      expect(usageFrom(counts)).toEqual(counts)
+    })
+
+    it.each([
+      ["a missing count", { promptTokens: 1, completionTokens: 1, wallTimeMs: 1 }],
+      ["a negative count", { ...counts, promptTokens: -1 }],
+      ["a non-finite count", { ...counts, wallTimeMs: Number.POSITIVE_INFINITY }],
+    ])("refuses %s", (_label, payload) => {
+      expect(usageFrom(payload)).toBeUndefined()
+    })
+
+    it("drops a cost that is not a usable number but keeps the counts", () => {
+      expect(usageFrom({ ...counts, costUsd: Number.NaN })).toEqual(counts)
+    })
+  })
 })

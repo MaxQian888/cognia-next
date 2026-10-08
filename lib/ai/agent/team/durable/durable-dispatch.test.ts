@@ -625,6 +625,51 @@ describe("durable dispatch bridge", () => {
     expect(checkpoints.filter((checkpoint) => checkpoint.replay === "safe")).toHaveLength(2)
   })
 
+  /**
+   * The durable record stays on the host; the execution run is what a paired
+   * device syncs, so the spend has to land on its snapshot too.
+   */
+  it("reports the run's spend onto its remote-safe execution snapshot", async () => {
+    const coordinator = createDurableTeamCoordinator({ now: () => 10 })
+    await coordinator.prepareRun(team, "run-usage")
+    let currentTime = 20
+    const dispatch = await beginDurableDispatch({
+      coordinator,
+      team,
+      runId: "run-usage",
+      teammateId: "mate",
+      taskId: "task",
+      access: "read",
+      repositoryId: "primary",
+      now: () => currentTime,
+    })
+    currentTime = 80
+    await dispatch.complete({
+      text: "Read it",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      costUsd: 0.0123,
+    })
+
+    const run = await getDb().executionRuns.get("execution:team:run-usage")
+    expect(run?.latestSnapshot?.usage).toEqual({
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+      costUsd: 0.0123,
+      wallTimeMs: 60,
+    })
+    const events = await getDb()
+      .executionRunEvents.where("runId")
+      .equals("execution:team:run-usage")
+      .toArray()
+    const usage = events.find((event) => event.type === "usage.reported")
+    expect(usage?.visibility).toBe("summary")
+    // Counts only: nothing from the launch constraints rides along.
+    expect(Object.keys(usage?.payload ?? {}).sort()).toEqual(
+      ["completionTokens", "costUsd", "promptTokens", "totalTokens", "wallTimeMs"].sort()
+    )
+  })
+
   it("redacts tool payloads before trajectory and evidence persistence", async () => {
     const coordinator = createDurableTeamCoordinator({ now: () => 30 })
     await coordinator.prepareRun(team, "run-redact")

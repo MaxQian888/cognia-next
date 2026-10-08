@@ -13,8 +13,6 @@
     "title": "内置团队"
   },
   "fleet": {
-    "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
-    "boardUnselectedTitle": "先选一个小队",
     "clearFilters": "清除筛选",
     "configure": "配置这个小队",
     "control": {
@@ -64,14 +62,11 @@
       "label": "收窄列表",
       "all": "全部",
       "waiting": "等你答复",
-      "live": "运行中"
+      "live": "运行中",
+      "countAria": "{label}，{count}"
     },
-    "inspectorLabel": "小队详情",
     "manageAction": "管理小队",
     "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
-    "mobile": {
-      "configureHint": "成员、治理与自动编排在设置里编辑，入口是上方的“配置这个小队”。"
-    },
     "newSquadName": "新小队",
     "noMatchesDescription": "放宽筛选，或清空搜索，看剩下的。",
     "noMatchesTitle": "没有匹配的小队",
@@ -84,18 +79,34 @@
     },
     "railLabel": "小队列表",
     "search": "搜索小队",
-    "stats": {
-      "waiting": "等你答复",
-      "working": "运行中"
-    },
     "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
     "tabs": {
       "board": "看板",
       "runs": "运行",
-      "squads": "小队"
+      "squads": "小队",
+      "overview": "概览",
+      "allRuns": "全部运行"
     },
     "title": "小队",
-    "waiting": "等你答复"
+    "waiting": "等你答复",
+    "composeCta": "按目标编排",
+    "onboarding": {
+      "description": "小队由一名队长和若干成员组成，在一个仓库里把一个目标做完。可以先建一个空小队再配人，也可以描述目标，让 Cognia 提议成员组成。",
+      "descriptionWithBuiltIns": "小队由一名队长和若干成员组成，在一个仓库里把一个目标做完。可以先建一个空小队再配人，也可以描述目标，让 Cognia 提议成员组成。{count, plural, other {列表里的 # 个内置团队}}现在就能在聊天里用。"
+    },
+    "allRuns": {
+      "title": "所有小队的运行",
+      "description": "在列表里选一个小队，查看它的概览、控制和看板。"
+    },
+    "detail": {
+      "back": "返回小队列表",
+      "waitingCount": "{count, plural, other {# 项等你答复}}",
+      "openTasks": "{count, plural, other {# 个未完成任务}}",
+      "cannotStart": "暂时无法启动：{reason}",
+      "missingTitle": "小队不可用",
+      "missingDescription": "它可能已在其他窗口被删除，或者这个链接已过期。",
+      "backToAll": "查看全部小队"
+    }
   },
   "readiness": {
     "title": "就绪状态",
@@ -127,6 +138,40 @@
     "errors": {
       "noWorkspaceRoot": "当前工作区没有可绑定的根目录。",
       "bindFailed": "无法保存绑定。"
+    }
+  },
+  "overview": {
+    "needsYou": {
+      "title": "等你答复",
+      "asked": "{when}发起",
+      "answer": "去答复"
+    },
+    "latestRun": {
+      "title": "最近一次运行",
+      "none": "还没有运行。在上方启动小队，或在输入框把会话交给它。",
+      "open": "查看运行",
+      "started": "开始于",
+      "duration": "耗时",
+      "tokens": "Token",
+      "cost": "费用",
+      "unknown": "未记录"
+    },
+    "tasks": {
+      "title": "任务",
+      "openBoard": "打开看板",
+      "none": "还没有任务。运行规划工作时队长会添加，也可以在看板上自己添加。",
+      "groups": {
+        "open": "待开始",
+        "active": "进行中",
+        "blocked": "受阻",
+        "done": "已完成",
+        "failed": "失败"
+      }
+    },
+    "roster": {
+      "title": "成员",
+      "edit": "编辑成员",
+      "none": "还没有成员。"
     }
   }
 }

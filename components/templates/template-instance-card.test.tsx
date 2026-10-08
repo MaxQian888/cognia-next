@@ -130,4 +130,42 @@ describe("TemplateInstanceCard", () => {
     )
     expect(screen.queryByTestId("template-instance-rebind-inst_1")).toBeNull()
   })
+
+  describe("variant", () => {
+    function renderVariant(variant?: "card" | "flat") {
+      const onDetach = jest.fn()
+      render(
+        <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+          <TemplateInstanceCard
+            instance={makeInstance()}
+            title="Created from Review v1.0.0"
+            availableVersions={["1.0.0", "1.1.0"]}
+            onPlanUpdate={jest.fn()}
+            onDetach={onDetach}
+            {...(variant ? { variant } : {})}
+          />
+        </NextIntlClientProvider>
+      )
+      return { onDetach }
+    }
+
+    it("frames the instance as a card by default, for the Studio's list", () => {
+      renderVariant()
+      const root = screen.getByTestId("template-instance-inst_1")
+      expect(root).toHaveAttribute("data-variant", "card")
+      expect(root).toHaveAttribute("data-slot", "card")
+    })
+
+    /** Inside a titled settings section a card was a box in a section on a pane. */
+    it("drops the frame but keeps every lifecycle control when flat", () => {
+      const { onDetach } = renderVariant("flat")
+      const root = screen.getByTestId("template-instance-inst_1")
+      expect(root).toHaveAttribute("data-variant", "flat")
+      expect(root).not.toHaveAttribute("data-slot", "card")
+      expect(root).toHaveTextContent("Created from Review v1.0.0")
+      expect(screen.getByTestId("template-instance-update-inst_1")).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("template-instance-detach-inst_1"))
+      expect(onDetach).toHaveBeenCalledWith("inst_1")
+    })
+  })
 })

@@ -110,6 +110,14 @@ export interface AgentTeamState {
     overlay: TeammateCapabilityOverlay | null
   ) => void
   removeTeammate: (teammateId: string) => void
+  /**
+   * Make a member the Squad's lead. The previous lead stays on as a teammate.
+   *
+   * Refused while the Squad is planning, executing or paused: a durable run
+   * snapshots `leadId` when it starts (`durable-runtime.ts`), so swapping the
+   * lead under a run that can still resume would split it between two leads.
+   */
+  setSquadLead: (teamId: string, teammateId: string) => SetSquadLeadResult
 
   // Task CRUD
   createTask: (input: CreateTaskInput) => AgentTeamTask
@@ -200,3 +208,7 @@ export interface AgentTeamState {
   // Reset
   reset: () => void
 }
+
+/** Why `setSquadLead` did or did not change the lead. */
+export type SetSquadLeadResult =
+  { ok: true } | { ok: false; reason: "not_found" | "already_lead" | "run_active" }

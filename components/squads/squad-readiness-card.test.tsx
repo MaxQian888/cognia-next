@@ -252,4 +252,62 @@ describe("SquadReadinessCard", () => {
     const { container } = render(<SquadReadinessCard squadId="nope" />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  /**
+   * Both hosts give it a titled section already, so its own frame and its own
+   * "Readiness" heading said the same word twice inside a box.
+   */
+  it("carries no frame and no title of its own", () => {
+    render(<SquadReadinessCard squadId="t1" />)
+    const card = screen.getByTestId("squad-readiness")
+    expect(card.className).not.toMatch(/\bborder\b/)
+    expect(screen.queryByText("title")).not.toBeInTheDocument()
+  })
+
+  /** The overview already holds the answer; reading it again doubled the query. */
+  it("renders readiness its host passes in instead of reading its own", () => {
+    readiness = { ready: true, loading: false, blockers: [], evaluatedAt: 1 }
+    render(
+      <SquadReadinessCard
+        squadId="t1"
+        readiness={{
+          ready: false,
+          loading: false,
+          blockers: [{ code: "no_teammates", action: "add_teammate" }],
+          evaluatedAt: 2,
+        }}
+      />
+    )
+    expect(screen.getByTestId("squad-readiness")).toHaveAttribute("data-ready", "false")
+    expect(screen.getByText(/blockers.no_teammates/)).toBeInTheDocument()
+  })
+
+  describe("adding a teammate", () => {
+    beforeEach(() => {
+      readiness = {
+        ready: false,
+        loading: false,
+        blockers: [{ code: "no_teammates", action: "add_teammate" }],
+        evaluatedAt: 1,
+      }
+    })
+
+    /** From `/squads` it lands on the roster in Settings, not the top of the pane. */
+    it("links to the roster in Settings by default", () => {
+      render(<SquadReadinessCard squadId="t1" />)
+      const link = screen.getByTestId("squad-readiness-add-teammate")
+      expect(link).toHaveAttribute("href", expect.stringContaining("focus=squad-roster"))
+      expect(link).toHaveAttribute("href", expect.stringContaining("squadTab=squad%3At1"))
+    })
+
+    /** In Settings the roster is on the same pane; a link there only reloaded it. */
+    it("acts in place when its host can", async () => {
+      const onAddTeammate = jest.fn()
+      render(<SquadReadinessCard squadId="t1" onAddTeammate={onAddTeammate} />)
+      const button = screen.getByTestId("squad-readiness-add-teammate")
+      expect(button.tagName).toBe("BUTTON")
+      fireEvent.click(button)
+      expect(onAddTeammate).toHaveBeenCalled()
+    })
+  })
 })

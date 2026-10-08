@@ -8,6 +8,7 @@ import {
   ensureTeamExecutionRun,
   projectRemoteAgentTeamEvent,
   reopenTeamExecutionRun,
+  reportTeamRunUsage,
   settleAgentTeamExecutionRun,
   teamIdForExecutionRun,
 } from "./agent-team-bridge"
@@ -130,5 +131,34 @@ describe("AgentTeam ExecutionRun bridge", () => {
     expect(types).toContain("run.resumed")
     const run = await getDb().executionRuns.get("execution:team:team-run-1")
     expect(run?.status).toBe("running")
+  })
+
+  describe("reportTeamRunUsage", () => {
+    const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15, wallTimeMs: 60 }
+
+    it("lands the spend on the execution run's snapshot", async () => {
+      await ensureAgentTeamExecutionRun(sourceRun)
+      await reportTeamRunUsage(sourceRun.id, { ...usage, costUsd: 0.01 }, 200)
+      const run = await getDb().executionRuns.get(agentTeamExecutionRunId(sourceRun.id))
+      expect(run?.latestSnapshot?.usage).toEqual({ ...usage, costUsd: 0.01 })
+    })
+
+    /** A usage report must never be what creates an execution run. */
+    it("does nothing for a run that has no execution run", async () => {
+      await reportTeamRunUsage("never-started", usage, 200)
+      expect(await getDb().executionRuns.get(agentTeamExecutionRunId("never-started"))).toBe(
+        undefined
+      )
+      expect(await getDb().executionRunEvents.count()).toBe(0)
+    })
+
+    /** A lost report costs a number on a screen; a thrown one would fail the dispatch. */
+    it("swallows a journal failure", async () => {
+      await ensureAgentTeamExecutionRun(sourceRun)
+      const table = getDb().executionRunEvents
+      const spy = jest.spyOn(table, "add").mockRejectedValue(new Error("disk full"))
+      await expect(reportTeamRunUsage(sourceRun.id, usage, 200)).resolves.toBeUndefined()
+      spy.mockRestore()
+    })
   })
 })

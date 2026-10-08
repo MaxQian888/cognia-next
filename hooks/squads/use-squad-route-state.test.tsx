@@ -6,7 +6,7 @@
 
 import { renderHook, act } from "@testing-library/react"
 
-import { useSquadRouteState } from "./use-squad-route-state"
+import { resolveSquadTab, useSquadRouteState } from "./use-squad-route-state"
 
 const replace = jest.fn()
 let params = new URLSearchParams()
@@ -39,8 +39,8 @@ describe("reading", () => {
   })
 
   /**
-   * `undefined`, not a default, so each surface picks its own landing tab: a
-   * phone opens on the Squads, a wide pane on the runs console.
+   * `undefined`, not a default, so each surface picks its own landing tab
+   * through `resolveSquadTab`.
    */
   it("leaves the tab unnamed when the URL names none", () => {
     expect(at("").result.current.tab).toBeUndefined()
@@ -85,13 +85,46 @@ describe("writing", () => {
     expect(replace).toHaveBeenLastCalledWith("/squads?q=review&tab=board", { scroll: false })
   })
 
-  /** `runs` is the wide-pane default, so naming it would be noise. */
-  it("omits the default tab and keeps every other one", () => {
+  /**
+   * Always named: a selected Squad lands on Overview and a wide pane with no
+   * selection on Runs, so eliding any one value would mean different things
+   * in different contexts.
+   */
+  it("names every tab it is asked for", () => {
     const { result } = at("id=team_1")
     act(() => result.current.setTab("runs"))
-    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1", { scroll: false })
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1&tab=runs", { scroll: false })
     act(() => result.current.setTab("board"))
     expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1&tab=board", { scroll: false })
+  })
+
+  /** An open run belongs to the Squad it was opened under. */
+  it("drops the open run whenever the Squad changes", () => {
+    const { result } = at("id=team_1&tab=runs&run=exec_1&status=failed")
+    act(() => result.current.setSelectedId("team_2"))
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_2&tab=runs&status=failed", {
+      scroll: false,
+    })
+  })
+
+  it("keeps the tab from one Squad to the next", () => {
+    const { result } = at("id=team_1&tab=board")
+    act(() => result.current.setSelectedId("team_2"))
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_2&tab=board", { scroll: false })
+  })
+
+  /**
+   * Arriving from the list opens the Squad's landing tab, and going back to
+   * the list leaves no Squad tab behind for the list to misread.
+   */
+  it("starts from the landing tab when entering or leaving a Squad", () => {
+    const entering = at("tab=runs")
+    act(() => entering.result.current.setSelectedId("team_1"))
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1", { scroll: false })
+
+    const leaving = at("id=team_1&tab=board")
+    act(() => leaving.result.current.setSelectedId(undefined))
+    expect(replace).toHaveBeenLastCalledWith("/squads", { scroll: false })
   })
 
   it("clears both narrowing axes at once, keeping the selection", () => {
@@ -110,9 +143,48 @@ describe("writing", () => {
     expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1&run=exec_1", { scroll: false })
   })
 
+  it("addresses a run in the Runs tab, keeping the rest of the URL", () => {
+    const { result } = at("id=team_1&q=review&tab=overview")
+    expect(result.current.runHref("execution:team:r1")).toBe(
+      "/squads?id=team_1&q=review&tab=runs&run=execution%3Ateam%3Ar1"
+    )
+    expect(replace).not.toHaveBeenCalled()
+  })
+
   it("drops the selection to the bare path when nothing else is set", () => {
     const { result } = at("id=team_1")
     act(() => result.current.setSelectedId(undefined))
     expect(replace).toHaveBeenLastCalledWith("/squads", { scroll: false })
+  })
+})
+
+describe("resolveSquadTab", () => {
+  it("lands a selected Squad on its Overview", () => {
+    expect(resolveSquadTab(undefined, { selected: true, compact: false })).toBe("overview")
+    expect(resolveSquadTab(undefined, { selected: true, compact: true })).toBe("overview")
+  })
+
+  it("keeps a selected Squad's own tabs", () => {
+    expect(resolveSquadTab("runs", { selected: true, compact: false })).toBe("runs")
+    expect(resolveSquadTab("board", { selected: true, compact: true })).toBe("board")
+  })
+
+  /** `squads` is the phone's list tab. A selected Squad has no such tab. */
+  it("maps the list tab to Overview once a Squad is selected", () => {
+    expect(resolveSquadTab("squads", { selected: true, compact: true })).toBe("overview")
+  })
+
+  /** The rail is the list on a wide pane, so the only view left is every Squad's runs. */
+  it("shows every Squad's runs on a wide pane with nothing selected", () => {
+    for (const tab of [undefined, "overview", "squads", "runs", "board"] as const) {
+      expect(resolveSquadTab(tab, { selected: false, compact: false })).toBe("runs")
+    }
+  })
+
+  it("offers the list and every Squad's runs on a phone with nothing selected", () => {
+    expect(resolveSquadTab(undefined, { selected: false, compact: true })).toBe("squads")
+    expect(resolveSquadTab("runs", { selected: false, compact: true })).toBe("runs")
+    expect(resolveSquadTab("board", { selected: false, compact: true })).toBe("squads")
+    expect(resolveSquadTab("overview", { selected: false, compact: true })).toBe("squads")
   })
 })

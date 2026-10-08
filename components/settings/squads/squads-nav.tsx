@@ -10,6 +10,8 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+
+import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { PlusIcon, SearchIcon, SparklesIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -39,6 +41,12 @@ export interface SquadsNavProps {
    * so the rail still renders where auto-compose has no host.
    */
   onAutoCompose?: () => void
+  /**
+   * Squad definitions are still arriving from Dexie. The list shows a
+   * skeleton rather than "No Squads yet", which is a claim about the user's
+   * data that is false for the first moment of every cold load.
+   */
+  loading?: boolean
 }
 
 export function SquadsNav({
@@ -47,6 +55,7 @@ export function SquadsNav({
   onSelect,
   onCreate,
   onAutoCompose,
+  loading = false,
 }: SquadsNavProps) {
   const t = useTranslations("settings.squads.nav")
   const [query, setQuery] = useState("")
@@ -125,7 +134,9 @@ export function SquadsNav({
             {t("squadsLabel")}
           </p>
 
-          {filtered.length === 0 ? (
+          {loading ? (
+            <ListSkeleton rows={3} testId="squads-nav-loading" />
+          ) : filtered.length === 0 ? (
             <p
               className="px-2 py-2 text-[11px] text-muted-foreground"
               data-testid="squads-nav-empty"

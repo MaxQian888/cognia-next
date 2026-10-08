@@ -22,7 +22,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
+import { ArrowUpRightIcon } from "lucide-react"
 
+import { StatusBadge } from "@/components/status-badge"
+import { Button } from "@/components/ui/button"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import {
   SETTINGS_DETAIL_PANE_CLASS,
@@ -44,6 +48,7 @@ import { SquadsNav } from "./squads-nav"
 import { SquadDetailPanel } from "./squad-detail-panel"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useSquadDefinitionsHydrating } from "@/hooks/squads/use-squad-definitions-hydrating"
 
 function SquadsSectionInner() {
   const t = useTranslations("settings.squads")
@@ -69,6 +74,8 @@ function SquadsSectionInner() {
         .sort((a, b) => a.name.localeCompare(b.name)),
     [teams, teammates, workspaceId]
   )
+
+  const hydrating = useSquadDefinitionsHydrating()
 
   const activePanel = useMemo(() => {
     const focusPanel = squadPanelForFocusId(searchParams?.get("focus") ?? null)
@@ -129,6 +136,7 @@ function SquadsSectionInner() {
 
   const nav = (
     <SquadsNav
+      loading={hydrating}
       squads={squads}
       activePanel={activePanel}
       onSelect={navigate}
@@ -154,25 +162,59 @@ function SquadsSectionInner() {
             what opens the list there, so this header no longer carries a
             second copy of that button. */}
         <div className="flex shrink-0 items-center gap-2 border-b p-3">
-          <span className="min-w-0 truncate text-sm font-medium">{headerTitle}</span>
+          {hydrating ? null : (
+            <span className="min-w-0 truncate text-sm font-medium">{headerTitle}</span>
+          )}
+          {!hydrating && activeSquad ? (
+            <>
+              <StatusBadge
+                value={activeSquad.status}
+                labelNamespace="agentTeam.status"
+                className="shrink-0 text-[10px]"
+                pulse={activeSquad.status === "executing" || activeSquad.status === "planning"}
+              />
+              {/* The way back to what this Squad is doing. Settings is where
+                  it is configured, `/squads` is where it runs, and the second
+                  only ever linked to the first. */}
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+              >
+                <Link
+                  href={`/squads?id=${encodeURIComponent(activeSquad.id)}`}
+                  data-testid="squad-detail-open-live"
+                >
+                  {t("detail.openLive")}
+                  <ArrowUpRightIcon aria-hidden className="size-3.5" />
+                </Link>
+              </Button>
+            </>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <PanelTransition activeKey={activePanel}>
-            {parsed.kind === "squad" ? (
-              <SquadDetailPanel
-                squadId={parsed.id}
-                onDeleted={() => {
-                  // Land on a neighbour rather than a pane addressing a Squad
-                  // that no longer exists.
-                  const next = squads.find((s) => s.id !== parsed.id)
-                  navigate(next ? squadPanelId(next.id) : "templates")
-                }}
-              />
-            ) : (
-              <AgentTeamTemplatesSection />
-            )}
-          </PanelTransition>
+          {/* Nothing until the definitions land: no gallery standing in for a
+              Squad that is about to arrive. */}
+          {hydrating ? null : (
+            <PanelTransition activeKey={activePanel}>
+              {parsed.kind === "squad" ? (
+                <SquadDetailPanel
+                  squadId={parsed.id}
+                  onOpenSquad={(id) => navigate(squadPanelId(id))}
+                  onDeleted={() => {
+                    // Land on a neighbour rather than a pane addressing a Squad
+                    // that no longer exists.
+                    const next = squads.find((s) => s.id !== parsed.id)
+                    navigate(next ? squadPanelId(next.id) : "templates")
+                  }}
+                />
+              ) : (
+                <AgentTeamTemplatesSection />
+              )}
+            </PanelTransition>
+          )}
         </div>
       </div>
 

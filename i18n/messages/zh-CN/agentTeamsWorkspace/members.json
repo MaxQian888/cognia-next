@@ -24,5 +24,11 @@
   "specialization": "专长",
   "specializationPlaceholder": "例如：安全、性能、测试",
   "teammate": "队员",
-  "title": "团队成员"
+  "title": "团队成员",
+  "count": "{count, plural, =0 {暂无成员} other {# 名成员}}",
+  "actionsFor": "{name} 的操作",
+  "makeLead": "设为队长",
+  "leadChanged": "{name} 现在是这个小队的队长。",
+  "leadLocked": "运行进行中或已暂停时不能更换队长，请先停止运行。",
+  "leadLockedShort": "运行进行中或已暂停时不可更换"
 }

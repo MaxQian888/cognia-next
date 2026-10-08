@@ -58,6 +58,15 @@ describe("SquadsNav", () => {
     expect(screen.getByTestId("squads-nav-empty")).toHaveTextContent(/No Squads yet/i)
   })
 
+  /** "No Squads yet" is a claim about the user's data, false on a cold load. */
+  it("shows a skeleton instead of an empty claim while definitions load", () => {
+    renderNav({ squads: [], loading: true })
+    expect(screen.getByTestId("squads-nav-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("squads-nav-empty")).not.toBeInTheDocument()
+    // The gallery stays reachable while the list loads.
+    expect(screen.getAllByTestId("squads-nav-static").length).toBeGreaterThan(0)
+  })
+
   it("says 'no match' when the list is non-empty but the query excludes it", async () => {
     renderNav()
     await userEvent.type(screen.getByTestId("squads-nav-search"), "zzzz")

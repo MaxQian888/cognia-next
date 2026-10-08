@@ -173,4 +173,63 @@ describe("<BuiltInTeamsSection />", () => {
     })
     expect(screen.getByTestId("squad-builtin-duplicate-team_builtin_brainstorm")).not.toBeDisabled()
   })
+
+  describe("folding", () => {
+    it("starts folded when asked, showing only its heading and count", () => {
+      render(<BuiltInTeamsSection teams={[brainstorm, research]} defaultOpen={false} />)
+      const toggle = screen.getByTestId("squad-builtin-toggle")
+      expect(toggle).toHaveAttribute("aria-expanded", "false")
+      expect(toggle).toHaveTextContent("2")
+      expect(screen.queryAllByTestId(/^squad-builtin-row-/)).toHaveLength(0)
+    })
+
+    it("unfolds and folds from its heading", async () => {
+      const user = userEvent.setup()
+      render(<BuiltInTeamsSection teams={[brainstorm, research]} defaultOpen={false} />)
+      await user.click(screen.getByTestId("squad-builtin-toggle"))
+      expect(screen.getAllByTestId(/^squad-builtin-row-/)).toHaveLength(2)
+      await user.click(screen.getByTestId("squad-builtin-toggle"))
+      expect(screen.queryAllByTestId(/^squad-builtin-row-/)).toHaveLength(0)
+    })
+
+    /** The list learns it has Squads after this section mounts. */
+    it("follows a default that changes until the reader chooses", async () => {
+      const user = userEvent.setup()
+      const { rerender } = render(
+        <BuiltInTeamsSection teams={[brainstorm, research]} defaultOpen />
+      )
+      expect(screen.getByTestId("squad-builtin-toggle")).toHaveAttribute("aria-expanded", "true")
+      rerender(<BuiltInTeamsSection teams={[brainstorm, research]} defaultOpen={false} />)
+      expect(screen.getByTestId("squad-builtin-toggle")).toHaveAttribute("aria-expanded", "false")
+      await user.click(screen.getByTestId("squad-builtin-toggle"))
+      rerender(<BuiltInTeamsSection teams={[brainstorm, research]} defaultOpen={false} />)
+      expect(screen.getByTestId("squad-builtin-toggle")).toHaveAttribute("aria-expanded", "true")
+    })
+
+    /** A folded group hiding the one search hit would read as "no results". */
+    it("always shows a search match, folded or not", () => {
+      render(
+        <BuiltInTeamsSection teams={[brainstorm, research]} query="research" defaultOpen={false} />
+      )
+      expect(screen.getByTestId("squad-builtin-toggle")).toHaveAttribute("aria-expanded", "true")
+      expect(
+        screen.getByTestId("squad-builtin-row-team_builtin_research_squad")
+      ).toBeInTheDocument()
+    })
+  })
+
+  describe("variant", () => {
+    it("sets rows on the rail's ground by default", () => {
+      render(<BuiltInTeamsSection teams={[brainstorm]} />)
+      expect(screen.getByTestId("squad-builtin-list")).not.toHaveAttribute("data-surface-layer")
+    })
+
+    it("groups rows on one surface on a page", () => {
+      render(<BuiltInTeamsSection teams={[brainstorm]} variant="page" />)
+      expect(screen.getByTestId("squad-builtin-list")).toHaveAttribute(
+        "data-surface-layer",
+        "raised"
+      )
+    })
+  })
 })

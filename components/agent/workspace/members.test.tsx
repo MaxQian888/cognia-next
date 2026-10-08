@@ -64,12 +64,16 @@ const addTeammateMock = jest.fn()
 const removeTeammateMock = jest.fn()
 const updateTeammateMock = jest.fn()
 
+const setSquadLeadMock = jest.fn((_teamId: string, _teammateId: string) => ({ ok: true }))
+const mockTeamStatus: { current: string } = { current: "idle" }
 jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (s: unknown) => unknown) =>
     selector({
       addTeammate: addTeammateMock,
       removeTeammate: removeTeammateMock,
       updateTeammate: updateTeammateMock,
+      setSquadLead: (teamId: string, teammateId: string) => setSquadLeadMock(teamId, teammateId),
+      teams: { team_x: { id: "team_x", status: mockTeamStatus.current } },
     }),
 }))
 
@@ -108,6 +112,8 @@ const teammate = (overrides: Partial<AgentTeammate>): AgentTeammate => ({
 })
 
 beforeEach(() => {
+  setSquadLeadMock.mockClear()
+  mockTeamStatus.current = "idle"
   addTeammateMock.mockClear()
   removeTeammateMock.mockClear()
   updateTeammateMock.mockClear()
@@ -220,11 +226,7 @@ describe("AgentTeamMembers", () => {
       config: { runtime: "codex", specialization: "qa" },
     })
     render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
-    const triggers = screen.getAllByRole("button", { name: "" })
-    const trigger = triggers.find(
-      (b) => b.closest('[data-testid="member-tm_1"]') !== null && b.querySelector("svg")
-    )
-    await userEvent.click(trigger!)
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Worker One" }))
     const slot = await screen.findByTestId("slot-agent.teammate.actions")
     const ctx = JSON.parse(slot.getAttribute("data-context") ?? "{}")
     expect(ctx).toMatchObject({
@@ -241,14 +243,8 @@ describe("AgentTeamMembers", () => {
     const lead = teammate({ id: "lead_1", name: "Lead Bot", role: "lead" })
     const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
     render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
-    // Open the worker's dropdown menu
-    const triggers = screen.getAllByRole("button", { name: "" }) // Icon-only buttons have empty accessible names
-    // Find the worker's MoreHorizontal dropdown trigger
-    const trigger = triggers.find(
-      (b) => b.closest('[data-testid="member-tm_1"]') !== null && b.querySelector("svg")
-    )
-    expect(trigger).toBeTruthy()
-    await userEvent.click(trigger!)
+    // The icon-only menu trigger is named after its member.
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Worker One" }))
     const removeItem = await screen.findByText(/^Remove$/i)
     await userEvent.click(removeItem)
     // The AlertDialog Remove action should call removeTeammate.
@@ -410,6 +406,121 @@ describe("AgentTeamMembers", () => {
         runtime: "codex",
         externalAgentConfigId: "lenient",
       })
+    })
+  })
+
+  describe("roster layout", () => {
+    /** One list, lead first, so the roster reads the same wherever it is shown. */
+    it("lists the lead first in one list, not a card per member", () => {
+      const lead = teammate({ id: "lead_1", name: "Lead Bot", role: "lead" })
+      const a = teammate({ id: "tm_a", name: "Alpha", role: "teammate" })
+      const b = teammate({ id: "tm_b", name: "Bravo", role: "teammate" })
+      render(<AgentTeamMembers teamId="team_x" teammates={[a, lead, b]} leadId="lead_1" />)
+      const rows = screen.getAllByRole("listitem")
+      expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
+        "member-lead_1",
+        "member-tm_a",
+        "member-tm_b",
+      ])
+      expect(rows[0]).toHaveAttribute("data-role", "lead")
+      expect(document.querySelector('[data-slot="card"]')).toBeNull()
+    })
+
+    it("counts the roster beside its add action", () => {
+      const lead = teammate({ id: "lead_1", name: "Lead Bot", role: "lead" })
+      const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+      render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+      expect(screen.getByTestId("workspace-members-count")).toHaveTextContent("2 members")
+    })
+
+    /** Sizes off the roster's own width, not the window's. */
+    it("declares the container its rows reflow against", () => {
+      const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+      render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+      expect(screen.getByTestId("workspace-members").className).toContain("@container/roster")
+    })
+  })
+
+  describe("controlled add dialog", () => {
+    it("opens when its host asks, and reports the add button to the host", async () => {
+      const onAddOpenChange = jest.fn()
+      const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+      const { rerender } = render(
+        <AgentTeamMembers
+          teamId="team_x"
+          teammates={[worker]}
+          leadId=""
+          addOpen={false}
+          onAddOpenChange={onAddOpenChange}
+        />
+      )
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+      await userEvent.click(screen.getByTestId("workspace-members-add"))
+      expect(onAddOpenChange).toHaveBeenCalledWith(true)
+      // Still closed: the host owns the state and has not said yes.
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+      rerender(
+        <AgentTeamMembers
+          teamId="team_x"
+          teammates={[worker]}
+          leadId=""
+          addOpen
+          onAddOpenChange={onAddOpenChange}
+        />
+      )
+      expect(await screen.findByRole("dialog")).toHaveTextContent("Add new teammate")
+    })
+
+    it("owns the dialog itself when no host controls it", async () => {
+      const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+      render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+      await userEvent.click(screen.getByTestId("workspace-members-add"))
+      expect(await screen.findByRole("dialog")).toHaveTextContent("Add new teammate")
+    })
+  })
+
+  describe("changing the lead", () => {
+    const lead = teammate({ id: "lead_1", name: "Lead Bot", role: "lead" })
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+
+    it("hands the lead to a teammate from its menu", async () => {
+      const { toast } = jest.requireMock("sonner") as { toast: { success: jest.Mock } }
+      render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+      await userEvent.click(screen.getByRole("button", { name: "Actions for Worker One" }))
+      await userEvent.click(await screen.findByTestId("make-lead-tm_1"))
+      expect(setSquadLeadMock).toHaveBeenCalledWith("team_x", "tm_1")
+      expect(toast.success).toHaveBeenCalledWith("Worker One now leads this Squad.")
+    })
+
+    it("offers no such action on the lead itself", async () => {
+      render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+      await userEvent.click(screen.getByRole("button", { name: "Actions for Lead Bot" }))
+      await screen.findByTestId("configure-lead_1")
+      expect(screen.queryByTestId("make-lead-lead_1")).not.toBeInTheDocument()
+    })
+
+    /** Said in the item, because a disabled item's tooltip never shows on touch. */
+    it.each(["planning", "executing", "paused"])(
+      "locks the action while the Squad is %s, saying why in the item",
+      async (status) => {
+        mockTeamStatus.current = status
+        render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+        await userEvent.click(screen.getByRole("button", { name: "Actions for Worker One" }))
+        const item = await screen.findByTestId("make-lead-tm_1")
+        expect(item).toHaveAttribute("data-disabled")
+        expect(item).toHaveTextContent("Locked while a run is live or paused")
+      }
+    )
+
+    it("explains a refusal the store returns", async () => {
+      const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+      setSquadLeadMock.mockReturnValueOnce({ ok: false, reason: "run_active" } as never)
+      render(<AgentTeamMembers teamId="team_x" teammates={[lead, worker]} leadId="lead_1" />)
+      await userEvent.click(screen.getByRole("button", { name: "Actions for Worker One" }))
+      await userEvent.click(await screen.findByTestId("make-lead-tm_1"))
+      expect(toast.error).toHaveBeenCalledWith(
+        "The lead can't change while a run is live or paused. Stop the run first."
+      )
     })
   })
 })

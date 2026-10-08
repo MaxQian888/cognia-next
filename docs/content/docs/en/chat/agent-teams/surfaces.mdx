@@ -11,7 +11,7 @@ Its six tabs moved to the surfaces that already owned those responsibilities.
 
 <TLDR>
 - **Configuration** lives in the Squads section of Settings: the library rail, a detail panel with roster, provenance and derive actions, and the template gallery.
-- **Runtime** lives on `/squads`: a fleet console with a runs tab and a board tab, plus start, pause, resume and stop.
+- **Runtime** lives on `/squads`: a fleet console whose selected Squad gets its own view (masthead with start, pause, resume and stop, then Overview, Runs and Board tabs).
 - **Per-run detail** lives on `/agent-runs`, which gains three Squad-only tabs (Coordination, Report, Operations) when the row is a Squad run.
 - **The composer chip** binds a conversation to a Squad, stored on `sessions.squadId`.
 - `/agent-teams` and `/agent-teams/workspace` are client-side redirects to `/squads` and render nothing.
@@ -28,8 +28,8 @@ Its six tabs moved to the surfaces that already owned those responsibilities.
 
 | Old workspace tab | Lives now in |
 | --- | --- |
-| Overview, run controls | `/squads`, the inspector's `TeamRunControls` |
-| Tasks (board) | `/squads`, the Board tab |
+| Overview, run controls | `/squads`, the selected Squad's masthead (`TeamRunControls`) and Overview tab |
+| Tasks (board) | `/squads`, the selected Squad's Board tab |
 | Chat | The conversation itself, via the composer executor chip |
 | Activity, operations, consensus | `/agent-runs`, the run detail's Squad tabs |
 | Members, and the nine governance sections | Settings, under Squads, in the detail panel |
@@ -50,15 +50,18 @@ The list is workspace-scoped: a Squad is shown when it has no `projectId` or its
 
 ### The detail panel
 
-`squad-detail-panel.tsx` renders, in order:
+`squad-detail-panel.tsx` renders one `SettingsStack` of titled `SettingsBlock`s split by hairlines, with no card or bordered box around any of them, in the order of use:
 
-1. **Name** and **Description**, deferred inputs committing on blur through `updateTeam`. An empty name is rejected.
-2. **Members**, which mounts `AgentTeamMembers` from `components/agent/workspace/members` whole. This is the real roster editor, not a read-only list.
-3. A **plugin slot** at the `agent.team.panel` extension point. Its declared host used to be the workspace overview, which nothing rendered, so registrations silently never appeared.
-4. **Made from a template**, the provenance block described below.
-5. **Reuse this squad**, the derive actions described below.
-6. A **danger zone** with Delete Squad behind a confirm dialog.
-7. **Advanced governance**, one collapsed group mounting `AgentTeamSettings` whole, rather than nine more rows in the rail.
+1. **General**: **Name** and **Description**, deferred inputs committing on blur through `updateTeam`. An empty name is rejected.
+2. **Members**, which mounts `AgentTeamMembers` from `components/agent/workspace/members` whole. This is the real roster editor, not a read-only list: one hairline-divided list, lead first, whose rows reflow off the roster's own width (`@container/roster`) rather than the window's. Any teammate can be made lead from its menu (`setSquadLead`, which swaps `leadId` and both roles together); the action is locked, with the reason printed in the item, while the Squad is planning, executing or paused, because a durable run snapshots `leadId` when it starts. The block carries `data-setting-id="squad-roster"`, so `?focus=squad-roster` lands on it.
+3. **Readiness**, the `SquadReadinessCard`. Its "Add a teammate" opens the roster's add dialog in place here (`onAddTeammate`), because a link to Settings from Settings only reloaded the pane.
+4. A **plugin slot** at the `agent.team.panel` extension point. Its declared host used to be the workspace overview, which nothing rendered, so registrations silently never appeared. It takes no place in the stack when no plugin contributes.
+5. **Made from a template**, the provenance block described below.
+6. **Reuse this squad**, the derive actions described below. A duplicate opens its copy (`onOpenSquad`).
+7. **Advanced governance**, one folded block mounting `AgentTeamSettings` whole, rather than nine more rows in the rail.
+8. **Delete this Squad**, last, behind a confirm dialog.
+
+The pane header names the Squad, shows its status, and links **View activity** to `/squads?id=`, the way back to what the Squad is doing. On a cold load the rail shows a skeleton and the pane stays empty until the definitions have reached the store (`useSquadDefinitionsHydrating`), instead of opening on the gallery and crossfading to the first Squad.
 
 ### Provenance: where a Squad came from
 
@@ -131,15 +134,21 @@ Exactly two cases still take the legacy path, and both say so. Either the platfo
 
 `app/squads/page.tsx` renders `SquadFleetConsole` on a wide layout and `SquadsMobileBody` on a compact one. It is deliberately runtime-only, because everything about *configuring* a Squad lives in Settings.
 
-Deep links arrive as `?id=`, never `[id]`. This app ships as a static export consumed by Tauri and Capacitor, where dynamic segments do not exist at runtime. `use-squad-route-state.ts` owns five parameters: `?id=`, `?run=` (the execution run open in the Runs tab, the same id space as `/agent-runs?run=`), `?tab=` (one of `squads`, `runs`, `board`), `?q=` and `?filter=` (one of `all`, `waiting`, `live`). Defaults drop out of the URL, and every write is a `router.replace` with `scroll: false`.
+Deep links arrive as `?id=`, never `[id]`. This app ships as a static export consumed by Tauri and Capacitor, where dynamic segments do not exist at runtime. `use-squad-route-state.ts` owns six parameters: `?id=`, `?run=` (the execution run open in the Runs tab, the same id space as `/agent-runs?run=`), `?status=` (the Runs tab's status bucket), `?tab=` (one of `overview`, `squads`, `runs`, `board`), `?q=` and `?filter=` (one of `all`, `waiting`, `live`). Every write is a `router.replace` with `scroll: false`. `resolveSquadTab` decides which tab a surface actually shows: a selected Squad offers Overview, Runs and Board and lands on Overview; with nothing selected a wide pane shows every Squad's runs and a phone shows the list or every Squad's runs. Changing Squad drops `?run=`, and `runHref` builds a real link to one run in the Runs tab.
 
-The desktop console is a list pane, a centre with two tabs, and an inspector.
+The desktop console is two panes: a list rail, and a centre that is either one Squad's view or every Squad's runs. There is no right-hand inspector. It used to add a fourth column beside the run cockpit's own list and detail, and every column was too narrow for what it held.
 
-- **Runs** renders the canonical `AgentRunsPanel` embedded, pinned to `kind = team` and to the selected Squad (ADR-0169). Same rows, same detail pane, same `allowedActions` and the same review form as `/agent-runs`. The retired command centre and per-team runs list, with their own history queries, are gone.
-- **Board** renders `AgentTeamTasks` for the selected Squad, and an explicit empty state when none is selected.
-- The **inspector** shows name and description, then `TeamRunControls` (start, start with ultracode, pause, resume, stop, with Start disabled by the first readiness blocker), then the `SquadReadinessCard` with every blocker and the action that clears it, then a "Configure this Squad" link back into Settings. Abort is gone: the visible destructive action is Stop, and it is terminal.
+- The **rail** (`SquadListPane`, `variant="rail"`) is flat rows on the rail's own ground, with the filter toggles carrying their counts and the built-in Teams in a foldable group below. Between `md` and `lg` the shell moves it into a sheet, which a pick closes.
+- With a Squad selected, the centre is `SquadDetailView`. Its **masthead** (`SquadMasthead`, still `data-testid="squad-fleet-inspector"`) shows the name, status, roster size and description, then `TeamRunControls` (Start, Start with ultracode, Pause, Resume, Stop) and **Configure this Squad**. When Start is disabled the reason is printed under it, because a button `title` is invisible on a touch screen. A refused start shows its reason, consent code, Host blockers and a retry that replays the same launch. The controls run on `useSquadRunControl`, over `useSquadLatestRun`.
+- **Overview** (`SquadOverview`) is hairline-separated sections in triage order: **Needs you** (open reviews, each a link into the Runs tab with its run open), **Readiness** first when the Squad is blocked, **Latest run** (objective, status, start, duration, tokens and cost; from the durable record on the host, and on a paired device from `latestSnapshot.usage`, which `reportTeamRunUsage` writes as a summary-visibility `usage.reported` journal event whenever durable dispatch totals a run's usage), **Tasks** (the board folded into open, in progress, blocked, done and failed), and **Roster**. On a wide pane readiness, once settled, and the roster move into a side column.
+- **Runs** renders the canonical `AgentRunsPanel` embedded, pinned to `kind = team` and to the selected Squad (ADR-0169). Same rows, same detail pane, same `allowedActions` and the same review form as `/agent-runs`. Its tab carries the count of open reviews.
+- **Board** renders `AgentTeamTasks` for the selected Squad.
+- A link naming a Squad that is gone says so ("Squad unavailable") with a way back; one that is still arriving from Dexie shows nothing until it lands (`useSelectedSquad`).
+- With nothing selected the centre is every Squad's runs; with no Squads at all it is one empty state offering **New Squad** and **Compose from an objective**, while the rail only says the list is empty. Abort is gone: the visible destructive action is Stop, and it is terminal.
 
-The header offers **Manage Squads**, which is the Settings deep link, and **Live host activity** into `/fleet` when a fleet snapshot exists. The phone renders the same pieces under three tabs, with the inspector in a sheet.
+The header offers **New Squad**, **Compose from an objective** (`AutoComposeDialog`), **Manage Squads** (the Settings deep link), and **Live host activity** into `/fleet` when a fleet snapshot exists.
+
+The phone (`SquadsMobileBody`) has two levels. With nothing selected it is the list (`variant="page"`: one grouped surface over the wallpaper) and every Squad's runs. A selected Squad replaces the list with the same `SquadDetailView`, full-screen, with a back button in its masthead. It used to open a drawer over the list while the page's Runs and Board tabs stayed scoped to a Squad nothing on screen named.
 
 ## `/agent-runs`
 

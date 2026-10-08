@@ -144,6 +144,7 @@ export type RunEventType =
   | "control.accepted"
   | "control.rejected"
   | "projection.degraded"
+  | "usage.reported"
 
 export type RunStepStatus =
   "pending" | "in_progress" | "completed" | "failed" | "skipped" | "blocked"
@@ -310,6 +311,15 @@ export interface RunProjectionSnapshot {
     type?: string
   }
   /**
+   * What the run has spent so far, from its latest `usage.reported` event.
+   *
+   * The durable Squad record (`agentTeamRuns`) holds the full tally but stays
+   * on the executing host, because it also carries launch constraints a peer
+   * has no business reading. This is the remote-safe half: token counts, cost
+   * and wall time, which is what a paired device needs to say how a run went.
+   */
+  usage?: RunUsageSnapshot
+  /**
    * The Squad a `team` run belongs to, read from its opening event. Lets a
    * team-scoped list (the `/squads` Runs tab) filter journal rows without a
    * second query per row.
@@ -318,6 +328,16 @@ export interface RunProjectionSnapshot {
   artifacts: RunArtifactSnapshot[]
   allowedActions: RunControlAction[]
   locale?: string
+}
+
+/** A run's spend, as carried in its remote-safe snapshot. */
+export interface RunUsageSnapshot {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  /** Absent when no provider in the run reported a price. */
+  costUsd?: number
+  wallTimeMs: number
 }
 
 export interface ExecutionRunInitiator {

@@ -54,7 +54,7 @@ export function isUltracodeActive(
 }
 ```
 
-`UltracodeOverride` is `"force" | "off" | undefined`, threaded from the workspace run control (the **Run Ultracode** button forces it on).
+`UltracodeOverride` is `"force" | "off" | undefined`, threaded from the workspace run control (the **Start with ultracode** button forces it on).
 
 ## Lead planning — `ultracode-planner.ts`
 
@@ -337,7 +337,7 @@ The runtime branches on `ultracodeActive`: a side-effect import registers the `p
 
 ## UI knobs
 
-Ultracode is configured per Squad in the **Advanced governance** group of the Settings detail panel (`enabled`, `autoMode`, `skepticsPerFinding`, `judgesPerAttempt`, `maxFinderRounds`) — see [Surfaces](./surfaces). The **Run Ultracode** control in the `/squads` inspector forces a run on (`override: "force"`) regardless of `autoMode`.
+Ultracode is configured per Squad in the **Advanced governance** group of the Settings detail panel (`enabled`, `autoMode`, `skepticsPerFinding`, `judgesPerAttempt`, `maxFinderRounds`) — see [Surfaces](./surfaces). The **Start with ultracode** control in the selected Squad's masthead on `/squads` forces a run on (`override: "force"`) regardless of `autoMode`.
 
 ## Related
 

@@ -455,6 +455,47 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     useAgentTeamStore.getState().removeTeammate("missing")
   })
 
+  describe("setSquadLead", () => {
+    it("moves the lead and swaps both roles together", () => {
+      const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+      const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
+      expect(useAgentTeamStore.getState().setSquadLead(team.id, tm.id)).toEqual({ ok: true })
+      const state = useAgentTeamStore.getState()
+      expect(state.teams[team.id].leadId).toBe(tm.id)
+      expect(state.teammates[tm.id].role).toBe("lead")
+      expect(state.teammates[team.leadId].role).toBe("teammate")
+      // The former lead stays on the roster.
+      expect(state.teams[team.id].teammateIds).toContain(team.leadId)
+    })
+
+    it("refuses the current lead, a stranger and another Squad's member", () => {
+      const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+      const other = useAgentTeamStore.getState().createTeam({ name: "Y", task: "t" })
+      const outsider = useAgentTeamStore.getState().addTeammate({ teamId: other.id, name: "O" })
+      const { setSquadLead } = useAgentTeamStore.getState()
+      expect(setSquadLead(team.id, team.leadId)).toEqual({ ok: false, reason: "already_lead" })
+      expect(setSquadLead(team.id, "missing")).toEqual({ ok: false, reason: "not_found" })
+      expect(setSquadLead("missing", outsider.id)).toEqual({ ok: false, reason: "not_found" })
+      expect(setSquadLead(team.id, outsider.id)).toEqual({ ok: false, reason: "not_found" })
+      expect(useAgentTeamStore.getState().teams[team.id].leadId).toBe(team.leadId)
+    })
+
+    /** A durable run snapshots `leadId` at start; a resumable run must keep it. */
+    it.each(["planning", "executing", "paused"] as const)(
+      "refuses while the Squad is %s",
+      (status) => {
+        const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+        const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
+        useAgentTeamStore.getState().updateTeam(team.id, { status })
+        expect(useAgentTeamStore.getState().setSquadLead(team.id, tm.id)).toEqual({
+          ok: false,
+          reason: "run_active",
+        })
+        expect(useAgentTeamStore.getState().teammates[tm.id].role).toBe("teammate")
+      }
+    )
+  })
+
   it("removeTeammate falls back to teammate-only removal when team is missing", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
     const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })

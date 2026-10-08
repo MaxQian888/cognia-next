@@ -142,6 +142,9 @@ function cleanUpTeam(
   }
 }
 
+/** Team statuses under which a run may still be in flight or resumable. */
+const LEAD_LOCKED_STATUSES: ReadonlySet<string> = new Set(["planning", "executing", "paused"])
+
 export const createAgentTeamActionsSlice = (
   set: AgentTeamStoreSet,
   get: AgentTeamStoreGet
@@ -610,6 +613,30 @@ export const createAgentTeamActionsSlice = (
         },
       }
     })
+  },
+
+  setSquadLead: (teamId, teammateId) => {
+    const { teams, teammates } = get()
+    const team = teams[teamId]
+    const next = teammates[teammateId]
+    if (!team || !next || next.teamId !== teamId) return { ok: false, reason: "not_found" }
+    if (team.leadId === teammateId) return { ok: false, reason: "already_lead" }
+    if (LEAD_LOCKED_STATUSES.has(team.status)) return { ok: false, reason: "run_active" }
+
+    const previous = teammates[team.leadId]
+    set((state) => ({
+      teams: { ...state.teams, [teamId]: { ...team, leadId: teammateId } },
+      teammates: {
+        ...state.teammates,
+        [teammateId]: { ...next, role: "lead" },
+        // Every reader pairs `leadId` with `role` (the roster, readiness's
+        // worker count, the avatar), so the two must move together.
+        ...(previous && previous.teamId === teamId
+          ? { [previous.id]: { ...previous, role: "teammate" as const } }
+          : {}),
+      },
+    }))
+    return { ok: true }
   },
 
   // ====================================================================

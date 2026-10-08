@@ -29,13 +29,16 @@
     "deleteTitle": "删除 {name}？",
     "descriptionLabel": "描述",
     "descriptionPlaceholder": "这个小队是做什么的？",
-    "memberCount": "{count, plural, =0 {无} other {# 名成员}}",
     "missingDescription": "它已被删除，可能是在另一个窗口里。请从列表另选一个。",
     "missingTitle": "小队已不存在",
     "nameLabel": "名称",
-    "noMembersDescription": "可以从模板添加成员，或在该小队自己的运行界面里添加。",
-    "noMembersTitle": "还没有成员",
-    "rosterLabel": "成员"
+    "rosterLabel": "成员",
+    "generalTitle": "基本信息",
+    "rosterDescription": "队长负责规划与审阅，成员领取任务。每名成员都可以使用自己的运行时。",
+    "readinessTitle": "就绪状态",
+    "readinessDescription": "小队运行前需要绑定的内容。",
+    "advancedDescription": "治理、预算、审阅与交付策略。改动会即时保存。",
+    "openLive": "查看动态"
   },
   "nav": {
     "autoCompose": "按目标自动编队",

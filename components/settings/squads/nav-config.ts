@@ -23,6 +23,14 @@ export type SquadPanelId = SquadStaticPanelId | `squad:${string}`
 /** The query parameter this section owns, alongside `?section=squads`. */
 export const SQUAD_TAB_PARAM = "squadTab"
 
+/**
+ * The roster block's `data-setting-id`, so `?focus=` can land on it. "Add a
+ * teammate" on `/squads` links here: the readiness blocker that asks for one
+ * is about the roster, and arriving at the top of a long pane left the reader
+ * to find it.
+ */
+export const SQUAD_ROSTER_SETTING_ID = "squad-roster"
+
 export const SQUAD_STATIC_PANELS: ReadonlyArray<{
   id: SquadStaticPanelId
   icon: ComponentType<{ className?: string }>

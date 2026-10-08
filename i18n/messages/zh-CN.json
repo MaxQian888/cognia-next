@@ -3461,15 +3461,21 @@
     "listEmpty": "暂无团队。从模板快速创建，或从零开始搭建。",
     "listTitle": "智能体团队",
     "members": {
+      "actionsFor": "{name} 的操作",
       "addMember": "添加队友",
       "addMemberTitle": "添加新队友",
       "cancel": "取消",
       "configOverrides": "配置覆盖",
       "configure": "配置",
+      "count": "{count, plural, =0 {暂无成员} other {# 名成员}}",
       "description": "描述",
       "descriptionPlaceholder": "该队友负责什么？",
       "empty": "暂无成员。添加第一个队友吧。",
       "lead": "领队",
+      "leadChanged": "{name} 现在是这个小队的队长。",
+      "leadLocked": "运行进行中或已暂停时不能更换队长，请先停止运行。",
+      "leadLockedShort": "运行进行中或已暂停时不可更换",
+      "makeLead": "设为队长",
       "model": "模型",
       "name": "名称",
       "namePlaceholder": "例如：安全审查员",
@@ -3625,10 +3631,10 @@
         "ultracodeOn": "ultracode 开启"
       },
       "runtime": "运行时",
-      "startTeam": "启动团队",
-      "startTeamUltracode": "以 Ultracode 运行",
+      "startTeam": "启动",
+      "startTeamUltracode": "以 Ultracode 启动",
       "status": "状态",
-      "stopTeam": "取消团队",
+      "stopTeam": "停止",
       "tasksProgress": "任务完成",
       "teammates": "成员",
       "tokenInput": "输入",
@@ -48726,6 +48732,7 @@
       },
       "detail": {
         "advanced": "高级治理",
+        "advancedDescription": "治理、预算、审阅与交付策略。改动会即时保存。",
         "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",
         "dangerTitle": "删除这个小队",
         "deleteAction": "删除小队",
@@ -48734,12 +48741,14 @@
         "deleteTitle": "删除 {name}？",
         "descriptionLabel": "描述",
         "descriptionPlaceholder": "这个小队是做什么的？",
-        "memberCount": "{count, plural, =0 {无} other {# 名成员}}",
+        "generalTitle": "基本信息",
         "missingDescription": "它已被删除，可能是在另一个窗口里。请从列表另选一个。",
         "missingTitle": "小队已不存在",
         "nameLabel": "名称",
-        "noMembersDescription": "可以从模板添加成员，或在该小队自己的运行界面里添加。",
-        "noMembersTitle": "还没有成员",
+        "openLive": "查看动态",
+        "readinessDescription": "小队运行前需要绑定的内容。",
+        "readinessTitle": "就绪状态",
+        "rosterDescription": "队长负责规划与审阅，成员领取任务。每名成员都可以使用自己的运行时。",
         "rosterLabel": "成员"
       },
       "nav": {
@@ -52301,9 +52310,12 @@
       "title": "内置团队"
     },
     "fleet": {
-      "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
-      "boardUnselectedTitle": "先选一个小队",
+      "allRuns": {
+        "description": "在列表里选一个小队，查看它的概览、控制和看板。",
+        "title": "所有小队的运行"
+      },
       "clearFilters": "清除筛选",
+      "composeCta": "按目标编排",
       "configure": "配置这个小队",
       "control": {
         "awaitingProjection": "正在等待 Host 运行记录同步…",
@@ -52345,24 +52357,34 @@
       "createCta": "新建小队",
       "defaultLeadName": "队长",
       "description": "每个小队此刻在做什么。",
+      "detail": {
+        "back": "返回小队列表",
+        "backToAll": "查看全部小队",
+        "cannotStart": "暂时无法启动：{reason}",
+        "missingDescription": "它可能已在其他窗口被删除，或者这个链接已过期。",
+        "missingTitle": "小队不可用",
+        "openTasks": "{count, plural, other {# 个未完成任务}}",
+        "waitingCount": "{count, plural, other {# 项等你答复}}"
+      },
       "emptyDescription": "在这里新建一个，然后在输入框把会话交给它。",
       "emptyDescriptionWithBuiltIns": "在这里新建一个，然后在输入框把会话交给它。{count, plural, other {下方的 # 个内置团队}}现在就能用。",
       "emptyTitle": "还没有小队",
       "filters": {
         "all": "全部",
+        "countAria": "{label}，{count}",
         "label": "收窄列表",
         "live": "运行中",
         "waiting": "等你答复"
       },
-      "inspectorLabel": "小队详情",
       "manageAction": "管理小队",
       "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
-      "mobile": {
-        "configureHint": "成员、治理与自动编排在设置里编辑，入口是上方的“配置这个小队”。"
-      },
       "newSquadName": "新小队",
       "noMatchesDescription": "放宽筛选，或清空搜索，看剩下的。",
       "noMatchesTitle": "没有匹配的小队",
+      "onboarding": {
+        "description": "小队由一名队长和若干成员组成，在一个仓库里把一个目标做完。可以先建一个空小队再配人，也可以描述目标，让 Cognia 提议成员组成。",
+        "descriptionWithBuiltIns": "小队由一名队长和若干成员组成，在一个仓库里把一个目标做完。可以先建一个空小队再配人，也可以描述目标，让 Cognia 提议成员组成。{count, plural, other {列表里的 # 个内置团队}}现在就能在聊天里用。"
+      },
       "openFleet": "宿主实时活动",
       "palette": {
         "meta": "小队控制",
@@ -52372,18 +52394,50 @@
       },
       "railLabel": "小队列表",
       "search": "搜索小队",
-      "stats": {
-        "waiting": "等你答复",
-        "working": "运行中"
-      },
       "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
       "tabs": {
+        "allRuns": "全部运行",
         "board": "看板",
+        "overview": "概览",
         "runs": "运行",
         "squads": "小队"
       },
       "title": "小队",
       "waiting": "等你答复"
+    },
+    "overview": {
+      "latestRun": {
+        "cost": "费用",
+        "duration": "耗时",
+        "none": "还没有运行。在上方启动小队，或在输入框把会话交给它。",
+        "open": "查看运行",
+        "started": "开始于",
+        "title": "最近一次运行",
+        "tokens": "Token",
+        "unknown": "未记录"
+      },
+      "needsYou": {
+        "answer": "去答复",
+        "asked": "{when}发起",
+        "title": "等你答复"
+      },
+      "roster": {
+        "edit": "编辑成员",
+        "none": "还没有成员。",
+        "title": "成员"
+      },
+      "tasks": {
+        "groups": {
+          "active": "进行中",
+          "blocked": "受阻",
+          "done": "已完成",
+          "failed": "失败",
+          "open": "待开始"
+        },
+        "none": "还没有任务。运行规划工作时队长会添加，也可以在看板上自己添加。",
+        "openBoard": "打开看板",
+        "title": "任务"
+      }
     },
     "readiness": {
       "actions": {

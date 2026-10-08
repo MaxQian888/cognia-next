@@ -13,10 +13,15 @@
  *   - a missing teammate goes to the roster
  *   - a host that cannot dispatch says which one can
  *
- * Mounted by the fleet inspector and the Settings detail panel. The card is
- * the only place a Squad's two bindings are edited: there was no editor for
- * them at all before this, only a "migrate to durable-v2" preview on a tab of
- * the retired workspace.
+ * Mounted by the Squad overview on `/squads` and the Settings detail panel.
+ * It is the only place a Squad's two bindings are edited: there was no editor
+ * for them at all before this, only a "migrate to durable-v2" preview on a tab
+ * of the retired workspace.
+ *
+ * It carries no frame and no title of its own. Both hosts already give it a
+ * titled section ("Readiness"), so its own bordered box with its own
+ * "Readiness" heading was a card inside a section saying the same word twice.
+ * What is left is the verdict badge, then either what is bound or what to fix.
  */
 
 import { Spinner } from "@/components/ui/spinner"
@@ -30,9 +35,9 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { squadPanelId } from "@/components/settings/squads/nav-config"
+import { SQUAD_ROSTER_SETTING_ID, squadPanelId } from "@/components/settings/squads/nav-config"
 import { useClientLiveQuery } from "@/hooks/data"
-import { useSquadReadiness } from "@/hooks/squads/use-squad-readiness"
+import { useSquadReadiness, type SquadReadinessState } from "@/hooks/squads/use-squad-readiness"
 import { projectRepositoryCandidate } from "@/lib/agent-team/binding-candidates"
 import type { SquadReadinessBlocker } from "@/lib/agent-team/squad-readiness"
 import {
@@ -50,6 +55,19 @@ import type { ProjectEnvironment } from "@/types/project-environment"
 
 export interface SquadReadinessCardProps {
   squadId: string
+  /**
+   * Handles "Add a teammate" in place. Settings passes this, because the
+   * roster is on the same pane and a link to Settings from Settings only
+   * reloaded the page it was on. Without it the action links to the roster in
+   * Settings, which is right from `/squads`.
+   */
+  onAddTeammate?: () => void
+  /**
+   * Readiness the host already holds. The Squad overview reads it to decide
+   * its section order, and evaluating it a second time here ran the same live
+   * query (and its environment lookups) twice for one answer.
+   */
+  readiness?: SquadReadinessState
   className?: string
 }
 
@@ -64,9 +82,17 @@ function blockerValues(blocker: SquadReadinessBlocker): Record<string, string> {
   }
 }
 
-export function SquadReadinessCard({ squadId, className }: SquadReadinessCardProps) {
+export function SquadReadinessCard({
+  squadId,
+  onAddTeammate,
+  readiness: provided,
+  className,
+}: SquadReadinessCardProps) {
   const t = useTranslations("squads.readiness")
-  const readiness = useSquadReadiness(squadId)
+  // Passing `undefined` skips the read: the hook answers "pending" for no id
+  // without querying anything.
+  const own = useSquadReadiness(provided ? undefined : squadId)
+  const readiness = provided ?? own
   const team = useAgentTeamStore((s) => s.teams[squadId])
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
   const project = useProjectStore((state) =>
@@ -184,14 +210,12 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
 
   return (
     <div
-      className={cn("space-y-2 rounded-md border p-3 text-xs", className)}
+      className={cn("space-y-2 text-xs", className)}
       data-testid="squad-readiness"
       data-ready={readiness.loading ? "loading" : readiness.ready ? "true" : "false"}
     >
-      {/* Wraps: in the Settings panel on a phone the blocked summary is wider
-          than what is left beside the title and ran past the card's edge. */}
+      {/* Wraps: on a phone the blocked summary is wider than the pane. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <p className="font-medium">{t("title")}</p>
         {readiness.loading ? (
           <Badge variant="outline" className="gap-1">
             <Spinner aria-hidden className="size-3 " />
@@ -299,9 +323,21 @@ export function SquadReadinessCard({ squadId, className }: SquadReadinessCardPro
                   </Link>
                 </div>
               ) : null}
-              {blocker.action === "add_teammate" ? (
+              {blocker.action === "add_teammate" && onAddTeammate ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onAddTeammate}
+                  data-testid="squad-readiness-add-teammate"
+                >
+                  {t("actions.addTeammate")}
+                </Button>
+              ) : blocker.action === "add_teammate" ? (
                 <Link
-                  href={settingsHref("squads", { params: { squadTab: squadPanelId(team.id) } })}
+                  href={settingsHref("squads", {
+                    focus: SQUAD_ROSTER_SETTING_ID,
+                    params: { squadTab: squadPanelId(team.id) },
+                  })}
                   className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
                   data-testid="squad-readiness-add-teammate"
                 >

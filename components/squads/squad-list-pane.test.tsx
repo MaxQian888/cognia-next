@@ -33,6 +33,7 @@ function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
     query: "",
     filter: "all",
     narrowed: false,
+    runHref: (runId) => `/squads?tab=runs&run=${runId}`,
     setSelectedId,
     setRunId: jest.fn(),
     setRunStatus: jest.fn(),
@@ -119,27 +120,50 @@ describe("rows", () => {
   })
 })
 
-describe("headline stats", () => {
+describe("filter counts", () => {
   /**
-   * The page computed the waiting count, sorted by it, and never showed it,
-   * which made the most actionable number on the screen one you had to infer
-   * from badge colours.
+   * The counts live on the toggles that act on them. A stat strip above
+   * repeated the same two numbers one row higher, away from the control.
    */
-  it("headlines what needs you and what is working", () => {
+  it("counts every Squad, what needs you and what is working on the toggles", () => {
     render(
       <SquadListPane
         fleet={fleet({ squads: [row({ waiting: true }), row({ id: "b", name: "B", live: true })] })}
         route={route()}
       />
     )
-    expect(screen.getByTestId("stat-waiting")).toHaveTextContent("1")
-    expect(screen.getByTestId("stat-working")).toHaveTextContent("1")
+    expect(screen.getByTestId("squad-fleet-filter-all-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("squad-fleet-filter-waiting-count")).toHaveTextContent("1")
+    expect(screen.getByTestId("squad-fleet-filter-live-count")).toHaveTextContent("1")
   })
 
-  it("offers no search, filter or stats when there is nothing to narrow", () => {
+  /** The number is decoration to sight, so the toggle's name carries it. */
+  it("names each toggle with its count for assistive tech", () => {
+    render(<SquadListPane fleet={fleet({ squads: [row({ waiting: true })] })} route={route()} />)
+    expect(screen.getByTestId("squad-fleet-filter-waiting")).toHaveAccessibleName("Needs you, 1")
+  })
+
+  it("offers no search or filter when there is nothing to narrow", () => {
     render(<SquadListPane fleet={fleet({ squads: [], total: 0 })} route={route()} />)
     expect(screen.queryByTestId("squad-fleet-search")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("squad-fleet-stats")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("squad-fleet-filter-all")).not.toBeInTheDocument()
+  })
+})
+
+describe("variant", () => {
+  /** The desktop rail paints its own ground; a frame per row was a card per name. */
+  it("sets rail rows straight on the rail's ground", () => {
+    render(<SquadListPane fleet={fleet()} route={route()} />)
+    const list = screen.getByTestId("squad-fleet-list")
+    expect(list).not.toHaveAttribute("data-surface-layer")
+    expect(screen.getByTestId("squad-fleet-row")).not.toHaveAttribute("data-surface-layer")
+  })
+
+  /** On a phone the list is the page, over the wallpaper: one surface for all rows. */
+  it("groups page rows on one raised surface", () => {
+    render(<SquadListPane fleet={fleet()} route={route()} variant="page" />)
+    expect(screen.getByTestId("squad-fleet-list")).toHaveAttribute("data-surface-layer", "raised")
+    expect(screen.getByTestId("squad-fleet-row")).not.toHaveAttribute("data-surface-layer")
   })
 })
 
@@ -225,10 +249,40 @@ describe("loading and empty", () => {
     expect(screen.queryByTestId("squad-fleet-create")).not.toBeInTheDocument()
   })
 
-  /** A control that appears only when the list is empty reads as a bug. */
-  it("keeps the CTA reachable once there are rows", () => {
+  /** "New Squad" lives in each host's header, which is always on screen. */
+  it("leaves creating to the host's header once there are rows", () => {
     render(<SquadListPane fleet={fleet()} route={route()} onCreate={jest.fn()} />)
-    expect(screen.getByTestId("squad-fleet-create")).toBeInTheDocument()
+    expect(screen.queryByTestId("squad-fleet-create")).not.toBeInTheDocument()
+  })
+
+  /**
+   * Beside a centre pane that already shows the full empty state, a second
+   * illustrated "No Squads yet" said the same thing twice.
+   */
+  it("says an empty workspace in one line when asked to be quiet", () => {
+    render(
+      <SquadListPane
+        fleet={fleet({ squads: [], total: 0 })}
+        route={route()}
+        onCreate={jest.fn()}
+        emptyStyle="quiet"
+      />
+    )
+    expect(screen.getByTestId("squad-fleet-empty-quiet")).toHaveTextContent("No Squads yet")
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("squad-fleet-create")).not.toBeInTheDocument()
+  })
+
+  /** A filter with no hits still needs its way out, quiet or not. */
+  it("keeps the clear-filters way out when quiet", () => {
+    render(
+      <SquadListPane
+        fleet={fleet({ squads: [], total: 3 })}
+        route={route({ query: "zzz", narrowed: true })}
+        emptyStyle="quiet"
+      />
+    )
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument()
   })
 })
 
@@ -274,6 +328,22 @@ describe("built-in Teams", () => {
     render(<SquadListPane fleet={fleet({ squads: [], total: 0 })} route={route()} />)
     expect(screen.queryByTestId("squad-builtin-teams")).not.toBeInTheDocument()
     expect(screen.queryByText(/built-in teams below/)).not.toBeInTheDocument()
+  })
+
+  /** With no Squads of their own, the built-ins are the only thing here to use. */
+  it("unfolds while the workspace has no Squads, and folds once it has some", () => {
+    const { unmount } = render(
+      <SquadListPane
+        fleet={fleet({ squads: [], total: 0 })}
+        route={route()}
+        builtInTeams={builtIns}
+      />
+    )
+    expect(screen.getByTestId("squad-builtin-teams")).toHaveAttribute("data-open", "true")
+    unmount()
+    render(<SquadListPane fleet={fleet()} route={route()} builtInTeams={builtIns} />)
+    expect(screen.getByTestId("squad-builtin-teams")).toHaveAttribute("data-open", "false")
+    expect(screen.queryAllByTestId(/^squad-builtin-row-/)).toHaveLength(0)
   })
 
   it("sits below the user's Squads", () => {

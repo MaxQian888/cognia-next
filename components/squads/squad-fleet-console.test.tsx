@@ -2,10 +2,11 @@
 
 // The wide-pane console. Triage, workspace scope and narrowing moved into
 // `useSquadFleet` and are tested there, against the store rather than through
-// two layers of rendering. What is left here is the frame: which panes exist,
-// which tab is showing, and where the header sends you.
+// two layers of rendering. One Squad's view is `SquadDetailView` with its own
+// suite. What is left here is the frame: which panes exist, what the centre
+// shows for each state of the URL, and where the header sends you.
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -70,6 +71,27 @@ jest.mock("@/components/agent/workspace/team-run-controls", () => ({
     <div data-testid="run-controls">{status}</div>
   ),
 }))
+// The shell decides between side panes and overlay sheets by breakpoint.
+let mockBreakpoint: "mobile" | "tablet" | "desktop" = "desktop"
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useBreakpoint: () => mockBreakpoint,
+}))
+// The dialog plans with a model. Here it only has to open and hand back an id.
+jest.mock("@/components/agent/workspace/auto-compose-dialog", () => ({
+  AutoComposeDialog: ({
+    open,
+    onComposed,
+  }: {
+    open: boolean
+    onComposed: (teamId: string) => void
+  }) =>
+    open ? (
+      <button type="button" data-testid="compose-stub" onClick={() => onComposed("composed")}>
+        compose
+      </button>
+    ) : null,
+}))
 // `useSquadFleet` asks Dexie whether the mirror holds anything, to tell "not
 // loaded yet" from "none". Answering 0 keeps every case here on the loaded
 // path. The loading path is the hook's own case.
@@ -132,6 +154,7 @@ function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
     query: "",
     filter: "all",
     narrowed: false,
+    runHref: (runId) => `/squads?tab=runs&run=${encodeURIComponent(runId)}`,
     setSelectedId,
     setRunId,
     setRunStatus,
@@ -154,6 +177,7 @@ function renderConsole(state: SquadRouteState) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockBreakpoint = "desktop"
   usePendingGatesStore.setState({ gates: [] } as never)
   fleetSource = "none"
   useProjectStore.setState({ activeProjectId: null } as never)
@@ -167,7 +191,7 @@ describe("SquadFleetConsole", () => {
   })
 
   it("leaves the header uncounted when there is no Squad to count", () => {
-    // It read "none working of 0 Squads" beside the rail's own empty state.
+    // It read "none working of 0 Squads" beside the empty state.
     seed([])
     renderConsole(route())
     expect(screen.queryByText(/0 Squads/)).not.toBeInTheDocument()
@@ -178,17 +202,44 @@ describe("SquadFleetConsole", () => {
     expect(screen.getAllByTestId("squad-fleet-row")).toHaveLength(2)
   })
 
-  /**
-   * ADR-0169: the Runs tab IS the canonical run cockpit, embedded and pinned
-   * to Squad runs. Without a selection it lists every Squad's runs.
-   */
-  it("shows the unified run cockpit without a selection, and without a second title", () => {
+  /** The rail scales with the window rather than keeping its first pixel width. */
+  it("offers no collapse toggle that would pin the rail's width", () => {
     renderConsole(route())
+    expect(screen.queryByRole("button", { name: /Hide Squad list/ })).not.toBeInTheDocument()
+  })
+
+  /**
+   * Two panes, not three: a selected Squad heads its own view in the centre,
+   * and nothing opens a fourth column on the right.
+   */
+  it("never opens a right-hand pane", () => {
+    renderConsole(route({ selectedId: "b" }))
+    expect(screen.queryByLabelText("Squad detail")).not.toBeInTheDocument()
+    expect(screen.getAllByTestId("squad-detail-view")).toHaveLength(1)
+  })
+})
+
+describe("SquadFleetConsole centre, nothing selected", () => {
+  /**
+   * ADR-0169: every Squad's runs are the canonical run cockpit, embedded and
+   * pinned to Squad runs. The rail already lists the Squads themselves.
+   */
+  it("shows every Squad's runs in the unified cockpit", () => {
+    renderConsole(route())
+    expect(screen.getByTestId("squad-fleet-all-runs")).toHaveTextContent("Runs across every Squad")
     const panel = screen.getByTestId("agent-runs-panel")
     expect(panel).toHaveAttribute("data-embedded", "true")
     expect(panel).toHaveAttribute("data-kind", "team")
     expect(panel).toHaveAttribute("data-team", "")
     expect(screen.queryByTestId("squad-fleet-inspector")).not.toBeInTheDocument()
+  })
+
+  /** A Board with no Squad could only ever say "pick one", so there is none. */
+  it("offers no Squad tabs, whatever tab the link named", () => {
+    renderConsole(route({ tab: "board" }))
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument()
+    expect(screen.getByTestId("agent-runs-panel")).toBeInTheDocument()
+    expect(screen.queryByTestId("task-board")).not.toBeInTheDocument()
   })
 
   /**
@@ -203,17 +254,44 @@ describe("SquadFleetConsole", () => {
     expect(setRunStatus).toHaveBeenCalledWith("failed")
   })
 
-  it("opens the inspector and pins the cockpit to the selected Squad's runs", () => {
-    renderConsole(route({ selectedId: "b", runId: "execution:team:run_9" }))
-    expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
+  it("keeps an open run from a deep link", () => {
+    renderConsole(route({ runId: "execution:team:run_9" }))
+    expect(screen.getByTestId("agent-runs-panel")).toHaveAttribute(
+      "data-run",
+      "execution:team:run_9"
+    )
+  })
+})
+
+describe("SquadFleetConsole centre, a Squad selected", () => {
+  it("lands on the Squad's overview, headed by its controls", () => {
+    renderConsole(route({ selectedId: "b" }))
+    expect(screen.getByTestId("squad-fleet-inspector")).toHaveTextContent("Bravo")
+    expect(screen.getByTestId("squad-detail-tab-overview")).toHaveAttribute("data-state", "active")
+    expect(screen.getByTestId("squad-overview")).toBeInTheDocument()
+  })
+
+  it("pins the cockpit to the selected Squad's runs", () => {
+    renderConsole(route({ selectedId: "b", tab: "runs", runId: "execution:team:run_9" }))
     const panel = screen.getByTestId("agent-runs-panel")
     expect(panel).toHaveAttribute("data-team", "b")
     // `?run=` shares the `/agent-runs` id space, so a card's deep link lands here too.
     expect(panel).toHaveAttribute("data-run", "execution:team:run_9")
   })
 
+  it("shows the chosen Squad's board", () => {
+    renderConsole(route({ tab: "board", selectedId: "a" }))
+    expect(screen.getByTestId("task-board")).toHaveTextContent("a")
+  })
+
+  /** `squads` is the phone's list tab; a selected Squad has no such tab. */
+  it("resolves the phone-only tab to the overview", () => {
+    renderConsole(route({ tab: "squads", selectedId: "a" }))
+    expect(screen.getByTestId("squad-detail-tab-overview")).toHaveAttribute("data-state", "active")
+  })
+
   it("sends configuration to Settings rather than growing a second editor", () => {
-    // One place per question: this page answers "what is running".
+    // One place per question: this page answers "what is it doing".
     renderConsole(route({ selectedId: "b" }))
     const link = screen.getByTestId("squad-fleet-configure")
     expect(link).toHaveAttribute("href", expect.stringContaining("section=squads"))
@@ -233,53 +311,37 @@ describe("SquadFleetConsole", () => {
 
   /**
    * Narrowing is about the list, not about what you were reading. Deriving the
-   * inspector from the narrowed rows would blank the detail of the Squad you
-   * had open the moment you typed into the search box.
+   * view from the narrowed rows would blank the Squad you had open the moment
+   * you typed into the search box.
    */
-  it("keeps the inspector open on a Squad the filter has hidden", () => {
+  it("keeps a Squad open after the filter has hidden its row", () => {
     renderConsole(route({ selectedId: "b", query: "Alpha", narrowed: true }))
     expect(screen.queryAllByTestId("squad-fleet-row")).toHaveLength(1)
-    expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
-    expect(screen.getByTestId("agent-runs-panel")).toHaveAttribute("data-team", "b")
+    expect(screen.getByTestId("squad-fleet-inspector")).toHaveTextContent("Bravo")
+  })
+
+  /** A stale link used to leave a blank centre. */
+  it("says a Squad is gone, and offers the way back to all of them", async () => {
+    renderConsole(route({ selectedId: "gone" }))
+    expect(screen.getByTestId("squad-fleet-missing")).toHaveTextContent("Squad unavailable")
+    await userEvent.click(screen.getByRole("button", { name: "Show all Squads" }))
+    expect(setSelectedId).toHaveBeenCalledWith(undefined)
   })
 })
 
-describe("SquadFleetConsole tabs", () => {
+describe("SquadFleetConsole between md and lg", () => {
   /**
-   * `squads` is the phone's tab. Asking for it here, from a shared link or
-   * after a resize, must not select a tab with no trigger and no content.
+   * The shell moves the rail into a sheet below `lg`. Picking a Squad there is
+   * the whole reason the sheet was opened, so the pick closes it and the
+   * Squad's view is what the reader sees next.
    */
-  it("resolves the phone-only tab to the runs console", () => {
-    renderConsole(route({ tab: "squads" }))
-    expect(screen.getByTestId("squad-fleet-tab-runs")).toHaveAttribute("data-state", "active")
-    expect(screen.queryByTestId("squad-fleet-tab-squads")).not.toBeInTheDocument()
-  })
-
-  it("opens on the runs console, because the rail is already on screen", () => {
+  it("closes the rail sheet on a pick", async () => {
+    mockBreakpoint = "tablet"
     renderConsole(route())
-    expect(screen.getByTestId("squad-fleet-tab-runs")).toHaveAttribute("data-state", "active")
-  })
-
-  it("reports a tab change instead of owning it", async () => {
-    const user = userEvent.setup()
-    renderConsole(route())
-    // Driven from the keyboard: Radix Tabs activates on arrow-key focus with
-    // its default `activationMode="automatic"`, and that path exercises the
-    // same `onValueChange` a click does while being the one a keyboard user
-    // actually takes.
-    screen.getByRole("tab", { name: "Runs" }).focus()
-    await user.keyboard("{ArrowRight}")
-    expect(setTab).toHaveBeenCalledWith("board")
-  })
-
-  it("offers the board only once a Squad is chosen", () => {
-    renderConsole(route({ tab: "board" }))
-    expect(screen.getByTestId("squad-fleet-board-unselected")).toBeInTheDocument()
-  })
-
-  it("shows the chosen Squad's board", () => {
-    renderConsole(route({ tab: "board", selectedId: "a" }))
-    expect(screen.getByTestId("task-board")).toHaveTextContent("a")
+    await userEvent.click(screen.getByRole("button", { name: /Squad list/ }))
+    await userEvent.click((await screen.findAllByTestId("squad-fleet-row"))[0]!)
+    expect(setSelectedId).toHaveBeenCalledWith("a")
+    await waitFor(() => expect(screen.queryByTestId("squad-fleet-row")).not.toBeInTheDocument())
   })
 })
 
@@ -299,19 +361,46 @@ describe("SquadFleetConsole host activity link", () => {
     renderConsole(route())
     expect(screen.queryByTestId("squad-fleet-host-activity")).not.toBeInTheDocument()
   })
+
+  it("links Settings for the library", () => {
+    renderConsole(route())
+    expect(screen.getByTestId("squad-fleet-manage")).toHaveAttribute(
+      "href",
+      expect.stringContaining("section=squads")
+    )
+  })
 })
 
 describe("SquadFleetConsole creation", () => {
+  /** "New Squad" is in the header, always on screen, and follows what it made. */
+  it("creates from the header and opens the new Squad", async () => {
+    renderConsole(route())
+    await userEvent.click(screen.getByTestId("squad-fleet-new"))
+    expect(createSquadMock).toHaveBeenCalled()
+    await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith("new"))
+  })
+
   /**
-   * The empty state used to name Settings and leave you to go find it, which
-   * is the one moment a fleet console has nothing else to offer.
+   * An empty workspace gets one full empty state, in the centre, with both
+   * ways to make a Squad. The rail beside it only says the list is empty.
    */
-  it("offers a way to make the first Squad, and follows what it made", async () => {
+  it("offers both ways to make the first Squad in the centre", async () => {
     seed([])
     renderConsole(route())
+    expect(screen.getByTestId("squad-fleet-onboarding")).toBeInTheDocument()
+    expect(screen.getByTestId("squad-fleet-empty-quiet")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-runs-panel")).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId("squad-fleet-create"))
     expect(createSquadMock).toHaveBeenCalled()
-    await screen.findByTestId("squad-fleet-create")
-    expect(setSelectedId).toHaveBeenCalledWith("new")
+    await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith("new"))
+  })
+
+  /** The auto-compose dialog was only reachable from Settings. */
+  it("composes a Squad from an objective and opens it", async () => {
+    renderConsole(route())
+    await userEvent.click(screen.getByTestId("squad-fleet-compose"))
+    await userEvent.click(screen.getByTestId("compose-stub"))
+    expect(setSelectedId).toHaveBeenCalledWith("composed")
+    expect(screen.queryByTestId("compose-stub")).not.toBeInTheDocument()
   })
 })
