@@ -1,4 +1,5 @@
 {
   "openLeft": "Open {name}",
-  "openRight": "Open {name}"
+  "openRight": "Open {name}",
+  "closeLeft": "Hide {name}"
 }

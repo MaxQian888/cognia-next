@@ -112,6 +112,8 @@ export function DeviceConsole() {
   return (
     <FeaturePageShell
       storageId="devices"
+      collapsibleLeftPane
+      headerPlacement="center"
       header={
         <FeaturePageHeader
           variant="management"
@@ -225,8 +227,8 @@ export function DeviceConsole() {
           />
         ),
         label: t("listPane.label"),
-        defaultSize: 26,
-        minSize: 18,
+        defaultSize: "15rem",
+        minSize: "15rem",
         maxSize: 40,
       }}
       centerClassName="min-h-0"

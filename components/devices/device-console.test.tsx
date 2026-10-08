@@ -1,5 +1,5 @@
 import { standaloneDevicesRequiresHost } from "@/lib/runtime/surface-contract"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -135,6 +135,23 @@ beforeEach(() => {
 })
 
 describe("DeviceConsole", () => {
+  it("uses a settings-width list and preserves the selected device when toggled", () => {
+    useDeviceConsoleStore.getState().select("device:a")
+    renderConsole()
+    const detail = screen.getByTestId("detail")
+    const header = screen.getByTestId("feature-shell-devices-header")
+    expect(header.closest('[data-testid="feature-shell-devices-center"]')).not.toBeNull()
+    expect(header).not.toContainElement(screen.getByTestId("device-list-pane"))
+    expect(screen.getByTestId("device-list-pane").closest("aside")).toHaveStyle({
+      minWidth: "15rem",
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Hide Device list" }))
+    expect(screen.getByTestId("device-list-pane").closest("aside")).toHaveAttribute("inert")
+    fireEvent.click(screen.getByRole("button", { name: "Open Device list" }))
+    expect(screen.getByTestId("detail")).toBe(detail)
+    expect(detail).toHaveTextContent("device:a")
+  })
+
   /**
    * This machine is the one row that is always present and always safe to
    * show. Reopening pinned to a phone that has since been revoked would leave

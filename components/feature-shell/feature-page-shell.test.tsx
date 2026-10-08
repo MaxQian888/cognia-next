@@ -288,3 +288,52 @@ describe("narrow desktop windows", () => {
     expect(screen.getByTestId("tablet-open-right")).toBeInTheDocument()
   })
 })
+
+test("an opt-in desktop list collapses without remounting the list or detail", () => {
+  render(
+    <FeaturePageShell
+      storageId="devices"
+      collapsibleLeftPane
+      header={<h1>Devices</h1>}
+      leftPane={{
+        label: "Devices",
+        content: <input aria-label="Search devices" />,
+        defaultSize: "15rem",
+        minSize: "15rem",
+      }}
+    >
+      <input aria-label="Detail draft" defaultValue="keep" />
+    </FeaturePageShell>
+  )
+  const search = screen.getByRole("textbox", { name: "Search devices" })
+  const detail = screen.getByRole("textbox", { name: "Detail draft" })
+  fireEvent.change(search, { target: { value: "phone" } })
+  fireEvent.click(screen.getByRole("button", { name: "closeLeft:Devices" }))
+  expect(screen.getByLabelText("Devices")).toHaveAttribute("inert")
+  expect(screen.getByRole("textbox", { name: "Detail draft" })).toBe(detail)
+  fireEvent.click(screen.getByRole("button", { name: "openLeft:Devices" }))
+  expect(screen.getByRole("textbox", { name: "Search devices" })).toBe(search)
+  expect(search).toHaveValue("phone")
+  expect(screen.getByLabelText("Devices")).not.toHaveAttribute("inert")
+})
+
+test("opt-in collapse leaves the tablet sheet navigation in place", () => {
+  breakpointValue = "tablet"
+  render(
+    <FeaturePageShell
+      storageId="devices-tablet"
+      collapsibleLeftPane
+      header={<h1>Devices</h1>}
+      leftPane={{
+        label: "Devices",
+        content: <input aria-label="Find device" />,
+        defaultSize: "15rem",
+      }}
+    >
+      <p>Device details</p>
+    </FeaturePageShell>
+  )
+  expect(screen.queryByRole("button", { name: "closeLeft:Devices" })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "openLeft:Devices" }))
+  expect(screen.getByRole("textbox", { name: "Find device" })).toBeVisible()
+})

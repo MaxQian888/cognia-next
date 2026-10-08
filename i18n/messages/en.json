@@ -16932,6 +16932,7 @@
     }
   },
   "featureShell": {
+    "closeLeft": "Hide {name}",
     "openLeft": "Open {name}",
     "openRight": "Open {name}"
   },

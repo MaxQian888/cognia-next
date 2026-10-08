@@ -16932,6 +16932,7 @@
     }
   },
   "featureShell": {
+    "closeLeft": "收起{name}",
     "openLeft": "打开{name}",
     "openRight": "打开{name}"
   },

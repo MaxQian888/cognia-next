@@ -41,6 +41,9 @@
  * attribute. Owning it here means a new feature route cannot forget.
  */
 
+import { useRef, useState } from "react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { PanelLeftIcon, PanelRightIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -94,8 +97,12 @@ export interface FeaturePageShellProps {
   storageId: string
   /** Optional header that spans the full content width and owns its own chrome. */
   header?: React.ReactNode
+  /** On desktop, place the header above only the detail pane beside a full-height list. */
+  headerPlacement?: "full-width" | "center"
   /** Optional left rail. Omit to render only center+right (or just center). */
   leftPane?: FeaturePaneConfig
+  /** Opt in to an animated desktop list toggle; overlay sheets keep their own controls. */
+  collapsibleLeftPane?: boolean
   /** Optional right inspector. Omit to render only left+center (or just center). */
   rightPane?: FeaturePaneConfig
   /** Center pane content. */
@@ -119,6 +126,8 @@ export function FeaturePageShell({
   rightPane,
   children,
   centerClassName,
+  collapsibleLeftPane = false,
+  headerPlacement = "full-width",
 }: FeaturePageShellProps) {
   // Three panes need roughly 1024px before the side ones stop starving each
   // other. Between `md` and `lg` the percentages still resolved, so the shell
@@ -127,6 +136,33 @@ export function FeaturePageShell({
   // its six columns off the edge. The tablet tier keeps the desktop centre and
   // moves the side panes into the overlay the phone tier already used.
   const overlayPanes = useBreakpoint() !== "desktop"
+
+  const t = useTranslations("featureShell")
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [animateToggle, setAnimateToggle] = useState(false)
+  const leftPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const previousCollapsedRef = useRef(false)
+  const expandedWidthRef = useRef<number | null>(null)
+  const leftDefault = paneSize(leftPane?.defaultSize, DEFAULT_LEFT_SIZE)
+
+  useIsomorphicLayoutEffect(() => {
+    if (previousCollapsedRef.current === leftCollapsed) return
+    previousCollapsedRef.current = leftCollapsed
+    const panel = leftPanelRef.current
+    if (leftCollapsed) panel?.collapse()
+    else
+      panel?.resize(
+        expandedWidthRef.current && expandedWidthRef.current > 0
+          ? expandedWidthRef.current
+          : leftDefault
+      )
+  }, [leftCollapsed, leftDefault])
+
+  const toggleLeft = () => {
+    if (!leftCollapsed) expandedWidthRef.current = leftPanelRef.current?.getSize().inPixels ?? null
+    setAnimateToggle(true)
+    setLeftCollapsed((collapsed) => !collapsed)
+  }
 
   if (overlayPanes) {
     return (
@@ -142,40 +178,96 @@ export function FeaturePageShell({
     )
   }
 
+  const desktopHeader =
+    header || (leftPane && collapsibleLeftPane) ? (
+      <div
+        className={cn("shrink-0", collapsibleLeftPane && "flex")}
+        data-testid={`feature-shell-${storageId}-header`}
+      >
+        {leftPane && collapsibleLeftPane ? (
+          <div className="flex shrink-0 items-center border-b border-border/70 pl-3">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t(leftCollapsed ? "openLeft" : "closeLeft", { name: leftPane.label })}
+              aria-expanded={!leftCollapsed}
+              aria-controls={`pane-${storageId}-left`}
+              onClick={toggleLeft}
+            >
+              <PanelLeftIcon className="size-4" />
+            </Button>
+          </div>
+        ) : null}
+        {collapsibleLeftPane ? <div className="min-w-0 flex-1">{header}</div> : header}
+      </div>
+    ) : null
+
   return (
     <div
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
       data-bg-target="chat"
       data-testid={`feature-shell-${storageId}`}
     >
-      {header ? (
-        <div className="shrink-0" data-testid={`feature-shell-${storageId}-header`}>
-          {header}
-        </div>
-      ) : null}
+      {headerPlacement === "full-width" ? desktopHeader : null}
 
       <div className="flex min-h-0 flex-1">
         <ResizablePanelGroup
           id={`feature-shell-group-${storageId}`}
           orientation="horizontal"
-          className="flex-1 min-h-0"
+          className={cn(
+            "flex-1 min-h-0",
+            animateToggle &&
+              "[&>[data-panel]]:transition-[flex-grow] [&>[data-panel]]:duration-200 [&>[data-panel]]:ease-out"
+          )}
+          onTransitionEnd={(event) => {
+            if (event.propertyName === "flex-grow") setAnimateToggle(false)
+          }}
+          onLayoutChanged={(layout) => {
+            if (!collapsibleLeftPane) return
+            const collapsed = layout[`pane-${storageId}-left`] === 0
+            // A drag can collapse the list as well as the header button.
+            setLeftCollapsed(collapsed)
+          }}
         >
           {leftPane ? (
             <>
               <ResizablePanel
                 id={`pane-${storageId}-left`}
-                defaultSize={paneSize(leftPane.defaultSize, DEFAULT_LEFT_SIZE)}
+                panelRef={leftPanelRef}
+                collapsible={collapsibleLeftPane}
+                collapsedSize="0%"
+                groupResizeBehavior={collapsibleLeftPane ? "preserve-pixel-size" : undefined}
+                defaultSize={leftCollapsed ? "0%" : leftDefault}
+                style={collapsibleLeftPane ? { overflow: "hidden" } : undefined}
                 minSize={paneSize(leftPane.minSize, DEFAULT_LEFT_MIN)}
                 maxSize={paneSize(leftPane.maxSize, DEFAULT_LEFT_MAX)}
               >
                 <aside
                   aria-label={leftPane.label}
+                  inert={leftCollapsed}
+                  aria-hidden={leftCollapsed || undefined}
+                  style={
+                    collapsibleLeftPane
+                      ? { minWidth: paneSize(leftPane.minSize, DEFAULT_LEFT_MIN) }
+                      : undefined
+                  }
                   className="flex h-full min-w-0 flex-col overflow-hidden border-r bg-muted/20"
                 >
                   {leftPane.content}
                 </aside>
               </ResizablePanel>
-              <ResizableHandle withHandle />
+              <ResizableHandle
+                withHandle
+                className={cn(leftCollapsed && "hidden")}
+                onPointerDownCapture={() => {
+                  setAnimateToggle(false)
+                  expandedWidthRef.current = leftPanelRef.current?.getSize().inPixels ?? null
+                }}
+                onKeyDownCapture={() => {
+                  setAnimateToggle(false)
+                  expandedWidthRef.current = leftPanelRef.current?.getSize().inPixels ?? null
+                }}
+              />
             </>
           ) : null}
 
@@ -197,7 +289,14 @@ export function FeaturePageShell({
               className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden", centerClassName)}
               data-testid={`feature-shell-${storageId}-center`}
             >
-              {children}
+              {headerPlacement === "center" ? (
+                <>
+                  {desktopHeader}
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+                </>
+              ) : (
+                children
+              )}
             </div>
           </ResizablePanel>
 
