@@ -663,3 +663,25 @@ it("consumes the internal Cognia readiness marker without exposing implementatio
     })
   ).toEqual([])
 })
+
+it("consumes the shell guard's readiness marker too", () => {
+  expect(
+    map({
+      type: "extension_ui_request",
+      id: "guard",
+      method: "setStatus",
+      statusKey: "cognia-shell-guard",
+      statusText: "cognia-shell-guard-ready v1",
+    })
+  ).toEqual([])
+  // Another extension's status under its own key still reaches the user.
+  expect(
+    map({
+      type: "extension_ui_request",
+      id: "mcp",
+      method: "setStatus",
+      statusKey: "mcp",
+      statusText: "MCP 0/2",
+    })
+  ).toMatchObject([{ update: { kind: "status", key: "mcp", text: "MCP 0/2" } }])
+})

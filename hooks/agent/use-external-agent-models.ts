@@ -28,6 +28,7 @@ import {
   EMPTY_MODEL_SURFACE,
   loadAgentModelCatalog,
   loadAgentModelSurface,
+  agentModelSurfaceEpoch,
   agentModelSurfaceRevision,
   subscribeAgentModelSurface,
   type ModelSurfaceResult,
@@ -200,6 +201,19 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     agentModelSurfaceRevision,
     () => 0
   )
+  /**
+   * Moves only when this agent's cached answers are DROPPED (a connect, a
+   * disconnect, a config write). The effect below keeps the last answer it was
+   * handed in `result`, and before this was a dependency nothing re-ran it
+   * when that answer went void: an agent asked a moment before it connected
+   * (startup, or a manager replaced by a hot update) stayed on "reported no
+   * models" while the runtime menu said "Connected".
+   */
+  const cacheEpoch = useSyncExternalStore(
+    subscribeAgentModelSurface,
+    () => (agentId ? agentModelSurfaceEpoch(agentId) : 0),
+    () => 0
+  )
 
   useEffect(() => {
     // No clearing here: the memo below already answers IDLE for a built-in
@@ -271,9 +285,11 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
           // without one (Pi, via `--list-models`) still answers, so the picker
           // can seed the first turn; every other agent answers `unsupported`
           // and the picker keeps its "arrives with the first turn" notice.
+          // An `error` is not an answer to serve: the loader retries it once
+          // its backoff expires, which this shortcut would skip forever.
           const cachedCatalog =
             nonce === 0 ? cachedAgentModelSurface(agentId, AGENT_MODEL_CATALOG) : null
-          if (cachedCatalog) {
+          if (cachedCatalog && cachedCatalog.status !== "error") {
             setResult(cachedCatalog)
             return
           }
@@ -284,7 +300,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
           return
         }
         const cached = nonce === 0 ? cachedAgentModelSurface(agentId, resolved) : null
-        if (cached) {
+        if (cached && cached.status !== "error") {
           setResult(cached)
           return
         }
@@ -316,7 +332,16 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
       cancelled = true
       clearTimeout(deadline)
     }
-  }, [agentId, hostConfigId, reportedLane, sessionId, nonce, planeScope, connectionStatus])
+  }, [
+    agentId,
+    hostConfigId,
+    reportedLane,
+    sessionId,
+    nonce,
+    planeScope,
+    connectionStatus,
+    cacheEpoch,
+  ])
 
   /**
    * What the shared cache holds right now, derived rather than mirrored.

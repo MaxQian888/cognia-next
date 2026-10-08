@@ -419,6 +419,22 @@ function latestSession<T extends Pick<ExternalAgentSession, "lastActivityAt">>(
   return latest
 }
 
+/**
+ * Where the live manager is recorded across a re-evaluation of this module.
+ *
+ * A dev-mode hot update that touches this module (or anything it imports, an
+ * agent package included) evaluates it again, and the new class starts with an
+ * empty `_instance`. The old manager kept its connected adapters and their
+ * processes, the store kept saying "connected", and every reader reached the
+ * new, empty manager: the model picker answered "no models" for an agent that
+ * was plainly connected. The slot lets the new class find the old instance and
+ * retire it, and `ExternalAgentInitializer` rehydrates the agents into the new
+ * one. A production bundle evaluates this module once, so the slot only ever
+ * holds the one instance there.
+ */
+const LIVE_MANAGER_SLOT = Symbol.for("cognia.externalAgentManager.live")
+type LiveManagerSlot = { [LIVE_MANAGER_SLOT]?: ExternalAgentManager }
+
 export class ExternalAgentManager {
   private static _instance: ExternalAgentManager | null = null
 
@@ -2135,7 +2151,20 @@ export class ExternalAgentManager {
    */
   static getInstance(config?: ExternalAgentManagerConfig): ExternalAgentManager {
     if (!ExternalAgentManager._instance) {
+      const slot = globalThis as LiveManagerSlot
+      const previous = slot[LIVE_MANAGER_SLOT]
+      // An instance of a PREVIOUS evaluation of this module (see
+      // `LIVE_MANAGER_SLOT`): disconnect its agents so their processes do not
+      // outlive it, then let the initializer rehydrate them into this one.
+      if (previous) {
+        void previous.dispose().catch((error: unknown) => {
+          externalAgentManagerLogger.warn("Failed to retire the previous external agent manager", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
       ExternalAgentManager._instance = new ExternalAgentManager(config)
+      slot[LIVE_MANAGER_SLOT] = ExternalAgentManager._instance
     }
     return ExternalAgentManager._instance
   }
@@ -2148,6 +2177,7 @@ export class ExternalAgentManager {
       ExternalAgentManager._instance.dispose()
       ExternalAgentManager._instance = null
     }
+    delete (globalThis as LiveManagerSlot)[LIVE_MANAGER_SLOT]
   }
 
   /**

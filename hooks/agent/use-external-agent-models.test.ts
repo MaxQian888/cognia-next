@@ -25,6 +25,7 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 // Both are read through `useSyncExternalStore`, so a mock that omits them does
 // not merely lose coverage, it makes every test in this file throw at render.
 let cacheRevision = 0
+let cacheEpoch = 0
 const cacheListeners = new Set<() => void>()
 jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
   loadAgentModelSurface: (...args: unknown[]) => loadAgentModelSurface(...args),
@@ -37,6 +38,7 @@ jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
     return () => cacheListeners.delete(listener)
   },
   agentModelSurfaceRevision: () => cacheRevision,
+  agentModelSurfaceEpoch: () => cacheEpoch,
   AGENT_MODEL_CATALOG: "*catalog*",
   EMPTY_MODEL_SURFACE: { choices: [], currentModelId: null, write: { kind: "none" } },
 }))
@@ -104,7 +106,47 @@ describe("useExternalAgentModels", () => {
     cachedConversationSurface.mockReset().mockReturnValue(null)
     mountIsLocal = true
     cacheRevision = 0
+    cacheEpoch = 0
     cacheListeners.clear()
+  })
+
+  it("re-asks when the agent's cached answers are dropped", async () => {
+    // Asked a moment before the agent connected: the answer is "unsupported".
+    // The connect drops the cache; the hook must not keep showing its own copy
+    // of the void answer ("reported no models" beside "Connected").
+    resolveConversationSessionId.mockReturnValue(null)
+    loadAgentModelCatalog.mockResolvedValueOnce({
+      status: "unsupported",
+      surface: { choices: [], currentModelId: null, write: { kind: "none" } },
+    })
+    const { result } = renderHook(() => useExternalAgentModels(undefined))
+    await waitFor(() => expect(result.current.status).toBe("unsupported"))
+    loadAgentModelCatalog.mockResolvedValueOnce({ status: "ready", surface: SURFACE })
+    act(() => {
+      cacheEpoch += 1
+      cacheRevision += 1
+      for (const listener of [...cacheListeners]) listener()
+    })
+    await waitFor(() => expect(result.current.surface).toEqual(SURFACE))
+    expect(loadAgentModelCatalog).toHaveBeenLastCalledWith("pi-1", { refresh: false })
+  })
+
+  it("does not serve a cached error as the answer", async () => {
+    resolveConversationSessionId.mockReturnValue(null)
+    cachedAgentModelSurface.mockReturnValue({ status: "error", surface: null, detail: "early" })
+    loadAgentModelCatalog.mockResolvedValueOnce({ status: "ready", surface: SURFACE })
+    const { result } = renderHook(() => useExternalAgentModels(undefined))
+    // The loader owns the retry policy for errors, so the hook asks it.
+    await waitFor(() =>
+      expect(loadAgentModelCatalog).toHaveBeenCalledWith("pi-1", { refresh: false })
+    )
+    // `shared` still reads the cached error until the loader rewrites it.
+    cachedAgentModelSurface.mockReturnValue(null)
+    act(() => {
+      cacheRevision += 1
+      for (const listener of [...cacheListeners]) listener()
+    })
+    await waitFor(() => expect(result.current.surface).toEqual(SURFACE))
   })
 
   it("stays inert on a built-in lane", async () => {

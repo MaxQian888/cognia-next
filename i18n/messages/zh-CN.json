@@ -16175,6 +16175,11 @@
       "tauriOnly": "外部代理仅在 Tauri 中可用"
     },
     "executionPlan": "执行计划",
+    "extensionUi": {
+      "dismissNotice": "关闭提示",
+      "statusRegion": "Agent 扩展状态",
+      "widget": "{name} 扩展的输出"
+    },
     "externalAgents": "外部代理",
     "failure": {
       "causes": "它包裹的原因",

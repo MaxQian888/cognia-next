@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
 import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/integrations/acp"
-import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import { getExternalAgentManager, type ExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 import { rehydrateExternalAgent } from "@/lib/ai/agent/external/session/rehydrate"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
@@ -24,7 +24,14 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
  * reported it disconnected, until one of them was opened and refreshed.
  */
 export function ExternalAgentInitializer() {
-  const hasInitialized = useRef(false)
+  /**
+   * The manager the persisted agents were last rehydrated into. Keyed by
+   * instance rather than a once-per-mount flag: a dev hot update can replace
+   * the manager (see `LIVE_MANAGER_SLOT` in the manager) while this component
+   * survives the refresh, and a flag left the new manager with no agents while
+   * the store still said they were connected.
+   */
+  const rehydratedInto = useRef<ExternalAgentManager | null>(null)
 
   useEffect(() => {
     let isActive = true
@@ -34,18 +41,32 @@ export function ExternalAgentInitializer() {
     // One-time startup rehydration. Runs every persisted agent in PARALLEL so a
     // single slow/hanging connect cannot block the rest (the old serial loop
     // stalled the whole subsystem behind the first agent).
+    //
+    // "One-time" per manager, and only for a run that was allowed to finish. A
+    // run cancelled by this effect's cleanup (StrictMode's second invocation,
+    // or a hot update re-running the effect) stops before it connects, so the
+    // next run must redo it rather than find the gate already closed: it used
+    // to, and the agents stayed registered but unconnected.
+    // `rehydrateExternalAgent` picks up an agent the cancelled run already
+    // registered, and `connect` joins one already in flight.
+    let rehydrating = false
     const runStartup = async () => {
-      if (hasInitialized.current) {
+      const manager = getExternalAgentManager()
+      if (rehydratedInto.current === manager) {
         return
       }
-      hasInitialized.current = true
-      const manager = getExternalAgentManager()
+      rehydratedInto.current = manager
+      rehydrating = true
       const persistedAgents = useExternalAgentStore.getState().getAllAgents()
-      await Promise.all(
-        // `rehydrateExternalAgent` writes the startup status itself, on every
-        // one of its exits. This listener is for what happens after.
-        persistedAgents.map((config) => rehydrateExternalAgent(config, manager, shouldContinue))
-      )
+      try {
+        await Promise.all(
+          // `rehydrateExternalAgent` writes the startup status itself, on every
+          // one of its exits. This listener is for what happens after.
+          persistedAgents.map((config) => rehydrateExternalAgent(config, manager, shouldContinue))
+        )
+      } finally {
+        rehydrating = false
+      }
     }
 
     // Bound before the rehydration starts, so a transition that lands while an
@@ -83,6 +104,8 @@ export function ExternalAgentInitializer() {
 
     return () => {
       isActive = false
+      // Cancelled before it finished: the next run of this effect owns it.
+      if (rehydrating) rehydratedInto.current = null
       unsubscribe()
       unbindLifecycle()
       setAcpDynamicMcpHostController(undefined)

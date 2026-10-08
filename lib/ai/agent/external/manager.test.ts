@@ -518,6 +518,25 @@ describe("the session a model surface should describe", () => {
   })
 })
 
+describe("a re-evaluated manager module (dev hot update)", () => {
+  it("retires the previous evaluation's live manager", () => {
+    const previous = freshManager()
+    const dispose = jest.spyOn(previous, "dispose").mockResolvedValue(undefined)
+    let replacement: ExternalAgentManager | null = null
+    jest.isolateModules(() => {
+      // A second evaluation of the module: a new class with an empty static.
+      const reloaded = jest.requireActual<typeof import("./manager")>("./manager")
+      replacement = reloaded.ExternalAgentManager.getInstance({ healthCheckInterval: 0 })
+      expect(replacement).not.toBe(previous)
+      expect(dispose).toHaveBeenCalledTimes(1)
+      // The new instance is the live one now; asking again is not a retirement.
+      expect(reloaded.ExternalAgentManager.getInstance()).toBe(replacement)
+      expect(dispose).toHaveBeenCalledTimes(1)
+      reloaded.ExternalAgentManager.resetInstance()
+    })
+  })
+})
+
 describe("fetchSessionModelSurface (the async twin the sync capabilities could not be)", () => {
   it("discovers session-scoped models before a prompt and closes the discovery session", async () => {
     const manager = freshManager()

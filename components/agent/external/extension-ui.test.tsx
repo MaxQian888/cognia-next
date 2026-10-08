@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
-import { ExternalAgentExtensionUi } from "./extension-ui"
+import { EXTENSION_NOTICE_MS, ExternalAgentExtensionUi, stripAnsi } from "./extension-ui"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import type { ExternalAgentEvent } from "@/types/agent/external-agent"
 
@@ -155,4 +155,101 @@ it("replaces same-session presentation after resume without replaying consumed e
   expect(screen.queryByText("old status")).not.toBeInTheDocument()
   expect(screen.queryByText("old widget")).not.toBeInTheDocument()
   expect(useComposerIntentStore.getState().pendingBySession.local).toBeUndefined()
+})
+
+const ESC = String.fromCharCode(27)
+
+it("renders terminal-styled statuses as one row of chips, colours kept and codes gone", async () => {
+  render(
+    <ExternalAgentExtensionUi chatSessionId="local" link={link}>
+      <textarea />
+    </ExternalAgentExtensionUi>
+  )
+  await waitFor(() => expect(mockListeners.size).toBe(1))
+  emit({ kind: "status", key: "mcp", text: `${ESC}[38;2;167;152;215mMCP 0/2${ESC}[39m` }, "s1")
+  emit({ kind: "status", key: "mode", text: "yolo" }, "s2")
+  // A status that is only styling has nothing to say.
+  emit({ kind: "status", key: "blank", text: `${ESC}[0m ` }, "s3")
+  const row = screen.getByRole("status")
+  const chips = screen.getAllByTestId("extension-status")
+  expect(chips).toHaveLength(2)
+  expect(row).toHaveTextContent("MCP 0/2")
+  expect(row.textContent).not.toContain(ESC)
+  expect(row.textContent).not.toContain("[38;2")
+  expect(chips[0]).toHaveAttribute("title", "mcp: MCP 0/2")
+  expect(screen.getByText("MCP 0/2")).toHaveStyle({ color: "rgb(167, 152, 215)" })
+})
+
+it("draws widgets without raw escape codes", async () => {
+  render(
+    <ExternalAgentExtensionUi chatSessionId="local" link={link}>
+      <textarea />
+    </ExternalAgentExtensionUi>
+  )
+  await waitFor(() => expect(mockListeners.size).toBe(1))
+  emit({
+    kind: "widget",
+    key: "bg",
+    lines: [`${ESC}[48;2;183;223;255m bg v2.6.9 ${ESC}[0m`],
+    placement: "belowEditor",
+  })
+  const widget = screen.getByTestId("extension-widget")
+  expect(widget).toHaveTextContent("bg v2.6.9")
+  expect(widget.textContent).not.toContain(ESC)
+})
+
+it("shows info notices on the strip for a moment instead of toasting them", async () => {
+  jest.useFakeTimers()
+  try {
+    render(
+      <ExternalAgentExtensionUi chatSessionId="local" link={link}>
+        <textarea />
+      </ExternalAgentExtensionUi>
+    )
+    await waitFor(() => expect(mockListeners.size).toBe(1))
+    emit({ kind: "notification", level: "info", message: "RTK rewrite: ls -> rtk ls" }, "n1")
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(screen.getByTestId("extension-notice")).toHaveTextContent("RTK rewrite: ls -> rtk ls")
+    // The next one replaces it rather than stacking.
+    emit({ kind: "notification", level: "info", message: "RTK rewrite: cat -> rtk read" }, "n2")
+    expect(screen.getAllByTestId("extension-notice")).toHaveLength(1)
+    expect(screen.getByTestId("extension-notice")).toHaveTextContent("cat -> rtk read")
+    act(() => jest.advanceTimersByTime(EXTENSION_NOTICE_MS))
+    expect(screen.queryByTestId("extension-notice")).not.toBeInTheDocument()
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+it("lets the user dismiss an info notice", async () => {
+  render(
+    <ExternalAgentExtensionUi chatSessionId="local" link={link}>
+      <textarea />
+    </ExternalAgentExtensionUi>
+  )
+  await waitFor(() => expect(mockListeners.size).toBe(1))
+  emit({ kind: "notification", level: "info", message: "hello" }, "n1")
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }))
+  expect(screen.queryByTestId("extension-notice")).not.toBeInTheDocument()
+})
+
+it("toasts a repeated warning once per conversation and agent, and every error", async () => {
+  render(
+    <ExternalAgentExtensionUi chatSessionId="local" link={link}>
+      <textarea />
+    </ExternalAgentExtensionUi>
+  )
+  await waitFor(() => expect(mockListeners.size).toBe(1))
+  const warning = "pi-permission-system: project is not trusted"
+  emit({ kind: "notification", level: "warning", message: warning }, "w1")
+  emit({ kind: "notification", level: "warning", message: warning }, "w2")
+  expect(toast.warning).toHaveBeenCalledTimes(1)
+  emit({ kind: "notification", level: "error", message: `${ESC}[31mboom${ESC}[0m` }, "e1")
+  emit({ kind: "notification", level: "error", message: `${ESC}[31mboom${ESC}[0m` }, "e2")
+  expect(toast.error).toHaveBeenCalledTimes(2)
+  expect(toast.error).toHaveBeenLastCalledWith("boom", expect.anything())
+})
+
+it("strips terminal styling", () => {
+  expect(stripAnsi(`${ESC}[1;32mok${ESC}[0m ${ESC}[2K`)).toBe("ok ")
 })

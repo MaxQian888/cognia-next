@@ -1,6 +1,7 @@
 import {
   __setModelSurfaceDepsForTests,
   AGENT_MODEL_CATALOG,
+  agentModelSurfaceEpoch,
   bindConversationSession,
   cachedAgentModelSurface,
   cachedConversationSurface,
@@ -129,6 +130,23 @@ describe("loadAgentModelSurface", () => {
     expect(cachedAgentModelSurface("b", "s")).not.toBeNull()
     await loadAgentModelSurface("a", "s")
     expect(fetchSurface).toHaveBeenCalledTimes(3)
+  })
+
+  it("moves an agent's epoch only when its answers are dropped", async () => {
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
+    restore = __setModelSurfaceDepsForTests({ fetchSurface })
+    const a = agentModelSurfaceEpoch("a")
+    const b = agentModelSurfaceEpoch("b")
+    // A write is not a drop: a reader's answer is still good.
+    await loadAgentModelSurface("a", "s")
+    expect(agentModelSurfaceEpoch("a")).toBe(a)
+    forgetAgentModelSurface("a")
+    expect(agentModelSurfaceEpoch("a")).toBe(a + 1)
+    expect(agentModelSurfaceEpoch("b")).toBe(b)
+    // Dropping everything voids every agent's answer.
+    forgetAgentModelSurface()
+    expect(agentModelSurfaceEpoch("a")).toBe(a + 2)
+    expect(agentModelSurfaceEpoch("b")).toBe(b + 1)
   })
 
   it("caches the thinking ladder alongside the models, from one fetch", async () => {

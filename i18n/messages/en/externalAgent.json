@@ -994,5 +994,10 @@
     "truncated": "Output truncated",
     "archive": "Archive session",
     "unarchive": "Restore archived session"
+  },
+  "extensionUi": {
+    "statusRegion": "Agent extension status",
+    "widget": "Output from the {name} extension",
+    "dismissNotice": "Dismiss notice"
   }
 }

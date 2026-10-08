@@ -3,6 +3,7 @@
  */
 
 import { render, act, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import type { ProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 
@@ -55,8 +56,11 @@ const fakeManager = {
   getAgent: getAgentMock,
   addLifecycleListener: addLifecycleListenerMock,
 }
+// The manager a call to `getExternalAgentManager` returns right now. A dev hot
+// update replaces it; tests swap it to stand in for one.
+let currentManager: Record<string, unknown> = fakeManager
 jest.mock("@/lib/ai/agent/external/manager", () => ({
-  getExternalAgentManager: () => fakeManager,
+  getExternalAgentManager: () => currentManager,
 }))
 
 const getBlockReasonMock = jest.fn<string | null, [ExternalAgentConfig]>(() => null)
@@ -117,6 +121,7 @@ function makeAgent(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgentC
 
 beforeEach(() => {
   jest.clearAllMocks()
+  currentManager = fakeManager
   agentsInManager.clear()
   registryListener = null
   lifecycleListener = null
@@ -156,6 +161,59 @@ describe("ExternalAgentInitializer", () => {
     expect(addAgentMock).toHaveBeenCalledTimes(2)
     expect(setConnectionStatusMock).toHaveBeenCalledWith("a1", "connected")
     expect(setConnectionStatusMock).toHaveBeenCalledWith("a2", "connected")
+  })
+
+  it("rehydrates once per manager when the effect runs twice", async () => {
+    storeState.getAllAgents = () => [makeAgent({ id: "a1" })]
+    await act(async () => {
+      render(
+        <StrictMode>
+          <ExternalAgentInitializer />
+        </StrictMode>
+      )
+    })
+    await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+    expect(addAgentMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("rehydrates into a manager that replaced the previous one", async () => {
+    // A dev hot update evaluates the manager module again: the component and
+    // its refs survive, its effect re-runs, and `getExternalAgentManager` now
+    // answers with a new, empty manager. StrictMode's second effect run with
+    // the swap in the cleanup between is the same sequence.
+    const replacementAgents = new Map<string, FakeInstance>()
+    const replacementAdd = jest.fn(async (config: ExternalAgentConfig) => {
+      const inst: FakeInstance = {
+        config,
+        connectionStatus: "disconnected",
+        validity: { executable: true },
+      }
+      replacementAgents.set(config.id, inst)
+      return inst
+    })
+    const replacementConnect = jest.fn(async (id: string) => {
+      const inst = replacementAgents.get(id)
+      if (inst) inst.connectionStatus = "connected"
+    })
+    const replacement = {
+      addAgent: replacementAdd,
+      connect: replacementConnect,
+      getAgent: (id: string) => replacementAgents.get(id),
+      addLifecycleListener: () => () => {},
+    }
+    unbindLifecycleMock.mockImplementationOnce(() => {
+      currentManager = replacement
+    })
+    storeState.getAllAgents = () => [makeAgent({ id: "a1" })]
+    await act(async () => {
+      render(
+        <StrictMode>
+          <ExternalAgentInitializer />
+        </StrictMode>
+      )
+    })
+    await waitFor(() => expect(replacementConnect).toHaveBeenCalledWith("a1"))
+    expect(replacementAdd).toHaveBeenCalledTimes(1)
   })
 
   it("does not connect when autoConnectOnStartup is off", async () => {

@@ -435,10 +435,13 @@ function mapExtensionUiRequest(
         : []
     case "setStatus": {
       const key = asString(event.statusKey)
+      // The bundled extension's handshakes (`cognia-ready …`, and the shell
+      // guard's `cognia-shell-guard-ready v1`) are bookkeeping the adapter
+      // reads off the raw frame, never something to show the user.
       if (
-        key === "cognia" &&
+        (key === "cognia" || key === "cognia-shell-guard") &&
         typeof event.statusText === "string" &&
-        /^cognia-ready/.test(event.statusText)
+        /^cognia-(shell-guard-)?ready/.test(event.statusText)
       )
         return []
       return key

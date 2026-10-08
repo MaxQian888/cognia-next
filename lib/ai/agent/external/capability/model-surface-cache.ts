@@ -104,6 +104,14 @@ const lastNativeSurfaces = new Map<string, ExternalAgentSessionSurface>()
 let cachedScope: string | null = null
 const listeners = new Set<() => void>()
 let revision = 0
+/**
+ * How many times each agent's entries have been dropped (`*` for "every
+ * agent"). A reader holding an answer of its own (the hook keeps the last one
+ * it was handed) watches this to learn that answer is void: the cache moving
+ * on its own does not re-ask anybody.
+ */
+const epochs = new Map<string, number>()
+let globalEpoch = 0
 
 /** First retry a second out, capped at half a minute, with the usual jitter. */
 const RETRY_BASE_MS = 1000
@@ -173,6 +181,8 @@ export function forgetAgentModelSurface(agentId?: string): void {
     failures.delete(id)
   }
   const keys = [...new Set([...cache.keys(), ...inFlight.keys(), ...failures.keys()])]
+  if (agentId) epochs.set(agentId, (epochs.get(agentId) ?? 0) + 1)
+  else globalEpoch += 1
   if (!agentId) {
     for (const entry of keys) invalidate(entry)
     conversationSessions.clear()
@@ -431,6 +441,15 @@ export function loadAgentModelCatalog(
   options: { refresh?: boolean } = {}
 ): Promise<ModelSurfaceResult> {
   return loadAgentModelSurface(agentId, AGENT_MODEL_CATALOG, options)
+}
+
+/**
+ * A counter that moves every time `agentId`'s cached answers are dropped
+ * ({@link forgetAgentModelSurface}: a connect, a disconnect, a config write),
+ * and not on any other write. A key for "re-ask now".
+ */
+export function agentModelSurfaceEpoch(agentId: string): number {
+  return globalEpoch + (epochs.get(agentId) ?? 0)
 }
 
 /**

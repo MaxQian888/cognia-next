@@ -16175,6 +16175,11 @@
       "tauriOnly": "External agent is only available in Tauri"
     },
     "executionPlan": "Execution Plan",
+    "extensionUi": {
+      "dismissNotice": "Dismiss notice",
+      "statusRegion": "Agent extension status",
+      "widget": "Output from the {name} extension"
+    },
     "externalAgents": "External Agents",
     "failure": {
       "causes": "What it was wrapping",
