@@ -220,9 +220,16 @@ export async function pushOutbox(deps: PushDeps): Promise<PushResult> {
   const result: PushResult = { pushed: 0, dropped: 0, tooLarge: [] }
   const skipped = new Set<string>()
   for (;;) {
-    const entries = (await deps.db.accountSyncOutbox.orderBy("[table+rowId]").toArray())
-      .filter((entry) => !skipped.has(`${entry.table}\u0000${entry.rowId}`))
-      .slice(0, OUTBOX_PAGE)
+    const pending = deps.db.accountSyncOutbox.orderBy("[table+rowId]")
+    // Bound materialization, including when oversized rows must be passed over.
+    // Keep the unfiltered bulk-read path until this round has skipped a row.
+    const entries = await (
+      skipped.size
+        ? pending.filter((entry) => !skipped.has(`${entry.table}\u0000${entry.rowId}`))
+        : pending
+    )
+      .limit(OUTBOX_PAGE)
+      .toArray()
     if (entries.length === 0) return result
     const read = await readOutgoing(deps.db, entries)
     const empty = entries.filter((_, index) => read[index] === null)

@@ -55,9 +55,20 @@ export function syncSessionState(transport: Transport, cursor: SyncCursor): Prom
           // on one ordered channel, so the latest one is what the Host will end
           // on once the queue drains — and what the row must show until then.
           const latestChoice = new Map<string, (typeof pending)[number]>()
+          // Fold once per slice instead of rescanning the queue for each row.
+          const readThroughBySession = new Map<string, number>()
           for (const job of pending) {
             const sessionId = job.payload.sessionId
             if (typeof sessionId !== "string") continue
+            if (
+              job.command === "session_mark_read" &&
+              typeof job.payload.readThrough === "number"
+            ) {
+              readThroughBySession.set(
+                sessionId,
+                Math.max(readThroughBySession.get(sessionId) ?? -1, job.payload.readThrough)
+              )
+            }
             const previous = latestChoice.get(sessionId)
             if (
               !previous ||
@@ -75,15 +86,7 @@ export function syncSessionState(transport: Transport, cursor: SyncCursor): Prom
                 // not applied it yet.
                 return { ...row, unreadCount: Math.max(1, row.unreadCount) } as SessionStateRow
               }
-              const readThrough = pending.reduce(
-                (latest, job) =>
-                  job.command === "session_mark_read" &&
-                  job.payload.sessionId === row.sessionId &&
-                  typeof job.payload.readThrough === "number"
-                    ? Math.max(latest, job.payload.readThrough)
-                    : latest,
-                -1
-              )
+              const readThrough = readThroughBySession.get(row.sessionId) ?? -1
               const watermark = row.updatedAt ?? row.lastReadAt
               // Same rule the Host applies (`markSessionReadOnHost`): a read
               // covers everything up to its snapshot, and also a manual unread

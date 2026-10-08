@@ -88,6 +88,83 @@ describe("syncSessions managed workspace boundary", () => {
       expect.objectContaining({ availability: "available", localRoot: "/local/root" })
     )
   })
+
+  it("does not read previous rows for sessions without a managed binding", async () => {
+    const table = getDb().sessions
+    const read = jest.spyOn(table, "bulkGet")
+    const rows = [
+      { id: "plain", title: "Plain", createdAt: 1, updatedAt: 20 },
+      {
+        id: "local",
+        title: "Local",
+        createdAt: 1,
+        updatedAt: 20,
+        executionContext: { location: "local", projectId: "p", projectRoot: "/project" },
+      },
+    ]
+    try {
+      expect((await syncSessions(transportFor(rows), { since: 0 })).ok).toBe(true)
+      expect(read).not.toHaveBeenCalled()
+      expect(await table.get("plain")).toEqual(rows[0])
+      expect(await table.get("local")).toEqual(rows[1])
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it("reads only managed merge rows and preserves duplicate-id last-write behavior", async () => {
+    const context = {
+      location: "managedWorktree",
+      projectId: "p",
+      projectRoot: "/local/workspace",
+      workspaceBinding: { kind: "managed", workspaceId: "workspace" },
+      managedWorkspace: { availability: "available", localRoot: "/local/workspace" },
+    }
+    const table = getDb().sessions
+    await table.put({
+      id: "managed",
+      title: "Before",
+      createdAt: 1,
+      updatedAt: 10,
+      executionContext: context,
+    } as never)
+    const managed = {
+      id: "managed",
+      title: "First",
+      createdAt: 1,
+      updatedAt: 20,
+      executionContext: {
+        ...context,
+        projectRoot: "",
+        managedWorkspace: { availability: "missing-on-device" },
+      },
+    }
+    const read = jest.spyOn(table, "bulkGet")
+    try {
+      expect(
+        (
+          await syncSessions(
+            transportFor([
+              managed,
+              { id: "plain", title: "Plain", createdAt: 1, updatedAt: 20 },
+              { ...managed, title: "Last" },
+            ]),
+            { since: 0 }
+          )
+        ).ok
+      ).toBe(true)
+      expect(read).toHaveBeenCalledWith(["managed", "managed"])
+      expect(await table.get("managed")).toMatchObject({
+        title: "Last",
+        executionContext: {
+          projectRoot: "/local/workspace",
+          managedWorkspace: context.managedWorkspace,
+        },
+      })
+    } finally {
+      read.mockRestore()
+    }
+  })
 })
 
 it("rejects cancellation after asynchronous merge preparation", async () => {
@@ -105,7 +182,17 @@ it("rejects cancellation after asynchronous merge preparation", async () => {
   }
   try {
     expect(
-      (await syncSessions(transportFor([{ id: "cancelled" }]), { since: 0, assertCurrent })).ok
+      (
+        await syncSessions(
+          transportFor([
+            {
+              id: "cancelled",
+              executionContext: { workspaceBinding: { kind: "managed", workspaceId: "cancelled" } },
+            },
+          ]),
+          { since: 0, assertCurrent }
+        )
+      ).ok
     ).toBe(false)
     expect(read).toHaveBeenCalled()
     expect(write).not.toHaveBeenCalled()

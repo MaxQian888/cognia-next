@@ -202,6 +202,55 @@ describe("pending read/unread relay", () => {
     expect(await getDb().sessionState.get("u3")).toMatchObject({ unreadCount: 0 })
   })
 
+  it("keeps the largest read watermark when the latest read carries an older snapshot", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      job("older-high", "session_mark_read", { sessionId: "watermarks", readThrough: 30 }, 1),
+      job("newer-low", "session_mark_read", { sessionId: "watermarks", readThrough: 20 }, 3),
+      job("unread-between", "session_mark_unread", { sessionId: "watermarks" }, 2),
+    ])
+    await syncSessionState(makeTransport([{ ...wire("watermarks", 4), updatedAt: 25 }]), {
+      since: 0,
+    })
+    expect(await getDb().sessionState.get("watermarks")).toMatchObject({
+      unreadCount: 0,
+      lastReadAt: 30,
+    })
+  })
+
+  it("breaks timestamp ties by client sequence without crossing session boundaries", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      {
+        ...job("tie-read", "session_mark_read", { sessionId: "tie", readThrough: 99 }, 1),
+        clientSeq: 2,
+      },
+      { ...job("tie-unread", "session_mark_unread", { sessionId: "tie" }, 1), clientSeq: 3 },
+      job("other-read", "session_mark_read", { sessionId: "other", readThrough: 99 }, 1),
+    ])
+    await syncSessionState(makeTransport([wire("tie", 0), wire("untouched", 2)]), { since: 0 })
+    expect(await getDb().sessionState.get("tie")).toMatchObject({ unreadCount: 1, lastReadAt: 10 })
+    expect(await getDb().sessionState.get("untouched")).toMatchObject({
+      unreadCount: 2,
+      lastReadAt: 10,
+    })
+  })
+
+  it("ignores non-numeric and missing watermarks independently per session", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      job("finite", "session_mark_read", { sessionId: "invalid", readThrough: 99 }, 1),
+      job("invalid", "session_mark_read", { sessionId: "invalid", readThrough: "999" }, 2),
+      job("missing", "session_mark_read", { sessionId: "missing" }, 3),
+    ])
+    await syncSessionState(makeTransport([wire("invalid", 4), wire("missing", 2)]), { since: 0 })
+    expect(await getDb().sessionState.get("invalid")).toMatchObject({
+      unreadCount: 0,
+      lastReadAt: 99,
+    })
+    expect(await getDb().sessionState.get("missing")).toMatchObject({
+      unreadCount: 2,
+      lastReadAt: 10,
+    })
+  })
+
   it("does not let that read hide a message that arrived after the unread", async () => {
     await getDb().mobileOutboundQueue.put(
       job("r", "session_mark_read", { sessionId: "u4", readThrough: 20 }, 2)

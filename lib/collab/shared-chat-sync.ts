@@ -204,6 +204,32 @@ async function projectEvents(
     )
     const changedMessages = new Map<string, StoredMessage>()
     const staleReferenceIds = new Set<string>()
+    const pendingMessages = new Map<string, StoredMessage>()
+    const hasMessageWriteHooks = () =>
+      db.messages.hook.creating.subscribers.length > 0 ||
+      db.messages.hook.updating.subscribers.length > 0
+    const flushMessages = async () => {
+      if (!pendingMessages.size) return
+      if (hasMessageWriteHooks()) {
+        // Plugins can query or modify rows inside a hook. Preserve their
+        // per-write view of the transaction instead of batching callbacks.
+        for (const message of pendingMessages.values()) await db.messages.put(message)
+      } else {
+        await db.messages.bulkPut([...pendingMessages.values()])
+      }
+      pendingMessages.clear()
+    }
+    // Buffer synchronously: yielding for each no-op enqueue can exhaust
+    // Dexie's transaction scope before the next IndexedDB request.
+    const writeMessage = (message: StoredMessage): Promise<void> | undefined => {
+      // Never coalesce repeated IDs: account capture needs intermediate
+      // fields (e.g. metadata subsequently removed by a redaction).
+      if (pendingMessages.has(message.id)) return flushMessages().then(() => writeMessage(message))
+      pendingMessages.set(message.id, message)
+      // Bound the encryption middleware's per-request Promise.all as well
+      // as the buffer, while retaining event order and every revision.
+      if (pendingMessages.size >= 128 || hasMessageWriteHooks()) return flushMessages()
+    }
     for (const event of orderedEvents) {
       if (
         event.sessionId !== remote.id ||
@@ -246,7 +272,8 @@ async function projectEvents(
                 version: existing?.collaboration?.version ?? 1,
               },
             }
-            await db.messages.put(projected)
+            const write = writeMessage(projected)
+            if (write) await write
             messages.set(remoteMessageId, projected)
             changedMessages.set(projected.id, projected)
             if (existing) staleReferenceIds.add(projected.id)
@@ -269,7 +296,8 @@ async function projectEvents(
               version: (target.collaboration?.version ?? 1) + 1,
             },
           }
-          await db.messages.put(projected)
+          const write = writeMessage(projected)
+          if (write) await write
           messages.set(targetId!, projected)
           changedMessages.set(projected.id, projected)
           staleReferenceIds.add(projected.id)
@@ -296,7 +324,8 @@ async function projectEvents(
               redactedBy: event.actor,
             },
           }
-          await db.messages.put(projected)
+          const write = writeMessage(projected)
+          if (write) await write
           messages.set(targetId!, projected)
           changedMessages.set(projected.id, projected)
           staleReferenceIds.add(projected.id)
@@ -305,6 +334,7 @@ async function projectEvents(
       cursor = Math.max(cursor, event.sequence)
     }
 
+    await flushMessages()
     await db.sessions.update(localSession.id, {
       collaboration: {
         ...(localSession.collaboration?.endpoint

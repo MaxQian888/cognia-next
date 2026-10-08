@@ -23,6 +23,7 @@ import {
 import { useChatStore } from "@/stores/chat/chat-store"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import type { Transport } from "@/lib/tauri/transport-types"
+import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import {
@@ -1790,6 +1791,89 @@ describe("HostStateService", () => {
       metadata: { hostState: { actionId: "pending-action", optimistic: true } },
     })
     sync.stop()
+  })
+
+  it.each([
+    { name: "equal sequences in primary-key order", aSeq: 1, zSeq: 1, expected: "z-pending" },
+    { name: "different sequences in client order", aSeq: 2, zSeq: 1, expected: "a-sending" },
+  ])("projects $name and ignores unrelated jobs", async ({ aSeq, zSeq, expected }) => {
+    const initial = createEmptyHostStateSession(channel, "session-1")
+    const queued = (
+      id: string,
+      status: MobileOutboundJobRow["status"],
+      clientSeq = 1,
+      patch: Partial<MobileOutboundJobRow> = {}
+    ): MobileOutboundJobRow => ({
+      id,
+      accountId: scope.accountId,
+      targetId: scope.runtimeTargetId,
+      command: "host_state_submit",
+      payload: {
+        actions: [
+          action(
+            { kind: "draft.replace", text: id, attachments: [] },
+            { actionId: id, hostGeneration: 4, clientSeq, baseRevision: undefined }
+          ),
+        ],
+      },
+      status,
+      attempts: 0,
+      createdAt: 100,
+      nextAttemptAt: 100,
+      idempotencyKey: id,
+      protocol: "host-state",
+      channel,
+      clientSeq,
+      ...patch,
+    })
+    const rows = [
+      queued("z-pending", "pending", zSeq),
+      queued("a-sending", "sending", aSeq),
+      queued("settled-sent", "sent", 99),
+      queued("settled-failed", "failed", 99),
+      queued("settled-deadletter", "deadlettered", 99),
+      queued("foreign-channel", "pending", 99, { channel: `${channel}-other` }),
+      queued("legacy-protocol", "sending", 99, { protocol: "legacy-rpc" }),
+      queued("invalid-action", "pending", 99, { payload: { actions: [{}] } }),
+      queued("invalid-batch", "pending", 99, { payload: { actions: [] } }),
+    ]
+    await getDb().mobileOutboundQueue.bulkPut(rows)
+    const snapshot: HostStateSnapshot = {
+      channel,
+      hostId,
+      hostGeneration: 4,
+      cutHostSeq: 8,
+      revision: 0,
+      digest: hostStateDigest(initial),
+      state: initial,
+    }
+    const onState = jest.fn()
+    const transport: Transport = {
+      subscribe: () => () => undefined,
+      call: async (command) =>
+        (command === "host_state_status" ? writableStatus : snapshot) as never,
+    }
+    let sync: Awaited<ReturnType<typeof installHostStateSync>> | undefined
+    try {
+      sync = await installHostStateSync({
+        transport,
+        ...scope,
+        channels: async () => [channel],
+        onState,
+      })
+      expect(onState).toHaveBeenLastCalledWith(
+        expect.objectContaining({ draft: expect.objectContaining({ text: expected }) })
+      )
+      await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({ text: expected })
+      await expect(getDb().hostStateChannels.get(channel)).resolves.toMatchObject({
+        state: initial,
+      })
+    } finally {
+      sync?.stop()
+    }
+    expect(await getDb().mobileOutboundQueue.toArray()).toEqual(
+      [...rows].sort((left, right) => left.id.localeCompare(right.id))
+    )
   })
 
   it("re-snapshots and keeps applying after a sequence gap", async () => {

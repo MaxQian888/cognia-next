@@ -851,13 +851,11 @@ async function projectPendingHostStateActions(
   db: ReturnType<typeof getDb>
 ): Promise<Extract<HostStateChannelState, { kind: "session" }>> {
   const rows = await db.mobileOutboundQueue
-    .filter(
-      (row) =>
-        row.protocol === "host-state" &&
-        row.channel === confirmed.channel &&
-        (row.status === "pending" || row.status === "sending")
-    )
-    .toArray()
+    .where("status")
+    .anyOf("pending", "sending")
+    .filter((row) => row.protocol === "host-state" && row.channel === confirmed.channel)
+    // Preserve primary-key order for equal client sequences across statuses.
+    .sortBy("id")
   const actions = rows
     .sort((left, right) => (left.clientSeq ?? 0) - (right.clientSeq ?? 0))
     .flatMap((row) => {

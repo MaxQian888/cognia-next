@@ -19,6 +19,7 @@ export const MOBILE_MEMORY_CACHE_LIMIT = 1_000
 export async function pruneMobileMemoryCache(limit = MOBILE_MEMORY_CACHE_LIMIT): Promise<number> {
   if (!Number.isInteger(limit) || limit < 1) throw new Error("Memory cache limit must be positive")
   const table = getDb().memories
+  if ((await table.count()) <= limit) return 0
   const rows = await table.toArray()
   if (rows.length <= limit) return 0
   rows.sort(

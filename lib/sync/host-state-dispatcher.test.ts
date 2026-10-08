@@ -18,9 +18,14 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 const buildSendOptionsMock = jest.fn(async () => ({ model: "sonnet" }))
+const prepareTranscriptRuntimeSendMock = jest.fn(
+  async (_sessionId: string, options: unknown) => options
+)
 jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
   buildSendOptions: (...args: unknown[]) =>
     (buildSendOptionsMock as (...a: unknown[]) => unknown)(...args),
+  prepareTranscriptRuntimeSend: (...args: unknown[]) =>
+    (prepareTranscriptRuntimeSendMock as (...a: unknown[]) => unknown)(...args),
 }))
 
 const sendPromptMock = jest.fn(async () => undefined)
@@ -58,6 +63,7 @@ function enqueue(sessionId: string) {
 
 beforeEach(() => {
   buildSendOptionsMock.mockClear()
+  prepareTranscriptRuntimeSendMock.mockClear()
   sendPromptMock.mockClear()
   runtimeRefMock.mockReturnValue({ kind: "builtin" })
 })
@@ -65,11 +71,16 @@ beforeEach(() => {
 it("dispatches a built-in session through buildSendOptions and sendPrompt", async () => {
   await createAgentRpcHostStateDispatcher()(enqueue("s-builtin"))
   expect(buildSendOptionsMock).toHaveBeenCalledTimes(1)
+  expect(prepareTranscriptRuntimeSendMock).toHaveBeenCalledWith(
+    "s-builtin",
+    { model: "sonnet" },
+    { currentMessageId: "m-1" }
+  )
   expect(sendPromptMock).toHaveBeenCalledWith(
     "s-builtin",
     "hi",
     { model: "sonnet" },
-    { commandId: "action-1" }
+    { commandId: "action-1", transcriptRuntime: "prepared" }
   )
 })
 
@@ -84,6 +95,7 @@ it("refuses a session whose runtime pick is an external agent before building op
     "host_state_runtime_not_builtin:external"
   )
   expect(buildSendOptionsMock).not.toHaveBeenCalled()
+  expect(prepareTranscriptRuntimeSendMock).not.toHaveBeenCalled()
   expect(sendPromptMock).not.toHaveBeenCalled()
 })
 
@@ -92,5 +104,6 @@ it("refuses a host-owned (remote) runtime pick the same way", async () => {
   await expect(createAgentRpcHostStateDispatcher()(enqueue("s-host"))).rejects.toThrow(
     "host_state_runtime_not_builtin:host"
   )
+  expect(prepareTranscriptRuntimeSendMock).not.toHaveBeenCalled()
   expect(sendPromptMock).not.toHaveBeenCalled()
 })

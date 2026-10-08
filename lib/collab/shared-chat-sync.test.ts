@@ -71,6 +71,185 @@ describe("shared chat synchronization", () => {
     expect(await getDb().collabChatSessions.get("sibling")).toBeDefined()
   })
 
+  it("persists catch-up in bounded batches while retaining every event and revision", async () => {
+    const db = getDb()
+    const events = Array.from({ length: 260 }, (_, index) => ({
+      ...messageEvent,
+      id: `batch-event-${index}`,
+      sequence: index + 1,
+      payload: { ...messageEvent.payload, messageId: `batch-message-${index}` },
+    }))
+    const client = readerFor()
+    client.listSessionEvents.mockImplementation(async (_org, _session, after) =>
+      events.filter((event) => event.sequence > after).slice(0, 200)
+    )
+    const put = jest.spyOn(db.messages, "put")
+    const bulkPut = jest.spyOn(db.messages, "bulkPut")
+    try {
+      const result = await syncSharedSession(client, session.orgId, session.id)
+      expect(result.cursor).toBe(260)
+      expect(put).not.toHaveBeenCalled()
+      expect(bulkPut.mock.calls.map(([rows]) => rows.length)).toEqual([128, 128, 4])
+      expect(await db.collabChatEvents.count()).toBe(260)
+      const messages = await db.messages.orderBy("syncRevision").toArray()
+      expect(messages.map((row) => row.collaboration?.remoteMessageId)).toEqual(
+        events.map((event) => event.payload.messageId)
+      )
+      expect(messages).toMatchObject(events.map((event) => ({ syncRevision: event.sequence })))
+      expect((await db.messageSyncClock.get("singleton"))?.revision).toBe(260)
+    } finally {
+      put.mockRestore()
+      bulkPut.mockRestore()
+    }
+  })
+
+  it.each([false, true])(
+    "preserves intermediate capture with message hooks=%s",
+    async (withHooks) => {
+      const db = getDb()
+      dbFixture.registerCleanup(() => db.accountSyncState.delete("capture"))
+      await db.accountSyncState.put({
+        id: "capture",
+        spaceId: "s".repeat(43),
+        deviceId: "dev_" + "A".repeat(26),
+        classes: { content: true, settings: true },
+        hlc: null,
+      })
+      const created = jest.fn()
+      const updated = jest.fn()
+      if (withHooks) {
+        db.messages.hook("creating", created)
+        db.messages.hook("updating", updated)
+      }
+      try {
+        await syncSharedSession(
+          readerFor(
+            messageEvent,
+            {
+              ...messageEvent,
+              id: "correct-with-references",
+              sequence: 2,
+              kind: "message.corrected",
+              payload: {
+                targetMessageId: "message_1",
+                parts: [{ type: "file", mediaType: "image/png", url: "cognia-media:temporary" }],
+                metadata: { mentions: [{ kind: "entity", id: "session:source_a" }] },
+              },
+            },
+            {
+              ...messageEvent,
+              id: "redact-references",
+              sequence: 3,
+              kind: "message.redacted",
+              payload: { targetMessageId: "message_1" },
+            }
+          ),
+          session.orgId,
+          session.id
+        )
+        const row = (await db.messages.toArray())[0]
+        expect(row.parts).toEqual([])
+        expect(row.metadata).toBeUndefined()
+        expect(row.collaboration).toMatchObject({
+          author: messageEvent.actor,
+          eventSequence: 3,
+          version: 3,
+        })
+        expect(row).toMatchObject({ syncRevision: 3 })
+        const outbox = await db.accountSyncOutbox.get(["messages", row.id])
+        expect(outbox?.fields).toContain("metadata")
+        expect(outbox?.rev).toBe(3)
+        expect(await db.messageMediaRefs.count()).toBe(0)
+        expect(await db.collabChatEvents.count()).toBe(3)
+        expect(created).toHaveBeenCalledTimes(withHooks ? 1 : 0)
+        expect(updated).toHaveBeenCalledTimes(withHooks ? 2 : 0)
+      } finally {
+        db.messages.hook("creating").unsubscribe(created)
+        db.messages.hook("updating").unsubscribe(updated)
+      }
+    }
+  )
+
+  it("preserves the intermediate database snapshots observed by message hooks", async () => {
+    const db = getDb()
+    const reads: Promise<number>[] = []
+    const observe = () => {
+      reads.push(db.messages.count())
+    }
+    db.messages.hook("creating", observe)
+    db.messages.hook("updating", observe)
+    try {
+      await syncSharedSession(
+        readerFor(
+          messageEvent,
+          {
+            ...messageEvent,
+            id: "second",
+            sequence: 2,
+            payload: { ...messageEvent.payload, messageId: "second" },
+          },
+          {
+            ...messageEvent,
+            id: "correct",
+            sequence: 3,
+            kind: "message.corrected",
+            payload: { targetMessageId: "message_1", parts: [] },
+          }
+        ),
+        session.orgId,
+        session.id
+      )
+      expect(await Promise.all(reads)).toEqual([0, 1, 2])
+      expect(await db.messages.count()).toBe(2)
+    } finally {
+      db.messages.hook("creating").unsubscribe(observe)
+      db.messages.hook("updating").unsubscribe(observe)
+    }
+  })
+
+  it("rolls back earlier message batches and their clocks if a later batch fails", async () => {
+    const db = getDb()
+    dbFixture.registerCleanup(() => db.accountSyncState.delete("capture"))
+    await db.accountSyncState.put({
+      id: "capture",
+      spaceId: "s".repeat(43),
+      deviceId: "dev_" + "A".repeat(26),
+      classes: { content: true, settings: true },
+      hlc: null,
+    })
+    const original = db.messages.bulkPut.bind(db.messages)
+    const bulkPut = jest
+      .spyOn(db.messages, "bulkPut")
+      .mockImplementationOnce((rows) => original(rows))
+      .mockRejectedValueOnce(new Error("batch persistence failed"))
+    try {
+      await expect(
+        syncSharedSession(
+          readerFor(
+            ...Array.from({ length: 129 }, (_, index) => ({
+              ...messageEvent,
+              id: `rollback-event-${index}`,
+              sequence: index + 1,
+              payload: { ...messageEvent.payload, messageId: `rollback-message-${index}` },
+            }))
+          ),
+          session.orgId,
+          session.id
+        )
+      ).rejects.toThrow("batch persistence failed")
+      expect(await db.messages.count()).toBe(0)
+      expect(await db.sessions.count()).toBe(0)
+      expect(await db.messageMediaRefs.count()).toBe(0)
+      expect(await db.collabChatEvents.count()).toBe(0)
+      expect(await db.messageSyncClock.get("singleton")).toBeUndefined()
+      expect(await db.accountSyncOutbox.count()).toBe(0)
+      expect(await db.syncFieldClocks.count()).toBe(0)
+      expect((await db.collabChatSyncStates.get(session.id))?.lastSequence).toBe(0)
+    } finally {
+      bulkPut.mockRestore()
+    }
+  })
+
   it("rewrites only the changed message's media references across 10 corrections", async () => {
     const events = Array.from({ length: 20 }, (_, index) => ({
       ...messageEvent,

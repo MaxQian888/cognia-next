@@ -218,3 +218,75 @@ it("does not import a paired DEK returned after cancellation", async () => {
   ).rejects.toThrow("cancelled")
   expect(store.importPaired).not.toHaveBeenCalled()
 })
+
+describe("memory cache pruning without loading payloads", () => {
+  const row = (id: string, patch: Partial<Memory> = {}): Memory => ({
+    id,
+    scope: "global",
+    type: "semantic",
+    text: `private ${id}`,
+    tags: [],
+    importance: 5,
+    createdAt: 1,
+    updatedAt: 1,
+    lastAccessedAt: 1,
+    accessCount: 0,
+    version: 1,
+    status: "active",
+    pinned: false,
+    provenance: "user",
+    ...patch,
+  })
+
+  beforeEach(async () => {
+    await getDb().memories.clear()
+  })
+
+  it.each([0, 1, 2])(
+    "does not load or delete payloads for %i rows within the limit",
+    async (size) => {
+      const table = getDb().memories
+      await table.bulkPut(Array.from({ length: size }, (_, index) => row(String(index))))
+      const read = jest.spyOn(table, "toArray")
+      const remove = jest.spyOn(table, "bulkDelete")
+      try {
+        await expect(pruneMobileMemoryCache(2)).resolves.toBe(0)
+        expect(read).not.toHaveBeenCalled()
+        expect(remove).not.toHaveBeenCalled()
+        expect(await table.count()).toBe(size)
+      } finally {
+        read.mockRestore()
+        remove.mockRestore()
+      }
+    }
+  )
+
+  it("retains pinned, accessed, updated, and identifier ordering on overflow", async () => {
+    const table = getDb().memories
+    await table.bulkPut([
+      row("pin", { pinned: true, lastAccessedAt: 0 }),
+      row("recent", { lastAccessedAt: 20 }),
+      row("b", { lastAccessedAt: 10, updatedAt: 2 }),
+      row("a", { lastAccessedAt: 10, updatedAt: 2 }),
+      row("older-update", { lastAccessedAt: 10, updatedAt: 1 }),
+    ])
+    await expect(pruneMobileMemoryCache(3)).resolves.toBe(2)
+    expect((await table.toArray()).map(({ id }) => id).sort()).toEqual(["a", "pin", "recent"])
+  })
+
+  it("propagates a rejected count without reading or deleting payloads", async () => {
+    const table = getDb().memories
+    const count = jest.spyOn(table, "count").mockRejectedValue(new Error("count unavailable"))
+    const read = jest.spyOn(table, "toArray")
+    const remove = jest.spyOn(table, "bulkDelete")
+    try {
+      await expect(pruneMobileMemoryCache(2)).rejects.toThrow("count unavailable")
+      expect(read).not.toHaveBeenCalled()
+      expect(remove).not.toHaveBeenCalled()
+    } finally {
+      count.mockRestore()
+      read.mockRestore()
+      remove.mockRestore()
+    }
+  })
+})
