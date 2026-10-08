@@ -70,9 +70,14 @@ export async function replaceCollabIssues(
 ): Promise<void> {
   const db = getDb()
   await db.transaction("rw", db.collabIssues, async () => {
-    const existing = await listCollabIssues(scope)
+    // Stale detection needs identities, not decrypted bodies or board order.
+    const existing = await (
+      scope.workspaceId !== undefined
+        ? db.collabIssues.where("[orgId+workspaceId]").equals([scope.orgId, scope.workspaceId])
+        : db.collabIssues.where("orgId").equals(scope.orgId)
+    ).primaryKeys()
     const incoming = new Set(rows.map((row) => row.id))
-    const stale = existing.filter((row) => !incoming.has(row.id)).map((row) => row.id)
+    const stale = existing.filter((id) => !incoming.has(id))
     if (stale.length > 0) await db.collabIssues.bulkDelete(stale)
     if (rows.length > 0) await db.collabIssues.bulkPut(rows)
   })
@@ -85,6 +90,6 @@ export async function clearCollabIssues(orgId?: string): Promise<void> {
     await db.collabIssues.clear()
     return
   }
-  const ids = (await listCollabIssues({ orgId })).map((row) => row.id)
+  const ids = await db.collabIssues.where("orgId").equals(orgId).primaryKeys()
   if (ids.length > 0) await db.collabIssues.bulkDelete(ids)
 }

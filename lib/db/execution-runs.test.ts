@@ -2,7 +2,8 @@
 import "fake-indexeddb/auto"
 import Dexie from "dexie"
 import * as schema from "./schema"
-import type { ExecutionRun } from "@/types/execution/run"
+import type { ExecutionRun, RunEvent } from "@/types/execution/run"
+import { reduceRunEvents } from "@/lib/execution/run-reducer"
 
 import { __resetDbForTesting, getDb } from "./schema"
 import {
@@ -343,6 +344,172 @@ describe("execution run journal", () => {
     expect(first.every((event) => event.projectId === "project-a")).toBe(true)
     expect(duplicate[0]).toEqual(first[1])
     expect(await runEventJournal.replay("run-batch")).toHaveLength(2)
+  })
+
+  it("loads batch history once while preserving mixed duplicate deliveries", async () => {
+    const db = getDb()
+    await createExecutionRun({
+      id: "batch-history",
+      kind: "workflow",
+      sourceId: "workflow-history",
+      title: "History",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const oldInput = semanticRunEvent("run.started", {}, { ts: 2, sourceEventId: "old" })
+    const oldEvent = await runEventJournal.append("batch-history", oldInput)
+    const explicit = {
+      ...semanticRunEvent("step.added", { stepId: "a" }, { ts: 3 }),
+      id: "explicit-new",
+    }
+    const sourced = semanticRunEvent(
+      "step.started",
+      { stepId: "a" },
+      { ts: 4, sourceEventId: "new" }
+    )
+    const historyReads = jest.spyOn(db.executionRunEvents, "where")
+    let appended: RunEvent[]
+    try {
+      appended = await runEventJournal.appendBatch("batch-history", [
+        oldInput,
+        explicit,
+        explicit,
+        sourced,
+        sourced,
+      ])
+      expect(historyReads).toHaveBeenCalledTimes(1)
+    } finally {
+      historyReads.mockRestore()
+    }
+    expect(appended!.map((event) => event.seq)).toEqual([1, 2, 2, 3, 3])
+    expect(appended![0]).toEqual(oldEvent)
+    expect(appended![1]).toEqual(appended![2])
+    expect(appended![3]).toEqual(appended![4])
+    const run = (await getExecutionRun("batch-history"))!
+    const replay = await runEventJournal.replay(run.id)
+    expect(run.latestSnapshot).toEqual(reduceRunEvents({ ...run, currentRevision: 0 }, replay))
+    expect(
+      (await db.notificationProjectionWork.where("subjectKey").equals(`run:${run.id}`).first())
+        ?.desiredRunSeq
+    ).toBe(3)
+  })
+
+  it("rolls back a terminal mid-batch and discards its cached history", async () => {
+    const db = getDb()
+    await createExecutionRun({
+      id: "batch-rollback",
+      kind: "workflow",
+      sourceId: "workflow-rollback",
+      title: "Rollback",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await runEventJournal.append("batch-rollback", semanticRunEvent("run.started", {}, { ts: 2 }))
+    const beforeRun = await getExecutionRun("batch-rollback")
+    const beforeEvents = await runEventJournal.replay("batch-rollback")
+    const beforeWork = await db.notificationProjectionWork.toArray()
+    await expect(
+      runEventJournal.appendBatch("batch-rollback", [
+        semanticRunEvent("step.added", { stepId: "a" }, { ts: 3 }),
+        semanticRunEvent("run.completed", { summary: "Done" }, { ts: 4 }),
+        semanticRunEvent("step.started", { stepId: "a" }, { ts: 5 }),
+      ])
+    ).rejects.toThrow("Execution run is terminal")
+    expect(await getExecutionRun("batch-rollback")).toEqual(beforeRun)
+    expect(await runEventJournal.replay("batch-rollback")).toEqual(beforeEvents)
+    expect(await db.notificationProjectionWork.toArray()).toEqual(beforeWork)
+    const completed = semanticRunEvent("run.completed", {}, { ts: 7, sourceEventId: "completed" })
+    const retry = await runEventJournal.appendBatch("batch-rollback", [
+      semanticRunEvent("step.added", { stepId: "b" }, { ts: 6 }),
+      completed,
+      completed,
+    ])
+    expect(retry.map((event) => event.seq)).toEqual([2, 3, 3])
+    expect((await getExecutionRun("batch-rollback"))?.latestSnapshot?.revision).toBe(3)
+  })
+
+  it("keeps canonical primary-key order when legacy history has a sequence gap and conflict", async () => {
+    const db = getDb()
+    await createExecutionRun({
+      id: "batch-legacy",
+      kind: "workflow",
+      sourceId: "workflow-legacy",
+      title: "Legacy",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await db.executionRunEvents.bulkPut([
+      {
+        id: "y-legacy",
+        runId: "batch-legacy",
+        seq: 3,
+        ts: 9,
+        type: "run.waiting",
+        visibility: "summary",
+        payload: {},
+      },
+      {
+        id: "z-legacy",
+        runId: "batch-legacy",
+        seq: 3,
+        ts: 10,
+        type: "run.paused",
+        visibility: "summary",
+        payload: {},
+      },
+    ])
+    const events = await runEventJournal.appendBatch("batch-legacy", [
+      { ...semanticRunEvent("run.started", {}, { ts: 2 }), id: "new-first" },
+      { ...semanticRunEvent("step.added", { stepId: "a" }, { ts: 3 }), id: "new-second" },
+      { ...semanticRunEvent("step.started", { stepId: "a" }, { ts: 4 }), id: "a-new-third" },
+    ])
+    const run = (await getExecutionRun("batch-legacy"))!
+    const replay = await runEventJournal.replay(run.id)
+    expect(events.map((event) => event.seq)).toEqual([1, 2, 4])
+    expect(run.latestSnapshot).toEqual(reduceRunEvents({ ...run, currentRevision: 0 }, replay))
+    expect(run.status).toBe("waiting")
+  })
+
+  it("rebuilds batch history after a retried transaction abort", async () => {
+    const db = getDb()
+    await createExecutionRun({
+      id: "batch-reopen",
+      kind: "workflow",
+      sourceId: "workflow-reopen",
+      title: "Reopen",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const originalUpdate = db.executionRuns.update.bind(db.executionRuns)
+    let attempts = 0
+    const update = jest.spyOn(db.executionRuns, "update").mockImplementation((...args) => {
+      if (++attempts === 2)
+        return Promise.reject(new Dexie.DatabaseClosedError("schema closed")) as never
+      return originalUpdate(...args)
+    })
+    try {
+      const inputs = [
+        { ...semanticRunEvent("run.started", {}, { ts: 2 }), id: "retry-start" },
+        { ...semanticRunEvent("step.added", { stepId: "a" }, { ts: 3 }), id: "retry-step" },
+      ]
+      const appended = await runEventJournal.appendBatch("batch-reopen", inputs)
+      expect(appended.map((event) => event.seq)).toEqual([1, 2])
+      const replay = await runEventJournal.replay("batch-reopen")
+      expect(replay.map((event) => event.id)).toEqual(["retry-start", "retry-step"])
+      const run = (await getExecutionRun("batch-reopen"))!
+      expect(run.latestSnapshot).toEqual(reduceRunEvents({ ...run, currentRevision: 0 }, replay))
+      expect(attempts).toBe(4)
+    } finally {
+      update.mockRestore()
+    }
   })
 
   it("redacts sensitive strings before they enter the durable journal", async () => {

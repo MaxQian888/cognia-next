@@ -214,7 +214,8 @@ export function appendRunEventInsideTransaction(
 function appendInsideTransaction(
   db: ReturnType<typeof getDb>,
   runId: string,
-  input: AppendRunEventInput
+  input: AppendRunEventInput,
+  batchHistory?: { events?: RunEvent[] }
 ): Promise<RunEvent> {
   const id = eventId(runId, input)
   return db.executionRuns.get(runId).then((run) => {
@@ -238,12 +239,28 @@ function appendInsideTransaction(
       }
       return db.executionRunEvents
         .add(event)
-        .then(() =>
-          db.executionRunEvents
+        .then(() => {
+          const events = batchHistory?.events
+          if (events && Number.isFinite(event.seq) && event.seq > (events.at(-1)?.seq ?? -1)) {
+            // Read back the stored row so encryption/serialization has exactly
+            // the same semantics as a full replay. The transaction excludes
+            // competing writers; only this batch can extend its history.
+            return db.executionRunEvents.get(event.id).then((stored) => {
+              if (stored) events.push(stored)
+              return events
+            })
+          }
+          // Legacy gaps or conflicting sequences retain the index's canonical
+          // seq/primary-key ordering instead of assuming append-only order.
+          return db.executionRunEvents
             .where("[runId+seq]")
             .between([runId, 0], [runId, Number.POSITIVE_INFINITY])
             .toArray()
-        )
+            .then((rows) => {
+              if (batchHistory) batchHistory.events = rows
+              return rows
+            })
+        })
         .then((events) => {
           const snapshot = reduceRunEvents({ ...run, currentRevision: 0 }, events)
           return db.executionRuns
@@ -309,11 +326,14 @@ export const runEventJournal: RunEventJournal = {
         db.executionRunEvents,
         db.notificationProjectionWork,
         () => {
+          // One cache per transaction attempt: aborts/reopens cannot retain
+          // events whose write or notification projection touch rolled back.
+          const batchHistory: { events?: RunEvent[] } = {}
           const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
           return idempotentInputs.reduce<Promise<RunEvent[]>>(
             (pending, input) =>
               pending.then((out) =>
-                appendInsideTransaction(db, runId, input).then((event) => {
+                appendInsideTransaction(db, runId, input, batchHistory).then((event) => {
                   out.push(event)
                   return out
                 })

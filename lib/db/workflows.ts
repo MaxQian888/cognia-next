@@ -416,13 +416,16 @@ export async function getRecentlyFailedWorkflowIds(sinceMs: number): Promise<Set
 
 /**
  * Dead-letter queue (A3): terminally-failed runs the user hasn't yet
- * acknowledged. Queries the existing `status` index (no schema change) and
- * filters out acknowledged rows in memory. Optionally scoped to one workflow.
- * Newest first.
+ * acknowledged. Uses the existing status indexes to restrict the read before
+ * decrypting run snapshots, then filters acknowledged rows in memory.
+ * Optionally scoped to one workflow. Newest first.
  */
 export async function listDeadLetters(workflowId?: string): Promise<WorkflowRunRow[]> {
   const db = getDb()
-  const rows = await db.workflowRuns.where("status").equals("failed").toArray()
+  const query = workflowId
+    ? db.workflowRuns.where("[workflowId+status]").equals([workflowId, "failed"])
+    : db.workflowRuns.where("status").equals("failed")
+  const rows = await query.toArray()
   return rows
     .filter((r) => r.acknowledgedAt === undefined && (!workflowId || r.workflowId === workflowId))
     .sort((a, b) => b.startedAt - a.startedAt)

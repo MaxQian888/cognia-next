@@ -4,6 +4,7 @@
 // POLICY live in `lib/notifications/*` (pure, DI-tested). This module is the
 // thin DB surface those policies call. Mirrors `lib/db/backup-history.ts`.
 
+import Dexie from "dexie"
 import type {
   NotificationRecord,
   NotificationSource,
@@ -63,7 +64,16 @@ export async function patchNotification(
 export async function listNotifications(
   filter: NotificationListFilter = {}
 ): Promise<NotificationRecord[]> {
-  let coll = getDb().notifications.orderBy("createdAt").reverse()
+  const table = getDb().notifications
+  const readState = filter.readStates?.length === 1 ? filter.readStates[0] : undefined
+  // The archived tab requests one state. Its existing compound index avoids
+  // walking newer active rows while preserving timestamp/primary-key order.
+  let coll = readState
+    ? table
+        .where("[readState+createdAt]")
+        .between([readState, Dexie.minKey], [readState, Dexie.maxKey], true, true)
+        .reverse()
+    : table.orderBy("createdAt").reverse()
 
   coll = coll.filter((r) => {
     if (filter.source && r.source !== filter.source) return false

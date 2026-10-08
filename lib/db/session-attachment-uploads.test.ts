@@ -202,6 +202,75 @@ describe("session attachment uploads", () => {
     ).rejects.toMatchObject({ code: "attachment_hash_mismatch" })
   })
 
+  it("serializes overlapping adjacent appends against the persisted write head", async () => {
+    const bytes = pngBytes(900)
+    const init = await beginAttachmentUpload({
+      sessionId: "ses-concurrent",
+      deviceId: "dev-a",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: bytes.length,
+      hash: await sha256(bytes),
+    })
+    const results = await Promise.all([
+      appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-a",
+        offset: 0,
+        bytes: bytes.subarray(0, 300),
+      }),
+      appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-a",
+        offset: 300,
+        bytes: bytes.subarray(300, 600),
+      }),
+      appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-a",
+        offset: 600,
+        bytes: bytes.subarray(600),
+      }),
+    ])
+    expect(results.map((result) => result.receivedBytes)).toEqual([300, 600, 900])
+    const committed = await commitAttachmentUpload({ uploadId: init.uploadId, deviceId: "dev-a" })
+    const resolved = await resolveAttachmentRef(committed.ref, {
+      sessionId: "ses-concurrent",
+      deviceId: "dev-a",
+    })
+    expect(resolved?.bytes).toEqual(bytes)
+  })
+
+  it("does not recreate an upload when an overlapping abort removes it", async () => {
+    const bytes = pngBytes(900)
+    const init = await beginAttachmentUpload({
+      sessionId: "ses-abort",
+      deviceId: "dev-a",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: bytes.length,
+      hash: await sha256(bytes),
+    })
+    await Promise.all([
+      appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-a",
+        offset: 0,
+        bytes: bytes.subarray(0, 300),
+      }),
+      abortAttachmentUpload({ uploadId: init.uploadId, deviceId: "dev-a" }),
+    ])
+    expect(await getDb().sessionAttachmentUploads.get(init.uploadId)).toBeUndefined()
+    await expect(
+      appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-a",
+        offset: 300,
+        bytes: bytes.subarray(300),
+      })
+    ).rejects.toMatchObject({ code: "attachment_not_found" })
+  })
+
   it("refuses a declared image whose bytes are not an image", async () => {
     const bytes = new TextEncoder().encode("#!/bin/sh\nrm -rf /\n")
     const hash = await sha256(bytes)

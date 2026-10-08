@@ -129,10 +129,11 @@ async function listScopedSessionsNow(projectId?: string): Promise<ChatSession[]>
  * conversation of no workspace is shown in whichever workspace is open —
  * the same reading `folderAcceptsSession` gives a missing `projectId`.
  *
- * The unscoped rows have no index to be found through, so they cost a table
- * scan; the scan is what the unscoped `listSessions` does anyway. Both reads
- * start before the first `await`, for the liveQuery zone-safety reason
- * `listScopedSessions` spells out. Newest-first, like the scoped read.
+ * Missing workspace keys are absent from the project index. Subtract its
+ * primary keys from the table's keys before loading those rows, so finding
+ * legacy sessions does not decrypt every other workspace's session content.
+ * Both reads start before the first `await`, for the liveQuery zone-safety
+ * reason `listScopedSessions` spells out. Newest-first, like the scoped read.
  */
 export function listWorkspaceSessions(projectId: string): Promise<ChatSession[]> {
   return measureOperation("storage.sessions.list", () => listWorkspaceSessionsNow(projectId))
@@ -146,7 +147,15 @@ async function listWorkspaceSessionsNow(projectId: string): Promise<ChatSession[
       .between([projectId, Dexie.minKey], [projectId, Dexie.maxKey])
       .reverse()
       .toArray(),
-    db.sessions.filter((session) => !session.projectId).toArray(),
+    db.transaction("r", db.sessions, async () => {
+      const [allIds, scopedIds] = await Promise.all([
+        db.sessions.toCollection().primaryKeys(),
+        db.sessions.where("projectId").above("").primaryKeys(),
+      ])
+      const scopedIdSet = new Set(scopedIds)
+      const rows = await db.sessions.bulkGet(allIds.filter((id) => !scopedIdSet.has(id)))
+      return rows.filter((row): row is ChatSession => row !== undefined && !row.projectId)
+    }),
   ])
   if (unscoped.length === 0) return scoped
   return [...scoped, ...unscoped].sort((a, b) => b.updatedAt - a.updatedAt)

@@ -871,6 +871,70 @@ describe("mobile outbound queue target isolation", () => {
     await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(0)
   })
 
+  it("preserves stable timestamp ties and scope boundaries in status listings", async () => {
+    const row = (
+      id: string,
+      overrides: Partial<MobileOutboundJobRow> = {}
+    ): MobileOutboundJobRow => ({
+      id,
+      ...scope,
+      command: "connector_send",
+      payload: { text: id },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: 20,
+      idempotencyKey: id,
+      ...overrides,
+    })
+    await getDb().mobileOutboundQueue.bulkPut([
+      row("z-tie"),
+      row("a-tie"),
+      row("old", { createdAt: 10 }),
+      row("foreign-account", { accountId: "acct_other" }),
+      row("foreign-target", { targetId: "other-host" }),
+      row("legacy-pending", { targetId: LEGACY_MIXED_TARGET_ID }),
+      row("other-status", { status: "sending" }),
+    ])
+
+    expect((await listByStatus("pending", scope)).map((job) => job.id)).toEqual([
+      "old",
+      "a-tie",
+      "z-tie",
+    ])
+    expect((await listByStatus("pending", null)).map((job) => job.id)).toEqual([
+      "old",
+      "a-tie",
+      "foreign-account",
+      "foreign-target",
+      "legacy-pending",
+      "z-tie",
+    ])
+    expect((await listByStatus("sending", scope)).map((job) => job.id)).toEqual(["other-status"])
+    expect(await getDb().mobileOutboundQueue.count()).toBe(7)
+  })
+
+  it("excludes another account's legacy deadletters from status listings", async () => {
+    for (const accountId of [scope.accountId, "acct_other"]) {
+      await getDb().mobileOutboundQueue.put({
+        id: accountId,
+        accountId,
+        targetId: LEGACY_MIXED_TARGET_ID,
+        command: "connector_send",
+        payload: { text: accountId },
+        status: "deadlettered",
+        attempts: 1,
+        nextAttemptAt: 0,
+        createdAt: 10,
+        idempotencyKey: accountId,
+      })
+    }
+    expect((await listByStatus("deadlettered", scope)).map((job) => job.id)).toEqual([
+      scope.accountId,
+    ])
+    await expect(listByStatus("rejected", scope)).resolves.toEqual([])
+  })
+
   it("shows quarantined legacy actions to their account without dispatching them", async () => {
     await getDb().mobileOutboundQueue.put({
       id: "legacy-action",

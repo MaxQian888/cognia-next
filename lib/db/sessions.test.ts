@@ -1627,6 +1627,7 @@ describe("workspace (project) scoping", () => {
     await saveSettings({ activeProjectId: "proj-A" })
     const a1 = await createSession({ title: "a1" })
     const b1 = await createSession({ title: "b1", projectId: "proj-B" })
+    await getDb().sessions.update(b1.id, { updatedAt: a1.updatedAt })
     const legacy = await createSession({ title: "legacy" })
     await getDb().sessions.update(legacy.id, { projectId: undefined, updatedAt: a1.updatedAt + 5 })
     const hostRow = await createSession({ title: "from host" })
@@ -1656,6 +1657,54 @@ describe("workspace (project) scoping", () => {
     await waitUntil(() => emissions.at(-1)?.[0] === "renamed")
     sub.unsubscribe()
     expect(emissions.at(-1)).toEqual(["renamed"])
+  })
+
+  it("preserves missing, null and empty workspaces and stable timestamp ties", async () => {
+    const db = getDb()
+    const template = await createSession({ title: "template", projectId: "proj-other" })
+    await db.sessions.bulkPut([
+      { ...template, id: "unscoped-a", projectId: undefined, updatedAt: 100 },
+      { ...template, id: "unscoped-b", projectId: null, updatedAt: 100 } as unknown as ChatSession,
+      { ...template, id: "unscoped-c", projectId: "", updatedAt: 100 },
+      { ...template, id: "scoped", projectId: "proj-A", updatedAt: 100 },
+    ])
+    const read = jest.spyOn(db.sessions, "bulkGet")
+    try {
+      expect((await listWorkspaceSessions("proj-A")).map((row) => row.id)).toEqual([
+        "scoped",
+        "unscoped-a",
+        "unscoped-b",
+        "unscoped-c",
+      ])
+      // The fallback must not load (and decrypt) unrelated workspace bodies.
+      expect(read).toHaveBeenCalledWith(["unscoped-a", "unscoped-b", "unscoped-c"])
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it("re-emits when indexed workspace membership enters or leaves the fallback", async () => {
+    const db = getDb()
+    const moved = await createSession({ title: "moving", projectId: "proj-other" })
+    const emissions: string[][] = []
+    const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
+      next: (rows) => emissions.push(rows.map((row) => row.id)),
+    })
+    try {
+      await waitUntil(() => emissions.length > 0)
+      expect(emissions.at(-1)).toEqual([])
+      await db.sessions.update(moved.id, { projectId: "" })
+      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+      await db.sessions.update(moved.id, { projectId: "proj-other" })
+      await waitUntil(() => emissions.at(-1)?.length === 0)
+      await db.sessions.update(moved.id, { projectId: undefined })
+      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+      await db.sessions.update(moved.id, { projectId: "proj-A" })
+      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+      expect((await listWorkspaceSessions("proj-A")).map((row) => row.id)).toEqual([moved.id])
+    } finally {
+      sub.unsubscribe()
+    }
   })
 })
 

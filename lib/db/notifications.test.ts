@@ -146,6 +146,84 @@ describe("listNotifications", () => {
   it("respects limit", async () => {
     expect((await listNotifications({ limit: 1 })).map((r) => r.id)).toEqual(["b"])
   })
+
+  it("finds archived rows without scanning timestamps of unrelated states", async () => {
+    const db = getDb()
+    const fullTimeline = jest.spyOn(db.notifications, "orderBy")
+    try {
+      expect(
+        (await listNotifications({ includeDone: true, readStates: ["done"], limit: 100 })).map(
+          (row) => row.id
+        )
+      ).toEqual(["c"])
+      expect(fullTimeline).not.toHaveBeenCalled()
+    } finally {
+      fullTimeline.mockRestore()
+    }
+  })
+
+  it("keeps reverse primary-key ties and the complete timestamp key domain", async () => {
+    await getDb().notifications.clear()
+    await getDb().notifications.bulkPut([
+      rec({ id: "negative-infinity", createdAt: Number.NEGATIVE_INFINITY, readState: "done" }),
+      rec({ id: "negative", createdAt: -1, readState: "done" }),
+      rec({ id: "zero", createdAt: 0, readState: "done" }),
+      rec({ id: "tie-a", createdAt: 100, readState: "done" }),
+      rec({ id: "tie-z", createdAt: 100, readState: "done" }),
+      rec({ id: "infinity", createdAt: Number.POSITIVE_INFINITY, readState: "done" }),
+      rec({ id: "legacy-date", createdAt: new Date(100) as unknown as number, readState: "done" }),
+    ])
+    const rows = await listNotifications({ includeDone: true, readStates: ["done"] })
+    expect(rows.map((row) => row.id)).toEqual([
+      "legacy-date",
+      "infinity",
+      "tie-z",
+      "tie-a",
+      "zero",
+      "negative",
+      "negative-infinity",
+    ])
+  })
+
+  it("preserves source, snooze and includeDone predicates on a single-state lookup", async () => {
+    await putNotification(
+      rec({
+        id: "visible",
+        createdAt: 500,
+        readState: "done",
+        source: "scheduler",
+        snoozedUntil: 1000,
+      })
+    )
+    await putNotification(
+      rec({
+        id: "snoozed",
+        createdAt: 600,
+        readState: "done",
+        source: "scheduler",
+        snoozedUntil: 1001,
+      })
+    )
+    await putNotification(
+      rec({ id: "other-source", createdAt: 700, readState: "done", source: "connector" })
+    )
+    const filter = {
+      includeDone: true,
+      readStates: ["done" as const],
+      source: "scheduler" as const,
+      hideSnoozedAfter: 1000,
+      limit: 1,
+    }
+    expect((await listNotifications(filter)).map((row) => row.id)).toEqual(["visible"])
+    expect(await listNotifications({ ...filter, includeDone: false })).toEqual([])
+    expect(await listNotifications({ includeDone: true, readStates: [] })).toEqual([])
+    expect(
+      (await listNotifications({ includeDone: true, readStates: ["done"], limit: 0 })).length
+    ).toBe(4)
+    expect(
+      (await listNotifications({ includeDone: true, readStates: ["done"], limit: -1 })).length
+    ).toBe(4)
+  })
 })
 
 describe("getBadgeCounts", () => {

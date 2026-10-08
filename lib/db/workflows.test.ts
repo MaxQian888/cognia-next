@@ -646,6 +646,44 @@ describe("schemaVersion 2 funnel", () => {
       expect((await listDeadLetters("wf_dl")).map((r) => r.id)).toEqual(["r1"])
     })
 
+    it("reads scoped failures through the existing workflow/status index", async () => {
+      await seedRun("r1")
+      await seedRun("r2", { workflowId: "other" })
+      const where = jest.spyOn(getDb().workflowRuns, "where")
+      try {
+        expect((await listDeadLetters("wf_dl")).map((r) => r.id)).toEqual(["r1"])
+        expect(where).toHaveBeenCalledWith("[workflowId+status]")
+        expect(where).not.toHaveBeenCalledWith("status")
+      } finally {
+        where.mockRestore()
+      }
+    })
+
+    it("preserves stable ties, legacy timestamps and acknowledgement semantics", async () => {
+      await seedRun("a", { startedAt: 10 })
+      await seedRun("b", { startedAt: 10 })
+      await seedRun("c", { startedAt: -10 })
+      await seedRun("d", { startedAt: undefined })
+      await seedRun("e", { acknowledgedAt: null as unknown as number })
+      await seedRun("f", { acknowledgedAt: 0 })
+      await seedRun("g", { workflowId: "other", startedAt: 100 })
+      const originalOrder = (await getDb().workflowRuns.where("status").equals("failed").toArray())
+        .filter((row) => row.acknowledgedAt === undefined && row.workflowId === "wf_dl")
+        .sort((a, b) => b.startedAt - a.startedAt)
+      const actual = await listDeadLetters("wf_dl")
+      expect(actual).toEqual(originalOrder)
+      expect(actual.map((row) => row.id)).toEqual(["a", "b", "c", "d"])
+    })
+
+    it("keeps absent and empty workflow ids global and missing workflows empty", async () => {
+      await seedRun("a")
+      await seedRun("b", { workflowId: "", startedAt: 2 })
+      await seedRun("c", { workflowId: undefined, startedAt: 3 })
+      expect((await listDeadLetters()).map((row) => row.id)).toEqual(["c", "b", "a"])
+      expect(await listDeadLetters("")).toEqual(await listDeadLetters())
+      expect(await listDeadLetters("missing")).toEqual([])
+    })
+
     it("acknowledgeRun removes a run from the queue", async () => {
       await seedRun("r1")
       await acknowledgeRun("r1")

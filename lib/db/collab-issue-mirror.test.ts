@@ -3,6 +3,7 @@
  */
 
 import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { getDb } from "./schema"
 
 import {
   clearCollabIssues,
@@ -86,6 +87,72 @@ describe("listCollabIssues", () => {
 })
 
 describe("replaceCollabIssues", () => {
+  it("selects stale keys without reading bodies and isolates same-named workspaces across orgs", async () => {
+    const db = getDb()
+    await db.collabIssues.bulkPut([
+      row({ id: "stale" }),
+      row({ id: "retained" }),
+      row({ id: "sibling", workspaceId: "proj-2" }),
+      row({ id: "foreign", orgId: OTHER_ORG }),
+    ])
+    const readBody = jest.fn(() => {
+      throw new Error("stale selection must not read issue bodies")
+    })
+    db.collabIssues.hook("reading", readBody)
+    try {
+      await replaceCollabIssues({ orgId: ORG, workspaceId: "proj-1" }, [
+        row({ id: "retained", title: "Updated", body: "New body", revision: 2 }),
+        row({ id: "new" }),
+      ])
+      expect(readBody).not.toHaveBeenCalled()
+    } finally {
+      db.collabIssues.hook("reading").unsubscribe(readBody)
+    }
+    expect((await db.collabIssues.toArray()).map((issue) => issue.id).sort()).toEqual([
+      "foreign",
+      "new",
+      "retained",
+      "sibling",
+    ])
+    expect(await getCollabIssue("retained")).toMatchObject({
+      title: "Updated",
+      body: "New body",
+      revision: 2,
+    })
+  })
+
+  it("treats an empty workspace id as an exact scope, including an empty server response", async () => {
+    await getDb().collabIssues.bulkPut([
+      row({ id: "empty-workspace", workspaceId: "" }),
+      row({ id: "sibling", workspaceId: "proj-2" }),
+      row({ id: "foreign", orgId: OTHER_ORG, workspaceId: "" }),
+    ])
+    await replaceCollabIssues({ orgId: ORG, workspaceId: "" }, [])
+    expect((await getDb().collabIssues.toArray()).map((issue) => issue.id).sort()).toEqual([
+      "foreign",
+      "sibling",
+    ])
+  })
+
+  it("restores stale rows if the replacement write fails", async () => {
+    const db = getDb()
+    const before = [row({ id: "stale" }), row({ id: "retained", title: "Before" })]
+    await db.collabIssues.bulkPut(before)
+    const put = jest
+      .spyOn(db.collabIssues, "bulkPut")
+      .mockRejectedValueOnce(new Error("storage failed"))
+    try {
+      await expect(
+        replaceCollabIssues({ orgId: ORG }, [row({ id: "retained", title: "After" })])
+      ).rejects.toThrow("storage failed")
+      expect((await db.collabIssues.toArray()).sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+        [...before].sort((a, b) => a.id.localeCompare(b.id))
+      )
+    } finally {
+      put.mockRestore()
+    }
+  })
+
   it("deletes rows the server no longer reports for that scope", async () => {
     await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_old" })])
     await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_new" })])
@@ -130,6 +197,26 @@ describe("getCollabIssue", () => {
 })
 
 describe("clearCollabIssues", () => {
+  it("clears an org across workspaces without reading bodies or deleting another org", async () => {
+    const db = getDb()
+    await db.collabIssues.bulkPut([
+      row({ id: "first" }),
+      row({ id: "second", workspaceId: "proj-2" }),
+      row({ id: "foreign", orgId: OTHER_ORG }),
+    ])
+    const readBody = jest.fn(() => {
+      throw new Error("scope removal must not read issue bodies")
+    })
+    db.collabIssues.hook("reading", readBody)
+    try {
+      await clearCollabIssues(ORG)
+      expect(readBody).not.toHaveBeenCalled()
+    } finally {
+      db.collabIssues.hook("reading").unsubscribe(readBody)
+    }
+    expect((await db.collabIssues.toArray()).map((issue) => issue.id)).toEqual(["foreign"])
+  })
+
   it("forgets one org and leaves the rest", async () => {
     await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_1" })])
     await replaceCollabIssues({ orgId: OTHER_ORG }, [row({ id: "iss_alien", orgId: OTHER_ORG })])

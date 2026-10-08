@@ -243,8 +243,12 @@ function ttlFor(status: SessionAttachmentUploadStatus): number {
  * A mismatched device is reported as "not found" rather than "forbidden": the
  * two answers together would let a device probe which upload ids exist.
  */
-async function ownedRow(uploadId: string, deviceId: string): Promise<SessionAttachmentUploadRow> {
-  const row = await getDb().sessionAttachmentUploads.get(uploadId)
+async function ownedRow(
+  uploadId: string,
+  deviceId: string,
+  db = getDb()
+): Promise<SessionAttachmentUploadRow> {
+  const row = await db.sessionAttachmentUploads.get(uploadId)
   if (!row || row.deviceId !== deviceId) throw new AttachmentUploadError("attachment_not_found")
   return row
 }
@@ -278,29 +282,36 @@ export async function appendAttachmentChunk(
   input: AppendAttachmentChunkInput
 ): Promise<AppendAttachmentChunkResult> {
   const now = input.now ?? Date.now()
-  const row = await ownedRow(input.uploadId, input.deviceId)
-  if (row.status === "committed") throw new AttachmentUploadError("attachment_already_committed")
-  if (input.offset + input.bytes.byteLength <= row.receivedBytes) {
-    return { receivedBytes: row.receivedBytes, complete: row.receivedBytes === row.size }
-  }
-  if (input.offset !== row.receivedBytes) {
-    throw new AttachmentUploadError("attachment_offset_mismatch")
-  }
-  const receivedBytes = row.receivedBytes + input.bytes.byteLength
-  if (receivedBytes > row.size) throw new AttachmentUploadError("attachment_size_mismatch")
+  const db = getDb()
+  // Keep the read and full-row write atomic. update() would read the entire
+  // accumulated payload again; a put outside this transaction could overwrite
+  // another append or recreate a row that an abort just removed.
+  return db.transaction("rw", db.sessionAttachmentUploads, async () => {
+    const row = await ownedRow(input.uploadId, input.deviceId, db)
+    if (row.status === "committed") throw new AttachmentUploadError("attachment_already_committed")
+    if (input.offset + input.bytes.byteLength <= row.receivedBytes) {
+      return { receivedBytes: row.receivedBytes, complete: row.receivedBytes === row.size }
+    }
+    if (input.offset !== row.receivedBytes) {
+      throw new AttachmentUploadError("attachment_offset_mismatch")
+    }
+    const receivedBytes = row.receivedBytes + input.bytes.byteLength
+    if (receivedBytes > row.size) throw new AttachmentUploadError("attachment_size_mismatch")
 
-  const merged = new Uint8Array(receivedBytes)
-  const held = readStoredBytes(row.bytes)
-  if (held) merged.set(held.subarray(0, row.receivedBytes), 0)
-  merged.set(input.bytes, row.receivedBytes)
+    const merged = new Uint8Array(receivedBytes)
+    const held = readStoredBytes(row.bytes)
+    if (held) merged.set(held.subarray(0, row.receivedBytes), 0)
+    merged.set(input.bytes, row.receivedBytes)
 
-  await getDb().sessionAttachmentUploads.update(input.uploadId, {
-    bytes: merged,
-    receivedBytes,
-    updatedAt: now,
-    expiresAt: now + ATTACHMENT_UPLOAD_TTL_MS,
+    await db.sessionAttachmentUploads.put({
+      ...row,
+      bytes: merged,
+      receivedBytes,
+      updatedAt: now,
+      expiresAt: now + ATTACHMENT_UPLOAD_TTL_MS,
+    })
+    return { receivedBytes, complete: receivedBytes === row.size }
   })
-  return { receivedBytes, complete: receivedBytes === row.size }
 }
 
 export interface CommitAttachmentUploadResult {

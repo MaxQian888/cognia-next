@@ -308,3 +308,31 @@ describe("settled bookkeeping", () => {
     ])
   })
 })
+
+describe("publication retention atomicity", () => {
+  it("rolls back publication deletions if the publication transaction fails", async () => {
+    const db = getDb()
+    await db.notificationPublications.bulkPut([
+      publication("rollback-a", "closed", OLD),
+      publication("rollback-b", "superseded", OLD),
+    ])
+    const original = db.notificationPublications.bulkDelete.bind(db.notificationPublications)
+    const deletion = jest
+      .spyOn(db.notificationPublications, "bulkDelete")
+      .mockImplementationOnce((keys) =>
+        original(keys).then(() => {
+          throw new Error("injected publication failure")
+        })
+      )
+    try {
+      await expect(prune()).rejects.toThrow("injected publication failure")
+      expect(await db.notificationPublications.toCollection().primaryKeys()).toEqual([
+        "rollback-a",
+        "rollback-b",
+      ])
+    } finally {
+      deletion.mockRestore()
+    }
+    expect((await prune()).publicationsDeleted).toBe(2)
+  })
+})
