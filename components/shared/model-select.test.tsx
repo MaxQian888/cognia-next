@@ -316,6 +316,55 @@ describe("ModelSelect for a surface run by an external agent", () => {
     })
   })
 
+  const piGroup = {
+    providerId: "cognia:external-agent:pi",
+    providerName: "Pi (native RPC)",
+    headingAction: <button type="button">Refresh models</button>,
+    models: [
+      {
+        id: "deepseek/deepseek-flash",
+        name: "DeepSeek V4.1 Flash",
+        contextLength: 1_000_000,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+      { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", supportsReasoning: true },
+    ],
+  }
+
+  it("starts the first row right under a heading that carries an action", () => {
+    renderSelect({ leadingGroups: [piGroup], hideProviderGroups: true })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByTestId("model-group-heading")).toHaveTextContent("Pi (native RPC)")
+    // The group drops its top padding: the heading row already supplies it.
+    const group = document.querySelector('[data-slot="command-group"]')
+    expect(group).toHaveClass("pt-0")
+  })
+
+  it("labels each capability glyph for hover and assistive tech", () => {
+    renderSelect({ leadingGroups: [piGroup], hideProviderGroups: true })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const [flash, pro] = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+    const vision = flash.querySelector('[aria-label="Vision"]')
+    expect(vision).toHaveAttribute("role", "img")
+    expect(vision).toHaveAttribute("title", "Vision")
+    expect(flash.querySelector('[data-testid="model-context-window"]')).toHaveTextContent("1M")
+    expect(pro.querySelector('[aria-label="Vision"]')).toBeNull()
+    expect(pro.querySelector('[aria-label="Reasoning"]')).not.toBeNull()
+  })
+
+  it("finds models by capability in search", () => {
+    renderSelect({ leadingGroups: [piGroup], hideProviderGroups: true })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.change(screen.getByPlaceholderText(/search models/i), {
+      target: { value: "vision" },
+    })
+    const items = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+    expect(items.map((node) => node.textContent)).toEqual([
+      expect.stringContaining("DeepSeek V4.1 Flash"),
+    ])
+  })
+
   it("prints a row's id under its name unless the id is a placeholder", () => {
     renderSelect({
       model: "__agent-default__",

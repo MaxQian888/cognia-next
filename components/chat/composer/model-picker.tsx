@@ -543,7 +543,9 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
       type="button"
       variant="ghost"
       size="sm"
-      className="h-7 gap-1.5 px-2 text-xs"
+      // Sized to the heading row it sits in (`h-6`), so the row stays the
+      // height of a plain group heading.
+      className="h-6 gap-1.5 px-1.5 text-xs font-normal"
       disabled={agentModels.loading}
       onClick={agentModels.refresh}
       aria-label={t("refreshAgentModels")}

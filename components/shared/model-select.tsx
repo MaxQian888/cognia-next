@@ -208,6 +208,21 @@ export const composerChipTriggerClass =
   "h-7 min-w-0 max-w-full gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-border/70 hover:bg-muted/70 hover:text-foreground"
 
 /** Compact "128K" / "1M" context-window label. */
+/** One capability glyph, labelled for hover and for assistive tech. */
+function CapabilityGlyph({
+  label,
+  icon: Icon,
+}: {
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}) {
+  return (
+    <span role="img" aria-label={label} title={label} className="inline-flex">
+      <Icon className="size-3" />
+    </span>
+  )
+}
+
 export function formatContextWindow(tokens: number): string {
   if (tokens >= 1_000_000) {
     const v = tokens / 1_000_000
@@ -310,6 +325,12 @@ export function ModelSelect({
   side = "top",
 }: ModelSelectProps) {
   const t = useTranslations("chat.composer.modelPicker")
+  /** The capability words a row answers to in search, in this locale. */
+  const capabilityKeywords = (gm: GroupedModel): string[] => [
+    ...(gm.supportsTools ? [t("capTools")] : []),
+    ...(gm.supportsVision ? [t("capVision")] : []),
+    ...(gm.supportsReasoning ? [t("capReasoning")] : []),
+  ]
   const { options, groups: providerGroups } = useModelOptions()
   const groups = useMemo(() => {
     if (hideProviderGroups) return leadingGroups ?? []
@@ -463,15 +484,27 @@ export function ModelSelect({
                   </div>
                 ) : null}
                 {group.models.length > 0 && group.headingAction ? (
-                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                    <span>{group.providerName}</span>
-                    {group.headingAction}
+                  // Drawn outside cmdk's heading slot because that slot is
+                  // `aria-hidden`, which would hide the action from assistive
+                  // tech. Its geometry copies the slot's instead: the group
+                  // below drops its top padding, so the first row sits where it
+                  // sits under a plain heading rather than a whole button's
+                  // height lower.
+                  <div
+                    className="flex min-h-8 items-center justify-between gap-2 px-3 pt-1 text-xs font-medium text-muted-foreground"
+                    data-testid="model-group-heading"
+                  >
+                    <span className="min-w-0 truncate">{group.providerName}</span>
+                    <span className="-mr-1.5 flex shrink-0 items-center">
+                      {group.headingAction}
+                    </span>
                   </div>
                 ) : null}
                 {group.models.length === 0 ? null : (
                   <ModelSelectorGroup
                     heading={group.headingAction ? undefined : group.providerName}
                     aria-label={group.headingAction ? group.providerName : undefined}
+                    className={group.headingAction ? "pt-0" : undefined}
                   >
                     {group.models.map((gm) => {
                       const { id: modelId, name: modelName } = gm
@@ -488,6 +521,9 @@ export function ModelSelect({
                           // Include both name and id so the command filter matches
                           // either the friendly name or the raw id the user types.
                           value={`${group.providerId} ${modelName} ${modelId}`}
+                          // Searching a capability ("vision", "推理") narrows
+                          // the list to the rows that wear its glyph.
+                          keywords={capabilityKeywords(gm)}
                           disabled={gm.disabled}
                           onSelect={() => {
                             if (gm.disabled) return
@@ -523,18 +559,26 @@ export function ModelSelect({
                           {hasMeta ? (
                             <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
                               {gm.contextLength !== undefined ? (
-                                <span title={t("contextWindowLabel")}>
+                                <span
+                                  title={t("contextWindowLabel")}
+                                  className="font-mono tabular-nums"
+                                  data-testid="model-context-window"
+                                >
                                   {formatContextWindow(gm.contextLength)}
                                 </span>
                               ) : null}
+                              {/* A labelled span per glyph rather than an
+                                  `aria-label` on the svg: lucide marks its
+                                  icons `aria-hidden`, which swallowed the
+                                  label, and an svg shows no hover text. */}
                               {gm.supportsTools ? (
-                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                                <CapabilityGlyph label={t("capTools")} icon={WrenchIcon} />
                               ) : null}
                               {gm.supportsVision ? (
-                                <EyeIcon className="size-3" aria-label={t("capVision")} />
+                                <CapabilityGlyph label={t("capVision")} icon={EyeIcon} />
                               ) : null}
                               {gm.supportsReasoning ? (
-                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                                <CapabilityGlyph label={t("capReasoning")} icon={BrainIcon} />
                               ) : null}
                             </span>
                           ) : null}
