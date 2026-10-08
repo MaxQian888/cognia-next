@@ -94,6 +94,8 @@ import {
 } from "@/components/shell/title-bar-outlets"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { usePlatform } from "@/hooks/use-platform"
+import { formatKeybinding, toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
+import type { Chord } from "@/lib/shortcuts/types"
 import { useSidebarPeek } from "@/hooks/shell/use-sidebar-peek"
 import { SidebarPeekEdge, SidebarPeekFrame } from "@/components/shell/sidebar-peek-panel"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
@@ -3131,10 +3133,7 @@ function ChannelListSearch({
             // drawn as a keycap outline so it doesn't read as a badge or a
             // literal slash inside the field.
             <span title={t("searchShortcutHint")} className="flex">
-              <Kbd
-                aria-hidden
-                className="h-[18px] min-w-[18px] rounded-[5px] border border-border/60 bg-background/70 px-1 text-[10px] leading-none font-medium text-muted-foreground/80 shadow-[inset_0_-1px_0_0_color-mix(in_oklab,var(--border)_60%,transparent)]"
-              >
+              <Kbd aria-hidden className={SIDEBAR_KEYCAP_CLASS}>
                 /
               </Kbd>
             </span>
@@ -3146,6 +3145,26 @@ function ChannelListSearch({
 }
 
 /**
+ * The sidebar's keycap hint: an outline keycap, so a chord never reads as a
+ * badge or as literal text in the row. Shared by the search field's `/` and
+ * New chat's accelerator so the two hints are one visual language.
+ */
+const SIDEBAR_KEYCAP_CLASS =
+  "h-[18px] min-w-[18px] rounded-[5px] border border-border/60 bg-background/70 px-1 text-[10px] leading-none font-medium text-muted-foreground/80 shadow-[inset_0_-1px_0_0_color-mix(in_oklab,var(--border)_60%,transparent)]"
+
+/**
+ * File → New Chat's native accelerator (`src-tauri/src/menu.rs`, `new-chat`,
+ * `CmdOrCtrl+N`), in the shortcut catalog's chord form so `formatKeybinding`
+ * prints it per platform (⌘N / Ctrl+N).
+ *
+ * Desktop only, on purpose. It is not an app-scope DOM shortcut: the native
+ * menu owns the key there, and a browser never hands ⌘N / Ctrl+N to a page
+ * (it opens a new window first) — so the web shell prints no chord rather
+ * than one that cannot fire.
+ */
+const NEW_CHAT_ACCELERATOR: Chord = "ctrl+n"
+
+/**
  * "New conversation" — the sidebar's first control, above the navigation,
  * where every conventional chat app puts it. It creates in whichever section
  * is selected (Chats, or the open team), so it is *one* fixed affordance
@@ -3154,8 +3173,12 @@ function ChannelListSearch({
  *
  * Drawn with `SidebarRow` itself — a hand-rolled copy once drifted 4px
  * right, because `Button`'s `has-[>svg]:px-3` fires on a bare icon child
- * that `SidebarRow`'s icon span shields it from. The trailing "+" keeps it
- * reading as an action rather than a destination.
+ * that `SidebarRow`'s icon span shields it from.
+ *
+ * The trailing slot carries the accelerator as a keycap on the desktop app,
+ * where ⌘N / Ctrl+N really opens a new chat — it says the same "this is an
+ * action" the "+" did, and teaches the faster path. Without an accelerator
+ * (the web shell) it stays the "+".
  *
  * Always a direct chat: the scope tree shows every squad at once, so there is
  * no selected scope for the button to inherit — squad conversations start
@@ -3163,14 +3186,35 @@ function ChannelListSearch({
  */
 function SidebarNewConversationButton({ onNewDirect }: { onNewDirect: () => void }) {
   const t = useTranslations("desktop.channelList")
+  const tRail = useTranslations("desktop.guildRail")
+  const desktop = usePlatform() === "tauri"
+  const label = t("newChat")
+  const shortcut = desktop ? formatKeybinding(NEW_CHAT_ACCELERATOR) : ""
   return (
     <div className="shrink-0 px-2 pt-1.5 pb-0.5">
       <SidebarRow
         onClick={onNewDirect}
-        title={t("newChat")}
+        title={shortcut ? tRail("shortcutHint", { label, shortcut }) : label}
+        aria-keyshortcuts={desktop ? toAriaKeyShortcuts(NEW_CHAT_ACCELERATOR) : undefined}
         icon={<MessagesSquareIcon />}
-        label={t("newChat")}
-        trailing={<PlusIcon className="size-3.5 text-muted-foreground/70" aria-hidden />}
+        label={label}
+        trailing={
+          shortcut ? (
+            <Kbd
+              aria-hidden
+              className={cn(
+                SIDEBAR_KEYCAP_CLASS,
+                "tracking-[0.04em] transition-colors group-hover/new-chat:text-foreground/80"
+              )}
+              data-testid="sidebar-new-conversation-shortcut"
+            >
+              {shortcut}
+            </Kbd>
+          ) : (
+            <PlusIcon className="size-3.5 text-muted-foreground/70" aria-hidden />
+          )
+        }
+        className="group/new-chat"
         testId="sidebar-new-conversation"
       />
     </div>

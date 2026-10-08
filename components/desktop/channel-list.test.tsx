@@ -164,6 +164,13 @@ let mockGuildUnread: { dm: number; teams: ReadonlyMap<string, number>; total: nu
 // its counts (the real one reads the window's shared unread store), while the
 // scope tree aggregates through the real pure `aggregateGuildUnread` over the
 // list's own unread read.
+// The real hook reads `"web"` in jsdom; a test flips it to `"tauri"` to see the
+// desktop-only accelerator hint on New chat.
+let mockPlatform: "web" | "tauri" = "web"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => mockPlatform,
+}))
+
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
   ...jest.requireActual<typeof import("@/hooks/shell/use-guild-unread")>(
     "@/hooks/shell/use-guild-unread"
@@ -4037,6 +4044,32 @@ describe("title-bar projection", () => {
     for (const testId of ["channel-list-search-scope", "channel-list-filter-trigger"]) {
       expect(screen.getByTestId(testId)).toHaveClass("size-8", "rounded-md")
     }
+  })
+
+  it("shows New chat's accelerator as a keycap on the desktop app", () => {
+    mockPlatform = "tauri"
+    try {
+      renderProjected()
+      const newButton = screen.getByTestId("sidebar-new-conversation")
+      const keycap = within(newButton).getByTestId("sidebar-new-conversation-shortcut")
+      // The native File → New Chat accelerator, printed per platform.
+      expect(keycap).toHaveTextContent(/^(⌘N|Ctrl\+N)$/)
+      expect(keycap).toHaveAttribute("aria-hidden", "true")
+      expect(newButton.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+N$/i)
+      expect(newButton.getAttribute("title")).toBe(
+        `shortcutHint:${JSON.stringify({ label: "newChat", shortcut: keycap.textContent })}`
+      )
+    } finally {
+      mockPlatform = "web"
+    }
+  })
+
+  it("keeps the plain + on New chat where no accelerator can fire (web shell)", () => {
+    renderProjected()
+    const newButton = screen.getByTestId("sidebar-new-conversation")
+    expect(within(newButton).queryByTestId("sidebar-new-conversation-shortcut")).toBeNull()
+    expect(newButton).not.toHaveAttribute("aria-keyshortcuts")
+    expect(newButton).toHaveAttribute("title", "newChat")
   })
 
   it("heads the rail with new-conversation and keeps the list actions beside the search row", async () => {
