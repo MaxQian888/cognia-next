@@ -163,9 +163,16 @@ interface Props {
    */
   composerSlot?: ReactNode
   /**
-   * Visual density. `"rich"` (default) shows the illustrated two-column hero
-   * and quiet surfaced starter cards; `"minimal"` uses a compact, media-free
-   * layout. The chat pane forces `"minimal"` on mobile/narrow viewports.
+   * Density — of information, not just of decoration.
+   *
+   * `"rich"` (default) is the dashboard: the ambient artwork, a display-size
+   * greeting with today's date under it, the "Continue" list with when each
+   * conversation was last touched, and the usage dashboard (`statsSlot` —
+   * the desktop chat pane passes it only in this style).
+   *
+   * `"minimal"` is the launcher: greeting, composer and prompt chips, with the
+   * recents folded into one quiet line of titles. The chat pane forces it on
+   * mobile/narrow viewports.
    */
   welcomeStyle?: WelcomeStyle
   /**
@@ -233,6 +240,56 @@ export function SectionHeading({
         </Button>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * The "Continue" list: one quiet row per recent session — title, then how long
+ * ago it was touched. Shared by the inline welcome and the rich fullscreen
+ * welcome, which differ only in how many columns they give it.
+ */
+function RecentSessionList({
+  sessions,
+  now,
+  onResume,
+  columns = 1,
+}: {
+  sessions: readonly RecentSessionEntry[]
+  now: Date
+  onResume: (id: string) => void
+  /** `2` splits the rows into two columns once the pane is wide enough. */
+  columns?: 1 | 2
+}) {
+  const format = useFormatter()
+  return (
+    <motion.div
+      className={cn("flex flex-col", columns === 2 && "@2xl:grid @2xl:grid-cols-2 @2xl:gap-x-1")}
+      variants={STAGGER_CONTAINER}
+    >
+      {sessions.map((s) => (
+        <motion.div key={s.id} variants={STAGGER_CHILD}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onResume(s.id)}
+            aria-label={s.title}
+            className={cn(
+              "group h-auto w-full justify-start gap-2.5 whitespace-normal px-3 py-2 text-left font-normal",
+              QUIET_ITEM_CLASS
+            )}
+          >
+            <MessageSquareTextIcon
+              className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+              aria-hidden
+            />
+            <span className="truncate text-sm">{s.title}</span>
+            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+              {format.relativeTime(s.updatedAt, now)}
+            </span>
+          </Button>
+        </motion.div>
+      ))}
+    </motion.div>
   )
 }
 
@@ -560,31 +617,11 @@ export function EmptyChatState({
         {showRecents ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
             <SectionHeading label={t("sections.continue")} />
-            <motion.div className="flex flex-col" variants={STAGGER_CONTAINER}>
-              {recents.map((s) => (
-                <motion.div key={s.id} variants={STAGGER_CHILD}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => onResumeSession?.(s.id)}
-                    aria-label={s.title}
-                    className={cn(
-                      "group h-auto w-full justify-start gap-2.5 whitespace-normal px-3 py-2 text-left font-normal",
-                      QUIET_ITEM_CLASS
-                    )}
-                  >
-                    <MessageSquareTextIcon
-                      className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-                      aria-hidden
-                    />
-                    <span className="truncate text-sm">{s.title}</span>
-                    <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-                      {format.relativeTime(s.updatedAt, now)}
-                    </span>
-                  </Button>
-                </motion.div>
-              ))}
-            </motion.div>
+            <RecentSessionList
+              sessions={recents}
+              now={now}
+              onResume={(id) => onResumeSession?.(id)}
+            />
           </motion.div>
         ) : null}
       </motion.div>
@@ -665,6 +702,17 @@ export function EmptyChatState({
             >
               {heading}
             </h2>
+            {/* Rich only: today's date under the greeting — a fact the page
+                can state that the composer's hints cannot, formatted by the
+                locale rather than spelled out in copy. */}
+            {rich ? (
+              <p
+                className="-mt-3 text-center text-sm text-muted-foreground tabular-nums"
+                data-testid="welcome-date"
+              >
+                {format.dateTime(now, { weekday: "long", month: "long", day: "numeric" })}
+              </p>
+            ) : null}
             {override?.subtitle ? (
               <p className="-mt-3 text-center text-sm text-muted-foreground text-pretty">
                 {override.subtitle}
@@ -777,13 +825,17 @@ export function EmptyChatState({
             </motion.div>
           ) : null}
 
-          {/* Recents demoted to one quiet line — present but never competing
-              with the composer for the eye. */}
-          {showRecents ? (
+          {/* Recents. Minimal demotes them to one quiet line of titles —
+              present but never competing with the composer for the eye. Rich
+              gives them a section of their own, with when each conversation
+              was last touched, which is what makes the list worth reading
+              rather than just a row of links. */}
+          {showRecents && !rich ? (
             <motion.div
               className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
               variants={STAGGER_CHILD}
               data-testid="welcome-recents"
+              data-style="minimal"
             >
               <span>{t("sections.continue")}:</span>
               {quietRecents.map((s) => (
@@ -796,6 +848,22 @@ export function EmptyChatState({
                   {s.title}
                 </button>
               ))}
+            </motion.div>
+          ) : null}
+          {showRecents && rich ? (
+            <motion.div
+              className="w-full pt-2"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-recents"
+              data-style="rich"
+            >
+              <SectionHeading label={t("sections.continue")} />
+              <RecentSessionList
+                sessions={recents}
+                now={now}
+                onResume={(id) => onResumeSession?.(id)}
+                columns={2}
+              />
             </motion.div>
           ) : null}
         </motion.div>

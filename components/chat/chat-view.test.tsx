@@ -1415,6 +1415,41 @@ describe("ChatPane", () => {
       storeState.messages = saved
     })
 
+    it("leaves the usage dashboard out of the desktop minimal welcome", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      settingsState.settings = { welcomeStyle: "minimal" }
+      try {
+        // "Minimal" is the bare launcher; the dashboard is part of "rich".
+        render(<ChatPane {...makeProps()} />)
+        const props = EmptyChatState.mock.calls.at(-1)?.[0]
+        expect(props?.welcomeStyle).toBe("minimal")
+        expect(props?.statsSlot).toBeUndefined()
+      } finally {
+        settingsState.settings = null
+        storeState.messages = saved
+      }
+    })
+
+    it("passes the full (non-compact) dashboard to the desktop rich welcome", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      settingsState.settings = { welcomeStyle: "rich" }
+      try {
+        render(<ChatPane {...makeProps()} />)
+        const props = EmptyChatState.mock.calls.at(-1)?.[0]
+        expect(props?.statsSlot).toBeTruthy()
+        expect(props?.statsSlot?.props?.compact).toBeFalsy()
+      } finally {
+        settingsState.settings = null
+        storeState.messages = saved
+      }
+    })
+
     it("omits the usage dashboard on surfaces that replace the welcome copy", () => {
       const saved = storeState.messages
       storeState.messages = []

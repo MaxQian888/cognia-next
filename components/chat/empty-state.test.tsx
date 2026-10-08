@@ -16,9 +16,10 @@ import {
 // locale-aware relative-time formatter used by the "Continue" group.
 const mockRelativeTime = jest.fn((value: number | Date) => `rel:${Number(value)}`)
 const MOCK_NOW = new Date("2026-05-25T00:00:00Z")
+const mockDateTime = jest.fn((value: number | Date) => `date:${Number(value)}`)
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
-  useFormatter: () => ({ relativeTime: mockRelativeTime }),
+  useFormatter: () => ({ relativeTime: mockRelativeTime, dateTime: mockDateTime }),
   // Provide a stable render-time "now" so relativeTime gets an explicit
   // anchor (mirrors the component's useNow() usage).
   useNow: () => MOCK_NOW,
@@ -98,6 +99,21 @@ describe("<EmptyChatState />", () => {
     const hero = screen.getByTestId("welcome-hero")
     expect(hero.className).toContain("items-center")
     expect(hero.className).not.toMatch(/\bgrid\b/)
+  })
+
+  it("states today's date under the rich greeting", () => {
+    render(<EmptyChatState {...baseProps()} />)
+    expect(screen.getByTestId("welcome-date")).toHaveTextContent(`date:${MOCK_NOW.getTime()}`)
+    expect(mockDateTime).toHaveBeenCalledWith(MOCK_NOW, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    })
+  })
+
+  it("leaves the date out of the minimal greeting", () => {
+    render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
+    expect(screen.queryByTestId("welcome-date")).not.toBeInTheDocument()
   })
 
   it("drops the ambient bloom in the minimal style", () => {
@@ -281,6 +297,7 @@ describe("<EmptyChatState />", () => {
     render(
       <EmptyChatState
         {...baseProps()}
+        welcomeStyle="minimal"
         recentSessions={recentSessions}
         onResumeSession={onResumeSession}
       />
@@ -299,6 +316,7 @@ describe("<EmptyChatState />", () => {
     render(
       <EmptyChatState
         {...baseProps()}
+        welcomeStyle="minimal"
         recentSessions={recentSessions}
         onResumeSession={jest.fn()}
       />
@@ -306,6 +324,48 @@ describe("<EmptyChatState />", () => {
     expect(screen.getByRole("button", { name: /Session 0/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Session 2/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Session 3/ })).not.toBeInTheDocument()
+  })
+
+  it("gives recents a section with timestamps in the rich style", async () => {
+    const onResumeSession = jest.fn()
+    const user = userEvent.setup()
+    const recentSessions: RecentSessionEntry[] = Array.from({ length: 6 }, (_, i) => ({
+      id: `s${i}`,
+      title: `Session ${i}`,
+      updatedAt: 1000 + i,
+    }))
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        recentSessions={recentSessions}
+        onResumeSession={onResumeSession}
+      />
+    )
+    const recents = screen.getByTestId("welcome-recents")
+    expect(recents).toHaveAttribute("data-style", "rich")
+    // A section heading rather than the inline "Continue:" label.
+    expect(screen.getByRole("heading", { level: 3, name: "sections.continue" })).toBeInTheDocument()
+    expect(screen.queryByText("sections.continue:")).not.toBeInTheDocument()
+    // Four rows (MAX_RECENT), each with its relative time.
+    expect(screen.getByRole("button", { name: "Session 3" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Session 4" })).not.toBeInTheDocument()
+    expect(screen.getByText("rel:1000")).toBeInTheDocument()
+    expect(mockRelativeTime).toHaveBeenCalledWith(1003, MOCK_NOW)
+    await user.click(screen.getByRole("button", { name: "Session 1" }))
+    expect(onResumeSession).toHaveBeenCalledWith("s1")
+  })
+
+  it("keeps the minimal recent line free of timestamps", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        welcomeStyle="minimal"
+        recentSessions={[{ id: "s1", title: "X", updatedAt: 42 }]}
+        onResumeSession={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("welcome-recents")).toHaveAttribute("data-style", "minimal")
+    expect(mockRelativeTime).not.toHaveBeenCalled()
   })
 
   it("hides the continue line when the recent list is empty", () => {

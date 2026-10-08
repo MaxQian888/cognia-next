@@ -727,7 +727,15 @@ export function ChatPane({
   // Usage dashboard — only on the generic chat welcome. Surfaces that replace
   // the welcome copy entirely (the workflow-editor chat tab passes
   // `emptyState`) get their own framing and would read as off-topic with it.
-  const statsSlot = emptyState ? undefined : <WelcomeStats compact={isMobileShell} />
+  // On desktop it is part of what "rich" means: "minimal" is the bare
+  // launcher, and a dashboard under it made the two styles differ by little
+  // more than font size. The phone keeps its compact, self-hiding copy — it is
+  // forced minimal, so the style cannot be what decides there.
+  const statsSlot = emptyState ? undefined : isMobileShell ? (
+    <WelcomeStats compact />
+  ) : welcomeStyle === "rich" ? (
+    <WelcomeStats />
+  ) : undefined
 
   if (runtimeNotice && (!activeSession || !hasHistory)) {
     return (
