@@ -6,6 +6,7 @@ import type {
   ExternalAgentContent,
   ExternalAgentMessage,
 } from "@cognia/agent-contracts/external-agent"
+import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
@@ -81,10 +82,14 @@ export abstract class OmpOperationAdapter extends BaseProtocolAdapter {
     const [state, catalog] = await Promise.all([client.getState(), client.getAvailableModels()])
     return {
       currentModelId: state.model ? `${state.model.provider}/${state.model.id}` : "",
-      availableModels: catalog.models.map((model) => ({
-        modelId: `${model.provider}/${model.id}`,
-        name: model.name || model.id,
-      })),
+      availableModels: catalog.models.map((model) => {
+        const capabilities = catalogModelCapabilities(model)
+        return {
+          modelId: `${model.provider}/${model.id}`,
+          name: model.name || model.id,
+          ...(capabilities ? { capabilities } : {}),
+        }
+      }),
     }
   }
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {

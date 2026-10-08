@@ -1355,6 +1355,42 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
     await expect(a.updateSessionTitle("s1", secret)).rejects.toThrow(/PII/)
   })
 
+  it("reports each provider model's models.dev capabilities", async () => {
+    const client = makeFakeClient()
+    client.provider.list.mockResolvedValue({
+      data: {
+        all: [
+          {
+            id: "anthropic",
+            models: {
+              claude: {
+                id: "claude",
+                name: "Claude",
+                reasoning: true,
+                limit: { context: 200_000, output: 64_000 },
+                modalities: { input: ["text", "image", "pdf"], output: ["text"] },
+              },
+              plain: { id: "plain", name: "Plain" },
+            },
+          },
+        ],
+        default: { anthropic: "claude" },
+        connected: ["anthropic"],
+      },
+    })
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const adapter = new OpenCodeClientAdapter(deps())
+    await adapter.connect(buildConfig())
+    const session = await adapter.createSession()
+    const models = adapter.getSessionModels(session.id)?.availableModels
+    expect(models?.[0]).toMatchObject({
+      modelId: "anthropic/claude",
+      capabilities: { contextWindow: 200_000, reasoning: true, vision: true },
+    })
+    // Nothing reported, nothing claimed.
+    expect(models?.[1]).not.toHaveProperty("capabilities")
+  })
+
   it("compacts with the session model before an advertised command", async () => {
     const client = makeFakeClient()
     client.provider.list.mockResolvedValue({

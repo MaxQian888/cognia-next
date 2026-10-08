@@ -483,9 +483,54 @@ export interface AcpSessionModelState {
     modelId: string
     name: string
     description?: string
+    /** What the agent reported about the model, when its catalog says (Cognia extension). */
+    capabilities?: ExternalAgentModelCapabilities
   }>
   /** Currently selected model ID */
   currentModelId: string
+}
+
+/**
+ * What an agent's own model catalog says a model can do.
+ *
+ * A Cognia extension to the ACP model shape: ACP's `ModelInfo` carries only an
+ * id, a name and a description, but the pull-based adapters (Pi and OMP answer
+ * `get_available_models` with their full model records) already know the
+ * context window, whether the model reasons and whether it takes images. The
+ * picker renders the same glyphs it draws for the built-in catalog. Every field
+ * is optional, and an absent field means "not reported", never "no".
+ */
+export interface ExternalAgentModelCapabilities {
+  /** Context window in tokens. */
+  contextWindow?: number
+  /** The model reasons (has a thinking control). */
+  reasoning?: boolean
+  /** The model accepts image input. */
+  vision?: boolean
+}
+
+/**
+ * Project a catalog model record (`reasoning`, `input`, `contextWindow`, the
+ * shape Pi and OMP both use) onto {@link ExternalAgentModelCapabilities}.
+ *
+ * Defensive on purpose: the record comes off an agent's wire, so a missing or
+ * malformed field is dropped rather than coerced. Returns `undefined` when the
+ * record says nothing, so a caller can spread the result without writing an
+ * empty object onto every choice.
+ */
+export function catalogModelCapabilities(record: {
+  reasoning?: unknown
+  input?: unknown
+  contextWindow?: unknown
+}): ExternalAgentModelCapabilities | undefined {
+  const capabilities: ExternalAgentModelCapabilities = {}
+  const window = record.contextWindow
+  if (typeof window === "number" && Number.isFinite(window) && window > 0) {
+    capabilities.contextWindow = window
+  }
+  if (typeof record.reasoning === "boolean") capabilities.reasoning = record.reasoning
+  if (Array.isArray(record.input)) capabilities.vision = record.input.includes("image")
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined
 }
 
 /**
@@ -947,6 +992,13 @@ export interface AcpConfigOptionValue {
   name: string
   /** Optional description of what this value does */
   description?: string
+  /**
+   * A model value's catalog capabilities (Cognia extension). Carried so a
+   * model surface folded back into a `model` select option by
+   * `reportableConfigOptions` (a paired Host reporting its agent's models)
+   * keeps them on the receiving side.
+   */
+  capabilities?: ExternalAgentModelCapabilities
 }
 
 /** A named group of select values. */

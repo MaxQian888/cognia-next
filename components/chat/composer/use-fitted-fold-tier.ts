@@ -21,7 +21,7 @@ export interface FittedToolbar {
 
 /**
  * The fold ladder's second opinion: the width thresholds propose a tier, the
- * rendered row confirms it.
+ * rendered row confirms it — in BOTH directions.
  *
  * `TOOLBAR_FOLD_PX` is a guess about how wide the roster is, made before any
  * of it renders — and the roster is not a fixed size. The web shell adds a
@@ -31,18 +31,30 @@ export interface FittedToolbar {
  * ladder exists to prevent: "Standard" shaved to "S…", "Cognia Agent" to
  * "Cog…", the thinking level to "A…".
  *
+ * The guess is just as wrong the other way. The thresholds were calibrated on
+ * the built-in runtime's full roster (mode, preset, fusion, effort); an
+ * external agent's lane carries none of the mode/preset/fusion chips, so a
+ * ~480px row folded the runtime chip to a bare glyph beside a third of the row
+ * standing empty.
+ *
  * So after every commit this hook asks the row whether any label is being
- * squeezed; if one is, it steps one rung further down and asks again. The
- * steps run in a layout effect, so the intermediate rungs never paint — the
- * user only ever sees the tier that fits.
+ * squeezed; if one is, it steps one rung further down and asks again. If none
+ * is, it tries the rung ABOVE, once: a roomier rung that then squeezes is
+ * stepped back from and the row settles there. The steps run in a layout
+ * effect, so the intermediate rungs never paint — the user only ever sees the
+ * tier that fits.
  *
  * The extra rungs are keyed by width AND a content signature. A wider pane or
  * a different roster (another session, model or runtime) starts again from the
  * threshold tier, so a row never stays folded because of what it used to hold.
  * Content that shrinks without changing the signature (a key being added, so
- * the credential badge leaves) keeps its rungs until the next resize — the row
- * errs towards folding, which is the invariant: a control may move into "⋯",
- * but a label is never shaved.
+ * the credential badge leaves) keeps its rungs once the row has settled, until
+ * the next resize — the row errs towards folding, which is the invariant: a
+ * control may move into "⋯", but a label is never shaved.
+ *
+ * A row with no layout (`clientWidth` 0, as under jsdom) is never probed
+ * upwards: with nothing measured, "nothing is squeezed" says nothing about the
+ * rung above.
  */
 export function useFittedToolbar(
   rootRef: RefObject<HTMLElement | null>,
@@ -50,13 +62,18 @@ export function useFittedToolbar(
   signature: string
 ): FittedToolbar {
   const base = resolveToolbarFoldTier(width)
-  const [bump, setBump] = useState<{ width: number; signature: string; extra: number }>({
-    width: 0,
-    signature: "",
-    extra: 0,
-  })
-  const extra = bump.width === width && bump.signature === signature ? bump.extra : 0
-  const steps = base + extra
+  const [bump, setBump] = useState<{
+    width: number
+    signature: string
+    /** Rungs away from the threshold tier: positive folds more, negative less. */
+    extra: number
+    /** The rung above has been shown to squeeze; stop probing upwards. */
+    settled: boolean
+  }>({ width: 0, signature: "", extra: 0, settled: false })
+  const keyed = bump.width === width && bump.signature === signature
+  const extra = keyed ? bump.extra : 0
+  const settled = keyed && bump.settled
+  const steps = Math.max(0, base + extra)
   const tier = Math.min(LAST_TIER, steps) as ToolbarFoldTier
   const exhausted = steps > LAST_TIER
 
@@ -69,7 +86,15 @@ export function useFittedToolbar(
     // threshold resolver; once exhausted the caller has changed arrangement
     // and there is no further rung to step to.
     if (!root || width <= 0 || exhausted) return
-    if (isToolbarSqueezed(root)) setBump({ width, signature, extra: extra + 1 })
+    if (isToolbarSqueezed(root)) {
+      // Whatever rung this was, the one above it does not fit: never probe
+      // back up to it for this width and roster.
+      setBump({ width, signature, extra: extra + 1, settled: true })
+      return
+    }
+    if (!settled && steps > 0 && root.clientWidth > 0) {
+      setBump({ width, signature, extra: extra - 1, settled: false })
+    }
   })
 
   return { tier, exhausted }

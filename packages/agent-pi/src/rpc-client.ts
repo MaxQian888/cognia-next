@@ -53,6 +53,7 @@ import type {
   ExternalAgentSession,
   ExternalAgentTokenUsage,
 } from "@cognia/agent-contracts/external-agent"
+import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 
 import {
   createExternalAgentUiState,
@@ -2202,15 +2203,12 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const [state, models] = await Promise.all([
       record.peer.sendCommand<{ model?: { id?: string; provider?: string } }>("get_state"),
       record.peer.sendCommand<{
-        models?: Array<{ id?: string; provider?: string; name?: string }>
+        models?: PiCatalogModel[]
       }>("get_available_models"),
     ])
     return {
       currentModelId: state.model ? qualifyModel(state.model) : "",
-      availableModels: (models.models ?? []).map((model) => ({
-        modelId: qualifyModel(model),
-        name: model.name ?? qualifyModel(model),
-      })),
+      availableModels: (models.models ?? []).map(piCatalogChoice),
     }
   }
 
@@ -2279,7 +2277,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       }>("get_state"),
       record.peer.sendCommand<{ levels?: string[] }>("get_available_thinking_levels"),
       record.peer.sendCommand<{
-        models?: Array<{ id?: string; provider?: string; name?: string }>
+        models?: PiCatalogModel[]
       }>("get_available_models"),
     ])
 
@@ -2290,10 +2288,10 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         category: "model",
         type: "select",
         currentValue: state.model ? qualifyModel(state.model) : "",
-        options: (models.models ?? []).map((model) => ({
-          value: qualifyModel(model),
-          name: model.name ?? qualifyModel(model),
-        })),
+        options: (models.models ?? []).map((model) => {
+          const { modelId, name, capabilities } = piCatalogChoice(model)
+          return { value: modelId, name, ...(capabilities ? { capabilities } : {}) }
+        }),
       },
       {
         id: "thinking",
@@ -2605,7 +2603,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         framing: "raw",
       })
       const reply = await peer.sendCommand<{
-        models?: Array<{ id?: string; provider?: string; name?: string }>
+        models?: PiCatalogModel[]
       }>("get_available_models", {}, PI_MODEL_DISCOVERY_TIMEOUT_MS)
       const models = reply.models ?? []
       if (models.length === 0) return null
@@ -2614,10 +2612,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         // conversation's stored choice, which is what the agent will be asked
         // to run. See `catalogModelSurface`.
         currentModelId: "",
-        availableModels: models.map((model) => ({
-          modelId: qualifyModel(model),
-          name: model.name ?? qualifyModel(model),
-        })),
+        availableModels: models.map(piCatalogChoice),
       }
     } catch {
       return null
@@ -2982,6 +2977,29 @@ export class PiResourceLimitError extends Error {
 
 function qualifyModel(model: { id?: string; provider?: string }): string {
   return model.provider ? `${model.provider}/${model.id ?? ""}` : (model.id ?? "")
+}
+
+/**
+ * One record of Pi's `get_available_models` reply. Pi sends its whole `Model`
+ * object; these are the fields the picker reads.
+ */
+interface PiCatalogModel {
+  id?: string
+  provider?: string
+  name?: string
+  reasoning?: unknown
+  input?: unknown
+  contextWindow?: unknown
+}
+
+/** A catalog record as an ACP model choice, keeping what Pi says it can do. */
+function piCatalogChoice(model: PiCatalogModel): AcpSessionModelState["availableModels"][number] {
+  const capabilities = catalogModelCapabilities(model)
+  return {
+    modelId: qualifyModel(model),
+    name: model.name ?? qualifyModel(model),
+    ...(capabilities ? { capabilities } : {}),
+  }
 }
 
 function messageToPiPrompt(message: ExternalAgentMessage): {

@@ -67,6 +67,7 @@ import type {
   AcpAvailableCommand,
   AcpPlanEntry,
 } from "@cognia/agent-contracts/external-agent"
+import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 
 // ============================================================================
 // Logging helper
@@ -295,6 +296,10 @@ interface ProviderListData {
           input: number
           output: number
         }
+        /** models.dev limits; `context` is the context window in tokens. */
+        limit?: { context?: number; output?: number }
+        /** models.dev modalities; `input` names `image` for a vision model. */
+        modalities?: { input?: string[]; output?: string[] }
       }
     >
   }>
@@ -2964,10 +2969,16 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       for (const provider of this.providerInfo.all) {
         if (provider.models) {
           for (const [modelKey, model] of Object.entries(provider.models)) {
+            const capabilities = catalogModelCapabilities({
+              reasoning: model.reasoning,
+              input: model.modalities?.input,
+              contextWindow: model.limit?.context,
+            })
             modelValues.push({
               value: `${provider.id}/${model.id ?? modelKey}`,
               name: model.name ?? model.id ?? modelKey,
               description: `Provider: ${provider.name ?? provider.id}`,
+              ...(capabilities ? { capabilities } : {}),
             })
           }
         }
@@ -2991,6 +3002,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
             modelId: v.value,
             name: v.name,
             description: v.description,
+            ...(v.capabilities ? { capabilities: v.capabilities } : {}),
           })),
           currentModelId: defaultModel
             ? `${defaultModel.providerID}/${defaultModel.modelID}`

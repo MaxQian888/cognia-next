@@ -1538,7 +1538,11 @@ export class ExternalAgentManager {
           status: "ok",
           data: {
             models: {
-              choices: models.map((model) => ({ modelId: model.id, name: model.name ?? model.id })),
+              choices: models.map((model) => ({
+                modelId: model.id,
+                name: model.name ?? model.id,
+                ...(model.capabilities ? { capabilities: model.capabilities } : {}),
+              })),
               currentModelId: null,
               write: { kind: "session-seed" },
             },

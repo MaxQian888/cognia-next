@@ -55,6 +55,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
+  ExternalAgentModelCapabilities,
   ExternalAgentResult,
   ExternalAgentSession,
   ExternalAgentSessionExtensionSupport,
@@ -423,6 +424,8 @@ export interface AcpIntrospectionCapability {
 export interface CatalogModel {
   id: string
   name?: string
+  /** What the runtime's catalog says the model can do, when it says. */
+  capabilities?: ExternalAgentModelCapabilities
 }
 
 /**

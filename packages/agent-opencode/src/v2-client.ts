@@ -27,6 +27,7 @@ import type {
   ExternalAgentMessage,
   ExternalAgentSession,
 } from "@cognia/agent-contracts/external-agent"
+import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 import { validateAcpElicitationResponse } from "@cognia/agent-runtime-kit/elicitation"
 import { OpenCodeV2EventMapper, mapOpenCodeV2Messages } from "./v2-events"
 import {
@@ -1375,10 +1376,19 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     const model = this.models.get(sessionId)
     return {
       currentModelId: model ? `${model.providerID}/${model.id}` : "",
-      availableModels: available.map((model) => ({
-        modelId: `${model.providerID}/${model.id}`,
-        name: model.name,
-      })),
+      availableModels: available.map((model) => {
+        // v2 `ModelInfo` has no reasoning flag; the input modalities and the
+        // context limit are what it reports.
+        const capabilities = catalogModelCapabilities({
+          input: model.capabilities?.input,
+          contextWindow: model.limit?.context,
+        })
+        return {
+          modelId: `${model.providerID}/${model.id}`,
+          name: model.name,
+          ...(capabilities ? { capabilities } : {}),
+        }
+      }),
     }
   }
 

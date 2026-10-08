@@ -48,6 +48,30 @@ describe("OMP shared session operations", () => {
     await adapter.setSessionModel("s", "p/a/b")
     expect(request).toHaveBeenLastCalledWith("set_model", { provider: "p", modelId: "a/b" })
   })
+  it("keeps the catalog's capabilities on each model", async () => {
+    const { adapter } = setup({
+      get_state: {},
+      get_available_models: {
+        models: [
+          {
+            provider: "p",
+            id: "m",
+            name: "M",
+            reasoning: true,
+            input: ["text", "image"],
+            contextWindow: 200_000,
+          },
+        ],
+      },
+    })
+    expect((await adapter.getSessionModels("s")).availableModels).toEqual([
+      {
+        modelId: "p/m",
+        name: "M",
+        capabilities: { contextWindow: 200_000, reasoning: true, vision: true },
+      },
+    ])
+  })
   it("queues images and clears duplicate snapshot messages only after confirmed removal", async () => {
     let pending = ["same", "same"]
     const { adapter, request } = setup({

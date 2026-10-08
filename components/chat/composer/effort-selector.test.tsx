@@ -14,9 +14,11 @@ const mockedUpdateSession = updateSession as unknown as jest.Mock
 
 // Settings drive both the model/provider fallbacks and the presentation mode.
 let mockSettings: Partial<AppSettings> | null = null
+const mockSave = jest.fn(async (_patch: Partial<AppSettings>) => undefined)
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: <T,>(selector: (s: { settings: Partial<AppSettings> | null }) => T) =>
-    selector({ settings: mockSettings }),
+  useSettingsStore: <T,>(
+    selector: (s: { settings: Partial<AppSettings> | null; save: typeof mockSave }) => T
+  ) => selector({ settings: mockSettings, save: mockSave }),
 }))
 
 // The offered ladder now depends on WHICH RAIL runs the turn (`./effort-surface`),
@@ -79,6 +81,7 @@ function stubTrackRect(width = 100, left = 0): HTMLElement {
 
 beforeEach(() => {
   mockedUpdateSession.mockClear()
+  mockSave.mockClear()
   mockedUpdateSession.mockImplementation(async () => undefined)
   mockSettings = null
   mockWidth = 0
@@ -86,9 +89,15 @@ beforeEach(() => {
 })
 
 describe("self-gating", () => {
-  it("renders nothing when there is no session", () => {
-    const { container } = renderSelector(null)
-    expect(container).toBeEmptyDOMElement()
+  it("edits the app default tier when there is no session yet", () => {
+    mockSettings = { defaultThinkingLevel: "low" }
+    renderSelector(null, { mode: "list" })
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Low")
+    fireEvent.click(screen.getByRole("radio", { name: /^High/ }))
+    // No row to write to: the pick becomes the default `createSession` stamps.
+    expect(mockSave).toHaveBeenCalledWith({ defaultThinkingLevel: "high" })
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
   })
 
   it("renders nothing when the active model does not support effort", () => {

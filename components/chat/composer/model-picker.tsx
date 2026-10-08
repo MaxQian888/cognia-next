@@ -192,7 +192,15 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
         providerName: agentLabel,
         models:
           choices.length > 0
-            ? choices.map((choice) => ({ id: choice.modelId, name: choice.name }))
+            ? choices.map((choice) => ({
+                id: choice.modelId,
+                name: choice.name,
+                // The agent's own catalog facts, drawn with the same glyphs
+                // the built-in rows wear.
+                contextLength: choice.capabilities?.contextWindow,
+                supportsVision: choice.capabilities?.vision,
+                supportsReasoning: choice.capabilities?.reasoning,
+              }))
             : [{ id: AGENT_DEFAULT_MODEL_ID, name: t("agentDefaultModelRow"), hideId: true }],
       },
     ]

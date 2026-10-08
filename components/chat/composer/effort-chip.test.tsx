@@ -13,9 +13,11 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 let mockSettings: Partial<AppSettings> | null = null
+const mockSave = jest.fn(async () => undefined)
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: <T,>(selector: (s: { settings: Partial<AppSettings> | null }) => T) =>
-    selector({ settings: mockSettings }),
+  useSettingsStore: <T,>(
+    selector: (s: { settings: Partial<AppSettings> | null; save: typeof mockSave }) => T
+  ) => selector({ settings: mockSettings, save: mockSave }),
 }))
 
 let mockRuntime: "claude-sdk" | "external" = "claude-sdk"
@@ -59,9 +61,24 @@ beforeEach(() => {
 })
 
 describe("self-gating", () => {
-  it("renders nothing without a session", () => {
-    const { container } = renderChip(<EffortChip session={null} />)
-    expect(container).toBeEmptyDOMElement()
+  // The welcome composer has no conversation yet: the chip shows the app
+  // default tier, which `createSession` stamps onto the first send's row.
+  it("shows the app default tier before a conversation exists", () => {
+    mockSettings = { defaultThinkingLevel: "high" }
+    renderChip(<EffortChip session={null} />)
+    expect(screen.getByTestId("effort-chip")).toHaveAttribute("data-level", "high")
+  })
+
+  it("reads Auto before a conversation exists when no default tier is set", () => {
+    renderChip(<EffortChip session={null} />)
+    expect(screen.getByTestId("effort-chip")).toHaveAttribute("data-level", "off")
+  })
+
+  it("shows the generic ladder on an external lane before a conversation exists", () => {
+    mockRuntime = "external"
+    mockSettings = { defaultThinkingLevel: "medium" }
+    renderChip(<EffortChip session={null} />)
+    expect(screen.getByTestId("effort-chip")).toHaveAttribute("data-level", "medium")
   })
 
   it("renders nothing on a model with no depth ladder", () => {

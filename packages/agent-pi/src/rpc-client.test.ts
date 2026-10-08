@@ -784,6 +784,49 @@ describe("session-less model discovery", () => {
     await adapter.disconnect()
   })
 
+  it("keeps what Pi's model records say the model can do", async () => {
+    // Pi sends its whole `Model` object. The context window, the reasoning
+    // flag and the image modality are what the picker draws as glyphs.
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const { reading } = await startDiscovery(host, adapter)
+    replyTo(host, "get_available_models", {
+      models: [
+        {
+          id: "deepseek-v4-flash",
+          provider: "deepseek",
+          name: "DeepSeek V4.1 Flash",
+          reasoning: true,
+          input: ["text"],
+          contextWindow: 1_000_000,
+          maxTokens: 64_000,
+        },
+        {
+          id: "gpt-5.5",
+          provider: "cpa",
+          name: "gpt-5.5",
+          reasoning: true,
+          input: ["text", "image"],
+          contextWindow: 400_000,
+        },
+      ],
+    })
+    const state = await reading
+    expect(state?.availableModels).toEqual([
+      {
+        modelId: "deepseek/deepseek-v4-flash",
+        name: "DeepSeek V4.1 Flash",
+        capabilities: { contextWindow: 1_000_000, reasoning: true, vision: false },
+      },
+      {
+        modelId: "cpa/gpt-5.5",
+        name: "gpt-5.5",
+        capabilities: { contextWindow: 400_000, reasoning: true, vision: true },
+      },
+    ])
+    await adapter.disconnect()
+  })
+
   it("answers null when the probe fails, and still kills the process", async () => {
     // `null` is "asked and could not say", which the caller renders as absent
     // rather than as "this agent has no models". The kill is what stops a

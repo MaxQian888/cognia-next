@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { NextIntlClientProvider } from "next-intl"
 import { ModelPicker, __testing__ } from "./model-picker"
@@ -60,7 +60,11 @@ const mockAgentModels: {
   agentName: string | null
   externalSessionId: string | null
   surface: {
-    choices: Array<{ modelId: string; name: string }>
+    choices: Array<{
+      modelId: string
+      name: string
+      capabilities?: { contextWindow?: number; reasoning?: boolean; vision?: boolean }
+    }>
     currentModelId: string | null
     write: { kind: string; optionId?: string }
   } | null
@@ -1151,6 +1155,29 @@ describe("an external agent's own models", () => {
     const [running, other] = commandItems()
     expect(running.querySelector("svg.opacity-100")).not.toBeNull()
     expect(other.querySelector("svg.opacity-100")).toBeNull()
+  })
+
+  it("draws the agent's reported capabilities with the built-in rows' glyphs", () => {
+    mockAgentModels.surface = {
+      ...mockAgentModels.surface!,
+      choices: [
+        {
+          modelId: "anthropic/agent-sonnet",
+          name: "Agent Sonnet",
+          capabilities: { contextWindow: 200_000, reasoning: true, vision: true },
+        },
+        { modelId: "openai/agent-gpt", name: "Agent GPT" },
+      ],
+    }
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const [reported, silent] = commandItems()
+    expect(within(reported).getByTitle("Context window")).toHaveTextContent("200K")
+    expect(within(reported).getByLabelText("Reasoning")).toBeInTheDocument()
+    expect(within(reported).getByLabelText("Vision")).toBeInTheDocument()
+    // A model the agent said nothing about gets no metadata, never a "no".
+    expect(within(silent).queryByTitle("Context window")).toBeNull()
+    expect(within(silent).queryByLabelText("Reasoning")).toBeNull()
   })
 
   it("prefers the pending pick over a seeded surface's current model, and says when it applies", () => {

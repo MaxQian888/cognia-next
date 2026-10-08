@@ -18,6 +18,12 @@
 // Self-gates to nothing on a surface with no depth control (see
 // `./effort-surface`), so a composer where it would be a no-op pays nothing for
 // it — including the toolbar's chrome budget, which counts mounted controls.
+//
+// Before a conversation exists (the welcome composer mounts with no session)
+// it shows and edits the app default tier, `AppSettings.defaultThinkingLevel`,
+// which `createSession` stamps onto the row the first send creates: the same
+// move the model chip makes with the default model. Hiding it there made the
+// thinking level unpickable for a first message.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -27,6 +33,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
+import { useSettingsStore } from "@/stores/settings"
 import { COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 import {
   clampThinkingLevel,
@@ -54,15 +61,18 @@ interface EffortChipProps {
 export function EffortChip({ session, disabled, className, glyph }: EffortChipProps) {
   const t = useTranslations("chat.composer.effort")
   const surface = useEffortSurface(session)
+  const defaultLevel = useSettingsStore((s) => s.settings?.defaultThinkingLevel)
   const [open, setOpen] = useState(false)
 
-  if (!session?.id) return null
   if (surface.levels.length === 0) return null
 
   // The same projection the card shows: a tier the active surface can't honour
   // displays as the deepest one it can, so the chip never advertises depth the
   // turn won't carry.
-  const current: ThinkingLevel = clampThinkingLevel(resolveThinkingLevel(session), surface.levels)
+  const stored: ThinkingLevel = session?.id
+    ? resolveThinkingLevel(session)
+    : (defaultLevel ?? "off")
+  const current: ThinkingLevel = clampThinkingLevel(stored, surface.levels)
   const ultra = isUltracodeLevel(current)
 
   return (

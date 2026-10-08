@@ -619,6 +619,34 @@ describe("reportableConfigOptions", () => {
     expect(resolveExternalAgentThinking({ configOptions: reported })).toEqual(thinking)
   })
 
+  it("carries model capabilities through the report", () => {
+    const models = resolveExternalAgentModels({
+      sessionModels: {
+        currentModelId: "pi/one",
+        availableModels: [
+          {
+            modelId: "pi/one",
+            name: "One",
+            capabilities: { contextWindow: 128_000, reasoning: true, vision: false },
+          },
+          { modelId: "pi/two", name: "Two" },
+        ],
+      },
+    })
+    expect(models.choices[0].capabilities).toEqual({
+      contextWindow: 128_000,
+      reasoning: true,
+      vision: false,
+    })
+    expect(models.choices[1]).not.toHaveProperty("capabilities")
+    const reported = reportableConfigOptions(undefined, {
+      models,
+      thinking: { levels: [], currentLevel: null, write: { kind: "none" } },
+    })
+    // A paired Host's report keeps them, so the client's picker draws them too.
+    expect(resolveExternalAgentModels({ configOptions: reported }).choices).toEqual(models.choices)
+  })
+
   it("reports nothing for an agent with no model or thinking concept", () => {
     expect(
       reportableConfigOptions(undefined, {

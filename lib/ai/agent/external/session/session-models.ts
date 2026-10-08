@@ -33,6 +33,7 @@ import type {
   AcpConfigOption,
   AcpSessionModelState,
   ExternalAgentCogniaModelBinding,
+  ExternalAgentModelCapabilities,
 } from "@/types/agent/external-agent"
 import { parseGatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
 import { findModelConfigOption, flattenValues } from "@cognia/agent-runtime-kit/config-options"
@@ -471,6 +472,8 @@ export interface ExternalAgentModelChoice {
   modelId: string
   name: string
   description?: string
+  /** What the agent's catalog says the model can do, when it says. */
+  capabilities?: ExternalAgentModelCapabilities
 }
 
 /** What an agent offers, plus how to write a choice back to it. */
@@ -520,6 +523,7 @@ export function resolveExternalAgentModels(input: {
           modelId: value.value,
           name: value.name || value.value,
           ...(value.description ? { description: value.description } : {}),
+          ...(value.capabilities ? { capabilities: value.capabilities } : {}),
         })),
         currentModelId: option.currentValue || null,
         write: { kind: "config-option", optionId: option.id },
@@ -534,6 +538,7 @@ export function resolveExternalAgentModels(input: {
         modelId: model.modelId,
         name: model.name || model.modelId,
         ...(model.description ? { description: model.description } : {}),
+        ...(model.capabilities ? { capabilities: model.capabilities } : {}),
       })),
       currentModelId: input.sessionModels?.currentModelId || null,
       write: { kind: "session-model" },
@@ -594,6 +599,7 @@ export function reportableConfigOptions(
         value: choice.modelId,
         name: choice.name,
         ...(choice.description ? { description: choice.description } : {}),
+        ...(choice.capabilities ? { capabilities: choice.capabilities } : {}),
       })),
     })
   }

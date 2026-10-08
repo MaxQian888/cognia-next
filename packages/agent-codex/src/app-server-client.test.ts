@@ -2598,6 +2598,28 @@ describe("CodexAppServerAdapter", () => {
       await adapter.disconnect()
     })
 
+    it("carries reasoning and image input from the catalog onto each model", async () => {
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.5",
+            displayName: "GPT-5.5",
+            supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+            inputModalities: ["text", "image"],
+          },
+          { id: "legacy", displayName: "Legacy", supportedReasoningEfforts: [] },
+        ],
+        nextCursor: null,
+      })
+      const adapter = await connectedAdapter()
+      expect(await adapter.listModels()).toEqual([
+        { id: "gpt-5.5", name: "GPT-5.5", capabilities: { reasoning: true, vision: true } },
+        // No efforts and no modalities sent: nothing is claimed either way.
+        { id: "legacy", name: "Legacy" },
+      ])
+      await adapter.disconnect()
+    })
+
     it("rejects invalid sandbox options without changing session metadata", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()

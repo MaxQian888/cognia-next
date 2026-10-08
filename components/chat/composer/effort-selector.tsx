@@ -25,8 +25,11 @@
 // it is drawn. Each adapts again to its own measured width (see
 // `./effort-selector-view`), so neither depends on a viewport breakpoint.
 //
-// Self-gates to nothing when there is no session or the active surface can't
-// use effort, so it never clutters a composer where it would be a no-op. Which
+// With no session yet (the welcome composer) it edits the app default tier,
+// `AppSettings.defaultThinkingLevel`, which `createSession` stamps onto the
+// conversation the first send creates. Self-gates to nothing when the active
+// surface can't use effort, so it never clutters a composer where it would be
+// a no-op. Which
 // tiers that surface offers — including the external-agent rail, whose model
 // the renderer never sees — is `./effort-surface`'s decision, not this file's.
 
@@ -80,6 +83,8 @@ export function EffortSelector({
 }: EffortSelectorProps) {
   const t = useTranslations("chat.composer.effort")
   const preferredMode = useSettingsStore((s) => s.settings?.composerBehavior?.effortSelectorMode)
+  const defaultLevel = useSettingsStore((s) => s.settings?.defaultThinkingLevel)
+  const saveSettings = useSettingsStore((s) => s.save)
   const surface = useEffortSurface(session)
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -103,14 +108,16 @@ export function EffortSelector({
   const [dragging, setDragging] = useState(false)
 
   const levels = surface.levels
-  if (!session?.id) return null
   if (levels.length === 0) return null
 
-  const sessionId = session.id
+  const sessionId = session?.id
+  const stored: ThinkingLevel = session?.id
+    ? resolveThinkingLevel(session)
+    : (defaultLevel ?? "off")
   // Display the tier the turn will REALLY carry: a level the active surface
   // does not offer folds to the deepest one it does. The session keeps the
   // user's actual choice, which reapplies once a capable model is active again.
-  const current = clampThinkingLevel(optimistic ?? resolveThinkingLevel(session), levels)
+  const current = clampThinkingLevel(optimistic ?? stored, levels)
   const currentIndex = current === "off" ? -1 : levels.indexOf(current)
   const lastIndex = levels.length - 1
   const layout = effortSelectorLayout(width)
@@ -131,7 +138,12 @@ export function EffortSelector({
     preview(level)
     // Revert the optimistic overlay if the write doesn't land, so the control
     // never shows a tier the session didn't actually persist.
-    void updateSession(sessionId, thinkingLevelPatch(level)).catch(() => setOptimistic(null))
+    const write = sessionId
+      ? updateSession(sessionId, thinkingLevelPatch(level))
+      : // No conversation yet: the pick becomes the default the first send's
+        // `createSession` stamps onto the new row.
+        saveSettings({ defaultThinkingLevel: level })
+    void write.catch(() => setOptimistic(null))
   }
 
   // The reference framing: a quiet "Effort" caption with the live tier name as

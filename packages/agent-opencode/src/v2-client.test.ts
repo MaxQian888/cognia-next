@@ -662,6 +662,31 @@ describe("current OpenCode V2 adapter", () => {
     await expect(adapter.closeSession("s2")).rejects.toThrow("interrupt transport down")
   })
 
+  it("keeps the catalog's input modalities and context limit on each model", async () => {
+    client.model.list.mockResolvedValue({
+      data: [
+        {
+          id: "model",
+          providerID: "vendor",
+          name: "Model",
+          enabled: true,
+          variants: [],
+          capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+          limit: { context: 256_000, output: 32_000 },
+        },
+      ],
+    })
+    await adapter.connect(config)
+    await adapter.createSession()
+    expect(adapter.getSessionModels("s1")?.availableModels).toEqual([
+      {
+        modelId: "vendor/model",
+        name: "Model",
+        capabilities: { contextWindow: 256_000, vision: true },
+      },
+    ])
+  })
+
   it("changes model variants through switchModel and rejects invalid config writes", async () => {
     await adapter.connect(config)
     await adapter.createSession()

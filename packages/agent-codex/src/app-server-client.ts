@@ -72,6 +72,7 @@ import type {
   ExternalAgentSessionExtensionSupport,
   ExternalAgentExtensionSupportStatus,
 } from "@cognia/agent-contracts/external-agent"
+import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 
 /** Active health-probe timeout — mirrors the ACP adapter's 5s ping. */
 const HEALTH_PROBE_TIMEOUT_MS = 5000
@@ -248,6 +249,8 @@ export interface CodexModelInfo {
   defaultReasoningEffort?: string
   supportedReasoningEfforts: Array<{ reasoningEffort: string; description?: string }>
   supportsPersonality?: boolean
+  /** v2 `inputModalities` (`text` / `image` / `audio`), when the build sends it. */
+  inputModalities?: string[]
 }
 
 /** `account/read` result (v2 `Account` union, flattened for the status card). */
@@ -3529,7 +3532,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         }
       } while (cursor)
       this.modelCache = models
-      return this.modelCache.map((m) => ({ id: m.id, name: m.displayName }))
+      return this.modelCache.map((m) => {
+        const capabilities = codexModelCapabilities(m)
+        return { id: m.id, name: m.displayName, ...(capabilities ? { capabilities } : {}) }
+      })
     } catch (error) {
       this.log.warn("model/list failed", { error })
       return []
@@ -3547,11 +3553,15 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const selected = readString(session.metadata?.selectedModel)
     const current = selected ?? this.modelCache.find((m) => m.isDefault)?.id
     return {
-      availableModels: this.modelCache.map((m) => ({
-        modelId: m.id,
-        name: m.displayName ?? m.id,
-        description: m.description,
-      })),
+      availableModels: this.modelCache.map((m) => {
+        const capabilities = codexModelCapabilities(m)
+        return {
+          modelId: m.id,
+          name: m.displayName ?? m.id,
+          description: m.description,
+          ...(capabilities ? { capabilities } : {}),
+        }
+      }),
       currentModelId: current ?? this.modelCache[0].id,
     }
   }
@@ -4690,7 +4700,28 @@ function mapModelInfo(raw: Record<string, unknown>): CodexModelInfo {
     defaultReasoningEffort: readString(raw.defaultReasoningEffort),
     supportedReasoningEfforts: efforts,
     supportsPersonality: raw.supportsPersonality === true,
+    ...(Array.isArray(raw.inputModalities)
+      ? {
+          inputModalities: raw.inputModalities.filter(
+            (value): value is string => typeof value === "string"
+          ),
+        }
+      : {}),
   }
+}
+
+/**
+ * What a `model/list` entry says the model can do. Codex publishes no context
+ * window there. A model with reasoning efforts reasons; one with none is left
+ * unreported rather than claimed non-reasoning, and the image modality is only
+ * read when the build actually sent `inputModalities` (the schema's default
+ * would otherwise turn "not reported" into "takes images").
+ */
+function codexModelCapabilities(model: CodexModelInfo) {
+  return catalogModelCapabilities({
+    reasoning: model.supportedReasoningEfforts.length > 0 ? true : undefined,
+    input: model.inputModalities,
+  })
 }
 
 /**

@@ -102,9 +102,14 @@ describe("isToolbarSqueezed — glyph chips", () => {
 describe("useFittedToolbar", () => {
   it("is not exhausted while a rung still makes the row fit", () => {
     const root = row()
-    label(root, { scroll: 40, client: 40 })
-    const { result } = renderHook(() => useFittedToolbar({ current: root }, 350, "a"))
-    expect(result.current).toEqual({ tier: 3, exhausted: false })
+    const span = label(root, { scroll: 48, client: 11 })
+    const { result } = renderHook(() => {
+      const fitted = useFittedToolbar({ current: root }, 250, "a")
+      // Below the threshold tier 4 the row is squeezed; at it, it fits.
+      box(span, fitted.tier >= 4 ? { scroll: 48, client: 48 } : { scroll: 48, client: 11 })
+      return fitted
+    })
+    expect(result.current).toEqual({ tier: 4, exhausted: false })
   })
 
   it("reports exhaustion when the row is still squeezed at the last rung", () => {
@@ -129,6 +134,34 @@ describe("useFittedToolbar", () => {
 })
 
 describe("useFittedFoldTier", () => {
+  it("unfolds past the threshold tier while the roomier rung still fits", () => {
+    // A small roster (an external agent's lane) in a 480px row: the threshold
+    // proposes tier 2, but nothing squeezes until tier 0.
+    const root = row()
+    const span = label(root, { scroll: 40, client: 40 })
+    const { result } = renderHook(() => {
+      const tier = useFittedFoldTier({ current: root }, 480, "a")
+      box(span, tier >= 1 ? { scroll: 40, client: 40 } : { scroll: 48, client: 11 })
+      return tier
+    })
+    // Tier 0 squeezed, so the row steps back to tier 1 and settles there.
+    expect(result.current).toBe(1)
+  })
+
+  it("unfolds all the way when every rung fits", () => {
+    const root = row()
+    label(root, { scroll: 40, client: 40 })
+    const { result } = renderHook(() => useFittedFoldTier({ current: root }, 350, "a"))
+    expect(result.current).toBe(0)
+  })
+
+  it("does not probe upwards on a row without layout", () => {
+    const root = row()
+    box(root, { scroll: 0, client: 0 })
+    const { result } = renderHook(() => useFittedFoldTier({ current: root }, 350, "a"))
+    expect(result.current).toBe(3)
+  })
+
   it("keeps the threshold tier when nothing is squeezed", () => {
     const root = row()
     label(root, { scroll: 40, client: 40 })

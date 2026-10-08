@@ -543,6 +543,38 @@ describe("fetchSessionModelSurface (the async twin the sync capabilities could n
     expect(manager.getAgent(config.id)?.sessions.size).toBe(0)
   })
 
+  it("keeps a runtime-owned catalog's capabilities on each choice", async () => {
+    const manager = freshManager()
+    const config = buildBaseConfig()
+    await manager.addAgent(config)
+    Object.assign(currentMock, {
+      listCatalogModels: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "gpt-5.5", name: "GPT-5.5", capabilities: { reasoning: true, vision: true } },
+          { id: "legacy" },
+        ]),
+    })
+    const result = await manager.fetchAgentModelCatalog(config.id)
+    expect(result).toMatchObject({
+      status: "ok",
+      data: {
+        models: {
+          choices: [
+            {
+              modelId: "gpt-5.5",
+              name: "GPT-5.5",
+              capabilities: { reasoning: true, vision: true },
+            },
+            { modelId: "legacy", name: "legacy" },
+          ],
+        },
+      },
+    })
+    if (result.status !== "ok") throw new Error("expected a catalog")
+    expect(result.data.models.choices[1]).not.toHaveProperty("capabilities")
+  })
+
   it("cleans up discovery sessions when model discovery fails", async () => {
     const manager = freshManager()
     const config = buildBaseConfig()
