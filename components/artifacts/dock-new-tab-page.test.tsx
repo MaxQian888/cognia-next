@@ -55,6 +55,19 @@ jest.mock("@/components/browser/local-content/browser-local-content-picker", () 
     </button>
   ),
 }))
+jest.mock("@/components/browser/launch/browser-launch-configs", () => ({
+  BrowserLaunchConfigs: ({
+    sessionId,
+    onOpen,
+  }: {
+    sessionId: string | null
+    onOpen: (url: string) => void
+  }) => (
+    <button type="button" onClick={() => onOpen("http://localhost:3000/")}>
+      {`launch ${sessionId}`}
+    </button>
+  ),
+}))
 jest.mock("@/components/browser/browser-backend-switcher", () => ({
   LocalChromiumInstall: () => <div data-testid="chromium-install" />,
 }))
@@ -304,6 +317,17 @@ describe("DockNewTabPage content", () => {
     renderPage({ desktop: true })
     fireEvent.click(screen.getByRole("button", { name: "dev server" }))
     expect(lastBrowserRequest()).toBe("http://localhost:5173/")
+  })
+
+  it("offers the task's launch configurations on the desktop only", () => {
+    local(true)
+    const view = renderPage({ desktop: true })
+    fireEvent.click(screen.getByRole("button", { name: /^launch / }))
+    expect(lastBrowserRequest()).toBe("http://localhost:3000/")
+    view.unmount()
+
+    renderPage({ desktop: false })
+    expect(screen.queryByRole("button", { name: /^launch / })).toBeNull()
   })
 
   it("offers the Chrome Web Store once Chromium is installed, and the install before", () => {

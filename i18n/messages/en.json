@@ -6097,6 +6097,21 @@
       "updatesAvailable": "{count, plural, one {# update available} other {# updates available}}",
       "version": "Version {version}"
     },
+    "launch": {
+      "empty": "Add .claude/launch.json to this project to start its dev servers from here.",
+      "failed": "Could not read launch.json: {message}",
+      "invalid": "{count, plural, one {# entry was skipped} other {# entries were skipped}} (each needs a name and a runtimeExecutable).",
+      "loading": "Reading launch.json…",
+      "open": "Open {name}",
+      "refresh": "Reload launch configurations",
+      "running": "Running on :{port}",
+      "start": "Start {name} and open it",
+      "startFailed": "Could not start {name}: {message}",
+      "started": "{name} started in a terminal tab.",
+      "starting": "Starting…",
+      "timeout": "{name} did not open port {port} in time. Check its terminal tab.",
+      "title": "Launch configurations"
+    },
     "localContent": {
       "devServers": "Local dev servers",
       "devServersEmpty": "No local web servers are running.",

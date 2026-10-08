@@ -217,6 +217,24 @@ describe("runInTerminalDock", () => {
     }
   })
 
+  it("layers option env over the project env and titles the tab", async () => {
+    const fake = makeFakeSession("spawned-1")
+    registerLiveSession(fake as unknown as Parameters<typeof registerLiveSession>[0])
+    useProjectStore.setState({
+      projects: [{ id: "p1", rootDir: "/proj", terminalConfig: { env: { A: "1", B: "1" } } }],
+      activeProjectId: "p1",
+    } as never)
+    ;(spawnFromDock as jest.Mock).mockClear()
+    try {
+      await runInTerminalDock("pnpm dev", "/proj", "chat-1", { env: { B: "2" }, title: "web" })
+      const input = (spawnFromDock as jest.Mock).mock.calls[0][0]
+      expect(input.req.env).toEqual({ A: "1", B: "2" })
+      expect(input.title).toBe("web")
+    } finally {
+      useProjectStore.setState({ projects: [], activeProjectId: null } as never)
+    }
+  })
+
   it("tolerates a spawned session that is not live (reveals, no write)", async () => {
     // No registerLiveSession → getLiveSession returns null; must not throw.
     ;(spawnFromDock as jest.Mock).mockResolvedValueOnce({

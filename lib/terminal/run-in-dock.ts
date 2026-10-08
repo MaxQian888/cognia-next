@@ -178,12 +178,16 @@ export async function runInDockTab(input: RunInDockInput): Promise<RunInDockOutc
  * fresh tab in `cwd`, reveals + focuses the dock, then pipes the command
  * (trailing CR submits it — the same convention as {@link runInDockTab}).
  *
+ * `options.env` is layered over the project's terminal env and `options.title`
+ * names the tab — a launch configuration's dev server is labelled by its name.
+ *
  * @throws when the spawn is denied or fails.
  */
 export async function runInTerminalDock(
   command: string,
   cwd: string,
-  chatSessionId: string
+  chatSessionId: string,
+  options: { env?: Record<string, string>; title?: string } = {}
 ): Promise<void> {
   const store = useTerminalStore.getState()
   const projectState = useProjectStore.getState()
@@ -209,13 +213,17 @@ export async function runInTerminalDock(
       rows: 24,
       cols: 80,
       cwd: resolvedCwd,
-      env: project?.terminalConfig?.env,
+      env:
+        options.env && Object.keys(options.env).length > 0
+          ? { ...project?.terminalConfig?.env, ...options.env }
+          : project?.terminalConfig?.env,
       projectId: activeProjectId ?? undefined,
       enableShellIntegration: true,
       forceUtf8: terminal?.forceUtf8 ?? true,
       sandboxed: terminal?.sandboxed ?? false,
     },
     store,
+    ...(options.title ? { title: options.title } : {}),
     agentSpawner: chatSessionId || undefined,
     ...spawnerMessage(chatSessionId),
   })

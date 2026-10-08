@@ -6097,6 +6097,21 @@
       "updatesAvailable": "{count, plural, other {有 # 个可用更新}}",
       "version": "版本 {version}"
     },
+    "launch": {
+      "empty": "在此项目中添加 .claude/launch.json,即可在这里启动它的开发服务器。",
+      "failed": "无法读取 launch.json:{message}",
+      "invalid": "已跳过 {count} 项(每项都需要 name 和 runtimeExecutable)。",
+      "loading": "正在读取 launch.json…",
+      "open": "打开 {name}",
+      "refresh": "重新加载启动配置",
+      "running": "运行中 :{port}",
+      "start": "启动 {name} 并打开",
+      "startFailed": "无法启动 {name}:{message}",
+      "started": "{name} 已在终端标签页中启动。",
+      "starting": "正在启动…",
+      "timeout": "{name} 未能及时打开端口 {port},请查看它的终端标签页。",
+      "title": "启动配置"
+    },
     "localContent": {
       "devServers": "本地开发服务器",
       "devServersEmpty": "没有正在运行的本地 Web 服务器。",

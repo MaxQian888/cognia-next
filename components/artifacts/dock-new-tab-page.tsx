@@ -13,7 +13,8 @@
  * - this task's tools, each opening its panel in place of this tab, plus the
  *   terminal, which is the bottom panel rather than a dock tab (R7);
  * - this task's artifacts;
- * - suggestions: running dev servers and local files (desktop), links this
+ * - suggestions: the project's launch configurations (`.claude/launch.json`),
+ *   running dev servers and local files (desktop), links this
  *   conversation shared, and — once the managed Chromium is installed — the
  *   Chrome Web Store for its extensions;
  * - recent pages, which are global (R12) and labelled so.
@@ -43,6 +44,7 @@ import {
 import { getArtifactTypeIcon } from "@/components/artifacts/artifact-icons"
 import { historyLabel } from "@/components/browser/browser-history-menu"
 import { LocalChromiumInstall } from "@/components/browser/browser-backend-switcher"
+import { BrowserLaunchConfigs } from "@/components/browser/launch/browser-launch-configs"
 import { BrowserExtensionsPanel } from "@/components/browser/extensions/browser-extensions-panel"
 import { BrowserLocalContentPicker } from "@/components/browser/local-content/browser-local-content-picker"
 import { Button } from "@/components/ui/button"
@@ -369,6 +371,7 @@ export function DockNewTabPage({
         {desktop || links.length > 0 || chromiumInstalled ? (
           <Section title={t("suggestions")}>
             <div className="flex flex-col gap-3">
+              {desktop ? <BrowserLaunchConfigs sessionId={sessionId} onOpen={onOpenPage} /> : null}
               {desktop ? <BrowserLocalContentPicker onOpen={onOpenPage} /> : null}
               {links.length > 0 ? (
                 <div className="space-y-1" data-testid="dock-new-tab-links">

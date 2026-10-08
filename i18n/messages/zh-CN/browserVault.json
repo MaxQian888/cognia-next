@@ -284,5 +284,20 @@
     "stop": "停止共享",
     "stopFailed": "无法停止共享该文件夹。",
     "title": "打开本地内容"
+  },
+  "launch": {
+    "title": "启动配置",
+    "loading": "正在读取 launch.json…",
+    "empty": "在此项目中添加 .claude/launch.json,即可在这里启动它的开发服务器。",
+    "failed": "无法读取 launch.json:{message}",
+    "invalid": "已跳过 {count} 项(每项都需要 name 和 runtimeExecutable)。",
+    "start": "启动 {name} 并打开",
+    "open": "打开 {name}",
+    "starting": "正在启动…",
+    "running": "运行中 :{port}",
+    "refresh": "重新加载启动配置",
+    "started": "{name} 已在终端标签页中启动。",
+    "timeout": "{name} 未能及时打开端口 {port},请查看它的终端标签页。",
+    "startFailed": "无法启动 {name}:{message}"
   }
 }

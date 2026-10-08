@@ -284,5 +284,20 @@
     "stop": "Stop sharing",
     "stopFailed": "Could not stop sharing that folder.",
     "title": "Open local content"
+  },
+  "launch": {
+    "title": "Launch configurations",
+    "loading": "Reading launch.json…",
+    "empty": "Add .claude/launch.json to this project to start its dev servers from here.",
+    "failed": "Could not read launch.json: {message}",
+    "invalid": "{count, plural, one {# entry was skipped} other {# entries were skipped}} (each needs a name and a runtimeExecutable).",
+    "start": "Start {name} and open it",
+    "open": "Open {name}",
+    "starting": "Starting…",
+    "running": "Running on :{port}",
+    "refresh": "Reload launch configurations",
+    "started": "{name} started in a terminal tab.",
+    "timeout": "{name} did not open port {port} in time. Check its terminal tab.",
+    "startFailed": "Could not start {name}: {message}"
   }
 }
