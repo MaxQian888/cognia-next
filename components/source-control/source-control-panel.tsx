@@ -14,6 +14,7 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   DownloadIcon,
+  FileDiffIcon,
   FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
@@ -28,6 +29,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Empty,
@@ -90,6 +92,13 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
  * which has a different answer wherever the panel is not the whole window.
  */
 export const SOURCE_CONTROL_DENSE_WIDTH = 960
+
+/**
+ * The change list's width beside the diff, in pixels (numbers, to
+ * `react-resizable-panels`). Wide enough for a commit box and a path with its
+ * row actions; capped so the diff always keeps the larger share.
+ */
+export const SOURCE_CONTROL_LIST_WIDTH = { default: 340, min: 260, max: "50%" } as const
 
 /** Which body the panel is showing. */
 export type SourceControlView = "changes" | "browse"
@@ -169,8 +178,11 @@ export function SourceControlPanel() {
   const panelRef = useRef<HTMLDivElement>(null)
   const paneWidth = useElementWidth(panelRef)
   const isNarrow = paneWidth > 0 && paneWidth < SOURCE_CONTROL_DENSE_WIDTH
+  // `-v2`: the side-by-side split moved from a 32% default to a fixed pixel
+  // width, and a layout saved under the old default would keep the 640px
+  // column a 2000px window gave it.
   const layout = useResizableLayout(
-    isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
+    isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal-v2"
   )
   // The first status read, skeleton-first. Deferred so a warm read (the usual
   // case: the status-bar controller already loaded this repository) never
@@ -323,16 +335,25 @@ export function SourceControlPanel() {
         variant="compact"
         icon={<GitBranchIcon />}
         title={t("title")}
-        breadcrumb={
-          <div className="flex min-w-0 items-center gap-2">
+        // After the title, not before it: the root reads as "Source Control ·
+        // which repository", a breadcrumb, where in the leading slot it sat in
+        // front of the page's own icon and title in 11px type. A panel that
+        // silently retargets is worse than one that needs a click: the user
+        // reads a diff believing they know which tree it is, so the chip says
+        // which folder, whether it is a worktree alias, and whether it is
+        // following the conversation or pinned.
+        status={
+          <div
+            // Capped against the HEADER's width (it is a size container): the
+            // status slot does not shrink, so an uncapped long folder name
+            // would take its width out of the actions instead of truncating.
+            className="flex min-w-0 max-w-[36cqw] items-center gap-1.5 overflow-hidden border-l border-border/70 pl-2"
+            data-testid="sc-repo-context"
+          >
             <RootSwitcher
               remoteWorkspaces={remote ? remoteWorkspaces : undefined}
               onSelectRemoteWorkspace={selectRemoteWorkspace}
             />
-            {/* A panel that silently retargets is worse than one that needs a
-                click: the user reads a diff believing they know which tree it
-                is. Says which folder, whether it is a worktree alias, and
-                whether it is following the conversation or pinned. */}
             <PanelRootChip
               panel="sourceControl"
               target={indicator.target}
@@ -401,13 +422,15 @@ export function SourceControlPanel() {
           </LayoutGroup>
         }
         actions={
-          <div className="flex min-w-0 items-center gap-0.5">
+          <div className="flex min-w-0 items-center gap-1">
             <BranchHeader
               branch={status?.branch ?? null}
               ahead={status?.ahead ?? 0}
               behind={status?.behind ?? 0}
               branches={branches}
               actions={actions}
+              showCounts={false}
+              className="max-w-44 border border-border/70 bg-background/60"
             />
             <SyncToolbar
               dense={isNarrow}
@@ -421,37 +444,51 @@ export function SourceControlPanel() {
               onOpenStacks={() => setStacksOpen(true)}
               onRefresh={refreshSafely}
             />
+            <span aria-hidden className="mx-0.5 h-4 w-px bg-border/80" />
             {/* Not `FileSearchIcon`: that is the Changes tab's glyph two
                 controls to the left, and one icon for two destinations made
-                the review sheet look like a second way into the change list. */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground"
-              aria-label={tReview("open")}
-              onClick={() => setReviewOpen(true)}
-              data-testid="sc-open-review"
-            >
-              <ScanSearchIcon className="size-3.5" />
-            </Button>
-            <Popover>
-              <PopoverTrigger asChild>
+                the review sheet look like a second way into the change list.
+                Labelled where the header has room, because a magnifier over a
+                square names nothing on its own. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="relative size-7 text-muted-foreground hover:text-foreground"
-                  aria-label={t("viewSettings.label")}
-                  data-testid="sc-view-settings-trigger"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  aria-label={tReview("open")}
+                  onClick={() => setReviewOpen(true)}
+                  data-testid="sc-open-review"
                 >
-                  <SlidersHorizontalIcon className="size-3.5" />
-                  {!prefsIsDefault && (
-                    <Badge
-                      className="absolute right-1 top-1 size-1.5 rounded-full p-0"
-                      aria-hidden
-                    />
-                  )}
+                  <ScanSearchIcon className="size-3.5" />
+                  <span className="hidden @4xl/feature-header:inline">{t("review.short")}</span>
                 </Button>
-              </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{tReview("open")}</TooltipContent>
+            </Tooltip>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="relative size-7 text-muted-foreground hover:text-foreground"
+                      aria-label={t("viewSettings.label")}
+                      data-testid="sc-view-settings-trigger"
+                    >
+                      <SlidersHorizontalIcon className="size-3.5" />
+                      {!prefsIsDefault && (
+                        <Badge
+                          className="absolute right-1 top-1 size-1.5 rounded-full p-0"
+                          aria-hidden
+                        />
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("viewSettings.label")}</TooltipContent>
+              </Tooltip>
               <PopoverContent align="end" className="w-72">
                 <SourceControlViewSettings />
               </PopoverContent>
@@ -518,8 +555,16 @@ export function SourceControlPanel() {
             >
               <ResizablePanel
                 id="sc-changes"
-                defaultSize={isNarrow ? "42%" : "32%"}
-                minSize={isNarrow ? "28%" : "20%"}
+                // Side by side, the change list is a column of paths and
+                // buttons whose useful width does not grow with the window: a
+                // percentage gave it 640px of mostly empty row on a wide
+                // screen. A pixel default, held at that width as the window
+                // resizes, leaves the room to the diff. Stacked, the split is
+                // a share of the height, which is relative by nature.
+                defaultSize={isNarrow ? "42%" : SOURCE_CONTROL_LIST_WIDTH.default}
+                minSize={isNarrow ? "28%" : SOURCE_CONTROL_LIST_WIDTH.min}
+                maxSize={isNarrow ? undefined : SOURCE_CONTROL_LIST_WIDTH.max}
+                groupResizeBehavior={isNarrow ? undefined : "preserve-pixel-size"}
               >
                 {status && (
                   <ChangesView
@@ -532,13 +577,16 @@ export function SourceControlPanel() {
                     onViewHistory={(path) => openTimelineFor(path)}
                     onViewBlame={(path) => setBlameTarget({ path })}
                     onRestore={(path) => setRestorePath(path)}
+                    onOpenHistory={() => openTimelineFor(null)}
                   />
                 )}
               </ResizablePanel>
               <ResizableHandle withHandle />
+              {/* Side by side the diff takes whatever the list leaves, so it
+                  names no default of its own; stacked, both halves do. */}
               <ResizablePanel
                 id="sc-diff"
-                defaultSize={isNarrow ? "58%" : "68%"}
+                defaultSize={isNarrow ? "58%" : undefined}
                 minSize={isNarrow ? "32%" : "30%"}
               >
                 {/* Faded in per KIND of content (diff, commit, conflict, empty),
@@ -743,6 +791,9 @@ function DiffPaneEmpty() {
   return (
     <Empty className="h-full border-0" data-testid="diff-pane-empty">
       <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileDiffIcon />
+        </EmptyMedia>
         <EmptyDescription>{t("diff.selectFile")}</EmptyDescription>
       </EmptyHeader>
     </Empty>

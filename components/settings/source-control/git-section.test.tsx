@@ -71,6 +71,20 @@ describe("GitSection", () => {
     )
   })
 
+  it("defaults the generator to the selected agent and explains what that means", () => {
+    setSettings({ enabled: true, conventionalCommits: true })
+    render(<GitSection />)
+    expect(screen.getByTestId("git-ai-source")).toHaveTextContent("Selected agent")
+    expect(screen.getByText(/read the repository in read-only plan mode/i)).toBeInTheDocument()
+  })
+
+  it("describes the utility-model source when it is chosen", () => {
+    setSettings({ enabled: true, conventionalCommits: true, source: "model" })
+    render(<GitSection />)
+    expect(screen.getByTestId("git-ai-source")).toHaveTextContent("Utility model")
+    expect(screen.getByText(/whichever agent is selected/i)).toBeInTheDocument()
+  })
+
   it("renders the review + explain AI toggles", () => {
     render(<GitSection />)
     expect(screen.getByLabelText(/AI code review/i)).toBeInTheDocument()

@@ -1,8 +1,11 @@
 import {
+  buildCommitAgentPrompt,
+  buildCommitAgentSystemPrompt,
   buildCommitSystemPrompt,
   buildCommitUserPrompt,
   clampDiff,
   DEFAULT_DIFF_CHAR_BUDGET,
+  extractCommitMessage,
   generateCommitMessage,
   stripFences,
 } from "./ai-commit"
@@ -100,5 +103,92 @@ describe("generateCommitMessage", () => {
     const [prompt, options] = complete.mock.calls[0]
     expect(options.system).toContain("Conventional Commits")
     expect(prompt).toContain("```diff")
+  })
+})
+
+describe("generateCommitMessage streaming", () => {
+  it("streams through onText when the client streams, and strips fences at the end", async () => {
+    async function* stream() {
+      yield "```\nfix: a"
+      yield "\n```"
+    }
+    const complete = jest.fn()
+    const seen: string[] = []
+    const out = await generateCommitMessage(
+      { diffText: "diff", files, config: { conventionalCommits: true } },
+      { complete, stream },
+      { onText: (text) => seen.push(text) }
+    )
+    expect(out).toBe("fix: a")
+    expect(seen).toEqual(["```\nfix: a", "```\nfix: a\n```"])
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it("forwards the abort signal to the client", async () => {
+    const controller = new AbortController()
+    const complete = jest.fn().mockResolvedValue("chore: x")
+    await generateCommitMessage(
+      { diffText: "diff", files, config: { conventionalCommits: false } },
+      { complete },
+      { abortSignal: controller.signal }
+    )
+    expect(complete.mock.calls[0][1].abortSignal).toBe(controller.signal)
+  })
+})
+
+describe("draft hint", () => {
+  it("puts the user's draft ahead of the diff when present", () => {
+    const prompt = buildCommitUserPrompt({
+      diffText: "diff",
+      files,
+      config: { conventionalCommits: true },
+      draftHint: "  fix the login race  ",
+    })
+    expect(prompt.indexOf("fix the login race")).toBeLessThan(prompt.indexOf("Staged files:"))
+  })
+
+  it("leaves the prompt unchanged for a blank draft", () => {
+    const base = { diffText: "diff", files, config: { conventionalCommits: true } }
+    expect(buildCommitUserPrompt({ ...base, draftHint: "   " })).toBe(buildCommitUserPrompt(base))
+  })
+})
+
+describe("agent prompts", () => {
+  it("asks the agent to stay read-only and to tag its answer", () => {
+    const system = buildCommitAgentSystemPrompt({ conventionalCommits: true })
+    expect(system).toContain("Conventional Commits")
+    expect(system).toContain("do not modify anything")
+    expect(system).toContain("<commit-message>")
+  })
+
+  it("carries the instructions inside the prompt as well", () => {
+    const prompt = buildCommitAgentPrompt({
+      diffText: "diff --git a b",
+      files,
+      config: { conventionalCommits: false },
+    })
+    expect(prompt).toContain("<commit-message>")
+    expect(prompt).toContain("diff --git a b")
+  })
+})
+
+describe("extractCommitMessage", () => {
+  it("takes the last tagged block, ignoring narration", () => {
+    const text =
+      "I will wrap it in <commit-message>like this</commit-message>.\n" +
+      "Reading files…\n<commit-message>\nfeat(git): add x\n\nBecause y.\n</commit-message>"
+    expect(extractCommitMessage(text)).toBe("feat(git): add x\n\nBecause y.")
+  })
+
+  it("strips fences inside the tag", () => {
+    expect(extractCommitMessage("<commit-message>```\nfix: z\n```</commit-message>")).toBe("fix: z")
+  })
+
+  it("falls back to the whole answer without a tag", () => {
+    expect(extractCommitMessage("  docs: update readme \n")).toBe("docs: update readme")
+  })
+
+  it("returns an empty string for an empty answer", () => {
+    expect(extractCommitMessage("<commit-message>  </commit-message>")).toBe("")
   })
 })

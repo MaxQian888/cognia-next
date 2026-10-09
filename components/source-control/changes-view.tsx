@@ -19,10 +19,18 @@ import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react"
-import { CheckIcon, MinusIcon, Trash2Icon } from "lucide-react"
+import { CheckIcon, CircleCheckIcon, HistoryIcon, MinusIcon, Trash2Icon } from "lucide-react"
 import { MOBILE_EASE, MOBILE_DURATION } from "@/lib/ui/motion"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import type { GitFileChange, GitStatus, GitStatusGroup } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { useGitStore } from "@/stores/git/git-store"
@@ -113,6 +121,8 @@ interface ChangesViewProps {
   onViewHistory?: (path: string) => void
   onViewBlame?: (path: string) => void
   onRestore?: (path: string) => void
+  /** Opens the repository's history; offered from the clean-tree state. */
+  onOpenHistory?: () => void
 }
 
 export function ChangesView({
@@ -127,6 +137,7 @@ export function ChangesView({
   onViewHistory,
   onViewBlame,
   onRestore,
+  onOpenHistory,
 }: ChangesViewProps) {
   const t = useTranslations("sourceControl")
   const expandedGroups = useGitStore((s) => s.expandedGroups)
@@ -282,11 +293,33 @@ export function ChangesView({
               ) : null
             )}
 
+            {/* A clean tree is a result, not an absence: say so, say what
+                will appear here, and offer the one useful next step. */}
             {!hasChanges && (
-              <Empty className="mt-8 border-0" data-testid="no-changes">
+              <Empty className="mt-6 gap-4 border-0 p-4" data-testid="no-changes">
                 <EmptyHeader>
-                  <EmptyDescription>{t("emptyState.noChanges")}</EmptyDescription>
+                  <EmptyMedia variant="icon">
+                    <CircleCheckIcon />
+                  </EmptyMedia>
+                  <EmptyTitle className="text-sm">{t("emptyState.noChanges")}</EmptyTitle>
+                  <EmptyDescription className="text-xs">
+                    {t("emptyState.noChangesDescription")}
+                  </EmptyDescription>
                 </EmptyHeader>
+                {onOpenHistory && (
+                  <EmptyContent>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={onOpenHistory}
+                      data-testid="no-changes-history"
+                    >
+                      <HistoryIcon className="size-3.5" />
+                      {t("emptyState.viewHistory")}
+                    </Button>
+                  </EmptyContent>
+                )}
               </Empty>
             )}
           </div>

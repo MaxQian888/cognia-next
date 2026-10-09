@@ -280,10 +280,22 @@ export const EMPTY_REPO_STATE: GitRepoState = Object.freeze({
 
 // --------------------------------------------------------------- UI settings
 
+/** Who writes an AI commit message. See {@link GitCommitAiSettings.source}. */
+export type GitCommitAiSource = "agent" | "model"
+
 /** AI commit-message generation preferences (under `AppSettings.gitSettings`). */
 export interface GitCommitAiSettings {
   /** Master toggle — when false the Sparkles button is hidden. */
   enabled: boolean
+  /**
+   * What writes the message. `"agent"` (the default) runs the agent the
+   * composer has selected: a local external agent (Codex, Claude Code, …) in
+   * read-only plan mode inside the repository, or a configuration the paired
+   * host owns. The built-in lane has no separate agent process, so it uses the
+   * utility model below either way. `"model"` always uses the utility model.
+   * Absent on settings saved before the field existed, which read as `"agent"`.
+   */
+  source?: GitCommitAiSource
   /** Constrain the generated message to the Conventional Commits format. */
   conventionalCommits: boolean
   /** Optional extra steering appended to the system prompt. */
@@ -339,8 +351,12 @@ export interface GitUiSettings {
 
 /** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */
 export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
+  // On by default: generation only ever runs on an explicit click, and the
+  // staged diff is PII-gated before it leaves the app. Hidden behind an
+  // off-by-default switch, the button was simply never found.
   commitMessageAI: {
-    enabled: false,
+    enabled: true,
+    source: "agent",
     conventionalCommits: true,
   },
   reviewAI: {

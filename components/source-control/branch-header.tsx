@@ -35,6 +35,11 @@ interface BranchHeaderProps {
   className?: string
   /** Where the picker opens. Defaults to below the trigger. */
   side?: "top" | "bottom"
+  /**
+   * Show the ahead/behind counts on the chip. The desktop panel turns them off
+   * because its sync button, one control to the right, already carries them.
+   */
+  showCounts?: boolean
 }
 
 export function BranchHeader({
@@ -45,6 +50,7 @@ export function BranchHeader({
   actions,
   className,
   side = "bottom",
+  showCounts = true,
 }: BranchHeaderProps) {
   const t = useTranslations("sourceControl")
   const [open, setOpen] = useState(false)
@@ -62,13 +68,13 @@ export function BranchHeader({
         >
           <GitBranchIcon className="size-3.5 shrink-0" />
           <span className="truncate">{branch ?? t("branches.detached")}</span>
-          {behind > 0 && (
+          {showCounts && behind > 0 && (
             <span className="flex items-center text-[10px] text-muted-foreground">
               <ArrowDownIcon className="size-2.5" />
               {behind}
             </span>
           )}
-          {ahead > 0 && (
+          {showCounts && ahead > 0 && (
             <span className="flex items-center text-[10px] text-muted-foreground">
               <ArrowUpIcon className="size-2.5" />
               {ahead}

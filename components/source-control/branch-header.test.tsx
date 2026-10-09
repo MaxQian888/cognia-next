@@ -33,6 +33,22 @@ describe("BranchHeader", () => {
     expect(screen.getByText("3")).toBeInTheDocument()
   })
 
+  it("leaves the counts to a host that shows them elsewhere", () => {
+    render(
+      <BranchHeader
+        branch="main"
+        ahead={2}
+        behind={3}
+        branches={branches}
+        actions={actions}
+        showCounts={false}
+      />
+    )
+    expect(screen.getByText("main")).toBeInTheDocument()
+    expect(screen.queryByText("2")).not.toBeInTheDocument()
+    expect(screen.queryByText("3")).not.toBeInTheDocument()
+  })
+
   it("falls back to the detached label when no branch", () => {
     render(
       <BranchHeader branch={null} ahead={0} behind={0} branches={branches} actions={actions} />

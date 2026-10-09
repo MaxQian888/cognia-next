@@ -77,18 +77,22 @@ jest.mock("@/components/ui/resizable", () => ({
     defaultSize,
     minSize,
     maxSize,
+    groupResizeBehavior,
   }: {
     children: React.ReactNode
     id?: string
     defaultSize?: number | string
     minSize?: number | string
     maxSize?: number | string
+    groupResizeBehavior?: string
   }) => (
     <div
       data-testid={id ? `resizable-panel-${id}` : "resizable-panel"}
       data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+      data-default-size-type={typeof defaultSize}
       data-min-size={minSize === undefined ? undefined : String(minSize)}
       data-max-size={maxSize === undefined ? undefined : String(maxSize)}
+      data-resize-behavior={groupResizeBehavior}
     >
       {children}
     </div>
@@ -101,13 +105,18 @@ jest.mock("./changes-view", () => ({
     onViewHistory,
     onViewBlame,
     onRestore,
+    onOpenHistory,
   }: {
     onSelectFile: (path: string, staged: boolean) => void
     onViewHistory: (path: string) => void
     onViewBlame: (path: string) => void
     onRestore: (path: string) => void
+    onOpenHistory?: () => void
   }) => (
     <div data-testid="changes-view-stub">
+      <button type="button" data-testid="changes-open-history" onClick={() => onOpenHistory?.()}>
+        repository history
+      </button>
       <button
         type="button"
         data-testid="changes-select"
@@ -346,11 +355,19 @@ jest.mock("./clone-repository-dialog", () => ({
     ) : null,
 }))
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import userEvent from "@testing-library/user-event"
-import { SOURCE_CONTROL_DENSE_WIDTH, SourceControlPanel } from "./source-control-panel"
+import {
+  SOURCE_CONTROL_DENSE_WIDTH,
+  SOURCE_CONTROL_LIST_WIDTH,
+  SourceControlPanel,
+} from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitStatus } from "@/types/git"
+
+/** Tooltips need their provider, which the app mounts in its root layout. */
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: TooltipProvider })
 
 const status: GitStatus = {
   branch: "main",
@@ -506,17 +523,21 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("changes-view-stub")).toBeInTheDocument()
   })
 
-  // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
-  // be percent strings or the changes/diff split collapses to px-wide slivers.
-  it("passes percent-string sizes to the changes and diff panels", () => {
+  // react-resizable-panels v4 interprets bare numbers as PIXELS, and side by
+  // side that is the point: the change list is a fixed-width column held at
+  // its width as the window resizes, and the diff takes the rest. A
+  // percentage gave the list 640px of empty row on a 2000px window.
+  it("gives the side-by-side change list a pixel width that survives window resizes", () => {
     render(<SourceControlPanel />)
-    const percent = /^\d+(\.\d+)?%$/
     const changes = screen.getByTestId("resizable-panel-sc-changes")
+    expect(changes.dataset.defaultSize).toBe(String(SOURCE_CONTROL_LIST_WIDTH.default))
+    expect(changes.dataset.defaultSizeType).toBe("number")
+    expect(changes.dataset.minSize).toBe(String(SOURCE_CONTROL_LIST_WIDTH.min))
+    expect(changes.dataset.maxSize).toBe(SOURCE_CONTROL_LIST_WIDTH.max)
+    expect(changes.dataset.resizeBehavior).toBe("preserve-pixel-size")
     const diff = screen.getByTestId("resizable-panel-sc-diff")
-    for (const panel of [changes, diff]) {
-      expect(panel.dataset.defaultSize).toMatch(percent)
-      expect(panel.dataset.minSize).toMatch(percent)
-    }
+    expect(diff.dataset.defaultSize).toBeUndefined()
+    expect(diff.dataset.minSize).toMatch(/^\d+(\.\d+)?%$/)
   })
 
   it("stacks the changes and diff panes when the PANE is narrow", () => {
@@ -530,6 +551,10 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("resizable-panel-sc-diff")).toHaveAttribute(
       "data-default-size",
       "58%"
+    )
+    // Stacked, the split is a share of the height: relative, not pinned.
+    expect(screen.getByTestId("resizable-panel-sc-changes")).not.toHaveAttribute(
+      "data-resize-behavior"
     )
   })
 
@@ -762,6 +787,19 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("sc-view-browse")).toContainElement(
       screen.getByTestId("sc-view-pill")
     )
+  })
+
+  it("names the repository after the title, not before it", () => {
+    render(<SourceControlPanel />)
+    const context = screen.getByTestId("sc-repo-context")
+    const heading = screen.getByRole("heading", { level: 1 })
+    expect(heading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("opens the repository history from the clean-tree state", () => {
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("changes-open-history"))
+    expect(screen.getByTestId("timeline-view-stub")).toBeInTheDocument()
   })
 
   it("opens the unified review sheet from its header control", async () => {

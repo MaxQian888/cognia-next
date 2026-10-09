@@ -14,6 +14,7 @@ import {
   DEFAULT_GIT_SETTINGS,
   type GitAiFeatureSettings,
   type GitCommitAiSettings,
+  type GitCommitAiSource,
 } from "@/types/git"
 import {
   AUTO_FETCH_INTERVAL_MAX,
@@ -262,6 +263,28 @@ export function GitSection() {
                   checked={commitAi.conventionalCommits}
                   onCheckedChange={(v) => saveCommitAi({ conventionalCommits: v })}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="git-ai-source">{t("commitAi.source.heading")}</Label>
+                <Select
+                  value={commitAi.source ?? "agent"}
+                  onValueChange={(v) => saveCommitAi({ source: v as GitCommitAiSource })}
+                >
+                  <SelectTrigger id="git-ai-source" data-testid="git-ai-source">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="agent">{t("commitAi.source.agent")}</SelectItem>
+                    <SelectItem value="model">{t("commitAi.source.model")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    (commitAi.source ?? "agent") === "agent"
+                      ? "commitAi.source.agentDescription"
+                      : "commitAi.source.modelDescription"
+                  )}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="git-custom-instructions">

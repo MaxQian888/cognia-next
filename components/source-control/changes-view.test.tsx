@@ -19,12 +19,16 @@ jest.mock("@tanstack/react-virtual", () => ({
   },
 }))
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ChangesView, ROW_MOTION_LIMIT } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GitStatus } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+
+/** Tooltips need their provider, which the app mounts in its root layout. */
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: TooltipProvider })
 
 /** Set the confirm-discard panel preference (defaults to on when unset). */
 function setConfirmDiscard(confirmDiscard: boolean) {
@@ -256,7 +260,27 @@ describe("ChangesView", () => {
         onRestore={() => {}}
       />
     )
-    expect(screen.getByTestId("no-changes")).toBeInTheDocument()
+    expect(screen.getByTestId("no-changes")).toHaveTextContent("Working tree clean")
+    // Nothing to offer without a history handler.
+    expect(screen.queryByTestId("no-changes-history")).not.toBeInTheDocument()
+  })
+
+  it("offers the repository history from a clean tree", () => {
+    const empty: GitStatus = { ...status, staged: [], changes: [], merge: [] }
+    const onOpenHistory = jest.fn()
+    render(
+      <ChangesView
+        rootDir="/r"
+        status={empty}
+        actions={makeActions()}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={() => {}}
+        onOpenHistory={onOpenHistory}
+      />
+    )
+    fireEvent.click(screen.getByTestId("no-changes-history"))
+    expect(onOpenHistory).toHaveBeenCalledTimes(1)
   })
 
   it("confirms before discarding a file when the pref is on (default)", async () => {

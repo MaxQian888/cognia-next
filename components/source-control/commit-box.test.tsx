@@ -1,13 +1,23 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CommitBox } from "./commit-box"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
+/** Tooltips need their provider, which the app mounts in its root layout. */
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: TooltipProvider })
+
 const mockGenerate = jest.fn().mockResolvedValue("feat: ai message")
+const mockCancel = jest.fn()
+let mockAi: { generating: boolean; preview: string; agentName: string | null }
 jest.mock("@/hooks/git/use-ai-commit-message", () => ({
-  useAiCommitMessage: () => ({ generating: false, error: null, generate: mockGenerate }),
+  useAiCommitMessage: () => ({
+    ...mockAi,
+    error: null,
+    generate: mockGenerate,
+    cancel: mockCancel,
+  }),
 }))
 jest.mock("./git-identity-dialog", () => ({
   GitIdentityDialog: ({ open, onSaved }: { open: boolean; onSaved: () => void | Promise<void> }) =>
@@ -30,11 +40,9 @@ function makeActions() {
 function setAiEnabled(enabled: boolean) {
   act(() => {
     useSettingsStore.setState({
-      settings: enabled
-        ? ({
-            gitSettings: { commitMessageAI: { enabled: true, conventionalCommits: true } },
-          } as never)
-        : null,
+      settings: {
+        gitSettings: { commitMessageAI: { enabled, conventionalCommits: true } },
+      } as never,
     })
   })
 }
@@ -66,6 +74,7 @@ function statusWithUpstream(upstream: string | null) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockAi = { generating: false, preview: "", agentName: null }
   window.localStorage.clear()
   act(() => {
     useGitStore.setState({ commitDraft: {}, commitAmend: false, status: null })
@@ -234,6 +243,88 @@ describe("CommitBox", () => {
       </TooltipProvider>
     )
     expect(screen.getByTestId("commit-ai-generate")).toBeDisabled()
+  })
+
+  it("shows the AI button by default, before settings load", () => {
+    act(() => useSettingsStore.setState({ settings: null }))
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-ai-generate")).toBeInTheDocument()
+  })
+
+  it("names the agent that will write the message", () => {
+    setAiEnabled(true)
+    mockAi = { generating: false, preview: "", agentName: "Codex" }
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-ai-agent")).toHaveTextContent("Codex")
+    expect(screen.getByTestId("commit-ai-generate")).toHaveAccessibleName(
+      "Generate a message with Codex"
+    )
+  })
+
+  it("shows the streaming message read-only, and offers Stop instead of Generate", () => {
+    setAiEnabled(true)
+    act(() => useGitStore.getState().setCommitDraft("/r", "my notes"))
+    mockAi = { generating: true, preview: "feat: half a mess", agentName: "Codex" }
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} />)
+    const box = screen.getByTestId("commit-message")
+    expect(box).toHaveValue("feat: half a mess")
+    expect(box).toHaveAttribute("readonly")
+    expect(screen.queryByTestId("commit-ai-generate")).not.toBeInTheDocument()
+    expect(screen.getByTestId("commit-button")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("commit-ai-stop"))
+    expect(mockCancel).toHaveBeenCalled()
+    expect(screen.getByTestId("commit-ai-stop")).toHaveTextContent("Codex is writing…")
+  })
+
+  it("says how many files a click commits", () => {
+    render(<CommitBox rootDir="/r" stagedCount={3} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-button")).toHaveTextContent("Commit 3 files")
+  })
+
+  it("says it commits everything when smart commit will stage the tree", () => {
+    setPanelPrefs({ smartCommit: true })
+    act(() =>
+      useGitStore.setState({
+        status: {
+          ...(statusWithUpstream("origin/main") as object),
+          changes: [
+            { path: "a.ts", status: "modified" },
+            { path: "b.ts", status: "modified" },
+          ],
+        } as never,
+      })
+    )
+    render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-button")).toHaveTextContent("Commit all 2 files")
+  })
+
+  it("dims the menu half with the commit half, but keeps it usable", async () => {
+    const user = userEvent.setup()
+    render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={makeActions()} />)
+    expect(screen.getByTestId("commit-button")).toBeDisabled()
+    const more = screen.getByTestId("commit-more")
+    expect(more).toHaveClass("opacity-50")
+    expect(more).not.toBeDisabled()
+    await user.click(more)
+    expect(await screen.findByTestId("commit-amend-toggle")).toBeInTheDocument()
+  })
+
+  it("prints the commit chord, outside touch density", () => {
+    const { unmount } = render(
+      <CommitBox rootDir="/r" stagedCount={1} committing={false} actions={makeActions()} />
+    )
+    expect(screen.getByTestId("commit-shortcut-hint")).toHaveTextContent(/Enter/)
+    unmount()
+    render(
+      <CommitBox
+        rootDir="/r"
+        stagedCount={1}
+        committing={false}
+        actions={makeActions()}
+        density="touch"
+      />
+    )
+    expect(screen.queryByTestId("commit-shortcut-hint")).not.toBeInTheDocument()
   })
 
   it("publishes after a plain commit when the branch has no upstream", async () => {

@@ -22,6 +22,11 @@ export interface BuildPromptInput {
   /** Staged file summary (path + status) so the model can pick a good scope. */
   files: Pick<GitFileChange, "path" | "status">[]
   config: CommitMessageAIConfig
+  /**
+   * What the user had already typed in the message box, PII-gated like the
+   * diff. Treated as their intent to refine, not as text to keep verbatim.
+   */
+  draftHint?: string
 }
 
 /** Default character budget for the diff sent to the model (token-safe proxy). */
@@ -58,7 +63,11 @@ export function buildCommitUserPrompt(input: BuildPromptInput): string {
     input.files.length > 0
       ? input.files.map((f) => `${statusLetter(f.status)} ${f.path}`).join("\n")
       : "(no staged file metadata)"
+  const hint = input.draftHint?.trim()
   return [
+    ...(hint
+      ? ["The user's draft of the message (keep its intent, improve the wording):", hint, ""]
+      : []),
     "Staged files:",
     fileList,
     "",
@@ -67,6 +76,39 @@ export function buildCommitUserPrompt(input: BuildPromptInput): string {
     clampDiff(input.diffText),
     "```",
   ].join("\n")
+}
+
+/** The tag an agent wraps its answer in, so its narration can be told apart. */
+export const COMMIT_MESSAGE_TAG = "commit-message"
+
+const AGENT_CLAUSE = `You are running inside the repository the diff belongs to. You may read files for context, but do not modify anything, run commands that change state, or commit. When you are done, reply with the commit message wrapped in <${COMMIT_MESSAGE_TAG}> and </${COMMIT_MESSAGE_TAG}> tags, and nothing else after the closing tag.`
+
+/**
+ * The instructions for an agent lane. An agent narrates (tool use, a preamble),
+ * so unlike the model lane it is asked to tag its answer.
+ */
+export function buildCommitAgentSystemPrompt(config: CommitMessageAIConfig): string {
+  return `${buildCommitSystemPrompt(config)}\n${AGENT_CLAUSE}`
+}
+
+/**
+ * The single prompt an agent receives. The instructions ride in the prompt as
+ * well as in the system prompt, because not every adapter honours the latter.
+ */
+export function buildCommitAgentPrompt(input: BuildPromptInput): string {
+  return `${buildCommitAgentSystemPrompt(input.config)}\n\n${buildCommitUserPrompt(input)}`
+}
+
+/**
+ * The message out of an answer: the last tagged block when there is one (an
+ * agent may quote the tag while thinking), else the answer with fences
+ * stripped. Returns "" when nothing usable is left.
+ */
+export function extractCommitMessage(text: string): string {
+  const pattern = new RegExp(`<${COMMIT_MESSAGE_TAG}>([\\s\\S]*?)</${COMMIT_MESSAGE_TAG}>`, "g")
+  let tagged: string | undefined
+  for (const match of text.matchAll(pattern)) tagged = match[1]
+  return stripFences((tagged ?? text).trim())
 }
 
 function statusLetter(status: GitFileChange["status"]): string {
@@ -94,19 +136,38 @@ export function stripFences(text: string): string {
   return (fenced ? fenced[1] : text).trim()
 }
 
+/** Streaming and cancellation for {@link generateCommitMessage}. */
+export interface GenerateCommitMessageOptions {
+  /** The raw text so far, while it streams. Only used when the client streams. */
+  onText?: (text: string) => void
+  abortSignal?: AbortSignal
+}
+
 /**
  * One-shot generation: assemble prompts, call the resolved utility LLM client
  * (which honors the user's provider/model override), return clean text. The
- * client is injected so this stays testable with a mock `{ complete }`.
+ * client is injected so this stays testable with a mock `{ complete }`. A
+ * client that streams, given an `onText`, reports the text as it arrives.
  */
 export async function generateCommitMessage(
   input: BuildPromptInput,
-  client: Pick<LlmClient, "complete">
+  client: Pick<LlmClient, "complete" | "stream">,
+  options: GenerateCommitMessageOptions = {}
 ): Promise<string> {
-  const text = await client.complete(buildCommitUserPrompt(input), {
+  const prompt = buildCommitUserPrompt(input)
+  const callOptions = {
     system: buildCommitSystemPrompt(input.config),
     temperature: 0.3,
     maxTokens: 400,
-  })
-  return stripFences(text)
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+  }
+  if (options.onText && client.stream) {
+    let text = ""
+    for await (const delta of client.stream(prompt, callOptions)) {
+      text += delta
+      options.onText(text)
+    }
+    return stripFences(text)
+  }
+  return stripFences(await client.complete(prompt, callOptions))
 }
