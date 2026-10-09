@@ -9875,6 +9875,164 @@
       },
       "additionalProperties": false
     },
+    "pet_act": {
+      "type": "object",
+      "description": "Care for the host pet once. Runs in the host's pet controller, so XP and coins are awarded exactly once there; `idempotencyKey` folds a retried press onto the first answer.",
+      "required": [
+        "action",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "fed",
+            "played",
+            "petted",
+            "talked",
+            "slept",
+            "cleaned",
+            "treated"
+          ]
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "An owned consumable to use for this action. Spent only when the controller accepts the action."
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "One per user intent. A retry of the same intent reuses it, so the host answers it once."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_chat_clear": {
+      "type": "object",
+      "description": "Forget the host pet's chat history.",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "pet_chat_list": {
+      "type": "object",
+      "description": "The host pet's chat history, newest page first; each page's items are in chronological order.",
+      "properties": {
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_chat_send": {
+      "type": "object",
+      "description": "One chat turn with the host pet, answered by the host's model settings behind its PII gate and rate limit.",
+      "required": [
+        "text",
+        "locale",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "locale": {
+          "type": "string",
+          "enum": [
+            "en",
+            "zh-CN"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "One per user intent. A retry of the same intent reuses it, so the host answers it once."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_get": {
+      "type": "object",
+      "description": "Read the host pet's live snapshot: availability, the PII-safe summary with per-action cooldowns, presentation flags and the host clock.",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "pet_item_apply": {
+      "type": "object",
+      "description": "Apply an owned decor item's cosmetic. Consumables are used through `pet_act` with `itemId`.",
+      "required": [
+        "itemId"
+      ],
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_item_purchase": {
+      "type": "object",
+      "required": [
+        "itemId",
+        "qty",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "qty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "One per user intent. A retry of the same intent reuses it, so the host answers it once."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_rename": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Whitespace is collapsed and the result clamped to the pet name limit on the host."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_soul_generate": {
+      "type": "object",
+      "description": "Hatch the host pet's egg. Single-flight on the host; answers `pending` when generation outlives the bridge window, and the hatch lands on its own.",
+      "properties": {},
+      "additionalProperties": false
+    },
     "plugin_activate_vscode": {
       "type": "object",
       "required": [
@@ -12675,7 +12833,12 @@
             "botDefinitions",
             "botInstallations",
             "botEventDeliveries",
-            "sessionFolders"
+            "sessionFolders",
+            "petProfile",
+            "petAchievements",
+            "petInventory",
+            "petCharacterBindings",
+            "petActivityLog"
           ],
           "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
@@ -12683,7 +12846,7 @@
           "type": "integer",
           "format": "int64",
           "default": 0,
-          "description": "Last cursor the phone received (ms epoch). Pass `0` for a full pull."
+          "description": "Last cursor the phone received: ms epoch for every table except `petActivityLog`, which is cursored on its numeric row id. Pass `0` for a full pull."
         },
         "content_protocol_version": {
           "type": "integer",

@@ -1874,5 +1874,15 @@ describe("SYNC_TABLE_DEPENDENCIES", () => {
     expect(SYNC_TABLE_DEPENDENCIES.platformIdentities).toContain("adapterInstances")
     expect(SYNC_TABLE_DEPENDENCIES.executionRunBindings).toContain("executionRuns")
     expect(SYNC_TABLE_DEPENDENCIES.botEventDeliveries).toContain("botInstallations")
+    // The pet ledger's reset rule reads the profile's birth time, and every
+    // other pet row is about the pet the profile names.
+    for (const table of [
+      "petAchievements",
+      "petInventory",
+      "petCharacterBindings",
+      "petActivityLog",
+    ] as const) {
+      expect(SYNC_TABLE_DEPENDENCIES[table]).toContain("petProfile")
+    }
   })
 })

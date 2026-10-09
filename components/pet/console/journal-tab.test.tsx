@@ -1,13 +1,24 @@
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 // Reactive ledger read — a controllable snapshot instead of a live Dexie.
 let rowsValue: unknown
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => rowsValue,
 }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("@/lib/db/pet", () => ({
+  listPetActivityPage: jest.fn(),
+  listPetActivitySince: jest.fn(),
+}))
 
-import { JournalTab, groupByLocalDay } from "./journal-tab"
+import { toast } from "sonner"
+import { listPetActivityPage } from "@/lib/db/pet"
+import { JOURNAL_KIND_ICONS, JOURNAL_PAGE, JournalTab, groupByLocalDay } from "./journal-tab"
+import en from "@/i18n/messages/en/pet.json"
+import zh from "@/i18n/messages/zh-CN/pet.json"
 import type { PetActivityRow } from "@/types/pet"
+
+const pageMock = listPetActivityPage as jest.Mock
 
 const NOON_JUL2 = new Date("2026-07-02T12:00:00").getTime()
 const NOON_JUL1 = new Date("2026-07-01T12:00:00").getTime()
@@ -18,6 +29,8 @@ function row(over: Partial<PetActivityRow>): PetActivityRow {
 
 beforeEach(() => {
   rowsValue = []
+  pageMock.mockReset()
+  ;(toast.error as jest.Mock).mockClear()
 })
 
 describe("groupByLocalDay", () => {
@@ -71,9 +84,52 @@ describe("JournalTab", () => {
     expect(screen.getAllByText("+25 XP").length).toBeGreaterThan(0)
   })
 
-  it("falls back to the raw kind for unknown ledger kinds", () => {
+  it("words an unknown ledger kind generically instead of showing its raw id", () => {
     rowsValue = [row({ id: 9, kind: "somePluginKind" as PetActivityRow["kind"] })]
     render(<JournalTab />)
-    expect(screen.getByText("somePluginKind")).toBeInTheDocument()
+    expect(screen.queryByText("somePluginKind")).toBeNull()
+    expect(screen.getByText("Other activity")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["en", en],
+    ["zh-CN", zh],
+  ])("authors a label for every iconed kind in %s", (_locale, messages) => {
+    const kinds = (messages as { journal: { kinds: Record<string, string> } }).journal.kinds
+    for (const kind of [...Object.keys(JOURNAL_KIND_ICONS), "other"]) {
+      expect(typeof kinds[kind]).toBe("string")
+    }
+  })
+
+  it("offers no older page when the head page is not full", () => {
+    rowsValue = [row({ id: 1 })]
+    render(<JournalTab />)
+    expect(screen.queryByTestId("pet-journal-load-older")).toBeNull()
+  })
+
+  it("loads older rows below the oldest one shown, until the ledger runs out", async () => {
+    rowsValue = Array.from({ length: JOURNAL_PAGE }, (_, i) =>
+      row({ id: 1000 - i, ts: NOON_JUL2 - i })
+    )
+    pageMock.mockResolvedValueOnce([row({ id: 5, ts: NOON_JUL1, kind: "played" })])
+    render(<JournalTab />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("pet-journal-load-older"))
+    })
+    expect(pageMock).toHaveBeenCalledWith(1000 - JOURNAL_PAGE + 1, JOURNAL_PAGE)
+    expect(screen.getByText("Played together")).toBeInTheDocument()
+    // A short page means the start of the ledger was reached.
+    expect(screen.queryByTestId("pet-journal-load-older")).toBeNull()
+  })
+
+  it("reports a failed older-page read", async () => {
+    rowsValue = Array.from({ length: JOURNAL_PAGE }, (_, i) => row({ id: 1000 - i }))
+    pageMock.mockRejectedValueOnce(new Error("closed"))
+    render(<JournalTab />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("pet-journal-load-older"))
+    })
+    expect(toast.error).toHaveBeenCalled()
+    expect(screen.getByTestId("pet-journal-load-older")).not.toBeDisabled()
   })
 })

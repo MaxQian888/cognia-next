@@ -23519,6 +23519,11 @@
           "memories": "记忆",
           "messages": "消息",
           "outboundQueue": "出站投递状态",
+          "petAchievements": "宠物成就",
+          "petActivityLog": "宠物动态",
+          "petCharacterBindings": "宠物角色外观",
+          "petInventory": "宠物物品",
+          "petProfile": "宠物",
           "plans": "计划",
           "platformIdentities": "联系人",
           "pluginCogsetState": "齿轮组状态",
@@ -24340,6 +24345,7 @@
       "pairing": "配对状态",
       "pairingPaired": "已与桌面配对（{deviceId}）",
       "pairingUnpaired": "尚未与桌面配对",
+      "petRow": "宠物",
       "pinned": "已置顶到常用",
       "pluginsRow": "插件",
       "preferencesRow": "偏好与安全",
@@ -28022,6 +28028,10 @@
         "title": "禅心宗师"
       }
     },
+    "achievementsProgress": {
+      "summary": "已解锁 {unlocked} / {total}",
+      "title": "已解锁"
+    },
     "actions": {
       "clean": "洗澡",
       "feed": "喂食",
@@ -28033,9 +28043,17 @@
     },
     "binding": {
       "clear": "清除",
+      "clearConfirm": {
+        "cancel": "取消",
+        "confirm": "清除绑定",
+        "description": "该角色将恢复使用全局宠物，物种和皮肤的覆盖设置都会被移除。",
+        "title": "清除 {name} 的宠物绑定？"
+      },
+      "cleared": "{name} 已恢复使用全局宠物。",
       "empty": "还没有角色。",
       "inheritAppearance": "继承全局外观",
       "live2dOption": "Live2D · {name}",
+      "saveFailed": "角色绑定保存失败，请重试。",
       "skinFor": "{name} 的皮肤",
       "speciesFor": "{name} 的物种",
       "spriteOption": "精灵图 · {name}",
@@ -28238,6 +28256,7 @@
       "enableCta": {
         "action": "开启聊天",
         "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
+        "failed": "未能开启宠物聊天，请重试。",
         "title": "开启宠物聊天"
       },
       "openFullChat": "打开完整对话",
@@ -28261,9 +28280,36 @@
       }
     },
     "condition": {
+      "recoveryHint": "想让它恢复，就把精力和心情都提升到 {threshold} 以上：让它睡一觉、陪它玩，或者喂点零食。商店里的急救包能让它恢复得更快。",
       "unwell": "需要照顾"
     },
     "console": {
+      "chat": {
+        "clear": "清空对话",
+        "clearConfirm": {
+          "cancel": "取消",
+          "confirm": "清空",
+          "description": "与宠物的所有消息都会被删除。宠物的等级、心情和照顾记录会保留。",
+          "title": "清空对话？"
+        },
+        "clearFailed": "无法清空对话，请重试。",
+        "cleared": "对话已清空。"
+      },
+      "desktopOnly": {
+        "badge": "桌面端",
+        "remedy": "请在桌面端打开 Cognia，进入 宠物 → {tab}。",
+        "title": "「{tab}」在桌面端使用",
+        "what": {
+          "customize": "修改宠物的物种、配色、皮肤和大小。",
+          "insights": "查看雷达从你的活动中发现的内容，并选择要捕获的来源。",
+          "plugins": "桌面端插件为宠物控制台添加的面板。"
+        },
+        "why": "它依赖保存在桌面端的皮肤、模型和插件，因此无法在此设备上运行。"
+      },
+      "desktopToggle": {
+        "failed": "切换桌面宠物失败，请重试。",
+        "openFailed": "桌面宠物未能打开。"
+      },
       "groups": {
         "extensions": "扩展",
         "nurture": "养成",
@@ -28271,13 +28317,75 @@
         "records": "记录"
       },
       "hatch": "孵化",
+      "hatchFailed": "孵化失败，请重试。",
       "hatchPrompt": "你的蛋可以孵化了。",
+      "hatching": "正在孵化…可能需要几秒钟。",
+      "insights": {
+        "captureDescription": "你采集的网页和笔记会成为雷达分析的素材，可以在这里选择采集哪些内容。",
+        "captureTitle": "采集来源"
+      },
       "live2dFallback": "Live2D 暂时不可用，正在显示内置形象。",
       "loading": "正在唤醒你的宠物…",
       "navigation": "宠物导航",
       "navigationDescription": "选择一个宠物工作区。",
+      "nurture": {
+        "care": "照顾",
+        "stats": "档案",
+        "status": "宠物现在的状态",
+        "wallet": "钱包"
+      },
       "openNavigation": "打开宠物导航",
+      "remote": {
+        "band": {
+          "connected": "正在照顾桌面端的宠物",
+          "connecting": "正在重新连接桌面端",
+          "connectionSettings": "连接设置",
+          "disabled": "宠物在桌面端已关闭",
+          "headless": "此主机没有宠物",
+          "hostStarting": "桌面端正在启动宠物",
+          "invalid": "桌面端返回了此应用无法识别的内容，请更新两端应用。",
+          "loading": "正在连接桌面端…",
+          "neverUpdated": "尚未更新",
+          "offline": "桌面端离线",
+          "retry": "重试",
+          "retrying": "正在重试…",
+          "showingMirror": "显示最近一次同步的状态",
+          "unavailable": "宠物在桌面端暂不可用",
+          "unreachable": "无法连接到桌面端",
+          "updated": "更新于 {time}"
+        },
+        "binding": {
+          "live2d": "Live2D 模型",
+          "readOnly": "角色的宠物外观需在桌面端编辑。",
+          "sprite": "精灵包"
+        },
+        "careDone": "宠物感受到了。",
+        "careRewarded": "+{xp} 经验 · +{coins} 金币",
+        "chatLoadFailed": "无法从桌面端加载对话。",
+        "chatOff": {
+          "body": "请在 Cognia 桌面客户端的宠物设置中开启宠物聊天，之后即可在这里和宠物聊天。宠物蛋需要先孵化。",
+          "title": "宠物聊天已关闭"
+        },
+        "chatPending": "宠物还在思考，回复会显示在这里。",
+        "desktopHidden": "已隐藏",
+        "desktopVisible": "在桌面上",
+        "hatchPending": "正在桌面端孵化，宠物很快就会出现在这里。",
+        "noPet": {
+          "description": "先打开一次 Cognia 桌面客户端来创建宠物，然后再回到这里。",
+          "title": "桌面端还没有宠物"
+        },
+        "simplifiedLook": "此设备显示简化外观，桌面端会显示完整皮肤。"
+      },
+      "renameFailed": "改名失败，请重试。",
+      "stages": {
+        "adult": "成年",
+        "baby": "幼年",
+        "egg": "蛋",
+        "elder": "老年",
+        "juvenile": "少年"
+      },
       "subtitle": "养育它、装扮它，一起成长。",
+      "tabLoading": "加载中…",
       "tabs": {
         "achievements": "成就",
         "binding": "角色",
@@ -28293,8 +28401,17 @@
       "title": "你的宠物",
       "unavailable": {
         "backToChat": "返回聊天",
+        "hostOutdated": {
+          "description": "与此设备配对的桌面端暂时无法共享宠物。请更新 Cognia 桌面客户端（如已关闭请先打开），然后再回到这里。",
+          "title": "请更新桌面客户端"
+        },
+        "secondaryWindow": "宠物控制台在 Cognia 主窗口中打开。请切换到主窗口来照顾宠物。",
         "title": "仅限桌面端",
-        "unsupportedHost": "桌宠仅在 Cognia 桌面客户端可用。请打开桌面客户端来照顾它。"
+        "unpaired": {
+          "action": "配对桌面端",
+          "description": "宠物住在 Cognia 桌面客户端里。将此设备与桌面端配对后，即可在这里喂养、陪玩并和宠物聊天。",
+          "title": "与桌面端配对"
+        }
       }
     },
     "customize": {
@@ -28377,6 +28494,7 @@
       "preview": {
         "unavailable": "孵化宠物后即可查看实时预览。"
       },
+      "saveFailed": "外观保存失败，请重试。",
       "sound": {
         "description": "音效与免打扰时段。",
         "title": "声音"
@@ -28401,23 +28519,37 @@
       "dayTotals": "{count} 条 · +{xp} XP",
       "empty": "日记还是空的——照顾你的宠物，它的每一天都会记录在这里。",
       "kinds": {
+        "achievementUnlocked": "解锁了一项成就",
+        "birthday": "过了个生日",
         "cleaned": "洗得干干净净",
+        "evolved": "进化了",
         "fed": "吃了一顿饭",
         "goalComplete": "庆祝目标完成",
         "goalProgress": "为目标进展欢呼",
+        "greeting": "打了个招呼",
+        "hatched": "破壳而出",
         "inboundMessage": "注意到新消息",
+        "levelUp": "升级了",
+        "other": "其他动态",
         "petted": "被摸了摸头",
         "played": "一起玩耍",
+        "pluginReward": "获得了插件奖励",
+        "radarReport": "读了一份新的雷达报告",
         "review": "查看了一些结果",
         "scheduledRun": "围观定时任务",
         "scheduledRunStarting": "看到任务启动",
         "slept": "睡了个午觉",
+        "streakDay": "照顾打卡又多了一天",
         "success": "庆祝一次成功",
         "talked": "聊了聊天",
         "teamRun": "围观智能体团队干活",
         "treated": "收到小奖励",
+        "twinMilestone": "注意到一个里程碑",
+        "unwell": "开始不舒服了",
         "workflowRun": "围观工作流运行"
       },
+      "loadOlder": "加载更早的记录",
+      "loadOlderFailed": "更早的记录加载失败，请重试。",
       "loading": "正在翻开日记…",
       "xp": "+{xp} XP"
     },
@@ -28443,6 +28575,41 @@
         "mute": "不再提醒",
         "open": "打开",
         "title": "定时任务到点"
+      }
+    },
+    "outcomes": {
+      "apply": {
+        "success": "已装扮上{item}。"
+      },
+      "failed": "出了点问题，请重试。",
+      "purchase": {
+        "insufficientCoins": "金币不够。",
+        "success": "已购买{item}。"
+      },
+      "refusal": {
+        "coolingDown": "宠物需要歇一会儿，{seconds} 秒后再试。",
+        "itemKindMismatch": "这件物品不适合这种照顾方式。",
+        "itemNotOwned": "你已经没有这件物品了。",
+        "kindNotAllowed": "宠物做不了这件事。",
+        "notHatched": "先让宠物孵化吧。",
+        "rateLimited": "操作太频繁了，稍等一下。",
+        "unavailable": "宠物现在在这里不可用。",
+        "uninitialized": "这台设备上还没有宠物。",
+        "unknownItem": "商店里已经没有这件物品了。"
+      },
+      "remote": {
+        "desktopOnly": "该功能仅在桌面客户端可用。",
+        "disabled": "宠物在桌面端已关闭。",
+        "headlessHost": "此主机没有宠物。请与 Cognia 桌面客户端配对来照顾宠物。",
+        "hostStarting": "桌面端仍在启动宠物，请稍后再试。",
+        "invalidName": "无法使用这个名字。",
+        "notDecor": "该物品需通过照顾动作使用，而不是装扮。",
+        "unavailable": "宠物在桌面端暂不可用。",
+        "uninitialized": "桌面端还没有创建宠物。",
+        "unreachable": "无法连接到桌面端，请检查连接后重试。"
+      },
+      "use": {
+        "success": "已使用{item}。"
       }
     },
     "overlay": {
@@ -28488,6 +28655,7 @@
       "apply": "装扮",
       "balance": "{coins} 金币",
       "buy": "购买",
+      "buyAria": "花 {price} 金币购买{item}",
       "categories": {
         "care": "护理",
         "decor": "装饰",
@@ -35104,6 +35272,7 @@
       "dispatchFailed": "已保存接受的任务，但需要重试调度或由本主机恢复。",
       "failed": "未能完成此决定，请先检查任务状态再重试。",
       "history": "报告历史",
+      "historyOption": "{date} — {verdict}",
       "latest": "最新报告",
       "loading": "正在加载来源…",
       "memory": "记忆",
@@ -47716,6 +47885,7 @@
         },
         "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
         "size": {
+          "description": "桌面上悬浮宠物的大小。应用内宠物的大小在“外观”中单独设置。",
           "label": "桌宠大小（{size}px）"
         },
         "title": "桌面宠物",
@@ -47901,7 +48071,15 @@
       },
       "memory": {
         "clearAction": "清空宠物记忆",
+        "clearConfirm": {
+          "cancel": "取消",
+          "confirm": "清除记忆",
+          "description": "宠物会忘掉它记得的所有对话，此操作无法撤销。",
+          "title": "清除宠物记忆？"
+        },
         "clearDescription": "清除宠物记住的所有对话内容。",
+        "clearFailed": "宠物记忆清除失败，请重试。",
+        "cleared": "已清除宠物记忆。",
         "description": "记住最近的对话并融入回复。仅存本地，上限 200 条。",
         "label": "对话记忆"
       },
@@ -47952,10 +48130,13 @@
         "confirmDescription": "这会永久删除宠物档案、成长进度、背包、日记和对话历史，但保留宠物配置。",
         "confirmTitle": "重置这个宠物档案？",
         "description": "删除所有宠物数据并重新开始。",
+        "done": "宠物档案已重置，一枚新蛋正在等你。",
+        "failed": "宠物档案重置失败，请重试。",
         "label": "重置宠物",
         "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。"
       },
       "size": {
+        "description": "应用内宠物在窗口角落里的大小。桌面悬浮宠物的大小单独设置。",
         "label": "大小（{size}px）"
       },
       "skin": {

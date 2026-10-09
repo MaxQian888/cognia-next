@@ -90234,6 +90234,2218 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_act:
+    post:
+      operationId: internalRpcPetAct
+      tags:
+        - headless-rpc
+      summary: pet_act (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Care for the host pet once. Runs in the host's pet controller, so XP and coins are awarded exactly once
+                there; `idempotencyKey` folds a retried press onto the first answer.
+              required:
+                - action
+                - idempotencyKey
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - fed
+                    - played
+                    - petted
+                    - talked
+                    - slept
+                    - cleaned
+                    - treated
+                itemId:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: An owned consumable to use for this action. Spent only when the controller accepts the action.
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: One per user intent. A retry of the same intent reuses it, so the host answers it once.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - grantedXp
+                      - grantedCoins
+                    properties:
+                      ok:
+                        const: true
+                      grantedXp:
+                        type: integer
+                        minimum: 0
+                      grantedCoins:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                    x-cognia-wire-source: lib/pet/remote/host-dispatch.ts
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_chat_clear:
+    post:
+      operationId: internalRpcPetChatClear
+      tags:
+        - headless-rpc
+      summary: pet_chat_clear (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Forget the host pet's chat history.
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                    properties:
+                      ok:
+                        const: true
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_chat_list:
+    post:
+      operationId: internalRpcPetChatList
+      tags:
+        - headless-rpc
+      summary: pet_chat_list (client.read)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The host pet's chat history, newest page first; each page's items are in chronological order.
+              properties:
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - at
+                        - userText
+                        - reply
+                      properties:
+                        id:
+                          type: string
+                        at:
+                          type: integer
+                          minimum: 0
+                        userText:
+                          type: string
+                        reply:
+                          type: string
+                      additionalProperties: false
+                  nextPageToken:
+                    type: string
+                    description: Opaque. Hand back unchanged as `pageToken` to read the next (older) page; absent on the last page.
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_chat_send:
+    post:
+      operationId: internalRpcPetChatSend
+      tags:
+        - headless-rpc
+      summary: pet_chat_send (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: One chat turn with the host pet, answered by the host's model settings behind its PII gate and rate limit.
+              required:
+                - text
+                - locale
+                - idempotencyKey
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                locale:
+                  type: string
+                  enum:
+                    - en
+                    - zh-CN
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: One per user intent. A retry of the same intent reuses it, so the host answers it once.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - status
+                      - reply
+                    properties:
+                      ok:
+                        const: true
+                      status:
+                        const: replied
+                      reply:
+                        type: string
+                      emotion:
+                        type: string
+                        enum:
+                          - happy
+                          - levelUp
+                          - sad
+                          - surprised
+                          - love
+                          - sleepy
+                          - wave
+                        description: The one-shot the reply's emotion tag plays on the desktop pet (`excited` plays `levelUp`).
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - ok
+                      - status
+                      - reason
+                    properties:
+                      ok:
+                        const: true
+                      status:
+                        const: degraded
+                      reason:
+                        type: string
+                        enum:
+                          - disabled
+                          - pii
+                          - rateLimited
+                          - noClient
+                          - empty
+                          - error
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - ok
+                      - status
+                    properties:
+                      ok:
+                        const: true
+                      status:
+                        const: pending
+                    additionalProperties: false
+                    description: The reply outlived the bridge window; it lands in `pet_chat_list` when it arrives.
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_get:
+    post:
+      operationId: internalRpcPetGet
+      tags:
+        - headless-rpc
+      summary: pet_get (client.read)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "Read the host pet's live snapshot: availability, the PII-safe summary with per-action cooldowns,
+                presentation flags and the host clock."
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - availability
+                  - summary
+                  - presentation
+                  - hostTime
+                properties:
+                  availability:
+                    type: object
+                    required:
+                      - available
+                    properties:
+                      available:
+                        type: boolean
+                      reason:
+                        type: string
+                        enum:
+                          - unsupported-host
+                          - secondary-window
+                          - disabled
+                          - headless-host
+                          - host-starting
+                    additionalProperties: false
+                  summary:
+                    oneOf:
+                      - type: "null"
+                      - type: object
+                        required:
+                          - hatched
+                          - name
+                          - level
+                          - stage
+                          - xp
+                          - mood
+                          - needs
+                          - condition
+                          - coins
+                          - streak
+                          - cooldowns
+                        properties:
+                          hatched:
+                            type: boolean
+                          name:
+                            type:
+                              - string
+                              - "null"
+                          level:
+                            type: integer
+                            minimum: 1
+                          stage:
+                            type: string
+                            enum:
+                              - egg
+                              - baby
+                              - juvenile
+                              - adult
+                              - elder
+                          xp:
+                            type: integer
+                            minimum: 0
+                          mood:
+                            type: string
+                          needs:
+                            type: object
+                            required:
+                              - energy
+                              - mood
+                              - bond
+                            properties:
+                              energy:
+                                type: number
+                              mood:
+                                type: number
+                              bond:
+                                type: number
+                            additionalProperties: false
+                          condition:
+                            type: string
+                          coins:
+                            type: integer
+                            minimum: 0
+                          streak:
+                            type: object
+                            required:
+                              - days
+                              - lastDay
+                              - multiplier
+                            properties:
+                              days:
+                                type: integer
+                                minimum: 0
+                              lastDay:
+                                type:
+                                  - string
+                                  - "null"
+                              multiplier:
+                                type: number
+                            additionalProperties: false
+                          cooldowns:
+                            type: object
+                            description: Milliseconds until each care action is accepted again, measured on the host clock; 0 means ready.
+                            additionalProperties:
+                              type: integer
+                              minimum: 0
+                        additionalProperties: false
+                  presentation:
+                    oneOf:
+                      - type: "null"
+                      - type: object
+                        required:
+                          - requestedSkinId
+                          - desktopVisible
+                          - llmSpeakEnabled
+                          - chatEnabled
+                        properties:
+                          requestedSkinId:
+                            type: string
+                          desktopVisible:
+                            type: boolean
+                          llmSpeakEnabled:
+                            type: boolean
+                          chatEnabled:
+                            type: boolean
+                        additionalProperties: false
+                  hostTime:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
+                description: The host pet as a paired device may see it. `summary` is null until the host has a pet profile;
+                  `presentation` is null on a headless brain.
+                x-cognia-wire-source: lib/pet/remote/host-snapshot.ts
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_item_apply:
+    post:
+      operationId: internalRpcPetItemApply
+      tags:
+        - headless-rpc
+      summary: pet_item_apply (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Apply an owned decor item's cosmetic. Consumables are used through `pet_act` with `itemId`.
+              required:
+                - itemId
+              properties:
+                itemId:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                    properties:
+                      ok:
+                        const: true
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_item_purchase:
+    post:
+      operationId: internalRpcPetItemPurchase
+      tags:
+        - headless-rpc
+      summary: pet_item_purchase (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - itemId
+                - qty
+                - idempotencyKey
+              properties:
+                itemId:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                qty:
+                  type: integer
+                  minimum: 1
+                  maximum: 99
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: One per user intent. A retry of the same intent reuses it, so the host answers it once.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - coins
+                    properties:
+                      ok:
+                        const: true
+                      coins:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                    description: "`coins` is the balance after the purchase."
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_rename:
+    post:
+      operationId: internalRpcPetRename
+      tags:
+        - headless-rpc
+      summary: pet_rename (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  description: Whitespace is collapsed and the result clamped to the pet name limit on the host.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - name
+                    properties:
+                      ok:
+                        const: true
+                      name:
+                        type: string
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/pet_soul_generate:
+    post:
+      operationId: internalRpcPetSoulGenerate
+      tags:
+        - headless-rpc
+      summary: pet_soul_generate (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Hatch the host pet's egg. Single-flight on the host; answers `pending` when generation outlives the bridge
+                window, and the hatch lands on its own.
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - state
+                    properties:
+                      ok:
+                        const: true
+                      state:
+                        type: string
+                        enum:
+                          - hatched
+                          - pending
+                          - already-hatched
+                    additionalProperties: false
+                    description: "`pending`: generation is still running on the host and will land on its own; read `pet_get` again."
+                  - type: object
+                    required:
+                      - ok
+                      - refusal
+                    properties:
+                      ok:
+                        const: false
+                      refusal:
+                        type: object
+                        required:
+                          - code
+                        properties:
+                          code:
+                            type: string
+                            enum:
+                              - unavailable
+                              - rate-limited
+                              - kind-not-allowed
+                              - unknown-item
+                              - item-not-owned
+                              - item-kind-mismatch
+                              - uninitialized
+                              - not-hatched
+                              - cooling-down
+                              - headless-host
+                              - host-starting
+                              - insufficient-coins
+                              - not-decor
+                              - invalid-name
+                              - hatch-failed
+                          reason:
+                            type: string
+                            enum:
+                              - unsupported-host
+                              - secondary-window
+                              - disabled
+                              - headless-host
+                              - host-starting
+                          kind:
+                            type: string
+                          itemId:
+                            type: string
+                          itemKind:
+                            type: string
+                          retryAfterMs:
+                            type: integer
+                            minimum: 0
+                        additionalProperties: false
+                        description: "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no
+                          pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest
+                          mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`."
+                        x-cognia-wire-source: lib/pet/remote/types.ts
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/plugin_activate_vscode:
     post:
       operationId: internalRpcPluginActivateVscode
@@ -122095,6 +124307,11 @@ paths:
                     - botInstallations
                     - botEventDeliveries
                     - sessionFolders
+                    - petProfile
+                    - petAchievements
+                    - petInventory
+                    - petCharacterBindings
+                    - petActivityLog
                   description: |
                     Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live
                     registry: `sync_registry.rs::default_tables`, listable via
@@ -122107,7 +124324,8 @@ paths:
                   type: integer
                   format: int64
                   default: 0
-                  description: Last cursor the phone received (ms epoch). Pass `0` for a full pull.
+                  description: "Last cursor the phone received: ms epoch for every table except `petActivityLog`, which is cursored on its
+                    numeric row id. Pass `0` for a full pull."
                 content_protocol_version:
                   type: integer
                   minimum: 0
@@ -156975,6 +159193,15 @@ components:
           - perf_trace_close
           - perf_trace_open
           - perf_trace_read_chunk
+          - pet_act
+          - pet_chat_clear
+          - pet_chat_list
+          - pet_chat_send
+          - pet_get
+          - pet_item_apply
+          - pet_item_purchase
+          - pet_rename
+          - pet_soul_generate
           - plugin_activate_vscode
           - plugin_api_batch_invoke
           - plugin_api_invoke
@@ -157530,10 +159757,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 745
-  generatedRequestSchemaCount: 745
+  internalCommandCount: 754
+  generatedRequestSchemaCount: 754
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 745
+  contractRequestSchemaCount: 754
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 745
+  generatedResponseSchemaCount: 754
   loopbackOnly: true

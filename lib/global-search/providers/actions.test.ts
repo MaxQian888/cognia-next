@@ -5,6 +5,7 @@ const hostDefaults: ReturnType<typeof makeTestContext>["host"] = {
   reachableSettingsSections: new Set(),
   recorderAvailable: false,
   petHostAvailable: false,
+  petConsoleReachable: false,
   theme: "light",
   hasApiKey: false,
   pluginQuickActions: [],
@@ -73,7 +74,7 @@ describe("actions provider", () => {
     expect(off.some((c) => c.id === "toggle-desktop-pet")).toBe(false)
     expect(off.some((c) => c.id === "open-pet-console")).toBe(false)
 
-    const on = actionCandidates(host({ petHostAvailable: true }))
+    const on = actionCandidates(host({ petHostAvailable: true, petConsoleReachable: true }))
     expect(on.find((c) => c.id === "toggle-desktop-pet")).toMatchObject({
       title: "globalSearch.actions.toggleDesktopPet",
     })
@@ -83,6 +84,14 @@ describe("actions provider", () => {
     })
     // Hidden rather than disabled where they cannot run, so no greyed row.
     expect(on.find((c) => c.id === "toggle-desktop-pet")!.extra).toBeUndefined()
+  })
+
+  // ADR-0219: a paired phone or browser opens the console to care for the
+  // desktop's pet, but summoning the pet onto a desktop stays the desktop's.
+  it("opens the console on a client paired for remote pet care, without the desktop toggle", () => {
+    const remote = actionCandidates(host({ petHostAvailable: false, petConsoleReachable: true }))
+    expect(remote.some((c) => c.id === "open-pet-console")).toBe(true)
+    expect(remote.some((c) => c.id === "toggle-desktop-pet")).toBe(false)
   })
 
   describe("navigation customization", () => {

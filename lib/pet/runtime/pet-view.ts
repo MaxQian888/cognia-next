@@ -34,12 +34,21 @@ export interface PetView {
   condition: PetCondition
 }
 
+/**
+ * The pet's generated body. A companion mirror carries the host's bones in
+ * `mirroredBones` because its fingerprint is a sentinel (see `PetProfile`);
+ * everywhere else they are regenerated from the fingerprint, deterministically.
+ */
+export function profileBones(profile: PetProfile): PetBones {
+  return profile.mirroredBones ?? generateBones(profile.accountFingerprint)
+}
+
 export function computePetView(
   profile: PetProfile,
   binding: PetCharacterBinding | null | undefined,
   now: number
 ): PetView {
-  const bones = generateBones(profile.accountFingerprint)
+  const bones = profileBones(profile)
   const needs = applyDecay(profile.needs, now)
   const { care } = deriveCareState({ needs, prev: profile.care, now })
   return {

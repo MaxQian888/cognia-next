@@ -68,6 +68,21 @@ describe("PetActionGrid", () => {
     expect(h.onSleep).not.toHaveBeenCalled()
   })
 
+  // Remote care (ADR-0219): the desktop's cooldowns, not this device's gate.
+  it("uses the caller's cooldowns over this device's own gate when given", () => {
+    remainingMs = { fed: 9000 }
+    render(
+      <PetActionGrid
+        {...makeHandlers()}
+        talkOpen={false}
+        cooldownRemaining={(kind) => (kind === "played" ? 2000 : 0)}
+      />
+    )
+    expect(document.querySelector('[data-action="fed"]')).not.toBeDisabled()
+    expect(document.querySelector('[data-action="played"]')).toBeDisabled()
+    expect(screen.getByTestId("pet-cooldown-played").textContent).toBe("2")
+  })
+
   it("renders a ready action as clickable", () => {
     remainingMs = {}
     const h = setup()
@@ -82,5 +97,17 @@ describe("PetActionGrid", () => {
     const h = setup()
     fireEvent.click(screen.getByLabelText("Talk"))
     expect(h.onToggleTalk).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives the console a comfortable size with 44px+ targets", () => {
+    render(<PetActionGrid {...makeHandlers()} talkOpen={false} size="comfortable" />)
+    expect(screen.getByTestId("pet-action-grid")).toHaveAttribute("data-size", "comfortable")
+    expect(document.querySelector('[data-action="fed"]')).toHaveClass("min-h-14")
+  })
+
+  it("stays compact by default for the popup", () => {
+    setup()
+    expect(screen.getByTestId("pet-action-grid")).toHaveAttribute("data-size", "compact")
+    expect(document.querySelector('[data-action="fed"]')).not.toHaveClass("min-h-14")
   })
 })

@@ -131,7 +131,15 @@
     "speciesFor": "{name} 的物种",
     "spriteOption": "精灵图 · {name}",
     "useGlobal": "使用全局宠物",
-    "useSvg": "内置矢量吉祥物"
+    "useSvg": "内置矢量吉祥物",
+    "clearConfirm": {
+      "cancel": "取消",
+      "confirm": "清除绑定",
+      "description": "该角色将恢复使用全局宠物，物种和皮肤的覆盖设置都会被移除。",
+      "title": "清除 {name} 的宠物绑定？"
+    },
+    "cleared": "{name} 已恢复使用全局宠物。",
+    "saveFailed": "角色绑定保存失败，请重试。"
   },
   "bubbleAction": {
     "openConsole": "打开{tab}"
@@ -218,7 +226,8 @@
     "enableCta": {
       "action": "开启聊天",
       "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
-      "title": "开启宠物聊天"
+      "title": "开启宠物聊天",
+      "failed": "未能开启宠物聊天，请重试。"
     },
     "openFullChat": "打开完整对话",
     "openPanel": "聊天",
@@ -241,7 +250,8 @@
     }
   },
   "condition": {
-    "unwell": "需要照顾"
+    "unwell": "需要照顾",
+    "recoveryHint": "想让它恢复，就把精力和心情都提升到 {threshold} 以上：让它睡一觉、陪它玩，或者喂点零食。商店里的急救包能让它恢复得更快。"
   },
   "console": {
     "groups": {
@@ -272,9 +282,106 @@
     },
     "title": "你的宠物",
     "unavailable": {
-      "unsupportedHost": "桌宠仅在 Cognia 桌面客户端可用。请打开桌面客户端来照顾它。",
       "title": "仅限桌面端",
-      "backToChat": "返回聊天"
+      "backToChat": "返回聊天",
+      "secondaryWindow": "宠物控制台在 Cognia 主窗口中打开。请切换到主窗口来照顾宠物。",
+      "unpaired": {
+        "title": "与桌面端配对",
+        "description": "宠物住在 Cognia 桌面客户端里。将此设备与桌面端配对后，即可在这里喂养、陪玩并和宠物聊天。",
+        "action": "配对桌面端"
+      },
+      "hostOutdated": {
+        "title": "请更新桌面客户端",
+        "description": "与此设备配对的桌面端暂时无法共享宠物。请更新 Cognia 桌面客户端（如已关闭请先打开），然后再回到这里。"
+      }
+    },
+    "desktopToggle": {
+      "failed": "切换桌面宠物失败，请重试。",
+      "openFailed": "桌面宠物未能打开。"
+    },
+    "hatchFailed": "孵化失败，请重试。",
+    "hatching": "正在孵化…可能需要几秒钟。",
+    "insights": {
+      "captureDescription": "你采集的网页和笔记会成为雷达分析的素材，可以在这里选择采集哪些内容。",
+      "captureTitle": "采集来源"
+    },
+    "nurture": {
+      "care": "照顾",
+      "stats": "档案",
+      "status": "宠物现在的状态",
+      "wallet": "钱包"
+    },
+    "renameFailed": "改名失败，请重试。",
+    "stages": {
+      "adult": "成年",
+      "baby": "幼年",
+      "egg": "蛋",
+      "elder": "老年",
+      "juvenile": "少年"
+    },
+    "tabLoading": "加载中…",
+    "desktopOnly": {
+      "badge": "桌面端",
+      "title": "「{tab}」在桌面端使用",
+      "why": "它依赖保存在桌面端的皮肤、模型和插件，因此无法在此设备上运行。",
+      "remedy": "请在桌面端打开 Cognia，进入 宠物 → {tab}。",
+      "what": {
+        "customize": "修改宠物的物种、配色、皮肤和大小。",
+        "insights": "查看雷达从你的活动中发现的内容，并选择要捕获的来源。",
+        "plugins": "桌面端插件为宠物控制台添加的面板。"
+      }
+    },
+    "chat": {
+      "clear": "清空对话",
+      "cleared": "对话已清空。",
+      "clearFailed": "无法清空对话，请重试。",
+      "clearConfirm": {
+        "title": "清空对话？",
+        "description": "与宠物的所有消息都会被删除。宠物的等级、心情和照顾记录会保留。",
+        "cancel": "取消",
+        "confirm": "清空"
+      }
+    },
+    "remote": {
+      "band": {
+        "connected": "正在照顾桌面端的宠物",
+        "updated": "更新于 {time}",
+        "neverUpdated": "尚未更新",
+        "loading": "正在连接桌面端…",
+        "connecting": "正在重新连接桌面端",
+        "offline": "桌面端离线",
+        "showingMirror": "显示最近一次同步的状态",
+        "unreachable": "无法连接到桌面端",
+        "invalid": "桌面端返回了此应用无法识别的内容，请更新两端应用。",
+        "hostStarting": "桌面端正在启动宠物",
+        "disabled": "宠物在桌面端已关闭",
+        "headless": "此主机没有宠物",
+        "unavailable": "宠物在桌面端暂不可用",
+        "retry": "重试",
+        "retrying": "正在重试…",
+        "connectionSettings": "连接设置"
+      },
+      "simplifiedLook": "此设备显示简化外观，桌面端会显示完整皮肤。",
+      "desktopVisible": "在桌面上",
+      "desktopHidden": "已隐藏",
+      "careRewarded": "+{xp} 经验 · +{coins} 金币",
+      "careDone": "宠物感受到了。",
+      "hatchPending": "正在桌面端孵化，宠物很快就会出现在这里。",
+      "chatPending": "宠物还在思考，回复会显示在这里。",
+      "chatLoadFailed": "无法从桌面端加载对话。",
+      "chatOff": {
+        "title": "宠物聊天已关闭",
+        "body": "请在 Cognia 桌面客户端的宠物设置中开启宠物聊天，之后即可在这里和宠物聊天。宠物蛋需要先孵化。"
+      },
+      "binding": {
+        "readOnly": "角色的宠物外观需在桌面端编辑。",
+        "live2d": "Live2D 模型",
+        "sprite": "精灵包"
+      },
+      "noPet": {
+        "title": "桌面端还没有宠物",
+        "description": "先打开一次 Cognia 桌面客户端来创建宠物，然后再回到这里。"
+      }
     }
   },
   "customize": {
@@ -360,7 +467,8 @@
     "sound": {
       "description": "音效与免打扰时段。",
       "title": "声音"
-    }
+    },
+    "saveFailed": "外观保存失败，请重试。"
   },
   "dex": {
     "live2dEmpty": "还没有 Live2D 模型。从「自定义 → 外观」导入后即可在此看到。",
@@ -393,10 +501,24 @@
       "talked": "聊了聊天",
       "teamRun": "围观智能体团队干活",
       "treated": "收到小奖励",
-      "workflowRun": "围观工作流运行"
+      "workflowRun": "围观工作流运行",
+      "achievementUnlocked": "解锁了一项成就",
+      "birthday": "过了个生日",
+      "evolved": "进化了",
+      "greeting": "打了个招呼",
+      "hatched": "破壳而出",
+      "levelUp": "升级了",
+      "other": "其他动态",
+      "pluginReward": "获得了插件奖励",
+      "radarReport": "读了一份新的雷达报告",
+      "streakDay": "照顾打卡又多了一天",
+      "twinMilestone": "注意到一个里程碑",
+      "unwell": "开始不舒服了"
     },
     "loading": "正在翻开日记…",
-    "xp": "+{xp} XP"
+    "xp": "+{xp} XP",
+    "loadOlder": "加载更早的记录",
+    "loadOlderFailed": "更早的记录加载失败，请重试。"
   },
   "live2d": {
     "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
@@ -556,7 +678,8 @@
     },
     "owned": "×{qty}",
     "streak": "连续照顾 {days} 天",
-    "use": "使用"
+    "use": "使用",
+    "buyAria": "花 {price} 金币购买{item}"
   },
   "species": {
     "axolotl": "六角恐龙",
@@ -609,5 +732,44 @@
     "minimize": "最小化宠物",
     "restore": "显示宠物",
     "toggle": "打开宠物"
+  },
+  "achievementsProgress": {
+    "summary": "已解锁 {unlocked} / {total}",
+    "title": "已解锁"
+  },
+  "outcomes": {
+    "apply": {
+      "success": "已装扮上{item}。"
+    },
+    "failed": "出了点问题，请重试。",
+    "purchase": {
+      "insufficientCoins": "金币不够。",
+      "success": "已购买{item}。"
+    },
+    "refusal": {
+      "coolingDown": "宠物需要歇一会儿，{seconds} 秒后再试。",
+      "itemKindMismatch": "这件物品不适合这种照顾方式。",
+      "itemNotOwned": "你已经没有这件物品了。",
+      "kindNotAllowed": "宠物做不了这件事。",
+      "notHatched": "先让宠物孵化吧。",
+      "rateLimited": "操作太频繁了，稍等一下。",
+      "uninitialized": "这台设备上还没有宠物。",
+      "unknownItem": "商店里已经没有这件物品了。",
+      "unavailable": "宠物现在在这里不可用。"
+    },
+    "use": {
+      "success": "已使用{item}。"
+    },
+    "remote": {
+      "headlessHost": "此主机没有宠物。请与 Cognia 桌面客户端配对来照顾宠物。",
+      "hostStarting": "桌面端仍在启动宠物，请稍后再试。",
+      "notDecor": "该物品需通过照顾动作使用，而不是装扮。",
+      "invalidName": "无法使用这个名字。",
+      "disabled": "宠物在桌面端已关闭。",
+      "unavailable": "宠物在桌面端暂不可用。",
+      "uninitialized": "桌面端还没有创建宠物。",
+      "unreachable": "无法连接到桌面端，请检查连接后重试。",
+      "desktopOnly": "该功能仅在桌面客户端可用。"
+    }
   }
 }

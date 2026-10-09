@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { levelProgress } from "@/lib/pet/xp/leveling"
+import { WELL_RECOVERY_THRESHOLD } from "@/lib/pet/care/condition"
 import type { PetCondition, PetMood } from "@/types/pet"
 import { NeedBar } from "./need-bar"
 
@@ -24,6 +25,12 @@ export interface PetVitalsCardProps {
   condition?: PetCondition
   className?: string
   variant?: "outlined" | "flat"
+  /**
+   * Spell out how to bring an unwell pet back, under the chips. Off in the
+   * compact panel, which has to stay popup-short; there the same sentence
+   * rides the chip's tooltip instead.
+   */
+  recoveryHint?: boolean
 }
 
 export function PetVitalsCard({
@@ -33,9 +40,13 @@ export function PetVitalsCard({
   condition,
   className,
   variant = "outlined",
+  recoveryHint = false,
 }: PetVitalsCardProps) {
   const t = useTranslations("pet")
   const progress = levelProgress(xp)
+  // "Needs care" alone named the problem without the way out: recovery is not
+  // one action, it is energy AND mood back above the hysteresis threshold.
+  const hint = t("condition.recoveryHint", { threshold: WELL_RECOVERY_THRESHOLD })
 
   return (
     <div
@@ -56,13 +67,19 @@ export function PetVitalsCard({
             </Badge>
           )}
           {condition === "unwell" && (
-            <Badge data-testid="pet-condition-chip" variant="destructive">
+            <Badge data-testid="pet-condition-chip" variant="destructive" title={hint}>
               <HeartPulseIcon className="size-3" />
               {t("condition.unwell")}
             </Badge>
           )}
         </div>
       )}
+
+      {condition === "unwell" && recoveryHint ? (
+        <p data-testid="pet-condition-hint" className="text-xs text-pretty text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
 
       <div>
         <div className="mb-1 flex items-center justify-between text-xs">

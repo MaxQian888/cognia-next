@@ -208,21 +208,22 @@ async function spendItem(
 
 /**
  * Ask the controller's own durable state whether it would accept a driven
- * nurture right now, BEFORE anything is spent.
+ * nurture of `kind` right now, BEFORE anything is spent.
  *
  * The controller stays the authority (it re-checks on the event), but it can
  * only drop an event after the fact: the ledger was already charged, the item
  * already decremented, and the caller already told it was granted rewards that
- * were never applied. A `user` subject is exempt, as from the ledger: its
- * refusal is answered by the controller's own cooldown bubble. Kinds without a
- * cooldown are ambient and pass.
+ * were never applied. Kinds without a cooldown are ambient and pass.
+ *
+ * Exported without a subject because spending is what makes the precheck
+ * necessary, not who is asking: the shop's `consumeItem` is a `user` action
+ * and still loses the item when the controller then drops its event.
  */
-async function checkControllerWouldAccept(
-  subject: PetAccessSubject,
+export async function checkInteractionAccepted(
   kind: string,
-  deps: PetAccessDeps
+  deps: Pick<PetAccessDeps, "getProfile" | "now"> = {}
 ): Promise<PetRefusal | null> {
-  if (subject.kind === "user" || INTERACTION_COOLDOWN_MS[kind] === undefined) return null
+  if (INTERACTION_COOLDOWN_MS[kind] === undefined) return null
   const profile = await (deps.getProfile ?? getPetProfile)()
   if (!profile) return { code: "uninitialized" }
   if (!profile.soul) return { code: "not-hatched" }
@@ -233,6 +234,21 @@ async function checkControllerWouldAccept(
     now
   )
   return retryAfterMs > 0 ? { code: "cooling-down", kind, retryAfterMs } : null
+}
+
+/**
+ * The subject-aware form. A `user` subject is exempt, as from the ledger: its
+ * refusal is answered by the controller's own cooldown bubble, unless it is
+ * about to spend an item, which the bubble cannot give back.
+ */
+async function checkControllerWouldAccept(
+  subject: PetAccessSubject,
+  kind: string,
+  deps: PetAccessDeps,
+  spendsItem = false
+): Promise<PetRefusal | null> {
+  if (subject.kind === "user" && !spendsItem) return null
+  return checkInteractionAccepted(kind, deps)
 }
 
 /** Remaining daily reward allowance for a subject. */
@@ -268,10 +284,12 @@ export async function requestPetInteraction(
   const limited = checkBurst(subjectKey, "pet:interact", deps)
   if (limited) return { ok: false, refusal: limited }
 
-  // Not awaited for a `user` subject (exempt anyway): a hotkey's event still
-  // reaches the bus in the same tick, the way the command registry always did.
-  if (subject.kind !== "user") {
-    const notNow = await checkControllerWouldAccept(subject, kind, deps)
+  // Not awaited for a bare `user` subject (exempt anyway): a hotkey's event
+  // still reaches the bus in the same tick, the way the command registry
+  // always did. A user spending an item waits, because a dropped event would
+  // otherwise cost them the item.
+  if (subject.kind !== "user" || opts.itemId) {
+    const notNow = await checkControllerWouldAccept(subject, kind, deps, Boolean(opts.itemId))
     if (notNow) return { ok: false, refusal: notNow }
   }
 

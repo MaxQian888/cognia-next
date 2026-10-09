@@ -97,6 +97,10 @@ jest.mock("@/lib/work-submission/paired-turn-adapter", () => ({
   dispatchPairedTurnCommand: jest.fn(async () => ({ admitted: true, submissionId: "work:r" })),
 }))
 
+jest.mock("@/lib/pet/remote/host-dispatch", () => ({
+  dispatchPetHostCommand: jest.fn(async () => ({ ok: true, grantedXp: 3, grantedCoins: 1 })),
+}))
+
 import { dispatchCommand } from "./desktop-write-source"
 
 const workflows = jest.requireMock("@/lib/db/workflows") as Record<string, jest.Mock>
@@ -441,5 +445,39 @@ describe("dispatchCommand: the two Router + Fusion gateway families", () => {
     await expect(dispatchCommand("router_fusion_run_teleport", {})).rejects.toThrow(
       /unknown desktop-write command/i
     )
+  })
+})
+
+describe("dispatchCommand: pet_*", () => {
+  it("delegates the remote pet care family wholesale, payload untouched", async () => {
+    const pet = jest.requireMock("@/lib/pet/remote/host-dispatch") as Record<string, jest.Mock>
+    const payload = { action: "fed", idempotencyKey: "k", callerDeviceId: "phone" }
+    await expect(dispatchCommand("pet_act", payload)).resolves.toEqual({
+      ok: true,
+      grantedXp: 3,
+      grantedCoins: 1,
+    })
+    expect(pet.dispatchPetHostCommand).toHaveBeenCalledWith("pet_act", payload)
+    for (const command of [
+      "pet_get",
+      "pet_rename",
+      "pet_item_purchase",
+      "pet_item_apply",
+      "pet_soul_generate",
+      "pet_chat_send",
+      "pet_chat_list",
+      "pet_chat_clear",
+    ]) {
+      await dispatchCommand(command, { callerDeviceId: "phone" })
+      expect(pet.dispatchPetHostCommand).toHaveBeenLastCalledWith(command, {
+        callerDeviceId: "phone",
+      })
+    }
+  })
+
+  it("leaves the overlay window's pet_window_* commands to their own arms", async () => {
+    const pet = jest.requireMock("@/lib/pet/remote/host-dispatch") as Record<string, jest.Mock>
+    await expect(dispatchCommand("pet_window_get_position", {})).rejects.toThrow()
+    expect(pet.dispatchPetHostCommand).not.toHaveBeenCalled()
   })
 })

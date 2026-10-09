@@ -1,9 +1,11 @@
 "use client"
 
-import { useSyncExternalStore } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   BrushIcon,
+  Loader2Icon,
   HeartPulseIcon,
   MessageCircleIcon,
   MonitorIcon,
@@ -102,6 +104,22 @@ export function PetCustomizationWorkspace() {
       enabled,
       desktopPet: { ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: false },
     }))
+  }
+
+  // Reset wipes every pet table; it used to run with no sign it had finished
+  // or failed. Rendered in both the console and Settings → Pet, so the
+  // feedback lives here rather than in either host.
+  const [resetting, setResetting] = useState(false)
+  const reset = async () => {
+    setResetting(true)
+    try {
+      await resetPet()
+      toast.success(t("reset.done"))
+    } catch {
+      toast.error(t("reset.failed"))
+    } finally {
+      setResetting(false)
+    }
   }
 
   const { profile, view } = usePet()
@@ -234,7 +252,14 @@ export function PetCustomizationWorkspace() {
           action={
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button type="button" size="sm" variant="destructive">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  disabled={resetting}
+                  aria-busy={resetting || undefined}
+                >
+                  {resetting ? <Loader2Icon className="size-3.5 animate-spin" aria-hidden /> : null}
                   {t("reset.action")}
                 </Button>
               </AlertDialogTrigger>
@@ -245,7 +270,7 @@ export function PetCustomizationWorkspace() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
-                  <AlertDialogAction variant="destructive" onClick={() => void resetPet()}>
+                  <AlertDialogAction variant="destructive" onClick={() => void reset()}>
                     {t("reset.confirm")}
                   </AlertDialogAction>
                 </AlertDialogFooter>

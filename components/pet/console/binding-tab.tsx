@@ -1,9 +1,37 @@
+// Characters tab: per-character pet overrides (species and skin). A session
+// whose character has a binding shows that look instead of the global one.
+//
+// Reads through `listPetBindingsWithCharacters` (one query, one loading
+// state) instead of the raw character table, so pack characters and variants
+// appear the way the rest of the app names them. Every write reports its
+// failure, and clearing a character's whole binding asks first: it drops the
+// species and the skin together.
+//
+// Read-only when caring for the desktop pet from a paired phone (ADR-0219):
+// the bindings are mirrored so the phone can show them, but editing one is a
+// desktop write no `pet_*` arm carries, and the Live2D models and sprite packs
+// a binding names exist only on the desktop. The rows then state each
+// character's look as text, under a line saying where to change it.
+
 "use client"
 
+import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
-import { UsersIcon } from "lucide-react"
+import { MonitorIcon, UsersIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Combobox,
@@ -30,12 +58,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { deletePetBinding, listPetBindings, upsertPetBinding } from "@/lib/db/pet"
+import { deletePetBinding, listPetBindingsWithCharacters, upsertPetBinding } from "@/lib/db/pet"
 import { listPetModels } from "@/lib/db/pet-models"
 import { listPetSpritePacks } from "@/lib/db/pet-sprite-packs"
-import { getDb } from "@/lib/db/schema"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import type { PetCharacterBinding, PetSkinSelection, PetSpecies } from "@/types/pet"
+import { PetTabSkeleton } from "./pet-console-skeleton"
 
 const INHERIT = "__inherit__"
 const GLOBAL_SPECIES = "__global__"
@@ -55,13 +83,39 @@ function parseSelection(value: string | null): PetSkinSelection | undefined {
   return undefined
 }
 
-export function BindingTab() {
+export interface BindingTabProps {
+  /** Show the bindings without edit controls (remote care, ADR-0219). */
+  readOnly?: boolean
+}
+
+export function BindingTab({ readOnly = false }: BindingTabProps = {}) {
   const t = useTranslations("pet")
-  const characters = useLiveQuery(() => getDb().characters.toArray(), [])
-  const bindings = useLiveQuery(() => listPetBindings(), [])
-  const models = useLiveQuery(() => listPetModels(), [], [])
-  const packs = useLiveQuery(() => listPetSpritePacks(), [], [])
-  const byCharacter = new Map((bindings ?? []).map((binding) => [binding.characterId, binding]))
+  const data = useLiveQuery(() => listPetBindingsWithCharacters(), [])
+  const models = useLiveQuery(() => listPetModels(), [])
+  const packs = useLiveQuery(() => listPetSpritePacks(), [])
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
+
+  if (data === undefined || models === undefined || packs === undefined) {
+    return <PetTabSkeleton testId="pet-binding-loading" count={4} />
+  }
+
+  const { characters, bindings } = data
+  const byCharacter = new Map(bindings.map((binding) => [binding.characterId, binding]))
+
+  const track = async (characterId: string, write: () => Promise<unknown>) => {
+    setPending((prev) => new Set(prev).add(characterId))
+    try {
+      await write()
+    } catch {
+      toast.error(t("binding.saveFailed"))
+    } finally {
+      setPending((prev) => {
+        const next = new Set(prev)
+        next.delete(characterId)
+        return next
+      })
+    }
+  }
 
   const save = (characterId: string, patch: Partial<PetCharacterBinding>) => {
     const current = byCharacter.get(characterId)
@@ -71,14 +125,21 @@ export function BindingTab() {
       characterId,
       updatedAt: new Date().toISOString(),
     }
+    // Nothing left to override: the binding goes rather than lingering empty.
     if (!next.species && !next.eyes && !next.hat && !next.bodyType && !next.palette && !next.skin) {
-      void deletePetBinding(characterId)
+      void track(characterId, () => deletePetBinding(characterId))
       return
     }
-    void upsertPetBinding(next)
+    void track(characterId, () => upsertPetBinding(next))
   }
 
-  if (!characters || characters.length === 0) {
+  const clear = (characterId: string, name: string) =>
+    void track(characterId, async () => {
+      await deletePetBinding(characterId)
+      toast.success(t("binding.cleared", { name }))
+    })
+
+  if (characters.length === 0) {
     return (
       <Empty data-testid="pet-binding-empty">
         <EmptyHeader>
@@ -91,10 +152,60 @@ export function BindingTab() {
     )
   }
 
+  // The look a read-only row names. A model or pack this device does not hold
+  // (they stay on the desktop) is named by its kind rather than misread as
+  // "inherit".
+  const readOnlySkinLabel = (value: string): string => {
+    if (value === INHERIT) return t("binding.inheritAppearance")
+    if (value === "svg") return t("binding.useSvg")
+    if (value.startsWith("live2d:")) {
+      const name = models.find((model) => `live2d:${model.id}` === value)?.name
+      return name ? t("binding.live2dOption", { name }) : t("console.remote.binding.live2d")
+    }
+    const name = packs.find((pack) => `sprite-v2:${pack.id}` === value)?.displayName
+    return name ? t("binding.spriteOption", { name }) : t("console.remote.binding.sprite")
+  }
+
+  if (readOnly) {
+    return (
+      <div data-testid="pet-binding" data-read-only className="flex flex-col gap-3">
+        <p
+          data-testid="pet-binding-read-only"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <MonitorIcon className="size-4 shrink-0" aria-hidden />
+          {t("console.remote.binding.readOnly")}
+        </p>
+        <ItemGroup>
+          {characters.map((character, index) => {
+            const binding = byCharacter.get(character.id)
+            return (
+              <div key={character.id} className="contents">
+                {index > 0 ? <ItemSeparator /> : null}
+                <Item data-character={character.id} className="px-0">
+                  <ItemContent className="min-w-32">
+                    <ItemTitle className="truncate">{character.name}</ItemTitle>
+                  </ItemContent>
+                  <ItemContent className="items-end text-right text-sm text-muted-foreground">
+                    <span>
+                      {binding?.species ? t(`species.${binding.species}`) : t("binding.useGlobal")}
+                    </span>
+                    <span>{readOnlySkinLabel(selectionValue(binding))}</span>
+                  </ItemContent>
+                </Item>
+              </div>
+            )
+          })}
+        </ItemGroup>
+      </div>
+    )
+  }
+
   return (
     <ItemGroup data-testid="pet-binding">
       {characters.map((character, index) => {
         const binding = byCharacter.get(character.id)
+        const busy = pending.has(character.id)
         const skinValue = selectionValue(binding)
         const skinLabel =
           skinValue === INHERIT
@@ -114,6 +225,7 @@ export function BindingTab() {
               </ItemContent>
               <ItemActions className="w-full flex-wrap @xl/pet-pane:w-auto">
                 <Select
+                  disabled={busy}
                   value={binding?.species ?? GLOBAL_SPECIES}
                   onValueChange={(species) =>
                     save(character.id, {
@@ -141,6 +253,7 @@ export function BindingTab() {
                 </Select>
 
                 <Combobox
+                  disabled={busy}
                   value={skinValue}
                   onValueChange={(value: string | null) =>
                     save(character.id, {
@@ -173,13 +286,32 @@ export function BindingTab() {
                   </ComboboxContent>
                 </Combobox>
                 {binding ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void deletePetBinding(character.id)}
-                  >
-                    {t("binding.clear")}
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" disabled={busy}>
+                        {t("binding.clear")}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          {t("binding.clearConfirm.title", { name: character.name })}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t("binding.clearConfirm.description")}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("binding.clearConfirm.cancel")}</AlertDialogCancel>
+                        <AlertDialogAction
+                          variant="destructive"
+                          onClick={() => clear(character.id, character.name)}
+                        >
+                          {t("binding.clearConfirm.confirm")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 ) : null}
               </ItemActions>
             </Item>

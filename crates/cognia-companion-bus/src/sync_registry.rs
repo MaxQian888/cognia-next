@@ -380,6 +380,35 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Bot delivery status projection (no event envelope, no dedupe key; host-owned, never drained by the client)".to_string(),
             has_tombstones: true,
         },
+        // Remote pet care (ADR-0219). The pet lives on the desktop; a paired
+        // phone mirrors these read-only and sends every action back as a
+        // `pet_*` RPC, so the one controller awards it once. Chat history,
+        // Live2D models and sprite packs never cross.
+        SyncTableDescriptor {
+            name: "petProfile".to_string(),
+            description: "The pet singleton as a projection: no account fingerprint (a sentinel stands in) and no proactive counters, with the host-generated bones in mirroredBones; a reset tombstones it".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "petAchievements".to_string(),
+            description: "Unlocked pet achievements (cursored on unlockedAt; a reset tombstones them)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "petInventory".to_string(),
+            description: "Owned pet items (cursored on updatedAt; an item used up to zero tombstones its row)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "petCharacterBindings".to_string(),
+            description: "Per-character pet appearance overrides (wire id is the characterId; edits stay on the desktop)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "petActivityLog".to_string(),
+            description: "Pet interaction ledger (cursored on its numeric id; capped at 2000 rows on both sides without tombstones, a reset is recognised by the profile's createdAt)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -422,6 +451,15 @@ mod tests {
         assert!(r.contains("botDefinitions"));
         assert!(r.contains("botInstallations"));
         assert!(r.contains("botEventDeliveries"));
+        assert!(r.contains("petProfile"));
+        assert!(r.contains("petAchievements"));
+        assert!(r.contains("petInventory"));
+        assert!(r.contains("petCharacterBindings"));
+        assert!(r.contains("petActivityLog"));
+        // Chat history and the model/sprite blobs stay on the host.
+        assert!(!r.contains("petConversationV2"));
+        assert!(!r.contains("petModels"));
+        assert!(!r.contains("petSpritePacks"));
         // No literal total. This was `24` and went stale the moment a table was
         // legitimately added — the same rot `command_manifest.rs` records: a
         // hardcoded inventory count goes red on every correct addition, and a
@@ -473,6 +511,10 @@ mod tests {
             "outboundQueue",
             "botEventDeliveries",
             "sessionState",
+            "petProfile",
+            "petAchievements",
+            "petInventory",
+            "petCharacterBindings",
         ] {
             assert_eq!(by_name.get(name), Some(&true), "{name} must tombstone");
         }
@@ -481,6 +523,7 @@ mod tests {
             "terminalHistory",
             "connectorHeartbeats",
             "executionRuns",
+            "petActivityLog",
         ] {
             assert_eq!(by_name.get(name), Some(&false), "{name} has no tombstones");
         }

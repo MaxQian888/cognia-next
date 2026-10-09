@@ -55,6 +55,7 @@ export function makeTestContext(over: Partial<GlobalSearchContext> = {}): Global
       reachableSettingsSections: new Set(),
       recorderAvailable: false,
       petHostAvailable: true,
+      petConsoleReachable: true,
       theme: "light",
       hasApiKey: false,
       pluginQuickActions: [],

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
 
 const save = jest.fn()
@@ -31,6 +31,7 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   destroyPetWindow: () => destroyPetWindow(),
 }))
 
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 const resetPet = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/pet", () => ({ resetPet: () => resetPet() }))
 // The cross-window writer, reduced to its contract: apply the updater to the
@@ -95,6 +96,7 @@ jest.mock("@/components/platform/capability-gate", () => ({
   CapabilityGate: ({ children }: { children: React.ReactNode }) => children,
 }))
 
+import { toast } from "sonner"
 import { PetCustomizationWorkspace } from "./pet-customization-workspace"
 import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 
@@ -146,12 +148,21 @@ describe("PetCustomizationWorkspace", () => {
     })
   })
 
-  it("requires confirmation before resetting the pet profile", () => {
+  it("requires confirmation before resetting the pet profile, then confirms it", async () => {
     render(<PetCustomizationWorkspace />)
     fireEvent.click(screen.getByRole("button", { name: /reset\.action|reset/i }))
     expect(resetPet).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: /reset pet profile|reset\.confirm/i }))
     expect(resetPet).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+  })
+
+  it("reports a reset that failed", async () => {
+    resetPet.mockRejectedValueOnce(new Error("blocked"))
+    render(<PetCustomizationWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: /reset\.action|reset/i }))
+    fireEvent.click(screen.getByRole("button", { name: /reset pet profile|reset\.confirm/i }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
   })
 
   it("offers a working retry for a recoverable preview runtime failure", () => {

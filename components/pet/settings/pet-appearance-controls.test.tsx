@@ -32,6 +32,11 @@ describe("PetAppearanceControls", () => {
     expect(patch).toHaveBeenCalledWith({ size: expect.any(Number) })
   })
 
+  it("says which pet the size slider sizes", () => {
+    render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
+    expect(screen.getByText(/in-app pet/i)).toBeInTheDocument()
+  })
+
   it("enables gaze following by default and lets the user disable it", () => {
     const patch = jest.fn()
     render(

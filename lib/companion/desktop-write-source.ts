@@ -15,8 +15,9 @@
  *   - headless brain   — `lib/headless/runtimes/desktop-message-source.ts`
  *
  * The command surface is not a fixed list. `dispatchCommand` owns the arms
- * enumerated in its own switch and delegates five families wholesale:
- * `perf_*` (`lib/perf/host-dispatch.ts`), `scheduled_task_*`
+ * enumerated in its own switch and delegates six families wholesale:
+ * `perf_*` (`lib/perf/host-dispatch.ts`), `pet_*` (`lib/pet/remote/host-dispatch.ts`,
+ * remote care of the desktop pet, ADR-0219), `scheduled_task_*`
  * (`lib/scheduler/scheduled-task-rpc.ts`), `workflow_api_*`
  * (`lib/workflow/api/workflow-api-service.ts`), `router_fusion_run_*`
  * (`lib/router-fusion/gate/run-api-bridge.ts`) and `router_fusion_passthrough_*`
@@ -101,6 +102,7 @@ import {
   handleAgentTaskStart,
 } from "@/lib/companion/agent-task-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
+import { isPetRemoteCommand } from "@/lib/pet/remote/commands"
 import { getDb } from "@/lib/db/schema"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -288,6 +290,14 @@ export async function dispatchCommand(
     await import("@/lib/perf/host-dispatch")
   if (isPerformanceHostCommand(command)) {
     return dispatchPerformanceHostCommand(command, payload)
+  }
+  // Remote pet care (ADR-0219). The arms run where the pet controller runs,
+  // so a phone's care action is awarded once, here; on the headless brain
+  // they answer `headless-host`. The name check is the leaf `commands` module;
+  // the arms (and the chat and hatch stacks behind them) load on a `pet_*` call.
+  if (isPetRemoteCommand(command)) {
+    const { dispatchPetHostCommand } = await import("@/lib/pet/remote/host-dispatch")
+    return dispatchPetHostCommand(command, payload)
   }
   // Router + Fusion's Run API (ADR-0188 B2). The gateway serves `/v1/runs` and
   // round-trips every request here, where Dexie is authoritative. The gate

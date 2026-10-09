@@ -1,4 +1,15 @@
-import { PET_ITEMS, getPetItem, petHatItem } from "./item-catalog"
+import {
+  PET_ITEMS,
+  getPetCatalogSnapshot,
+  getPetItem,
+  listAllPetItems,
+  petHatItem,
+  subscribePetCatalog,
+} from "./item-catalog"
+import {
+  __resetPetItemsForTesting,
+  registerPetItem,
+} from "@/lib/plugin/registries/pet-item-registry"
 
 describe("PET_ITEMS catalog invariants", () => {
   it("has unique ids and getPetItem resolves them", () => {
@@ -61,5 +72,36 @@ describe("PET_ITEMS catalog invariants", () => {
   it("keeps hat-granting decor items one-per-hat", () => {
     const hats = PET_ITEMS.filter((i) => i.cosmetic?.hat).map((i) => i.cosmetic!.hat)
     expect(new Set(hats).size).toBe(hats.length)
+  })
+})
+
+describe("getPetCatalogSnapshot", () => {
+  afterEach(() => __resetPetItemsForTesting())
+
+  it("keeps one identity until the plugin registry changes", () => {
+    const first = getPetCatalogSnapshot()
+    expect(getPetCatalogSnapshot()).toBe(first)
+    expect(first).toEqual(listAllPetItems())
+
+    const listener = jest.fn()
+    const unsubscribe = subscribePetCatalog(listener)
+    registerPetItem(
+      "star-cookie",
+      {
+        id: "star-cookie",
+        labels: { en: "Star Cookie" },
+        category: "food",
+        price: 6,
+        consumable: true,
+        interactionKind: "fed",
+      },
+      { pluginId: "p1" }
+    )
+    unsubscribe()
+
+    expect(listener).toHaveBeenCalled()
+    const next = getPetCatalogSnapshot()
+    expect(next).not.toBe(first)
+    expect(next.map((item) => item.id)).toContain("plugin:p1:star-cookie")
   })
 })

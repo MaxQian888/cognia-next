@@ -578,9 +578,13 @@ const HOST_CATEGORIES = [
   {
     id: "sessions",
     title: "Sessions and messages",
-    description: "Chat sessions, messages, conversations, characters, and transcripts.",
+    description:
+      "Chat sessions, messages, conversations, characters, the desktop pet, and transcripts.",
     skill: "cognia-host-sessions",
-    pattern: /^(session_|message_|conversation_|character_|transcript_|thread_handoff_)/,
+    // `pet_` is here: the pet is a companion character the user talks to and
+    // cares for (ADR-0219), and its arms answer from the same renderer Dexie
+    // as the conversation reads, not from a runtime or a job.
+    pattern: /^(session_|message_|conversation_|character_|transcript_|thread_handoff_|pet_)/,
   },
   {
     id: "agents",

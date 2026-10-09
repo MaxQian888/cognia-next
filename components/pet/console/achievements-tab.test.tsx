@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 import { useLiveQuery } from "dexie-react-hooks"
@@ -30,12 +30,22 @@ describe("AchievementsTab", () => {
     )
   })
 
-  it("treats an undefined query result as nothing unlocked", () => {
+  it("waits for the unlocked set instead of greying everything out", () => {
     liveQuery.mockReturnValue(undefined)
     const { container } = render(<AchievementsTab />)
-    expect(container.querySelector('[data-achievement="hatched"]')).toHaveAttribute(
-      "data-unlocked",
-      "false"
+    expect(screen.getByTestId("pet-achievements-loading")).toBeInTheDocument()
+    expect(container.querySelector("[data-achievement]")).toBeNull()
+  })
+
+  it("counts what is unlocked out of the whole catalog", () => {
+    // An unlock for an achievement no longer in the catalog is not counted.
+    liveQuery.mockReturnValue([
+      { id: "hatched", unlockedAt: 1 },
+      { id: "plugin:gone:old", unlockedAt: 2 },
+    ])
+    render(<AchievementsTab />)
+    expect(screen.getByTestId("pet-achievements-progress")).toHaveTextContent(
+      `1 of ${PET_ACHIEVEMENTS.length} unlocked`
     )
   })
 

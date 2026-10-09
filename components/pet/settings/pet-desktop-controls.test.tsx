@@ -80,6 +80,16 @@ describe("PetDesktopControls", () => {
     expect(openPetWindow).not.toHaveBeenCalled()
   })
 
+  it("says which pet the desktop size slider sizes", () => {
+    render(
+      <PetDesktopControls
+        pet={withDesktop({ enabled: true, clickThrough: false, size: 128, position: null })}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getByText(/floating desktop pet/i)).toBeInTheDocument()
+  })
+
   it("disabling destroys the overlay window and records the intent", () => {
     render(
       <PetDesktopControls

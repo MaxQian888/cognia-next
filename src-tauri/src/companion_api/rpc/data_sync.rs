@@ -63,6 +63,15 @@ pub(super) const COMMANDS: &[&str] = &[
     "bot_console_read",
     "bot_run_manual",
     "bot_delivery_replay",
+    "pet_get",
+    "pet_act",
+    "pet_rename",
+    "pet_item_purchase",
+    "pet_item_apply",
+    "pet_soul_generate",
+    "pet_chat_send",
+    "pet_chat_list",
+    "pet_chat_clear",
     "device_capabilities_report",
     "session_mark_read",
     "session_mark_unread",
@@ -778,6 +787,21 @@ pub(super) async fn dispatch(
         | "bot_console_read"
         | "bot_run_manual"
         | "bot_delivery_replay"
+        // Remote pet care (ADR-0219): a paired phone reads and drives the
+        // DESKTOP pet. The TS arms (`lib/pet/remote/host-dispatch.ts`) run in
+        // the renderer that owns the pet controller, so an award happens once,
+        // there; a headless brain answers every one of them `headless-host`.
+        // Each carries an explicit request schema, and the caller id is
+        // injected below because the arms key their idempotency on it.
+        | "pet_get"
+        | "pet_act"
+        | "pet_rename"
+        | "pet_item_purchase"
+        | "pet_item_apply"
+        | "pet_soul_generate"
+        | "pet_chat_send"
+        | "pet_chat_list"
+        | "pet_chat_clear"
         // ADR-0060 — device capability report; TS arm persists onto the
         // caller's `pairedDevices` row (caller id injected below).
         | "device_capabilities_report"
@@ -1152,7 +1176,9 @@ fn wire_offset(offset: u64) -> Result<u32, (StatusCode, Json<RpcError>)> {
 
 /// The bridged list arms that page, and the legacy member each answers its
 /// rows under. `browser_context_list` has no offset underneath, so it is one
-/// page and never issues a token.
+/// page and never issues a token. `pet_chat_list` is deliberately absent: its
+/// TS arm reads `pageSize`/`pageToken` and issues its own token, so
+/// translating them here would page it twice.
 const BRIDGED_PAGED_ARMS: &[(&str, &str, bool)] = &[
     ("workflow_run_list", "runs", true),
     ("memory_list", "memories", false),
@@ -1424,6 +1450,14 @@ mod tests {
 
         // A legacy spelling is refused before anything crosses the bridge.
         assert!(bridged_page_args("workflow_run_list", serde_json::json!({ "limit": 3 })).is_err());
+        // `pet_chat_list` pages natively in its TS arm; its token passes through.
+        let (args, paging) = bridged_page_args(
+            "pet_chat_list",
+            serde_json::json!({ "pageSize": 5, "pageToken": "opaque" }),
+        )
+        .unwrap();
+        assert!(paging.is_none());
+        assert_eq!(args, serde_json::json!({ "pageSize": 5, "pageToken": "opaque" }));
         // Other bridged commands are untouched.
         let (args, paging) =
             bridged_page_args("workflow_create", serde_json::json!({ "a": 1 })).unwrap();

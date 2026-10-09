@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { getMemory } from "@/lib/db/memories"
 import { getCapturedItem } from "@/lib/db/captured-items"
@@ -33,6 +33,8 @@ export function RadarTaskResults({ taskId }: { taskId: string }) {
 
 export function RadarSource({ source }: { source: NonNullable<RadarReport["sources"]>[number] }) {
   const t = useTranslations("radar.decisions")
+  // The app's locale, not the OS default `toLocaleString` would pick.
+  const locale = useLocale()
   const item = useLiveQuery(async () => {
     try {
       if (source.source === "memory") {
@@ -51,7 +53,9 @@ export function RadarSource({ source }: { source: NonNullable<RadarReport["sourc
     <li className="text-xs text-muted-foreground">
       {t(source.source)} ·{" "}
       <time dateTime={new Date(source.at).toISOString()}>
-        {new Date(source.at).toLocaleString()}
+        {new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+          source.at
+        )}
       </time>
       {item === undefined ? (
         <span> — {t("loading")}</span>

@@ -5,11 +5,17 @@
  * 7-dimension info-diet report, a "Run now" trigger, and a folded-in config /
  * schedule section (so radar setup lives with the feature rather than needing a
  * separate Settings-nav entry).
+ *
+ * Dates format in the app's locale (not the OS default `toLocaleString`
+ * picked), the history picker is the shared `Select`, and the report's
+ * sections are `SettingsBlock`s instead of a private look-alike. The report
+ * query answers `null` for "no report", so `undefined` can mean "loading" and
+ * the empty state no longer flashes before a report that exists.
  */
 
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { Loader2Icon, SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
@@ -26,10 +32,19 @@ import {
   FieldTitle,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { getLatestRadarReport, getRadarReport, listRadarReports } from "@/lib/db/radar-reports"
 import { RadarSource, RadarSuggestions } from "./radar-suggestions"
+import { PetTabSkeleton } from "./pet-console-skeleton"
 import { runRadarReport, NoRadarModelError } from "@/lib/radar/radar-runner"
 import { resolveRadarCron, syncRadarCronToScheduler } from "@/lib/radar/radar-cron-bridge"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -40,16 +55,25 @@ import {
   type RadarSettings,
 } from "@/types/radar"
 
+/** Radix `Select` reserves "" for "no value", so "latest" needs a real id. */
+const LATEST_REPORT = "__latest__"
+
 export function RadarPanel() {
   const t = useTranslations("radar")
+  const locale = useLocale()
+  const dateTimeFormat = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
   const [busy, setBusy] = useState(false)
   const [settings, setSettings] = useState<RadarSettings>(DEFAULT_RADAR_SETTINGS)
   const [saving, setSaving] = useState(false)
 
   const [reportId, setReportId] = useState("")
   const reports = useLiveQuery(() => listRadarReports(Number.MAX_SAFE_INTEGER), [])
-  const report = useLiveQuery<RadarReport | undefined>(
-    () => (reportId ? getRadarReport(reportId) : getLatestRadarReport("self")),
+  const report = useLiveQuery<RadarReport | null>(
+    async () =>
+      (reportId ? await getRadarReport(reportId) : await getLatestRadarReport("self")) ?? null,
     [reportId]
   )
 
@@ -137,23 +161,42 @@ export function RadarPanel() {
       </div>
 
       <SettingsStack>
-        <label className="space-y-1 text-sm">
-          <span>{t("decisions.history")}</span>
-          <select
-            className="w-full rounded border bg-background p-2"
-            value={reportId}
-            onChange={(e) => setReportId(e.target.value)}
-          >
-            <option value="">{t("decisions.latest")}</option>
-            {reports?.map((row) => (
-              <option key={row.id} value={row.id}>
-                {new Date(row.generatedAt).toLocaleString()} — {row.verdict}
-              </option>
-            ))}
-          </select>
-        </label>
-        <SettingsBlock title={t("panel.title")}>
-          {report ? (
+        <SettingsBlock title={t("panel.title")} headingLevel={3}>
+          <div className="flex flex-col gap-1.5">
+            <label id="radar-history-label" className="text-sm" htmlFor="radar-history">
+              {t("decisions.history")}
+            </label>
+            <Select
+              value={reportId || LATEST_REPORT}
+              onValueChange={(value) => setReportId(value === LATEST_REPORT ? "" : value)}
+              disabled={reports === undefined}
+            >
+              <SelectTrigger
+                id="radar-history"
+                size="sm"
+                aria-labelledby="radar-history-label"
+                className="w-full @md/settings-stack:w-80"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value={LATEST_REPORT}>{t("decisions.latest")}</SelectItem>
+                  {reports?.map((row) => (
+                    <SelectItem key={row.id} value={row.id}>
+                      {t("decisions.historyOption", {
+                        date: dateTimeFormat.format(row.generatedAt),
+                        verdict: row.verdict,
+                      })}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          {report === undefined ? (
+            <PetTabSkeleton testId="radar-report-loading" variant="report" count={3} />
+          ) : report ? (
             <RadarReportView report={report} t={t} />
           ) : (
             <Empty className="py-8">
@@ -286,37 +329,37 @@ function RadarReportView({
 }) {
   const maxHeat = Math.max(1, ...report.heatmap.map((h) => h.count))
   return (
-    <div className="space-y-3 text-sm">
+    <div className="flex flex-col gap-3 text-sm">
       <Alert>
         <AlertDescription className="font-medium italic">{report.verdict}</AlertDescription>
       </Alert>
 
-      <Section title={t("section.atAGlance")}>
+      <ReportSection title={t("section.atAGlance")}>
         <ul className="list-disc space-y-1 pl-4">
           {report.atAGlance.map((h, i) => (
             <li key={i}>{h}</li>
           ))}
         </ul>
-      </Section>
+      </ReportSection>
 
-      <Section title={t("section.infoDiet")}>
+      <ReportSection title={t("section.infoDiet")}>
         <p className="text-muted-foreground">{report.infoDiet}</p>
-      </Section>
-      <Section title={t("section.subconscious")}>
+      </ReportSection>
+      <ReportSection title={t("section.subconscious")}>
         <p className="text-muted-foreground">{report.subconscious}</p>
-      </Section>
-      <Section title={t("section.blindSpots")}>
+      </ReportSection>
+      <ReportSection title={t("section.blindSpots")}>
         <p className="text-muted-foreground">{report.blindSpots}</p>
-      </Section>
+      </ReportSection>
 
       {report.actions.length > 0 && (
-        <Section title={t("section.actions")}>
+        <ReportSection title={t("section.actions")}>
           <RadarSuggestions report={report} />
-        </Section>
+        </ReportSection>
       )}
 
       {report.graveyard.length > 0 && (
-        <Section title={t("section.graveyard")}>
+        <ReportSection title={t("section.graveyard")}>
           <ul className="space-y-1 text-muted-foreground">
             {report.graveyard.map((g, i) => (
               <li key={i}>
@@ -331,11 +374,11 @@ function RadarReportView({
               </li>
             ))}
           </ul>
-        </Section>
+        </ReportSection>
       )}
 
       {report.topicCloud.length > 0 && (
-        <Section title={t("section.topics")}>
+        <ReportSection title={t("section.topics")}>
           <div className="flex flex-wrap gap-1.5">
             {report.topicCloud.map((tp, i) => (
               <Badge key={i} variant="secondary">
@@ -343,10 +386,10 @@ function RadarReportView({
               </Badge>
             ))}
           </div>
-        </Section>
+        </ReportSection>
       )}
 
-      <Section title={t("section.heatmap")}>
+      <ReportSection title={t("section.heatmap")}>
         <div className="flex items-end gap-0.5" aria-hidden>
           {report.heatmap.map((h) => (
             <div
@@ -357,7 +400,7 @@ function RadarReportView({
             />
           ))}
         </div>
-      </Section>
+      </ReportSection>
 
       <p className="text-[11px] text-muted-foreground">
         {t("panel.meta", { count: report.itemCount, days: report.windowDays })}
@@ -366,13 +409,14 @@ function RadarReportView({
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * One report section: the flat settings block with a real level-4 heading,
+ * nested under the report's own level-3 block.
+ */
+function ReportSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
+    <SettingsBlock title={title} headingLevel={4} contentClassName="mt-1.5 space-y-1.5">
       {children}
-    </div>
+    </SettingsBlock>
   )
 }

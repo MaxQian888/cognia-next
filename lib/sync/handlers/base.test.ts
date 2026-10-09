@@ -399,6 +399,19 @@ describe("runSyncHandler", () => {
     expect(fake.table.bulkPut).not.toHaveBeenCalled()
   })
 
+  it("uses applyDeletes override instead of bulkDelete when provided", async () => {
+    const fake = makeFakeTable()
+    const applyDeletes = jest.fn(async () => {})
+    const out = await runSyncHandler<FakeRow>(
+      { table: "petActivityLog", getTable: () => fake.table, applyDeletes },
+      makeTransport({ rows: [], deleted_ids: ["17", "18"], next_since: 18 }),
+      { since: 0 }
+    )
+    expect(out.ok && out.result.applied).toBe(2)
+    expect(applyDeletes).toHaveBeenCalledWith(["17", "18"], expect.any(Function))
+    expect(fake.table.bulkDelete).not.toHaveBeenCalled()
+  })
+
   it("writes a large page in slices so no single job holds the main thread", async () => {
     const fake = makeFakeTable()
     const rows = Array.from({ length: 450 }, (_, i) => ({ id: `m${i}`, name: "m" }))

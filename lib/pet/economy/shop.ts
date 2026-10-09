@@ -5,12 +5,16 @@
 // event's read-modify-write `upsertPetProfile` silently overwrites the
 // deduction. Consumption itself is just an event emission: the controller owns
 // all progression (needs restore via meta.itemId, XP, coins, achievements).
+// Because the controller can still DROP that event (cooldown, egg), consumption
+// asks it first via `checkInteractionAccepted`, so a refused use never costs
+// the item.
 
 import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import { decrementPetInventory, patchPetProfile } from "@/lib/db/pet"
 import { normalizeCoins, type PetShopItem } from "@/types/pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { enqueuePetWork } from "@/lib/pet/runtime/pet-controller"
+import { checkInteractionAccepted, type PetRefusal } from "@/lib/pet/access/gate"
 import { getPetItem } from "./item-catalog"
 
 export type PurchaseError = "no-profile" | "unknown-item" | "insufficient-coins"
@@ -61,19 +65,44 @@ export async function purchaseItem(itemId: string, qty = 1): Promise<PurchaseRes
   )
 }
 
-export type ConsumeError = "unknown-item" | "not-owned"
+export type ConsumeError =
+  | "unknown-item"
+  | "not-owned"
+  /** The controller would drop the item's interaction right now. */
+  | "cooling-down"
+  /** The pet is still an egg; nurturing it would do nothing. */
+  | "not-hatched"
+  | "no-profile"
 
 export interface ConsumeResult {
   ok: boolean
   error?: ConsumeError
+  /** With `cooling-down`: how long until the interaction is accepted again. */
+  retryAfterMs?: number
+}
+
+type ConsumeDeps = Parameters<typeof checkInteractionAccepted>[1]
+
+function refusalToConsumeResult(refusal: PetRefusal): ConsumeResult {
+  switch (refusal.code) {
+    case "cooling-down":
+      return { ok: false, error: "cooling-down", retryAfterMs: refusal.retryAfterMs }
+    case "not-hatched":
+      return { ok: false, error: "not-hatched" }
+    default:
+      return { ok: false, error: "no-profile" }
+  }
 }
 
 /**
  * Use an owned item. Consumables decrement and emit their interaction event
  * with `meta.itemId` (controller applies the item's restore + progression);
  * decor applies its cosmetic override to the profile without consuming.
+ *
+ * The precheck and the decrement share one `enqueuePetWork` turn, so no event
+ * the controller is still processing can start the cooldown between them.
  */
-export async function consumeItem(itemId: string): Promise<ConsumeResult> {
+export async function consumeItem(itemId: string, deps: ConsumeDeps = {}): Promise<ConsumeResult> {
   const item = getPetItem(itemId)
   if (!item) return { ok: false, error: "unknown-item" }
 
@@ -86,8 +115,15 @@ export async function consumeItem(itemId: string): Promise<ConsumeResult> {
     })
   }
 
-  const consumed = await enqueuePetWork(() => decrementPetInventory(itemId))
-  if (!consumed) return { ok: false, error: "not-owned" }
+  const spent = await enqueuePetWork(async (): Promise<ConsumeResult> => {
+    if (item.interactionKind) {
+      const refusal = await checkInteractionAccepted(item.interactionKind, deps)
+      if (refusal) return refusalToConsumeResult(refusal)
+    }
+    const consumed = await decrementPetInventory(itemId)
+    return consumed ? { ok: true } : { ok: false, error: "not-owned" }
+  })
+  if (!spent.ok) return spent
   if (item.interactionKind) {
     emitPetEvent({ source: "user", kind: item.interactionKind, meta: { itemId } })
   }

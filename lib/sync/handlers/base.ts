@@ -23,8 +23,7 @@ export interface SyncHandlerOptions<TRow extends { id: string }> {
    * Optional override for how upsert rows are written. Defaults to
    * `getTable().bulkPut(rows)`. Used by the settings singleton to merge only
    * cross-platform fields onto the local row instead of clobbering it
-   * (`handlers/app-settings.ts`). Deletes always go through
-   * `getTable().bulkDelete`.
+   * (`handlers/app-settings.ts`). Deletes go through {@link applyDeletes}.
    *
    * Called once per slice (see {@link SYNC_APPLY_SLICE_SIZE}), never once per
    * page, so an override must be safe to run repeatedly over disjoint row sets
@@ -32,6 +31,16 @@ export interface SyncHandlerOptions<TRow extends { id: string }> {
    * idempotent housekeeping).
    */
   applyRows?: (rows: TRow[], assertCurrent: () => void) => Promise<void>
+  /**
+   * Optional override for how tombstoned ids are removed. Defaults to
+   * `getTable().bulkDelete(ids)`, which is right whenever the wire id IS the
+   * local primary key. A table whose key is not a string (`petActivityLog`'s
+   * auto-increment number) maps the ids back here, or `bulkDelete` would look
+   * for string keys that do not exist and silently delete nothing.
+   *
+   * Called once per slice, like {@link applyRows}.
+   */
+  applyDeletes?: (ids: string[], assertCurrent: () => void) => Promise<void>
   /** Override the write slice size (tests). */
   applySliceSize?: number
 }
@@ -186,6 +195,8 @@ export async function runSyncHandler<TRow extends { id: string }>(
       const t = target
       const sliceSize = opts.applySliceSize ?? SYNC_APPLY_SLICE_SIZE
       const applySlice = opts.applyRows ?? ((rows: TRow[]) => t.bulkPut(rows).then(() => undefined))
+      const deleteSlice =
+        opts.applyDeletes ?? ((ids: string[]) => t.bulkDelete(ids).then(() => undefined))
       await applyInSlices(filtered, sliceSize, async (slice) => {
         assertCurrent()
         await applySlice(slice as TRow[], assertCurrent)
@@ -193,7 +204,7 @@ export async function runSyncHandler<TRow extends { id: string }>(
       })
       await applyInSlices(delta.deleted_ids, sliceSize, async (slice) => {
         assertCurrent()
-        await t.bulkDelete(slice as string[])
+        await deleteSlice(slice as string[], assertCurrent)
         assertCurrent()
       })
     } catch (err: unknown) {

@@ -9,11 +9,14 @@ import {
   appendPetActivity,
   prunePetActivity,
   listPetActivity,
+  listPetActivityPage,
+  listPetActivitySince,
   getPetActivityCounters,
   getPetBinding,
   upsertPetBinding,
   deletePetBinding,
   listPetBindings,
+  listPetBindingsWithCharacters,
   listPetAchievements,
   recordPetAchievement,
   listPetInventory,
@@ -25,7 +28,14 @@ import {
 } from "./pet"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { createDefaultProfile } from "@/lib/pet/defaults"
+import { readTombstonesSince } from "@/lib/sync/tombstones"
+import {
+  __resetHostInvalidateForTests,
+  __setHostInvalidateDepsForTests,
+  flushPendingSyncInvalidates,
+} from "@/lib/sync/host-invalidate"
 import type { PetActivityRow, PetCharacterBinding } from "@/types/pet"
+import type { Character } from "@cognia/agent-config-types"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -89,6 +99,32 @@ describe("activity ledger", () => {
     expect(remaining?.ts).toBe(4)
   })
 
+  it("pages newest-first by append order, strictly below the cursor", async () => {
+    for (let i = 1; i <= 5; i++) await appendPetActivity(activity({ kind: `k${i}`, ts: i }))
+    const head = await listPetActivityPage(undefined, 2)
+    expect(head.map((r) => r.kind)).toEqual(["k5", "k4"])
+    const next = await listPetActivityPage(head[head.length - 1]!.id, 2)
+    expect(next.map((r) => r.kind)).toEqual(["k3", "k2"])
+    const last = await listPetActivityPage(next[next.length - 1]!.id, 2)
+    expect(last.map((r) => r.kind)).toEqual(["k1"])
+    expect(await listPetActivityPage(last[0]!.id, 2)).toEqual([])
+  })
+
+  it("keeps an older page stable while new rows arrive at the head", async () => {
+    for (let i = 1; i <= 3; i++) await appendPetActivity(activity({ kind: `k${i}`, ts: i }))
+    const head = await listPetActivityPage(undefined, 1)
+    await appendPetActivity(activity({ kind: "k4", ts: 4 }))
+    const older = await listPetActivityPage(head[0]!.id, 10)
+    expect(older.map((r) => r.kind)).toEqual(["k2", "k1"])
+  })
+
+  it("lists every row from an id up, newest first", async () => {
+    const ids: number[] = []
+    for (let i = 1; i <= 4; i++)
+      ids.push(await appendPetActivity(activity({ kind: `k${i}`, ts: i })))
+    expect((await listPetActivitySince(ids[1]!)).map((r) => r.kind)).toEqual(["k4", "k3", "k2"])
+  })
+
   it("tallies counters by kind", async () => {
     await appendPetActivity(activity({ kind: "fed", ts: 1 }))
     await appendPetActivity(activity({ kind: "fed", ts: 2 }))
@@ -109,6 +145,27 @@ describe("bindings", () => {
     expect((await listPetBindings()).map((b) => b.characterId)).toEqual(["c2", "c1"])
     await deletePetBinding("c1")
     expect(await getPetBinding("c1")).toBeUndefined()
+    expect((await readTombstonesSince("petCharacterBindings", 0)).ids).toEqual(["c1"])
+  })
+})
+
+describe("bindings with characters", () => {
+  it("returns the bindable characters alongside every binding", async () => {
+    const character = {
+      id: "char-pet-test",
+      name: "Pet Test Character",
+      createdAt: 1,
+      updatedAt: 1,
+    } as unknown as Character
+    await getDb().characters.put(character)
+    await upsertPetBinding({
+      characterId: "char-pet-test",
+      updatedAt: new Date(1).toISOString(),
+      species: "cat",
+    })
+    const { characters, bindings } = await listPetBindingsWithCharacters()
+    expect(characters.map((c) => c.id)).toContain("char-pet-test")
+    expect(bindings).toEqual([expect.objectContaining({ characterId: "char-pet-test" })])
   })
 })
 
@@ -135,8 +192,13 @@ describe("inventory (v94)", () => {
     await addPetInventory("berry", 2, 100)
     expect(await decrementPetInventory("berry", 1, 300)).toBe(true)
     expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
-    expect(await decrementPetInventory("berry")).toBe(true)
+    expect((await readTombstonesSince("petInventory", 0)).ids).toEqual([])
+    expect(await decrementPetInventory("berry", 1, 400)).toBe(true)
     expect(await getPetInventoryItem("berry")).toBeUndefined()
+    expect(await readTombstonesSince("petInventory", 0)).toEqual({
+      ids: ["berry"],
+      maxDeletedAt: 400,
+    })
   })
 
   it("refuses to decrement below the owned quantity", async () => {
@@ -160,5 +222,41 @@ describe("resetPet", () => {
     expect(await listPetAchievements()).toEqual([])
     expect(await listPetBindings()).toEqual([])
     expect(await listPetInventory()).toEqual([])
+  })
+
+  it("tombstones the mirrored tables and announces the clear to paired phones", async () => {
+    const published: string[] = []
+    const restore = __setHostInvalidateDepsForTests({
+      publish: (_topic, payload) => {
+        published.push(payload.table)
+      },
+      isRemoteHostActiveFn: () => false,
+    })
+    try {
+      await upsertPetProfile(createDefaultProfile("acct-1"))
+      await recordPetAchievement("a")
+      await upsertPetBinding({ characterId: "c1", updatedAt: new Date().toISOString() })
+      await addPetInventory("berry", 2)
+      __resetHostInvalidateForTests()
+      published.length = 0
+      await resetPet()
+      expect((await readTombstonesSince("petProfile", 0)).ids).toEqual(["global"])
+      expect((await readTombstonesSince("petAchievements", 0)).ids).toEqual(["a"])
+      expect((await readTombstonesSince("petInventory", 0)).ids).toEqual(["berry"])
+      expect((await readTombstonesSince("petCharacterBindings", 0)).ids).toEqual(["c1"])
+      flushPendingSyncInvalidates()
+      expect(new Set(published)).toEqual(
+        new Set([
+          "petProfile",
+          "petAchievements",
+          "petInventory",
+          "petCharacterBindings",
+          "petActivityLog",
+        ])
+      )
+    } finally {
+      __resetHostInvalidateForTests()
+      restore()
+    }
   })
 })

@@ -551,6 +551,18 @@ const KNOWN_COMMANDS: &[&str] = &[
     "bot_console_read",
     "bot_run_manual",
     "bot_delivery_replay",
+    // Remote pet care (ADR-0219). Bridged to the desktop renderer's pet
+    // controller; deliberately NOT in `CONTROL_COMMANDS`: caring for a pet is
+    // the device's own client surface, not remote control of the host.
+    "pet_get",
+    "pet_act",
+    "pet_rename",
+    "pet_item_purchase",
+    "pet_item_apply",
+    "pet_soul_generate",
+    "pet_chat_send",
+    "pet_chat_list",
+    "pet_chat_clear",
     // ADR-0060 — a paired device reports its platform capability manifest
     // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
     // row by the TS dispatch arm. Direct `transport.call` from the mobile
@@ -1192,6 +1204,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "execution_run_get",
     "execution_run_events",
     "bot_console_read",
+    // Remote pet care reads: the live snapshot and the chat history page.
+    "pet_get",
+    "pet_chat_list",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -2026,6 +2041,21 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // id is one the client must not be able to choose.
     "bot_run_manual",
     "bot_delivery_replay",
+    // Remote pet care. The three writes that carry a body `idempotencyKey`
+    // (`pet_act`, `pet_item_purchase`, `pet_chat_send`) are also deduped by the
+    // renderer's ledger on `<callerDeviceId>:<idempotencyKey>`, so a
+    // caller-chosen id would let one device replay (or pre-empt) another
+    // device's care action. Every pet write is additionally deduped here by
+    // the required `Idempotency-Key` header.
+    "pet_get",
+    "pet_act",
+    "pet_rename",
+    "pet_item_purchase",
+    "pet_item_apply",
+    "pet_soul_generate",
+    "pet_chat_send",
+    "pet_chat_list",
+    "pet_chat_clear",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",

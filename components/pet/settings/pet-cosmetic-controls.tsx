@@ -8,11 +8,19 @@
 // until that item is owned (`petInventory`), so decor purchases actually gate
 // something. The genetic hat and `none` are always free; genetics-only hats
 // (tinyduck) never unlock through the shop.
+//
+// Every write merges into the profile as it is when the write runs, read inside
+// `enqueuePetWork`, not into this render's copy: two quick picks (palette, then
+// hat) used to each merge into the same stale `profile.cosmetic`, so the second
+// write silently dropped the first, and a controller event landing in between
+// could be overwritten the same way.
 
 "use client"
 
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { XIcon } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Field, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field"
@@ -26,7 +34,8 @@ import {
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { usePet } from "@/hooks/pet/use-pet"
-import { listPetInventory, patchPetProfile } from "@/lib/db/pet"
+import { getPetProfile, listPetInventory, patchPetProfile } from "@/lib/db/pet"
+import { enqueuePetWork } from "@/lib/pet/runtime/pet-controller"
 import { PALETTE_PRESETS, matchPalettePreset } from "@/lib/pet/bones/palettes"
 import { petHatItem } from "@/lib/pet/economy/item-catalog"
 import type { PetBodyType, PetCosmeticOverride, PetEyes, PetHat } from "@/types/pet"
@@ -44,6 +53,22 @@ const HATS: PetHat[] = [
 const EYES: PetEyes[] = ["dot", "sleepy", "wide", "wink", "star", "spiral"]
 const BODIES: PetBodyType[] = ["round", "tall", "wide"]
 
+/**
+ * Merge `next` into the cosmetic stored right now and persist it, serialized
+ * after any in-flight controller work. `null` clears every override.
+ */
+function writeCosmetic(next: PetCosmeticOverride | null): Promise<void> {
+  return enqueuePetWork(async () => {
+    if (next === null) {
+      await patchPetProfile({ cosmetic: undefined })
+      return
+    }
+    const latest = await getPetProfile()
+    if (!latest) return
+    await patchPetProfile({ cosmetic: cleanCosmetic({ ...(latest.cosmetic ?? {}), ...next }) })
+  })
+}
+
 /** Drop empty fields; return undefined when nothing is overridden. */
 function cleanCosmetic(next: PetCosmeticOverride): PetCosmeticOverride | undefined {
   const out: PetCosmeticOverride = {}
@@ -56,6 +81,7 @@ function cleanCosmetic(next: PetCosmeticOverride): PetCosmeticOverride | undefin
 
 export function PetCosmeticControls() {
   const t = useTranslations("pet.customize.cosmetic")
+  const tc = useTranslations("pet.customize")
   const { profile, view } = usePet()
   const inventory = useLiveQuery(() => listPetInventory(), [])
 
@@ -69,8 +95,9 @@ export function PetCosmeticControls() {
   }
 
   const cosmetic = profile.cosmetic ?? {}
-  const set = (next: PetCosmeticOverride) =>
-    void patchPetProfile({ cosmetic: cleanCosmetic({ ...cosmetic, ...next }) })
+  const persist = (next: PetCosmeticOverride | null) =>
+    void writeCosmetic(next).catch(() => toast.error(tc("saveFailed")))
+  const set = (next: PetCosmeticOverride) => persist(next)
   const activePalette = matchPalettePreset(cosmetic.palette)
   const hasOverride = !!profile.cosmetic && Object.keys(profile.cosmetic).length > 0
 
@@ -110,7 +137,7 @@ export function PetCosmeticControls() {
             aria-label={t("default")}
             className="size-8 rounded-full p-0"
           >
-            ✕
+            <XIcon className="size-4" aria-hidden />
           </ToggleGroupItem>
           {PALETTE_PRESETS.map((p) => (
             <ToggleGroupItem
@@ -173,12 +200,7 @@ export function PetCosmeticControls() {
       </Field>
 
       <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={!hasOverride}
-          onClick={() => void patchPetProfile({ cosmetic: undefined })}
-        >
+        <Button variant="ghost" size="sm" disabled={!hasOverride} onClick={() => persist(null)}>
           {t("reset")}
         </Button>
       </div>

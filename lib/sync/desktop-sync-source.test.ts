@@ -1603,3 +1603,104 @@ it("handles rejected native unregister promises during source teardown", async (
   await Promise.all(failures.map((failure) => failure.catch(() => {})))
   expect(attached).toEqual([1])
 })
+
+describe("the desktop pet readers (ADR-0219)", () => {
+  const { createDefaultProfile } = jest.requireActual(
+    "@/lib/pet/defaults"
+  ) as typeof import("@/lib/pet/defaults")
+  const { generateBones } = jest.requireActual(
+    "@/lib/pet/bones/generate"
+  ) as typeof import("@/lib/pet/bones/generate")
+  const { recordTombstones } = jest.requireActual("./tombstones") as typeof import("./tombstones")
+
+  beforeEach(async () => {
+    const db = getDb()
+    await Promise.all([
+      db.petProfile.clear(),
+      db.petAchievements.clear(),
+      db.petInventory.clear(),
+      db.petCharacterBindings.clear(),
+      db.petActivityLog.clear(),
+      db.syncTombstones.clear(),
+    ])
+  })
+
+  it("sends the profile as a projection: no fingerprint, no proactive counters, the host's bones", async () => {
+    const profile = {
+      ...createDefaultProfile("raw-provider-account-id", 1_000),
+      proactiveState: {
+        lastSpokeAtMs: 5,
+        dayKey: "2026-10-09",
+        spokenToday: 1,
+        greetedWindows: [],
+      },
+    }
+    await getDb().petProfile.put(profile as never)
+    const delta = await readDexieDelta("petProfile", 0)
+    expect(delta.rows).toHaveLength(1)
+    const row = delta.rows[0] as Record<string, unknown>
+    expect(row.accountFingerprint).toBe("companion-mirror")
+    expect(JSON.stringify(row)).not.toContain("raw-provider-account-id")
+    expect(row.proactiveState).toBeUndefined()
+    expect(row.mirroredBones).toEqual(generateBones("raw-provider-account-id"))
+    expect(delta.next_since).toBe(1_000)
+    // Incremental: nothing new past the stamp.
+    expect((await readDexieDelta("petProfile", 1_000)).rows).toHaveLength(0)
+  })
+
+  it("cursors achievements on unlockedAt and inventory on updatedAt", async () => {
+    await getDb().petAchievements.bulkPut([
+      { id: "first-feed", unlockedAt: 10 },
+      { id: "streak-3", unlockedAt: 30 },
+    ] as never)
+    await getDb().petInventory.bulkPut([
+      { id: "apple", qty: 2, acquiredAt: 5, updatedAt: 20 },
+      { id: "ball", qty: 1, acquiredAt: 5, updatedAt: 40 },
+    ])
+    const achievements = await readDexieDelta("petAchievements", 10)
+    expect(achievements.rows.map((r) => (r as { id: string }).id)).toEqual(["streak-3"])
+    expect(achievements.next_since).toBe(30)
+    const inventory = await readDexieDelta("petInventory", 20)
+    expect(inventory.rows.map((r) => (r as { id: string }).id)).toEqual(["ball"])
+    expect(inventory.next_since).toBe(40)
+  })
+
+  it("folds an inventory tombstone into deleted_ids", async () => {
+    await recordTombstones("petInventory", ["apple"], 50)
+    const delta = await readDexieDelta("petInventory", 40)
+    expect(delta.deleted_ids).toEqual(["apple"])
+    expect(delta.next_since).toBe(50)
+  })
+
+  it("keys bindings by characterId on the wire and cursors their ISO stamp", async () => {
+    await getDb().petCharacterBindings.put({
+      characterId: "char-1",
+      species: "dragon",
+      updatedAt: new Date(2_000).toISOString(),
+    })
+    const delta = await readDexieDelta("petCharacterBindings", 0)
+    expect(delta.rows).toEqual([
+      expect.objectContaining({ id: "char-1", characterId: "char-1", species: "dragon" }),
+    ])
+    expect(delta.next_since).toBe(2_000)
+  })
+
+  it("names ledger rows by their numeric key and cursors on it", async () => {
+    const db = getDb()
+    const first = (await db.petActivityLog.add({
+      kind: "fed",
+      source: "user",
+      xp: 3,
+      ts: 1,
+    } as never)) as number
+    const second = (await db.petActivityLog.add({
+      kind: "played",
+      source: "user",
+      xp: 4,
+      ts: 2,
+    } as never)) as number
+    const delta = await readDexieDelta("petActivityLog", first)
+    expect(delta.rows).toEqual([expect.objectContaining({ id: String(second), kind: "played" })])
+    expect(delta.next_since).toBe(second)
+  })
+})

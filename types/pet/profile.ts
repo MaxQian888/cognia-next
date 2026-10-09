@@ -3,7 +3,7 @@
 // `PetCharacterBinding`. Bones are NOT stored here — they are recomputed from the
 // account id and merged over the soul-derived view at load time.
 
-import type { PetCosmeticOverride } from "./bones"
+import type { PetBones, PetCosmeticOverride } from "./bones"
 import type { PetCareState } from "./care"
 import type { PetStreak } from "./economy"
 import type { PetNeeds } from "./needs"
@@ -96,6 +96,15 @@ export interface PetProfile {
    * normal). Set by `applyPetEvent` from `flavorForCareQuality`.
    */
   evolutionFlavor?: PetEvolutionFlavor
+  /**
+   * The host's generated bones, present ONLY on a paired device's sync mirror
+   * (ADR-0219). The host projects its profile for companion sync without
+   * `accountFingerprint` (it derives from the provider account id, which never
+   * leaves the host), replacing it with a fixed sentinel. A mirror therefore
+   * cannot regenerate the same body, so the host ships the result instead and
+   * `computePetView` prefers it. Never written on the host itself.
+   */
+  mirroredBones?: PetBones
   createdAt: string
   updatedAt: string
 }

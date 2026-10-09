@@ -28,8 +28,10 @@ const meta = {
     onTreat: fn(),
   },
   decorators: [
+    // The tab lays out against the console's scrolling pane, which is the
+    // `pet-pane` container its two-column breakpoint measures.
     (Story) => (
-      <div className="p-4">
+      <div className="@container/pet-pane p-4">
         <Story />
       </div>
     ),

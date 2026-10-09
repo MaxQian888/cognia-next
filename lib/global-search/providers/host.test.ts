@@ -9,6 +9,7 @@ const host = (over: Partial<ReturnType<typeof makeTestContext>["host"]>) =>
       reachableSettingsSections: new Set(),
       recorderAvailable: false,
       petHostAvailable: false,
+      petConsoleReachable: false,
       theme: "light",
       hasApiKey: false,
       pluginQuickActions: [],

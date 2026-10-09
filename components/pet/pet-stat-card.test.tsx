@@ -4,8 +4,21 @@ import type { PetBones, PetSoul } from "@/types/pet"
 // Stub the renderer so the preview avatar's skin choice is observable without
 // pulling the live2d skin's stores/canvas into a stat-card unit test.
 jest.mock("./pet-renderer", () => ({
-  PetRenderer: ({ skinId, flavor }: { skinId?: string; flavor?: string }) => (
-    <div data-testid="pet-preview" data-skin={skinId ?? "default"} data-flavor={flavor} />
+  PetRenderer: ({
+    skinId,
+    flavor,
+    lowPower,
+  }: {
+    skinId?: string
+    flavor?: string
+    lowPower?: boolean
+  }) => (
+    <div
+      data-testid="pet-preview"
+      data-skin={skinId ?? "default"}
+      data-flavor={flavor}
+      data-low-power={lowPower || undefined}
+    />
   ),
 }))
 
@@ -29,6 +42,12 @@ function makeBones(overrides: Partial<PetBones> = {}): PetBones {
 const soul: PetSoul = { name: "Boba", personality: "Smug.", hatchDate: new Date(0).toISOString() }
 
 describe("PetStatCard", () => {
+  // The remote console draws every avatar in low power (ADR-0219).
+  it("passes low power through to its avatar", () => {
+    render(<PetStatCard bones={makeBones()} soul={soul} stage="adult" lowPower />)
+    expect(screen.getByTestId("pet-preview")).toHaveAttribute("data-low-power", "true")
+  })
+
   it("shows the soul name, rarity, star count and shiny badge", () => {
     const { container } = render(<PetStatCard bones={makeBones()} soul={soul} stage="adult" />)
     expect(screen.getByText("Boba")).toBeInTheDocument()

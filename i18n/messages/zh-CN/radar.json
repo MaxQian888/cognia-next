@@ -17,7 +17,8 @@
     "dispatchFailed": "已保存接受的任务，但需要重试调度或由本主机恢复。",
     "retry": "重试调度",
     "history": "报告历史",
-    "latest": "最新报告"
+    "latest": "最新报告",
+    "historyOption": "{date} — {verdict}"
   },
   "panel": {
     "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",

@@ -45,6 +45,22 @@ export function pluginItemText(id: string, locale: string): PluginDisplayText | 
   }
 }
 
+/**
+ * A shop item's title in `locale`: the plugin's own label for a plugin item,
+ * else the host key `shop.items.<i18nKey>.title` through the caller's `pet`
+ * translator. One function so the toasts the desktop and the remote console
+ * raise name an item exactly the way the shop lists it.
+ */
+export function petItemTitle(
+  item: { id: string; i18nKey: string },
+  locale: string,
+  translatePet: (key: string) => string
+): string {
+  return isPluginPetId(item.id)
+    ? (pluginItemText(item.id, locale)?.title ?? item.id)
+    : translatePet(`shop.items.${item.i18nKey}.title`)
+}
+
 /** Display text for a plugin achievement id (same contract as items). */
 export function pluginAchievementText(id: string, locale: string): PluginDisplayText | undefined {
   const display = getPluginAchievementDisplay(id)

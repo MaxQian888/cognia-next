@@ -204,20 +204,23 @@ export const SURFACE_CONTRACTS = [
   },
   {
     id: "pet",
-    // The desktop pet runs only in the Tauri desktop shell (ADR-0058 D9): web
-    // and mobile never mount its controller, so neither a companion nor a
-    // standalone browser can drive it. It said `"remote"` while `PetMount`
-    // refused to initialize the profile on mobile and the console rendered a
-    // loading state that could never resolve: a route the user could reach and
-    // then wait at forever. `"explain"` is what it actually is on both
-    // columns. The route stays deep-linkable and `PetConsole` says why; the
-    // rail and ⌘K drop it off desktop (`desktopOnly` with no `operation`).
-    // See {@link petRequiresDesktopShell}.
+    // The pet RUNTIME stays on the desktop (ADR-0058 D9): web and mobile never
+    // mount its controller, overlay or tray. Since ADR-0219 the CONSOLE does
+    // not: a companion paired to a desktop that advertises `pet.remote-care`
+    // cares for that desktop's pet remotely, painting from a mirror of the pet
+    // tables and sending each action to the desktop's controller. `pet_get` is
+    // the operation a host must advertise; with the host offline the mirror
+    // still reads (`cached-read`). A standalone browser or an unpaired phone
+    // has no pet to reach and is told to pair (`explain`, rendered by this
+    // boundary's `/pair` remedy and by `PetConsole` itself). See
+    // {@link petRuntimeRequiresDesktopShell} and
+    // {@link petConsoleRequiresPairedHost}.
     route: "/pet",
     navigation: true,
+    operation: "pet_get",
     standalone: "explain",
-    companion: "explain",
-    offline: "local",
+    companion: "remote",
+    offline: "cached-read",
   },
   {
     id: "browser",
@@ -417,26 +420,62 @@ export const standaloneInboxRequiresHost = {
 } as const
 
 /**
- * `/pet` anywhere but the desktop app: the pet is the desktop shell's own
- * subsystem, and no host, pairing or setting lifts that.
+ * The pet's RUNTIME never leaves the desktop app (ADR-0058 D9): the pet
+ * controller, the overlay window, the tray entries and the agent's pet tools
+ * run only in the Tauri main window, and no host, pairing or setting lifts
+ * that. What a paired device gets instead is remote care through the console
+ * ({@link petConsoleRequiresPairedHost}).
  *
  * Intentional and permanent, so documented on all three axes (CLAUDE.md
  * rule 7):
  *
- *  1. **Type** — the `pet` contract above is `explain` on both columns, the
- *     `pet` rail entry is `desktopOnly` with no `operation`, and this constant
- *     carries the reason.
- *  2. **UI** — `components/pet/console/pet-console.tsx` renders its
- *     `unsupportedHost` explanation, and the rail, ⌘K and Settings → Pet
- *     (`profiles: ["desktop"]`) never offer the surface off desktop.
- *  3. **Test** — pinned by `lib/shell/sidebar-nav.test.ts`,
- *     `components/pet/console/pet-console.test.tsx` and
+ *  1. **Type** — this constant carries the reason, and
+ *     `lib/pet/console/action-capabilities.ts` classifies each console
+ *     capability that therefore stays on the desktop (customization, insights,
+ *     plugins, binding edits, reset, the desktop toggle, skin retry).
+ *  2. **UI** — `PetMount` refuses to start off desktop; in the console the
+ *     desktop-only tabs carry a "Desktop" badge and render
+ *     `components/pet/console/desktop-only-notice.tsx`, the binding tab is
+ *     read-only and the desktop toggle is a status chip; ⌘K's toggle-desktop
+ *     action and Settings → Pet (`profiles: ["desktop"]`) are offered only on
+ *     desktop.
+ *  3. **Test** — pinned by `lib/pet/console/action-capabilities.test.ts`,
+ *     `components/pet/console/pet-console.remote.test.tsx`,
+ *     `lib/global-search/providers/actions.test.ts` and
  *     `lib/runtime/surface-contract.test.ts`.
  */
-export const petRequiresDesktopShell = {
+export const petRuntimeRequiresDesktopShell = {
   surfaceId: "pet",
   reason: "desktop-shell-only",
   remedy: "desktop-app",
+} as const
+
+/**
+ * `/pet` off the desktop needs a paired desktop that advertises remote pet
+ * care (ADR-0219): the console is a remote control for that desktop's pet, so
+ * a standalone browser or an unpaired phone has nothing to show.
+ *
+ * Documented on all three axes (CLAUDE.md rule 7):
+ *
+ *  1. **Type** — the `pet` contract above is `standalone: "explain"` with
+ *     `operation: "pet_get"`, the `pet` rail entry is `hostOperationGated`, and
+ *     this constant carries the reason.
+ *  2. **UI** — `SurfaceAvailabilityBoundary` answers a standalone target with
+ *     its `/pair` remedy, and `components/pet/console/pet-console.tsx` explains
+ *     an unpaired device (with a `/pair` link) and a desktop too old to share
+ *     its pet; the rail, ⌘K and the phone's Me tab offer the page only while
+ *     the paired host advertises `pet_get`.
+ *  3. **Test** — pinned by `lib/shell/sidebar-nav.test.ts`,
+ *     `components/mobile/me/me-entries.test.ts`,
+ *     `components/pet/console/pet-console.test.tsx` and
+ *     `lib/runtime/surface-contract.test.ts`.
+ *
+ * Pairing with a current desktop lifts it.
+ */
+export const petConsoleRequiresPairedHost = {
+  surfaceId: "pet",
+  reason: "no-paired-pet-host",
+  remedy: "/pair",
 } as const
 
 /**

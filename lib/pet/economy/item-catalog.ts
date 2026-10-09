@@ -5,8 +5,10 @@
 
 import type { PetShopItem } from "@/types/pet"
 import {
+  getPetItemsRevision,
   getProjectedPluginItem,
   listProjectedPluginItems,
+  subscribePetItems,
 } from "@/lib/plugin/registries/pet-item-registry"
 
 export const PET_ITEMS: PetShopItem[] = [
@@ -230,4 +232,27 @@ export function getPetItem(id: string): PetShopItem | undefined {
 /** Full catalog: static items first, then plugin contributions. */
 export function listAllPetItems(): PetShopItem[] {
   return [...PET_ITEMS, ...listProjectedPluginItems()]
+}
+
+let catalogSnapshot: { revision: number; items: readonly PetShopItem[] } | null = null
+
+/**
+ * `listAllPetItems`, rebuilt only when a plugin item registers or unregisters.
+ *
+ * The shop and the inventory strip called `listAllPetItems` on every render,
+ * re-projecting every plugin item each time the inventory live query ticked.
+ * The identity is stable between registry mutations, which is what
+ * `useSyncExternalStore` needs from a snapshot.
+ */
+export function getPetCatalogSnapshot(): readonly PetShopItem[] {
+  const revision = getPetItemsRevision()
+  if (!catalogSnapshot || catalogSnapshot.revision !== revision) {
+    catalogSnapshot = { revision, items: listAllPetItems() }
+  }
+  return catalogSnapshot.items
+}
+
+/** Notifies after every plugin-item registry mutation. */
+export function subscribePetCatalog(listener: () => void): () => void {
+  return subscribePetItems(listener)
 }

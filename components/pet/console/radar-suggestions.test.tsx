@@ -56,3 +56,22 @@ it("links the goal output from the same persisted scheduler task", () => {
   render(<RadarTaskResults taskId="task" />)
   expect(screen.getByText("goal-to-review")).toBeInTheDocument()
 })
+
+it("stamps a source in the app's locale, not the OS default", () => {
+  // Swap the global next-intl mock's locale: a Chinese UI on an English OS
+  // must still read its dates in Chinese.
+  const intl = jest.requireMock("next-intl") as { useLocale: () => string }
+  const spy = jest.spyOn(intl, "useLocale").mockReturnValue("zh-CN")
+  try {
+    const at = Date.UTC(2026, 9, 9, 6, 30)
+    const { container } = render(<RadarSource source={{ id: "m", source: "memory", at }} />)
+    const time = container.querySelector("time")
+    const options = { dateStyle: "medium", timeStyle: "short" } as const
+    const zh = new Intl.DateTimeFormat("zh-CN", options).format(at)
+    expect(zh).not.toBe(new Intl.DateTimeFormat("en", options).format(at))
+    expect(time).toHaveTextContent(zh)
+    expect(time).toHaveAttribute("dateTime", new Date(at).toISOString())
+  } finally {
+    spy.mockRestore()
+  }
+})

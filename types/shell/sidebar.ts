@@ -54,11 +54,20 @@ export interface SidebarNavMeta {
   /**
    * Hidden off the desktop shell: always on mobile (Capacitor), and on the
    * web unless a paired host advertises the surface's `operation` (see
-   * `getSidebarCatalog`). A desktop-only surface with no host operation, like
-   * the pet, is a constraint of the desktop shell no companion can lift, so
-   * it never appears off desktop.
+   * `getSidebarCatalog`). A desktop-only surface with no host operation is a
+   * constraint of the desktop shell no companion can lift, so it never
+   * appears off desktop.
    */
   desktopOnly?: boolean
+  /**
+   * Off the desktop shell (mobile AND web), shown only while the paired host
+   * advertises the surface contract's `operation`. For a surface that is
+   * remote control of something only a host runs: the pet console
+   * (ADR-0219) cares for the DESKTOP's pet, so a phone or browser paired to a
+   * host without `pet_get`, or not paired at all, has nothing to open. Unlike
+   * `desktopOnly` this does not drop the entry on mobile.
+   */
+  hostOperationGated?: boolean
   /**
    * Hidden on the phone shell (Capacitor) only; shown on desktop and on the
    * web. For a surface that runs on any full client but has not been built for
@@ -112,15 +121,16 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     category: "agents",
   },
   { id: "goals", route: "/goals", i18nKey: "goals", group: "feature", category: "agents" },
-  // The pet runs only in the desktop shell (ADR-0058 D9); off desktop its
-  // route renders an explanation, which is not worth a rail slot.
+  // The pet runs on the desktop (ADR-0058 D9); a paired phone or browser
+  // cares for it remotely (ADR-0219), so off desktop the entry appears only
+  // while the paired host advertises remote pet care.
   {
     id: "pet",
     route: "/pet",
     i18nKey: "pet",
     group: "feature",
     category: "agents",
-    desktopOnly: true,
+    hostOperationGated: true,
   },
   {
     id: "browser",

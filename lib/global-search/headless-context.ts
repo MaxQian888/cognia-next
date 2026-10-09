@@ -122,6 +122,7 @@ export async function buildHeadlessSearchContext(
       reachableSettingsSections: new Set<string>(),
       recorderAvailable: false,
       petHostAvailable: false,
+      petConsoleReachable: false,
       theme: undefined,
       hasApiKey: false,
       pluginQuickActions: [],

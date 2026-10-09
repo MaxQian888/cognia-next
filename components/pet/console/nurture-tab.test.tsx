@@ -141,4 +141,70 @@ describe("NurtureTab", () => {
     expect(h.onTalk).toHaveBeenCalledWith("hi Boba")
     expect(input).toHaveValue("")
   })
+
+  it("puts the pet's state in its own column and the care actions at touch size", () => {
+    setup()
+    const status = screen.getByTestId("pet-nurture-status")
+    expect(status).toContainElement(screen.getByTestId("pet-vitals-card"))
+    // The 160px hero lives in the status column (the stat card has its own thumbnail).
+    const hero = screen.getAllByTestId("pet-preview").find((el) => el.dataset.size === "160")
+    expect(status).toContainElement(hero as HTMLElement)
+    expect(screen.getByTestId("pet-action-grid")).toHaveAttribute("data-size", "comfortable")
+    expect(
+      screen.getByRole("heading", { name: /care|console\.nurture\.care/i })
+    ).toBeInTheDocument()
+  })
+
+  it("explains how to bring an unwell pet back", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const view = { ...computePetView(profile, null, 0), condition: "unwell" as const }
+    render(
+      <NurtureTab
+        profile={profile}
+        view={view}
+        onFeed={jest.fn()}
+        onPlay={jest.fn()}
+        onPet={jest.fn()}
+        onTalk={jest.fn()}
+        onSleep={jest.fn()}
+        onClean={jest.fn()}
+        onTreat={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("pet-condition-hint")).toBeInTheDocument()
+  })
+
+  // Remote care (ADR-0219): talk is a plain care action (words go through the
+  // chat tab), and the cooldowns are the desktop's.
+  it("makes talk a direct action and reads the caller's cooldowns in remote care", () => {
+    const profile: PetProfile = {
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    }
+    const onTalk = jest.fn()
+    render(
+      <NurtureTab
+        profile={profile}
+        view={computePetView(profile, null, 0)}
+        onFeed={jest.fn()}
+        onPlay={jest.fn()}
+        onPet={jest.fn()}
+        onTalk={onTalk}
+        onSleep={jest.fn()}
+        onClean={jest.fn()}
+        onTreat={jest.fn()}
+        talkMode="direct"
+        cooldownRemaining={(kind) => (kind === "fed" ? 3000 : 0)}
+      />
+    )
+    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    expect(onTalk).toHaveBeenCalledWith()
+    expect(screen.queryByTestId("pet-talk-composer")).not.toBeInTheDocument()
+    expect(document.querySelector('[data-action="fed"]')).toBeDisabled()
+  })
 })

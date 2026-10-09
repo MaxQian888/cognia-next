@@ -656,6 +656,18 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // filed rows into folders the Host did not have. Writes travel back as
   // `folder.*` HostState intents, never as sync writes.
   "sessionFolders",
+  // Remote pet care (ADR-0219). The pet lives on the desktop; a paired phone
+  // reads these as a read-only mirror and sends every action back as a
+  // `pet_*` RPC, so the controller awards it once. The profile crosses as a
+  // projection (no account fingerprint, no proactive counters, the host's
+  // bones instead). `petConversationV2` stays off the list (chat history is
+  // user content and the phone reads it live through `pet_chat_list`), and so
+  // do the model and sprite blobs, which are device-local assets.
+  "petProfile",
+  "petAchievements",
+  "petInventory",
+  "petCharacterBindings",
+  "petActivityLog",
 ])
 
 /**
@@ -713,6 +725,11 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "workflowDeployments",
   "executionRunBindings",
   "sessionFolders",
+  "petProfile",
+  "petAchievements",
+  "petInventory",
+  "petCharacterBindings",
+  "petActivityLog",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
@@ -791,6 +808,18 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   workflowDeployments: "never-deleted",
   executionRunBindings: "never-deleted",
   sessionFolders: "tombstoned",
+  // The profile singleton is deleted only by a pet reset, which tombstones it
+  // along with every achievement, inventory row and binding it clears.
+  petProfile: "tombstoned",
+  petAchievements: "tombstoned",
+  // An item used up to zero deletes its row, so the empty slot has to reach
+  // the phone too.
+  petInventory: "tombstoned",
+  petCharacterBindings: "tombstoned",
+  // The ledger is capped at the newest 2000 rows on the host and the client
+  // prunes its mirror to the same cap; a reset is recognised on the client by
+  // the profile's new `createdAt` (`lib/sync/handlers/pet.ts`).
+  petActivityLog: "retention-pruned",
 }
 
 const CACHE_TABLES = new Set<CoreTableName>([

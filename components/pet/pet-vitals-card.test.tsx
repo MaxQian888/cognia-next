@@ -53,6 +53,26 @@ describe("PetVitalsCard", () => {
     }
   })
 
+  it("explains how an unwell pet recovers when asked to", () => {
+    const needs = { energy: 10, mood: 10, bond: 10 }
+    const { rerender } = render(
+      <PetVitalsCard xp={0} needs={needs} condition="unwell" recoveryHint />
+    )
+    expect(screen.getByTestId("pet-condition-hint")).toHaveTextContent(/45/)
+    expect(screen.getByTestId("pet-condition-chip")).toHaveAttribute(
+      "title",
+      screen.getByTestId("pet-condition-hint").textContent
+    )
+
+    // The compact panel keeps the sentence on the chip only.
+    rerender(<PetVitalsCard xp={0} needs={needs} condition="unwell" />)
+    expect(screen.queryByTestId("pet-condition-hint")).toBeNull()
+    expect(screen.getByTestId("pet-condition-chip")).toHaveAttribute("title")
+
+    rerender(<PetVitalsCard xp={0} needs={needs} condition="well" recoveryHint />)
+    expect(screen.queryByTestId("pet-condition-hint")).toBeNull()
+  })
+
   it("supports a flat page variant", () => {
     render(<PetVitalsCard xp={0} needs={{ energy: 80, mood: 60, bond: 40 }} variant="flat" />)
     expect(screen.getByTestId("pet-vitals-card")).toHaveAttribute("data-variant", "flat")

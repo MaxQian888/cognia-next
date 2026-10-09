@@ -27,6 +27,10 @@ jest.mock("@/lib/pet/events/sources/twin-activity-source", () => ({
 jest.mock("@/lib/pet/runtime/pet-controller", () => ({ handlePetEvent: jest.fn() }))
 
 import { usePetEventBus } from "./use-pet-event-bus"
+import {
+  __resetPetControllerPresenceForTesting,
+  isPetControllerPresent,
+} from "@/lib/pet/runtime/controller-presence"
 
 beforeEach(() => {
   offController.mockClear()
@@ -34,6 +38,7 @@ beforeEach(() => {
   subscribe.mockClear()
   wirePetSources.mockClear()
   wireTwinActivitySource.mockClear()
+  __resetPetControllerPresenceForTesting()
 })
 
 describe("usePetEventBus", () => {
@@ -83,5 +88,17 @@ describe("usePetEventBus", () => {
     expect(offSources).toHaveBeenCalledTimes(1) // old wiring torn down
     expect(wirePetSources).toHaveBeenCalledTimes(2)
     expect(wireTwinActivitySource).toHaveBeenLastCalledWith("tw_2")
+  })
+
+  it("marks the controller present while subscribed, for remote pet care", () => {
+    const { unmount } = renderHook(() => usePetEventBus(true))
+    expect(isPetControllerPresent()).toBe(true)
+    unmount()
+    expect(isPetControllerPresent()).toBe(false)
+  })
+
+  it("never marks the controller present while disabled", () => {
+    renderHook(() => usePetEventBus(false))
+    expect(isPetControllerPresent()).toBe(false)
   })
 })

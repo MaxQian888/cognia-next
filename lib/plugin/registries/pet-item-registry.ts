@@ -24,6 +24,9 @@ export const unregisterPetItemById = registry.unregisterById
 export const unregisterPetItemsByPlugin = registry.unregisterByPlugin
 export const listPetItemEntries = registry.entries
 export const __resetPetItemsForTesting = registry.__resetForTesting
+/** Mutation subscription; pair with `getPetItemsRevision` in `useSyncExternalStore`. */
+export const subscribePetItems = registry.subscribe
+export const getPetItemsRevision = registry.getRevision
 
 /** Build the namespaced runtime id for a plugin item. */
 export function buildPluginItemId(pluginId: string | undefined, localId: string): string {

@@ -382,6 +382,13 @@ export interface GlobalSearchHostContext {
    * offered at all, since the pet never runs there.
    */
   petHostAvailable: boolean
+  /**
+   * The /pet console can be opened from here: this window hosts the pet, or
+   * this client is paired to a host that advertises remote pet care
+   * (ADR-0219). Gates "Open pet console"; summoning the pet onto the desktop
+   * stays on `petHostAvailable`, since only the desktop runs the pet.
+   */
+  petConsoleReachable: boolean
   theme: "light" | "dark" | "system" | string | undefined
   hasApiKey: boolean
   /** Plugin quick actions already filtered for the palette surface + `when`. */

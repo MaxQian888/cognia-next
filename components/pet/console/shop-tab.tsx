@@ -3,13 +3,16 @@
 // inventory; using a consumable emits its interaction event (the controller
 // owns the restore/XP), and decor applies its cosmetic override.
 // Balance/inventory are read reactively. Plugin items carry plain per-locale
-// labels instead of host i18n keys — resolved via `pluginItemText`.
+// labels instead of host i18n keys — resolved via `pluginItemText`. Every buy
+// and use goes through `usePetItemActions`, so its outcome is toasted (the
+// shop used to drop `{ ok, error }` on the floor) and a button cannot fire
+// twice while its write is in flight.
 
 "use client"
 
 import { useLocale, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CoinsIcon, FlameIcon } from "lucide-react"
+import { CoinsIcon, FlameIcon, Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -23,24 +26,32 @@ import {
 } from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import { getPetProfile, listPetInventory } from "@/lib/db/pet"
-import { listAllPetItems } from "@/lib/pet/economy/item-catalog"
 import { isPluginPetId, pluginItemText } from "@/lib/pet/plugin-display"
-import { canAfford, consumeItem, purchaseItem } from "@/lib/pet/economy/shop"
+import { canAfford } from "@/lib/pet/economy/shop"
 import { normalizeCoins, normalizeStreak, type PetItemCategory } from "@/types/pet"
+import { usePetItemCatalog } from "@/hooks/pet/use-pet-item-catalog"
+import { usePetItemActions } from "@/hooks/pet/use-pet-item-actions"
 import { petItemIcon } from "../item-icons"
+import { PetTabSkeleton } from "./pet-console-skeleton"
 
 const CATEGORIES: PetItemCategory[] = ["food", "toy", "care", "decor"]
 
 export function ShopTab() {
   const t = useTranslations("pet")
   const locale = useLocale()
-  const profile = useLiveQuery(() => getPetProfile(), [])
+  // `null` is "no profile" (a broke wallet); `undefined` is still loading.
+  const profile = useLiveQuery(async () => (await getPetProfile()) ?? null, [])
   const inventory = useLiveQuery(() => listPetInventory(), [])
-  const catalog = listAllPetItems()
+  const catalog = usePetItemCatalog()
+  const actions = usePetItemActions()
+
+  if (profile === undefined || inventory === undefined) {
+    return <PetTabSkeleton testId="pet-shop-loading" />
+  }
 
   const coins = normalizeCoins(profile?.coins)
   const streak = normalizeStreak(profile?.streak)
-  const ownedQty = new Map((inventory ?? []).map((row) => [row.id, row.qty]))
+  const ownedQty = new Map(inventory.map((row) => [row.id, row.qty]))
 
   return (
     <div data-testid="pet-shop-tab" className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -74,6 +85,8 @@ export function ShopTab() {
                 const Icon = petItemIcon(item.icon)
                 const owned = ownedQty.get(item.id) ?? 0
                 const affordable = canAfford(coins, item)
+                const buying = actions.isPending("buy", item.id)
+                const using = actions.isPending("use", item.id)
                 const pluginText = isPluginPetId(item.id)
                   ? pluginItemText(item.id, locale)
                   : undefined
@@ -101,12 +114,18 @@ export function ShopTab() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        disabled={!affordable}
+                        disabled={!affordable || buying}
+                        aria-busy={buying || undefined}
                         data-action={`buy-${item.id}`}
+                        aria-label={t("shop.buyAria", { item: title, price: item.price })}
                         title={affordable ? undefined : t("shop.insufficient")}
-                        onClick={() => void purchaseItem(item.id)}
+                        onClick={() => void actions.purchase(item)}
                       >
-                        <CoinsIcon className="size-3.5" />
+                        {buying ? (
+                          <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+                        ) : (
+                          <CoinsIcon className="size-3.5" aria-hidden />
+                        )}
                         <span className={cn("tabular-nums", !affordable && "opacity-60")}>
                           {item.price}
                         </span>
@@ -116,7 +135,9 @@ export function ShopTab() {
                           size="sm"
                           variant="ghost"
                           data-action={`use-${item.id}`}
-                          onClick={() => void consumeItem(item.id)}
+                          disabled={using}
+                          aria-busy={using || undefined}
+                          onClick={() => void actions.use(item)}
                         >
                           {item.consumable ? t("shop.use") : t("shop.apply")}
                         </Button>

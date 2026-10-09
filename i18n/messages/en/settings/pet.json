@@ -33,7 +33,8 @@
     },
     "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
     "size": {
-      "label": "Desktop pet size ({size}px)"
+      "label": "Desktop pet size ({size}px)",
+      "description": "Size of the floating desktop pet. The in-app pet has its own size under Appearance."
     },
     "title": "Desktop pet",
     "wander": {
@@ -220,7 +221,15 @@
     "clearAction": "Clear pet memory",
     "clearDescription": "Forget everything the pet remembers from your talks.",
     "description": "Remember recent talk exchanges and weave them into replies. Stored locally, capped at 200 turns.",
-    "label": "Conversation memory"
+    "label": "Conversation memory",
+    "clearConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Clear memory",
+      "description": "Your pet forgets every conversation it remembers. This can't be undone.",
+      "title": "Clear pet memory?"
+    },
+    "clearFailed": "Couldn't clear pet memory. Try again.",
+    "cleared": "Pet memory cleared."
   },
   "motion": {
     "label": "Motion",
@@ -270,10 +279,13 @@
     "confirmTitle": "Reset this pet profile?",
     "description": "Delete all pet data and start over.",
     "label": "Reset pet",
-    "profileScope": "This resets pet progress and history, not the settings on this page."
+    "profileScope": "This resets pet progress and history, not the settings on this page.",
+    "done": "Pet profile reset. A fresh egg is waiting.",
+    "failed": "Couldn't reset the pet profile. Try again."
   },
   "size": {
-    "label": "Size ({size}px)"
+    "label": "Size ({size}px)",
+    "description": "Size of the in-app pet in the corner of this window. The floating desktop pet is sized separately."
   },
   "skin": {
     "label": "Skin",

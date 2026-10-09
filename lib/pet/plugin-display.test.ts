@@ -8,6 +8,7 @@ import {
 } from "@/lib/plugin/registries/pet-achievement-registry"
 import {
   isPluginPetId,
+  petItemTitle,
   pickLocalized,
   pluginAchievementText,
   pluginItemText,
@@ -81,6 +82,36 @@ describe("pluginItemText", () => {
   it("returns undefined for static ids and unregistered plugin ids", () => {
     expect(pluginItemText("berry", "en")).toBeUndefined()
     expect(pluginItemText("plugin:gone:item", "en")).toBeUndefined()
+  })
+})
+
+describe("petItemTitle", () => {
+  const translatePet = (key: string) => `pet.${key}`
+
+  it("names a static item through the host key", () => {
+    expect(petItemTitle({ id: "berry", i18nKey: "berry" }, "en", translatePet)).toBe(
+      "pet.shop.items.berry.title"
+    )
+  })
+
+  it("names a plugin item by its own label, or its id once the plugin is gone", () => {
+    registerPetItem(
+      "moon-pie",
+      {
+        id: "moon-pie",
+        labels: { en: "Moon Pie", "zh-CN": "月亮派" },
+        category: "food",
+        price: 4,
+        consumable: true,
+      },
+      { pluginId: "p1" }
+    )
+    expect(petItemTitle({ id: "plugin:p1:moon-pie", i18nKey: "x" }, "zh-CN", translatePet)).toBe(
+      "月亮派"
+    )
+    expect(petItemTitle({ id: "plugin:gone:item", i18nKey: "x" }, "en", translatePet)).toBe(
+      "plugin:gone:item"
+    )
   })
 })
 

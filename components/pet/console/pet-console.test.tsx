@@ -1,4 +1,30 @@
-import { render, screen, within, fireEvent, act } from "@testing-library/react"
+import {
+  render as rtlRender,
+  screen,
+  within,
+  fireEvent,
+  act,
+  type RenderOptions,
+} from "@testing-library/react"
+import type { ReactElement } from "react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+// The nav's icon rail wraps each tab in a tooltip; the app mounts the provider
+// globally in `app/layout.tsx`.
+const render = (ui: ReactElement, options?: RenderOptions) =>
+  rtlRender(ui, { wrapper: TooltipProvider, ...options })
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("@/hooks/pet/use-active-character-id", () => ({
+  useActiveCharacterId: () => "char-1",
+}))
+const chatTabProps = jest.fn()
+jest.mock("./chat-tab", () => ({
+  ChatTab: (props: unknown) => {
+    chatTabProps(props)
+    return <div data-testid="tab-chat" />
+  },
+}))
 
 const mockUsePlatform = jest.fn(() => "tauri")
 jest.mock("@/hooks/use-platform", () => ({
@@ -36,12 +62,11 @@ jest.mock("../pet-renderer", () => ({
     return <div data-testid="pet-renderer-stub" />
   },
 }))
-jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: () => null }))
-const hatchPet = jest.fn().mockResolvedValue(undefined)
-const emitPetEvent = jest.fn()
+const hatchPetOnce = jest.fn()
 const renamePet = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/pet/runtime/init-pet", () => ({ hatchPet: () => hatchPet() }))
-jest.mock("@/lib/pet/events/pet-event-bus", () => ({ emitPetEvent: () => emitPetEvent() }))
+jest.mock("@/lib/pet/runtime/hatch", () => ({
+  hatchPetOnce: (settings: unknown) => hatchPetOnce(settings),
+}))
 jest.mock("@/lib/pet/runtime/rename-pet", () => ({
   renamePet: (name: string) => renamePet(name),
   sanitizePetName: (s: string) => s.trim(),
@@ -73,6 +98,7 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
 jest.mock("./achievements-tab", () => ({ AchievementsTab: () => <div data-testid="tab-ach" /> }))
 jest.mock("./binding-tab", () => ({ BindingTab: () => <div data-testid="tab-bind" /> }))
 
+import { toast } from "sonner"
 import { usePet } from "@/hooks/pet/use-pet"
 import { PetConsole } from "./pet-console"
 import { createDefaultProfile } from "@/lib/pet/defaults"
@@ -100,16 +126,21 @@ function petResult(soul: PetProfile["soul"]) {
 }
 
 beforeEach(() => {
+  mockUsePlatform.mockReturnValue("tauri")
   resetPetSkinRuntimeForTests()
   mockUsePet.mockReset()
-  hatchPet.mockClear()
-  emitPetEvent.mockClear()
-  renamePet.mockClear()
+  hatchPetOnce.mockReset()
+  hatchPetOnce.mockResolvedValue({ status: "hatched", profile: {} })
+  renamePet.mockReset()
+  renamePet.mockResolvedValue(undefined)
+  chatTabProps.mockClear()
+  ;(toast.error as jest.Mock).mockClear()
   rendererProps.mockClear()
   slotProps.mockClear()
   hasPluginExtensions = false
   settingsValue = {}
-  toggleDesktopPetWindow.mockClear()
+  toggleDesktopPetWindow.mockReset()
+  toggleDesktopPetWindow.mockResolvedValue(true)
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
   useActiveSpritePack.mockReset()
@@ -135,23 +166,51 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("pet-console-desktop-toggle")).toBeInTheDocument()
   })
 
-  it("offers a hatch action for an unhatched egg", async () => {
+  it("offers a hatch action for an unhatched egg, through the single-flight hatch", async () => {
+    settingsValue = { defaultProvider: "openai" }
     mockUsePet.mockReturnValue(petResult(null))
     render(<PetConsole />)
     expect(screen.getByTestId("pet-hatch")).toBeInTheDocument()
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /hatch|console\.hatch/i }))
     })
-    expect(hatchPet).toHaveBeenCalled()
-    expect(emitPetEvent).toHaveBeenCalled()
+    expect(hatchPetOnce).toHaveBeenCalledWith({ defaultProvider: "openai" })
+  })
+
+  it("toasts a hatch that failed", async () => {
+    hatchPetOnce.mockResolvedValue({ status: "failed", error: new Error("x") })
+    mockUsePet.mockReturnValue(petResult(null))
+    render(<PetConsole />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /hatch|console\.hatch/i }))
+    })
+    expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("reads the pet through the open session's character and names it in chat", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole initialTab="chat" />)
+    expect(mockUsePet).toHaveBeenCalledWith("char-1")
+    // The chat itself reads the character through the console's actions.
+    expect(chatTabProps).toHaveBeenCalledWith({ petName: "Boba" })
+  })
+
+  it("runs in local mode on the desktop, with nothing labelled desktop-only", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole />)
+    expect(screen.getByTestId("pet-console")).toHaveAttribute("data-mode", "local")
+    expect(screen.queryByTestId("pet-console-desktop-badge")).toBeNull()
+    expect(screen.queryByTestId("pet-remote-status-band")).toBeNull()
+    expect(screen.queryByTestId("pet-console-desktop-status")).toBeNull()
   })
 
   it("shows the nurture layout for a hatched pet and switches tabs", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
     expect(screen.getByTestId("pet-nurture-tab")).toBeInTheDocument()
+    // Radix tabs activate on mousedown (and on focus/keys), not on click.
     const clickTab = (id: string) =>
-      fireEvent.click(document.querySelector(`[data-tab="${id}"]`) as Element)
+      fireEvent.mouseDown(document.querySelector(`[data-tab="${id}"]`) as Element)
     clickTab("shop")
     expect(screen.getByTestId("tab-shop")).toBeInTheDocument()
     clickTab("dex")
@@ -162,19 +221,22 @@ describe("PetConsole", () => {
     expect(screen.getByTestId("tab-bind")).toBeInTheDocument()
   })
 
-  it("renders grouped desktop navigation and a mobile Sheet trigger", () => {
+  it("renders one grouped tablist whose tabs control the content panel", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
 
-    expect(screen.getByTestId("pet-console-nav")).toBeInTheDocument()
-    expect(screen.getByTestId("pet-console-mobile-nav-trigger")).toHaveTextContent(
-      /nurture|console\.tabs\.nurture/i
-    )
-    expect(screen.getAllByText(/care|console\.groups\.nurture/i).length).toBeGreaterThan(0)
-    expect(
-      screen.getAllByText(/personalization|console\.groups\.personalize/i).length
-    ).toBeGreaterThan(0)
-    expect(screen.getAllByText(/records|console\.groups\.records/i).length).toBeGreaterThan(0)
+    const nav = screen.getByTestId("pet-console-nav")
+    expect(nav).toHaveAttribute("role", "tablist")
+    // The phone no longer goes through a hamburger Sheet.
+    expect(screen.queryByTestId("pet-console-mobile-nav-trigger")).toBeNull()
+    const nurture = within(nav).getByRole("tab", { name: /nurture/i })
+    expect(nurture).toHaveAttribute("aria-selected", "true")
+    const panel = screen.getByRole("tabpanel")
+    expect(nurture).toHaveAttribute("aria-controls", panel.id)
+    expect(panel).toContainElement(screen.getByTestId("pet-nurture-tab"))
+    for (const group of ["nurture", "personalize", "records"]) {
+      expect(nav.querySelector(`[data-nav-group="${group}"]`)).not.toBeNull()
+    }
   })
 
   it("opens at the deep-linked initial tab and follows later deep links", () => {
@@ -255,7 +317,7 @@ describe("PetConsole", () => {
     hasPluginExtensions = true
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
-    fireEvent.click(document.querySelector('[data-tab="plugins"]') as Element)
+    fireEvent.mouseDown(document.querySelector('[data-tab="plugins"]') as Element)
     expect(screen.getByTestId("pet-plugin-slot")).toBeInTheDocument()
     expect(slotProps).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -270,6 +332,19 @@ describe("PetConsole", () => {
     )
   })
 
+  it("falls back to nurture for a plugins deep link with no plugin tab yet", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    render(<PetConsole initialTab="plugins" />)
+    expect(screen.getByTestId("pet-nurture-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("pet-plugin-slot")).toBeNull()
+  })
+
+  it("shows a layout-matched placeholder while the profile loads", () => {
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    render(<PetConsole />)
+    expect(screen.getByTestId("pet-console-loading")).toHaveAttribute("aria-busy", "true")
+  })
+
   it("renames the pet from the header editor", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
@@ -282,23 +357,28 @@ describe("PetConsole", () => {
 })
 
 describe("hosts where the pet cannot run", () => {
-  it.each(["web", "mobile"])("explains itself on %s instead of spinning forever", (platform) => {
-    // The surface contract lists /pet as a navigable route, and `PetMount`
-    // refuses to initialize the profile on the Capacitor shell, so a phone
-    // reaching this page used to wait at a spinner that never resolved.
-    mockUsePlatform.mockReturnValue(platform)
-    mockUsePet.mockReturnValue(petResult(null))
-    render(<PetConsole />)
-    expect(screen.getByTestId("pet-console-unavailable")).toBeInTheDocument()
-    expect(screen.queryByTestId("pet-console-loading")).not.toBeInTheDocument()
-  })
+  it.each(["web", "mobile"])(
+    "asks an unpaired %s client to pair instead of spinning forever",
+    (platform) => {
+      // The surface contract lists /pet as a navigable route, and `PetMount`
+      // refuses to initialize the profile on the Capacitor shell, so a phone
+      // reaching this page used to wait at a spinner that never resolved.
+      mockUsePlatform.mockReturnValue(platform)
+      mockUsePet.mockReturnValue(petResult(null))
+      render(<PetConsole />)
+      const unavailable = screen.getByTestId("pet-console-unavailable")
+      expect(unavailable).toHaveAttribute("data-reason", "unpaired")
+      expect(unavailable).toHaveTextContent("Pair with your desktop")
+      expect(screen.queryByTestId("pet-console-loading")).not.toBeInTheDocument()
+    }
+  )
 
-  it("gives the unavailable page a way out instead of a bare sentence", () => {
+  it("gives the unavailable page the pairing remedy and a way out", () => {
     mockUsePlatform.mockReturnValue("mobile")
     mockUsePet.mockReturnValue(petResult(null))
     render(<PetConsole />)
-    const exit = within(screen.getByTestId("pet-console-unavailable")).getByRole("link")
-    expect(exit).toHaveAttribute("href", "/")
+    const links = within(screen.getByTestId("pet-console-unavailable")).getAllByRole("link")
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/pair", "/"])
   })
 
   it("renders the console normally on a host that does run the pet", () => {
@@ -348,6 +428,28 @@ describe("desktop toggle in the console header", () => {
     await act(async () => {
       resolve(true)
     })
+    expect(button).not.toBeDisabled()
+  })
+
+  it("says so when the desktop pet would not open", async () => {
+    hatched()
+    toggleDesktopPetWindow.mockResolvedValueOnce(false)
+    render(<PetConsole />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("pet-console-desktop-toggle"))
+    })
+    expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
+  it("recovers from a toggle that throws instead of staying disabled", async () => {
+    hatched()
+    toggleDesktopPetWindow.mockRejectedValueOnce(new Error("ipc"))
+    render(<PetConsole />)
+    const button = screen.getByTestId("pet-console-desktop-toggle")
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(toast.error).toHaveBeenCalledTimes(1)
     expect(button).not.toBeDisabled()
   })
 

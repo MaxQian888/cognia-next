@@ -122,6 +122,7 @@ export function PetDesktopControls({ pet }: PetControlsProps) {
         <FieldLabel htmlFor="pet-desktop-size">
           {t("desktopPet.size.label", { size: shownSize })}
         </FieldLabel>
+        <FieldDescription>{t("desktopPet.size.description")}</FieldDescription>
         <Slider
           id="pet-desktop-size"
           min={96}

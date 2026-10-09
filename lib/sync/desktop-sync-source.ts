@@ -54,6 +54,12 @@ import type { SyncDelta, SyncableTable } from "./types"
 import { portableExecutionContext } from "@/lib/task-workspace/managed-workspace"
 import { createProfileDekStore, type ProfileDekHandle } from "@/lib/rag/profile-dek-store"
 import { createMemorySyncRowV1, MEMORY_SYNC_PROFILE_ID } from "./memory-content-protocol"
+import {
+  isoMs,
+  projectPetActivityForSync,
+  projectPetBindingForSync,
+  projectPetProfileForSync,
+} from "./handlers/pet"
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
@@ -274,6 +280,16 @@ export async function readDexieDelta(
       return readExecutionRunBindingsDelta(since)
     case "sessionFolders":
       return readSessionFoldersDelta(since)
+    case "petProfile":
+      return readPetProfileDelta(since)
+    case "petAchievements":
+      return readPetAchievementsDelta(since)
+    case "petInventory":
+      return readPetInventoryDelta(since)
+    case "petCharacterBindings":
+      return readPetCharacterBindingsDelta(since)
+    case "petActivityLog":
+      return readPetActivityLogDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -1168,6 +1184,81 @@ async function readExecutionRunBindingsDelta(
     .executionRunBindings.filter((row) => Number(row.updatedAt ?? row.createdAt ?? 0) > since)
     .toArray()
   return finalizeDelta("executionRunBindings", rows, since)
+}
+
+// ── The desktop pet (ADR-0219, remote pet care) ─────────────────────────────
+//
+// A paired phone mirrors these read-only and acts through `pet_*` RPCs. The
+// projections, and the client half that applies them, live together in
+// `lib/sync/handlers/pet.ts`.
+
+/**
+ * The profile singleton, as a projection (no account fingerprint, no proactive
+ * counters, the host's bones). `updatedAt` is an ISO string, so the cursor is
+ * its epoch ms; every writer stamps it (`patchPetProfile`, `applyPetEvent`,
+ * the shop, the hatch). A first pull always carries the row, even one whose
+ * stamp does not parse, so a cold mirror is never left without its pet.
+ */
+async function readPetProfileDelta(since: number): Promise<SyncDelta<unknown>> {
+  const row = await getDb().petProfile.get("global")
+  const rows =
+    row && (since === 0 || isoMs(row.updatedAt) > since) ? [projectPetProfileForSync(row)] : []
+  return finalizeDelta("petProfile", rows as unknown as UpdatedAtRow[], since, false, (r) =>
+    isoMs((r as unknown as { updatedAt?: string }).updatedAt)
+  )
+}
+
+/** Unlocks are written once and never edited, so the indexed `unlockedAt` is the cursor. */
+async function readPetAchievementsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().petAchievements.where("unlockedAt").above(since).toArray()
+  return finalizeDelta("petAchievements", rows as unknown as UpdatedAtRow[], since, false, (r) =>
+    Number((r as unknown as { unlockedAt?: number }).unlockedAt ?? 0)
+  )
+}
+
+/**
+ * Owned items. `updatedAt` is epoch ms but not indexed; the table holds one
+ * row per catalog item at most, so this scans what the shop already scans.
+ */
+async function readPetInventoryDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb()
+    .petInventory.filter((row) => Number(row.updatedAt ?? 0) > since)
+    .toArray()
+  return finalizeDelta("petInventory", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Per-character appearance overrides. Keyed by `characterId`, which the wire
+ * carries as `id` (tombstones are recorded under the same key); `updatedAt`
+ * is an ISO string, so the cursor is its epoch ms. One row per bound
+ * character, so a scan.
+ */
+async function readPetCharacterBindingsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = (await getDb().petCharacterBindings.toArray())
+    .filter((row) => isoMs(row.updatedAt) > since)
+    .map(projectPetBindingForSync)
+  return finalizeDelta(
+    "petCharacterBindings",
+    rows as unknown as UpdatedAtRow[],
+    since,
+    false,
+    (r) => isoMs((r as unknown as { updatedAt?: string }).updatedAt)
+  )
+}
+
+/**
+ * The interaction ledger. Append-only with an auto-increment key, and the key
+ * IS the cursor: it only grows, survives `clear()` (IndexedDB key generators
+ * are never reset), and orders rows exactly as they were written. Bounded at
+ * `PET_ACTIVITY_CAP` rows on the host, so one page carries a cold pull.
+ */
+async function readPetActivityLogDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = projectPetActivityForSync(
+    await getDb().petActivityLog.where(":id").above(since).toArray()
+  )
+  return finalizeDelta("petActivityLog", rows as unknown as UpdatedAtRow[], since, false, (r) =>
+    Number((r as unknown as { id: string }).id)
+  )
 }
 
 async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {

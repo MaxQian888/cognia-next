@@ -104,8 +104,10 @@ export interface SidebarCatalogItem extends SidebarNavMeta {
  * Off the desktop shell (mobile AND plain/cloud-companion browsers — ADR-0059
  * F5), `desktopOnly` items are dropped so they never surface in the rail or
  * the customizer as dead ends. On the web a paired host can bring one back,
- * but only a surface with a host `operation` it can advertise; one without
- * (the pet) is a shell constraint and stays dropped. Falls back to a
+ * but only a surface with a host `operation` it can advertise; one without is
+ * a shell constraint and stays dropped. A `hostOperationGated` item (the pet
+ * console, ADR-0219) appears on mobile and web exactly while the paired host
+ * advertises its operation. Falls back to a
  * question-mark-free no-op icon only if a mapping is missing (shouldn't
  * happen — covered by tests).
  */
@@ -115,6 +117,18 @@ export function getSidebarCatalog(
 ): SidebarCatalogItem[] {
   return SIDEBAR_NAV_META.filter((meta) => {
     if (platform === "tauri") return true
+    // Remote control of something only a host runs: shown only while the
+    // paired host advertises it. Checked first, so neither the mobile
+    // `desktopOnly` rule nor the contract's `standalone` column (the pet's is
+    // `explain`, which `shouldShowSurface` would let through) can override it.
+    if (meta.hostOperationGated) {
+      const operation = getSurfaceContract(meta.id)?.operation
+      return (
+        operation !== undefined &&
+        runtimeSnapshot !== undefined &&
+        hostAdvertisesOperation(runtimeSnapshot, operation)
+      )
+    }
     // `desktopOnly` is a shell constraint, not a runtime capability. A paired
     // desktop may advertise the underlying operation to a phone, but the
     // mobile drawer must still not expose destinations designed only for the
@@ -125,9 +139,9 @@ export function getSidebarCatalog(
     if (platform === "mobile" && meta.mobileHidden) return false
     // A desktop-only surface with no host operation cannot be served by any
     // companion, so no runtime snapshot can make it reachable here. Without
-    // this the web path below consulted only the surface contract, and the pet
-    // (`standalone: "explain"`) showed in a browser's rail and ⌘K as a page
-    // that could only explain it does not run there.
+    // this the web path below consulted only the surface contract, and a
+    // `standalone: "explain"` surface showed in a browser's rail and ⌘K as a
+    // page that could only explain it does not run there.
     if (meta.desktopOnly && !getSurfaceContract(meta.id)?.operation) return false
     if (runtimeSnapshot) {
       const contract = getSurfaceContract(meta.id)
@@ -145,6 +159,19 @@ export function getSidebarCatalog(
     ...m,
     Icon: SIDEBAR_NAV_ICONS[m.id] ?? ActivityIcon,
   }))
+}
+
+/**
+ * Whether the paired host advertises `operation` right now: a compatible
+ * companion host whose manifest lists it. Cached reads do not count; an entry
+ * gated on this is only worth a slot when the host can act on it.
+ */
+function hostAdvertisesOperation(snapshot: RuntimeSnapshot, operation: string): boolean {
+  return (
+    snapshot.target?.kind === "companion" &&
+    snapshot.host?.compatible === true &&
+    snapshot.host.operations.includes(operation)
+  )
 }
 
 /** Resolved partition of the catalog into the three rail buckets. */

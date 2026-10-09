@@ -84,6 +84,25 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: { apiKey: "sk" } }),
 }))
 
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
+const OFFLINE_SNAPSHOT: RuntimeSnapshot = {
+  target: null,
+  vaultState: "unavailable",
+  connectionState: "offline",
+}
+let mockRuntimeSnapshot: RuntimeSnapshot = OFFLINE_SNAPSHOT
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => mockRuntimeSnapshot,
+}))
+
+// The remote host this desktop drives (ADR-0219): its feature manifest, not
+// the runtime snapshot, says whether that host can care for a pet.
+const mockActiveHostSupportsFeature = jest.fn<boolean, [string, string | undefined]>(() => false)
+jest.mock("@/stores/remote-host/remote-host-store", () => ({
+  useActiveHostSupportsFeature: (feature: string, operation?: string) =>
+    mockActiveHostSupportsFeature(feature, operation),
+}))
+
 import { resolvePanelLabel, useGlobalSearchContext } from "./use-global-search-context"
 
 describe("useGlobalSearchContext", () => {
@@ -92,6 +111,9 @@ describe("useGlobalSearchContext", () => {
     mockPlatform = "web"
     mockPathname = "/"
     uiState.guildRailCollapsed = false
+    mockRuntimeSnapshot = OFFLINE_SNAPSHOT
+    mockActiveHostSupportsFeature.mockReset()
+    mockActiveHostSupportsFeature.mockReturnValue(false)
   })
 
   it("assembles the context from hooks and stores", () => {
@@ -117,6 +139,7 @@ describe("useGlobalSearchContext", () => {
       recorderAvailable: true,
       // A browser can never host the desktop pet (ADR-0058 D9).
       petHostAvailable: false,
+      petConsoleReachable: false,
       theme: "dark",
       hasApiKey: true,
       pluginQuickActions: quickActions,
@@ -140,6 +163,47 @@ describe("useGlobalSearchContext", () => {
     mockPlatform = "mobile"
     const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
     expect(result.current.host.petHostAvailable).toBe(false)
+    expect(result.current.host.petConsoleReachable).toBe(false)
+  })
+
+  it("reaches the console on the desktop that hosts the pet", () => {
+    mockPlatform = "tauri"
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(result.current.host.petConsoleReachable).toBe(true)
+  })
+
+  // ADR-0219: a phone paired to a desktop that advertises remote pet care can
+  // open the console, though it never hosts the pet itself.
+  it("reaches the console from a phone paired for remote pet care", () => {
+    mockPlatform = "mobile"
+    mockRuntimeSnapshot = {
+      target: { id: "m", kind: "companion", hostKind: "desktop", platform: "mobile" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["pet_get"], grants: [] },
+    }
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(result.current.host.petHostAvailable).toBe(false)
+    expect(result.current.host.petConsoleReachable).toBe(true)
+  })
+
+  // A desktop driving a remote host has no companion runtime target, so only
+  // the remote-host store's manifest can say that host serves the pet. Run on
+  // a shell that cannot host a pet itself, so this branch alone decides.
+  it("reaches the console through the remote host this desktop drives", () => {
+    mockPlatform = "web"
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(mockActiveHostSupportsFeature).toHaveBeenCalledWith("pet.remote-care", "pet_get")
+    expect(result.current.host.petHostAvailable).toBe(false)
+    expect(result.current.host.petConsoleReachable).toBe(true)
+  })
+
+  it("does not reach the console when the driven remote host lacks pet care", () => {
+    mockPlatform = "web"
+    const { result } = renderHook(() => useGlobalSearchContext({ sessions: [], scope: "all" }))
+    expect(mockActiveHostSupportsFeature).toHaveBeenCalledWith("pet.remote-care", "pet_get")
+    expect(result.current.host.petConsoleReachable).toBe(false)
   })
 
   describe("shellNav", () => {

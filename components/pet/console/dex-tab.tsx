@@ -3,7 +3,8 @@
 // skin for you) and the built-in species showcase, themed with the palette and
 // highlighting the owned one. The Live2D section is why an imported model now
 // actually shows up in the "pet list"; before, this tab only knew about SVG
-// species.
+// species. The model list distinguishes "still loading" from "none imported",
+// so the empty state no longer flashes before the models appear.
 
 "use client"
 
@@ -15,18 +16,19 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
-import { listPetModels, type PetModelRow } from "@/lib/db/pet-models"
+import { listPetModels } from "@/lib/db/pet-models"
 import { useSettingsStore } from "@/stores/settings"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { DEFAULT_PET_SETTINGS, type PetBones } from "@/types/pet"
 import { updatePetSettings } from "@/lib/pet/settings-sync"
 import { PetRenderer } from "../pet-renderer"
+import { PetTabSkeleton } from "./pet-console-skeleton"
 
 export function DexTab({ bones }: { bones: PetBones }) {
   const t = useTranslations("pet")
   const settings = useSettingsStore((s) => s.settings)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const models = useLiveQuery(() => listPetModels(), [], [] as PetModelRow[])
+  const models = useLiveQuery(() => listPetModels(), [])
   const { modelId: activeModelId, coreReady } = useActiveLive2dModel(pet)
   const live2dActive = pet.skinId === "live2d"
 
@@ -54,7 +56,14 @@ export function DexTab({ bones }: { bones: PetBones }) {
             </Button>
           )}
         </div>
-        {models.length === 0 ? (
+        {models === undefined ? (
+          <PetTabSkeleton
+            testId="pet-dex-loading"
+            variant="grid"
+            count={6}
+            className="max-w-none"
+          />
+        ) : models.length === 0 ? (
           <Empty className="py-8">
             <EmptyDescription>{t("dex.live2dEmpty")}</EmptyDescription>
           </Empty>

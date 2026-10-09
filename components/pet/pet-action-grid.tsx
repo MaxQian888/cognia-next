@@ -32,6 +32,18 @@ export interface PetActionGridProps {
   talkOpen: boolean
   onToggleTalk: () => void
   className?: string
+  /**
+   * `compact` keeps the popup panel short; `comfortable` gives every action a
+   * 44px touch target and a readable label for the full-page console.
+   */
+  size?: "compact" | "comfortable"
+  /**
+   * Remaining cooldown per kind, when the caller owns it. The remote console
+   * (ADR-0219) ages the DESKTOP's cooldowns from its `pet_get` snapshot; the
+   * mirrored gate holds desktop timestamps, which this device's clock would
+   * misread. Omitted, the grid reads this device's own gate.
+   */
+  cooldownRemaining?: (kind: string) => number
 }
 
 interface ActionDef {
@@ -56,6 +68,8 @@ export function PetActionGrid({
   talkOpen,
   onToggleTalk,
   className,
+  size = "compact",
+  cooldownRemaining,
 }: PetActionGridProps) {
   const t = useTranslations("pet")
   // The cooldown is read, not owned. Its durations and its enforcement live in
@@ -63,7 +77,8 @@ export function PetActionGrid({
   // overlay, the popup, the tray and the agent all obey one deadline. When a
   // UI file owned the numbers, the button greyed out correctly while every
   // other path farmed the same action freely.
-  const { remaining } = useActionCooldown()
+  const local = useActionCooldown()
+  const remaining = cooldownRemaining ?? local.remaining
 
   // `kind` matches the emitted PetEvent kind, which is also the key the gate
   // stores its deadline under, so a surface reads exactly what it wrote.
@@ -91,8 +106,16 @@ export function PetActionGrid({
     { kind: "treated", labelKey: "actions.treat", Icon: GiftIcon, run: onTreat },
   ]
 
+  const comfortable = size === "comfortable"
+  const buttonClass = cn("h-auto flex-col gap-1 py-2", comfortable && "min-h-14 py-2.5")
+  const labelClass = cn("leading-none", comfortable ? "text-xs" : "text-[10px]")
+
   return (
-    <div data-testid="pet-action-grid" className={cn("grid grid-cols-4 gap-2", className)}>
+    <div
+      data-testid="pet-action-grid"
+      data-size={size}
+      className={cn("grid grid-cols-4 gap-2", className)}
+    >
       {actions.map((a) => {
         const rem = remaining(a.kind)
         const cooling = rem > 0
@@ -105,7 +128,7 @@ export function PetActionGrid({
             disabled={cooling}
             data-action={a.kind}
             aria-label={t(a.labelKey)}
-            className="h-auto flex-col gap-1 py-2"
+            className={buttonClass}
             onClick={() => a.run()}
           >
             {cooling ? (
@@ -120,7 +143,7 @@ export function PetActionGrid({
             ) : (
               <a.Icon className="size-4" />
             )}
-            <span className="text-[10px] leading-none">{t(a.labelKey)}</span>
+            <span className={labelClass}>{t(a.labelKey)}</span>
           </Button>
         )
       })}
@@ -128,11 +151,11 @@ export function PetActionGrid({
         size="sm"
         variant={talkOpen ? "default" : "secondary"}
         aria-label={t("actions.talk")}
-        className="h-auto flex-col gap-1 py-2"
+        className={buttonClass}
         onClick={onToggleTalk}
       >
         <AnimatedActionIcon icon={AnimatedMessageCircleIcon} size={16} animateOnChange={talkOpen} />
-        <span className="text-[10px] leading-none">{t("actions.talk")}</span>
+        <span className={labelClass}>{t("actions.talk")}</span>
       </Button>
     </div>
   )

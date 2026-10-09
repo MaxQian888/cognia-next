@@ -328,5 +328,6 @@
   "workflowsSettingsRow": "Workflow settings",
   "workspaceRow": "Workspace",
   "chatTemplatesRow": "Chat templates",
-  "templatesRow": "Template catalog"
+  "templatesRow": "Template catalog",
+  "petRow": "Pet"
 }

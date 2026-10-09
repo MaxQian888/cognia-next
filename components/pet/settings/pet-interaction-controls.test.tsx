@@ -1,5 +1,6 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 const clearPetConversation = jest.fn()
 jest.mock("@/lib/db/pet-conversation", () => ({
   clearPetConversation: () => clearPetConversation(),
@@ -9,10 +10,24 @@ jest.mock("@/components/settings/common/model-override-fields", () => ({
   ModelOverrideFields: () => <div data-testid="model-override" />,
 }))
 
+import { toast } from "sonner"
 import { PetInteractionControls } from "./pet-interaction-controls"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
-beforeEach(() => clearPetConversation.mockClear())
+beforeEach(() => {
+  clearPetConversation.mockReset().mockResolvedValue(undefined)
+  ;(toast.success as jest.Mock).mockClear()
+  ;(toast.error as jest.Mock).mockClear()
+})
+
+/** Open the confirmation and accept it. */
+async function confirmClear() {
+  fireEvent.click(screen.getByRole("button", { name: /clear pet memory/i }))
+  const confirm = await screen.findByRole("button", { name: /^clear memory$/i })
+  await act(async () => {
+    fireEvent.click(confirm)
+  })
+}
 
 describe("PetInteractionControls", () => {
   it("toggles muted bubbles and reveals the model override when LLM speak is on", () => {
@@ -29,21 +44,34 @@ describe("PetInteractionControls", () => {
     expect(document.getElementById("pet-proactive-enabled")).not.toBeNull()
   })
 
-  it("clears conversation memory", () => {
+  it("clears conversation memory only after confirming, and says so", async () => {
     const withLlm: PetSettings = { ...DEFAULT_PET_SETTINGS, llmSpeak: { enabled: true } }
     render(<PetInteractionControls pet={withLlm} patch={jest.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /clear pet memory/i }))
-    expect(clearPetConversation).toHaveBeenCalled()
+    expect(clearPetConversation).not.toHaveBeenCalled()
+    const confirm = await screen.findByRole("button", { name: /^clear memory$/i })
+    await act(async () => {
+      fireEvent.click(confirm)
+    })
+    await waitFor(() => expect(clearPetConversation).toHaveBeenCalled())
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
   })
 
-  it("keeps conversation memory controls available when LLM bubbles are disabled", () => {
+  it("reports a failed clear", async () => {
+    clearPetConversation.mockRejectedValue(new Error("closed"))
+    render(<PetInteractionControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
+    await confirmClear()
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+  })
+
+  it("keeps conversation memory controls available when LLM bubbles are disabled", async () => {
     const patch = jest.fn()
     render(<PetInteractionControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
 
     fireEvent.click(document.getElementById("pet-memory-enabled") as HTMLButtonElement)
     expect(patch).toHaveBeenCalledWith({ petMemory: { enabled: false } })
-    fireEvent.click(screen.getByRole("button", { name: /clear pet memory/i }))
-    expect(clearPetConversation).toHaveBeenCalled()
+    await confirmClear()
+    await waitFor(() => expect(clearPetConversation).toHaveBeenCalled())
   })
 
   it("drives the llm-speak, proactive, and memory controls", () => {

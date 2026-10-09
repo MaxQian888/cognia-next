@@ -135,6 +135,9 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
 
       <Field>
         <FieldLabel htmlFor="pet-size">{t("size.label", { size: pet.size })}</FieldLabel>
+        {/* Two size sliders exist (this one and the desktop pet's); each says
+            which pet it sizes so neither reads as the broken twin. */}
+        <FieldDescription>{t("size.description")}</FieldDescription>
         <Slider
           id="pet-size"
           min={64}

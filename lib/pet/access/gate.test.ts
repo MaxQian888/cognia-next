@@ -1,5 +1,6 @@
 import type { PetEvent, PetProfile } from "@/types/pet"
 import {
+  checkInteractionAccepted,
   MAX_COINS_PER_REWARD,
   MAX_XP_PER_REWARD,
   petSubjectKey,
@@ -444,5 +445,69 @@ describe("the controller's own state is consulted before anything is spent", () 
       deps({ getProfile: async () => hatched({ fed: NOW - 1500 }) })
     )
     expect(res.ok).toBe(true)
+  })
+})
+
+describe("checkInteractionAccepted (the subject-free precheck)", () => {
+  const at = (profile: PetProfile | undefined | null) => ({
+    getProfile: async () => profile,
+    now: () => NOW,
+  })
+
+  it("reports the remaining cooldown for a cooling kind", async () => {
+    expect(await checkInteractionAccepted("fed", at(hatched({ fed: NOW - 500 })))).toEqual({
+      code: "cooling-down",
+      kind: "fed",
+      retryAfterMs: 1000,
+    })
+  })
+
+  it("accepts a kind whose cooldown has elapsed", async () => {
+    expect(await checkInteractionAccepted("fed", at(hatched({ fed: NOW - 1500 })))).toBeNull()
+  })
+
+  it("passes ambient kinds without reading the profile", async () => {
+    const getProfile = jest.fn(async () => undefined)
+    expect(await checkInteractionAccepted("talked", { getProfile, now: () => NOW })).toBeNull()
+    expect(getProfile).not.toHaveBeenCalled()
+  })
+
+  it("refuses an egg and a missing profile", async () => {
+    expect(
+      await checkInteractionAccepted("fed", at({ soul: null } as unknown as PetProfile))
+    ).toEqual({ code: "not-hatched" })
+    expect(await checkInteractionAccepted("fed", at(undefined))).toEqual({
+      code: "uninitialized",
+    })
+  })
+})
+
+describe("a user spending an item", () => {
+  it("is refused on cooldown before the item is decremented", async () => {
+    const decrements: string[] = []
+    const res = await requestPetInteraction(
+      { kind: "user" },
+      "fed",
+      { itemId: "berry" },
+      deps({
+        getProfile: async () => hatched({ fed: NOW - 100 }),
+        decrementInventory: async (id) => {
+          decrements.push(id)
+          return true
+        },
+      })
+    )
+    expect(res).toEqual({
+      ok: false,
+      refusal: { code: "cooling-down", kind: "fed", retryAfterMs: 1400 },
+    })
+    expect(decrements).toEqual([])
+    expect(emitted).toEqual([])
+  })
+
+  it("spends and emits once the controller would accept", async () => {
+    const res = await requestPetInteraction({ kind: "user" }, "fed", { itemId: "berry" }, deps())
+    expect(res.ok).toBe(true)
+    expect(emitted).toEqual([{ source: "user", kind: "fed", meta: { itemId: "berry" } }])
   })
 })

@@ -2,6 +2,7 @@ import {
   ENVIRONMENT_CATALOG_HOST_OPERATIONS,
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
   INBOX_RELAY_HOST_OPERATIONS,
+  PET_REMOTE_CARE_HOST_OPERATIONS,
   ROUTER_FUSION_COMPANION_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
   parseHostFeatureManifest,
@@ -15,6 +16,23 @@ import {
 } from "@/lib/chat/attachments/prepare"
 
 describe("host feature manifest", () => {
+  it("advertises remote pet care on the desktop only (ADR-0219)", () => {
+    const desktop = buildLocalHostFeatureManifest({ platform: "tauri" })
+    expect(desktop.features["pet.remote-care"]).toEqual({
+      version: 1,
+      operations: [...PET_REMOTE_CARE_HOST_OPERATIONS],
+    })
+    expect(supportsHostFeatureOperation(desktop, "pet.remote-care", "pet_act")).toBe(true)
+    expect(supportsHostFeatureOperation(desktop, "pet.remote-care", "sync:petProfile")).toBe(true)
+    // The headless brain answers every pet arm `headless-host`; it must not
+    // send a phone into that refusal by advertising the feature.
+    for (const platform of ["headless", "web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["pet.remote-care"]
+      ).toBeUndefined()
+    }
+  })
+
   it("advertises HostState v1 through the existing manifest on execution hosts", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
 

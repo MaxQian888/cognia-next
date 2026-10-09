@@ -2,9 +2,11 @@ import {
   ME_ENTRIES,
   ME_SECTION_ORDER,
   ME_SECTION_TITLE_KEY,
+  isMeEntryOffered,
   matchMeEntry,
   type MeEntry,
 } from "./me-entries"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 import { MOBILE_SPOT_ICON_NAMES } from "../mobile-spot-icon"
 import { getSurfaceContractForRoute } from "@/lib/runtime/surface-contract"
 
@@ -58,6 +60,25 @@ describe("me-entries registry", () => {
     })
   })
 
+  // ADR-0219: the phone cares for the DESKTOP's pet, so the row follows the
+  // rail and ⌘K: offered off the desktop only while the paired host advertises
+  // the contract's `pet_get`, and its contract is `explain` standalone.
+  it("offers remote care of the desktop pet only through a host that serves it", () => {
+    const pet = ME_ENTRIES.find((entry) => entry.id === "pet")
+    expect(pet).toMatchObject({
+      href: "/pet",
+      labelKey: "petRow",
+      spotIcon: "pet",
+      hostOperationGated: true,
+    })
+    expect(getSurfaceContractForRoute("/pet")).toMatchObject({
+      standalone: "explain",
+      companion: "remote",
+      operation: "pet_get",
+    })
+    expect(matchMeEntry(pet!, "宠物", echo)).toBe(true)
+  })
+
   it("never marks a row desktop-only when its surface contract runs standalone", () => {
     // The row label and the route's own contract are two gates on one page;
     // they disagreed for Issues / Delivery projects / Workspace, which opened
@@ -109,6 +130,7 @@ describe("me-entries registry", () => {
       "workflows-settings": "workflows",
       backup: "secure-backup",
       memory: "memory",
+      pet: "pet",
     })
     expect(new Set(Object.values(spots)).size).toBe(ME_ENTRIES.length)
   })
@@ -268,3 +290,44 @@ describe("matchMeEntry", () => {
     expect(matchMeEntry(noKeywords, "restore", t)).toBe(false)
   })
 })
+
+
+describe("isMeEntryOffered", () => {
+  const pet = ME_ENTRIES.find((entry) => entry.id === "pet") as MeEntry
+  const plain = ME_ENTRIES.find((entry) => entry.id === "backup") as MeEntry
+  const standalone: RuntimeSnapshot = {
+    target: null,
+    vaultState: "unavailable",
+    connectionState: "offline",
+  }
+  const paired = (operations: string[], compatible = true): RuntimeSnapshot => ({
+    target: { kind: "companion" } as RuntimeSnapshot["target"],
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: { compatible, operations, grants: [] },
+  })
+
+  it("keeps ungated rows everywhere", () => {
+    expect(isMeEntryOffered(plain, "mobile", standalone)).toBe(true)
+    expect(isMeEntryOffered(plain, "web", standalone)).toBe(true)
+  })
+
+  it("offers every row on the desktop shell, which runs the pet itself", () => {
+    expect(isMeEntryOffered(pet, "tauri", standalone)).toBe(true)
+  })
+
+  it("hides the pet off the desktop until a compatible host advertises pet_get", () => {
+    expect(isMeEntryOffered(pet, "mobile", standalone)).toBe(false)
+    // Paired, but the manifest has not arrived yet.
+    expect(
+      isMeEntryOffered(pet, "mobile", { ...paired([]), host: undefined } as RuntimeSnapshot)
+    ).toBe(false)
+    // A desktop too old to share its pet.
+    expect(isMeEntryOffered(pet, "mobile", paired(["chat_send"]))).toBe(false)
+    // Lists the operation but speaks an incompatible protocol.
+    expect(isMeEntryOffered(pet, "mobile", paired(["pet_get"], false))).toBe(false)
+    expect(isMeEntryOffered(pet, "mobile", paired(["pet_get"]))).toBe(true)
+    expect(isMeEntryOffered(pet, "web", paired(["pet_get"]))).toBe(true)
+  })
+})
+

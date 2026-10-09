@@ -114,6 +114,13 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   workflowDeployments: "workflowDeployments",
   sessionFolders: "sessionFolders",
   executionRunBindings: "executionRunBindings",
+  // Remote pet care (ADR-0219). Identity names. `Table.clear()` fires none of
+  // these hooks, so a pet reset publishes its invalidation explicitly.
+  petProfile: "petProfile",
+  petAchievements: "petAchievements",
+  petInventory: "petInventory",
+  petCharacterBindings: "petCharacterBindings",
+  petActivityLog: "petActivityLog",
 })
 
 /** The Dexie surface this module needs — narrowed so tests can hand it a stub. */

@@ -189,10 +189,11 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       icon: { lucide: GlobeIcon },
       extra: ctx.isTauri ? undefined : { disabledReason: t("globalSearch.actions.desktopOnly") },
     },
-    // The desktop pet (ADR-0058). Hidden, not disabled, off the desktop main
-    // window: the pet never runs on the web or mobile, so a greyed row there
-    // would advertise a feature the host cannot have. Summoning switches a
-    // disabled pet on (D9), so the pet's own setting does not gate these.
+    // The desktop pet (ADR-0058). Hidden, not disabled, where it cannot run:
+    // only the desktop main window hosts the pet, so a greyed "show desktop
+    // pet" row anywhere else would advertise something the client cannot
+    // have. Summoning switches a disabled pet on (D9), so the pet's own
+    // setting does not gate it.
     ...(ctx.host.petHostAvailable
       ? [
           {
@@ -213,6 +214,12 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
             ],
             icon: { lucide: PawPrintIcon },
           },
+        ]
+      : []),
+    // The console also opens on a client paired to a host that advertises
+    // remote pet care (ADR-0219): it cares for that desktop's pet from here.
+    ...(ctx.host.petConsoleReachable
+      ? [
           {
             id: "open-pet-console" as const,
             title: t("globalSearch.actions.openPetConsole"),

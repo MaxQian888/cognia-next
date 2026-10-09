@@ -4,7 +4,7 @@ import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import type { PetBones } from "@/types/pet"
 
 // Live2D model list (reactive) + settings store + core-readiness probe.
-let mockModels: Array<{ id: string; name: string }> = []
+let mockModels: Array<{ id: string; name: string }> | undefined = []
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockModels }))
 
 const save = jest.fn()
@@ -102,5 +102,12 @@ describe("DexTab", () => {
     expect(save).toHaveBeenCalledWith({
       petSettings: expect.objectContaining({ skinId: "svg" }),
     })
+  })
+
+  it("shows a placeholder, not the empty state, while the models load", () => {
+    mockModels = undefined
+    render(<DexTab bones={bones} />)
+    expect(screen.getByTestId("pet-dex-loading")).toBeInTheDocument()
+    expect(screen.queryByText(/No Live2D models yet/)).toBeNull()
   })
 })

@@ -131,7 +131,15 @@
     "speciesFor": "Species for {name}",
     "spriteOption": "Sprite · {name}",
     "useGlobal": "Use global pet",
-    "useSvg": "Built-in vector mascot"
+    "useSvg": "Built-in vector mascot",
+    "clearConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Clear binding",
+      "description": "The character goes back to the global pet: its species and skin overrides are both removed.",
+      "title": "Clear the pet binding for {name}?"
+    },
+    "cleared": "{name} now uses the global pet.",
+    "saveFailed": "Couldn't save the character binding. Try again."
   },
   "bubbleAction": {
     "openConsole": "Open {tab}"
@@ -225,7 +233,8 @@
     "enableCta": {
       "action": "Enable chat",
       "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
-      "title": "Turn on pet chat"
+      "title": "Turn on pet chat",
+      "failed": "Couldn't turn on pet chat. Try again."
     },
     "openFullChat": "Open full chat",
     "openPanel": "Chat",
@@ -248,7 +257,8 @@
     }
   },
   "condition": {
-    "unwell": "Needs care"
+    "unwell": "Needs care",
+    "recoveryHint": "To help it recover, bring both energy and mood back above {threshold}: let it sleep, play together, or give it a treat. A first-aid kit from the shop speeds this up."
   },
   "console": {
     "groups": {
@@ -279,9 +289,106 @@
     },
     "title": "Your Pet",
     "unavailable": {
-      "unsupportedHost": "The pet is only available in the Cognia desktop app. Open the desktop app to look after it.",
       "title": "Desktop only",
-      "backToChat": "Back to chat"
+      "backToChat": "Back to chat",
+      "secondaryWindow": "The pet console opens in Cognia's main window. Switch to it to look after your pet.",
+      "unpaired": {
+        "title": "Pair with your desktop",
+        "description": "Your pet lives in the Cognia desktop app. Pair this device with it to feed, play with and chat to your pet from here.",
+        "action": "Pair a desktop"
+      },
+      "hostOutdated": {
+        "title": "Update your desktop app",
+        "description": "The desktop this device is paired with can't share its pet yet. Update the Cognia desktop app, or open it if it's closed, then come back here."
+      }
+    },
+    "desktopToggle": {
+      "failed": "Couldn't change the desktop pet. Try again.",
+      "openFailed": "The desktop pet couldn't be opened."
+    },
+    "hatchFailed": "Couldn't hatch the egg. Try again.",
+    "hatching": "Hatching… this can take a few seconds.",
+    "insights": {
+      "captureDescription": "Pages and notes you capture are part of what the radar reads. Choose what gets captured here.",
+      "captureTitle": "Capture sources"
+    },
+    "nurture": {
+      "care": "Care",
+      "stats": "Profile",
+      "status": "How your pet is doing",
+      "wallet": "Wallet"
+    },
+    "renameFailed": "Couldn't rename your pet. Try again.",
+    "stages": {
+      "adult": "Adult",
+      "baby": "Baby",
+      "egg": "Egg",
+      "elder": "Elder",
+      "juvenile": "Juvenile"
+    },
+    "tabLoading": "Loading…",
+    "desktopOnly": {
+      "badge": "Desktop",
+      "title": "{tab} is on your desktop",
+      "why": "It works with skins, models and plugins stored on your desktop, so it can't run on this device.",
+      "remedy": "Open Cognia on your desktop and go to Pet → {tab}.",
+      "what": {
+        "customize": "Change your pet's species, colors, skin and size.",
+        "insights": "See what the radar noticed from your activity, and choose what gets captured.",
+        "plugins": "Panels that your desktop's plugins add to the pet console."
+      }
+    },
+    "chat": {
+      "clear": "Clear conversation",
+      "cleared": "Conversation cleared.",
+      "clearFailed": "Couldn't clear the conversation. Try again.",
+      "clearConfirm": {
+        "title": "Clear the conversation?",
+        "description": "Every message with your pet is removed. Your pet keeps its level, mood and memories of care.",
+        "cancel": "Cancel",
+        "confirm": "Clear"
+      }
+    },
+    "remote": {
+      "band": {
+        "connected": "Caring for your desktop pet",
+        "updated": "Updated {time}",
+        "neverUpdated": "Not updated yet",
+        "loading": "Reaching your desktop…",
+        "connecting": "Reconnecting to your desktop",
+        "offline": "Desktop offline",
+        "showingMirror": "showing the last synced state",
+        "unreachable": "Couldn't reach your desktop",
+        "invalid": "Your desktop sent something this app can't read. Update both apps.",
+        "hostStarting": "Your desktop is starting the pet",
+        "disabled": "The pet is switched off on your desktop",
+        "headless": "This host has no pet",
+        "unavailable": "The pet isn't available on your desktop right now",
+        "retry": "Retry",
+        "retrying": "Retrying…",
+        "connectionSettings": "Connection settings"
+      },
+      "simplifiedLook": "Simplified look on this device. Your desktop shows the full skin.",
+      "desktopVisible": "On your desktop",
+      "desktopHidden": "Hidden",
+      "careRewarded": "+{xp} XP · +{coins} {coins, plural, one {coin} other {coins}}",
+      "careDone": "Your pet felt that.",
+      "hatchPending": "Hatching on your desktop. Your pet will appear here in a moment.",
+      "chatPending": "Your pet is still thinking. The reply will show up here.",
+      "chatLoadFailed": "Couldn't load the conversation from your desktop.",
+      "chatOff": {
+        "title": "Pet chat is off",
+        "body": "Turn on pet chat in the pet settings of the Cognia desktop app, then chat with your pet from here. An egg needs to hatch first."
+      },
+      "binding": {
+        "readOnly": "Characters' looks are edited in the desktop app.",
+        "live2d": "Live2D model",
+        "sprite": "Sprite pack"
+      },
+      "noPet": {
+        "title": "No pet on your desktop yet",
+        "description": "Open the Cognia desktop app once to create your pet, then come back here."
+      }
     }
   },
   "customize": {
@@ -367,7 +474,8 @@
     "sound": {
       "description": "Sound effects and quiet hours.",
       "title": "Sound"
-    }
+    },
+    "saveFailed": "Couldn't save the look. Try again."
   },
   "dex": {
     "live2dEmpty": "No Live2D models yet. Import one from Customize → Appearance to see it here.",
@@ -403,10 +511,24 @@
       "talked": "Had a chat",
       "teamRun": "Watched the agent team work",
       "treated": "Got a treat",
-      "workflowRun": "Followed a workflow run"
+      "workflowRun": "Followed a workflow run",
+      "achievementUnlocked": "Unlocked an achievement",
+      "birthday": "Celebrated a birthday",
+      "evolved": "Evolved",
+      "greeting": "Said hello",
+      "hatched": "Hatched",
+      "levelUp": "Leveled up",
+      "other": "Other activity",
+      "pluginReward": "Earned a plugin reward",
+      "radarReport": "Read a new radar report",
+      "streakDay": "Kept the care streak going",
+      "twinMilestone": "Noticed a milestone",
+      "unwell": "Started feeling unwell"
     },
     "loading": "Opening the diary…",
-    "xp": "+{xp} XP"
+    "xp": "+{xp} XP",
+    "loadOlder": "Load older entries",
+    "loadOlderFailed": "Couldn't load older entries. Try again."
   },
   "live2d": {
     "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
@@ -566,7 +688,8 @@
     },
     "owned": "×{qty}",
     "streak": "{days}-day care streak",
-    "use": "Use"
+    "use": "Use",
+    "buyAria": "Buy {item} for {price} coins"
   },
   "species": {
     "axolotl": "Axolotl",
@@ -619,5 +742,44 @@
     "minimize": "Minimize pet",
     "restore": "Show pet",
     "toggle": "Open pet"
+  },
+  "achievementsProgress": {
+    "summary": "{unlocked} of {total} unlocked",
+    "title": "Unlocked"
+  },
+  "outcomes": {
+    "apply": {
+      "success": "{item} applied."
+    },
+    "failed": "Something went wrong. Try again.",
+    "purchase": {
+      "insufficientCoins": "Not enough coins for that.",
+      "success": "Bought {item}."
+    },
+    "refusal": {
+      "coolingDown": "Your pet needs a moment. Try again in {seconds, plural, one {# second} other {# seconds}}.",
+      "itemKindMismatch": "That item isn't for this kind of care.",
+      "itemNotOwned": "You don't have that item anymore.",
+      "kindNotAllowed": "Your pet can't do that.",
+      "notHatched": "Hatch your pet first.",
+      "rateLimited": "That's a lot at once. Give it a second.",
+      "uninitialized": "Your pet isn't set up on this device yet.",
+      "unknownItem": "That item isn't in the shop anymore.",
+      "unavailable": "The pet isn't available here right now."
+    },
+    "use": {
+      "success": "Used {item}."
+    },
+    "remote": {
+      "headlessHost": "This host has no pet. Pair with the Cognia desktop app to look after it.",
+      "hostStarting": "Your desktop is still starting the pet. Try again in a moment.",
+      "notDecor": "That item is used from the care actions, not applied.",
+      "invalidName": "That name can't be used.",
+      "disabled": "The pet is switched off on your desktop.",
+      "unavailable": "The pet isn't available on your desktop right now.",
+      "uninitialized": "Your desktop hasn't set up a pet yet.",
+      "unreachable": "Couldn't reach your desktop. Check the connection and try again.",
+      "desktopOnly": "That's only available in the desktop app."
+    }
   }
 }

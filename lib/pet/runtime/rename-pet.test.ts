@@ -49,6 +49,12 @@ describe("renamePet", () => {
     expect(res?.soul?.name).toBe("Mochi")
   })
 
+  it("refuses a name the PII gate would block, since it reaches every pet prompt", async () => {
+    expect(isValidPetName("alice@example.com")).toBe(false)
+    expect(await renamePet("alice@example.com")).toBeUndefined()
+    expect(patchPetProfile).not.toHaveBeenCalled()
+  })
+
   it("is a no-op for a blank name", async () => {
     expect(await renamePet("   ")).toBeUndefined()
     expect(getPetProfile).not.toHaveBeenCalled()

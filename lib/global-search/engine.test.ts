@@ -36,6 +36,7 @@ const ctx = (scope: GlobalSearchContext["scope"] = "all"): GlobalSearchContext =
     reachableSettingsSections: new Set(),
     recorderAvailable: false,
     petHostAvailable: false,
+    petConsoleReachable: false,
     theme: "light",
     hasApiKey: false,
     pluginQuickActions: [],

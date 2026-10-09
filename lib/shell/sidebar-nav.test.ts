@@ -72,7 +72,12 @@ describe("getSidebarCatalog", () => {
     // Derived, not hard-coded — the browser pane addition broke a literal "-2".
     expect(cat).toHaveLength(
       SIDEBAR_NAV_META.filter(
-        (meta) => !meta.desktopOnly && !meta.mobileHidden && meta.id !== "source-control"
+        (meta) =>
+          !meta.desktopOnly &&
+          !meta.mobileHidden &&
+          // Shown only while a paired host advertises it; no snapshot here.
+          !meta.hostOperationGated &&
+          meta.id !== "source-control"
       ).length
     )
   })
@@ -121,9 +126,32 @@ describe("getSidebarCatalog", () => {
     expect(getSidebarCatalog("tauri").map((item) => item.id)).toContain("pet")
   })
 
-  it.each<[string, RuntimeSnapshot]>([
+  // ADR-0219: a paired phone or browser cares for the DESKTOP's pet, so the
+  // entry is worth a slot exactly while the paired host advertises it.
+  const petHost = (
+    platform: "web" | "mobile",
+    operations: string[],
+    compatible = true
+  ): RuntimeSnapshot => ({
+    target: { id: "desktop", kind: "companion", hostKind: "desktop", platform },
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: { compatible, operations, grants: ["client.read", "client.write"] },
+  })
+
+  it.each(["web", "mobile"] as const)(
+    "offers the pet on %s while the paired host advertises remote pet care",
+    (platform) => {
+      expect(
+        getSidebarCatalog(platform, petHost(platform, ["pet_get", "pet_act"])).map((i) => i.id)
+      ).toContain("pet")
+    }
+  )
+
+  it.each<[string, "web" | "mobile", RuntimeSnapshot | undefined]>([
     [
       "a standalone browser",
+      "web",
       {
         target: { id: "local", kind: "standalone", platform: "web" },
         vaultState: "unlocked",
@@ -132,21 +160,14 @@ describe("getSidebarCatalog", () => {
     ],
     [
       "a snapshot with no target yet",
+      "mobile",
       { target: null, vaultState: "unavailable", connectionState: "offline" },
     ],
-    [
-      "a paired Companion",
-      {
-        target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
-        vaultState: "unlocked",
-        connectionState: "online",
-        host: { compatible: true, operations: ["browser_session_ensure"], grants: ["agent.run"] },
-      },
-    ],
-  ])("never restores the pet on the web from %s (ADR-0058 D9)", (_label, runtime) => {
-    // The pet has no host operation a companion could serve; the web branch
-    // used to consult only the surface contract, which lets `explain` through.
-    expect(getSidebarCatalog("web", runtime).map((item) => item.id)).not.toContain("pet")
+    ["no snapshot at all", "web", undefined],
+    ["a paired host without the feature", "web", petHost("web", ["browser_session_ensure"])],
+    ["an incompatible paired host", "mobile", petHost("mobile", ["pet_get"], false)],
+  ])("keeps the pet off the rail from %s", (_label, platform, runtime) => {
+    expect(getSidebarCatalog(platform, runtime).map((item) => item.id)).not.toContain("pet")
   })
 
   it("restores a host-owned surface when the active Companion advertises it", () => {

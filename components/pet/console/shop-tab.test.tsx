@@ -18,6 +18,10 @@ jest.mock("@/lib/pet/economy/shop", () => ({
   consumeItem: (id: string) => consumeItem(id),
 }))
 
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+
+import { act } from "@testing-library/react"
+import { toast } from "sonner"
 import { ShopTab } from "./shop-tab"
 import {
   registerPetItem,
@@ -42,19 +46,28 @@ describe("ShopTab", () => {
     expect(screen.getByTestId("pet-shop-streak").textContent).toContain("5")
   })
 
-  it("hides the streak chip at zero days and treats a missing profile as broke", () => {
+  it("shows a placeholder while the wallet and inventory load", () => {
     profileValue = undefined
+    render(<ShopTab />)
+    expect(screen.getByTestId("pet-shop-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("pet-shop-balance")).toBeNull()
+  })
+
+  it("hides the streak chip at zero days and treats a missing profile as broke", () => {
+    profileValue = null
     render(<ShopTab />)
     expect(screen.queryByTestId("pet-shop-streak")).toBeNull()
     expect(screen.getByTestId("pet-shop-balance").textContent).toContain("0")
   })
 
-  it("lists catalog items grouped with buy buttons; buying calls purchaseItem", () => {
+  it("lists catalog items grouped with buy buttons; buying calls purchaseItem", async () => {
     render(<ShopTab />)
     const buyBerry = document.querySelector('[data-action="buy-berry"]') as HTMLButtonElement
     expect(buyBerry).not.toBeNull()
     expect(buyBerry).not.toBeDisabled()
-    fireEvent.click(buyBerry)
+    await act(async () => {
+      fireEvent.click(buyBerry)
+    })
     expect(purchaseItem).toHaveBeenCalledWith("berry", undefined)
   })
 
@@ -65,16 +78,18 @@ describe("ShopTab", () => {
     expect(document.querySelector('[data-action="buy-star-charm"]')).toBeDisabled() // price 40
   })
 
-  it("shows the owned badge and a Use button that calls consumeItem", () => {
+  it("shows the owned badge and a Use button that calls consumeItem", async () => {
     inventoryValue = [{ id: "berry", qty: 2, acquiredAt: 1, updatedAt: 1 }]
     render(<ShopTab />)
     const item = document.querySelector('[data-shop-item="berry"]') as HTMLElement
     expect(item.textContent).toContain("×2")
-    fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    })
     expect(consumeItem).toHaveBeenCalledWith("berry")
   })
 
-  it("renders plugin-contributed items with their plain locale labels", () => {
+  it("renders plugin-contributed items with their plain locale labels", async () => {
     registerPetItem(
       "star-cookie",
       {
@@ -95,7 +110,11 @@ describe("ShopTab", () => {
     expect(item).not.toBeNull()
     expect(item!.textContent).toContain("Star Cookie")
     expect(item!.textContent).toContain("A crunchy star-shaped snack.")
-    fireEvent.click(document.querySelector('[data-action="buy-plugin:p1:star-cookie"]') as Element)
+    await act(async () => {
+      fireEvent.click(
+        document.querySelector('[data-action="buy-plugin:p1:star-cookie"]') as Element
+      )
+    })
     expect(purchaseItem).toHaveBeenCalledWith("plugin:p1:star-cookie", undefined)
   })
 
@@ -106,5 +125,24 @@ describe("ShopTab", () => {
     expect(useBtn.textContent).not.toBe("")
     const berryUse = document.querySelector('[data-action="use-berry"]')
     expect(berryUse).toBeNull()
+  })
+
+  it("toasts a refused purchase with its reason", async () => {
+    purchaseItem.mockResolvedValueOnce({ ok: false, error: "insufficient-coins" })
+    render(<ShopTab />)
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-action="buy-berry"]') as Element)
+    })
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/coins/i))
+  })
+
+  it("toasts a cooling-down use instead of losing the click", async () => {
+    consumeItem.mockResolvedValueOnce({ ok: false, error: "cooling-down", retryAfterMs: 900 })
+    inventoryValue = [{ id: "berry", qty: 1, acquiredAt: 1, updatedAt: 1 }]
+    render(<ShopTab />)
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    })
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("1"))
   })
 })

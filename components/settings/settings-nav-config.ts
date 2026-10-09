@@ -548,7 +548,11 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: PawPrintIcon,
     // The pet runs only in the desktop shell (ADR-0058 D9). Off desktop every
     // control here would configure a pet that never mounts, so the section is
-    // unreachable there and a deep link renders the desktop-only notice.
+    // unreachable there and a deep link renders the desktop-only notice. A
+    // paired phone cares for the desktop pet through the /pet console instead
+    // (ADR-0219), whose customization tab is desktop-only for the same reason
+    // (`lib/pet/console/action-capabilities.ts`): skins, models and these
+    // settings are the desktop's.
     profiles: ["desktop"],
   },
   {

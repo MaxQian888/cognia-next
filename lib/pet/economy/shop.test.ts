@@ -137,4 +137,41 @@ describe("consumeItem", () => {
   it("rejects unknown items", async () => {
     expect(await consumeItem("nope")).toEqual({ ok: false, error: "unknown-item" })
   })
+
+  it("keeps the item when the controller would drop its event on cooldown", async () => {
+    const now = 1_800_000_000_000
+    await upsertPetProfile({
+      ...(await seedProfile(20)),
+      interactionGate: { lastAtByKind: { fed: now - 500 } },
+    })
+    await purchaseItem("berry")
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => seen.push(e))
+
+    const result = await consumeItem("berry", { now: () => now })
+    expect(result).toEqual({ ok: false, error: "cooling-down", retryAfterMs: 1000 })
+    expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
+    expect(seen).toEqual([])
+  })
+
+  it("keeps the item for an egg, which cannot be nurtured", async () => {
+    await upsertPetProfile({ ...(await seedProfile(20)), soul: null, stage: "egg" })
+    await purchaseItem("berry")
+    expect(await consumeItem("berry")).toEqual({ ok: false, error: "not-hatched" })
+    expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
+  })
+
+  it("keeps the item when there is no pet to give it to", async () => {
+    // An inventory row can outlive the profile (it was cleared under it); the
+    // item must not be spent on an event no pet will receive.
+    await seedProfile(20)
+    await purchaseItem("berry")
+    await getDb().petProfile.clear()
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => seen.push(e))
+
+    expect(await consumeItem("berry")).toEqual({ ok: false, error: "no-profile" })
+    expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
+    expect(seen).toEqual([])
+  })
 })

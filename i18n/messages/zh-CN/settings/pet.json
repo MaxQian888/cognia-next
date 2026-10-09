@@ -33,7 +33,8 @@
     },
     "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
     "size": {
-      "label": "桌宠大小（{size}px）"
+      "label": "桌宠大小（{size}px）",
+      "description": "桌面上悬浮宠物的大小。应用内宠物的大小在“外观”中单独设置。"
     },
     "title": "桌面宠物",
     "wander": {
@@ -220,7 +221,15 @@
     "clearAction": "清空宠物记忆",
     "clearDescription": "清除宠物记住的所有对话内容。",
     "description": "记住最近的对话并融入回复。仅存本地，上限 200 条。",
-    "label": "对话记忆"
+    "label": "对话记忆",
+    "clearConfirm": {
+      "cancel": "取消",
+      "confirm": "清除记忆",
+      "description": "宠物会忘掉它记得的所有对话，此操作无法撤销。",
+      "title": "清除宠物记忆？"
+    },
+    "clearFailed": "宠物记忆清除失败，请重试。",
+    "cleared": "已清除宠物记忆。"
   },
   "motion": {
     "label": "动效",
@@ -270,10 +279,13 @@
     "confirmTitle": "重置这个宠物档案？",
     "description": "删除所有宠物数据并重新开始。",
     "label": "重置宠物",
-    "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。"
+    "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。",
+    "done": "宠物档案已重置，一枚新蛋正在等你。",
+    "failed": "宠物档案重置失败，请重试。"
   },
   "size": {
-    "label": "大小（{size}px）"
+    "label": "大小（{size}px）",
+    "description": "应用内宠物在窗口角落里的大小。桌面悬浮宠物的大小单独设置。"
   },
   "skin": {
     "label": "皮肤",

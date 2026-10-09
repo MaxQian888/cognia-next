@@ -17,7 +17,8 @@
     "dispatchFailed": "The accepted task is saved, but dispatch needs to be retried or resumed by this host.",
     "retry": "Retry dispatch",
     "history": "Report history",
-    "latest": "Latest report"
+    "latest": "Latest report",
+    "historyOption": "{date} — {verdict}"
   },
   "panel": {
     "empty": "No report yet. Run the radar to analyze your recent info diet.",

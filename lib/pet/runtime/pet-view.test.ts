@@ -1,4 +1,4 @@
-import { computePetView } from "./pet-view"
+import { computePetView, profileBones } from "./pet-view"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { generateBones } from "@/lib/pet/bones/generate"
 import type { PetCharacterBinding, PetProfile } from "@/types/pet"
@@ -52,5 +52,22 @@ describe("computePetView", () => {
 
   it("reads as well for a healthy pet", () => {
     expect(computePetView(profile(), null, 0).condition).toBe("well")
+  })
+})
+
+describe("profileBones", () => {
+  it("regenerates bones from the fingerprint on the host", () => {
+    expect(profileBones(profile())).toEqual(generateBones("acct-1"))
+  })
+
+  it("prefers the host's mirrored bones on a companion mirror", () => {
+    // A mirror's fingerprint is a sentinel, so regenerating would draw a
+    // different pet; the host-generated bones must win.
+    const hostBones = generateBones("the-host-account")
+    const mirror = profile({ accountFingerprint: "companion-mirror", mirroredBones: hostBones })
+    expect(profileBones(mirror)).toEqual(hostBones)
+    const view = computePetView(mirror, null, 0)
+    expect(view.bones).toEqual(hostBones)
+    expect(view.effectiveBones.species).toBe(hostBones.species)
   })
 })

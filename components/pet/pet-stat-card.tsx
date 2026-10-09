@@ -54,6 +54,8 @@ export interface PetStatCardProps {
    */
   skinId?: string
   selection?: PetSkinSelection
+  /** Render the avatar in low power, like the hero beside it. */
+  lowPower?: boolean
   className?: string
   variant?: "outlined" | "flat"
 }
@@ -67,6 +69,7 @@ export function PetStatCard({
   flavor,
   skinId,
   selection,
+  lowPower,
   className,
   variant = "outlined",
 }: PetStatCardProps) {
@@ -95,6 +98,7 @@ export function PetStatCard({
             skinId={skinId}
             selection={selection}
             flavor={flavor}
+            lowPower={lowPower}
             renderPriority="thumbnail"
           />
         </div>

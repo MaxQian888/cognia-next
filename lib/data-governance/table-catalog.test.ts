@@ -92,8 +92,22 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 50 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(50)
+  it("maps all 55 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(55)
+    // Remote pet care (ADR-0219): the phone mirrors the desktop pet read-only.
+    // Chat history and the model/sprite blobs deliberately stay host-local.
+    for (const table of [
+      "petProfile",
+      "petAchievements",
+      "petInventory",
+      "petCharacterBindings",
+      "petActivityLog",
+    ]) {
+      expect(policyForTable(table)?.syncPolicy.mode).toBe("companion-readonly")
+    }
+    for (const table of ["petConversationV2", "petModels", "petModelFiles", "petSpritePacks"]) {
+      expect(COMPANION_SYNC_TABLES.has(table as never)).toBe(false)
+    }
     // Conversation folders, so a paired device files its list into the Host's
     // sections. Writes travel back as `folder.*` HostState intents.
     expect(policyForTable("sessionFolders")?.syncPolicy.mode).toBe("companion-readonly")
@@ -445,17 +459,25 @@ describe("desktop pet", () => {
     expect(policyForTable("petSpritePacks")?.expectedScale).toBe("large")
   })
 
-  it("keeps the whole subsystem out of companion sync, deliberately", () => {
-    // ADR-0059 puts the desktop pet on the far side of a physical boundary:
-    // it does not run on the Capacitor shell at all, so mirroring its rows to
-    // a phone would sync a subsystem with nothing to render them.
+  it("mirrors the pet's state to a paired phone and keeps its content and blobs home", () => {
+    // The pet still RUNS only on the desktop (ADR-0058 D9), but ADR-0219 lets
+    // a paired phone care for it remotely: the phone reads a read-only mirror
+    // of the state tables and sends every action back as a `pet_*` RPC.
     for (const table of [
       "petProfile",
       "petActivityLog",
-      "petConversationV2",
       "petAchievements",
       "petInventory",
       "petCharacterBindings",
+    ] as const) {
+      expect(COMPANION_SYNC_TABLES.has(table)).toBe(true)
+      expect(policyForTable(table)?.syncPolicy.mode).toBe("companion-readonly")
+      expect(policyForTable(table)?.accountScope).toBe("account")
+    }
+    // Chat history is user content the phone reads live (`pet_chat_list`),
+    // and the Live2D models and sprite atlases are device-local assets.
+    for (const table of [
+      "petConversationV2",
       "petModels",
       "petModelFiles",
       "petSpritePacks",

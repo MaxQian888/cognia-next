@@ -2,8 +2,20 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { PlusIcon, XIcon } from "lucide-react"
+import { Loader2Icon, PlusIcon, XIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,6 +50,19 @@ const MAX_BUBBLE_LEN = 60
 
 export function PetInteractionControls({ pet, patch }: PetControlsProps) {
   const t = useTranslations("settings.pet")
+  const [clearing, setClearing] = useState(false)
+
+  const clearMemory = async () => {
+    setClearing(true)
+    try {
+      await clearPetConversation()
+      toast.success(t("memory.cleared"))
+    } catch {
+      toast.error(t("memory.clearFailed"))
+    } finally {
+      setClearing(false)
+    }
+  }
   const [draft, setDraft] = useState("")
   const phrases = pet.customBubbles ?? []
   const providers = useUtilityProviderOptions()
@@ -233,9 +258,35 @@ export function PetInteractionControls({ pet, patch }: PetControlsProps) {
       </Field>
       <Field orientation="responsive">
         <FieldDescription>{t("memory.clearDescription")}</FieldDescription>
-        <Button variant="outline" size="sm" onClick={() => void clearPetConversation()}>
-          {t("memory.clearAction")}
-        </Button>
+        {/* Irreversible, so it asks first and says when it is done: it used
+            to wipe the transcript on one click with nothing on screen. */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={clearing}
+              aria-busy={clearing || undefined}
+            >
+              {clearing ? <Loader2Icon className="size-3.5 animate-spin" aria-hidden /> : null}
+              {t("memory.clearAction")}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("memory.clearConfirm.title")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("memory.clearConfirm.description")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("memory.clearConfirm.cancel")}</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={() => void clearMemory()}>
+                {t("memory.clearConfirm.confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </Field>
     </FieldGroup>
   )

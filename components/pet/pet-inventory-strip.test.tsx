@@ -1,4 +1,6 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 // Reactive inventory read — a controllable snapshot instead of a live Dexie.
 let inventoryValue: unknown
@@ -12,6 +14,7 @@ jest.mock("@/lib/pet/economy/shop", () => ({
   consumeItem: (id: string) => consumeItem(id),
 }))
 
+import { toast } from "sonner"
 import { PetInventoryStrip } from "./pet-inventory-strip"
 import {
   registerPetItem,
@@ -55,14 +58,16 @@ describe("PetInventoryStrip", () => {
     expect(screen.queryByTestId("pet-inventory-strip")).toBeNull()
   })
 
-  it("uses an item on click", () => {
+  it("uses an item on click", async () => {
     inventoryValue = [{ id: "berry", qty: 2 }]
     render(<PetInventoryStrip />)
-    fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    })
     expect(consumeItem).toHaveBeenCalledWith("berry")
   })
 
-  it("shows owned plugin consumables with their plain labels", () => {
+  it("shows owned plugin consumables with their plain labels", async () => {
     registerPetItem(
       "star-cookie",
       {
@@ -82,7 +87,25 @@ describe("PetInventoryStrip", () => {
     ) as HTMLButtonElement | null
     expect(btn).not.toBeNull()
     expect(btn!.getAttribute("aria-label")).toBe("Star Cookie")
-    fireEvent.click(btn!)
+    await act(async () => {
+      fireEvent.click(btn!)
+    })
     expect(consumeItem).toHaveBeenCalledWith("plugin:p1:star-cookie")
+  })
+
+  it("says why a use was refused instead of doing nothing", async () => {
+    consumeItem.mockResolvedValueOnce({ ok: false, error: "cooling-down", retryAfterMs: 1200 })
+    inventoryValue = [{ id: "berry", qty: 2 }]
+    render(<PetInventoryStrip />)
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
+    })
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("2"))
+  })
+
+  it("offers 44px targets in the comfortable size", () => {
+    inventoryValue = [{ id: "berry", qty: 2 }]
+    render(<PetInventoryStrip size="comfortable" />)
+    expect(document.querySelector('[data-action="use-berry"]')).toHaveClass("h-11")
   })
 })

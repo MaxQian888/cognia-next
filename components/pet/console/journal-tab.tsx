@@ -2,13 +2,31 @@
 // written on every XP-bearing event since v67 but never surfaced before)
 // grouped by local day, newest first, with per-day event/XP totals. Read
 // reactively so a fresh interaction appears while the tab is open.
+//
+// It used to stop at a fixed 300 rows with no way further back. The head page
+// is now live and "Load older" pages backwards by id; once an older page is
+// loaded the live head is pinned from the oldest head row up
+// (`listPetActivitySince`), so a new row arriving at the top cannot push a row
+// out of the head and into the seam above the older pages. A kind the journal
+// has no wording for reads as a generic entry, never as its raw id.
 
 "use client"
 
+import { useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { toast } from "sonner"
 import {
+  AwardIcon,
   BellIcon,
+  CakeIcon,
+  HandIcon,
+  EggIcon,
+  FlameIcon,
+  Loader2Icon,
+  PartyPopperIcon,
+  PlugIcon,
+  RadarIcon,
   BotIcon,
   CalendarClockIcon,
   CheckCircle2Icon,
@@ -23,10 +41,14 @@ import {
   MoonIcon,
   SparklesIcon,
   TargetIcon,
+  TrophyIcon,
   TrendingUpIcon,
+  ThermometerIcon,
+  UserRoundCheckIcon,
   WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription } from "@/components/ui/empty"
 import {
@@ -37,15 +59,20 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
-import { listPetActivity } from "@/lib/db/pet"
+import { listPetActivityPage, listPetActivitySince } from "@/lib/db/pet"
 import { localDayKey } from "@/lib/pet/economy/streak"
 import type { PetActivityRow } from "@/types/pet"
+import { PetTabSkeleton } from "./pet-console-skeleton"
 
-/** Ledger rows shown per visit — ~2 weeks of active use; the table caps at 2000. */
-const JOURNAL_ROWS = 300
+/** Rows per page — the live head and each "Load older" step. */
+export const JOURNAL_PAGE = 100
 
-/** Kinds with an authored `pet.journal.kinds.<kind>` label (XP-bearing set). */
-const KIND_ICONS: Record<string, LucideIcon> = {
+/**
+ * Kinds with an authored `pet.journal.kinds.<kind>` label. Anything else (a
+ * future event kind, a plugin's) falls back to `journal.kinds.other`; the
+ * co-located test checks both locales author every key listed here.
+ */
+export const JOURNAL_KIND_ICONS: Record<string, LucideIcon> = {
   review: EyeIcon,
   success: CheckCircle2Icon,
   goalProgress: TrendingUpIcon,
@@ -62,6 +89,17 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   slept: MoonIcon,
   cleaned: DropletsIcon,
   treated: HeartPulseIcon,
+  hatched: EggIcon,
+  levelUp: AwardIcon,
+  evolved: PartyPopperIcon,
+  achievementUnlocked: TrophyIcon,
+  birthday: CakeIcon,
+  streakDay: FlameIcon,
+  pluginReward: PlugIcon,
+  radarReport: RadarIcon,
+  twinMilestone: UserRoundCheckIcon,
+  unwell: ThermometerIcon,
+  greeting: HandIcon,
 }
 
 interface DayGroup {
@@ -91,21 +129,49 @@ export function groupByLocalDay(rows: PetActivityRow[]): DayGroup[] {
 export function JournalTab() {
   const t = useTranslations("pet")
   const locale = useLocale()
-  const rows = useLiveQuery(() => listPetActivity(JOURNAL_ROWS), [])
+  // Older pages, appended by "Load older"; immutable once read.
+  const [older, setOlder] = useState<PetActivityRow[]>([])
+  // Set on the first "Load older": the live head becomes "this id and up".
+  const [floorId, setFloorId] = useState<number | undefined>(undefined)
+  const [exhausted, setExhausted] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const head = useLiveQuery(
+    () =>
+      floorId === undefined
+        ? listPetActivityPage(undefined, JOURNAL_PAGE)
+        : listPetActivitySince(floorId),
+    [floorId]
+  )
 
-  if (!rows) {
-    return (
-      <Empty data-testid="pet-journal-loading" className="py-8">
-        <EmptyDescription>{t("journal.loading")}</EmptyDescription>
-      </Empty>
-    )
+  if (!head) {
+    return <PetTabSkeleton testId="pet-journal-loading" />
   }
+  const rows = [...head, ...older]
   if (rows.length === 0) {
     return (
       <Empty data-testid="pet-journal-empty" className="py-8">
         <EmptyDescription>{t("journal.empty")}</EmptyDescription>
       </Empty>
     )
+  }
+
+  // Until the first older page arrives, "more" means the head page was full.
+  const hasMore = !exhausted && (older.length > 0 || head.length >= JOURNAL_PAGE)
+
+  const loadOlder = async () => {
+    const oldestId = rows[rows.length - 1]?.id
+    if (oldestId === undefined || loadingOlder) return
+    setLoadingOlder(true)
+    try {
+      const page = await listPetActivityPage(oldestId, JOURNAL_PAGE)
+      if (floorId === undefined) setFloorId(head[head.length - 1]?.id)
+      setOlder((prev) => [...prev, ...page])
+      if (page.length < JOURNAL_PAGE) setExhausted(true)
+    } catch {
+      toast.error(t("journal.loadOlderFailed"))
+    } finally {
+      setLoadingOlder(false)
+    }
   }
 
   const dayFormat = new Intl.DateTimeFormat(locale, { dateStyle: "medium" })
@@ -125,8 +191,8 @@ export function JournalTab() {
           </div>
           <ItemGroup>
             {group.rows.map((row) => {
-              const Icon = KIND_ICONS[row.kind] ?? SparklesIcon
-              const known = row.kind in KIND_ICONS
+              const Icon = JOURNAL_KIND_ICONS[row.kind] ?? SparklesIcon
+              const known = row.kind in JOURNAL_KIND_ICONS
               return (
                 <Item
                   key={row.id ?? `${row.kind}-${row.ts}`}
@@ -139,7 +205,7 @@ export function JournalTab() {
                   </ItemMedia>
                   <ItemContent className="min-w-0">
                     <ItemTitle className="max-w-full truncate">
-                      {known ? t(`journal.kinds.${row.kind}`) : row.kind}
+                      {known ? t(`journal.kinds.${row.kind}`) : t("journal.kinds.other")}
                     </ItemTitle>
                   </ItemContent>
                   <ItemActions className="shrink-0 flex-wrap justify-end">
@@ -158,6 +224,19 @@ export function JournalTab() {
           </ItemGroup>
         </section>
       ))}
+      {hasMore ? (
+        <Button
+          variant="outline"
+          className="min-h-11 self-center"
+          data-testid="pet-journal-load-older"
+          disabled={loadingOlder}
+          aria-busy={loadingOlder || undefined}
+          onClick={() => void loadOlder()}
+        >
+          {loadingOlder ? <Loader2Icon className="size-4 animate-spin" aria-hidden /> : null}
+          {t("journal.loadOlder")}
+        </Button>
+      ) : null}
     </div>
   )
 }

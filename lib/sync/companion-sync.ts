@@ -76,6 +76,13 @@ import {
   syncLabels,
 } from "./handlers/issues"
 import { syncTwinProfile } from "./handlers/twin-profile"
+import {
+  syncPetAchievements,
+  syncPetActivityLog,
+  syncPetCharacterBindings,
+  syncPetInventory,
+  syncPetProfile,
+} from "./handlers/pet"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
 import {
@@ -323,6 +330,30 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // never cross, so a mirrored device resolves those from its own plugin state
   // or reads the installation as an orphan, which the console already renders.
   { table: "botDefinitions", stage: "background", run: syncBotDefinitions },
+  // Remote pet care (ADR-0219). `/pet` is a page the user opens, not the first
+  // screen, and its console reads the live `pet_get` snapshot first; the mirror
+  // is what paints offline. The profile leads: the ledger's reset rule reads
+  // the profile's birth time, and everything else is a row about that pet.
+  { table: "petProfile", stage: "background", run: syncPetProfile },
+  {
+    table: "petAchievements",
+    stage: "background",
+    run: syncPetAchievements,
+    after: ["petProfile"],
+  },
+  { table: "petInventory", stage: "background", run: syncPetInventory, after: ["petProfile"] },
+  {
+    table: "petCharacterBindings",
+    stage: "background",
+    run: syncPetCharacterBindings,
+    after: ["petProfile"],
+  },
+  {
+    table: "petActivityLog",
+    stage: "background",
+    run: syncPetActivityLog,
+    after: ["petProfile"],
+  },
 ]
 
 /** Which stage each table is pulled in. */
@@ -466,6 +497,16 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // (`handlers/bot-event-deliveries.ts`). `opaque`: the cursor is a bounded
   // `receivedAt` scan filtered on `updatedAt`, not an indexed `updatedAt`.
   botEventDeliveries: syncDomain("ttl", "internal", "opaque"),
+  // The pet. `confidential` for the profile: the soul carries the generated
+  // personality, and the projection still names the pet. Achievements, items
+  // and bindings are ids, counts and appearance choices. A reset tombstones
+  // all four.
+  petProfile: syncDomain("tombstone"),
+  petAchievements: syncDomain("tombstone", "internal"),
+  petInventory: syncDomain("tombstone", "internal"),
+  petCharacterBindings: syncDomain("tombstone", "internal"),
+  // Capped on both sides without tombstones; the cursor is the numeric id.
+  petActivityLog: syncDomain("ttl", "internal", "opaque"),
 })
 
 interface SyncState {

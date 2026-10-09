@@ -148,6 +148,7 @@
     "prune": "Remove stale entries.",
     "publish": "Broadcast a record or state to subscribers.",
     "pull": "Receive remote records or state into the local copy.",
+    "purchase": "Spend a balance on catalog items.",
     "push": "Send local records or state to a remote peer.",
     "query": "Run a structured query and return matches.",
     "read": "Read bytes or a document. read_chunk is a byte-range read with offset and length.",

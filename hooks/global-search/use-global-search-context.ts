@@ -35,6 +35,11 @@ import type {
   GlobalSearchShellNav,
 } from "@/lib/global-search/types"
 import { isPetAvailable } from "@/lib/pet/access/availability"
+import {
+  PET_REMOTE_CARE_OPERATION,
+  hostAdvertisesPetRemoteCare,
+} from "@/lib/pet/console/console-mode"
+import { useActiveHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { navItemForPath } from "@/lib/shell/sidebar-nav"
 import { isTauri } from "@/lib/tauri"
@@ -84,6 +89,14 @@ export function useGlobalSearchContext({
     () => isPetAvailable({ enabled: true, role: getPetWindowRole(), platform }),
     [platform]
   )
+  // The console also opens where it can care for a paired desktop's pet
+  // (ADR-0219): the companion's host, or the remote host this desktop drives.
+  const remoteHostHasPet = useActiveHostSupportsFeature(
+    "pet.remote-care",
+    PET_REMOTE_CARE_OPERATION
+  )
+  const petConsoleReachable =
+    petHostAvailable || remoteHostHasPet || hostAdvertisesPetRemoteCare(runtimeSnapshot)
   const workspaceDirGate = useWorkspaceCommandGate()
   const pluginQuickActions = usePluginQuickActions("palette")
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
@@ -153,6 +166,7 @@ export function useGlobalSearchContext({
         reachableSettingsSections: sections as ReadonlySet<string>,
         recorderAvailable,
         petHostAvailable,
+        petConsoleReachable,
         theme,
         hasApiKey,
         pluginQuickActions,
@@ -177,6 +191,7 @@ export function useGlobalSearchContext({
       sections,
       recorderAvailable,
       petHostAvailable,
+      petConsoleReachable,
       workspaceDirGate,
       theme,
       hasApiKey,

@@ -9497,6 +9497,232 @@
       },
       "required": ["uid", "gid"],
       "type": "object"
+    },
+    "PetRemoteRefusal": {
+      "type": "object",
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "rate-limited",
+            "kind-not-allowed",
+            "unknown-item",
+            "item-not-owned",
+            "item-kind-mismatch",
+            "uninitialized",
+            "not-hatched",
+            "cooling-down",
+            "headless-host",
+            "host-starting",
+            "insufficient-coins",
+            "not-decor",
+            "invalid-name",
+            "hatch-failed"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "unsupported-host",
+            "secondary-window",
+            "disabled",
+            "headless-host",
+            "host-starting"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "itemKind": {
+          "type": "string"
+        },
+        "retryAfterMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "Why the host pet did not do what was asked. `headless-host`: the host is a headless brain, which has no pet; `host-starting`: the desktop pet controller has not mounted yet, retry shortly. The rest mirror `PetRefusal` (`lib/pet/access/gate.ts`) without the limiter's internal `cause`.",
+      "x-cognia-wire-source": "lib/pet/remote/types.ts"
+    },
+    "PetRemoteSnapshot": {
+      "type": "object",
+      "required": ["availability", "summary", "presentation", "hostTime"],
+      "properties": {
+        "availability": {
+          "type": "object",
+          "required": ["available"],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "unsupported-host",
+                "secondary-window",
+                "disabled",
+                "headless-host",
+                "host-starting"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "summary": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "hatched",
+                "name",
+                "level",
+                "stage",
+                "xp",
+                "mood",
+                "needs",
+                "condition",
+                "coins",
+                "streak",
+                "cooldowns"
+              ],
+              "properties": {
+                "hatched": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": ["string", "null"]
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": ["egg", "baby", "juvenile", "adult", "elder"]
+                },
+                "xp": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "mood": {
+                  "type": "string"
+                },
+                "needs": {
+                  "type": "object",
+                  "required": ["energy", "mood", "bond"],
+                  "properties": {
+                    "energy": {
+                      "type": "number"
+                    },
+                    "mood": {
+                      "type": "number"
+                    },
+                    "bond": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "condition": {
+                  "type": "string"
+                },
+                "coins": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "streak": {
+                  "type": "object",
+                  "required": ["days", "lastDay", "multiplier"],
+                  "properties": {
+                    "days": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "lastDay": {
+                      "type": ["string", "null"]
+                    },
+                    "multiplier": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "cooldowns": {
+                  "type": "object",
+                  "description": "Milliseconds until each care action is accepted again, measured on the host clock; 0 means ready.",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "presentation": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": ["requestedSkinId", "desktopVisible", "llmSpeakEnabled", "chatEnabled"],
+              "properties": {
+                "requestedSkinId": {
+                  "type": "string"
+                },
+                "desktopVisible": {
+                  "type": "boolean"
+                },
+                "llmSpeakEnabled": {
+                  "type": "boolean"
+                },
+                "chatEnabled": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "hostTime": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "The host pet as a paired device may see it. `summary` is null until the host has a pet profile; `presentation` is null on a headless brain.",
+      "x-cognia-wire-source": "lib/pet/remote/host-snapshot.ts"
+    },
+    "PetRemoteChatTurn": {
+      "type": "object",
+      "required": ["id", "at", "userText", "reply"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "userText": {
+          "type": "string"
+        },
+        "reply": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -13784,6 +14010,279 @@
       "required": ["admitted", "availableTiers", "fault"],
       "title": "SpecPreview",
       "type": "object"
+    },
+    "pet_get": {
+      "$ref": "#/$defs/PetRemoteSnapshot"
+    },
+    "pet_act": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "grantedXp", "grantedCoins"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "grantedXp": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "grantedCoins": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "x-cognia-wire-source": "lib/pet/remote/host-dispatch.ts"
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_rename": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "name"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_item_purchase": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "coins"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "coins": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "description": "`coins` is the balance after the purchase."
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_item_apply": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_soul_generate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "state"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "state": {
+              "type": "string",
+              "enum": ["hatched", "pending", "already-hatched"]
+            }
+          },
+          "additionalProperties": false,
+          "description": "`pending`: generation is still running on the host and will land on its own; read `pet_get` again."
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_chat_send": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "status", "reply"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "status": {
+              "const": "replied"
+            },
+            "reply": {
+              "type": "string"
+            },
+            "emotion": {
+              "type": "string",
+              "enum": ["happy", "levelUp", "sad", "surprised", "love", "sleepy", "wave"],
+              "description": "The one-shot the reply's emotion tag plays on the desktop pet (`excited` plays `levelUp`)."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["ok", "status", "reason"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "status": {
+              "const": "degraded"
+            },
+            "reason": {
+              "type": "string",
+              "enum": ["disabled", "pii", "rateLimited", "noClient", "empty", "error"]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["ok", "status"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "status": {
+              "const": "pending"
+            }
+          },
+          "additionalProperties": false,
+          "description": "The reply outlived the bridge window; it lands in `pet_chat_list` when it arrives."
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pet_chat_list": {
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PetRemoteChatTurn"
+          }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next (older) page; absent on the last page."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pet_chat_clear": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["ok", "refusal"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "refusal": {
+              "$ref": "#/$defs/PetRemoteRefusal"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

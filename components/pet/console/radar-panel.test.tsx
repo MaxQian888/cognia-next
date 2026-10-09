@@ -8,7 +8,7 @@ import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { RadarPanel } from "./radar-panel"
-import { getLatestRadarReport } from "@/lib/db/radar-reports"
+import { getLatestRadarReport, listRadarReports } from "@/lib/db/radar-reports"
 import { runRadarReport, NoRadarModelError } from "@/lib/radar/radar-runner"
 import { syncRadarCronToScheduler } from "@/lib/radar/radar-cron-bridge"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -65,6 +65,17 @@ beforeEach(() => {
 })
 
 describe("RadarPanel", () => {
+  it("holds the report's shape while it loads, rather than flashing the empty state", async () => {
+    // `undefined` is "still reading"; only a settled `null` means no report.
+    mockLatest.mockReturnValue(new Promise(() => {}))
+    render(<RadarPanel />)
+    const loading = await screen.findByTestId("radar-report-loading")
+    expect(loading).toHaveAttribute("data-skeleton", "report")
+    expect(loading).toHaveAttribute("aria-busy", "true")
+    expect(loading.querySelectorAll("[data-skeleton-item]")).toHaveLength(3)
+    expect(screen.queryByText(/No report yet/i)).not.toBeInTheDocument()
+  })
+
   it("shows the empty state when there is no report", async () => {
     render(<RadarPanel />)
     expect(await screen.findByText(/No report yet/i)).toBeInTheDocument()
@@ -117,5 +128,20 @@ describe("RadarPanel", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(mockSaveSettings).not.toHaveBeenCalled()
     expect(mockSync).not.toHaveBeenCalled()
+  })
+
+  it("picks a past report from the shared Select, dated in the app locale", async () => {
+    const past = { ...report(), id: "r0", generatedAt: Date.UTC(2026, 6, 1, 9, 30) }
+    ;(listRadarReports as jest.Mock).mockResolvedValue([past])
+    render(<RadarPanel />)
+    const user = userEvent.setup()
+    const trigger = await screen.findByRole("combobox", { name: /history|decisions\.history/i })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    await user.click(trigger)
+    const expected = new Intl.DateTimeFormat("en", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(past.generatedAt)
+    expect(await screen.findByRole("option", { name: new RegExp(expected) })).toBeInTheDocument()
   })
 })

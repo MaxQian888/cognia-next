@@ -5002,3 +5002,69 @@ fn bot_lifecycle_commands_require_workspace_write_authority() {
     assert!(READ_ONLY_COMMANDS.contains(&"bot_console_read"));
     assert!(!READ_ONLY_COMMANDS.contains(&"bot_installation_mutate"));
 }
+
+/// Remote pet care (ADR-0219). Every arm rides the generic desktop-writes
+/// bridge to the renderer that owns the pet controller, binds the verified
+/// caller (the host keys its idempotency ledger on it), stays off the
+/// remote-control gate, and only the two reads skip the idempotency cache.
+#[test]
+fn pet_remote_care_commands_are_bridged_and_bind_the_caller() {
+    let reads = ["pet_get", "pet_chat_list"];
+    let writes = [
+        "pet_act",
+        "pet_rename",
+        "pet_item_purchase",
+        "pet_item_apply",
+        "pet_soul_generate",
+        "pet_chat_send",
+        "pet_chat_clear",
+    ];
+    for command in reads.iter().chain(writes.iter()) {
+        assert!(KNOWN_COMMANDS.contains(command), "{command} is known");
+        assert!(
+            data_sync::COMMANDS.contains(command),
+            "{command} is bridged"
+        );
+        assert!(
+            !is_control_command(command),
+            "{command} is the device's own client surface, not remote control"
+        );
+        assert!(
+            CALLER_DEVICE_ID_COMMANDS.contains(command),
+            "{command} must bind callerDeviceId"
+        );
+        let bound = inject_caller_device_id(
+            command,
+            json!({ "callerDeviceId": "spoofed" }),
+            "verified-device",
+        );
+        assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+            .expect("pet commands have a manifest descriptor");
+        assert_eq!(
+            descriptor.target,
+            crate::companion_api::command_manifest::CommandTarget::Execution
+        );
+    }
+    // The runtime reads idempotency caching and the rate-limit class from the
+    // generated manifest, so pin that, not just the legacy test arrays.
+    use crate::companion_api::command_manifest::{CommandIdempotency, CommandOperation};
+    for command in reads {
+        assert!(READ_ONLY_COMMANDS_SET.contains(command), "{command} reads");
+        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "client.read");
+        assert_eq!(descriptor.operation, CommandOperation::Read, "{command} reads");
+    }
+    for command in writes {
+        assert!(!READ_ONLY_COMMANDS_SET.contains(command), "{command} writes");
+        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "client.write");
+        assert_ne!(descriptor.operation, CommandOperation::Read, "{command} writes");
+        // A retried care action must replay its first answer, never run twice.
+        assert_eq!(
+            descriptor.idempotency,
+            CommandIdempotency::Required,
+            "{command} requires an idempotency key"
+        );
+    }
+}

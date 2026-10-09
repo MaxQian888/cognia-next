@@ -12,6 +12,7 @@ import { computePetView, type PetView } from "@/lib/pet/runtime/pet-view"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import type { PetCharacterBinding, PetProfile } from "@/types/pet"
 import { migrateLegacyPetBinding } from "@/lib/pet/binding/resolve-skin"
+import { isPetMirrorShell } from "@/lib/pet/remote/mirror"
 
 export interface UsePetResult {
   profile: PetProfile | undefined
@@ -35,7 +36,12 @@ export function usePet(activeCharacterId?: string | null): UsePetResult {
     const stored = await getDb().petCharacterBindings.get(activeCharacterId)
     if (!stored) return undefined
     const migrated = migrateLegacyPetBinding(stored)
-    if (migrated !== stored) await getDb().petCharacterBindings.put(migrated)
+    // Persist the migration only where these tables are the pet's own store.
+    // On a companion mirror the row is the host's, and sync would revert a
+    // local write on its next pull; the migrated shape is still what renders.
+    if (migrated !== stored && !isPetMirrorShell()) {
+      await getDb().petCharacterBindings.put(migrated)
+    }
     return migrated
   }, [activeCharacterId])
 

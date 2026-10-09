@@ -40,6 +40,23 @@ jest.mock("@/hooks/companion/use-companion-config", () => ({
   }),
 }))
 
+// The pet console row follows the paired host's manifest (ADR-0219).
+let platformValue: "mobile" | "web" | "tauri" = "mobile"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformValue,
+}))
+const runtimeSnapshotState: { current: unknown } = { current: null }
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => runtimeSnapshotState.current,
+}))
+const STANDALONE_SNAPSHOT = { target: null, vaultState: "unavailable", connectionState: "offline" }
+const petHostSnapshot = (operations: string[]) => ({
+  target: { kind: "companion" },
+  vaultState: "unlocked",
+  connectionState: "online",
+  host: { compatible: true, operations, grants: [] },
+})
+
 const pinnedState = { current: [] as string[] }
 const togglePinMock = jest.fn()
 jest.mock("@/components/mobile/me/use-pinned-me-rows", () => ({
@@ -116,6 +133,8 @@ beforeEach(() => {
   companionConfigState.current = { paired: false, shortDeviceId: null }
   pinnedState.current = []
   syncStates.current = {}
+  platformValue = "mobile"
+  runtimeSnapshotState.current = STANDALONE_SNAPSHOT
 })
 
 function hrefOf(testid: string): string | null | undefined {
@@ -273,5 +292,42 @@ describe("MePage favorites", () => {
     expect(screen.getByTestId("me-row-fav-backup")).toBeInTheDocument()
     // The same rows still appear in their normal groups (distinct ids).
     expect(screen.getByTestId("me-row-sync")).toBeInTheDocument()
+  })
+})
+
+describe("MePage pet console row", () => {
+  it("is absent on a phone whose paired host does not advertise pet_get", () => {
+    compactValue = true
+    companionConfigState.current = { paired: true, shortDeviceId: "ABCDEFGH" }
+    runtimeSnapshotState.current = petHostSnapshot(["chat_send"])
+    render(<MePage />)
+    expect(screen.queryByTestId("me-row-pet")).toBeNull()
+  })
+
+  it("appears while the paired host advertises pet_get", () => {
+    compactValue = true
+    companionConfigState.current = { paired: true, shortDeviceId: "ABCDEFGH" }
+    runtimeSnapshotState.current = petHostSnapshot(["pet_get"])
+    render(<MePage />)
+    expect(hrefOf("me-row-pet")).toBe("/pet")
+    // Served by the host, so no "Requires desktop" annotation.
+    expect(screen.getByTestId("me-row-pet")).not.toHaveTextContent("requiresDesktop")
+  })
+
+  it("is offered on the desktop shell, which runs the pet itself", () => {
+    compactValue = true
+    platformValue = "tauri"
+    render(<MePage />)
+    expect(screen.getByTestId("me-row-pet")).toBeInTheDocument()
+  })
+
+  it("cannot be resurfaced by search or a stale pin once the host stops serving it", () => {
+    compactValue = true
+    pinnedState.current = ["pet"]
+    render(<MePage />)
+    expect(screen.queryByTestId("me-row-fav-pet")).toBeNull()
+    fireEvent.change(screen.getByTestId("me-search-input"), { target: { value: "宠物" } })
+    expect(screen.queryByTestId("me-row-pet")).toBeNull()
+    expect(screen.getByTestId("me-search-empty")).toBeInTheDocument()
   })
 })

@@ -87,6 +87,11 @@ export const HOST_FEATURE_IDS = [
   // the host's `companion` switch. The mobile composer offers Cascade and
   // Panel only while `execution_run_create` is healthy.
   "router-fusion.companion",
+  // Remote care of the desktop pet (ADR-0219). Its presence says this host
+  // runs the pet controller and answers the `pet_*` arms; a phone without it
+  // shows the pet console's pairing remedy instead of offering actions that
+  // would come back `headless-host` or `unknown command`.
+  "pet.remote-care",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -288,6 +293,28 @@ export const ENVIRONMENT_CATALOG_HOST_OPERATIONS = Object.freeze([
   "environment_image_inspect",
 ] as const)
 
+/**
+ * Remote pet care (ADR-0219): the snapshot read, the care, shop, rename, hatch
+ * and chat arms, and the five pet tables a paired device mirrors read-only.
+ * The `sync:` markers name tables, like `INBOX_RELAY_HOST_OPERATIONS` does.
+ */
+export const PET_REMOTE_CARE_HOST_OPERATIONS = Object.freeze([
+  "pet_get",
+  "pet_act",
+  "pet_rename",
+  "pet_item_purchase",
+  "pet_item_apply",
+  "pet_soul_generate",
+  "pet_chat_send",
+  "pet_chat_list",
+  "pet_chat_clear",
+  "sync:petProfile",
+  "sync:petAchievements",
+  "sync:petInventory",
+  "sync:petCharacterBindings",
+  "sync:petActivityLog",
+] as const)
+
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
 export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
   getCommandManifest()
@@ -362,6 +389,16 @@ export function buildLocalHostFeatureManifest({
     features["automation.hitl"] = {
       version: 1,
       operations: ["automation_consent_pending", "automation_consent_respond"],
+    }
+    // Desktop only, and only now that the Rust bridge rows, the command
+    // manifest, the TS arms and the sync readers all ship together (the rule
+    // `bots.control` states below). The headless brain installs the same
+    // desktop-write source but has no pet: it answers every arm
+    // `headless-host`, so advertising the feature there would send a phone
+    // into a refusal it could have known about from the manifest.
+    features["pet.remote-care"] = {
+      version: 1,
+      operations: [...PET_REMOTE_CARE_HOST_OPERATIONS],
     }
   }
   if (platform === "tauri" || platform === "headless") {

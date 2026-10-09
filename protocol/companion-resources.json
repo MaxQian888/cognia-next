@@ -827,6 +827,13 @@
         "trace_dir": {}
       }
     },
+    "pet": {
+      "children": {
+        "chat": {},
+        "item": {},
+        "soul": {}
+      }
+    },
     "pi": {
       "children": {
         "extension": {},

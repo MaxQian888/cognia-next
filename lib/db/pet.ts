@@ -7,7 +7,10 @@
 // decay is a pure function (`lib/pet/needs/decay.ts`) applied at the read site so
 // storage stays a faithful record of the last settled values.
 
+import type { Character } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
+import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
+import { recordTombstones } from "@/lib/sync/tombstones"
 import type {
   PetAchievementRecord,
   PetActivityRow,
@@ -78,6 +81,30 @@ export async function listPetActivity(limit = 100): Promise<PetActivityRow[]> {
   return getDb().petActivityLog.orderBy("ts").reverse().limit(limit).toArray()
 }
 
+/**
+ * One page of the ledger, newest first by append order, strictly older than
+ * `beforeId` (the id of the last row the caller already has). Without
+ * `beforeId` it is the newest page. Paging by the auto-increment key instead
+ * of an offset keeps a page stable while new rows keep arriving at the head.
+ */
+export async function listPetActivityPage(
+  beforeId: number | undefined,
+  limit: number
+): Promise<PetActivityRow[]> {
+  const table = getDb().petActivityLog
+  const range = beforeId === undefined ? table.toCollection() : table.where(":id").below(beforeId)
+  return range.reverse().limit(Math.max(0, limit)).toArray()
+}
+
+/**
+ * Every ledger row from `fromId` up, newest first. The journal pins its live
+ * head here once older pages are loaded, so a row arriving at the head cannot
+ * push another one out of the head page and into the gap above the older ones.
+ */
+export async function listPetActivitySince(fromId: number): Promise<PetActivityRow[]> {
+  return getDb().petActivityLog.where(":id").aboveOrEqual(fromId).reverse().toArray()
+}
+
 /** Tally activity counts by kind across the (capped) ledger window. */
 export async function getPetActivityCounters(): Promise<Record<string, number>> {
   const rows = await getDb().petActivityLog.toArray()
@@ -99,10 +126,34 @@ export async function upsertPetBinding(binding: PetCharacterBinding): Promise<Pe
 
 export async function deletePetBinding(characterId: string): Promise<void> {
   await getDb().petCharacterBindings.delete(characterId)
+  // A paired phone mirrors bindings (companion sync); without the tombstone a
+  // removed binding would stay on the phone indefinitely.
+  await recordTombstones("petCharacterBindings", [characterId])
 }
 
 export async function listPetBindings(): Promise<PetCharacterBinding[]> {
   return getDb().petCharacterBindings.orderBy("updatedAt").reverse().toArray()
+}
+
+export interface PetBindingsWithCharacters {
+  /** Every character a session can bind, each showing its effective profile. */
+  characters: Character[]
+  bindings: PetCharacterBinding[]
+}
+
+/**
+ * What the console's binding tab lists: the characters and their bindings in
+ * one read, so the tab renders one loading state instead of two.
+ *
+ * Characters come through `listResolvedCharacters`, not the raw table: that
+ * includes pack characters (a session can carry one, so `usePet` can bind
+ * one) and resolves a variant's effective name. Imported lazily so the many
+ * pet callers of this module do not load the character and pack registries.
+ */
+export async function listPetBindingsWithCharacters(): Promise<PetBindingsWithCharacters> {
+  const { listResolvedCharacters } = await import("./characters")
+  const [characters, bindings] = await Promise.all([listResolvedCharacters(), listPetBindings()])
+  return { characters, bindings }
 }
 
 // ── Achievements ─────────────────────────────────────────────────────────────
@@ -156,6 +207,9 @@ export async function decrementPetInventory(
   if (!cur || cur.qty < qty) return false
   if (cur.qty === qty) {
     await db.petInventory.delete(id)
+    // Using the last one removes the row, which the mirror only learns from
+    // a tombstone; otherwise the phone keeps showing an item that is gone.
+    await recordTombstones("petInventory", [id], now)
   } else {
     await db.petInventory.put({ ...cur, qty: cur.qty - qty, updatedAt: now })
   }
@@ -167,6 +221,14 @@ export async function decrementPetInventory(
 /** Wipe all pet data (used by the settings "reset" action). */
 export async function resetPet(): Promise<void> {
   const db = getDb()
+  // Collected before the clear: `Table.clear()` fires no Dexie hooks, so
+  // neither the tombstones nor the sync invalidation below would happen on
+  // their own, and a paired phone would keep mirroring the old pet.
+  const [achievementIds, inventoryIds, bindingIds] = await Promise.all([
+    db.petAchievements.toCollection().primaryKeys(),
+    db.petInventory.toCollection().primaryKeys(),
+    db.petCharacterBindings.toCollection().primaryKeys(),
+  ])
   await Promise.all([
     db.petProfile.clear(),
     db.petCharacterBindings.clear(),
@@ -175,4 +237,22 @@ export async function resetPet(): Promise<void> {
     db.petConversationV2.clear(),
     db.petInventory.clear(),
   ])
+  const at = Date.now()
+  await Promise.all([
+    recordTombstones("petProfile", ["global"], at),
+    recordTombstones("petAchievements", achievementIds.map(String), at),
+    recordTombstones("petInventory", inventoryIds.map(String), at),
+    recordTombstones("petCharacterBindings", bindingIds.map(String), at),
+  ])
+  // The activity log needs no tombstones: the phone drops its copy when the
+  // profile tombstone (or a new profile generation) arrives.
+  for (const table of [
+    "petProfile",
+    "petAchievements",
+    "petInventory",
+    "petCharacterBindings",
+    "petActivityLog",
+  ] as const) {
+    publishSyncInvalidate(table)
+  }
 }

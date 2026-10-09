@@ -53,12 +53,15 @@ import {
   ME_ENTRIES,
   ME_SECTION_ORDER,
   ME_SECTION_TITLE_KEY,
+  isMeEntryOffered,
   matchMeEntry,
   type MeEntry,
 } from "@/components/mobile/me/me-entries"
 import { usePinnedMeRows } from "@/components/mobile/me/use-pinned-me-rows"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { usePlatform } from "@/hooks/use-platform"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { formatRelative } from "@cognia/time"
 
@@ -77,6 +80,8 @@ export default function MePage() {
   const [lastSyncedLabel, setLastSyncedLabel] = useState<string | undefined>(undefined)
   const { paired, shortDeviceId } = useCompanionConfig()
   const { pinnedIds, togglePin } = usePinnedMeRows()
+  const platform = usePlatform()
+  const runtimeSnapshot = useRuntimeSnapshot()
   const activeWorkspaceName = useProjectStore((state) => {
     const id = state.activeProjectId
     return id ? (state.projects.find((p) => p.id === id)?.name ?? null) : null
@@ -101,13 +106,20 @@ export default function MePage() {
     setLastSyncedLabel(max > 0 ? formatRelative(max) : undefined)
   }, [compact, mounted])
 
+  // Rows a paired host must advertise (the pet console) come and go with its
+  // manifest. Filtered once here so search and a stale pin cannot resurface a
+  // row the grouped list hides.
+  const entries = useMemo(
+    () => ME_ENTRIES.filter((e) => isMeEntryOffered(e, platform, runtimeSnapshot)),
+    [platform, runtimeSnapshot]
+  )
   const filtered = useMemo(
-    () => (query.trim() ? ME_ENTRIES.filter((e) => matchMeEntry(e, query, t)) : []),
-    [query, t]
+    () => (query.trim() ? entries.filter((e) => matchMeEntry(e, query, t)) : []),
+    [entries, query, t]
   )
   const pinnedEntries = useMemo(
-    () => ME_ENTRIES.filter((e) => pinnedIds.includes(e.id)),
-    [pinnedIds]
+    () => entries.filter((e) => pinnedIds.includes(e.id)),
+    [entries, pinnedIds]
   )
 
   if (!mounted || !compact) return null
@@ -234,9 +246,7 @@ export default function MePage() {
                   testid={`me-section-${section}`}
                 >
                   {section === "about" ? <VersionRow /> : null}
-                  {ME_ENTRIES.filter((e) => e.section === section).map((entry) =>
-                    renderEntry(entry)
-                  )}
+                  {entries.filter((e) => e.section === section).map((entry) => renderEntry(entry))}
                   {section === "appearance" ? <MobileTabCustomizer /> : null}
                   {section === "account" && !paired ? (
                     <MeRow
