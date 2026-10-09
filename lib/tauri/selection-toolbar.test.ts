@@ -60,7 +60,7 @@ it("maps candidate and action calls without changing the captured text", async (
     kind: "translate",
     targetLocale: "zh-CN",
   })
-  await revealSelectionToolbar()
+  await revealSelectionToolbar("candidate-1")
   await setSelectionToolbarInteractive(true)
 
   expect(invokeMock).toHaveBeenNthCalledWith(1, "selection_toolbar_current_candidate")
@@ -70,7 +70,9 @@ it("maps candidate and action calls without changing the captured text", async (
     candidateId: "candidate-1",
     action: { kind: "translate", targetLocale: "zh-CN" },
   })
-  expect(invokeMock).toHaveBeenNthCalledWith(5, "selection_toolbar_reveal")
+  expect(invokeMock).toHaveBeenNthCalledWith(5, "selection_toolbar_reveal", {
+    candidateId: "candidate-1",
+  })
   expect(invokeMock).toHaveBeenNthCalledWith(6, "selection_toolbar_set_interactive", {
     interactive: true,
   })
@@ -110,7 +112,9 @@ it("sends the measured window box and every opaque content rect", async () => {
 
   const capsule = { x: 20, y: 20, width: 240, height: 48 }
   const localeList = { x: 40, y: 76, width: 160, height: 120 }
-  await expect(resizeSelectionToolbar(280, 88, [capsule, localeList])).resolves.toEqual({
+  await expect(
+    resizeSelectionToolbar("candidate-1", 280, 88, [capsule, localeList])
+  ).resolves.toEqual({
     placement: "below",
   })
 
@@ -118,6 +122,7 @@ it("sends the measured window box and every opaque content rect", async () => {
   // made the shadow padding a dead zone; sending only the capsule is what made
   // a click in the open language list dismiss the toolbar.
   expect(invokeMock).toHaveBeenCalledWith("selection_toolbar_resize", {
+    candidateId: "candidate-1",
     width: 280,
     height: 88,
     hitRects: [capsule, localeList],
@@ -215,11 +220,11 @@ describe("off Tauri", () => {
     await expect(bridge.listShortcutChords()).resolves.toEqual({})
     // A placeholder placement keeps the renderer's layout deterministic.
     await expect(
-      bridge.resizeSelectionToolbar(1, 1, [{ x: 0, y: 0, width: 1, height: 1 }])
+      bridge.resizeSelectionToolbar("candidate-1", 1, 1, [{ x: 0, y: 0, width: 1, height: 1 }])
     ).resolves.toEqual({ placement: "above" })
 
     await bridge.executeSelectionToolbarAction("c1", { kind: "copy" })
-    await bridge.revealSelectionToolbar()
+    await bridge.revealSelectionToolbar("candidate-1")
     await bridge.setSelectionToolbarInteractive(true)
     await bridge.setSelectionToolbarKeepAlive(true)
     await bridge.finishSelectionToolbar("c1")

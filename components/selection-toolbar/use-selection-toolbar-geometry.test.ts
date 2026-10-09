@@ -58,9 +58,12 @@ afterEach(() => {
 
 describe("useSelectionToolbarGeometry", () => {
   it("sizes the window to the widest hover state plus shadow padding", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -68,33 +71,39 @@ describe("useSelectionToolbarGeometry", () => {
 
     // Ghost (320) beats the collapsed shell (200), so the window never has to
     // resize while the pointer sweeps the row.
-    expect(resizeMock).toHaveBeenCalledWith(320 + 40, 40 + 40, [
+    expect(resizeMock).toHaveBeenCalledWith("candidate-1", 320 + 40, 40 + 40, [
       { x: 20, y: 20, width: 200, height: 40 },
     ])
   })
 
   it("reports the capsule rect, not the window box, so the padding is not a dead zone", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
     })
-    const [width, height, [capsule]] = resizeMock.mock.calls[0]
+    const [, width, height, [capsule]] = resizeMock.mock.calls[0]
     expect(capsule.width).toBeLessThan(width)
     expect(capsule.height).toBeLessThan(height)
   })
 
   it("reports the open language list as a second rect, so clicking it is not a click away", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
     })
-    expect(resizeMock.mock.calls[0][2]).toHaveLength(1)
+    expect(resizeMock.mock.calls[0][3]).toHaveLength(1)
 
     // The list is a sibling of the capsule with the shell's gap between them,
     // so its rect has to travel separately — a bounding box would hand Rust
@@ -103,7 +112,7 @@ describe("useSelectionToolbarGeometry", () => {
     await act(async () => {
       rerender({ key: "locale-open" })
     })
-    expect(resizeMock.mock.calls[1][2]).toEqual([
+    expect(resizeMock.mock.calls[1][3]).toEqual([
       { x: 20, y: 20, width: 200, height: 40 },
       { x: 40, y: 148, width: 160, height: 120 },
     ])
@@ -114,14 +123,17 @@ describe("useSelectionToolbarGeometry", () => {
     await act(async () => {
       rerender({ key: "locale-closed" })
     })
-    expect(resizeMock.mock.calls[2][2]).toHaveLength(1)
+    expect(resizeMock.mock.calls[2][3]).toHaveLength(1)
   })
 
   it("surfaces the placement Rust chose", async () => {
     resizeMock.mockResolvedValue({ placement: "below" })
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -131,9 +143,12 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("does not re-send an unchanged measurement", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -145,9 +160,12 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("grows immediately but defers shrinking until the collapse animation ends", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -160,7 +178,7 @@ describe("useSelectionToolbarGeometry", () => {
       rerender({ key: "open" })
     })
     expect(resizeMock).toHaveBeenCalledTimes(2)
-    expect(resizeMock.mock.calls[1][1]).toBe(200 + 40)
+    expect(resizeMock.mock.calls[1][2]).toBe(200 + 40)
 
     // Panel closes: shorter. Held back so the window does not crop the
     // collapse mid-flight.
@@ -173,14 +191,17 @@ describe("useSelectionToolbarGeometry", () => {
       jest.advanceTimersByTime(220)
     })
     expect(resizeMock).toHaveBeenCalledTimes(3)
-    expect(resizeMock.mock.calls[2][1]).toBe(40 + 40)
+    expect(resizeMock.mock.calls[2][2]).toBe(40 + 40)
   })
 
   it("shrinks without delay under reduced motion, since nothing is animating", async () => {
     reduceMotion = true
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -193,9 +214,12 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("sends a hit-rect-only change straight away, because nothing moves on screen", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -206,11 +230,11 @@ describe("useSelectionToolbarGeometry", () => {
       rerender({ key: "hover" })
     })
     expect(resizeMock).toHaveBeenCalledTimes(2)
-    expect(resizeMock.mock.calls[1][2][0].width).toBe(260)
+    expect(resizeMock.mock.calls[1][3][0].width).toBe(260)
   })
 
   it("stays quiet until the refs are attached", async () => {
-    const { rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
+    const { rerender } = renderHook(({ key }) => useSelectionToolbarGeometry("candidate-1", key), {
       initialProps: { key: "a" },
     })
     await act(async () => {
@@ -220,9 +244,12 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("abandons a pending shrink when the content changes again first", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -244,14 +271,17 @@ describe("useSelectionToolbarGeometry", () => {
       jest.advanceTimersByTime(500)
     })
     expect(resizeMock).toHaveBeenCalledTimes(2)
-    expect(resizeMock.mock.calls[1][1]).toBe(300 + 40)
+    expect(resizeMock.mock.calls[1][2]).toBe(300 + 40)
   })
 
   it("keeps a placeholder placement when there is no candidate to anchor to", async () => {
     resizeMock.mockResolvedValue({ placement: "above" })
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -260,22 +290,28 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("uses the shell width when it already exceeds the widest hover state", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     // An open language panel can be wider than any hover state.
     setRect(result.current.shellRef, { width: 500, height: 240, left: 0, top: 0 })
     await act(async () => {
       rerender({ key: "wide" })
     })
-    expect(resizeMock.mock.calls[0][0]).toBe(500 + 40)
+    expect(resizeMock.mock.calls[0][1]).toBe(500 + 40)
   })
 
   it("treats a zero-sized element as not yet laid out", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     // A capsule mid-mount measures 0x0; sending that would collapse the window.
     setRect(result.current.capsuleRef, { width: 0, height: 0, left: 0, top: 0 })
@@ -286,20 +322,23 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("falls back to the shell width when the ghost has not rendered", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     result.current.ghostRef.current = null
     await act(async () => {
       rerender({ key: "b" })
     })
-    expect(resizeMock.mock.calls[0][0]).toBe(200 + 40)
+    expect(resizeMock.mock.calls[0][1]).toBe(200 + 40)
   })
 
   it("cancels a pending shrink on unmount rather than firing into a dead window", async () => {
     const { result, rerender, unmount } = renderHook(
-      ({ key }) => useSelectionToolbarGeometry(key),
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
       { initialProps: { key: "a" } }
     )
     mountBoxes(result.current)
@@ -320,9 +359,12 @@ describe("useSelectionToolbarGeometry", () => {
   })
 
   it("re-measures on demand when nothing else changed", async () => {
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -334,20 +376,21 @@ describe("useSelectionToolbarGeometry", () => {
     expect(resizeMock).toHaveBeenCalledTimes(2)
   })
 
-  it("still reveals the window when the resize call is rejected", async () => {
-    // `measured` gates the reveal. Leaving it false on a rejected resize is
-    // how a missing ACL grant turned into a toolbar that never appeared at
-    // all — a wrongly-sized toolbar beats an invisible one.
+  it("keeps the window hidden when the resize call is rejected", async () => {
+    // A failed placement must not expose the placeholder at the wrong location.
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     resizeMock.mockRejectedValueOnce(new Error("Command not found"))
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
     })
-    expect(result.current.measured).toBe(true)
+    expect(result.current.measured).toBe(false)
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
@@ -357,9 +400,12 @@ describe("useSelectionToolbarGeometry", () => {
     // rejected send never landed, so it must not count as sent.
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     resizeMock.mockRejectedValueOnce(new Error("Command not found"))
-    const { result, rerender } = renderHook(({ key }) => useSelectionToolbarGeometry(key), {
-      initialProps: { key: "a" },
-    })
+    const { result, rerender } = renderHook(
+      ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+      {
+        initialProps: { key: "a" },
+      }
+    )
     mountBoxes(result.current)
     await act(async () => {
       rerender({ key: "b" })
@@ -370,4 +416,123 @@ describe("useSelectionToolbarGeometry", () => {
     expect(resizeMock).toHaveBeenCalledTimes(2)
     warn.mockRestore()
   })
+})
+
+it("re-anchors identical content for a new candidate and waits for its own acknowledgement", async () => {
+  const { result, rerender } = renderHook(({ id, key }) => useSelectionToolbarGeometry(id, key), {
+    initialProps: { id: "first", key: "idle" },
+  })
+  mountBoxes(result.current)
+  await act(async () => {
+    result.current.remeasure()
+  })
+  expect(result.current.measured).toBe(true)
+  let finish!: (value: { placement: "below" }) => void
+  resizeMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  await act(async () => {
+    rerender({ id: "second", key: "idle" })
+  })
+  expect(resizeMock).toHaveBeenCalledTimes(2)
+  expect(resizeMock.mock.calls[1][0]).toBe("second")
+  expect(result.current.measured).toBe(false)
+  await act(async () => {
+    finish({ placement: "below" })
+  })
+  expect(result.current.measured).toBe(true)
+  expect(result.current.placement).toBe("below")
+})
+
+it("refreshes hit rectangles after native placement changes the layout", async () => {
+  const { result } = renderHook(() => useSelectionToolbarGeometry("first", "idle"))
+  mountBoxes(result.current)
+  resizeMock.mockImplementationOnce(async () => {
+    setRect(result.current.capsuleRef, { width: 200, height: 40, left: 80, top: 20 })
+    return { placement: "below" }
+  })
+  await act(async () => {
+    result.current.remeasure()
+  })
+  expect(resizeMock).toHaveBeenCalledTimes(2)
+  expect(resizeMock.mock.calls[1][3][0]).toEqual({ x: 80, y: 20, width: 200, height: 40 })
+  expect(result.current.measured).toBe(true)
+})
+
+it("does not let a stale reply reveal a newer candidate", async () => {
+  let finish!: (value: { placement: "below" }) => void
+  resizeMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { result, rerender } = renderHook(({ id }) => useSelectionToolbarGeometry(id, "idle"), {
+    initialProps: { id: "first" },
+  })
+  mountBoxes(result.current)
+  await act(async () => {
+    result.current.remeasure()
+  })
+  await act(async () => {
+    rerender({ id: "second" })
+  })
+  expect(result.current.measured).toBe(false)
+  expect(resizeMock).toHaveBeenCalledTimes(1)
+  resizeMock.mockImplementationOnce(() => new Promise(() => {}))
+  await act(async () => {
+    finish({ placement: "below" })
+  })
+  expect(resizeMock).toHaveBeenCalledTimes(2)
+  expect(result.current.measured).toBe(false)
+  expect(result.current.placement).toBe("above")
+})
+
+it("refreshes local hit rectangles on a native viewport resize", async () => {
+  const { result } = renderHook(() => useSelectionToolbarGeometry("first", "idle"))
+  mountBoxes(result.current)
+  await act(async () => {
+    result.current.remeasure()
+  })
+  setRect(result.current.capsuleRef, { width: 200, height: 40, left: 80, top: 32 })
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"))
+  })
+  expect(resizeMock.mock.calls.at(-1)[3][0].y).toBe(32)
+})
+
+it("restores acknowledged geometry after an obsolete in-flight resize", async () => {
+  const { result, rerender } = renderHook(
+    ({ key }) => useSelectionToolbarGeometry("candidate-1", key),
+    { initialProps: { key: "idle" } }
+  )
+  mountBoxes(result.current)
+  await act(async () => {
+    result.current.remeasure()
+  })
+  let finish!: (value: { placement: "above" }) => void
+  resizeMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  setRect(result.current.shellRef, { width: 200, height: 200, left: 0, top: 0 })
+  await act(async () => {
+    rerender({ key: "open" })
+  })
+  setRect(result.current.shellRef, { width: 200, height: 40, left: 0, top: 0 })
+  await act(async () => {
+    rerender({ key: "closed" })
+  })
+  expect(result.current.measured).toBe(false)
+  await act(async () => {
+    finish({ placement: "above" })
+  })
+  expect(resizeMock).toHaveBeenCalledTimes(3)
+  expect(resizeMock.mock.calls[2][2]).toBe(80)
+  expect(result.current.measured).toBe(true)
 })

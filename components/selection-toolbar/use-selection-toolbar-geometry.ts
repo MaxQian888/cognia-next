@@ -59,7 +59,7 @@ export interface SelectionToolbarGeometryHandles {
    */
   ghostRef: React.RefObject<HTMLDivElement | null>
   placement: SelectionToolbarPlacement
-  /** True once the first resize has landed — the window may now be revealed. */
+  /** True once this candidate has acknowledged its final geometry. */
   measured: boolean
   remeasure: () => void
 }
@@ -97,12 +97,15 @@ function toHitRect(element: HTMLElement | null): SelectionAnchorRect | null {
 }
 
 /**
+ * @param candidateId Identity of the selection being placed; null keeps the window hidden.
  * @param contentKey Signature of everything that can change the layout
  *   (candidate id, state, hovered action, open panel). Re-measures whenever it
- *   changes — cheaper and more predictable than a ResizeObserver here, because
- *   the layout only moves in response to discrete state changes.
+ *   changes. Viewport and observed content sizes also invalidate the measurement.
  */
-export function useSelectionToolbarGeometry(contentKey: string): SelectionToolbarGeometryHandles {
+export function useSelectionToolbarGeometry(
+  candidateId: string | null,
+  contentKey: string
+): SelectionToolbarGeometryHandles {
   const shellRef = useRef<HTMLDivElement | null>(null)
   const capsuleRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLElement | null>(null)
@@ -110,16 +113,27 @@ export function useSelectionToolbarGeometry(contentKey: string): SelectionToolba
   const reduceMotion = useReducedMotion()
 
   const [placement, setPlacement] = useState<SelectionToolbarPlacement>("above")
-  const [measured, setMeasured] = useState(false)
+  const [measuredLayout, setMeasuredLayout] = useState<{
+    candidateId: string
+    contentKey: string
+    measureNonce: number
+  } | null>(null)
+  const [acknowledgement, setAcknowledgement] = useState(0)
   const [measureNonce, setMeasureNonce] = useState(0)
 
   const lastBoxRef = useRef<WindowBox | null>(null)
   const lastHitRectsRef = useRef<SelectionAnchorRect[] | null>(null)
-  const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastCandidateRef = useRef<string | null>(null)
+  // Native mutations must finish in order, including after an effect is cancelled.
+  const pendingRef = useRef<Promise<void>>(Promise.resolve())
 
   const remeasure = useCallback(() => setMeasureNonce((nonce) => nonce + 1), [])
 
   useLayoutEffect(() => {
+    if (!candidateId) {
+      lastCandidateRef.current = null
+      return
+    }
     const shell = readBox(shellRef.current)
     const capsuleRect = toHitRect(capsuleRef.current)
     if (!shell || !capsuleRect) return
@@ -136,56 +150,91 @@ export function useSelectionToolbarGeometry(contentKey: string): SelectionToolba
     const panelRect = toHitRect(panelRef.current)
     const hitRects = panelRect ? [capsuleRect, panelRect] : [capsuleRect]
 
-    const boxUnchanged = sameBox(lastBoxRef.current, box)
-    if (boxUnchanged && sameRects(lastHitRectsRef.current, hitRects)) return
-
-    const send = () => {
-      lastBoxRef.current = box
-      lastHitRectsRef.current = hitRects
-      void resizeSelectionToolbar(box.width, box.height, hitRects).then(
-        (geometry) => {
-          setPlacement(geometry.placement)
-          setMeasured(true)
-        },
-        (error: unknown) => {
-          // `measured` gates the reveal, so swallowing this would leave the
-          // window permanently hidden — a toolbar at the wrong size beats no
-          // toolbar at all. Forget the sent box so the next content change
-          // retries instead of being suppressed by the equality guard above.
-          console.warn("selection toolbar resize failed", error)
-          lastBoxRef.current = null
-          lastHitRectsRef.current = null
-          setMeasured(true)
-        }
-      )
-    }
-
-    // No need to clear a pending shrink here: React runs the previous effect's
-    // cleanup before this body, and the shrink branch is the only path that
-    // arms the timer — so it is always already null by now.
-    const previous = lastBoxRef.current
-    const shrinking =
-      previous !== null && (box.width < previous.width || box.height < previous.height)
-    // A pure hit-rect change (hover expanding the capsule inside an unchanged
-    // window) is invisible, so it never waits.
-    if (shrinking && !boxUnchanged && !reduceMotion) {
-      shrinkTimerRef.current = setTimeout(send, SHRINK_SETTLE_MS)
+    const sameCandidate = lastCandidateRef.current === candidateId
+    const boxUnchanged = sameCandidate && sameBox(lastBoxRef.current, box)
+    if (boxUnchanged && sameRects(lastHitRectsRef.current, hitRects)) {
+      // A successful native resize causes another layout pass. Only its final
+      // local rectangles may unlock reveal, including when placement flipped.
+      let cancelled = false
+      void Promise.resolve().then(() => {
+        if (!cancelled) setMeasuredLayout({ candidateId, contentKey, measureNonce })
+      })
       return () => {
-        if (shrinkTimerRef.current) {
-          clearTimeout(shrinkTimerRef.current)
-          shrinkTimerRef.current = null
-        }
+        cancelled = true
       }
     }
-    send()
-  }, [contentKey, measureNonce, reduceMotion])
 
-  useLayoutEffect(
-    () => () => {
-      if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current)
-    },
-    []
-  )
+    let cancelled = false
+    let shrinkTimer: ReturnType<typeof setTimeout> | undefined
+    const send = () => {
+      pendingRef.current = pendingRef.current.then(async () => {
+        if (cancelled) return
+        try {
+          // A cancelled IPC still mutates the native window. Until it settles,
+          // the last acknowledged box cannot justify skipping a restoration.
+          lastCandidateRef.current = null
+          const geometry = await resizeSelectionToolbar(
+            candidateId,
+            box.width,
+            box.height,
+            hitRects
+          )
+          if (cancelled) return
+          lastCandidateRef.current = candidateId
+          lastBoxRef.current = box
+          lastHitRectsRef.current = hitRects
+          setPlacement(geometry.placement)
+          setAcknowledgement((value) => value + 1)
+        } catch (error) {
+          if (cancelled) return
+          console.warn("selection toolbar resize failed", error)
+          lastCandidateRef.current = null
+          lastBoxRef.current = null
+          lastHitRectsRef.current = null
+          // Keep the placeholder hidden. A later layout/viewport change or an
+          // explicit remeasure retries without claiming a failed placement.
+        }
+      })
+    }
+
+    const previous = sameCandidate ? lastBoxRef.current : null
+    const shrinking =
+      previous !== null && (box.width < previous.width || box.height < previous.height)
+    if (shrinking && !boxUnchanged && !reduceMotion) {
+      shrinkTimer = setTimeout(send, SHRINK_SETTLE_MS)
+    } else {
+      send()
+    }
+    return () => {
+      cancelled = true
+      if (shrinkTimer !== undefined) clearTimeout(shrinkTimer)
+    }
+  }, [candidateId, contentKey, measureNonce, reduceMotion, placement, acknowledgement])
+
+  useLayoutEffect(() => {
+    window.addEventListener("resize", remeasure)
+    return () => window.removeEventListener("resize", remeasure)
+  }, [remeasure])
+
+  useLayoutEffect(() => {
+    if (!candidateId || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(remeasure)
+    for (const element of [
+      shellRef.current,
+      capsuleRef.current,
+      panelRef.current,
+      ghostRef.current,
+    ]) {
+      if (element) observer.observe(element)
+    }
+    return () => observer.disconnect()
+  }, [candidateId, contentKey, remeasure])
+
+  const measured =
+    candidateId !== null &&
+    measuredLayout?.candidateId === candidateId &&
+    measuredLayout.contentKey === contentKey &&
+    measuredLayout.measureNonce === measureNonce
 
   return { shellRef, capsuleRef, panelRef, ghostRef, placement, measured, remeasure }
 }

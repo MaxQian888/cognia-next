@@ -6,6 +6,11 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => true),
 }))
 
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => toastError(...args) },
+}))
+
 jest.mock("@/lib/automation/client", () => ({
   desktop: {
     capabilities: jest.fn(),
@@ -104,13 +109,19 @@ function state(revision = 1): UiStateRevision {
   }
 }
 
-function mount() {
+function mount(props: { onOpenPermissions?: () => void } = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={{}} timeZone="UTC">
-      <InspectorTab />
+      <InspectorTab {...props} />
     </NextIntlClientProvider>
   )
 }
+
+// Tauri rejects with the JSON string the Rust `AutomationError` serializes to.
+const surfaceDisabled = JSON.stringify({
+  code: "PERMISSION_DENIED",
+  reason: "surface Workflow disabled",
+})
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -221,5 +232,64 @@ describe("InspectorTab canonical app sessions", () => {
 
     expect(await screen.findByText("Save")).toBeInTheDocument()
     expect(screen.queryByRole("img", { name: /captured application window/i })).toBeNull()
+  })
+
+  it("explains a capture refused by the permission gate in place, with a way to fix it", async () => {
+    mockedDesktop.getAppState.mockRejectedValueOnce(surfaceDisabled).mockResolvedValueOnce(state())
+    const onOpenPermissions = jest.fn()
+    mount({ onOpenPermissions })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole("button", { name: /capture state/i }))
+
+    expect(await screen.findByText(/capturing needs automation permission/i)).toBeInTheDocument()
+    expect(toastError).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: /open permissions/i }))
+    expect(onOpenPermissions).toHaveBeenCalledTimes(1)
+
+    // Once the operator allows it, the next capture clears the notice.
+    await user.click(screen.getByRole("button", { name: /capture state/i }))
+    expect(await screen.findByText("Save")).toBeInTheDocument()
+    expect(screen.queryByText(/capturing needs automation permission/i)).toBeNull()
+  })
+
+  it("omits the shortcut when the host cannot switch tabs", async () => {
+    mockedDesktop.getAppState.mockRejectedValue(surfaceDisabled)
+    mount()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole("button", { name: /capture state/i }))
+
+    expect(await screen.findByText(/capturing needs automation permission/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /open permissions/i })).toBeNull()
+  })
+
+  it("toasts other automation errors as readable text, not raw JSON", async () => {
+    mockedDesktop.listApps.mockRejectedValue(JSON.stringify({ code: "KILL_SWITCH_ACTIVE" }))
+    mount()
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Failed to list applications", {
+        description: expect.stringMatching(/kill switch is engaged/i),
+      })
+    )
+    for (const [, options] of toastError.mock.calls) {
+      expect((options as { description: string }).description).not.toContain("{")
+    }
+  })
+
+  it("passes through an error that is not an automation error", async () => {
+    mockedDesktop.getAppState.mockRejectedValue("socket closed")
+    mount()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole("button", { name: /capture state/i }))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Failed to capture app state", {
+        description: "socket closed",
+      })
+    )
+    expect(screen.queryByText(/capturing needs automation permission/i)).toBeNull()
   })
 })

@@ -79,7 +79,8 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
     })
 }
 
-/// Capture a region given in GLOBAL LOGICAL coordinates.
+/// Capture a region given in global desktop units (see `desktop_space`):
+/// logical points on macOS, physical pixels on Windows and Linux.
 ///
 /// `capture_primary`'s `ScreenshotOpts.region` is monitor-local *physical*
 /// pixels, which is the right contract for Computer Use (the model is looking
@@ -152,14 +153,28 @@ fn monitor_contains_center(info: &MonitorInfo, region: Rect) -> bool {
         && cy < info.y.saturating_add(info.height as i32)
 }
 
-/// Global logical points → monitor-local physical pixels.
+/// Global desktop units → monitor-local physical pixels.
 ///
-/// `xcap` reports monitor bounds in logical points (`CGDisplayBounds`) but
-/// captures at `scale_factor` — so this both re-origins to the monitor and
-/// scales to pixels. Pure, because it is the single place the whole OCR
-/// fallback can silently read the wrong part of the screen.
+/// On macOS `xcap` reports monitor bounds in logical points (`CGDisplayBounds`)
+/// but captures at `scale_factor`, so this both re-origins to the monitor and
+/// scales to pixels. On Windows and Linux it reports physical pixels
+/// (`dmPosition` / `dmPelsWidth`, X11 geometry) and captures at that size, so
+/// the region only needs re-originating — scaling there would read a region
+/// `scale_factor` times too large and too far from the origin. Pure, because
+/// it is the single place the whole OCR fallback can silently read the wrong
+/// part of the screen.
 pub(crate) fn global_rect_to_monitor_pixels(region: Rect, info: &MonitorInfo) -> Option<Rect> {
-    let scale = if info.scale_factor.is_finite() && info.scale_factor > 0.0 {
+    rect_to_monitor_pixels(region, info, super::desktop_space::DESKTOP_UNITS_ARE_POINTS)
+}
+
+fn rect_to_monitor_pixels(
+    region: Rect,
+    info: &MonitorInfo,
+    units_are_points: bool,
+) -> Option<Rect> {
+    let scale = if !units_are_points {
+        1.0
+    } else if info.scale_factor.is_finite() && info.scale_factor > 0.0 {
         f64::from(info.scale_factor)
     } else {
         1.0
@@ -550,13 +565,54 @@ mod tests {
             height: 40,
         };
         assert_eq!(
-            global_rect_to_monitor_pixels(region, &info),
+            rect_to_monitor_pixels(region, &info, true),
             Some(Rect {
                 x: 200,
                 y: 200,
                 width: 400,
                 height: 80
             })
+        );
+    }
+
+    #[test]
+    fn a_pixel_desktop_region_is_reorigined_but_never_rescaled() {
+        // Windows: a 150% monitor to the left of the primary, reported (and
+        // captured) in physical pixels. The drag rect is physical too.
+        let info = monitor(-2880, 0, 2880, 1620, 1.5);
+        let region = Rect {
+            x: -2780,
+            y: 300,
+            width: 600,
+            height: 90,
+        };
+        assert_eq!(
+            rect_to_monitor_pixels(region, &info, false),
+            Some(Rect {
+                x: 100,
+                y: 300,
+                width: 600,
+                height: 90
+            })
+        );
+    }
+
+    #[test]
+    fn the_platform_entry_point_uses_the_platform_units() {
+        let info = monitor(0, 0, 1512, 982, 2.0);
+        let region = Rect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        };
+        assert_eq!(
+            global_rect_to_monitor_pixels(region, &info),
+            rect_to_monitor_pixels(
+                region,
+                &info,
+                super::super::desktop_space::DESKTOP_UNITS_ARE_POINTS
+            )
         );
     }
 
@@ -569,7 +625,7 @@ mod tests {
             width: 100,
             height: 20,
         };
-        assert_eq!(global_rect_to_monitor_pixels(region, &info), Some(region));
+        assert_eq!(rect_to_monitor_pixels(region, &info, true), Some(region));
     }
 
     #[test]
@@ -577,14 +633,15 @@ mod tests {
         let info = monitor(0, 0, 1920, 1080, 2.0);
         // Zero-area selection: nothing to OCR.
         assert_eq!(
-            global_rect_to_monitor_pixels(
+            rect_to_monitor_pixels(
                 Rect {
                     x: 10,
                     y: 10,
                     width: 0,
                     height: 5
                 },
-                &info
+                &info,
+                true
             ),
             None
         );
@@ -592,14 +649,15 @@ mod tests {
         // multiply the region by zero.
         let broken = monitor(0, 0, 1920, 1080, 0.0);
         assert_eq!(
-            global_rect_to_monitor_pixels(
+            rect_to_monitor_pixels(
                 Rect {
                     x: 10,
                     y: 10,
                     width: 30,
                     height: 8
                 },
-                &broken
+                &broken,
+                true
             ),
             Some(Rect {
                 x: 10,

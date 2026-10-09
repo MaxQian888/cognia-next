@@ -39,7 +39,9 @@ describe("SelectionListPanel", () => {
   it("hands Rust its own hit rect, so a click inside is not a click away", () => {
     const containerRef = createRef<HTMLElement>()
     renderPanel({ containerRef })
-    expect(containerRef.current).toBe(screen.getByRole("menu"))
+    expect(containerRef.current).toContainElement(screen.getByRole("menu"))
+    expect(containerRef.current).not.toBe(screen.getByRole("menu"))
+    expect(containerRef.current!.style.transform).toBe("")
   })
 
   it("lands focus on the row the caller nominated", () => {

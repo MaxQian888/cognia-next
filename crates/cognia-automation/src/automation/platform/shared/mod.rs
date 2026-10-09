@@ -10,6 +10,10 @@
 //!     but validates chords through this module too.
 
 pub mod credential_window;
+// Desktop units — AX / CGEvent points on macOS, physical pixels elsewhere — and
+// the conversions from tao's monitor and window rects, so overlay placement and
+// region capture never mix two coordinate spaces.
+pub mod desktop_space;
 pub mod input_monitoring;
 // ADR-0020 W2 — keymap is consumed by the macOS / Linux backends (and
 // by tests on every platform). Gating it out of the Windows lib build

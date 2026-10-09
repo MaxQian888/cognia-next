@@ -349,18 +349,22 @@ impl<'a> Call<'a> {
         }
     }
 
-    /// Passive inspection reads the accessibility tree (or resolves an element
-    /// under the cursor) without driving the desktop or capturing pixels. These
+    /// Passive inspection reads the accessibility tree, resolves an element
+    /// under the cursor, or lists the running applications (names, bundle ids
+    /// and pids — what the Inspector's app picker shows) without driving the
+    /// desktop or capturing pixels. These
     /// power the Settings → Inspector diagnostic, which the operator opens
     /// explicitly. On the operator-facing `Workflow` surface `evaluate` lets
     /// them through regardless of the engine-enabled flag or the configured
     /// tier (short of an engaged kill switch); other surfaces still gate them
-    /// normally. `screenshot` is deliberately excluded: it is read-only but
-    /// leaks on-screen content, so it stays fully gated everywhere.
+    /// normally. `screenshot` and `get_app_state` (whose revision carries a
+    /// window frame) are deliberately excluded: they are read-only but leak
+    /// on-screen content, so they stay fully gated everywhere.
     pub fn is_passive_inspection(&self) -> bool {
         matches!(
             self.command,
             "get_focus"
+                | "list_apps"
                 | "read_tree"
                 | "find"
                 | "cursor_position"
@@ -1288,6 +1292,45 @@ mod tests {
         assert!(matches!(
             g.evaluate(&inspect_call(Surface::Workflow)),
             Decision::Allow
+        ));
+    }
+
+    #[test]
+    fn the_inspector_can_list_apps_but_not_capture_them_while_workflow_is_off() {
+        // The Inspector's app picker only needs names and pids; the capture
+        // behind "Capture state" carries a window frame and stays gated.
+        // Workflow `Off` inherits the default tier, also `Off` here: the state
+        // that produced "surface Workflow disabled".
+        let g = PermissionGate::new(AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Off,
+            ..Default::default()
+        });
+        let call = |command| Call {
+            command,
+            surface: Surface::Workflow,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(g.evaluate(&call("list_apps")), Decision::Allow));
+        assert!(matches!(
+            g.evaluate(&call("get_app_state")),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
+        ));
+        assert!(matches!(
+            g.evaluate(&call("screenshot")),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
+        ));
+        // Only the operator-facing Workflow surface skips the gate; an MCP
+        // client still cannot enumerate the running apps unpermissioned.
+        assert!(matches!(
+            g.evaluate(&Call {
+                command: "list_apps",
+                surface: Surface::Mcp,
+                plugin_id: None,
+                target: TargetMeta::default(),
+            }),
+            Decision::Deny(AutomationError::PermissionDenied { .. })
         ));
     }
 

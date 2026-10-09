@@ -23,9 +23,13 @@
 //! hears nothing when the user switches to Notes. Rather than register against
 //! every running application — hundreds of observers, most of them never
 //! firing — the thread tracks the frontmost application and re-targets when it
-//! changes. `run_in_mode` gives that for free: it services observer callbacks
-//! for one interval and then returns, so the poll is the loop itself and no
-//! `CFRunLoopTimer` is needed.
+//! changes. `run_in_mode` gives that for free while a registration is live: it
+//! services observer callbacks for one interval and then returns, so the poll
+//! is the loop itself and no `CFRunLoopTimer` is needed. With no source
+//! scheduled (the frontmost app refused, or none resolved yet) `run_in_mode`
+//! returns `Finished` at once, so the loop sleeps the interval itself rather
+//! than spin; and an application that refused is only retried after
+//! [`REFUSED_RETRY`], not on every tick.
 //!
 //! # Failure is always local
 //!
@@ -36,28 +40,21 @@
 //! a feature-wide error.
 
 use std::ffi::c_void;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use accessibility::{AXUIElement, AXUIElementAttributes};
-use accessibility_sys::{
-    kAXErrorSuccess, kAXFocusedUIElementChangedNotification, kAXSelectedTextChangedNotification,
-    AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
-    AXObserverRemoveNotification, AXUIElementCreateApplication, AXUIElementRef,
+use objc2_application_services::{AXError, AXObserver, AXUIElement};
+use objc2_core_foundation::{
+    kCFRunLoopDefaultMode, CFRetained, CFRunLoop, CFRunLoopMode, CFRunLoopRunResult,
+    CFRunLoopSource, CFString,
 };
-use core_foundation as cf_ax;
-use core_foundation::base::TCFType as TCFType010;
-use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop, CFRunLoopSource};
-use core_foundation_sys::base::CFRelease;
-use core_foundation_sys::runloop::CFRunLoopSourceRef;
-use core_foundation_sys::string::CFStringRef;
 
-use cf_ax::string::CFString;
-
-use super::raw;
+use super::raw::{self, AxElement};
 use crate::automation::events::{emit_uia_event, UiaEventPayload};
 use crate::automation::selection_events::{self, SelectionSignal, SelectionSignalKind};
 
@@ -66,6 +63,12 @@ use crate::automation::selection_events::{self, SelectionSignal, SelectionSignal
 /// the *re-targeting* is coarse. 400ms is well under the time it takes a human
 /// to switch apps and select something.
 const FOCUS_POLL: Duration = Duration::from_millis(400);
+
+/// How long an application that refused registration is left alone before the
+/// next attempt. Each attempt re-activates web accessibility in that app (a
+/// Chromium tree rebuild), so it must not happen every poll; but an app that
+/// just launched may only be missing its AX server for a moment.
+const REFUSED_RETRY: Duration = Duration::from_secs(5);
 
 /// Cap on a single AX message to an observed application.
 ///
@@ -78,21 +81,47 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// `kAXSelectedTextChangedNotification`. The AX notification names are C
+/// `#define`s in `AXNotificationConstants.h`, so no binding exports them; the
+/// literals are pinned to Apple's spelling by
+/// `notification_names_match_the_ax_headers`.
+const SELECTED_TEXT_CHANGED: &str = "AXSelectedTextChanged";
+
+/// `kAXFocusedUIElementChangedNotification`.
+const FOCUSED_UI_ELEMENT_CHANGED: &str = "AXFocusedUIElementChanged";
+
+/// The notifications every registration subscribes to.
+const NOTIFICATIONS: [&str; 2] = [SELECTED_TEXT_CHANGED, FOCUSED_UI_ELEMENT_CHANGED];
+
 /// Which notification fired, mapped off the CFString name.
 ///
 /// Split out as a pure function so the mapping is unit-testable without a live
 /// accessibility server.
-// The arms match `accessibility_sys` constants, whose Cocoa-style names we do
-// not control. They are `const`, so these are value comparisons and not
-// catch-all bindings — `maps_only_the_two_notifications_it_registers_for` pins
-// that by asserting the `None` arm still fires.
-#[allow(non_upper_case_globals)]
 pub(crate) fn signal_kind_for(notification: &str) -> Option<SelectionSignalKind> {
     match notification {
-        kAXSelectedTextChangedNotification => Some(SelectionSignalKind::SelectionChanged),
-        kAXFocusedUIElementChangedNotification => Some(SelectionSignalKind::FocusChanged),
+        SELECTED_TEXT_CHANGED => Some(SelectionSignalKind::SelectionChanged),
+        FOCUSED_UI_ELEMENT_CHANGED => Some(SelectionSignalKind::FocusChanged),
         _ => None,
     }
+}
+
+/// `AXObserverGetRunLoopSource`, declared here rather than through the binding:
+/// the binding's wrapper panics on a null source, and an observer that cannot
+/// produce one is one more uncooperative application, not a reason to take the
+/// observer thread down.
+fn observer_run_loop_source(observer: &AXObserver) -> Option<CFRetained<CFRunLoopSource>> {
+    extern "C-unwind" {
+        fn AXObserverGetRunLoopSource(observer: &AXObserver) -> Option<NonNull<CFRunLoopSource>>;
+    }
+    // SAFETY: valid observer. The source follows the Get rule, so it is
+    // retained here for as long as the registration holds it.
+    unsafe { AXObserverGetRunLoopSource(observer).map(|source| CFRetained::retain(source)) }
+}
+
+/// The run loop mode every observer source is scheduled in and serviced from.
+fn default_mode() -> Option<&'static CFRunLoopMode> {
+    // SAFETY: an immutable framework constant.
+    unsafe { kCFRunLoopDefaultMode }
 }
 
 /// Whether a pid change should cause a re-target. Pure half of the poll loop.
@@ -106,32 +135,58 @@ pub(crate) fn should_retarget(current: Option<u32>, focused: Option<u32>) -> boo
     }
 }
 
+/// Whether a registration attempt against `pid` is due, given the last refusal.
+/// Pure half of the retry backoff.
+pub(crate) fn attempt_due(pid: u32, refused: Option<(u32, Instant)>, now: Instant) -> bool {
+    match refused {
+        Some((refused_pid, at)) if refused_pid == pid => {
+            now.saturating_duration_since(at) >= REFUSED_RETRY
+        }
+        _ => true,
+    }
+}
+
 /// The AX observer registered against one application.
 ///
-/// `Drop` removes both notifications and releases the observer, so re-targeting
-/// is just an assignment.
+/// `Drop` unschedules the source and removes both notifications; the retained
+/// handles release the observer and the source after that, so re-targeting is
+/// just an assignment.
 struct AppObserver {
-    observer: AXObserverRef,
-    app: AXUIElement,
-    source: CFRunLoopSource,
-    run_loop: CFRunLoop,
+    observer: CFRetained<AXObserver>,
+    app: AxElement,
+    source: CFRetained<CFRunLoopSource>,
+    run_loop: CFRetained<CFRunLoop>,
     pid: u32,
 }
 
 impl AppObserver {
     /// Register against `pid`. Returns `None` for any application that will not
     /// cooperate — the caller treats that as "this app uses the click path".
-    fn install(pid: u32, run_loop: &CFRunLoop, context: *mut c_void) -> Option<Self> {
-        let mut observer: AXObserverRef = std::ptr::null_mut();
-        let err = unsafe { AXObserverCreate(pid as i32, on_ax_notification, &mut observer) };
-        if err != kAXErrorSuccess || observer.is_null() {
-            log::debug!("ax observer: AXObserverCreate failed for pid {pid} (err {err})");
+    fn install(pid: u32, run_loop: &CFRetained<CFRunLoop>, context: *mut c_void) -> Option<Self> {
+        let mut observer: *mut AXObserver = std::ptr::null_mut();
+        // SAFETY: `observer` is a valid out-parameter; on success it holds a
+        // +1 observer, adopted below.
+        let err = unsafe {
+            AXObserver::create(
+                pid as i32,
+                Some(on_ax_notification),
+                NonNull::from(&mut observer),
+            )
+        };
+        if err != AXError::Success {
+            log::debug!(
+                "ax observer: AXObserverCreate failed for pid {pid} (err {})",
+                err.0
+            );
             return None;
         }
-
-        let app = unsafe {
-            AXUIElement::wrap_under_create_rule(AXUIElementCreateApplication(pid as i32))
+        let Some(observer) = NonNull::new(observer) else {
+            log::debug!("ax observer: AXObserverCreate returned no observer for pid {pid}");
+            return None;
         };
+        let observer = unsafe { CFRetained::from_raw(observer) };
+
+        let app = AxElement::application(pid);
         raw::set_messaging_timeout(&app, AX_MESSAGING_TIMEOUT_SECONDS);
         // Chromium / WebKit / Electron publish no web-content accessibility —
         // and therefore post no selection notifications — until an assistive
@@ -139,36 +194,32 @@ impl AppObserver {
         // silent and every browser falls back to the click path.
         raw::activate_web_a11y(&app);
 
-        let app_ref = app.as_concrete_TypeRef() as AXUIElementRef;
         let mut added = false;
-        for notification in [
-            kAXSelectedTextChangedNotification,
-            kAXFocusedUIElementChangedNotification,
-        ] {
-            let name = CFString::new(notification);
-            let err = unsafe {
-                AXObserverAddNotification(observer, app_ref, name.as_concrete_TypeRef(), context)
-            };
-            if err == kAXErrorSuccess {
+        for notification in NOTIFICATIONS {
+            let name = CFString::from_str(notification);
+            // SAFETY: valid observer and element; `context` outlives every
+            // registration (the observer thread reclaims it only after the
+            // last `AppObserver` is dropped).
+            let err = unsafe { observer.add_notification(app.as_ax(), &name, context) };
+            if err == AXError::Success {
                 added = true;
             } else {
-                log::debug!("ax observer: {notification} not available for pid {pid} (err {err})");
+                log::debug!(
+                    "ax observer: {notification} not available for pid {pid} (err {})",
+                    err.0
+                );
             }
         }
         if !added {
-            unsafe { CFRelease(observer.cast()) };
+            // Dropping `observer` releases it; nothing was registered.
             return None;
         }
 
-        let source: CFRunLoopSource = unsafe {
-            let raw_source: CFRunLoopSourceRef = AXObserverGetRunLoopSource(observer);
-            if raw_source.is_null() {
-                CFRelease(observer.cast());
-                return None;
-            }
-            CFRunLoopSource::wrap_under_get_rule(raw_source)
+        let Some(source) = observer_run_loop_source(&observer) else {
+            log::debug!("ax observer: no run loop source for pid {pid}");
+            return None;
         };
-        unsafe { run_loop.add_source(&source, kCFRunLoopDefaultMode) };
+        run_loop.add_source(Some(&source), default_mode());
 
         Some(Self {
             observer,
@@ -183,18 +234,13 @@ impl AppObserver {
 impl Drop for AppObserver {
     fn drop(&mut self) {
         self.run_loop
-            .remove_source(&self.source, unsafe { kCFRunLoopDefaultMode });
-        let app_ref = self.app.as_concrete_TypeRef() as AXUIElementRef;
-        for notification in [
-            kAXSelectedTextChangedNotification,
-            kAXFocusedUIElementChangedNotification,
-        ] {
-            let name = CFString::new(notification);
-            unsafe {
-                AXObserverRemoveNotification(self.observer, app_ref, name.as_concrete_TypeRef());
-            }
+            .remove_source(Some(&self.source), default_mode());
+        for notification in NOTIFICATIONS {
+            let name = CFString::from_str(notification);
+            // SAFETY: valid observer and element. Removing a notification that
+            // failed to register returns an error, which is fine to ignore.
+            let _ = unsafe { self.observer.remove_notification(self.app.as_ax(), &name) };
         }
-        unsafe { CFRelease(self.observer.cast()) };
         log::debug!("ax observer: released pid {}", self.pid);
     }
 }
@@ -211,34 +257,49 @@ struct ObserverContext {
 /// reads and a non-blocking publish. Reading the selected *text* here would put
 /// every keystroke in every text field on a broadcast channel; consumers fetch
 /// the body later, once, through the gated `read_text_selection` path.
-unsafe extern "C" fn on_ax_notification(
-    _observer: AXObserverRef,
-    element: AXUIElementRef,
-    notification: CFStringRef,
+///
+/// The binding's callback ABI is `C-unwind`, so a panic here would unwind into
+/// the CF run loop. It is caught and logged instead: one bad notification must
+/// not take down the observer thread (or the process).
+unsafe extern "C-unwind" fn on_ax_notification(
+    _observer: NonNull<AXObserver>,
+    element: NonNull<AXUIElement>,
+    notification: NonNull<CFString>,
     refcon: *mut c_void,
 ) {
-    if element.is_null() || notification.is_null() || refcon.is_null() {
+    if refcon.is_null() {
         return;
     }
-    let context = &*(refcon as *const ObserverContext);
-    let name = CFString::wrap_under_get_rule(notification).to_string();
-    let Some(kind) = signal_kind_for(&name) else {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: `refcon` is the `ObserverContext` every registration was
+        // given, alive until the thread reclaims it after the last removal;
+        // `element` and `notification` are valid for the callback's duration.
+        let context = unsafe { &*(refcon as *const ObserverContext) };
+        let name = unsafe { notification.as_ref() }.to_string();
+        let element = unsafe { AxElement::retain_borrowed(element) };
+        handle_notification(context, &name, &element);
+    }));
+    if outcome.is_err() {
+        log::warn!("ax observer: notification handler panicked; event dropped");
+    }
+}
+
+fn handle_notification(context: &ObserverContext, name: &str, element: &AxElement) {
+    let Some(kind) = signal_kind_for(name) else {
         return;
     };
-    let element = AXUIElement::wrap_under_get_rule(element);
 
     // A secure text field reports "the selection is gone" rather than its size.
     // Nothing downstream should be tempted to go read that element's contents.
     let secure = element
         .subrole()
-        .ok()
         .is_some_and(|subrole| subrole == "AXSecureTextField");
     let selected_len = if secure {
         0
     } else {
-        raw::selected_text_range_length(&element).unwrap_or(0)
+        raw::selected_text_range_length(element).unwrap_or(0)
     };
-    let pid = raw::element_pid(&element);
+    let pid = raw::element_pid(element);
 
     selection_events::publish(SelectionSignal {
         kind,
@@ -254,7 +315,7 @@ unsafe extern "C" fn on_ax_notification(
             SelectionSignalKind::FocusChanged => "focus-changed".into(),
         },
         name: None,
-        control_type: element.role().ok().map(|role| role.to_string()),
+        control_type: element.role(),
         process_id: pid,
         property: None,
         structure_change_type: None,
@@ -285,26 +346,45 @@ impl AxObserverHandle {
         let join = thread::Builder::new()
             .name("ax-selection-observer".into())
             .spawn(move || {
-                let run_loop = CFRunLoop::get_current();
+                let Some(run_loop) = CFRunLoop::current() else {
+                    let _ = ready_tx.send(Err("ax observer: no run loop for this thread".into()));
+                    return;
+                };
                 // Leaked for the lifetime of the thread and reclaimed below;
                 // every registration holds this pointer as its `refcon`.
                 let context = Box::into_raw(Box::new(ObserverContext { subscription_id }));
                 let _ = ready_tx.send(Ok(()));
 
                 let mut current: Option<AppObserver> = None;
+                let mut refused: Option<(u32, Instant)> = None;
                 while !thread_stop.load(Ordering::SeqCst) {
                     let focused = raw::system_wide_focused_pid();
                     if should_retarget(current.as_ref().map(|o| o.pid), focused) {
-                        // Drop first: the old registration must be gone before
-                        // the new one is added, or a fast app switch leaks.
-                        current = None;
                         if let Some(pid) = focused {
-                            current = AppObserver::install(pid, &run_loop, context.cast());
+                            let now = Instant::now();
+                            if attempt_due(pid, refused, now) {
+                                // Drop first: the old registration must be gone
+                                // before the new one is added, or a fast app
+                                // switch leaks.
+                                drop(current.take());
+                                current = AppObserver::install(pid, &run_loop, context.cast());
+                                refused = current.is_none().then_some((pid, now));
+                            } else {
+                                // Still inside the refusal backoff: the user is
+                                // in an app we cannot observe, so stop hearing
+                                // the one they left.
+                                current = None;
+                            }
                         }
                     }
                     // Services observer callbacks for one interval, then
-                    // returns so the pid can be re-checked. This IS the poll.
-                    CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, FOCUS_POLL, false);
+                    // returns so the pid can be re-checked. This IS the poll —
+                    // unless no source is scheduled, when it returns at once.
+                    let result =
+                        CFRunLoop::run_in_mode(default_mode(), FOCUS_POLL.as_secs_f64(), false);
+                    if result == CFRunLoopRunResult::Finished {
+                        thread::sleep(FOCUS_POLL);
+                    }
                 }
 
                 drop(current);
@@ -344,13 +424,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn notification_names_match_the_ax_headers() {
+        // `AXNotificationConstants.h`:
+        //   #define kAXSelectedTextChangedNotification CFSTR("AXSelectedTextChanged")
+        //   #define kAXFocusedUIElementChangedNotification CFSTR("AXFocusedUIElementChanged")
+        assert_eq!(SELECTED_TEXT_CHANGED, "AXSelectedTextChanged");
+        assert_eq!(FOCUSED_UI_ELEMENT_CHANGED, "AXFocusedUIElementChanged");
+        assert_eq!(
+            NOTIFICATIONS,
+            [SELECTED_TEXT_CHANGED, FOCUSED_UI_ELEMENT_CHANGED]
+        );
+    }
+
+    #[test]
     fn maps_only_the_two_notifications_it_registers_for() {
         assert_eq!(
-            signal_kind_for(kAXSelectedTextChangedNotification),
+            signal_kind_for(SELECTED_TEXT_CHANGED),
             Some(SelectionSignalKind::SelectionChanged)
         );
         assert_eq!(
-            signal_kind_for(kAXFocusedUIElementChangedNotification),
+            signal_kind_for(FOCUSED_UI_ELEMENT_CHANGED),
             Some(SelectionSignalKind::FocusChanged)
         );
         assert_eq!(signal_kind_for("AXValueChanged"), None);
@@ -362,6 +455,35 @@ mod tests {
         assert!(should_retarget(None, Some(42)));
         assert!(should_retarget(Some(42), Some(43)));
         assert!(!should_retarget(Some(42), Some(42)));
+    }
+
+    #[test]
+    fn a_refused_app_is_retried_only_after_the_backoff() {
+        let at = Instant::now();
+        assert!(attempt_due(42, None, at));
+        // The app that just refused waits out the backoff…
+        assert!(!attempt_due(
+            42,
+            Some((42, at)),
+            at + Duration::from_secs(1)
+        ));
+        assert!(attempt_due(42, Some((42, at)), at + REFUSED_RETRY));
+        // …but switching to any other app is attempted at once.
+        assert!(attempt_due(43, Some((42, at)), at));
+    }
+
+    #[test]
+    fn an_empty_run_loop_returns_at_once_so_the_poll_must_sleep() {
+        // Pins the premise behind the idle sleep: with no source scheduled,
+        // `run_in_mode` does not wait out its interval.
+        let started = Instant::now();
+        let result = thread::spawn(|| {
+            CFRunLoop::run_in_mode(default_mode(), FOCUS_POLL.as_secs_f64(), false)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(result, CFRunLoopRunResult::Finished);
+        assert!(started.elapsed() < FOCUS_POLL);
     }
 
     #[test]

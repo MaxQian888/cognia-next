@@ -44,7 +44,7 @@ jest.mock("@/lib/tauri/selection-toolbar", () => ({
   SELECTION_SHADOW_PAD: 20,
   executeSelectionToolbarAction: (...args: unknown[]) => executeMock(...args),
   getCurrentSelectionCandidate: () => currentMock(),
-  revealSelectionToolbar: () => revealMock(),
+  revealSelectionToolbar: (...args: unknown[]) => revealMock(...args),
   setSelectionToolbarInteractive: (...args: unknown[]) => interactiveMock(...args),
   setSelectionToolbarKeepAlive: (...args: unknown[]) => keepAliveMock(...args),
   finishSelectionToolbar: (...args: unknown[]) => finishMock(...args),
@@ -131,7 +131,7 @@ describe("SelectionToolbarView", () => {
   it("hydrates the live candidate and reveals the window once it has been measured", async () => {
     render(<SelectionToolbarView />)
     expect(await screen.findByRole("button", { name: "copy" })).toBeInTheDocument()
-    await waitFor(() => expect(revealMock).toHaveBeenCalled())
+    await waitFor(() => expect(revealMock).toHaveBeenCalledWith("candidate-1"))
     expect(document.documentElement).toHaveAttribute("data-selection-toolbar")
   })
 
@@ -519,4 +519,12 @@ describe("SelectionToolbarView", () => {
     for (const dispose of disposers) expect(dispose).toHaveBeenCalled()
     events.listen = original
   })
+})
+
+it("reuses the capsule layout when an equal-sized selection replaces the candidate", async () => {
+  render(<SelectionToolbarView />)
+  const original = await screen.findByTestId("selection-toolbar-capsule")
+  await emit("selection://candidate", { ...candidate, id: "candidate-2" })
+  expect(screen.getByTestId("selection-toolbar-capsule")).toBe(original)
+  await waitFor(() => expect(revealMock).toHaveBeenCalledWith("candidate-2"))
 })

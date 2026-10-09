@@ -12,7 +12,7 @@ import { useTranslations } from "next-intl"
 import { ChevronRightIcon, MousePointerClickIcon, RefreshCwIcon, SearchIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,14 +28,16 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { desktop, type CallContext } from "@/lib/automation/client"
-import type {
-  ActionResult,
-  AppLocator,
-  Capabilities,
-  ExpandedElements,
-  ResolvedApplication,
-  UiStateRevision,
-  UiTreeNode,
+import {
+  parseAutomationError,
+  type ActionResult,
+  type AppLocator,
+  type AutomationError,
+  type Capabilities,
+  type ExpandedElements,
+  type ResolvedApplication,
+  type UiStateRevision,
+  type UiTreeNode,
 } from "@/lib/automation/types"
 import { isTauri } from "@/lib/tauri"
 import { AutomationUnavailableNotice } from "./automation-unavailable-notice"
@@ -89,7 +91,12 @@ function overlayStyle(state: UiStateRevision, node: UiTreeNode): CSSProperties |
   }
 }
 
-export function InspectorTab() {
+export interface InspectorTabProps {
+  /** Switch the Automation section to its Permissions tab. */
+  onOpenPermissions?: () => void
+}
+
+export function InspectorTab({ onOpenPermissions }: InspectorTabProps = {}) {
   const t = useTranslations("automation.inspector")
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [apps, setApps] = useState<ResolvedApplication[]>([])
@@ -110,6 +117,38 @@ export function InspectorTab() {
   const [loadingApps, setLoadingApps] = useState(true)
   const [loadingState, setLoadingState] = useState(false)
   const [busy, setBusy] = useState<"query" | "expand" | "action" | null>(null)
+  // A capture carries a window frame, so unlike the app list it goes through
+  // the full permission gate (`Call::is_passive_inspection`). A refusal there
+  // is a settings state to explain in place, not a transient failure to toast.
+  const [captureDenied, setCaptureDenied] = useState(false)
+
+  const describeError = useCallback(
+    (error: unknown): string => {
+      const parsed: AutomationError | null = parseAutomationError(error)
+      if (!parsed) return String(error)
+      switch (parsed.code) {
+        case "UNSUPPORTED_PLATFORM":
+          return t("errors.unsupportedPlatform")
+        case "KILL_SWITCH_ACTIVE":
+          return t("errors.killSwitchActive")
+        case "PERMISSION_DENIED":
+          return t("errors.permissionDenied", { reason: parsed.reason })
+        case "USER_DECLINED":
+          return t("errors.userDeclined")
+        case "WHITELIST_MISS":
+          return t("errors.whitelistMiss")
+        case "ELEMENT_NOT_FOUND":
+          return t("errors.elementNotFound")
+        case "STALE_ELEMENT":
+          return t("errors.staleElement")
+        case "BACKEND_ERROR":
+          return t("errors.backend", { message: parsed.message })
+        case "INTERNAL":
+          return t("errors.internal", { message: parsed.message })
+      }
+    },
+    [t]
+  )
 
   const pushEvent = useCallback(
     (kind: InspectorEvent["kind"], message: string, revision: number | null) => {
@@ -130,27 +169,27 @@ export function InspectorTab() {
         return next[0] ? appKey(next[0]) : ""
       })
     } catch (error) {
-      toast.error(t("appsFailed"), { description: String(error) })
+      toast.error(t("appsFailed"), { description: describeError(error) })
     } finally {
       setLoadingApps(false)
     }
-  }, [t])
+  }, [describeError, t])
 
   useEffect(() => {
     if (!isTauri()) return
     desktop
       .capabilities()
       .then(setCaps)
-      .catch((error) => toast.error(t("capabilitiesFailed"), { description: String(error) }))
+      .catch((error) => toast.error(t("capabilitiesFailed"), { description: describeError(error) }))
     desktop
       .listApps(INSPECTOR_CONTEXT)
       .then((next) => {
         setApps(next)
         setSelectedAppKey(next[0] ? appKey(next[0]) : "")
       })
-      .catch((error) => toast.error(t("appsFailed"), { description: String(error) }))
+      .catch((error) => toast.error(t("appsFailed"), { description: describeError(error) }))
       .finally(() => setLoadingApps(false))
-  }, [t])
+  }, [describeError, t])
 
   const selectedApp = useMemo(
     () => apps.find((app) => appKey(app) === selectedAppKey) ?? null,
@@ -170,6 +209,7 @@ export function InspectorTab() {
         },
         INSPECTOR_CONTEXT
       )
+      setCaptureDenied(false)
       setHistory((current) => ({
         initial: current.initial ?? next,
         previous: current.current,
@@ -181,12 +221,16 @@ export function InspectorTab() {
       pushEvent("capture", t("events.capture", { revision: next.revision }), next.revision)
       return next
     } catch (error) {
-      toast.error(t("stateFailed"), { description: String(error) })
+      if (parseAutomationError(error)?.code === "PERMISSION_DENIED") {
+        setCaptureDenied(true)
+      } else {
+        toast.error(t("stateFailed"), { description: describeError(error) })
+      }
       return null
     } finally {
       setLoadingState(false)
     }
-  }, [pushEvent, selectedApp, t])
+  }, [describeError, pushEvent, selectedApp, t])
 
   const currentState = history.current
 
@@ -210,11 +254,11 @@ export function InspectorTab() {
       setPage(0)
       pushEvent("query", t("events.query", { count: nodes.length }), state.revision)
     } catch (error) {
-      toast.error(t("queryFailed"), { description: String(error) })
+      toast.error(t("queryFailed"), { description: describeError(error) })
     } finally {
       setBusy(null)
     }
-  }, [currentState, pushEvent, query, t])
+  }, [currentState, describeError, pushEvent, query, t])
 
   const expandSelected = useCallback(async () => {
     if (!selected) return
@@ -236,11 +280,11 @@ export function InspectorTab() {
         selected.handle.revision
       )
     } catch (error) {
-      toast.error(t("expandFailed"), { description: String(error) })
+      toast.error(t("expandFailed"), { description: describeError(error) })
     } finally {
       setBusy(null)
     }
-  }, [expanded, pushEvent, selected, t])
+  }, [describeError, expanded, pushEvent, selected, t])
 
   const performSemanticClick = useCallback(async () => {
     const state = currentState
@@ -260,11 +304,11 @@ export function InspectorTab() {
       pushEvent("action", t("events.action", { status: result.status }), state.revision)
       await captureState()
     } catch (error) {
-      toast.error(t("actionFailed"), { description: String(error) })
+      toast.error(t("actionFailed"), { description: describeError(error) })
     } finally {
       setBusy(null)
     }
-  }, [captureState, currentState, pushEvent, selected, t])
+  }, [captureState, currentState, describeError, pushEvent, selected, t])
 
   if (!isTauri()) return <AutomationUnavailableNotice />
 
@@ -345,6 +389,20 @@ export function InspectorTab() {
           </Button>
         </CardContent>
       </Card>
+
+      {captureDenied && (
+        <Alert>
+          <AlertTitle>{t("permissionNotice.title")}</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{t("permissionNotice.description")}</p>
+            {onOpenPermissions && (
+              <Button variant="outline" size="sm" onClick={onOpenPermissions}>
+                {t("permissionNotice.action")}
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {state && (
         <>

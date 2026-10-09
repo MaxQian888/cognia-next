@@ -22,6 +22,11 @@
 //!   * COPIES THROUGH THE HOST. The panel never takes focus, and a webview's
 //!     `navigator.clipboard` refuses to write from an unfocused document.
 //!
+//! Placement is computed in desktop units (points on macOS, physical pixels
+//! elsewhere; see `desktop_space`) and applied with the selection toolbar's
+//! `place_window`, so the panel lands where intended when it moves between a
+//! Retina display and a 1x one.
+//!
 //! Live window operations cannot run under `tauri::test::mock_app()` on this
 //! project's toolchains (documented in `pet_window/mod.rs`), so only the pure
 //! placement math is unit-tested; runtime behaviour is covered by
@@ -29,9 +34,11 @@
 
 pub mod placement;
 
-use placement::{Anchor, Rect};
+use crate::automation::platform::shared::desktop_space::{self, DesktopMonitor};
+use crate::selection_toolbar::{desktop_monitors, place_window};
+use placement::{Anchor, Target};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const CHAT_COPILOT_LABEL: &str = "chat-copilot";
@@ -57,104 +64,78 @@ fn set_anchor(anchor: Option<Anchor>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = anchor;
 }
 
-fn monitor_area(monitor: &tauri::Monitor) -> (Rect, f64) {
-    let area = monitor.work_area();
-    (
-        Rect {
-            x: area.position.x as f64,
-            y: area.position.y as f64,
-            w: area.size.width as f64,
-            h: area.size.height as f64,
-        },
-        monitor.scale_factor(),
-    )
-}
-
-fn fallback_area<R: Runtime>(app: &AppHandle<R>) -> (Rect, f64) {
-    app.primary_monitor()
+/// The cursor in desktop units, if the platform reports it.
+fn cursor<R: Runtime>(app: &AppHandle<R>) -> Option<(f64, f64)> {
+    let cursor = app.cursor_position().ok()?;
+    let primary_scale = app
+        .primary_monitor()
         .ok()
         .flatten()
-        .map(|monitor| monitor_area(&monitor))
-        .unwrap_or((
-            Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 1920.0,
-                h: 1080.0,
-            },
-            1.0,
-        ))
+        .map_or(1.0, |monitor| monitor.scale_factor());
+    let (x, y) = desktop_space::cursor_point(
+        (cursor.x, cursor.y),
+        primary_scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    );
+    Some((f64::from(x), f64::from(y)))
 }
 
-/// The work area (physical) and scale of the monitor showing the anchor's
-/// center. Monitors report physical frames; the anchor is in logical points,
-/// so each monitor is compared at its own scale.
-fn area_for_anchor<R: Runtime>(app: &AppHandle<R>, anchor: &Anchor) -> (Rect, f64) {
-    let (cx, cy) = anchor.center();
-    if let Ok(monitors) = app.available_monitors() {
-        for monitor in monitors {
-            let scale = monitor.scale_factor();
-            let frame = Rect {
-                x: monitor.position().x as f64 / scale,
-                y: monitor.position().y as f64 / scale,
-                w: monitor.size().width as f64 / scale,
-                h: monitor.size().height as f64 / scale,
-            };
-            if frame.contains((cx, cy)) {
-                return monitor_area(&monitor);
-            }
-        }
-    }
-    fallback_area(app)
-}
-
-fn area_under_cursor<R: Runtime>(app: &AppHandle<R>) -> (Rect, f64) {
-    let Ok(cursor) = app.cursor_position() else {
-        return fallback_area(app);
+/// What the panel goes beside right now, and every display, in desktop units.
+fn layout<R: Runtime>(app: &AppHandle<R>) -> (Target, Vec<DesktopMonitor>) {
+    let target = match current_anchor() {
+        Some(anchor) => Target::Window(placement::to_desktop(
+            &anchor,
+            desktop_space::DESKTOP_UNITS_ARE_POINTS,
+        )),
+        None => Target::Cursor(cursor(app)),
     };
-    if let Ok(monitors) = app.available_monitors() {
-        for monitor in monitors {
-            let frame = Rect {
-                x: monitor.position().x as f64,
-                y: monitor.position().y as f64,
-                w: monitor.size().width as f64,
-                h: monitor.size().height as f64,
-            };
-            if frame.contains((cursor.x, cursor.y)) {
-                return monitor_area(&monitor);
-            }
-        }
-    }
-    fallback_area(app)
+    (target, desktop_monitors(app))
 }
 
+/// The panel's current outer size in desktop units. tao reports it as the
+/// logical size times the scale of the display the panel is on now.
+fn panel_size<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<(f64, f64)> {
+    let size = window.outer_size().ok()?;
+    let scale = window.scale_factor().ok()?;
+    let frame = desktop_space::window_frame(
+        (0, 0),
+        (size.width, size.height),
+        scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    );
+    Some((f64::from(frame.width), f64::from(frame.height)))
+}
+
+/// Resize the panel to a size in desktop units. Logical on macOS for the same
+/// reason `place_window` positions logically there: tao divides a physical
+/// size by the scale of the display the panel is on NOW, not the one it is
+/// about to move to.
+fn size_window<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    (width, height): (f64, f64),
+) -> Result<(), String> {
+    let result = if desktop_space::DESKTOP_UNITS_ARE_POINTS {
+        window.set_size(tauri::LogicalSize::new(width, height))
+    } else {
+        window.set_size(tauri::PhysicalSize::new(width, height))
+    };
+    result.map_err(|error| error.to_string())
+}
+
+/// Move the panel beside the anchor (or to the cursor's screen). `panel` is
+/// its size in desktop units when the caller just set it: on macOS a resize
+/// lands asynchronously, so reading it back could see the old size.
 fn reposition<R: Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
+    panel: Option<(f64, f64)>,
 ) -> Result<(), String> {
-    let size = window
-        .outer_size()
-        .map(|s| (s.width as f64, s.height as f64))
-        .unwrap_or((DEFAULT_WIDTH, DEFAULT_HEIGHT));
-    let (x, y) = match current_anchor() {
-        Some(anchor) => {
-            let (area, scale) = area_for_anchor(app, &anchor);
-            placement::place_beside(
-                placement::to_physical(&anchor, scale),
-                size,
-                area,
-                placement::GAP * scale,
-                placement::MARGIN * scale,
-            )
-        }
-        None => {
-            let (area, scale) = area_under_cursor(app);
-            placement::place_default(size, area, placement::MARGIN * scale)
-        }
-    };
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
+    let (target, monitors) = layout(app);
+    let panel = panel
+        .or_else(|| panel_size(window))
+        .unwrap_or_else(|| placement::fit(target, (DEFAULT_WIDTH, DEFAULT_HEIGHT), &monitors));
+    let (x, y) = placement::position(target, panel, &monitors);
+    place_window(window, x.round() as i32, y.round() as i32)
 }
 
 fn open_claimed<R: Runtime>(app: &AppHandle<R>, generation: u64) -> Result<(), String> {
@@ -164,7 +145,7 @@ fn open_claimed<R: Runtime>(app: &AppHandle<R>, generation: u64) -> Result<(), S
     }
 
     if let Some(window) = app.get_webview_window(CHAT_COPILOT_LABEL) {
-        let _ = reposition(app, &window);
+        let _ = reposition(app, &window, None);
         if let Err(error) =
             crate::pet_window::reveal_overlay_panel(&window, role, false, generation)
         {
@@ -209,7 +190,7 @@ fn open_claimed<R: Runtime>(app: &AppHandle<R>, generation: u64) -> Result<(), S
         log::warn!("chat-copilot: panel stays capturable ({error})");
     }
 
-    if let Err(error) = reposition(app, &window) {
+    if let Err(error) = reposition(app, &window, None) {
         crate::pet_window::cancel_overlay_panel_reveal(role);
         let _ = window.close();
         return Err(error);
@@ -313,7 +294,7 @@ pub async fn chat_copilot_open(app: AppHandle, anchor: Option<Anchor>) -> Result
 pub async fn chat_copilot_place(app: AppHandle, anchor: Anchor) -> Result<(), String> {
     set_anchor(valid_anchor(Some(anchor))?);
     match app.get_webview_window(CHAT_COPILOT_LABEL) {
-        Some(window) => reposition(&app, &window),
+        Some(window) => reposition(&app, &window, None),
         None => Ok(()),
     }
 }
@@ -352,19 +333,10 @@ pub async fn chat_copilot_resize(
     if !width.is_finite() || !height.is_finite() {
         return Err("invalid chat copilot size".into());
     }
-    let (area, scale) = match current_anchor() {
-        Some(anchor) => area_for_anchor(&app, &anchor),
-        None => area_under_cursor(&app),
-    };
-    let (w, h) = placement::clamp_size(
-        (width * scale, height * scale),
-        area,
-        placement::MARGIN * scale,
-    );
-    window
-        .set_size(tauri::PhysicalSize::new(w, h))
-        .map_err(|e| e.to_string())?;
-    reposition(&app, &window)
+    let (target, monitors) = layout(&app);
+    let panel = placement::fit(target, (width, height), &monitors);
+    size_window(&window, panel)?;
+    reposition(&app, &window, Some(panel))
 }
 
 /// Copy a candidate through the host clipboard (see the module docs).

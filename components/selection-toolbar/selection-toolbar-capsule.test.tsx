@@ -348,3 +348,11 @@ describe("SelectionToolbarCapsule under reduced motion", () => {
     expect(capsule()).toHaveStyle({ transformOrigin: "top center" })
   })
 })
+
+it("measures a stationary capsule container rather than its animated surface", () => {
+  const { props } = renderCapsule()
+  const hitTarget = props.geometry.capsuleRef.current!
+  expect(hitTarget).toContainElement(capsule())
+  expect(hitTarget).not.toBe(capsule())
+  expect(hitTarget.style.transform).toBe("")
+})

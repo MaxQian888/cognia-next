@@ -343,9 +343,9 @@ export async function executeSelectionToolbarAction(
   await invoke(OVERLAY_COMMANDS.execute, { candidateId, action })
 }
 
-export async function revealSelectionToolbar(): Promise<void> {
+export async function revealSelectionToolbar(candidateId: string): Promise<void> {
   if (!isTauri()) return
-  await invoke(OVERLAY_COMMANDS.reveal)
+  await invoke(OVERLAY_COMMANDS.reveal, { candidateId })
 }
 
 export async function setSelectionToolbarInteractive(interactive: boolean): Promise<void> {
@@ -364,12 +364,14 @@ export async function setSelectionToolbarInteractive(interactive: boolean): Prom
  * once the real height is known.
  */
 export async function resizeSelectionToolbar(
+  candidateId: string,
   width: number,
   height: number,
   hitRects: SelectionAnchorRect[]
 ): Promise<SelectionToolbarGeometry> {
   if (!isTauri()) return { placement: "above" }
   return invoke<SelectionToolbarGeometry>(OVERLAY_COMMANDS.resize, {
+    candidateId,
     width,
     height,
     hitRects,

@@ -18,7 +18,7 @@
  */
 
 import { useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
+import { AnimatePresence, motion, useIsPresent } from "motion/react"
 import { useFormatter, useTranslations } from "next-intl"
 import {
   ArrowLeftIcon,
@@ -132,6 +132,7 @@ export function SelectionToolbarCapsule({
   overflowInitialParentId,
 }: SelectionToolbarCapsuleProps) {
   const t = useTranslations("selectionToolbar")
+  const isPresent = useIsPresent()
   const { shellRef, capsuleRef, panelRef, ghostRef, placement, remeasure } = geometry
 
   const enter = reduceMotion
@@ -181,7 +182,7 @@ export function SelectionToolbarCapsule({
   return (
     <>
       <HoverWidthGhost
-        ref={ghostRef}
+        ref={isPresent ? ghostRef : undefined}
         actions={actions}
         chords={chords}
         isMac={isMac}
@@ -190,108 +191,111 @@ export function SelectionToolbarCapsule({
       />
 
       <div
-        ref={shellRef}
+        ref={isPresent ? shellRef : undefined}
         className={cn(
           "flex w-max flex-col items-center gap-1.5",
+          !isPresent && "absolute",
           placement === "above" ? "justify-end" : "justify-start"
         )}
       >
         {placement === "above" ? auxiliaryPanel : null}
-        <Surface asChild layer="overlay" radius="pill" elevation={3}>
-          <motion.div
-            ref={capsuleRef}
-            layout={!reduceMotion}
-            initial={enter}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={exit}
-            // Spring in, tween out. The entrance can afford a spring's
-            // settle because it grows out of the selection anchor and reads as
-            // physical. The exit cannot, because Rust only holds the native
-            // window for EXIT_ANIMATION_MS and a spring's tail would be cropped
-            // mid-flight.
-            transition={
-              reduceMotion
-                ? { duration: 0 }
-                : { ...MOBILE_SPRING, opacity: { duration: MOBILE_DURATION.fast } }
-            }
-            style={{
-              ...SELECTION_GLASS_TINT,
-              transformOrigin: placement === "above" ? "bottom center" : "top center",
-            }}
-            className={cn(CAPSULE_CLASS, SELECTION_GLASS)}
-            data-testid="selection-toolbar-capsule"
-            data-placement={placement}
-          >
-            <AnimatePresence mode="popLayout" initial={false}>
-              {phase.kind === "speaking" ? (
-                <SpeechBar
-                  key="speech"
-                  progress={phase.progress}
-                  onStop={onStopSpeech}
-                  label={t("stopSpeaking")}
-                  reduceMotion={reduceMotion}
-                />
-              ) : phase.kind === "error" ? (
-                <MessageBar
-                  key="error"
-                  tone="error"
-                  message={phase.reason}
-                  reduceMotion={reduceMotion}
-                />
-              ) : phase.kind === "status" ? (
-                <MessageBar
-                  key="status"
-                  tone="status"
-                  message={phase.message}
-                  reduceMotion={reduceMotion}
-                />
-              ) : (
-                <motion.div
-                  key="actions"
-                  layout={!reduceMotion}
-                  role="toolbar"
-                  aria-orientation="horizontal"
-                  aria-label={t("title")}
-                  className="flex items-center gap-0.5"
-                  initial={reduceMotion ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-                  transition={{ duration: reduceMotion ? 0 : MOBILE_DURATION.fast }}
-                >
-                  {actions.map((action, index) => (
-                    <Band key={action.id}>
-                      {startsBand(actions, index) ? <SelectionDivider /> : null}
-                      <ActionButton
-                        index={index}
-                        action={action}
-                        label={actionLabel(action)}
-                        chord={action.shortcutId ? chords[action.shortcutId] : action.accelerator}
-                        isMac={isMac}
-                        expanded={hovered === action.id}
-                        phase={phase}
-                        localeOpen={localeOpen}
-                        localeLabel={t(`languages.${targetLocale}` as never)}
-                        chooseLanguageLabel={t("chooseLanguage")}
-                        onHoverChange={onHoverChange}
-                        onAction={onAction}
-                        onLocaleOpenChange={onLocaleOpenChange}
-                        reduceMotion={reduceMotion}
-                      />
-                    </Band>
-                  ))}
-                  {truncated ? (
-                    <span
-                      className="ml-0.5 rounded-pill bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
-                      title={t("truncatedHint")}
-                    >
-                      {t("truncated")}
-                    </span>
-                  ) : null}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        </Surface>
+        {/* Measure the layout box, not the animated scale/translation. */}
+        <div ref={isPresent ? capsuleRef : undefined}>
+          <Surface asChild layer="overlay" radius="pill" elevation={3}>
+            <motion.div
+              layout={!reduceMotion}
+              initial={enter}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={exit}
+              // Spring in, tween out. The entrance can afford a spring's
+              // settle because it grows out of the selection anchor and reads as
+              // physical. The exit cannot, because Rust only holds the native
+              // window for EXIT_ANIMATION_MS and a spring's tail would be cropped
+              // mid-flight.
+              transition={
+                reduceMotion
+                  ? { duration: 0 }
+                  : { ...MOBILE_SPRING, opacity: { duration: MOBILE_DURATION.fast } }
+              }
+              style={{
+                ...SELECTION_GLASS_TINT,
+                transformOrigin: placement === "above" ? "bottom center" : "top center",
+              }}
+              className={cn(CAPSULE_CLASS, SELECTION_GLASS)}
+              data-testid="selection-toolbar-capsule"
+              data-placement={placement}
+            >
+              <AnimatePresence mode="popLayout" initial={false}>
+                {phase.kind === "speaking" ? (
+                  <SpeechBar
+                    key="speech"
+                    progress={phase.progress}
+                    onStop={onStopSpeech}
+                    label={t("stopSpeaking")}
+                    reduceMotion={reduceMotion}
+                  />
+                ) : phase.kind === "error" ? (
+                  <MessageBar
+                    key="error"
+                    tone="error"
+                    message={phase.reason}
+                    reduceMotion={reduceMotion}
+                  />
+                ) : phase.kind === "status" ? (
+                  <MessageBar
+                    key="status"
+                    tone="status"
+                    message={phase.message}
+                    reduceMotion={reduceMotion}
+                  />
+                ) : (
+                  <motion.div
+                    key="actions"
+                    layout={!reduceMotion}
+                    role="toolbar"
+                    aria-orientation="horizontal"
+                    aria-label={t("title")}
+                    className="flex items-center gap-0.5"
+                    initial={reduceMotion ? false : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                    transition={{ duration: reduceMotion ? 0 : MOBILE_DURATION.fast }}
+                  >
+                    {actions.map((action, index) => (
+                      <Band key={action.id}>
+                        {startsBand(actions, index) ? <SelectionDivider /> : null}
+                        <ActionButton
+                          index={index}
+                          action={action}
+                          label={actionLabel(action)}
+                          chord={action.shortcutId ? chords[action.shortcutId] : action.accelerator}
+                          isMac={isMac}
+                          expanded={hovered === action.id}
+                          phase={phase}
+                          localeOpen={localeOpen}
+                          localeLabel={t(`languages.${targetLocale}` as never)}
+                          chooseLanguageLabel={t("chooseLanguage")}
+                          onHoverChange={onHoverChange}
+                          onAction={onAction}
+                          onLocaleOpenChange={onLocaleOpenChange}
+                          reduceMotion={reduceMotion}
+                        />
+                      </Band>
+                    ))}
+                    {truncated ? (
+                      <span
+                        className="ml-0.5 rounded-pill bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                        title={t("truncatedHint")}
+                      >
+                        {t("truncated")}
+                      </span>
+                    ) : null}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          </Surface>
+        </div>
         {placement === "below" ? auxiliaryPanel : null}
       </div>
     </>
@@ -330,7 +334,7 @@ function HoverWidthGhost({
   localeLabel,
   label,
 }: {
-  ref: React.RefObject<HTMLDivElement | null>
+  ref?: React.RefObject<HTMLDivElement | null>
   actions: readonly SelectionActionDescriptor[]
   chords: Record<string, string>
   isMac: boolean

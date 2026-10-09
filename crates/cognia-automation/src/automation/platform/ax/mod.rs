@@ -17,8 +17,9 @@
 //!     walking is out of scope for the minimum-viable surface.
 //!
 //! ADR-0020 cross-platform bounded subset (macOS): `read_tree` / `find` walk the
-//! frontmost application's AX element subtree via the high-level `accessibility`
-//! crate, capped through the shared `tree_shape` helper (depth + node budget).
+//! frontmost application's AX element subtree through `raw::AxElement` (over
+//! `objc2-application-services`), capped through the shared `tree_shape` helper
+//! (depth + node budget).
 //! `capabilities()` therefore reports `hasA11yTree: true`.
 //!
 //! The macOS follow-up (see `ax/raw.rs`) closed the "only window name" gap that
@@ -51,7 +52,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use accessibility::{AXUIElement, AXUIElementAttributes};
 use enigo::{Direction, Enigo, Keyboard, Mouse, Settings};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
@@ -66,6 +66,8 @@ use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::session::{AppLocator, ResolvedApplication};
 use crate::automation::types::*;
 
+use raw::AxElement;
+
 #[derive(Default)]
 pub struct AxBackend {
     /// The one observer thread, started on the first subscription and stopped
@@ -73,7 +75,7 @@ pub struct AxBackend {
     /// `&self`; nothing here awaits, so no guard ever crosses a suspend point.
     events: Mutex<Option<observer::AxObserverHandle>>,
     subscriptions: Mutex<HashMap<u64, EventFilter>>,
-    elements: Mutex<HashMap<String, AXUIElement>>,
+    elements: Mutex<HashMap<String, AxElement>>,
     capture_stream: Mutex<Option<screen_capture::ActiveWindowCapture>>,
     next_subscription: AtomicU64,
 }
@@ -89,7 +91,7 @@ impl AxBackend {
         process_name: Option<&str>,
         budget: TreeBudget,
     ) -> Result<Vec<ElementInfo>> {
-        let app = AXUIElement::application(pid as i32);
+        let app = AxElement::application(pid);
         raw::set_messaging_timeout(&app, 0.25);
         raw::activate_web_a11y(&app);
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -103,7 +105,7 @@ impl AxBackend {
         // ONLY way to resolve a ref: `resolve_element` falls back to replaying
         // the locator recipe, so a ref survives the next `read_tree` clearing
         // this map.
-        let to_info = |element: &AXUIElement| {
+        let to_info = |element: &AxElement| {
             let mut info = ax_element_to_info(element, Some(pid), process_name);
             let handle_key = format!(
                 "macos|pid={pid}|element={:x}",
@@ -115,7 +117,7 @@ impl AxBackend {
             info.element_ref = ElementRef(handle_key);
             info
         };
-        let children = |element: &AXUIElement, limit: usize| -> Vec<AXUIElement> {
+        let children = |element: &AxElement, limit: usize| -> Vec<AxElement> {
             raw::read_children_page(element, 0, limit)
         };
         let mut tree = tree_shape::walk_tree(&root, budget, &to_info, &children);
@@ -146,7 +148,7 @@ impl AxBackend {
     /// A ref that is neither cached nor a decodable locator is stale — legacy
     /// `macos|pid=…` strings from a previous build land here and are refused
     /// rather than guessed at.
-    fn resolve_element(&self, element_ref: &ElementRef) -> Result<AXUIElement> {
+    fn resolve_element(&self, element_ref: &ElementRef) -> Result<AxElement> {
         if let Some(cached) = self
             .elements
             .lock()
@@ -578,14 +580,13 @@ impl AutomationBackend for AxBackend {
         let Some(pid) = focused.pid else {
             return Ok(None);
         };
-        let app = AXUIElement::application(pid as i32);
+        let app = AxElement::application(pid);
         raw::activate_web_a11y(&app);
         let Some(element) = raw::focused_ui_element(&app) else {
             return Ok(None);
         };
         if element
             .subrole()
-            .ok()
             .is_some_and(|subrole| subrole == "AXSecureTextField")
         {
             return Ok(None);
@@ -622,20 +623,11 @@ impl AutomationBackend for AxBackend {
                 ..Default::default()
             });
         };
-        let app = AXUIElement::application(pid as i32);
+        let app = AxElement::application(pid);
         raw::set_messaging_timeout(&app, PREFLIGHT_TIMEOUT_SECONDS);
         let focused = raw::focused_ui_element(&app);
-        let source_subrole = focused.as_ref().and_then(|element| {
-            element
-                .subrole()
-                .ok()
-                .map(|value| value.to_string())
-                .filter(|value| !value.is_empty())
-        });
-        let source_role = focused
-            .as_ref()
-            .and_then(|element| element.role().ok())
-            .map(|value| value.to_string());
+        let source_subrole = focused.as_ref().and_then(AxElement::subrole);
+        let source_role = focused.as_ref().and_then(AxElement::role);
         let secure_field = source_subrole
             .as_deref()
             .is_some_and(|subrole| subrole == "AXSecureTextField");
@@ -645,11 +637,8 @@ impl AutomationBackend for AxBackend {
                 .is_some_and(|role| matches!(role, "AXTextArea" | "AXTextField" | "AXComboBox"));
         Ok(SelectionPreflight {
             pid: Some(pid),
-            process_name: str_attr(app.title()),
-            window_title: raw::resolve_window_root(&app).title().ok().and_then(|t| {
-                let title = t.to_string();
-                (!title.is_empty()).then_some(title)
-            }),
+            process_name: app.title(),
+            window_title: raw::resolve_window_root(&app).title(),
             // Rides the round-trip we are already making — the focused element
             // is in hand, so walking to its web area costs no extra hop. Never
             // read for a password field.
@@ -902,7 +891,7 @@ pub(crate) fn focused_window_credential_signals() -> Option<(Option<String>, Opt
     let snap = read_focused_window().ok()?;
     let secure_text_field = snap
         .pid
-        .map(|pid| raw::focused_element_is_secure_text_field(&AXUIElement::application(pid as i32)))
+        .map(|pid| raw::focused_element_is_secure_text_field(&AxElement::application(pid)))
         .unwrap_or(false);
     Some((snap.process_name, snap.window_title, secure_text_field))
 }
@@ -997,18 +986,14 @@ fn poisoned<T>(error: std::sync::PoisonError<T>) -> AutomationError {
     }
 }
 
-fn ax_element_to_info(el: &AXUIElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
-    let role = str_attr(el.role());
-    let subrole = str_attr(el.subrole());
+fn ax_element_to_info(el: &AxElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
+    let role = el.role();
+    let subrole = el.subrole();
     let secure_field = subrole.as_deref() == Some("AXSecureTextField");
-    let title = (!secure_field).then(|| str_attr(el.title())).flatten();
-    let description = (!secure_field)
-        .then(|| str_attr(el.description()))
-        .flatten();
-    let role_description = (!secure_field)
-        .then(|| str_attr(el.role_description()))
-        .flatten();
-    let identifier = str_attr(el.identifier());
+    let title = (!secure_field).then(|| el.title()).flatten();
+    let description = (!secure_field).then(|| el.description()).flatten();
+    let role_description = (!secure_field).then(|| el.role_description()).flatten();
+    let identifier = el.identifier();
     let name = project_ax_name(
         secure_field,
         title.clone(),
@@ -1062,11 +1047,6 @@ fn project_ax_name(
     secure_field
         .then(|| "[REDACTED]".into())
         .or_else(|| pick_name(title, description, value, role_description))
-}
-
-/// Read a CFString-typed AX accessor result into a trimmed, non-empty `String`.
-fn str_attr<S: ToString, E>(r: std::result::Result<S, E>) -> Option<String> {
-    r.ok().map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 
 fn focused_to_element_info(snap: &FocusedSnapshot) -> ElementInfo {
@@ -1208,6 +1188,71 @@ mod tests {
     #[test]
     fn named_f_key_routes_through_function_key_map() {
         assert_eq!(named_to_enigo(NamedKey::F(5)), enigo::Key::F5);
+    }
+
+    /// End-to-end over the real AX server: tree read, locator replay,
+    /// hit-test, selection preflight and the observer thread, against a live
+    /// application. Needs this process to hold the Accessibility grant — run
+    /// it from a terminal that has it:
+    /// `COGNIA_AX_TEST_PID=$(pgrep -x Finder) cargo test -p cognia-automation
+    /// --lib reads_and_replays_a_live_application -- --ignored`.
+    #[test]
+    #[ignore = "requires a macOS process with the Accessibility grant and a live target app"]
+    fn reads_and_replays_a_live_application() {
+        let pid: u32 = std::env::var("COGNIA_AX_TEST_PID")
+            .expect("set COGNIA_AX_TEST_PID to an application with a window")
+            .parse()
+            .expect("COGNIA_AX_TEST_PID must be a u32");
+        assert!(
+            raw::is_trusted(),
+            "this process lacks the Accessibility grant"
+        );
+        let backend = AxBackend::new().unwrap();
+        let application = ResolvedApplication {
+            bundle_id: None,
+            path: None,
+            display_name: "AX fixture".into(),
+            process_id: pid,
+        };
+
+        let roots = backend
+            .read_application_tree(&application, TreeOpts::default())
+            .unwrap();
+        let root = roots.first().expect("one window root");
+        assert!(root.control_type.is_some(), "the root has an AXRole");
+        assert_eq!(root.process_id, Some(pid));
+
+        // Tree refs are locator recipes (the handle cache is keyed by pointer
+        // identity), so resolving one replays its path against the live tree.
+        let child = root
+            .children
+            .as_ref()
+            .and_then(|children| children.first())
+            .expect("the window root has children");
+        let replayed = backend.resolve_element(&child.element_ref).unwrap();
+        assert_eq!(raw::element_pid(&replayed), Some(pid));
+        assert_eq!(replayed.role(), child.control_type);
+        if let Some(rect) = &child.bounding_rect {
+            let center_x = (rect.x + rect.width / 2) as f32;
+            let center_y = (rect.y + rect.height / 2) as f32;
+            assert!(raw::element_at_position(center_x, center_y).is_some());
+        }
+
+        let preflight = backend.selection_preflight().unwrap();
+        assert!(preflight.trusted);
+
+        let subscription = backend
+            .subscribe_events(EventFilter {
+                kinds: None,
+                scope: None,
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        backend.unsubscribe(subscription).unwrap();
+        assert!(
+            backend.events.lock().unwrap().is_none(),
+            "the observer thread stopped"
+        );
     }
 
     #[test]

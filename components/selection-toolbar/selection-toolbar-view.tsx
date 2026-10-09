@@ -284,7 +284,7 @@ export function SelectionToolbarView() {
     candidate?.truncated ? "trunc" : "",
     Object.keys(chords).length,
   ].join("|")
-  const geometry = useSelectionToolbarGeometry(contentKey)
+  const geometry = useSelectionToolbarGeometry(candidate?.id ?? null, contentKey)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -381,7 +381,11 @@ export function SelectionToolbarView() {
   const measured = geometry.measured
   useEffect(() => {
     if (!candidate || !measured) return
-    void revealSelectionToolbar()
+    void revealSelectionToolbar(candidate.id).catch((error: unknown) => {
+      if (candidateIdRef.current === candidate.id) {
+        console.warn("selection toolbar reveal failed", error)
+      }
+    })
   }, [candidate, measured])
 
   // Freeze the idle countdown whenever the user is engaged with the toolbar or
@@ -705,7 +709,7 @@ export function SelectionToolbarView() {
           : undefined
       }
     >
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={geometry.remeasure}>
         {/*
           No row means no toolbar. A password field withholds every action, and
           an empty pill floating over the field would be a promise of something
@@ -735,7 +739,6 @@ export function SelectionToolbarView() {
             </SelectionResultPanelShell>
           ) : (
             <SelectionToolbarCapsule
-              key={candidate.id}
               geometry={geometry}
               actions={visibleActions}
               overflowActions={

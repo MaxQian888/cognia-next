@@ -12,14 +12,15 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, State, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalSize, Manager, Runtime, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::automation::commands::AutomationState;
 use crate::automation::input_monitor::{InputButton, InputEvent, InputSubscription};
 use crate::automation::platform::shared::credential_window;
+use crate::automation::platform::shared::desktop_space::{self, DesktopMonitor};
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::selection_events::{self, SelectionSubscription};
 use crate::automation::types::{EventFilter, EventKind, KeyChord, Point, Rect, SubscriptionId};
@@ -679,6 +680,14 @@ struct SelectionToolbarInner {
     input_generation: AtomicU64,
     undo_lease: Mutex<Option<UndoLease>>,
     replacement_in_progress: AtomicBool,
+    /// Where the pointer was last seen, in desktop units. Only selections
+    /// without a mouse gesture or usable AX bounds use this fallback; mouse
+    /// selection reads carry their own frozen release point.
+    last_pointer: Mutex<Option<(i32, i32)>>,
+    /// The anchor the shown candidate was placed against, in desktop units.
+    /// Kept apart from `candidate.anchor_rect`, which stays the selection's own
+    /// bounds: that is what replacement compares against a live re-read.
+    placement_anchor: Mutex<Option<Rect>>,
 }
 
 #[derive(Clone, Default)]
@@ -760,6 +769,7 @@ pub async fn selection_toolbar_start(
         let mut previous_release: Option<PressRecord> = None;
         let mut click_count: u32 = 0;
         let mut left_button_down = false;
+        let mut selection_release: Option<(i32, i32)> = None;
         let mut settle = SettleState::default();
         // The in-flight selection read, so a superseding gesture can cancel it
         // rather than letting a stale answer race the fresh one.
@@ -769,10 +779,14 @@ pub async fn selection_toolbar_start(
             tokio::select! {
                 event = receiver.recv() => {
                     let Some(event) = event else { break };
+                    if let Some(point) = pointer_position(&event) {
+                        *coordinator.last_pointer.lock() = Some(point);
+                    }
                     match event {
                         InputEvent::MouseDown { x, y, button, ts_ms } => {
                             if button == InputButton::Left {
                                 left_button_down = true;
+                                selection_release = None;
                                 press = Some(PressRecord { x, y, ts_ms });
                             }
                             if !point_inside_toolbar(&app_handle, &coordinator, x, y) {
@@ -790,6 +804,7 @@ pub async fn selection_toolbar_start(
                                 invalidate_undo(&coordinator);
                             }
                             left_button_down = false;
+                            selection_release = Some((x, y));
                             let release = PressRecord { x, y, ts_ms };
                             let (intent, count) =
                                 classify_release(press.take(), release, previous_release, click_count);
@@ -813,7 +828,7 @@ pub async fn selection_toolbar_start(
                                         &automation_handle,
                                         SelectionTrigger::Click,
                                         intent,
-                                        Rect { x, y, width: 1, height: 1 },
+                                        selection_release,
                                     ));
                                 }
                                 // A plain click on an app that posts nothing.
@@ -827,6 +842,7 @@ pub async fn selection_toolbar_start(
                             dismiss(&app_handle, &coordinator, DismissReason::Interrupted)
                         }
                         InputEvent::KeyDown { vk, ts_ms, .. } => {
+                            selection_release = None;
                             if !toolbar_is_focused(&app_handle) {
                                 invalidate_undo(&coordinator);
                             }
@@ -885,7 +901,7 @@ pub async fn selection_toolbar_start(
                         &automation_handle,
                         SelectionTrigger::AxObserver,
                         ClickIntent::Ignore,
-                        Rect { x: 0, y: 0, width: 1, height: 1 },
+                        selection_release,
                     ));
                 }
             }
@@ -928,7 +944,7 @@ fn spawn_publish<R: Runtime>(
     automation: &crate::automation::worker::AutomationHandle,
     trigger: SelectionTrigger,
     intent: ClickIntent,
-    cursor_anchor: Rect,
+    selection_release: Option<(i32, i32)>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let app = app.clone();
     let inner = inner.clone();
@@ -968,12 +984,12 @@ fn spawn_publish<R: Runtime>(
             snapshot = read_accessibility_selection(&automation).await;
         }
 
-        let Some(mut snapshot) = snapshot else {
+        let Some(snapshot) = snapshot else {
             // AX told us nothing. In an image, a PDF viewer, a Java app or a
             // remote desktop that is not a failure — there simply is no
             // accessible text — so read the pixels instead.
             if let Some(candidate) = ocr_fallback(&app, &inner, intent, preflight.as_ref()).await {
-                let _ = show_candidate(&app, &inner, candidate);
+                let _ = show_candidate(&app, &inner, candidate, selection_release);
             }
             return;
         };
@@ -993,9 +1009,6 @@ fn spawn_publish<R: Runtime>(
         {
             return;
         }
-        if snapshot.anchor_rect.is_none() {
-            snapshot.anchor_rect = Some(cursor_anchor);
-        }
         // `secure_field` is the only subrole the renderer acts on, and the
         // preflight already resolved it — no second hit-test needed for the
         // overwhelmingly common case.
@@ -1012,7 +1025,7 @@ fn spawn_publish<R: Runtime>(
                     preflight.as_ref().is_some_and(|p| p.editable),
                     preflight.as_ref().and_then(|p| p.pid),
                 );
-        let _ = show_candidate(&app, &inner, candidate);
+        let _ = show_candidate(&app, &inner, candidate, selection_release);
     })
 }
 
@@ -1446,16 +1459,20 @@ pub fn dispatch_shortcut<R: Runtime>(app: &AppHandle<R>, id: &str) {
     // chord is already sitting in its grace window, and it must stand down even
     // if the candidate went away in between.
     claim_key_press(&state.inner, now_ms());
-    if let Some(candidate) = state.inner.candidate.lock().clone() {
-        emit_shortcut(app, id, &candidate);
-        return;
-    }
-
-    // Action chords are also manual activation. This is what makes a 4,001+
-    // character selection actionable without auto-raising a capsule first.
+    // The OS callback can run on AppKit. Never wait there for the candidate
+    // mutex: a geometry command can hold it while awaiting an AppKit query.
+    // Claim the key synchronously above, then do all candidate work off-thread.
+    let inner = state.inner.clone();
     let app = app.clone();
     let id = id.to_string();
     tauri::async_runtime::spawn(async move {
+        let current = inner.candidate.lock().clone();
+        if let Some(candidate) = current {
+            emit_shortcut(&app, &id, &candidate);
+            return;
+        }
+        // Action chords are also manual activation. This is what makes a
+        // 4,001+ character selection actionable without auto-raising a capsule.
         if let Ok(Some(candidate)) = capture_live_candidate(&app).await {
             emit_shortcut(&app, &id, &candidate);
         }
@@ -1959,6 +1976,7 @@ pub async fn selection_toolbar_resize(
     app: AppHandle,
     state: State<'_, SelectionToolbarState>,
     window: WebviewWindow,
+    candidate_id: String,
     width: f64,
     height: f64,
     hit_rects: Vec<Rect>,
@@ -1966,29 +1984,24 @@ pub async fn selection_toolbar_resize(
     if window.label() != SELECTION_TOOLBAR_LABEL {
         return Err("selection toolbar resize called from wrong window".into());
     }
+    let current = state.inner.candidate.lock();
+    require_current_candidate(current.as_ref(), &candidate_id)?;
     let width = width.max(MIN_TOOLBAR_WIDTH);
     let height = height.max(MIN_TOOLBAR_HEIGHT);
-    *state.inner.hit_rects.lock() = hit_rects;
 
     window
         .set_size(LogicalSize::new(width, height))
         .map_err(|error| error.to_string())?;
 
-    let anchor = state
-        .inner
-        .candidate
-        .lock()
-        .as_ref()
-        .and_then(|candidate| candidate.anchor_rect);
+    let anchor = *state.inner.placement_anchor.lock();
     let Some(anchor) = anchor else {
         return Ok(SelectionToolbarGeometry {
             placement: ToolbarPlacement::Above,
         });
     };
-    let (x, y, placement) = toolbar_position(&app, anchor, width as i32, height as i32);
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())?;
+    let (x, y, placement) = toolbar_position(&app, anchor, width, height);
+    place_window(&window, x, y)?;
+    *state.inner.hit_rects.lock() = hit_rects;
     Ok(SelectionToolbarGeometry { placement })
 }
 
@@ -2000,10 +2013,16 @@ pub async fn selection_toolbar_take_pending_stage(
 }
 
 #[tauri::command]
-pub async fn selection_toolbar_reveal(window: WebviewWindow) -> Result<(), String> {
+pub async fn selection_toolbar_reveal(
+    state: State<'_, SelectionToolbarState>,
+    window: WebviewWindow,
+    candidate_id: String,
+) -> Result<(), String> {
     if window.label() != SELECTION_TOOLBAR_LABEL {
         return Err("selection toolbar reveal called from wrong window".into());
     }
+    let current = state.inner.candidate.lock();
+    require_current_candidate(current.as_ref(), &candidate_id)?;
     reveal_toolbar_window(&window)
 }
 
@@ -2129,7 +2148,7 @@ async fn capture_live_candidate<R: Runtime>(
                 preflight.as_ref().is_some_and(|value| value.editable),
                 preflight.as_ref().and_then(|value| value.pid),
             );
-    show_candidate(app, &state.inner, candidate.clone())?;
+    show_candidate(app, &state.inner, candidate.clone(), None)?;
     Ok(Some(candidate))
 }
 
@@ -2175,7 +2194,7 @@ async fn capture_clipboard_candidate<R: Runtime>(
         return Ok(None);
     };
     let candidate = ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Clipboard);
-    show_candidate(app, &state.inner, candidate.clone())?;
+    show_candidate(app, &state.inner, candidate.clone(), None)?;
     Ok(Some(candidate))
 }
 
@@ -2281,21 +2300,70 @@ fn is_same_selection(
     current: &ExternalSelectionCandidate,
     snapshot: &TextSelectionSnapshot,
 ) -> bool {
-    current.text == snapshot.text && current.source_app == snapshot.source_app
+    current.text == snapshot.text
+        && current.source_app == snapshot.source_app
+        && current.source_title == snapshot.source_title
+        && current.anchor_rect == snapshot.anchor_rect
+}
+
+/// Renderer work belongs to exactly one selection lifecycle.
+fn require_current_candidate(
+    current: Option<&ExternalSelectionCandidate>,
+    candidate_id: &str,
+) -> Result<(), String> {
+    if current.is_some_and(|candidate| candidate.id == candidate_id) {
+        Ok(())
+    } else {
+        Err("selection toolbar candidate is no longer current".into())
+    }
+}
+
+fn delayed_hide_is_current(
+    inner: &SelectionToolbarInner,
+    generation: u64,
+    current: Option<&ExternalSelectionCandidate>,
+) -> bool {
+    inner.generation.load(Ordering::SeqCst) == generation && current.is_none()
+}
+
+fn selection_placement_anchor(
+    selection_bounds: Option<Rect>,
+    selection_release: Option<(i32, i32)>,
+    fallback_pointer: Option<(i32, i32)>,
+    monitors: &[DesktopMonitor],
+) -> Rect {
+    let bounds = selection_release
+        .map(|(x, y)| Rect {
+            x,
+            y,
+            width: 1,
+            height: 1,
+        })
+        .or(selection_bounds);
+    desktop_space::resolve_anchor(bounds, selection_release.or(fallback_pointer), monitors)
 }
 
 fn show_candidate<R: Runtime>(
     app: &AppHandle<R>,
     inner: &Arc<SelectionToolbarInner>,
     candidate: ExternalSelectionCandidate,
+    selection_release: Option<(i32, i32)>,
 ) -> Result<(), String> {
-    let anchor = candidate.anchor_rect.unwrap_or(Rect {
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-    });
+    // Mouse selections follow the gesture's frozen release point, including
+    // reverse drags. Keep the original AX bounds on the candidate for safe
+    // replacement; keyboard selections still use those bounds for placement.
+    let anchor = selection_placement_anchor(
+        candidate.anchor_rect,
+        selection_release,
+        *inner.last_pointer.lock(),
+        &desktop_monitors(app),
+    );
     let window = ensure_window(app)?;
+    // Serialize synchronous native mutations with renderer commands and
+    // dismissals. No parking_lot guard is held across an await.
+    let mut current = inner.candidate.lock();
+    inner.generation.fetch_add(1, Ordering::SeqCst);
+    window.hide().map_err(|error| error.to_string())?;
     // Claim a reveal lifecycle. Everything queued for an older candidate is
     // invalidated by the bumped generation, so a `reveal` still in flight when
     // this candidate arrives cannot show the previous one's geometry.
@@ -2306,16 +2374,10 @@ fn show_candidate<R: Runtime>(
     // Placeholder placement only. The window is still hidden: the renderer
     // measures the capsule, calls `selection_toolbar_resize` (which re-anchors
     // against the real size) and only then reveals.
-    let (x, y, _) = toolbar_position(
-        app,
-        anchor,
-        MIN_TOOLBAR_WIDTH as i32,
-        MIN_TOOLBAR_HEIGHT as i32,
-    );
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())?;
-    *inner.candidate.lock() = Some(candidate.clone());
+    let (x, y, _) = toolbar_position(app, anchor, MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT);
+    place_window(&window, x, y)?;
+    *inner.placement_anchor.lock() = Some(anchor);
+    *current = Some(candidate.clone());
     *inner.undo_lease.lock() = None;
     inner.hit_rects.lock().clear();
     inner.keep_alive.store(false, Ordering::SeqCst);
@@ -2324,6 +2386,7 @@ fn show_candidate<R: Runtime>(
         .emit(SELECTION_CANDIDATE_EVENT, candidate.clone())
         .map_err(|error| error.to_string())?;
 
+    drop(current);
     spawn_idle_watchdog(app, inner, candidate.id);
     Ok(())
 }
@@ -2432,39 +2495,119 @@ fn set_windows_interactive(window: &WebviewWindow, interactive: bool) -> Result<
     Ok(())
 }
 
+/// Every display, in desktop units, primary first (the last-resort anchor in
+/// `desktop_space::resolve_anchor` is the first display's work area). Shared
+/// with the other desktop overlays (chat copilot, pet popup).
+pub(crate) fn desktop_monitors<R: Runtime>(app: &AppHandle<R>) -> Vec<DesktopMonitor> {
+    let primary = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| *monitor.position());
+    let mut monitors: Vec<(bool, DesktopMonitor)> = app
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            let work = monitor.work_area();
+            (
+                primary == Some(*position),
+                DesktopMonitor::from_tao(
+                    Rect {
+                        x: position.x,
+                        y: position.y,
+                        width: size.width as i32,
+                        height: size.height as i32,
+                    },
+                    Rect {
+                        x: work.position.x,
+                        y: work.position.y,
+                        width: work.size.width as i32,
+                        height: work.size.height as i32,
+                    },
+                    monitor.scale_factor(),
+                    desktop_space::DESKTOP_UNITS_ARE_POINTS,
+                ),
+            )
+        })
+        .collect();
+    monitors.sort_by_key(|(is_primary, _)| !*is_primary);
+    monitors.into_iter().map(|(_, monitor)| monitor).collect()
+}
+
+/// Move an overlay window to a top-left corner given in desktop units.
+///
+/// macOS takes it as a *logical* position, which tao applies as global points
+/// unchanged. A physical position there is divided by the scale of the display
+/// the window is currently on, which misplaces it whenever the target display
+/// has another scale. Elsewhere desktop units are already physical pixels.
+pub(crate) fn place_window<R: Runtime>(
+    window: &WebviewWindow<R>,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let result = if desktop_space::DESKTOP_UNITS_ARE_POINTS {
+        window.set_position(tauri::LogicalPosition::new(f64::from(x), f64::from(y)))
+    } else {
+        window.set_position(tauri::PhysicalPosition::new(x, y))
+    };
+    result.map_err(|error| error.to_string())
+}
+
+/// Where a pointer event happened, if it carries a position.
+fn pointer_position(event: &InputEvent) -> Option<(i32, i32)> {
+    match *event {
+        InputEvent::MouseMoved { x, y, .. }
+        | InputEvent::MouseDown { x, y, .. }
+        | InputEvent::MouseUp { x, y, .. }
+        | InputEvent::Scroll { x, y, .. } => Some((x, y)),
+        _ => None,
+    }
+}
+
+/// Place the toolbar for `anchor` (desktop units) given its renderer-measured
+/// size (logical CSS pixels). Returns the top-left corner in desktop units.
 fn toolbar_position<R: Runtime>(
     app: &AppHandle<R>,
     anchor: Rect,
-    width: i32,
-    height: i32,
+    width: f64,
+    height: f64,
 ) -> (i32, i32, ToolbarPlacement) {
-    let preferred_x = anchor.x + anchor.width / 2 - width / 2;
-    let preferred_y = anchor.y - height - EDGE_MARGIN;
-    let monitor = app
-        .monitor_from_point(anchor.x as f64, anchor.y as f64)
-        .ok()
-        .flatten()
-        .or_else(|| app.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
+    position_on_monitors(anchor, width, height, &desktop_monitors(app))
+}
+
+/// Pure half of `toolbar_position`: one coordinate space throughout.
+fn position_on_monitors(
+    anchor: Rect,
+    width: f64,
+    height: f64,
+    monitors: &[DesktopMonitor],
+) -> (i32, i32, ToolbarPlacement) {
+    let Some(monitor) = desktop_space::monitor_for(anchor, monitors) else {
+        let width = width.round() as i32;
+        let height = height.round() as i32;
         return (
-            preferred_x,
-            preferred_y.max(EDGE_MARGIN),
+            anchor.x + anchor.width / 2 - width / 2,
+            (anchor.y - height - EDGE_MARGIN).max(EDGE_MARGIN),
             ToolbarPlacement::Above,
         );
     };
-    let work = monitor.work_area();
+    let scale = monitor.content_scale;
+    let width = desktop_space::logical_to_desktop(width, scale);
+    let height = desktop_space::logical_to_desktop(height, scale);
+    let margin = desktop_space::logical_to_desktop(f64::from(EDGE_MARGIN), scale);
+    let anchor = desktop_space::clip_to(anchor, monitor.bounds);
+    let work = monitor.work;
     clamp_toolbar_position(
-        preferred_x,
-        preferred_y,
+        anchor.x + anchor.width / 2 - width / 2,
+        anchor.y - height - margin,
         anchor,
         width,
         height,
-        (
-            work.position.x,
-            work.position.y,
-            work.size.width as i32,
-            work.size.height as i32,
-        ),
+        (work.x, work.y, work.width, work.height),
+        margin,
     )
 }
 
@@ -2475,21 +2618,19 @@ fn clamp_toolbar_position(
     width: i32,
     height: i32,
     work: (i32, i32, i32, i32),
+    margin: i32,
 ) -> (i32, i32, ToolbarPlacement) {
     let (work_x, work_y, work_width, work_height) = work;
-    let max_x = work_x + work_width - width - EDGE_MARGIN;
-    let max_y = work_y + work_height - height - EDGE_MARGIN;
-    let x = preferred_x.clamp(work_x + EDGE_MARGIN, max_x.max(work_x + EDGE_MARGIN));
-    let above_fits = preferred_y >= work_y + EDGE_MARGIN;
+    let max_x = work_x + work_width - width - margin;
+    let max_y = work_y + work_height - height - margin;
+    let x = preferred_x.clamp(work_x + margin, max_x.max(work_x + margin));
+    let above_fits = preferred_y >= work_y + margin;
     let (desired_y, placement) = if above_fits {
         (preferred_y, ToolbarPlacement::Above)
     } else {
-        (
-            anchor.y + anchor.height + EDGE_MARGIN,
-            ToolbarPlacement::Below,
-        )
+        (anchor.y + anchor.height + margin, ToolbarPlacement::Below)
     };
-    let y = desired_y.clamp(work_y + EDGE_MARGIN, max_y.max(work_y + EDGE_MARGIN));
+    let y = desired_y.clamp(work_y + margin, max_y.max(work_y + margin));
     (x, y, placement)
 }
 
@@ -2526,19 +2667,31 @@ fn point_inside_toolbar<R: Runtime>(
     let Ok(size) = window.outer_size() else {
         return false;
     };
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let origin = (position.x, position.y);
+    // The pointer arrives in desktop units (points on macOS), so the window is
+    // measured in the same units — tao's `outer_position` on macOS is points
+    // times the window's own scale, and comparing the two directly put the
+    // "inside the toolbar" test at the wrong place on any Retina display.
+    let window_scale = window.scale_factor().unwrap_or(1.0);
+    let frame = desktop_space::window_frame(
+        (position.x, position.y),
+        (size.width, size.height),
+        window_scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    );
+    let content_scale =
+        desktop_space::window_content_scale(window_scale, desktop_space::DESKTOP_UNITS_ARE_POINTS);
+    let origin = (frame.x, frame.y);
     let rects = inner.hit_rects.lock();
     if rects.is_empty() {
         let whole = Rect {
             x: 0,
             y: 0,
-            width: size.width as i32,
-            height: size.height as i32,
+            width: frame.width,
+            height: frame.height,
         };
         return point_in_window_rect(origin, whole, x, y);
     }
-    point_in_any_rect(origin, &rects, scale, x, y)
+    point_in_any_rect(origin, &rects, content_scale, x, y)
 }
 
 /// Pure half of `point_inside_toolbar` — testable without a live window.
@@ -2549,7 +2702,7 @@ fn point_in_any_rect(origin: (i32, i32), rects: &[Rect], scale: f64, x: i32, y: 
 }
 
 /// Convert a renderer-reported rect (logical CSS pixels, relative to the
-/// window) into the physical pixels `outer_position` / `outer_size` speak.
+/// window) into desktop units, `scale` being desktop units per CSS pixel.
 fn scale_rect(rect: Rect, scale: f64) -> Rect {
     Rect {
         x: (rect.x as f64 * scale).round() as i32,
@@ -2578,8 +2731,9 @@ fn dismiss<R: Runtime>(
     inner: &Arc<SelectionToolbarInner>,
     reason: DismissReason,
 ) {
+    let mut current = inner.candidate.lock();
     let generation = inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    *inner.candidate.lock() = None;
+    *current = None;
     inner.hit_rects.lock().clear();
     *inner.idle_deadline.lock() = None;
     inner.keep_alive.store(false, Ordering::SeqCst);
@@ -2606,11 +2760,13 @@ fn dismiss<R: Runtime>(
         return;
     }
 
+    drop(current);
     let app = app.clone();
     let inner = inner.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(EXIT_ANIMATION_MS)).await;
-        if inner.generation.load(Ordering::SeqCst) != generation {
+        let current = inner.candidate.lock();
+        if !delayed_hide_is_current(&inner, generation, current.as_ref()) {
             return;
         }
         if let Some(window) = app.get_webview_window(SELECTION_TOOLBAR_LABEL) {
@@ -2725,6 +2881,7 @@ mod tests {
             360,
             44,
             (0, 0, 1280, 720),
+            EDGE_MARGIN,
         );
         assert_eq!(position, (8, 120, ToolbarPlacement::Above));
     }
@@ -2743,6 +2900,7 @@ mod tests {
             360,
             44,
             (0, 0, 1280, 720),
+            EDGE_MARGIN,
         );
         assert_eq!(position, (100, 40, ToolbarPlacement::Below));
     }
@@ -2759,10 +2917,131 @@ mod tests {
             height: 20,
         };
         let work = (0, 0, 1280, 720);
-        let (_, _, short) = clamp_toolbar_position(400, 90 - 48 - 8, anchor, 200, 48, work);
-        let (_, _, tall) = clamp_toolbar_position(400, 90 - 240 - 8, anchor, 200, 240, work);
+        let (_, _, short) =
+            clamp_toolbar_position(400, 90 - 48 - 8, anchor, 200, 48, work, EDGE_MARGIN);
+        let (_, _, tall) =
+            clamp_toolbar_position(400, 90 - 240 - 8, anchor, 200, 240, work, EDGE_MARGIN);
         assert_eq!(short, ToolbarPlacement::Above);
         assert_eq!(tall, ToolbarPlacement::Below);
+    }
+
+    fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// A Retina laptop (1512×982pt at 2×) and a 2560×1440pt display at 1× to
+    /// its right, as tao reports them on macOS.
+    fn mac_displays() -> Vec<DesktopMonitor> {
+        vec![
+            DesktopMonitor::from_tao(rect(0, 0, 3024, 1964), rect(0, 50, 3024, 1914), 2.0, true),
+            DesktopMonitor::from_tao(
+                rect(1512, 0, 2560, 1440),
+                rect(1512, 25, 2560, 1415),
+                1.0,
+                true,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_retina_selection_places_the_toolbar_in_points_right_above_it() {
+        // AX bounds are points. The toolbar must sit centred above them — not
+        // at half the coordinates, which is where a physical-pixel placement
+        // landed once tao divided it by the display's scale.
+        let (x, y, placement) =
+            position_on_monitors(rect(600, 400, 120, 18), 160.0, 48.0, &mac_displays());
+        assert_eq!((x, y, placement), (580, 344, ToolbarPlacement::Above));
+    }
+
+    #[test]
+    fn a_selection_on_the_second_display_stays_on_the_second_display() {
+        let monitors = mac_displays();
+        let (x, y, _) = position_on_monitors(rect(2000, 600, 120, 18), 160.0, 48.0, &monitors);
+        assert_eq!((x, y), (1980, 544));
+        // Near that display's right edge it clamps to *its* work area, not the
+        // laptop's.
+        let (x, _, _) = position_on_monitors(rect(4050, 600, 10, 18), 160.0, 48.0, &monitors);
+        assert_eq!(x, 1512 + 2560 - 160 - EDGE_MARGIN);
+    }
+
+    #[test]
+    fn under_the_menu_bar_the_toolbar_flips_below_the_selection() {
+        let (_, y, placement) =
+            position_on_monitors(rect(300, 40, 80, 18), 160.0, 48.0, &mac_displays());
+        assert_eq!(placement, ToolbarPlacement::Below);
+        assert_eq!(y, 40 + 18 + EDGE_MARGIN);
+    }
+
+    #[test]
+    fn a_selection_taller_than_the_screen_anchors_to_its_visible_part() {
+        // A selection scrolled partly above the top of the screen: placement
+        // follows what is visible instead of floating off the top.
+        let (_, y, placement) =
+            position_on_monitors(rect(300, -2000, 400, 2300), 160.0, 48.0, &mac_displays());
+        assert_eq!(placement, ToolbarPlacement::Below);
+        assert_eq!(y, 300 + EDGE_MARGIN);
+    }
+
+    #[test]
+    fn on_a_pixel_desktop_the_measured_size_and_margin_are_scaled() {
+        // Windows at 150%: the renderer measured 160×48 CSS px, which is
+        // 240×72 physical pixels; the margin scales the same way.
+        let monitors = vec![DesktopMonitor::from_tao(
+            rect(0, 0, 2880, 1620),
+            rect(0, 0, 2880, 1560),
+            1.5,
+            false,
+        )];
+        let (x, y, placement) =
+            position_on_monitors(rect(1000, 500, 200, 30), 160.0, 48.0, &monitors);
+        assert_eq!(
+            (x, y, placement),
+            (1100 - 120, 500 - 72 - 12, ToolbarPlacement::Above)
+        );
+    }
+
+    #[test]
+    fn with_no_display_information_placement_still_avoids_negative_space() {
+        let (x, y, placement) = position_on_monitors(rect(100, 20, 10, 10), 160.0, 48.0, &[]);
+        assert_eq!(
+            (x, y, placement),
+            (25, EDGE_MARGIN, ToolbarPlacement::Above)
+        );
+    }
+
+    #[test]
+    fn every_positioned_pointer_event_updates_the_fallback_anchor() {
+        assert_eq!(
+            pointer_position(&InputEvent::MouseMoved {
+                x: 3,
+                y: 4,
+                ts_ms: 0
+            }),
+            Some((3, 4))
+        );
+        assert_eq!(
+            pointer_position(&InputEvent::MouseUp {
+                x: 5,
+                y: 6,
+                button: InputButton::Left,
+                ts_ms: 0
+            }),
+            Some((5, 6))
+        );
+        assert_eq!(
+            pointer_position(&InputEvent::Scroll {
+                x: 7,
+                y: 8,
+                dy: 1,
+                ts_ms: 0
+            }),
+            Some((7, 8))
+        );
     }
 
     #[test]
@@ -2816,7 +3095,7 @@ mod tests {
     }
 
     #[test]
-    fn capsule_rect_is_scaled_into_physical_pixels() {
+    fn capsule_rect_is_scaled_into_desktop_units() {
         let scaled = scale_rect(
             Rect {
                 x: 20,
@@ -3455,6 +3734,83 @@ mod tests {
         assert!(!is_same_selection(&candidate, &elsewhere));
         let different = build_text_selection("goodbye", "TextEdit", None, None).unwrap();
         assert!(!is_same_selection(&candidate, &different));
+        let another_window =
+            build_text_selection("hello", "TextEdit", Some("Draft"), None).unwrap();
+        assert!(!is_same_selection(&candidate, &another_window));
+        let moved =
+            build_text_selection("hello", "TextEdit", None, Some(rect(50, 100, 80, 18))).unwrap();
+        assert!(!is_same_selection(&candidate, &moved));
+    }
+
+    #[test]
+    fn renderer_geometry_and_reveal_require_the_current_candidate() {
+        let snapshot = build_text_selection("hello", "TextEdit", None, None).unwrap();
+        let candidate =
+            ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility);
+        assert!(require_current_candidate(Some(&candidate), &candidate.id).is_ok());
+        assert!(require_current_candidate(Some(&candidate), "previous-selection").is_err());
+        assert!(require_current_candidate(None, &candidate.id).is_err());
+    }
+
+    #[test]
+    fn animated_dismiss_cannot_hide_a_new_selection() {
+        let inner = SelectionToolbarInner::default();
+        let snapshot = build_text_selection("hello", "TextEdit", None, None).unwrap();
+        let candidate =
+            ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility);
+        let dismissed_generation = inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(delayed_hide_is_current(&inner, dismissed_generation, None));
+        assert!(!delayed_hide_is_current(
+            &inner,
+            dismissed_generation,
+            Some(&candidate)
+        ));
+        inner.generation.fetch_add(1, Ordering::SeqCst);
+        assert!(!delayed_hide_is_current(&inner, dismissed_generation, None));
+    }
+
+    #[test]
+    fn reverse_mouse_selection_uses_release_without_replacing_accessibility_bounds() {
+        let snapshot =
+            build_text_selection("hello", "TextEdit", None, Some(rect(600, 500, 80, 18))).unwrap();
+        let candidate =
+            ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility);
+        let anchor = selection_placement_anchor(
+            candidate.anchor_rect,
+            Some((300, 200)),
+            Some((900, 700)),
+            &mac_displays(),
+        );
+        assert_eq!(anchor, rect(300, 200, 1, 1));
+        assert_eq!(candidate.anchor_rect, Some(rect(600, 500, 80, 18)));
+    }
+
+    #[test]
+    fn mouse_selection_without_bounds_does_not_follow_later_pointer_movement() {
+        for later_pointer in [(900, 700), (2100, 700)] {
+            assert_eq!(
+                selection_placement_anchor(
+                    None,
+                    Some((300, 200)),
+                    Some(later_pointer),
+                    &mac_displays()
+                ),
+                rect(300, 200, 1, 1)
+            );
+        }
+    }
+
+    #[test]
+    fn keyboard_selection_prefers_accessibility_bounds_over_the_mouse() {
+        assert_eq!(
+            selection_placement_anchor(
+                Some(rect(600, 500, 80, 18)),
+                None,
+                Some((300, 200)),
+                &mac_displays()
+            ),
+            rect(600, 500, 80, 18)
+        );
     }
 
     #[test]

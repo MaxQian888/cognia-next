@@ -164,7 +164,7 @@ export function AutomationSection() {
           <AutomationAuditTable />
         </TabsContent>
         <TabsContent value="inspector" className="pt-4">
-          <InspectorTab />
+          <InspectorTab onOpenPermissions={() => setTab("permissions")} />
         </TabsContent>
         <TabsContent value="sandboxes" className="pt-4">
           <SandboxConnectionsTab />

@@ -678,3 +678,27 @@ Out of scope here, and still open: the Windows app-session backend (the four
 `AutomationBackend` methods have no UIA override, so app sessions are macOS
 only), the permission-grant call to action, macOS `window_op`, and `DragOpts` /
 `ScrollTarget::Element` on macOS and Linux.
+
+## Addendum (2026-10-08): the AX layer moves to `objc2-application-services`
+
+The macOS element tree, actions, hit-testing and the selection `AXObserver`
+were bound through `accessibility` 0.2 + `accessibility-sys`, with raw
+`core-foundation-sys` for everything the high-level crate could not do.
+`accessibility` pulls in `cocoa` → `objc` → `block`, an unmaintained chain
+whose `block` 0.1.6 trips a future-incompatibility lint (a `static` of an
+uninhabited type) that a later Rust release turns into a hard error. The crate
+already used `objc2` for AppKit, so two Objective-C binding stacks coexisted.
+
+`crates/cognia-automation` now binds AX through `objc2-application-services`
+over `objc2-core-foundation`. Every element goes through one wrapper,
+`ax/raw.rs::AxElement` (a `CFRetained<AXUIElement>`), so no other module
+handles a raw pointer or an `AXError`; ownership follows the Create/Copy rule
+through `CFRetained`, with no hand-written `CFRelease`. Values whose type an
+attribute does not guarantee (`AXValue`, `AXURL`, array items) are checked
+with a `downcast` instead of being reinterpreted, and a boolean attribute that
+a host reports as a CFNumber now reads as its value rather than as `false`.
+The observer callback uses the binding's `C-unwind` ABI and catches a panic
+instead of unwinding into the run loop. The AX notification names are C
+`#define`s that no binding exports, so they are local constants pinned to the
+header spelling by a test. `accessibility`, `accessibility-sys`, `cocoa`,
+`cocoa-foundation`, `objc`, `block` and `malloc_buf` leave the dependency graph.

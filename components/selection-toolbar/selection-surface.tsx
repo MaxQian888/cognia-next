@@ -176,37 +176,42 @@ export function SelectionListPanel({
   }
 
   return (
-    <Surface asChild layer="overlay" radius="panel" elevation={3}>
-      <motion.div
-        ref={(node) => {
-          localRef.current = node
-          containerRef.current = node
-        }}
-        role={role}
-        aria-label={label}
-        aria-orientation="vertical"
-        onKeyDown={onKeyDown}
-        initial={
-          reduceMotion ? false : { opacity: 0, scale: 0.96, y: placement === "above" ? 6 : -6 }
-        }
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-        transition={
-          reduceMotion ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
-        }
-        style={{
-          ...SELECTION_GLASS_TINT,
-          transformOrigin: placement === "above" ? "bottom center" : "top center",
-        }}
-        className={cn(
-          "selection-scroll pointer-events-auto flex max-h-72 w-max min-w-44 flex-col gap-px overflow-y-auto p-1",
-          SELECTION_GLASS,
-          className
-        )}
-      >
-        {children}
-      </motion.div>
-    </Surface>
+    <div
+      ref={(node) => {
+        containerRef.current = node
+      }}
+    >
+      <Surface asChild layer="overlay" radius="panel" elevation={3}>
+        <motion.div
+          ref={(node) => {
+            localRef.current = node
+          }}
+          role={role}
+          aria-label={label}
+          aria-orientation="vertical"
+          onKeyDown={onKeyDown}
+          initial={
+            reduceMotion ? false : { opacity: 0, scale: 0.96, y: placement === "above" ? 6 : -6 }
+          }
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+          transition={
+            reduceMotion ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
+          }
+          style={{
+            ...SELECTION_GLASS_TINT,
+            transformOrigin: placement === "above" ? "bottom center" : "top center",
+          }}
+          className={cn(
+            "selection-scroll pointer-events-auto flex max-h-72 w-max min-w-44 flex-col gap-px overflow-y-auto p-1",
+            SELECTION_GLASS,
+            className
+          )}
+        >
+          {children}
+        </motion.div>
+      </Surface>
+    </div>
   )
 }
 

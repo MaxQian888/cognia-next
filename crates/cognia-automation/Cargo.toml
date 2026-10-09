@@ -97,11 +97,30 @@ windows = { version = "0.62.2", features = [
 # Input simulation + AX element tree for the macOS Computer Use backend.
 enigo = "0.6"
 core-graphics = "0.25"
-core-graphics-types = "0.2"
 core-foundation = "0.10"
-accessibility = "0.2"
-accessibility-sys = "0.2"
-core-foundation-sys = "0.8"
+# AX element tree, actions, hit-testing and the selection `AXObserver`, on the
+# same objc2 stack as AppKit below (replaced `accessibility` 0.2, whose
+# `cocoa` / `objc` / `block` chain is unmaintained and trips a
+# future-incompatibility lint in `block`).
+objc2-application-services = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "libc",
+    "HIServices",
+    "AXError",
+    "AXUIElement",
+    "AXValue",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFArray",
+    "CFCGTypes",
+    "CFDate",
+    "CFDictionary",
+    "CFNumber",
+    "CFRunLoop",
+    "CFString",
+    "CFURL",
+] }
 # `ForeignType::as_ptr` on `CGEvent`, so the recorder's input hook can call
 # `CGEventKeyboardGetUnicodeString` (core-graphics binds only the setter).
 # Pinned to core-graphics 0.25's own foreign-types requirement.

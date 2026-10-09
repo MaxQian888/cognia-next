@@ -327,3 +327,9 @@ Docker/computer-server 连接现在只被视为**远程 GUI** 提供方。它不
 **六处休眠接线接回。** `startAutomationAuditMirror` 零调用点，于是保留策略任务在勤奋清理一张自动化从不写入的表。`classify-risk.ts` 仍以已删除的工具名为键，ADR-0070 的 risk-to-ceremony 升级对 Computer Use 从未触发过。它的回归测试现在直接遍历共享常量，改名不会再让某个工具静默掉出等级。画中画视图在现行工具路径上没有生产者。`ComputerUseCard` 映射到已删除的工具名，解析的还是旧的 `{action, coordinate}` 形状，因此每次调用在聊天里都渲染成一坨原始 JSON。`find_text` / `click_text` 基于既有的 `ocr-click.ts` 重新注册为工具，覆盖元素句柄的盲区（Canvas、游戏、远程桌面、自绘控件），并在表面指引里注明它们捕获的是主显示器而非应用窗口。以及新建了 `app/recorder-controller/page.tsx`，因为 `recorder_window` 打开的是一条不存在的路由，每次录制期间都是一条空白置顶条。
 
 本轮不做、仍然开放的部分：Windows 的 app-session 后端（那四个 `AutomationBackend` 方法没有 UIA 覆写，所以 app session 目前只有 macOS）、权限授予入口、macOS 的 `window_op`，以及 macOS/Linux 上的 `DragOpts` 与 `ScrollTarget::Element`。
+
+## 附录（2026-10-08）：AX 层迁移到 `objc2-application-services`
+
+macOS 的元素树、动作、命中测试和选区 `AXObserver` 原先经由 `accessibility` 0.2 + `accessibility-sys` 绑定，高层 crate 做不到的部分再直接调用 `core-foundation-sys`。`accessibility` 会带入 `cocoa` → `objc` → `block` 这条已无人维护的依赖链，其中 `block` 0.1.6 会触发一条未来不兼容 lint（无人居类型的 `static`），后续某个 Rust 版本会把它变成硬错误。这个 crate 的 AppKit 部分本来就用 `objc2`，于是同时存在两套 Objective-C 绑定。
+
+`crates/cognia-automation` 现在通过 `objc2-application-services`（基于 `objc2-core-foundation`）绑定 AX。所有元素都经过同一个包装 `ax/raw.rs::AxElement`（一个 `CFRetained<AXUIElement>`），其他模块不再接触裸指针或 `AXError`；所有权按 Create/Copy 规则由 `CFRetained` 管理，不再手写 `CFRelease`。属性不保证类型的值（`AXValue`、`AXURL`、数组元素）先 `downcast` 校验再使用，不再强行重解释；宿主以 CFNumber 报告的布尔属性现在读出它的真实值，而不是一律当作 `false`。观察者回调采用绑定的 `C-unwind` ABI，并捕获 panic，不让它展开进 run loop。AX 通知名是 C 的 `#define`，没有任何绑定导出，因此改为本地常量，并由测试钉住与头文件一致的拼写。`accessibility`、`accessibility-sys`、`cocoa`、`cocoa-foundation`、`objc`、`block` 和 `malloc_buf` 从依赖图中移除。
