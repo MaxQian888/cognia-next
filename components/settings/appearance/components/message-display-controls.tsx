@@ -237,6 +237,14 @@ export function MessageDisplayControls({
             />
           </div>
 
+          <PreferenceSwitch
+            id="message-display-fold-completed-turns"
+            label={t("foldCompletedTurns.label")}
+            description={t("foldCompletedTurns.hint")}
+            checked={resolved.foldCompletedTurns}
+            onCheckedChange={(next) => updateOverride("foldCompletedTurns", next)}
+          />
+
           {/* ADR-0218: prose size and rhythm. Applied as attributes on the
               message shell, so both renderer branches pick them up. */}
           <div className="space-y-2" data-testid="message-display-reading">

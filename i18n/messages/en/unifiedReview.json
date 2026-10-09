@@ -50,12 +50,6 @@
   "retry": "Retry",
   "roots": "Repository roots",
   "scope": "Review scope",
-  "scopes": {
-    "branch": "Branch comparison",
-    "commit": "Commit",
-    "lastTurn": "Last agent turn",
-    "uncommitted": "Uncommitted changes"
-  },
   "staleComments": "Stale hunk comments omitted: {count}.",
   "success": "GitHub operation completed.",
   "summary": "Review summary",
@@ -66,5 +60,28 @@
     "missing-run": "{root} has no agent run to review — only the repository the last turn wrote in does.",
     "missing-commit": "{root} needs its own commit SHA.",
     "missing-refs": "{root} needs its own base and target references."
+  },
+  "scopePicker": {
+    "label": "Diff scope: {scope}",
+    "lastTurn": "Last turn",
+    "aTurn": "A turn",
+    "turn": "Turn {ordinal}",
+    "turnWithPrompt": "Turn {ordinal} · {prompt}",
+    "turnStats": "{files, plural, one {# file} other {# files}}",
+    "earlierTurns": "Pick a turn",
+    "noTurns": "None yet",
+    "conversation": "This conversation",
+    "uncommitted": "Uncommitted",
+    "unstaged": "Unstaged",
+    "staged": "Staged",
+    "commit": "Committed",
+    "commitValue": "Commit {sha}",
+    "branch": "Branch",
+    "branchValue": "Branch vs {base}",
+    "branchHint": "Compare this branch against",
+    "loading": "Loading…",
+    "refsFailed": "Could not read the repository",
+    "noCommits": "No commits yet",
+    "noBranches": "No other branches"
   }
 }

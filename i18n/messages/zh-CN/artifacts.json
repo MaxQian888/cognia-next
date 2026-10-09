@@ -179,23 +179,6 @@
   "words": "字",
   "workspace": {
     "allWorkspace": "全部工作区",
-    "card": {
-      "cancel": "取消",
-      "discardFile": "丢弃此文件的改动",
-      "discardFileConfirm": "丢弃文件改动",
-      "discardFileConfirmDescription": "这会把 {path} 还原到最近一次提交的状态，且不可撤销。其它改动不受影响。",
-      "discardFileConfirmTitle": "丢弃此文件的改动？",
-      "discardFileFailed": "无法丢弃 {path}：{error}",
-      "discardFileSuccess": "已还原 {path}",
-      "editedFiles": "已编辑 {count} 个文件",
-      "review": "审阅",
-      "undo": "撤销",
-      "undoConfirm": "撤销全部改动",
-      "undoConfirmDescription": "这会丢弃此仓库当前全部已暂存、未暂存和未跟踪改动，包括你手工完成的修改，且无法恢复。",
-      "undoConfirmTitle": "撤销仓库中的全部改动？",
-      "undoFailed": "无法撤销工作区改动：{error}",
-      "undoSuccess": "已撤销工作区改动"
-    },
     "close": "关闭工作区",
     "currentTask": "当前任务",
     "filePreview": {
@@ -318,15 +301,30 @@
       "title": "工作区不可用"
     },
     "reviewScope": {
-      "label": "列出哪些改动",
-      "all": "全部",
-      "allLabel": "工作区的全部改动（{count}）",
-      "conversation": "本对话",
-      "conversationLabel": "本对话改动的文件（{count}）",
       "baseline": "本对话编辑过的文件。差异仍与上次提交比较，因此也包含这些文件中的其他改动。",
       "commitIncludesHidden": "提交还会包含 {count} 个此处未列出的已暂存文件。",
       "empty": "本对话尚未改动此仓库中的任何文件。",
       "loading": "正在查找本对话改动的文件…"
+    },
+    "snapshot": {
+      "note": {
+        "lastTurn": "这一轮实际做出的改动（只读），不包含之后对同一文件的修改。",
+        "commit": "此提交相对其父提交的改动（只读）。",
+        "branch": "当前分支从基准分支分出后的全部改动（只读）。"
+      },
+      "emptyWorkingTree": {
+        "staged": "没有已暂存的改动。",
+        "unstaged": "没有未暂存的改动。"
+      },
+      "empty": "此范围内没有文件改动。",
+      "listFailed": "无法列出改动：{error}",
+      "diffFailed": "无法加载此差异：{error}",
+      "unavailable": {
+        "missing-run": "这一轮没有可显示的已记录改动。",
+        "missing-commit": "请选择要审阅的提交。",
+        "missing-refs": "请选择要对比的分支。"
+      },
+      "loading": "正在加载改动…"
     }
   },
   "compareVersion": "比较此版本",

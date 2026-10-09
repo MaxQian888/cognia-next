@@ -179,23 +179,6 @@
   "words": "words",
   "workspace": {
     "allWorkspace": "All workspace",
-    "card": {
-      "cancel": "Cancel",
-      "discardFile": "Discard this file's changes",
-      "discardFileConfirm": "Discard file changes",
-      "discardFileConfirmDescription": "This reverts {path} to its last committed state and cannot be undone. Other changes are left untouched.",
-      "discardFileConfirmTitle": "Discard changes to this file?",
-      "discardFileFailed": "Could not discard {path}: {error}",
-      "discardFileSuccess": "Reverted {path}",
-      "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
-      "review": "Review",
-      "undo": "Undo",
-      "undoConfirm": "Undo all changes",
-      "undoConfirmDescription": "This discards every staged, unstaged, and untracked change currently in this repository, including changes you made manually. This cannot be undone.",
-      "undoConfirmTitle": "Undo all repository changes?",
-      "undoFailed": "Could not undo workspace changes: {error}",
-      "undoSuccess": "Workspace changes undone"
-    },
     "close": "Close workspace",
     "currentTask": "Current task",
     "filePreview": {
@@ -318,15 +301,30 @@
       "title": "Workspace is unavailable"
     },
     "reviewScope": {
-      "label": "Which changes to list",
-      "all": "All",
-      "allLabel": "All changes in the working tree ({count})",
-      "conversation": "This chat",
-      "conversationLabel": "Files this conversation changed ({count})",
       "baseline": "Files this conversation edited. Diffs still compare with the last commit, so they include any other edits to the same files.",
       "commitIncludesHidden": "{count, plural, one {Commit also includes # staged file not listed here.} other {Commit also includes # staged files not listed here.}}",
       "empty": "This conversation hasn't changed any files in this repository yet.",
       "loading": "Looking up what this conversation changed…"
+    },
+    "snapshot": {
+      "note": {
+        "lastTurn": "Exactly what this turn changed, read-only. Later edits to the same files are not included.",
+        "commit": "The changes in this commit against its parent, read-only.",
+        "branch": "Everything this branch changed since it split from the base, read-only."
+      },
+      "emptyWorkingTree": {
+        "staged": "Nothing is staged.",
+        "unstaged": "No unstaged changes."
+      },
+      "empty": "No file changes in this scope.",
+      "listFailed": "Could not list the changes: {error}",
+      "diffFailed": "Could not load this diff: {error}",
+      "unavailable": {
+        "missing-run": "This turn has no recorded changes to show.",
+        "missing-commit": "Pick a commit to review.",
+        "missing-refs": "Pick a branch to compare against."
+      },
+      "loading": "Loading changes…"
     }
   },
   "compareVersion": "Compare this version",

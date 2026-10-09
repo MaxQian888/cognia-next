@@ -63,6 +63,56 @@ jest.mock("@/components/source-control/diff-pane", () => ({
   ),
 }))
 
+jest.mock("@/components/source-control/review-scope-picker", () => ({
+  ReviewScopePicker: ({
+    value,
+    onChange,
+    allowConversation,
+    counts,
+  }: {
+    value: { scope: string }
+    onChange: (next: unknown) => void
+    allowConversation?: boolean
+    counts?: Record<string, number>
+  }) => (
+    <div
+      data-testid="scope-picker"
+      data-value={JSON.stringify(value)}
+      data-conversation={String(Boolean(allowConversation))}
+      data-counts={JSON.stringify(counts ?? {})}
+    >
+      {["uncommitted", "unstaged", "staged", "conversation"].map((scope) => (
+        <button key={scope} data-testid={`pick-${scope}`} onClick={() => onChange({ scope })} />
+      ))}
+      <button
+        data-testid="pick-turn"
+        onClick={() => onChange({ scope: "lastTurn", runId: "run:1" })}
+      />
+    </div>
+  ),
+}))
+jest.mock("./snapshot-review", () => ({
+  isSnapshotSelection: (choice: { scope: string }) =>
+    choice.scope === "lastTurn" || choice.scope === "commit" || choice.scope === "branch",
+  SnapshotReview: ({
+    selection,
+    focusPath,
+    header,
+  }: {
+    selection: unknown
+    focusPath: string | null
+    header: ReactNode
+  }) => (
+    <div
+      data-testid="snapshot-review"
+      data-selection={JSON.stringify(selection)}
+      data-focus={focusPath ?? ""}
+    >
+      {header}
+    </div>
+  ),
+}))
+
 let mockConversationPaths: Set<string> = new Set()
 let mockConversationReady = true
 jest.mock("@/hooks/git/use-conversation-changed-paths", () => ({
@@ -379,18 +429,24 @@ describe("WorkspaceReview conversation scope", () => {
     mockWidth = 1000
   })
 
-  it("has no scope bar without a conversation", () => {
+  it("offers no conversation scope without a conversation", () => {
     renderReview({ selected: { path: "a.ts", staged: false } })
-    expect(screen.queryByTestId("workspace-review-scope")).toBeNull()
+    expect(screen.getByTestId("scope-picker")).toHaveAttribute("data-conversation", "false")
+    expect(JSON.parse(screen.getByTestId("scope-picker").getAttribute("data-counts")!)).toEqual({
+      uncommitted: 3,
+      unstaged: 3,
+      staged: 0,
+    })
   })
 
   it("narrows the list to what this conversation changed, with counts and the baseline note", () => {
     mockConversationPaths = new Set(["b.ts"])
     renderReview({ sessionId: "s1", selected: { path: "b.ts", staged: false } })
-    expect(screen.getByTestId("workspace-review-scope-all")).toHaveTextContent("3")
-    expect(screen.getByTestId("workspace-review-scope-conversation")).toHaveTextContent("1")
+    expect(
+      JSON.parse(screen.getByTestId("scope-picker").getAttribute("data-counts")!)
+    ).toMatchObject({ uncommitted: 3, conversation: 1 })
     expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "a.ts,b.ts,c.ts")
-    fireEvent.click(screen.getByTestId("workspace-review-scope-conversation"))
+    fireEvent.click(screen.getByTestId("pick-conversation"))
     expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "b.ts")
     expect(screen.getByTestId("workspace-review-scope-note")).toBeInTheDocument()
     // File navigation walks the narrowed list.
@@ -403,7 +459,7 @@ describe("WorkspaceReview conversation scope", () => {
       sessionId: "s1",
       selected: { path: "a.ts", staged: false },
     })
-    fireEvent.click(screen.getByTestId("workspace-review-scope-conversation"))
+    fireEvent.click(screen.getByTestId("pick-conversation"))
     expect(screen.getByTestId("workspace-review-scope-empty")).toHaveTextContent(
       "Looking up what this conversation changed"
     )
@@ -433,7 +489,7 @@ describe("WorkspaceReview conversation scope", () => {
       selected: { path: "a.ts", staged: false },
     })
     expect(screen.queryByTestId("workspace-review-commit-hidden")).toBeNull()
-    fireEvent.click(screen.getByTestId("workspace-review-scope-conversation"))
+    fireEvent.click(screen.getByTestId("pick-conversation"))
     expect(screen.getByTestId("workspace-review-commit-hidden")).toHaveTextContent("2 staged files")
     expect(screen.getByTestId("commit-box")).toHaveAttribute("data-staged", "2")
   })
@@ -455,9 +511,102 @@ describe("WorkspaceReview conversation scope", () => {
       />
     )
     const { rerender } = render(view(null))
-    fireEvent.click(screen.getByTestId("workspace-review-scope-conversation"))
+    fireEvent.click(screen.getByTestId("pick-conversation"))
     expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "b.ts")
     rerender(view({ id: "r1", file: { path: "c.ts", staged: false } }))
     expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "a.ts,b.ts,c.ts")
+  })
+})
+
+describe("WorkspaceReview scopes", () => {
+  beforeEach(() => {
+    mockWidth = 1000
+    mockConversationPaths = new Set()
+    mockConversationReady = true
+  })
+
+  it("narrows to the staged or the unstaged side of the working tree", () => {
+    renderReview({
+      sessionId: "s1",
+      status: status(["a.ts"], ["s.ts"]),
+      selected: { path: "a.ts", staged: false },
+    })
+    expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "s.ts,a.ts")
+    fireEvent.click(screen.getByTestId("pick-staged"))
+    expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "s.ts")
+    fireEvent.click(screen.getByTestId("pick-unstaged"))
+    expect(screen.getByTestId("changes")).toHaveAttribute("data-paths", "a.ts")
+    // The commit still takes the staged file the unstaged list hides.
+    expect(screen.getByTestId("workspace-review-commit-hidden")).toBeInTheDocument()
+  })
+
+  it("says so when a working-tree half is empty", () => {
+    renderReview({ sessionId: "s1", selected: { path: "a.ts", staged: false } })
+    fireEvent.click(screen.getByTestId("pick-staged"))
+    expect(screen.getByTestId("workspace-review-scope-empty")).toHaveTextContent(
+      "Nothing is staged."
+    )
+  })
+
+  it("hands a turn, commit or branch to the read-only snapshot review", () => {
+    renderReview({ sessionId: "s1", selected: { path: "a.ts", staged: false } })
+    fireEvent.click(screen.getByTestId("pick-turn"))
+    expect(screen.getByTestId("snapshot-review")).toHaveAttribute(
+      "data-selection",
+      JSON.stringify({ scope: "lastTurn", runId: "run:1" })
+    )
+    expect(screen.queryByTestId("changes")).toBeNull()
+    // The picker rides along as the snapshot's header, so the way back is there.
+    fireEvent.click(screen.getByTestId("pick-uncommitted"))
+    expect(screen.getByTestId("changes")).toBeInTheDocument()
+  })
+
+  it("opens on a revealed scope and file, and follows each new reveal", () => {
+    const view = (scopeRequest: Parameters<typeof WorkspaceReview>[0]["scopeRequest"]) => (
+      <WorkspaceReview
+        rootPath="/repo"
+        sessionId="s1"
+        status={status(["a.ts", "b.ts"])}
+        actions={actions}
+        committing={false}
+        selected={{ path: "a.ts", staged: false }}
+        onSelect={jest.fn()}
+        layout="desktop"
+        scopeRequest={scopeRequest}
+      />
+    )
+    const { rerender } = render(
+      view({ id: "r1", choice: { scope: "lastTurn", runId: "run:7" }, relPath: "b.ts" })
+    )
+    expect(screen.getByTestId("snapshot-review")).toHaveAttribute("data-focus", "b.ts")
+    rerender(view({ id: "r2", choice: { scope: "staged" } }))
+    expect(screen.queryByTestId("snapshot-review")).toBeNull()
+    expect(screen.getByTestId("scope-picker")).toHaveAttribute(
+      "data-value",
+      JSON.stringify({ scope: "staged" })
+    )
+  })
+
+  it("lets a file reveal that also names a scope keep that scope", () => {
+    const view = (id: string | null) => (
+      <WorkspaceReview
+        rootPath="/repo"
+        sessionId="s1"
+        status={status(["a.ts"], ["s.ts"])}
+        actions={actions}
+        committing={false}
+        selected={{ path: "s.ts", staged: true }}
+        onSelect={jest.fn()}
+        layout="desktop"
+        focus={id ? { id, file: { path: "s.ts", staged: true } } : null}
+        scopeRequest={id ? { id, choice: { scope: "staged" }, relPath: "s.ts" } : null}
+      />
+    )
+    const { rerender } = render(view(null))
+    rerender(view("r1"))
+    expect(screen.getByTestId("scope-picker")).toHaveAttribute(
+      "data-value",
+      JSON.stringify({ scope: "staged" })
+    )
   })
 })

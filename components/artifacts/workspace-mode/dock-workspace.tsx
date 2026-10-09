@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
+import type { ReviewScopeChoice } from "@/types/review"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
@@ -40,6 +41,7 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { TaskResourcesPanel } from "./task-resources-panel"
 import { WorkspaceFilePreview } from "./workspace-file-preview"
 import { WorkspaceReview } from "./workspace-review"
+import { isSnapshotSelection } from "./snapshot-review"
 import { changedPathCount } from "@/lib/git/conversation-scope"
 
 interface DockWorkspaceProps {
@@ -210,6 +212,12 @@ function WorkspaceEditorBody({
     id: string
     file: { path: string; staged: boolean }
   } | null>(null)
+  /** The last review reveal that named a scope (WorkspaceReview `scopeRequest`). */
+  const [reviewScopeRequest, setReviewScopeRequest] = useState<{
+    id: string
+    choice: ReviewScopeChoice
+    relPath?: string
+  } | null>(null)
   // Any editor open has to land on a surface the user can see. Task scope
   // replaces the editor with the task ledger, so an open that only flipped the
   // Editor/Review switch — a chat file link, a terminal path, a search hit —
@@ -372,8 +380,12 @@ function WorkspaceEditorBody({
     if (request.kind === "review") {
       // The side that holds the change: a file that is only staged has an
       // empty working-tree diff, and asking for that one opened a blank pane.
-      // The review surface then opens straight into this file's diff.
-      const side = request.relPath ? resolveReviewSide(status, request.relPath) : null
+      // The review surface then opens straight into this file's diff. A turn,
+      // commit or branch reveal is not about the working tree, so it has no
+      // side; the snapshot review opens the file itself.
+      const snapshotReveal = request.scope ? isSnapshotSelection(request.scope) : false
+      const side =
+        request.relPath && !snapshotReveal ? resolveReviewSide(status, request.relPath) : null
       if (side) selectFile(side.path, side.staged)
       // Always target the review surface. `visibleSurface` below falls back to
       // the file surface until git status hydrates, then flips to review once
@@ -384,6 +396,13 @@ function WorkspaceEditorBody({
       queueMicrotask(() => {
         if (processedRequest.current === request.id) {
           if (side) setReviewFocus({ id: request.id, file: side })
+          if (request.scope) {
+            setReviewScopeRequest({
+              id: request.id,
+              choice: request.scope,
+              ...(request.relPath ? { relPath: request.relPath } : {}),
+            })
+          }
           setSurface("review")
           // The review surface lives under workspace scope; left on the task
           // ledger the reveal would select a file in a pane nobody can see.
@@ -734,6 +753,7 @@ function WorkspaceEditorBody({
                 onSendToChat={sendDiffToChat}
                 onOpenInEditor={openReviewFileInEditor}
                 focus={reviewFocus}
+                scopeRequest={reviewScopeRequest}
               />
             </div>
           ) : null}

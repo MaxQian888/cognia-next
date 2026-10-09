@@ -80,7 +80,6 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
-import { WorkspaceChangesCard } from "./workspace-changes-card"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import { useCapability } from "@/hooks/use-host-profile"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
@@ -1160,9 +1159,6 @@ export function ChatPane({
                   <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
                 </ChatColumn>
               )}
-              <ChatColumn>
-                <WorkspaceChangesCard session={activeSession} />
-              </ChatColumn>
               {supportPanel}
               {runStatusEl}
               {boundId ? (

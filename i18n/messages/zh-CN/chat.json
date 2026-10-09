@@ -3050,5 +3050,28 @@
     "loading": "正在加载预览",
     "open": "打开",
     "unavailable": "此页面没有可用的预览。"
+  },
+  "turnFold": {
+    "workedFor": "已工作 {duration}",
+    "worked": "共 {count} 个步骤",
+    "expand": "展开此回答的过程：{label}",
+    "collapse": "收起此回答的过程：{label}",
+    "failed": "{count} 个失败"
+  },
+  "turnChanges": {
+    "edited": "已修改 {count} 个文件",
+    "reverted": "已撤销 {count} 个文件的修改",
+    "undo": "撤销",
+    "view": "查看更改",
+    "showAll": "再显示 {count} 个文件",
+    "truncated": "仅记录了这一轮修改的前若干个文件。",
+    "undoConfirmTitle": "撤销这一轮的修改？",
+    "undoConfirmDescription": "这会撤销这一轮对 {count} 个文件所做的修改。之后对相同行的编辑会保留；如有冲突，不会覆盖任何内容并会报告冲突。",
+    "undoConfirm": "撤销修改",
+    "cancel": "取消",
+    "undoSuccess": "已撤销这一轮对 {count} 个文件的修改",
+    "undoConflict": "无法干净地撤销：{count} 个文件存在后续编辑冲突",
+    "undoFailed": "无法撤销这一轮：{error}",
+    "undoNotApplied": "没有可撤销的内容：这一轮的改动不在工作区中。"
   }
 }

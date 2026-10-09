@@ -123,6 +123,29 @@ describe("resolveMessageDisplayOptions", () => {
     ).toMatchObject({ preset: "balanced", agentFlowMode: "detailed" })
   })
 
+  describe("foldCompletedTurns", () => {
+    it("folds in the reading presets and never in the inspector", () => {
+      expect(resolveMessageDisplayOptions({ preset: "focused" }).foldCompletedTurns).toBe(true)
+      expect(resolveMessageDisplayOptions({ preset: "balanced" }).foldCompletedTurns).toBe(true)
+      expect(resolveMessageDisplayOptions({ preset: "inspector" }).foldCompletedTurns).toBe(false)
+    })
+
+    it("honours an explicit override and ignores a non-boolean one", () => {
+      expect(
+        resolveMessageDisplayOptions({
+          preset: "balanced",
+          overrides: { foldCompletedTurns: false },
+        }).foldCompletedTurns
+      ).toBe(false)
+      expect(
+        resolveMessageDisplayOptions({
+          preset: "inspector",
+          overrides: { foldCompletedTurns: "yes" },
+        } as never).foldCompletedTurns
+      ).toBe(false)
+    })
+  })
+
   describe("markdown / bodyFont knobs (ADR-0127)", () => {
     it("every preset resolves to the pre-ADR renderer behaviour by default", () => {
       for (const preset of ["focused", "balanced", "inspector"] as const) {

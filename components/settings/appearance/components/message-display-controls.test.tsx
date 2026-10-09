@@ -86,6 +86,26 @@ describe("MessageDisplayControls", () => {
     })
   })
 
+  it("shows the preset's turn folding and emits an explicit override", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <MessageDisplayControls value={{ preset: "balanced" }} onChange={onChange} />
+    )
+    const fold = document.getElementById("message-display-fold-completed-turns")!
+    expect(fold).toHaveAttribute("data-state", "checked")
+    fireEvent.click(fold)
+    expect(onChange).toHaveBeenCalledWith({
+      preset: "balanced",
+      overrides: { foldCompletedTurns: false },
+    })
+
+    rerender(<MessageDisplayControls value={{ preset: "inspector" }} onChange={onChange} />)
+    expect(document.getElementById("message-display-fold-completed-turns")).toHaveAttribute(
+      "data-state",
+      "unchecked"
+    )
+  })
+
   it("emits action, part, rich-control, motion, metadata, inherit, and reset changes", () => {
     const onChange = jest.fn()
     render(

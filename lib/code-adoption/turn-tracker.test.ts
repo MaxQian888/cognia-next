@@ -1,4 +1,8 @@
-jest.mock("@/lib/task-workspace/client", () => ({ settleTaskWorkspaceTurn: jest.fn() }))
+jest.mock("@/lib/task-workspace/client", () => ({
+  settleTaskWorkspaceTurn: jest.fn(),
+  turnRecordId: (sessionId: string, runId: number) => `${sessionId}:${runId}:epoch`,
+}))
+jest.mock("@/lib/db/messages", () => ({ listRecentMessages: jest.fn() }))
 jest.mock("./client", () => ({
   endCodeAdoptionTurn: jest.fn(),
   consumeCodeAdoptionTrackingAttempt: jest.fn(),
@@ -7,19 +11,32 @@ jest.mock("./persist", () => ({
   persistCodeAdoptionTurn: jest.fn(),
   pruneCodeAdoptionTurns: jest.fn(),
 }))
-jest.mock("@/stores/chat/chat-store", () => ({ useChatStore: { subscribe: jest.fn() } }))
+const mockChatState: {
+  activeSessionId: string | null
+  messages: unknown[]
+  sessions: Record<string, { messages?: unknown[] }>
+} = {
+  activeSessionId: null,
+  messages: [],
+  sessions: {},
+}
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { subscribe: jest.fn(), getState: () => mockChatState },
+}))
 jest.mock("@/stores/task-workspace-store", () => ({
   useTaskWorkspaceStore: {
     getState: () => ({ activeBySession: { s1: { workspaceRoot: "/repo" } } }),
   },
 }))
 
+import { listRecentMessages } from "@/lib/db/messages"
 import { settleTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 
 import { consumeCodeAdoptionTrackingAttempt, endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
 import {
+  closingAssistantMessageId,
   isSettleEdge,
   markTaskWorkspaceTurnCancelled,
   markTaskWorkspaceTurnUnowned,
@@ -32,12 +49,41 @@ const mockEnd = endCodeAdoptionTurn as jest.Mock
 const mockAttempt = consumeCodeAdoptionTrackingAttempt as jest.Mock
 const mockPersist = persistCodeAdoptionTurn as jest.Mock
 const mockPrune = pruneCodeAdoptionTurns as jest.Mock
+const mockListRecent = listRecentMessages as jest.Mock
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockAttempt.mockReturnValue(undefined)
+  mockListRecent.mockResolvedValue([])
+  mockChatState.activeSessionId = null
+  mockChatState.messages = []
+  mockChatState.sessions = {}
+})
+
+describe("closingAssistantMessageId", () => {
+  it("returns the last assistant message after the last user message", () => {
+    expect(
+      closingAssistantMessageId([
+        { id: "u1", role: "user" },
+        { id: "a1", role: "assistant" },
+        { id: "u2", role: "user" },
+        { id: "a2", role: "assistant" },
+        { id: "a3", role: "assistant" },
+      ])
+    ).toBe("a3")
+  })
+
+  it("returns undefined when the turn produced no assistant message", () => {
+    expect(
+      closingAssistantMessageId([
+        { id: "a1", role: "assistant" },
+        { id: "u1", role: "user" },
+      ])
+    ).toBeUndefined()
+    expect(closingAssistantMessageId([])).toBeUndefined()
+  })
 })
 
 describe("isSettleEdge", () => {
@@ -75,6 +121,10 @@ describe("startCodeAdoptionTracker", () => {
 
   it("ends and persists on a settle edge", async () => {
     const row = { id: "s1:3" }
+    mockListRecent.mockResolvedValue([
+      { id: "u", role: "user" },
+      { id: "a-closing", role: "assistant" },
+    ])
     mockEnd.mockResolvedValue(row)
     const { fn } = wire()
     fn(
@@ -85,9 +135,68 @@ describe("startCodeAdoptionTracker", () => {
     expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 3, "ready")
     expect(mockEnd).toHaveBeenCalledWith("s1:3")
     expect(mockPersist).toHaveBeenCalledWith(
-      expect.objectContaining({ id: row.id, measurement: "legacyFingerprint" })
+      expect.objectContaining({
+        id: "s1:3:epoch",
+        measurement: "legacyFingerprint",
+        assistantMessageId: "a-closing",
+      })
     )
     expect(mockPrune).toHaveBeenCalled()
+  })
+
+  it("reads the closing message from the live transcript when the session is on screen", async () => {
+    mockEnd.mockResolvedValue({ id: "s1:2" })
+    mockChatState.activeSessionId = "s1"
+    mockChatState.messages = [
+      { id: "u", role: "user" },
+      { id: "a-live", role: "assistant" },
+    ]
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 2 } } },
+      { sessions: { s1: { status: "streaming", runId: 2 } } }
+    )
+    await flush()
+    expect(mockListRecent).not.toHaveBeenCalled()
+    expect(mockPersist).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1:2:epoch", assistantMessageId: "a-live" })
+    )
+  })
+
+  it("prefers a background session's in-memory slice over the persisted tail", async () => {
+    mockEnd.mockResolvedValue({ id: "s1:8" })
+    mockChatState.sessions = {
+      s1: {
+        messages: [
+          { id: "u", role: "user" },
+          { id: "a-slice", role: "assistant" },
+        ],
+      },
+    }
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 8 } } },
+      { sessions: { s1: { status: "streaming", runId: 8 } } }
+    )
+    await flush()
+    expect(mockListRecent).not.toHaveBeenCalled()
+    expect(mockPersist).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantMessageId: "a-slice" })
+    )
+  })
+
+  it("still persists the record when the closing message cannot be read", async () => {
+    mockEnd.mockResolvedValue({ id: "s1:6" })
+    mockListRecent.mockRejectedValue(new Error("db closed"))
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 6 } } },
+      { sessions: { s1: { status: "streaming", runId: 6 } } }
+    )
+    await flush()
+    const persisted = mockPersist.mock.calls[0][0]
+    expect(persisted.id).toBe("s1:6:epoch")
+    expect(persisted).not.toHaveProperty("assistantMessageId")
   })
 
   it("does nothing without a settle edge", async () => {
@@ -291,7 +400,7 @@ describe("startCodeAdoptionTracker", () => {
     await flush()
     expect(mockPersist).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "s1:3",
+        id: "s1:3:epoch",
         workspaceRoot: "/repo",
         totalFiles: 1,
         totalAdded: 4,
@@ -324,7 +433,7 @@ describe("startCodeAdoptionTracker", () => {
     await flush()
     expect(mockPersist).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "s1:4",
+        id: "s1:4:epoch",
         trackingState: "unavailable",
         trackingReason: "concurrent",
       })

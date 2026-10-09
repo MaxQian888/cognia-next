@@ -37,12 +37,18 @@ export type CodeAdoptionState =
 
 /** One turn's write-attribution record. */
 export interface CodeAdoptionTurnRow {
-  /** `"${sessionId}:${runId}"` — Dexie primary key. */
+  /** Dexie primary key: `turnRecordId(sessionId, runId)`, unique across page loads. */
   id: string
   runId: number
   sessionId: string
   /** Durable Task Workspace run correlated with this chat turn, when present. */
   taskWorkspaceRunId?: string
+  /**
+   * The assistant message that closed this turn, stamped at settle. The chat
+   * renders the turn's change card under it. TS-only: the Rust DTO never
+   * carries it.
+   */
+  assistantMessageId?: string
   /** Canonicalized workspace root (resolved cwd). */
   workspaceRoot: string
   /** Runtime attribution, for example `"in-app"` or `"external"`. */

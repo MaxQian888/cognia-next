@@ -687,6 +687,10 @@
         "solid": "Solid",
         "subtle": "Subtle"
       }
+    },
+    "foldCompletedTurns": {
+      "label": "Fold finished turns",
+      "hint": "When a reply finishes, fold its reasoning and tool calls into one \"Worked for …\" row and keep the conclusion visible."
     }
   },
   "nav": {

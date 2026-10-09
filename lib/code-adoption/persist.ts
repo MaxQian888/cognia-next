@@ -40,6 +40,23 @@ export async function listCodeAdoptionTurnsBySession(
   return getDb().codeAdoptionTurns.where("sessionId").equals(sessionId).sortBy("ts")
 }
 
+/**
+ * The turn record whose closing message is `messageId` (the row the turn
+ * tracker stamps `assistantMessageId` on), or `undefined`. When a message was
+ * stamped twice (a regenerate re-settling the same row) the newest wins.
+ */
+export async function getCodeAdoptionTurnForMessage(
+  sessionId: string,
+  messageId: string
+): Promise<CodeAdoptionTurnRow | undefined> {
+  const rows = await getDb()
+    .codeAdoptionTurns.where("sessionId")
+    .equals(sessionId)
+    .filter((row) => row.assistantMessageId === messageId)
+    .sortBy("ts")
+  return rows.at(-1)
+}
+
 /** Newest-first list across all sessions, capped. */
 export async function listRecentCodeAdoptionTurns(limit = 50): Promise<CodeAdoptionTurnRow[]> {
   return getDb().codeAdoptionTurns.orderBy("ts").reverse().limit(limit).toArray()

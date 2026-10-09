@@ -10,7 +10,10 @@
  * idle→streaming edge (`chat-store.ts:statusPatch`).
  */
 
-import { settleTaskWorkspaceTurn } from "@/lib/task-workspace/client"
+import type { UIMessage } from "ai"
+
+import { listRecentMessages } from "@/lib/db/messages"
+import { settleTaskWorkspaceTurn, turnRecordId } from "@/lib/task-workspace/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import type { ChatStatus } from "@/stores/chat/chat-store"
@@ -156,6 +159,35 @@ export function isSettleEdge(before: ChatStatus | undefined, now: ChatStatus): b
   return now === "idle" || now === "error"
 }
 
+/**
+ * The assistant message that closed the turn: the last assistant row after the
+ * last user row, or `undefined` when the turn produced none.
+ */
+export function closingAssistantMessageId(
+  messages: ReadonlyArray<Pick<UIMessage, "id" | "role">>
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "assistant") return message.id
+    if (message.role === "user") return undefined
+  }
+  return undefined
+}
+
+/**
+ * Read the settled turn's closing message from the freshest copy there is: the
+ * live transcript when the conversation is on screen, its in-memory slice when
+ * it ran in the background (in both cases its last write may still be
+ * queued), and only then the persisted tail.
+ */
+async function resolveClosingMessageId(sessionId: string): Promise<string | undefined> {
+  const state = useChatStore.getState()
+  if (state.activeSessionId === sessionId) return closingAssistantMessageId(state.messages)
+  const slice = state.sessions[sessionId]?.messages
+  if (slice && slice.length > 0) return closingAssistantMessageId(slice)
+  return closingAssistantMessageId(await listRecentMessages(sessionId, 40))
+}
+
 /** Best-effort: reconcile a settled turn, persist its record, and bound growth. */
 async function settleTurn(sessionId: string, runId: number, status: ChatStatus): Promise<void> {
   const turnKey = `${sessionId}:${runId}`
@@ -181,7 +213,13 @@ async function settleTurn(sessionId: string, runId: number, status: ChatStatus):
     attempt
   )
   if (!row) return
-  await persistCodeAdoptionTurn(row)
+  // A failed read only costs the turn its change card, never its record.
+  const assistantMessageId = await resolveClosingMessageId(sessionId).catch(() => undefined)
+  await persistCodeAdoptionTurn({
+    ...row,
+    id: turnRecordId(sessionId, runId),
+    ...(assistantMessageId ? { assistantMessageId } : {}),
+  })
   await pruneCodeAdoptionTurns()
 }
 

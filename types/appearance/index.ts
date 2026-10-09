@@ -568,6 +568,11 @@ export interface MessageDisplayOverrides {
   reasoning?: MessagePartVisibility
   tools?: MessagePartVisibility
   sources?: MessagePartVisibility
+  /**
+   * Fold a finished turn's process (reasoning, tool calls, narration) into one
+   * "Worked for …" row, leaving the conclusion and deliverables on screen.
+   */
+  foldCompletedTurns?: boolean
   richControls?: MessageRichControls
   motion?: MessageMotion
   markdown?: Partial<MessageMarkdownOptions>

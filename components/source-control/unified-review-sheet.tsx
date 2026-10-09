@@ -24,13 +24,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -39,6 +32,8 @@ import {
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { createGitHubPullRequestProvider } from "@/lib/review/github-runtime"
+import { refsForSelection, selectionFromScope } from "@/lib/review/scope"
+import { useChatStore } from "@/stores/chat/chat-store"
 import {
   isUniqueHunk,
   reviewFileKey,
@@ -47,8 +42,9 @@ import {
   type ReviewWorkspace,
 } from "./use-review-workspace"
 import type { ReviewScopeFileRef } from "@/lib/review/scope"
-import type { PullRequestProvider, ReviewDeliveryLeg, ReviewScope } from "@/types/review"
+import type { PullRequestProvider, ReviewDeliveryLeg } from "@/types/review"
 import { CommitBox } from "./commit-box"
+import { ReviewScopePicker } from "./review-scope-picker"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 type CommitActions = Pick<UseGitActionsResult, "commit" | "push" | "sync" | "stage">
@@ -94,6 +90,10 @@ export function UnifiedReviewSheet({
   const [draftPr, setDraftPr] = useState(true)
 
   const allRoots = repositoryRoots.length > 0 ? repositoryRoots : [rootDir]
+  // Turns are the focused conversation's; the picker sets the primary root's
+  // refs, and any other root keeps its own inputs below.
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const scopeValue = selectionFromScope(workspace.scope, workspace.rootState(rootDir).refs)
   const needsRefs = workspace.scope === "commit" || workspace.scope === "branch"
 
   const toggleExpanded = (ref: ReviewScopeFileRef) => {
@@ -130,21 +130,20 @@ export function UnifiedReviewSheet({
 
             <section className="space-y-3 rounded-md border p-3">
               <Label className="text-xs">{t("scope")}</Label>
-              <Select
-                value={workspace.scope}
-                onValueChange={(value) => workspace.setScope(value as ReviewScope)}
-              >
-                <SelectTrigger aria-label={t("scope")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(["lastTurn", "uncommitted", "commit", "branch"] as const).map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {t(`scopes.${value}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div>
+                <ReviewScopePicker
+                  value={scopeValue}
+                  onChange={(next) => {
+                    // The sheet has no conversation filter; the picker only
+                    // offers one when asked.
+                    if (next.scope === "conversation") return
+                    workspace.setScope(next.scope)
+                    workspace.setRootRefs(rootDir, refsForSelection(next))
+                  }}
+                  rootDir={rootDir}
+                  sessionId={activeSessionId}
+                />
+              </div>
 
               <div className="space-y-2">
                 <Label className="text-xs">{t("roots")}</Label>

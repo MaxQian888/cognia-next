@@ -4450,23 +4450,6 @@
     "words": "words",
     "workspace": {
       "allWorkspace": "All workspace",
-      "card": {
-        "cancel": "Cancel",
-        "discardFile": "Discard this file's changes",
-        "discardFileConfirm": "Discard file changes",
-        "discardFileConfirmDescription": "This reverts {path} to its last committed state and cannot be undone. Other changes are left untouched.",
-        "discardFileConfirmTitle": "Discard changes to this file?",
-        "discardFileFailed": "Could not discard {path}: {error}",
-        "discardFileSuccess": "Reverted {path}",
-        "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
-        "review": "Review",
-        "undo": "Undo",
-        "undoConfirm": "Undo all changes",
-        "undoConfirmDescription": "This discards every staged, unstaged, and untracked change currently in this repository, including changes you made manually. This cannot be undone.",
-        "undoConfirmTitle": "Undo all repository changes?",
-        "undoFailed": "Could not undo workspace changes: {error}",
-        "undoSuccess": "Workspace changes undone"
-      },
       "close": "Close workspace",
       "currentTask": "Current task",
       "filePreview": {
@@ -4499,18 +4482,33 @@
       "reviewNextFile": "Next file (Alt+↓)",
       "reviewPrevFile": "Previous file (Alt+↑)",
       "reviewScope": {
-        "all": "All",
-        "allLabel": "All changes in the working tree ({count})",
         "baseline": "Files this conversation edited. Diffs still compare with the last commit, so they include any other edits to the same files.",
         "commitIncludesHidden": "{count, plural, one {Commit also includes # staged file not listed here.} other {Commit also includes # staged files not listed here.}}",
-        "conversation": "This chat",
-        "conversationLabel": "Files this conversation changed ({count})",
         "empty": "This conversation hasn't changed any files in this repository yet.",
-        "label": "Which changes to list",
         "loading": "Looking up what this conversation changed…"
       },
       "reviewWithCount": "Review, {count, plural, one {# changed file} other {# changed files}}",
       "scopeLabel": "Workspace scope",
+      "snapshot": {
+        "diffFailed": "Could not load this diff: {error}",
+        "empty": "No file changes in this scope.",
+        "emptyWorkingTree": {
+          "staged": "Nothing is staged.",
+          "unstaged": "No unstaged changes."
+        },
+        "listFailed": "Could not list the changes: {error}",
+        "loading": "Loading changes…",
+        "note": {
+          "branch": "Everything this branch changed since it split from the base, read-only.",
+          "commit": "The changes in this commit against its parent, read-only.",
+          "lastTurn": "Exactly what this turn changed, read-only. Later edits to the same files are not included."
+        },
+        "unavailable": {
+          "missing-commit": "Pick a commit to review.",
+          "missing-refs": "Pick a branch to compare against.",
+          "missing-run": "This turn has no recorded changes to show."
+        }
+      },
       "surfaceLabel": "Workspace view",
       "taskResources": {
         "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
@@ -9761,6 +9759,29 @@
         "slot": "waiting for {holder} to finish in this working copy",
         "slotNamed": "waiting for {holder} “{label}” to finish in this working copy"
       }
+    },
+    "turnChanges": {
+      "cancel": "Cancel",
+      "edited": "Edited {count, plural, one {# file} other {# files}}",
+      "reverted": "Reverted {count, plural, one {# file} other {# files}}",
+      "showAll": "Show {count, plural, one {# more file} other {# more files}}",
+      "truncated": "Only the first files this turn changed were recorded.",
+      "undo": "Undo",
+      "undoConfirm": "Undo changes",
+      "undoConfirmDescription": "This reverts what this turn changed in {count, plural, one {# file} other {# files}}. Later edits to the same lines are kept; if they collide, nothing is overwritten and the conflict is reported.",
+      "undoConfirmTitle": "Undo this turn's changes?",
+      "undoConflict": "Could not undo cleanly: {count, plural, one {# file has} other {# files have}} later edits in the way",
+      "undoFailed": "Could not undo this turn: {error}",
+      "undoNotApplied": "There is nothing to undo: this turn's changes are not in the working tree.",
+      "undoSuccess": "Reverted this turn's changes to {count, plural, one {# file} other {# files}}",
+      "view": "View changes"
+    },
+    "turnFold": {
+      "collapse": "Hide the work behind this answer: {label}",
+      "expand": "Show the work behind this answer: {label}",
+      "failed": "{count, plural, one {# failed} other {# failed}}",
+      "worked": "Worked through {count, plural, one {# step} other {# steps}}",
+      "workedFor": "Worked for {duration}"
     },
     "twinBadge": {
       "fewShotOff": "Style few-shot off",
@@ -40028,6 +40049,10 @@
           "sans": "Sans-serif",
           "serif": "Serif"
         },
+        "foldCompletedTurns": {
+          "hint": "When a reply finishes, fold its reasoning and tool calls into one \"Worked for …\" row and keep the conclusion visible.",
+          "label": "Fold finished turns"
+        },
         "layout": {
           "bubbles": "Bubbles",
           "cards": "Cards",
@@ -56222,11 +56247,28 @@
     "retry": "Retry",
     "roots": "Repository roots",
     "scope": "Review scope",
-    "scopes": {
-      "branch": "Branch comparison",
-      "commit": "Commit",
-      "lastTurn": "Last agent turn",
-      "uncommitted": "Uncommitted changes"
+    "scopePicker": {
+      "aTurn": "A turn",
+      "branch": "Branch",
+      "branchHint": "Compare this branch against",
+      "branchValue": "Branch vs {base}",
+      "commit": "Committed",
+      "commitValue": "Commit {sha}",
+      "conversation": "This conversation",
+      "earlierTurns": "Pick a turn",
+      "label": "Diff scope: {scope}",
+      "lastTurn": "Last turn",
+      "loading": "Loading…",
+      "noBranches": "No other branches",
+      "noCommits": "No commits yet",
+      "noTurns": "None yet",
+      "refsFailed": "Could not read the repository",
+      "staged": "Staged",
+      "turn": "Turn {ordinal}",
+      "turnStats": "{files, plural, one {# file} other {# files}}",
+      "turnWithPrompt": "Turn {ordinal} · {prompt}",
+      "uncommitted": "Uncommitted",
+      "unstaged": "Unstaged"
     },
     "staleComments": "Stale hunk comments omitted: {count}.",
     "success": "GitHub operation completed.",

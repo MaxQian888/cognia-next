@@ -44,7 +44,6 @@ import {
   type GitDefaultBranch,
   type GitDiff,
   type GitFileChange,
-  type GitFileDiffStat,
   type GitIdentity,
   type GitRef,
   type GitRemote,
@@ -257,11 +256,6 @@ export async function gitRepoState(repoPath: string): Promise<GitRepoState> {
 export async function gitStatus(repoPath: string): Promise<GitStatus> {
   if (!hasGitBridge()) return EMPTY_STATUS
   return transport.call<GitStatus>("git_status", { repoPath })
-}
-
-export async function gitDiffStat(repoPath: string): Promise<GitFileDiffStat[]> {
-  if (!hasGitBridge()) return []
-  return transport.call<GitFileDiffStat[]>("git_diff_stat", { repoPath })
 }
 
 export async function gitDiffFile(

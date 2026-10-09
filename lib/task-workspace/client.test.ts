@@ -80,6 +80,7 @@ import {
   pinManagedWorkspace,
   resolveTaskWorkspaceConflict,
   runIdForTurn,
+  turnRecordId,
   settleTaskWorkspaceTurn,
   restoreTaskWorkspaceSnapshot,
   restoreManagedWorkspace,
@@ -566,6 +567,11 @@ describe("task workspace client", () => {
     expect(reloaded.runIdForTurn("session", 0)).not.toBe(first)
     // Same load, same answer: anything deriving it twice still agrees.
     expect(runIdForTurn("session", 0)).toBe(first)
+  })
+
+  it("keys a turn's local record by its run id without the prefix", () => {
+    expect(turnRecordId("session", 3)).toBe(runIdForTurn("session", 3).slice("run:".length))
+    expect(turnRecordId("session", 3)).toMatch(/^session:3:[a-z0-9]+$/)
   })
 
   it("activates the isolated execution root and starts watching", async () => {

@@ -364,6 +364,12 @@ jest.mock("@cognia/logging", () => {
 let mockFlowMode = "standard"
 let mockToolsVisibility = "auto"
 let mockActions: "hover" | "core" | "all" = "all"
+let mockFoldTurns = false
+jest.mock("@/components/chat/turn-changes-card", () => ({
+  TurnChangesCard: ({ sessionId, messageId }: { sessionId: string; messageId: string }) => (
+    <div data-testid="turn-changes-card" data-session={sessionId} data-message={messageId} />
+  ),
+}))
 // Mutable so a test can move a markdown knob off its default; every other
 // field stays at the resolved default the presets ship.
 const mockMarkdown = {
@@ -404,6 +410,7 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
     reasoning: "auto",
     tools: mockToolsVisibility,
     sources: "collapsed",
+    foldCompletedTurns: mockFoldTurns,
     richControls: "hover",
     motion: "off",
     markdown: mockMarkdown,
@@ -2454,5 +2461,124 @@ describe("a /video job block", () => {
     } as never
     render(<MessageRenderer message={message} />)
     expect(screen.getByTestId("video-job-view")).toHaveTextContent("vjob_1")
+  })
+})
+
+describe("finished-turn fold", () => {
+  const tool = (id: string, state = "output-available") =>
+    ({
+      type: "tool-SomeTool",
+      toolCallId: id,
+      toolName: "SomeTool",
+      state,
+      input: {},
+      output: "done",
+    }) as unknown as UIMessage["parts"][number]
+  const finished = (parts: UIMessage["parts"]): UIMessage =>
+    ({
+      id: "fold-1",
+      role: "assistant",
+      parts,
+      metadata: { run: { durationMs: 788_000 } },
+    }) as UIMessage
+
+  beforeEach(() => {
+    mockFoldTurns = true
+  })
+  afterEach(() => {
+    mockFoldTurns = false
+  })
+
+  it("folds the process of a finished turn and keeps the conclusion visible", () => {
+    render(
+      <MessageRenderer
+        message={finished([
+          { type: "text", text: "Looking around." },
+          tool("c1"),
+          { type: "text", text: "The answer." },
+        ])}
+      />
+    )
+    expect(screen.getByTestId("turn-process-fold-label")).toHaveTextContent("workedFor")
+    expect(screen.getByText("The answer.")).toBeInTheDocument()
+    expect(screen.queryByText("Looking around.")).toBeNull()
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("turn-process-fold-toggle"))
+    expect(screen.getByText("Looking around.")).toBeInTheDocument()
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeTruthy()
+  })
+
+  it("does not fold while the turn is still streaming", () => {
+    render(
+      <MessageRenderer
+        isStreaming
+        message={finished([tool("c1"), { type: "text", text: "The answer." }])}
+      />
+    )
+    expect(screen.queryByTestId("turn-process-fold")).toBeNull()
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeTruthy()
+  })
+
+  it("does not fold a turn with a tool still waiting on approval", () => {
+    render(
+      <MessageRenderer
+        message={finished([tool("c1", "approval-requested"), { type: "text", text: "x" }])}
+      />
+    )
+    expect(screen.queryByTestId("turn-process-fold")).toBeNull()
+  })
+
+  it("leaves turns unfolded when the display option is off", () => {
+    mockFoldTurns = false
+    render(<MessageRenderer message={finished([tool("c1"), { type: "text", text: "x" }])} />)
+    expect(screen.queryByTestId("turn-process-fold")).toBeNull()
+  })
+
+  it("never folds a user message", () => {
+    render(
+      <MessageRenderer
+        message={{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] } as UIMessage}
+      />
+    )
+    expect(screen.queryByTestId("turn-process-fold")).toBeNull()
+  })
+})
+
+describe("turn changes card", () => {
+  const reply = (sessionId = "s-cards"): UIMessage =>
+    ({
+      id: "a-cards",
+      role: "assistant",
+      parts: [{ type: "text", text: "Done." }],
+      metadata: { sessionId },
+    }) as UIMessage
+
+  it("mounts under a finished assistant turn, keyed by session and message", () => {
+    render(<MessageRenderer message={reply()} />)
+    const card = screen.getByTestId("turn-changes-card")
+    expect(card).toHaveAttribute("data-session", "s-cards")
+    expect(card).toHaveAttribute("data-message", "a-cards")
+  })
+
+  it("waits for the turn to finish", () => {
+    render(<MessageRenderer isStreaming message={reply()} />)
+    expect(screen.queryByTestId("turn-changes-card")).toBeNull()
+  })
+
+  it("never mounts under a user message", () => {
+    render(
+      <MessageRenderer
+        message={
+          {
+            id: "u-cards",
+            role: "user",
+            parts: [{ type: "text", text: "hi" }],
+            metadata: { sessionId: "s-cards" },
+          } as UIMessage
+        }
+      />
+    )
+    expect(screen.queryByTestId("turn-changes-card")).toBeNull()
   })
 })

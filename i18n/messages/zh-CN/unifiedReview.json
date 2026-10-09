@@ -50,12 +50,6 @@
   "retry": "重试",
   "roots": "仓库根目录",
   "scope": "审查范围",
-  "scopes": {
-    "branch": "分支对比",
-    "commit": "指定提交",
-    "lastTurn": "最后一轮 Agent",
-    "uncommitted": "未提交改动"
-  },
   "staleComments": "已省略 {count} 条失效的 hunk 评论。",
   "success": "GitHub 操作已完成。",
   "summary": "审查摘要",
@@ -66,5 +60,28 @@
     "missing-run": "{root} 没有可供评审的智能体运行——只有上一轮实际写入的那个仓库才有。",
     "missing-commit": "{root} 需要填写自己的提交 SHA。",
     "missing-refs": "{root} 需要填写自己的基准与目标引用。"
+  },
+  "scopePicker": {
+    "label": "差异范围：{scope}",
+    "lastTurn": "最近一轮",
+    "aTurn": "某一轮",
+    "turn": "第 {ordinal} 轮",
+    "turnWithPrompt": "第 {ordinal} 轮 · {prompt}",
+    "turnStats": "{files} 个文件",
+    "earlierTurns": "选择轮次",
+    "noTurns": "暂无",
+    "conversation": "本次对话",
+    "uncommitted": "未提交",
+    "unstaged": "未暂存",
+    "staged": "已暂存",
+    "commit": "已提交",
+    "commitValue": "提交 {sha}",
+    "branch": "分支",
+    "branchValue": "与 {base} 对比",
+    "branchHint": "将当前分支与以下分支对比",
+    "loading": "加载中…",
+    "refsFailed": "无法读取仓库",
+    "noCommits": "暂无提交",
+    "noBranches": "没有其他分支"
   }
 }

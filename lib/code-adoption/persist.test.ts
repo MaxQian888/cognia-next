@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db/schema"
 import {
   getCodeAdoptionTurn,
   getCodeAdoptionTurnByTaskWorkspaceRun,
+  getCodeAdoptionTurnForMessage,
   listCodeAdoptionTurnsInRange,
   listCodeAdoptionTurnsBySession,
   listRecentCodeAdoptionTurns,
@@ -91,4 +92,14 @@ it("returns every row in an explicit inclusive time window", async () => {
   await persistCodeAdoptionTurn(turn("s1", 2, 200))
   await persistCodeAdoptionTurn(turn("s1", 3, 300))
   expect((await listCodeAdoptionTurnsInRange(100, 200)).map((row) => row.ts)).toEqual([100, 200])
+})
+
+it("finds a session's turn by its closing message, newest first", async () => {
+  await persistCodeAdoptionTurn({ ...turn("s1", 1, 100), assistantMessageId: "m1" })
+  await persistCodeAdoptionTurn({ ...turn("s1", 2, 300), assistantMessageId: "m1" })
+  await persistCodeAdoptionTurn({ ...turn("s2", 1, 200), assistantMessageId: "m1" })
+  await persistCodeAdoptionTurn({ ...turn("s1", 3, 400), assistantMessageId: "m2" })
+  expect((await getCodeAdoptionTurnForMessage("s1", "m1"))?.id).toBe("s1:2")
+  expect((await getCodeAdoptionTurnForMessage("s2", "m1"))?.id).toBe("s2:1")
+  expect(await getCodeAdoptionTurnForMessage("s1", "missing")).toBeUndefined()
 })

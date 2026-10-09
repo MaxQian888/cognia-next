@@ -86,6 +86,19 @@ export function runIdForTurn(sessionId: string, runId: number): string {
   return safeId("run:", `${sessionId}:${runId}:${RUN_ID_EPOCH}`)
 }
 
+/**
+ * Durable key for one chat turn's local records (the `codeAdoptionTurns` row).
+ *
+ * The bare `${sessionId}:${runId}` key repeated across loads for the same
+ * reason the run id did, so a turn in a later load overwrote the record of the
+ * turn that had the same counter in an earlier one, and that turn's change card
+ * then showed another turn's files. This is the run id without its prefix, which
+ * is also what `getCodeAdoptionTurnByTaskWorkspaceRun` derives.
+ */
+export function turnRecordId(sessionId: string, runId: number): string {
+  return runIdForTurn(sessionId, runId).slice("run:".length)
+}
+
 export async function beginTaskWorkspaceTurn(
   input: BeginTaskWorkspaceTurn
 ): Promise<TaskRun | null> {

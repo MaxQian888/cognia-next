@@ -30,13 +30,6 @@ export interface GitStatus {
   isMerging: boolean
 }
 
-export interface GitFileDiffStat {
-  /** Final repo-relative path, forward slashes. */
-  path: string
-  insertions: number
-  deletions: number
-}
-
 export interface GitDiffLine {
   /** `"context"` | `"add"` | `"del"`. */
   kind: string

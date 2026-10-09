@@ -13,14 +13,20 @@ jest.mock("@/lib/git/commands", () => ({
   gitDiffRefsFile: (...args: unknown[]) => gitDiffRefsFileMock(...args),
 }))
 const getTaskPatchSetMock = jest.fn()
+const readTaskResourceDiffMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
   getTaskPatchSet: (...args: unknown[]) => getTaskPatchSetMock(...args),
+  readTaskResourceDiff: (...args: unknown[]) => readTaskResourceDiffMock(...args),
 }))
 
 import {
   listReviewScopeFiles,
+  loadReviewScopeDiff,
   loadReviewScopeFile,
   refsForRoot,
+  refsForSelection,
+  sameScopeChoice,
+  selectionFromScope,
   type ReviewScopeRequest,
   type ReviewScopedFile,
 } from "./scope"
@@ -53,6 +59,7 @@ beforeEach(() => {
   gitDiffCommitMock.mockReset().mockResolvedValue({ hunks: [] })
   gitDiffRefsFileMock.mockReset().mockResolvedValue({ hunks: [] })
   getTaskPatchSetMock.mockReset().mockResolvedValue(null)
+  readTaskResourceDiffMock.mockReset().mockResolvedValue("")
 })
 
 it("collects last-turn Task Workspace patches across selected roots", async () => {
@@ -334,5 +341,138 @@ describe("listing before loading", () => {
     })
     const files = await collectReviewScope({ scope: "uncommitted", repositoryRoots: ["/repo"] })
     expect(files[0].hunks).toHaveLength(1)
+  })
+})
+
+describe("staged and unstaged scopes", () => {
+  beforeEach(() => {
+    gitStatusMock.mockResolvedValue({
+      staged: [file("a.ts", true), file("both.ts", true)],
+      changes: [file("b.ts"), file("both.ts")],
+      merge: [{ ...file("conflict.ts"), group: "merge" }],
+    })
+  })
+
+  it("lists only the index side for staged", async () => {
+    const { files } = await listReviewScopeFiles({ scope: "staged", repositoryRoots: ["/r"] })
+    expect(files.map((f) => [f.path, f.staged])).toEqual([
+      ["a.ts", true],
+      ["both.ts", true],
+    ])
+    expect(files[0]).toMatchObject({ source: "staged", status: "modified" })
+  })
+
+  it("lists the working-tree side and merges for unstaged", async () => {
+    const { files } = await listReviewScopeFiles({ scope: "unstaged", repositoryRoots: ["/r"] })
+    expect(files.map((f) => f.path)).toEqual(["b.ts", "both.ts", "conflict.ts"])
+    expect(files.every((f) => !f.staged)).toBe(true)
+  })
+
+  it("loads a staged file's hunks from the index side", async () => {
+    const request = { scope: "staged" as const, repositoryRoots: ["/r"] }
+    const { files } = await listReviewScopeFiles(request)
+    await loadReviewScopeFile(request, files[0])
+    expect(gitDiffFileMock).toHaveBeenCalledWith("/r", "a.ts", true)
+  })
+})
+
+describe("loadReviewScopeDiff", () => {
+  it("parses a turn's diff text into hunks without full texts", async () => {
+    readTaskResourceDiffMock.mockResolvedValue(
+      [
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -1,2 +1,2 @@",
+        " keep",
+        "-old",
+        "+new",
+        "",
+      ].join("\n")
+    )
+    const diff = await loadReviewScopeDiff(
+      { scope: "lastTurn", repositoryRoots: ["/r"], defaults: { lastTurnRunId: "run:1" } },
+      { repositoryRoot: "/r", path: "src/x.ts", source: "lastTurn", reviewKey: "k" }
+    )
+    expect(readTaskResourceDiffMock).toHaveBeenCalledWith("run:1", "src/x.ts")
+    expect(diff).toMatchObject({ path: "src/x.ts", contentOmitted: true, isBinary: false })
+    expect(diff.hunks).toHaveLength(1)
+    expect(diff.hunks[0].lines.map((line) => line.kind)).toEqual(["context", "del", "add"])
+  })
+
+  it("refuses a turn diff without a run", async () => {
+    await expect(
+      loadReviewScopeDiff(
+        { scope: "lastTurn", repositoryRoots: ["/r"] },
+        { repositoryRoot: "/r", path: "x", source: "lastTurn", reviewKey: "k" }
+      )
+    ).rejects.toThrow(/requires a run/)
+  })
+
+  it("returns git's own diff for commit, branch and working-tree scopes", async () => {
+    gitDiffCommitMock.mockResolvedValue({ path: "c", hunks: [] })
+    gitDiffRefsFileMock.mockResolvedValue({ path: "b", hunks: [] })
+    gitDiffFileMock.mockResolvedValue({ path: "u", hunks: [] })
+    const base = { repositoryRoots: ["/r"] }
+    await expect(
+      loadReviewScopeDiff(
+        { ...base, scope: "commit", defaults: { commitSha: "abc" } },
+        { repositoryRoot: "/r", path: "c", source: "commit", reviewKey: "k" }
+      )
+    ).resolves.toEqual({ path: "c", hunks: [] })
+    expect(gitDiffCommitMock).toHaveBeenCalledWith("/r", "abc", "c")
+    await loadReviewScopeDiff(
+      { ...base, scope: "branch", defaults: { baseRef: "main", targetRef: "HEAD" } },
+      { repositoryRoot: "/r", path: "b", source: "branch", reviewKey: "k" }
+    )
+    expect(gitDiffRefsFileMock).toHaveBeenCalledWith("/r", "main", "HEAD", "b")
+    await loadReviewScopeDiff(
+      { ...base, scope: "unstaged" },
+      { repositoryRoot: "/r", path: "u", source: "unstaged", staged: false, reviewKey: "k" }
+    )
+    expect(gitDiffFileMock).toHaveBeenCalledWith("/r", "u", false)
+  })
+})
+
+describe("scope selections", () => {
+  it("maps each selection to the refs it needs", () => {
+    expect(refsForSelection({ scope: "lastTurn", runId: "r" })).toEqual({ lastTurnRunId: "r" })
+    expect(refsForSelection({ scope: "commit", commitSha: "s" })).toEqual({ commitSha: "s" })
+    expect(refsForSelection({ scope: "branch", baseRef: "main", targetRef: "HEAD" })).toEqual({
+      baseRef: "main",
+      targetRef: "HEAD",
+    })
+    expect(refsForSelection({ scope: "staged" })).toEqual({})
+  })
+
+  it("reads a scope and a root's refs back as a selection", () => {
+    expect(selectionFromScope("lastTurn", { lastTurnRunId: "r" })).toEqual({
+      scope: "lastTurn",
+      runId: "r",
+    })
+    expect(selectionFromScope("commit", {})).toEqual({ scope: "commit", commitSha: "" })
+    expect(selectionFromScope("branch", { baseRef: "main", targetRef: "HEAD" })).toEqual({
+      scope: "branch",
+      baseRef: "main",
+      targetRef: "HEAD",
+    })
+    expect(selectionFromScope("unstaged", { commitSha: "x" })).toEqual({ scope: "unstaged" })
+  })
+
+  it("compares choices by scope and ref", () => {
+    expect(sameScopeChoice({ scope: "staged" }, { scope: "staged" })).toBe(true)
+    expect(sameScopeChoice({ scope: "staged" }, { scope: "unstaged" })).toBe(false)
+    expect(
+      sameScopeChoice({ scope: "lastTurn", runId: "a" }, { scope: "lastTurn", runId: "b" })
+    ).toBe(false)
+    expect(
+      sameScopeChoice({ scope: "commit", commitSha: "a" }, { scope: "commit", commitSha: "a" })
+    ).toBe(true)
+    expect(
+      sameScopeChoice(
+        { scope: "branch", baseRef: "main", targetRef: "HEAD" },
+        { scope: "branch", baseRef: "dev", targetRef: "HEAD" }
+      )
+    ).toBe(false)
   })
 })

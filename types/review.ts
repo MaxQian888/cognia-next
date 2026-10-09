@@ -1,5 +1,27 @@
-/** Repository diff scopes supported by Cognia's unified review surface. */
-export type ReviewScope = "lastTurn" | "uncommitted" | "commit" | "branch"
+/**
+ * Repository diff scopes supported by Cognia's unified review surface.
+ *
+ * `uncommitted` is HEAD against the working tree, staged and unstaged
+ * together; `staged` and `unstaged` are its two halves. `lastTurn` is one chat
+ * turn's Task Workspace patch set, whichever turn the refs name.
+ */
+export type ReviewScope = "lastTurn" | "uncommitted" | "unstaged" | "staged" | "commit" | "branch"
+
+/** One concrete review target, with the ref it needs. */
+export type ReviewScopeSelection =
+  | { scope: "uncommitted" }
+  | { scope: "unstaged" }
+  | { scope: "staged" }
+  | { scope: "lastTurn"; runId: string }
+  | { scope: "commit"; commitSha: string }
+  | { scope: "branch"; baseRef: string; targetRef: string }
+
+/**
+ * What a scope picker can choose: a review target, or (on a surface bound to a
+ * conversation) the working tree narrowed to the paths that conversation
+ * changed. The narrowing is a filter over `uncommitted`, not a diff of its own.
+ */
+export type ReviewScopeChoice = ReviewScopeSelection | { scope: "conversation" }
 
 export interface ReviewCommentAnchor {
   repositoryRoot: string

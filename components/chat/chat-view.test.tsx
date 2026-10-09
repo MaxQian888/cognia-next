@@ -124,11 +124,6 @@ jest.mock("@/components/router-fusion/router-fusion-progress-card", () => ({
     <div data-testid="router-fusion-progress-card" data-session={sessionId ?? ""} />
   ),
 }))
-jest.mock("./workspace-changes-card", () => ({
-  WorkspaceChangesCard: ({ session }: { session: { id: string } }) => (
-    <div data-testid="workspace-changes-card" data-session={session.id} />
-  ),
-}))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: ({
     sessionId,
@@ -852,11 +847,6 @@ describe("ChatPane", () => {
   it("mounts the Router + Fusion progress card above the composer for this pane's session", () => {
     render(<ChatPane {...makeProps()} />)
     expect(screen.getByTestId("router-fusion-progress-card")).toHaveAttribute("data-session", "s1")
-  })
-
-  it("mounts the workspace changes card for this pane's session", () => {
-    render(<ChatPane {...makeProps()} />)
-    expect(screen.getByTestId("workspace-changes-card")).toHaveAttribute("data-session", "s1")
   })
 
   it("passes stable onCopy reference across re-renders", () => {

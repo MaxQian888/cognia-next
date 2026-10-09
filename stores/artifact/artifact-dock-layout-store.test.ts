@@ -368,6 +368,27 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.revealIntent).toBeNull()
     })
 
+    it("carries a review scope through to the reveal request and the retained context", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() =>
+        result.current.revealWorkspaceReview({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+          scope: { scope: "lastTurn", runId: "run:s:1" },
+        })
+      )
+      expect(result.current.workspaceRevealRequest).toMatchObject({
+        kind: "review",
+        relPath: "src/a.ts",
+        scope: { scope: "lastTurn", runId: "run:s:1" },
+      })
+      expect(result.current.workspaceContext).toMatchObject({
+        kind: "review",
+        scope: { scope: "lastTurn", runId: "run:s:1" },
+      })
+    })
+
     it("leaving the workspace profile drops a stale workspace reveal", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.revealWorkspaceReview({ sessionId: "session-1", rootPath: "/repo" }))

@@ -35,6 +35,8 @@ export interface ResolvedMessageDisplayOptions {
   reasoning: MessagePartVisibility
   tools: MessagePartVisibility
   sources: MessagePartVisibility
+  /** Fold a finished turn down to its conclusion (`lib/chat/turn-fold.ts`). */
+  foldCompletedTurns: boolean
   richControls: MessageRichControls
   motion: MessageMotion
   /** ADR-0127 — fully resolved markdown / code / math knobs (both renderers read this). */
@@ -117,6 +119,7 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     reasoning: "collapsed",
     tools: "auto",
     sources: "collapsed",
+    foldCompletedTurns: true,
     richControls: "hover",
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
@@ -144,6 +147,7 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     reasoning: "auto",
     tools: "auto",
     sources: "collapsed",
+    foldCompletedTurns: true,
     richControls: "hover",
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
@@ -169,6 +173,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     reasoning: "expanded",
     tools: "expanded",
     sources: "expanded",
+    // The inspector preset exists to show the whole route, so it never folds.
+    foldCompletedTurns: false,
     richControls: "always",
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
@@ -223,6 +229,9 @@ function applyPreferences(
     reasoning: isPartVisibility(overrides.reasoning) ? overrides.reasoning : base.reasoning,
     tools: isPartVisibility(overrides.tools) ? overrides.tools : base.tools,
     sources: isPartVisibility(overrides.sources) ? overrides.sources : base.sources,
+    foldCompletedTurns: isBool(overrides.foldCompletedTurns)
+      ? overrides.foldCompletedTurns
+      : base.foldCompletedTurns,
     richControls: isRichControls(overrides.richControls)
       ? overrides.richControls
       : base.richControls,

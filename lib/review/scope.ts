@@ -7,10 +7,16 @@ import {
   gitStatus,
 } from "@/lib/git/commands"
 import { hunkContentHash, normalizeReviewKey } from "@/lib/git/hunk-review"
-import { getTaskPatchSet } from "@/lib/task-workspace/client"
+import { parseUnifiedPatch, patchFilePath } from "@/lib/git/unified-patch"
+import { getTaskPatchSet, readTaskResourceDiff } from "@/lib/task-workspace/client"
 import type { PatchSet } from "@/lib/task-workspace/types"
 import type { GitDiff, GitFileChange, GitFileStatus } from "@/types/git"
-import type { ReviewRepositoryRefs, ReviewScope } from "@/types/review"
+import type {
+  ReviewRepositoryRefs,
+  ReviewScope,
+  ReviewScopeChoice,
+  ReviewScopeSelection,
+} from "@/types/review"
 
 /**
  * Scoped review collection, in two steps.
@@ -27,6 +33,52 @@ import type { ReviewRepositoryRefs, ReviewScope } from "@/types/review"
  * `commitSha` / `baseRef` / `targetRef` and applied it to every root.
  */
 
+/** The per-root refs a selection implies. */
+export function refsForSelection(selection: ReviewScopeSelection): ReviewRepositoryRefs {
+  switch (selection.scope) {
+    case "lastTurn":
+      return { lastTurnRunId: selection.runId }
+    case "commit":
+      return { commitSha: selection.commitSha }
+    case "branch":
+      return { baseRef: selection.baseRef, targetRef: selection.targetRef }
+    default:
+      return {}
+  }
+}
+
+/**
+ * The selection a scope and one root's refs amount to, for a picker that shows
+ * what a refs-based surface (the review sheet) is set to. Missing refs read as
+ * empty, which matches nothing in the picker's lists.
+ */
+export function selectionFromScope(
+  scope: ReviewScope,
+  refs: ReviewRepositoryRefs
+): ReviewScopeSelection {
+  switch (scope) {
+    case "lastTurn":
+      return { scope, runId: refs.lastTurnRunId ?? "" }
+    case "commit":
+      return { scope, commitSha: refs.commitSha ?? "" }
+    case "branch":
+      return { scope, baseRef: refs.baseRef ?? "", targetRef: refs.targetRef ?? "" }
+    default:
+      return { scope }
+  }
+}
+
+/** Whether two choices name the same target (refs included). */
+export function sameScopeChoice(a: ReviewScopeChoice, b: ReviewScopeChoice): boolean {
+  if (a.scope !== b.scope) return false
+  if (a.scope === "lastTurn" && b.scope === "lastTurn") return a.runId === b.runId
+  if (a.scope === "commit" && b.scope === "commit") return a.commitSha === b.commitSha
+  if (a.scope === "branch" && b.scope === "branch") {
+    return a.baseRef === b.baseRef && a.targetRef === b.targetRef
+  }
+  return true
+}
+
 export interface ReviewScopeRequest {
   scope: ReviewScope
   repositoryRoots: string[]
@@ -42,6 +94,8 @@ export interface ReviewScopeFileRef {
   oldPath?: string
   source: ReviewScope
   staged?: boolean
+  /** How the file changed, when the listing knew. */
+  status?: GitFileStatus
   reviewKey: string
   /**
    * Hunks the listing step already had.
@@ -140,6 +194,7 @@ function fileRef(
     ...(change.origPath ? { oldPath: change.origPath } : {}),
     source,
     staged: change.staged,
+    status: change.status,
     reviewKey: reviewKey(change),
   }
 }
@@ -171,6 +226,7 @@ async function listRootFiles(
       path: file.path,
       ...(file.oldPath ? { oldPath: file.oldPath } : {}),
       source: request.scope,
+      status: patchStatus(file.kind),
       reviewKey: reviewKey({
         path: file.path,
         origPath: file.oldPath,
@@ -186,10 +242,20 @@ async function listRootFiles(
     return { ok: true, files }
   }
 
-  if (request.scope === "uncommitted") {
+  if (
+    request.scope === "uncommitted" ||
+    request.scope === "staged" ||
+    request.scope === "unstaged"
+  ) {
     const status = await gitStatus(repositoryRoot)
+    const sides =
+      request.scope === "staged"
+        ? status.staged
+        : request.scope === "unstaged"
+          ? [...status.changes, ...status.merge]
+          : [...status.staged, ...status.changes, ...status.merge]
     const seen = new Set<string>()
-    const changes = [...status.staged, ...status.changes, ...status.merge].flatMap((file) => {
+    const changes = sides.flatMap((file) => {
       const key = `${file.path}:${file.staged}`
       if (seen.has(key)) return []
       seen.add(key)
@@ -248,25 +314,61 @@ export async function loadReviewScopeFile(
   if (ref.hunks) return { ...ref, hunks: ref.hunks }
   const refs = refsForRoot(request, ref.repositoryRoot)
 
-  if (ref.source === "uncommitted") {
-    const diff = await gitDiffFile(ref.repositoryRoot, ref.path, ref.staged ?? false)
-    return { ...ref, hunks: gitReviewHunks(diff) }
+  // `lastTurn` always arrives with hunks; reaching here means the patch set was
+  // read without them, which is a producer bug rather than an empty diff.
+  if (ref.source === "lastTurn") {
+    throw new Error(`Last-turn review returned no hunks for ${ref.path}`)
   }
+  return { ...ref, hunks: gitReviewHunks(await loadGitScopeDiff(refs, ref)) }
+}
+
+async function loadGitScopeDiff(
+  refs: ReviewRepositoryRefs,
+  ref: ReviewScopeFileRef
+): Promise<GitDiff> {
   if (ref.source === "commit") {
     if (!refs.commitSha) {
       throw new Error(`Commit review requires a commit SHA for ${ref.repositoryRoot}`)
     }
-    const diff = await gitDiffCommit(ref.repositoryRoot, refs.commitSha, ref.path)
-    return { ...ref, hunks: gitReviewHunks(diff) }
+    return gitDiffCommit(ref.repositoryRoot, refs.commitSha, ref.path)
   }
   if (ref.source === "branch") {
     if (!refs.baseRef || !refs.targetRef) {
       throw new Error(`Branch review requires base and target refs for ${ref.repositoryRoot}`)
     }
-    const diff = await gitDiffRefsFile(ref.repositoryRoot, refs.baseRef, refs.targetRef, ref.path)
-    return { ...ref, hunks: gitReviewHunks(diff) }
+    return gitDiffRefsFile(ref.repositoryRoot, refs.baseRef, refs.targetRef, ref.path)
   }
-  // `lastTurn` always arrives with hunks; reaching here means the patch set was
-  // read without them, which is a producer bug rather than an empty diff.
-  throw new Error(`Last-turn review returned no hunks for ${ref.path}`)
+  return gitDiffFile(ref.repositoryRoot, ref.path, ref.staged ?? false)
+}
+
+/**
+ * One file's full diff, in the shape the diff viewer reads.
+ *
+ * Git scopes return git's own diff. A turn's diff comes from its Task
+ * Workspace run as unified text; it is parsed into hunks and marked
+ * `contentOmitted`, because the run keeps the change, not both full texts, so
+ * the viewer shows the changed sections.
+ */
+export async function loadReviewScopeDiff(
+  request: ReviewScopeRequest,
+  ref: ReviewScopeFileRef
+): Promise<GitDiff> {
+  const refs = refsForRoot(request, ref.repositoryRoot)
+  if (ref.source !== "lastTurn") return loadGitScopeDiff(refs, ref)
+  if (!refs.lastTurnRunId) {
+    throw new Error(`Turn review requires a run for ${ref.repositoryRoot}`)
+  }
+  const text = await readTaskResourceDiff(refs.lastTurnRunId, ref.path)
+  const files = parseUnifiedPatch(text)
+  const file =
+    files.find((candidate) => patchFilePath(candidate) === ref.path) ??
+    (files.length === 1 ? files[0] : undefined)
+  return {
+    path: ref.path,
+    oldContent: "",
+    newContent: "",
+    hunks: file?.hunks ?? [],
+    isBinary: file?.binary ?? false,
+    contentOmitted: true,
+  }
 }

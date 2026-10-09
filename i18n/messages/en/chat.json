@@ -3050,5 +3050,28 @@
     "loading": "Loading preview",
     "open": "Open",
     "unavailable": "No preview available for this page."
+  },
+  "turnFold": {
+    "workedFor": "Worked for {duration}",
+    "worked": "Worked through {count, plural, one {# step} other {# steps}}",
+    "expand": "Show the work behind this answer: {label}",
+    "collapse": "Hide the work behind this answer: {label}",
+    "failed": "{count, plural, one {# failed} other {# failed}}"
+  },
+  "turnChanges": {
+    "edited": "Edited {count, plural, one {# file} other {# files}}",
+    "reverted": "Reverted {count, plural, one {# file} other {# files}}",
+    "undo": "Undo",
+    "view": "View changes",
+    "showAll": "Show {count, plural, one {# more file} other {# more files}}",
+    "truncated": "Only the first files this turn changed were recorded.",
+    "undoConfirmTitle": "Undo this turn's changes?",
+    "undoConfirmDescription": "This reverts what this turn changed in {count, plural, one {# file} other {# files}}. Later edits to the same lines are kept; if they collide, nothing is overwritten and the conflict is reported.",
+    "undoConfirm": "Undo changes",
+    "cancel": "Cancel",
+    "undoSuccess": "Reverted this turn's changes to {count, plural, one {# file} other {# files}}",
+    "undoConflict": "Could not undo cleanly: {count, plural, one {# file has} other {# files have}} later edits in the way",
+    "undoFailed": "Could not undo this turn: {error}",
+    "undoNotApplied": "There is nothing to undo: this turn's changes are not in the working tree."
   }
 }

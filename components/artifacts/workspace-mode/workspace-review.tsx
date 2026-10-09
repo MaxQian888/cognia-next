@@ -19,30 +19,28 @@
  * staged, discarded) hands over to the one after it, Alt+↑ / Alt+↓ step
  * between files, and "Open in editor" lands on the file surface at the change.
  *
- * The list can narrow to the files this conversation changed
- * (`useConversationChangedPaths`: its edit tool calls plus the host's per-turn
- * record, shell writes included). The diffs themselves still compare against
- * the index / HEAD, and the scope bar says so. The commit box sits under the
- * list, so a review ends in a commit without leaving the dock; it always
- * commits everything staged, and says when that includes files the narrowed
- * list is not showing.
+ * The scope picker (`ReviewScopePicker`) says which diff is on screen. The
+ * working-tree scopes stay here, with staging: Uncommitted, its Unstaged and
+ * Staged halves, and This conversation, which narrows the list to the files
+ * this conversation changed (`useConversationChangedPaths`: its edit tool calls
+ * plus the host's per-turn record, shell writes included) while the diffs still
+ * compare against the index / HEAD, as the scope bar says. A turn, a commit or
+ * the branch against a base is not the working tree and hands over to the
+ * read-only `SnapshotReview`. The commit box sits under the working-tree list,
+ * so a review ends in a commit without leaving the dock; it always commits
+ * everything staged, and says when that includes files the list is not showing.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
-import {
-  ArrowLeftIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  FolderGit2Icon,
-  MessageSquareIcon,
-} from "lucide-react"
+import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ChangesView } from "@/components/source-control/changes-view"
 import { CommitBox } from "@/components/source-control/commit-box"
 import { DiffPane } from "@/components/source-control/diff-pane"
+import { ReviewScopePicker } from "@/components/source-control/review-scope-picker"
+import { isSnapshotSelection, SnapshotReview } from "./snapshot-review"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { useConversationChangedPaths } from "@/hooks/git/use-conversation-changed-paths"
@@ -55,6 +53,7 @@ import {
 } from "@/lib/git/diff-presentation"
 import { cn } from "@/lib/utils"
 import type { GitStatus } from "@/types/git"
+import type { ReviewScopeChoice } from "@/types/review"
 
 /**
  * Below this dock width the list and the diff take turns. 720px leaves a
@@ -62,14 +61,32 @@ import type { GitStatus } from "@/types/git"
  */
 export const REVIEW_SPLIT_MIN_WIDTH = 720
 
-/** Which changes the list shows. */
-export type ReviewScope = "all" | "conversation"
+type WorkingTreeScope = "uncommitted" | "unstaged" | "staged" | "conversation"
+
+/** The working-tree status a working-tree scope shows. */
+export function statusForScope(
+  status: GitStatus | null,
+  scope: WorkingTreeScope,
+  conversationPaths: ReadonlySet<string>
+): GitStatus | null {
+  if (!status) return status
+  switch (scope) {
+    case "staged":
+      return { ...status, changes: [], merge: [] }
+    case "unstaged":
+      return { ...status, staged: [] }
+    case "conversation":
+      return scopeStatus(status, conversationPaths)
+    default:
+      return status
+  }
+}
 
 export interface WorkspaceReviewProps {
   rootPath: string
   /**
-   * The conversation the dock belongs to; enables "This conversation" in the
-   * scope bar. Without one the list is the whole working tree, as before.
+   * The conversation the dock belongs to; enables "This conversation" and the
+   * conversation's turns in the scope picker.
    */
   sessionId?: string | null
   status: GitStatus | null
@@ -89,6 +106,11 @@ export interface WorkspaceReviewProps {
    * not a request to read it.
    */
   focus?: { id: string; file: ReviewFileRef } | null
+  /**
+   * A reveal that named a scope (a turn card's "View changes"). Each new `id`
+   * switches the review to it, opening `relPath` when the scope lists it.
+   */
+  scopeRequest?: { id: string; choice: ReviewScopeChoice; relPath?: string } | null
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -113,6 +135,7 @@ export function WorkspaceReview({
   onSendToChat,
   onOpenInEditor,
   focus = null,
+  scopeRequest = null,
 }: WorkspaceReviewProps) {
   const t = useTranslations("artifacts.workspace")
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -123,24 +146,41 @@ export function WorkspaceReview({
   const stacked = touch || (width > 0 && width < REVIEW_SPLIT_MIN_WIDTH)
   const splitLayout = useResizableLayout("cognia-dock-review-split")
 
-  // ── Scope: the whole working tree, or what this conversation changed ──
-  const [scope, setScope] = useState<ReviewScope>("all")
-  const conversation = useConversationChangedPaths(sessionId, rootPath)
-  const canScope = Boolean(sessionId)
-  const activeScope: ReviewScope = canScope ? scope : "all"
-  const scopedStatus = useMemo(
-    () =>
-      status && activeScope === "conversation" ? scopeStatus(status, conversation.paths) : status,
-    [status, activeScope, conversation.paths]
+  // ── Scope: which diff the review shows ──
+  // A reveal that mounts the review brings its scope with it.
+  const [choice, setChoice] = useState<ReviewScopeChoice>(
+    () => scopeRequest?.choice ?? { scope: "uncommitted" }
   )
-  const allCount = useMemo(() => changedPathCount(status), [status])
-  const conversationCount = useMemo(
-    () => (status && canScope ? changedPathCount(scopeStatus(status, conversation.paths)) : 0),
-    [status, canScope, conversation.paths]
+  const conversation = useConversationChangedPaths(sessionId, rootPath)
+  const canScopeConversation = Boolean(sessionId)
+  const activeChoice: ReviewScopeChoice =
+    choice.scope === "conversation" && !canScopeConversation ? { scope: "uncommitted" } : choice
+  const snapshot = isSnapshotSelection(activeChoice) ? activeChoice : null
+  const workingScope: WorkingTreeScope = snapshot
+    ? "uncommitted"
+    : (activeChoice.scope as WorkingTreeScope)
+  const scopedStatus = useMemo(
+    () => statusForScope(status, workingScope, conversation.paths),
+    [status, workingScope, conversation.paths]
+  )
+  const counts = useMemo(
+    () => ({
+      uncommitted: changedPathCount(status),
+      unstaged: changedPathCount(statusForScope(status, "unstaged", conversation.paths)),
+      staged: changedPathCount(statusForScope(status, "staged", conversation.paths)),
+      ...(canScopeConversation
+        ? {
+            conversation: changedPathCount(
+              statusForScope(status, "conversation", conversation.paths)
+            ),
+          }
+        : {}),
+    }),
+    [status, canScopeConversation, conversation.paths]
   )
   // Staged files the narrowed list hides still go into the commit.
   const hiddenStaged =
-    status && scopedStatus && activeScope === "conversation"
+    status && scopedStatus && workingScope !== "uncommitted"
       ? status.staged.length - scopedStatus.staged.length
       : 0
 
@@ -157,13 +197,26 @@ export function WorkspaceReview({
   if (focus && focus.id !== seenFocus) {
     setSeenFocus(focus.id)
     setPane("detail")
-    // A reveal must land on its file: widen a narrowed list that hides it.
+    // A reveal must land on its file: widen a list that hides it, and leave a
+    // snapshot (a file reveal is about the working tree). Not when the same
+    // reveal also named a scope: that scope is what it asked for.
     if (
-      activeScope === "conversation" &&
-      !files.some((f) => f.path === focus.file.path && f.staged === focus.file.staged)
+      scopeRequest?.id !== focus.id &&
+      (snapshot || !files.some((f) => f.path === focus.file.path && f.staged === focus.file.staged))
     ) {
-      setScope("all")
+      setChoice({ scope: "uncommitted" })
     }
+  }
+  const [seenScopeRequest, setSeenScopeRequest] = useState(scopeRequest?.id ?? null)
+  const [snapshotFocus, setSnapshotFocus] = useState<{ id: string; path: string } | null>(
+    scopeRequest?.relPath ? { id: scopeRequest.id, path: scopeRequest.relPath } : null
+  )
+  if (scopeRequest && scopeRequest.id !== seenScopeRequest) {
+    setSeenScopeRequest(scopeRequest.id)
+    setChoice(scopeRequest.choice)
+    setSnapshotFocus(
+      scopeRequest.relPath ? { id: scopeRequest.id, path: scopeRequest.relPath } : null
+    )
   }
 
   const open = useCallback(
@@ -286,52 +339,34 @@ export function WorkspaceReview({
     </div>
   )
 
-  const toggleItem = cn("gap-1 text-xs", touch ? "h-9 min-w-0 flex-1 px-3" : "h-6 px-2")
-  const scopeBar = canScope ? (
+  const scopeBar = (
     <div className="shrink-0 space-y-1 border-b px-1.5 py-1" data-testid="workspace-review-scope">
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
-        value={activeScope}
-        // An empty value (the pressed item clicked again) is ignored.
-        onValueChange={(next) => {
-          if (next === "all" || next === "conversation") setScope(next)
-        }}
-        aria-label={t("reviewScope.label")}
-        className={cn(touch && "w-full")}
-      >
-        <ToggleGroupItem
-          value="all"
-          className={toggleItem}
-          data-testid="workspace-review-scope-all"
-          aria-label={t("reviewScope.allLabel", { count: allCount })}
-        >
-          <FolderGit2Icon className="size-3.5" />
-          {t("reviewScope.all")}
-          <span className="tabular-nums text-muted-foreground">{allCount}</span>
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          value="conversation"
-          className={toggleItem}
-          data-testid="workspace-review-scope-conversation"
-          aria-label={t("reviewScope.conversationLabel", { count: conversationCount })}
-        >
-          <MessageSquareIcon className="size-3.5" />
-          {t("reviewScope.conversation")}
-          <span className="tabular-nums text-muted-foreground">{conversationCount}</span>
-        </ToggleGroupItem>
-      </ToggleGroup>
-      {activeScope === "conversation" ? (
+      <ReviewScopePicker
+        value={activeChoice}
+        onChange={setChoice}
+        rootDir={rootPath}
+        sessionId={sessionId}
+        allowConversation={canScopeConversation}
+        counts={counts}
+        density={touch ? "touch" : "compact"}
+      />
+      {activeChoice.scope === "conversation" ? (
         <p
           className="px-0.5 text-[11px] text-muted-foreground"
           data-testid="workspace-review-scope-note"
         >
           {t("reviewScope.baseline")}
         </p>
+      ) : snapshot ? (
+        <p
+          className="px-0.5 text-[11px] text-muted-foreground"
+          data-testid="workspace-review-scope-note"
+        >
+          {t(`snapshot.note.${snapshot.scope}`)}
+        </p>
       ) : null}
     </div>
-  ) : null
+  )
 
   const commitFooter = status ? (
     <div className="shrink-0 border-t bg-muted/10" data-testid="workspace-review-commit">
@@ -355,12 +390,16 @@ export function WorkspaceReview({
   ) : null
 
   const scopedEmpty =
-    activeScope === "conversation" && scopedStatus && files.length === 0 ? (
+    workingScope !== "uncommitted" && scopedStatus && files.length === 0 ? (
       <div
         className="flex min-h-0 flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground"
         data-testid="workspace-review-scope-empty"
       >
-        {conversation.ready ? t("reviewScope.empty") : t("reviewScope.loading")}
+        {workingScope !== "conversation"
+          ? t(`snapshot.emptyWorkingTree.${workingScope}`)
+          : conversation.ready
+            ? t("reviewScope.empty")
+            : t("reviewScope.loading")}
       </div>
     ) : null
 
@@ -404,6 +443,28 @@ export function WorkspaceReview({
   ) : (
     empty
   )
+
+  if (snapshot) {
+    return (
+      <div
+        ref={rootRef}
+        className="h-full min-h-0 min-w-0"
+        data-testid="workspace-review"
+        data-layout={stacked ? "stacked" : "split"}
+      >
+        <SnapshotReview
+          // A new target or a new reveal starts the snapshot over.
+          key={`${JSON.stringify(snapshot)}:${snapshotFocus?.id ?? ""}`}
+          rootPath={rootPath}
+          selection={snapshot}
+          focusPath={snapshotFocus?.path ?? null}
+          stacked={stacked}
+          touch={touch}
+          header={scopeBar}
+        />
+      </div>
+    )
+  }
 
   return (
     <div

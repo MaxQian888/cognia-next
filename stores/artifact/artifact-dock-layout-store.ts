@@ -23,6 +23,7 @@ import {
   type ContextPanelMode,
 } from "@/types/context-workbench"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
+import type { ReviewScopeChoice } from "@/types/review"
 
 /**
  * The dock's *sizing* profile. Derived from whichever workbench panel is
@@ -60,6 +61,11 @@ type WorkspaceRevealReviewRequest = {
   rootPath: string
   kind: "review"
   relPath?: string
+  /**
+   * The diff to open on: one turn, a commit, the staged side… Absent keeps the
+   * review on the working tree, which is what every reveal meant before.
+   */
+  scope?: ReviewScopeChoice
 }
 
 export type WorkspaceRevealRequest = WorkspaceRevealFileRequest | WorkspaceRevealReviewRequest
@@ -265,6 +271,7 @@ export interface ArtifactDockLayoutState {
     sessionId: string
     rootPath: string
     relPath?: string
+    scope?: ReviewScopeChoice
   }) => void
   clearWorkspaceRevealRequest: (id: string) => void
   /**

@@ -4450,23 +4450,6 @@
     "words": "字",
     "workspace": {
       "allWorkspace": "全部工作区",
-      "card": {
-        "cancel": "取消",
-        "discardFile": "丢弃此文件的改动",
-        "discardFileConfirm": "丢弃文件改动",
-        "discardFileConfirmDescription": "这会把 {path} 还原到最近一次提交的状态，且不可撤销。其它改动不受影响。",
-        "discardFileConfirmTitle": "丢弃此文件的改动？",
-        "discardFileFailed": "无法丢弃 {path}：{error}",
-        "discardFileSuccess": "已还原 {path}",
-        "editedFiles": "已编辑 {count} 个文件",
-        "review": "审阅",
-        "undo": "撤销",
-        "undoConfirm": "撤销全部改动",
-        "undoConfirmDescription": "这会丢弃此仓库当前全部已暂存、未暂存和未跟踪改动，包括你手工完成的修改，且无法恢复。",
-        "undoConfirmTitle": "撤销仓库中的全部改动？",
-        "undoFailed": "无法撤销工作区改动：{error}",
-        "undoSuccess": "已撤销工作区改动"
-      },
       "close": "关闭工作区",
       "currentTask": "当前任务",
       "filePreview": {
@@ -4499,18 +4482,33 @@
       "reviewNextFile": "下一个文件（Alt+↓）",
       "reviewPrevFile": "上一个文件（Alt+↑）",
       "reviewScope": {
-        "all": "全部",
-        "allLabel": "工作区的全部改动（{count}）",
         "baseline": "本对话编辑过的文件。差异仍与上次提交比较，因此也包含这些文件中的其他改动。",
         "commitIncludesHidden": "提交还会包含 {count} 个此处未列出的已暂存文件。",
-        "conversation": "本对话",
-        "conversationLabel": "本对话改动的文件（{count}）",
         "empty": "本对话尚未改动此仓库中的任何文件。",
-        "label": "列出哪些改动",
         "loading": "正在查找本对话改动的文件…"
       },
       "reviewWithCount": "审阅，{count} 个已更改文件",
       "scopeLabel": "工作区范围",
+      "snapshot": {
+        "diffFailed": "无法加载此差异：{error}",
+        "empty": "此范围内没有文件改动。",
+        "emptyWorkingTree": {
+          "staged": "没有已暂存的改动。",
+          "unstaged": "没有未暂存的改动。"
+        },
+        "listFailed": "无法列出改动：{error}",
+        "loading": "正在加载改动…",
+        "note": {
+          "branch": "当前分支从基准分支分出后的全部改动（只读）。",
+          "commit": "此提交相对其父提交的改动（只读）。",
+          "lastTurn": "这一轮实际做出的改动（只读），不包含之后对同一文件的修改。"
+        },
+        "unavailable": {
+          "missing-commit": "请选择要审阅的提交。",
+          "missing-refs": "请选择要对比的分支。",
+          "missing-run": "这一轮没有可显示的已记录改动。"
+        }
+      },
       "surfaceLabel": "工作区视图",
       "taskResources": {
         "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
@@ -9761,6 +9759,29 @@
         "slot": "正在等待{holder}在此工作副本中结束",
         "slotNamed": "正在等待{holder}“{label}”在此工作副本中结束"
       }
+    },
+    "turnChanges": {
+      "cancel": "取消",
+      "edited": "已修改 {count} 个文件",
+      "reverted": "已撤销 {count} 个文件的修改",
+      "showAll": "再显示 {count} 个文件",
+      "truncated": "仅记录了这一轮修改的前若干个文件。",
+      "undo": "撤销",
+      "undoConfirm": "撤销修改",
+      "undoConfirmDescription": "这会撤销这一轮对 {count} 个文件所做的修改。之后对相同行的编辑会保留；如有冲突，不会覆盖任何内容并会报告冲突。",
+      "undoConfirmTitle": "撤销这一轮的修改？",
+      "undoConflict": "无法干净地撤销：{count} 个文件存在后续编辑冲突",
+      "undoFailed": "无法撤销这一轮：{error}",
+      "undoNotApplied": "没有可撤销的内容：这一轮的改动不在工作区中。",
+      "undoSuccess": "已撤销这一轮对 {count} 个文件的修改",
+      "view": "查看更改"
+    },
+    "turnFold": {
+      "collapse": "收起此回答的过程：{label}",
+      "expand": "展开此回答的过程：{label}",
+      "failed": "{count} 个失败",
+      "worked": "共 {count} 个步骤",
+      "workedFor": "已工作 {duration}"
     },
     "twinBadge": {
       "fewShotOff": "风格少样本已关闭",
@@ -40028,6 +40049,10 @@
           "sans": "无衬线",
           "serif": "衬线"
         },
+        "foldCompletedTurns": {
+          "hint": "回复完成后，将推理和工具调用折叠为一行“已工作 …”，只保留结论。",
+          "label": "折叠已完成的轮次"
+        },
         "layout": {
           "bubbles": "气泡",
           "cards": "卡片",
@@ -56222,11 +56247,28 @@
     "retry": "重试",
     "roots": "仓库根目录",
     "scope": "审查范围",
-    "scopes": {
-      "branch": "分支对比",
-      "commit": "指定提交",
-      "lastTurn": "最后一轮 Agent",
-      "uncommitted": "未提交改动"
+    "scopePicker": {
+      "aTurn": "某一轮",
+      "branch": "分支",
+      "branchHint": "将当前分支与以下分支对比",
+      "branchValue": "与 {base} 对比",
+      "commit": "已提交",
+      "commitValue": "提交 {sha}",
+      "conversation": "本次对话",
+      "earlierTurns": "选择轮次",
+      "label": "差异范围：{scope}",
+      "lastTurn": "最近一轮",
+      "loading": "加载中…",
+      "noBranches": "没有其他分支",
+      "noCommits": "暂无提交",
+      "noTurns": "暂无",
+      "refsFailed": "无法读取仓库",
+      "staged": "已暂存",
+      "turn": "第 {ordinal} 轮",
+      "turnStats": "{files} 个文件",
+      "turnWithPrompt": "第 {ordinal} 轮 · {prompt}",
+      "uncommitted": "未提交",
+      "unstaged": "未暂存"
     },
     "staleComments": "已省略 {count} 条失效的 hunk 评论。",
     "success": "GitHub 操作已完成。",

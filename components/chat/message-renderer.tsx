@@ -78,14 +78,18 @@ import {
   type ToolActivityChildOptions,
   type ToolActivityGroupEntry,
 } from "@/components/chat/message-parts/tool-activity-group"
+import { TurnProcessFold } from "@/components/chat/message-parts/turn-process-fold"
+import { TurnChangesCard } from "@/components/chat/turn-changes-card"
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import {
   groupAgentParts,
   isToolOnlyFlow,
+  type AgentFlowSegment,
   isToolPartType,
   SILENT_CONTROL_PART_TYPES,
 } from "@/lib/chat/agent-flow-grouping"
+import { foldTurnParts, type TurnFold } from "@/lib/chat/turn-fold"
 import { parseTodoInput } from "@/lib/chat/todos"
 import { userBubbleClass } from "@/lib/chat/message-bubble"
 import { buildReplyTo, readReplyTo } from "@/lib/chat/reply-to"
@@ -154,7 +158,15 @@ import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { UsageBreakdown } from "@/components/chat/usage-breakdown"
 import type { Character } from "@cognia/agent-config-types"
-import React, { memo, useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import React, {
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
 import { useTranslations } from "next-intl"
 import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
@@ -286,6 +298,13 @@ function usePluginToolRendererRevision(): number {
     getToolResultRenderersRevision,
     getToolResultRenderersRevision
   )
+}
+
+/** True when every part a render segment draws sits inside the turn's fold. */
+function isSegmentFolded(segment: AgentFlowSegment<unknown>, fold: TurnFold): boolean {
+  return segment.kind === "group"
+    ? segment.entries.every((entry) => fold.folded.has(entry.index))
+    : fold.folded.has(segment.entry.index)
 }
 
 function MessageRendererInner({
@@ -456,6 +475,16 @@ function MessageRendererInner({
   const segments = useMemo(
     () => groupAgentParts(presentationParts, agentFlowMode),
     [presentationParts, agentFlowMode]
+  )
+  // A finished turn folds its process under one "Worked for …" row and keeps
+  // the conclusion on screen (`lib/chat/turn-fold.ts`). Never while the row is
+  // still being written, by the live tail or by a room member.
+  const turnFold = useMemo(
+    () =>
+      message.role === "assistant" && !isStreaming && !memberBusy && display.foldCompletedTurns
+        ? foldTurnParts(presentationParts)
+        : null,
+    [message.role, isStreaming, memberBusy, display.foldCompletedTurns, presentationParts]
   )
 
   // A sent video's parts — its description, and the storyboard, frames or
@@ -761,6 +790,140 @@ function MessageRendererInner({
 
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
+  // One render segment: a tool-activity group or a single part. Shared by the
+  // folded process and the visible remainder of a finished turn.
+  const renderSegment = (segment: (typeof segments)[number], si: number): ReactNode => {
+    if (segment.kind === "group") {
+      const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
+        part: e.part as ToolUIPart,
+        key: `${message.id}-${(e.part as ToolUIPart).toolCallId ?? e.index}`,
+        defaultOpen:
+          display.tools === "expanded"
+            ? true
+            : display.tools === "collapsed"
+              ? false
+              : agentFlowMode === "detailed" ||
+                (agentFlowMode === "standard" &&
+                  ((e.part as ToolUIPart).state === "input-available" ||
+                    (e.part as ToolUIPart).state === "output-error")),
+      }))
+      return (
+        <MotionReveal
+          key={`${message.id}-group-${si}`}
+          index={si}
+          disabled={display.motion === "off"}
+          intensity={display.motion === "expressive" ? "expressive" : "restrained"}
+        >
+          <ToolActivityGroup
+            entries={entries}
+            mode={agentFlowMode}
+            defaultOpen={display.tools === "expanded" ? true : undefined}
+            renderChild={(part, key, opts) =>
+              renderToolPart(
+                part,
+                key,
+                agentFlowMode,
+                opts,
+                message.id,
+                branchSessionId ?? undefined,
+                display.tools
+              )
+            }
+          />
+        </MotionReveal>
+      )
+    }
+
+    const { part, index } = segment.entry
+    const partKey = `${message.id}-${index}`
+    const partType = (part as { type?: string }).type
+    if (messageVideoAttachments.partIndexes.has(index)) {
+      const video = messageVideoAttachments.byFirstPartIndex.get(index)
+      if (!video) return null
+      return (
+        <MessageVideoAttachmentCard
+          key={`${message.id}-video-${video.info.groupId}`}
+          attachment={video}
+          idPrefix={message.id}
+          sessionId={branchSessionId ?? undefined}
+        />
+      )
+    }
+    if (messageImageGallery.partIndexes.has(index)) {
+      if (index !== messageImageGallery.firstPartIndex) return null
+      return (
+        <div key={`${message.id}-image-gallery`}>
+          <MessageImageGallery items={messageImageGallery.items} />
+          {branchSessionId
+            ? [
+                ...new Set(
+                  [...messageImageGallery.partIndexes].flatMap((partIndex) => {
+                    const content = readAttachmentExtractedContent(
+                      (message.parts[partIndex] as { extractedContent?: unknown })?.extractedContent
+                    )
+                    return content ? [content.attachmentId] : []
+                  })
+                ),
+              ].map((assetId) => (
+                <AttachmentSourceActions
+                  key={`${branchSessionId}:${assetId}`}
+                  sessionId={branchSessionId}
+                  assetId={assetId}
+                />
+              ))
+            : null}
+        </div>
+      )
+    }
+    // Tool cards and reasoning read the display mode only through their
+    // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
+    // a live standard⇄detailed switch changes the prop but never
+    // re-opens or re-collapses an already-mounted card. Fold the mode
+    // into just those parts' key so switching the display mode remounts
+    // them and re-applies the per-mode default. Prose keeps a
+    // mode-agnostic key (no reflow), and the outer MotionReveal key
+    // stays stable so the entrance animation isn't replayed on a toggle.
+    const disclosureKey = isToolPartType(partType)
+      ? `${agentFlowMode}-${display.tools}`
+      : partType === "reasoning"
+        ? `${agentFlowMode}-${display.reasoning}`
+        : partType === "sources"
+          ? display.sources
+          : null
+    const nodeKey = disclosureKey ? `${partKey}-${disclosureKey}` : partKey
+    const node = (
+      <MessagePart
+        key={nodeKey}
+        part={part}
+        partKey={partKey}
+        isStreaming={isStreaming}
+        mentionPattern={message.role === "user" ? mentionPattern : null}
+        characterById={characterById}
+        messageId={message.id}
+        sessionId={branchSessionId ?? undefined}
+        mode={agentFlowMode}
+        display={display}
+        t={t}
+        projectRoot={projectRoot}
+      />
+    )
+    // Give tool cards/rows and dispatch banners a one-shot entrance;
+    // leave text/markdown untouched to avoid wrapping prose in extra
+    // block boxes.
+    return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
+      <MotionReveal
+        key={partKey}
+        index={si}
+        disabled={display.motion === "off"}
+        intensity={display.motion === "expressive" ? "expressive" : "restrained"}
+      >
+        {node}
+      </MotionReveal>
+    ) : (
+      node
+    )
+  }
+
   return (
     <PerfBoundary id="chat:message">
       <Message
@@ -877,143 +1040,29 @@ function MessageRendererInner({
                 />
                 {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
                 {/* into one activity group. Subagent parts are transparent here and */}
-                {/* render once below as a dispatch tree. */}
-                {segments.map((segment, si) => {
-                  if (segment.kind === "group") {
-                    const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
-                      part: e.part as ToolUIPart,
-                      key: `${message.id}-${(e.part as ToolUIPart).toolCallId ?? e.index}`,
-                      defaultOpen:
-                        display.tools === "expanded"
-                          ? true
-                          : display.tools === "collapsed"
-                            ? false
-                            : agentFlowMode === "detailed" ||
-                              (agentFlowMode === "standard" &&
-                                ((e.part as ToolUIPart).state === "input-available" ||
-                                  (e.part as ToolUIPart).state === "output-error")),
-                    }))
-                    return (
-                      <MotionReveal
-                        key={`${message.id}-group-${si}`}
-                        index={si}
-                        disabled={display.motion === "off"}
-                        intensity={display.motion === "expressive" ? "expressive" : "restrained"}
-                      >
-                        <ToolActivityGroup
-                          entries={entries}
-                          mode={agentFlowMode}
-                          defaultOpen={display.tools === "expanded" ? true : undefined}
-                          renderChild={(part, key, opts) =>
-                            renderToolPart(
-                              part,
-                              key,
-                              agentFlowMode,
-                              opts,
-                              message.id,
-                              branchSessionId ?? undefined,
-                              display.tools
-                            )
-                          }
-                        />
-                      </MotionReveal>
-                    )
-                  }
-
-                  const { part, index } = segment.entry
-                  const partKey = `${message.id}-${index}`
-                  const partType = (part as { type?: string }).type
-                  if (messageVideoAttachments.partIndexes.has(index)) {
-                    const video = messageVideoAttachments.byFirstPartIndex.get(index)
-                    if (!video) return null
-                    return (
-                      <MessageVideoAttachmentCard
-                        key={`${message.id}-video-${video.info.groupId}`}
-                        attachment={video}
-                        idPrefix={message.id}
-                        sessionId={branchSessionId ?? undefined}
-                      />
-                    )
-                  }
-                  if (messageImageGallery.partIndexes.has(index)) {
-                    if (index !== messageImageGallery.firstPartIndex) return null
-                    return (
-                      <div key={`${message.id}-image-gallery`}>
-                        <MessageImageGallery items={messageImageGallery.items} />
-                        {branchSessionId
-                          ? [
-                              ...new Set(
-                                [...messageImageGallery.partIndexes].flatMap((partIndex) => {
-                                  const content = readAttachmentExtractedContent(
-                                    (message.parts[partIndex] as { extractedContent?: unknown })
-                                      ?.extractedContent
-                                  )
-                                  return content ? [content.attachmentId] : []
-                                })
-                              ),
-                            ].map((assetId) => (
-                              <AttachmentSourceActions
-                                key={`${branchSessionId}:${assetId}`}
-                                sessionId={branchSessionId}
-                                assetId={assetId}
-                              />
-                            ))
-                          : null}
-                      </div>
-                    )
-                  }
-                  // Tool cards and reasoning read the display mode only through their
-                  // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
-                  // a live standard⇄detailed switch changes the prop but never
-                  // re-opens or re-collapses an already-mounted card. Fold the mode
-                  // into just those parts' key so switching the display mode remounts
-                  // them and re-applies the per-mode default. Prose keeps a
-                  // mode-agnostic key (no reflow), and the outer MotionReveal key
-                  // stays stable so the entrance animation isn't replayed on a toggle.
-                  const disclosureKey = isToolPartType(partType)
-                    ? `${agentFlowMode}-${display.tools}`
-                    : partType === "reasoning"
-                      ? `${agentFlowMode}-${display.reasoning}`
-                      : partType === "sources"
-                        ? display.sources
-                        : null
-                  const nodeKey = disclosureKey ? `${partKey}-${disclosureKey}` : partKey
-                  const node = (
-                    <MessagePart
-                      key={nodeKey}
-                      part={part}
-                      partKey={partKey}
-                      isStreaming={isStreaming}
-                      mentionPattern={message.role === "user" ? mentionPattern : null}
-                      characterById={characterById}
-                      messageId={message.id}
-                      sessionId={branchSessionId ?? undefined}
-                      mode={agentFlowMode}
-                      display={display}
-                      t={t}
-                      projectRoot={projectRoot}
-                    />
-                  )
-                  // Give tool cards/rows and dispatch banners a one-shot entrance;
-                  // leave text/markdown untouched to avoid wrapping prose in extra
-                  // block boxes.
-                  return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
-                    <MotionReveal
-                      key={partKey}
-                      index={si}
-                      disabled={display.motion === "off"}
-                      intensity={display.motion === "expressive" ? "expressive" : "restrained"}
-                    >
-                      {node}
-                    </MotionReveal>
-                  ) : (
-                    node
-                  )
-                })}
-                <SubagentTree parts={message.parts} mode={agentFlowMode} />
+                {/* render once below as a dispatch tree. A finished turn draws its */}
+                {/* process segments (and the tree) inside the fold, the rest after it. */}
+                {turnFold ? (
+                  <TurnProcessFold fold={turnFold} durationMs={runMetadataOf(message)?.durationMs}>
+                    {segments.map((segment, si) =>
+                      isSegmentFolded(segment, turnFold) ? renderSegment(segment, si) : null
+                    )}
+                    <SubagentTree parts={message.parts} mode={agentFlowMode} />
+                  </TurnProcessFold>
+                ) : null}
+                {segments.map((segment, si) =>
+                  turnFold && isSegmentFolded(segment, turnFold) ? null : renderSegment(segment, si)
+                )}
+                {turnFold ? null : <SubagentTree parts={message.parts} mode={agentFlowMode} />}
               </MessageContent>
             </MessageImageCollectionProvider>
           )}
+
+          {/* The files this turn changed, from its own record. Self-hides for a
+            turn that changed nothing or that the host did not track. */}
+          {message.role === "assistant" && !isStreaming && !memberBusy && branchSessionId ? (
+            <TurnChangesCard sessionId={branchSessionId} messageId={message.id} />
+          ) : null}
 
           {/* Delivery state of a mid-run follow-up. Self-hides for every message
             that is not a pending steer. */}

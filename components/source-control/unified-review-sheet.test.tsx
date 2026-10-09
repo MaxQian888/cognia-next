@@ -9,8 +9,40 @@ import type { PullRequestRef, ReviewFeedbackBundle } from "@/types/review"
 const listMock = jest.fn()
 const loadMock = jest.fn()
 jest.mock("@/lib/review/scope", () => ({
+  ...jest.requireActual("@/lib/review/scope"),
   listReviewScopeFiles: (...args: unknown[]) => listMock(...args),
   loadReviewScopeFile: (...args: unknown[]) => loadMock(...args),
+}))
+
+// The shared picker has its own suite; here it only has to hand the sheet a
+// choice, which the sheet turns into a scope plus the primary root's refs.
+jest.mock("./review-scope-picker", () => ({
+  ReviewScopePicker: ({
+    value,
+    onChange,
+    sessionId,
+  }: {
+    value: unknown
+    onChange: (next: unknown) => void
+    sessionId: string | null
+  }) => (
+    <div
+      data-testid="scope-picker"
+      data-value={JSON.stringify(value)}
+      data-session={sessionId ?? ""}
+    >
+      <button
+        type="button"
+        data-testid="pick-commit"
+        onClick={() => onChange({ scope: "commit", commitSha: "abc123" })}
+      />
+      <button
+        type="button"
+        data-testid="pick-staged"
+        onClick={() => onChange({ scope: "staged" })}
+      />
+    </div>
+  ),
 }))
 
 const gitStatusMock = jest.fn()
@@ -303,4 +335,35 @@ it("enables only the authenticated root in a mixed public and enterprise workspa
   fireEvent.click(screen.getByRole("button", { name: "Find pull requests" }))
   await waitFor(() => expect(provider.findForBranch).toHaveBeenCalledTimes(1))
   expect(provider.findForBranch).toHaveBeenCalledWith("/second", "feature")
+})
+
+it("turns a picked scope into the sheet's scope and the primary root's refs", async () => {
+  renderSheet()
+  expect(screen.getByTestId("scope-picker")).toHaveAttribute(
+    "data-value",
+    JSON.stringify({ scope: "uncommitted" })
+  )
+  fireEvent.click(screen.getByTestId("pick-commit"))
+  expect(screen.getByTestId("scope-picker")).toHaveAttribute(
+    "data-value",
+    JSON.stringify({ scope: "commit", commitSha: "abc123" })
+  )
+  fireEvent.click(screen.getByRole("button", { name: en.load }))
+  await waitFor(() =>
+    expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scope: "commit",
+        repositoryRoots: ["/repo"],
+        refsByRoot: expect.objectContaining({
+          "/repo": expect.objectContaining({ commitSha: "abc123" }),
+        }),
+      })
+    )
+  )
+
+  fireEvent.click(screen.getByTestId("pick-staged"))
+  fireEvent.click(screen.getByRole("button", { name: en.load }))
+  await waitFor(() =>
+    expect(listMock).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "staged" }))
+  )
 })

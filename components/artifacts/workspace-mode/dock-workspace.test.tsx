@@ -894,6 +894,25 @@ describe("DockWorkspace", () => {
     await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
   })
 
+  it("opens a turn reveal on that turn's read-only snapshot, not on a working-tree side", async () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+        scope: { scope: "lastTurn", runId: "run:session-1:3" },
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    const snapshot = await screen.findByTestId("snapshot-review")
+    expect(snapshot).toHaveAttribute("data-scope", "lastTurn")
+    expect(screen.queryByTestId("review-changes")).not.toBeInTheDocument()
+    // A turn's file is not a working-tree side, so nothing selects one.
+    expect(gitState.selectFile).not.toHaveBeenCalled()
+  })
+
   it("does not expose the review tab for a non-Git root", () => {
     gitState = { ...gitState, repoState: { isRepo: false } }
     render(<DockWorkspace activeSessionId="session-1" />)
