@@ -1,6 +1,6 @@
 //! Codex App dispatch (ADR-0196 P6b): hand a Cognia conversation to the Codex
-//! desktop app, and drive its tasks over the app-server control socket
-//! (`$CODEX_HOME/…`, a Unix-domain socket on every desktop platform).
+//! desktop app. Import through its app-server control socket when available,
+//! or the installed App's bundled stdio runtime, then open the native task.
 //!
 //! What the dispatcher needs from the process it runs in is behind
 //! [`CodexAppHost`]: where app data lives, where the sidecar's
@@ -21,10 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
-use tokio::io::AsyncWriteExt;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::process::Command;
-use tokio::time::{sleep, timeout};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{client_async_with_config, WebSocketStream};
@@ -36,7 +35,7 @@ pub trait CodexAppHost: Send + Sync {
     /// The app data directory; dispatch receipts go under `codex-handoffs/`.
     fn app_data_dir(&self) -> Result<PathBuf>;
     /// The sidecar tree holding `codex-app-control/control-cli.mjs`, which
-    /// runs the CDP control operations.
+    /// discovers the bundled CLI and runs the CDP control operations.
     fn sidecar_dir(&self) -> std::result::Result<PathBuf, String>;
     /// Open `url` with the OS handler (a `codex://` link launches Codex App).
     fn open_url(&self, url: &str) -> Result<()>;
@@ -45,7 +44,6 @@ pub trait CodexAppHost: Send + Sync {
 const CONTROL_SOCKET_RELATIVE_PATH: &str = "app-server-control/app-server-control.sock";
 const UDS_WEBSOCKET_HANDSHAKE_URL: &str = "ws://localhost/rpc";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
-const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(150);
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_TRANSCRIPT_BYTES: usize = 64 << 20;
@@ -196,30 +194,24 @@ impl std::error::Error for RpcCallError {}
 trait CodexRpc {
     async fn request(&mut self, method: &str, params: Value, wait: Duration) -> Result<Value>;
     async fn wait_for_import_completion(&mut self, import_id: &str) -> Result<Value>;
-}
-
-struct SocketRpc<S> {
-    socket: WebSocketStream<S>,
-    next_request_id: u64,
-    notifications: VecDeque<(String, Value)>,
-    server_info: Value,
-}
-
-impl<S> SocketRpc<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send,
-{
-    fn new(socket: WebSocketStream<S>) -> Self {
-        Self {
-            socket,
-            next_request_id: 0,
-            notifications: VecDeque::new(),
-            server_info: Value::Null,
-        }
+    /// True only after this connection's owned importer has exited.
+    async fn stop_owned_import(&mut self) -> Result<bool> {
+        Ok(false)
     }
+}
 
+#[async_trait]
+trait JsonRpcTransport: Send {
+    async fn send_json(&mut self, value: Value) -> Result<()>;
+    async fn read_json_until(&mut self, deadline: Instant) -> Result<Value>;
+}
+
+struct SocketTransport<S>(WebSocketStream<S>);
+
+#[async_trait]
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> JsonRpcTransport for SocketTransport<S> {
     async fn send_json(&mut self, value: Value) -> Result<()> {
-        self.socket
+        self.0
             .send(Message::Text(value.to_string().into()))
             .await
             .context("failed to write to the Codex App control socket")
@@ -229,11 +221,11 @@ where
         loop {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
-                .ok_or_else(|| anyhow!("timed out waiting for Codex App"))?;
-            let frame = timeout(remaining, self.socket.next())
+                .context("timed out waiting for Codex App")?;
+            let frame = timeout(remaining, self.0.next())
                 .await
                 .context("timed out waiting for Codex App")?
-                .ok_or_else(|| anyhow!("Codex App closed the control connection"))?
+                .context("Codex App closed the control connection")?
                 .context("failed to read from the Codex App control socket")?;
             match frame {
                 Message::Text(text) => {
@@ -245,12 +237,96 @@ where
                         .context("Codex App returned an invalid JSON-RPC message")
                 }
                 Message::Ping(payload) => {
-                    self.socket.send(Message::Pong(payload)).await?;
+                    self.0.send(Message::Pong(payload)).await?;
                 }
                 Message::Pong(_) | Message::Frame(_) => {}
                 Message::Close(_) => bail!("Codex App closed the control connection"),
             }
         }
+    }
+}
+
+/// The installed App's bundled CLI also serves the same protocol over stdio.
+/// Bound each JSON line before allocating it, including transcripts read back
+/// by verification; a malformed child cannot grow the buffer without limit.
+struct LineTransport<W, R> {
+    writer: W,
+    reader: BufReader<R>,
+}
+
+#[async_trait]
+impl<W, R> JsonRpcTransport for LineTransport<W, R>
+where
+    W: AsyncWrite + Unpin + Send,
+    R: AsyncRead + Unpin + Send,
+{
+    async fn send_json(&mut self, value: Value) -> Result<()> {
+        self.writer.write_all(value.to_string().as_bytes()).await?;
+        self.writer.write_all(b"\n").await?;
+        self.writer.flush().await?;
+        Ok(())
+    }
+
+    async fn read_json_until(&mut self, deadline: Instant) -> Result<Value> {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .context("timed out waiting for Codex App")?;
+        timeout(remaining, async {
+            let mut line = Vec::new();
+            loop {
+                let chunk = self.reader.fill_buf().await?;
+                if chunk.is_empty() {
+                    bail!("Codex App import process closed its output")
+                }
+                let end = chunk.iter().position(|byte| *byte == b'\n');
+                let length = end.map_or(chunk.len(), |index| index + 1);
+                if line.len() + length > MAX_WEBSOCKET_MESSAGE_BYTES {
+                    bail!("Codex App JSON-RPC message exceeds 128 MiB")
+                }
+                line.extend_from_slice(&chunk[..length]);
+                self.reader.consume(length);
+                if end.is_some() {
+                    return serde_json::from_slice(&line)
+                        .context("Codex App returned an invalid JSON-RPC message");
+                }
+            }
+        })
+        .await
+        .context("timed out waiting for Codex App")?
+    }
+}
+
+struct JsonRpc<T> {
+    transport: T,
+    next_request_id: u64,
+    notifications: VecDeque<(String, Value)>,
+    server_info: Value,
+}
+
+impl<T: JsonRpcTransport> JsonRpc<T> {
+    fn new(transport: T) -> Self {
+        Self {
+            transport,
+            next_request_id: 0,
+            notifications: VecDeque::new(),
+            server_info: Value::Null,
+        }
+    }
+
+    async fn send_json(&mut self, value: Value) -> Result<()> {
+        self.transport.send_json(value).await
+    }
+
+    async fn read_json_until(&mut self, deadline: Instant) -> Result<Value> {
+        self.transport.read_json_until(deadline).await
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        self.server_info = self.request_value("initialize", json!({
+            "clientInfo": { "name": "cognia", "title": "Cognia", "version": env!("CARGO_PKG_VERSION") },
+            "capabilities": { "experimentalApi": true, "requestAttestation": false, "mcpServerOpenaiFormElicitation": false }
+        }), RPC_TIMEOUT).await.context("failed to initialize the Codex App import connection")?;
+        self.send_json(json!({ "method": "initialized" })).await
     }
 
     async fn request_value(
@@ -261,10 +337,13 @@ where
     ) -> Result<Value> {
         self.next_request_id += 1;
         let request_id = self.next_request_id;
-        self.send_json(json!({ "id": request_id, "method": method, "params": params }))
-            .await?;
-
         let deadline = Instant::now() + wait;
+        timeout(
+            wait,
+            self.send_json(json!({ "id": request_id, "method": method, "params": params })),
+        )
+        .await
+        .context("timed out writing to Codex App")??;
         loop {
             let message = self.read_json_until(deadline).await?;
             if message.get("id") == Some(&json!(request_id)) && message.get("method").is_none() {
@@ -335,10 +414,7 @@ where
 }
 
 #[async_trait]
-impl<S> CodexRpc for SocketRpc<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send,
-{
+impl<T: JsonRpcTransport> CodexRpc for JsonRpc<T> {
     async fn request(&mut self, method: &str, params: Value, wait: Duration) -> Result<Value> {
         self.request_value(method, params, wait).await
     }
@@ -699,7 +775,9 @@ mod local_socket {
     unsafe impl async_io::IoSafe for WindowsUnixStream {}
 }
 
-async fn connect_rpc(path: &Path) -> Result<SocketRpc<local_socket::Stream>> {
+type SocketRpc = JsonRpc<SocketTransport<local_socket::Stream>>;
+
+async fn connect_rpc(path: &Path) -> Result<SocketRpc> {
     let stream = local_socket::connect(path).await?;
     let mut config = WebSocketConfig::default();
     config.max_message_size = Some(MAX_WEBSOCKET_MESSAGE_BYTES);
@@ -707,64 +785,110 @@ async fn connect_rpc(path: &Path) -> Result<SocketRpc<local_socket::Stream>> {
     let (socket, _) = client_async_with_config(UDS_WEBSOCKET_HANDSHAKE_URL, stream, Some(config))
         .await
         .context("Codex App rejected the WebSocket control handshake")?;
-    let mut rpc = SocketRpc::new(socket);
-    rpc.server_info = rpc
-        .request(
-        "initialize",
-        json!({
-            "clientInfo": { "name": "cognia", "title": "Cognia", "version": env!("CARGO_PKG_VERSION") },
-            "capabilities": {
-                "experimentalApi": true,
-                "requestAttestation": false,
-                "mcpServerOpenaiFormElicitation": false
-            }
-        }),
-        RPC_TIMEOUT,
-    )
-        .await
-        .context("failed to initialize the Codex App control connection")?;
-    rpc.send_json(json!({ "method": "initialized" })).await?;
+    let mut rpc = JsonRpc::new(SocketTransport(socket));
+    rpc.initialize().await?;
     Ok(rpc)
+}
+
+struct ProcessRpc {
+    rpc: JsonRpc<LineTransport<ChildStdin, ChildStdout>>,
+    // Dropping the connection also terminates this import-only process. The
+    // user's App and its App Server are never stopped or replaced.
+    child: Child,
+}
+
+#[async_trait]
+impl CodexRpc for ProcessRpc {
+    async fn request(&mut self, method: &str, params: Value, wait: Duration) -> Result<Value> {
+        self.rpc.request(method, params, wait).await
+    }
+
+    async fn wait_for_import_completion(&mut self, import_id: &str) -> Result<Value> {
+        self.rpc.wait_for_import_completion(import_id).await
+    }
+
+    async fn stop_owned_import(&mut self) -> Result<bool> {
+        if self.child.try_wait()?.is_none() {
+            timeout(CONNECT_TIMEOUT, self.child.kill())
+                .await
+                .context("timed out stopping the Codex importer")?
+                .context("failed to stop the Codex importer")?;
+        }
+        Ok(true)
+    }
+}
+
+async fn connect_import_process(executable: &Path) -> Result<ProcessRpc> {
+    let mut child = Command::new(executable)
+        .args(["app-server", "--stdio"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .context("failed to launch the installed Codex App import runtime")?;
+    let writer = child
+        .stdin
+        .take()
+        .context("Codex App import stdin is unavailable")?;
+    let reader = BufReader::new(
+        child
+            .stdout
+            .take()
+            .context("Codex App import stdout is unavailable")?,
+    );
+    let mut rpc = JsonRpc::new(LineTransport { writer, reader });
+    rpc.initialize().await?;
+    Ok(ProcessRpc { rpc, child })
 }
 
 async fn connect_or_launch(
     host: &dyn CodexAppHost,
     socket_path: &Path,
-) -> Result<SocketRpc<local_socket::Stream>> {
+) -> Result<Box<dyn CodexRpc + Send>> {
     if tokio::fs::try_exists(socket_path)
         .await
         .context("failed to inspect the Codex App control socket")?
     {
+        // An unsafe control path remains an error, rather than being bypassed
+        // by fallback. A stale but owner-verified socket is safe to ignore.
         local_socket::verify_path(socket_path).await?;
-        if let Ok(rpc) = connect_rpc(socket_path).await {
-            return Ok(rpc);
+        if let Ok(Ok(rpc)) = timeout(CONNECT_TIMEOUT, connect_rpc(socket_path)).await {
+            return Ok(Box::new(rpc));
         }
     }
-
-    host.open_url("codex://threads/new")
-        .context("failed to launch Codex App")?;
-
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
-    let mut last_error = None;
-    while Instant::now() < deadline {
-        if tokio::fs::try_exists(socket_path)
-            .await
-            .context("failed to inspect the Codex App control socket")?
-        {
-            local_socket::verify_path(socket_path).await?;
-            match connect_rpc(socket_path).await {
-                Ok(rpc) => return Ok(rpc),
-                Err(error) => last_error = Some(error),
+    #[cfg(target_os = "macos")]
+    {
+        let runtime = run_cdp_control(host, "runtime-path", json!({})).await?;
+        let executable = runtime
+            .get("executable")
+            .and_then(Value::as_str)
+            .context("Codex App discovery omitted its bundled executable")?;
+        Ok(Box::new(
+            connect_import_process(Path::new(executable)).await?,
+        ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        host.open_url("codex://threads/new")
+            .context("failed to launch Codex App")?;
+        let deadline = Instant::now() + CONNECT_TIMEOUT;
+        let mut last_error = None;
+        while Instant::now() < deadline {
+            if tokio::fs::try_exists(socket_path).await? {
+                local_socket::verify_path(socket_path).await?;
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match timeout(remaining, connect_rpc(socket_path)).await {
+                    Ok(Ok(rpc)) => return Ok(Box::new(rpc)),
+                    Ok(Err(error)) => last_error = Some(error),
+                    Err(_) => break,
+                }
             }
+            tokio::time::sleep(Duration::from_millis(150)).await;
         }
-        sleep(CONNECT_RETRY_DELAY).await;
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("Codex App did not expose its control socket after launch")))
     }
-    Err(last_error.unwrap_or_else(|| {
-        anyhow!(
-            "Codex App did not expose its control socket at {}",
-            socket_path.display()
-        )
-    }))
 }
 
 fn import_thread_id(completion: &Value) -> Result<String> {
@@ -809,6 +933,8 @@ struct DispatchReceipt {
     source_session_id: String,
     import_id: Option<String>,
     thread_id: Option<String>,
+    #[serde(default)]
+    owned_import_terminated: bool,
 }
 
 fn receipt_key(request: &CodexAppDispatchRequest) -> Result<String> {
@@ -860,7 +986,7 @@ async fn remove_receipt(path: &Path) -> Result<()> {
 
 /// A completion notification is not replayed on a new socket. Recover by
 /// matching the durable marker AND the exact imported transcript, never by title.
-async fn reconcile_import<R: CodexRpc + Send>(
+async fn reconcile_import<R: CodexRpc + Send + ?Sized>(
     rpc: &mut R,
     request: &CodexAppDispatchRequest,
 ) -> Result<Option<String>> {
@@ -884,13 +1010,8 @@ async fn reconcile_import<R: CodexRpc + Send>(
             if !inspected.insert(id.to_string()) {
                 continue;
             }
-            if candidate
-                .get("cwd")
-                .and_then(Value::as_str)
-                .is_some_and(|cwd| cwd != request.cwd)
-            {
-                continue;
-            }
+            // Inspect the marker even when cwd differs: a partial/misplaced
+            // owned import must not be mistaken for an empty recovery scan.
             let read = rpc
                 .request(
                     "thread/read",
@@ -901,6 +1022,25 @@ async fn reconcile_import<R: CodexRpc + Send>(
             let Some(thread) = read.get("thread") else {
                 continue;
             };
+            let marker = format!(
+                "Cognia handoff {}\n",
+                request.handoff_key.as_deref().unwrap()
+            );
+            let carries_marker = thread["turns"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|turn| turn["items"].as_array().into_iter().flatten())
+                .any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("userMessage")
+                        && item_text(item).starts_with(&marker)
+                });
+            if carries_marker
+                && (thread.get("cwd").and_then(Value::as_str) != Some(request.cwd.as_str())
+                    || verify_transcript(request, &thread["turns"]).is_err())
+            {
+                bail!("A partial Codex task matches the handoff marker; inspect it before retrying. No duplicate task was created.")
+            }
             if thread.get("cwd").and_then(Value::as_str) == Some(request.cwd.as_str())
                 && verify_transcript(request, &thread["turns"]).is_ok()
             {
@@ -1025,7 +1165,7 @@ fn verify_transcript(request: &CodexAppDispatchRequest, turns: &Value) -> Result
     Ok(())
 }
 
-async fn delete_imported_thread<R: CodexRpc + Send>(rpc: &mut R, thread_id: &str) {
+async fn delete_imported_thread<R: CodexRpc + Send + ?Sized>(rpc: &mut R, thread_id: &str) {
     let _ = rpc
         .request(
             "thread/delete",
@@ -1035,7 +1175,7 @@ async fn delete_imported_thread<R: CodexRpc + Send>(rpc: &mut R, thread_id: &str
         .await;
 }
 
-async fn import_and_verify<R: CodexRpc + Send>(
+async fn import_and_verify<R: CodexRpc + Send + ?Sized>(
     rpc: &mut R,
     request: &CodexAppDispatchRequest,
     source_path: &Path,
@@ -1056,6 +1196,11 @@ async fn import_and_verify<R: CodexRpc + Send>(
             if let Some(path) = receipt_path {
                 save_receipt(path, receipt.clone()).await?;
             }
+        } else if existing.as_ref().is_some_and(|receipt| receipt.owned_import_terminated) {
+            if let Some(path) = receipt_path {
+                remove_receipt(path).await?;
+            }
+            existing = None;
         } else {
             bail!("The accepted Codex handoff is not yet discoverable. Retry reconciliation after the import finishes; no duplicate task was created.")
         }
@@ -1076,6 +1221,7 @@ async fn import_and_verify<R: CodexRpc + Send>(
                         source_session_id: request.source_session_id.clone(),
                         import_id: None,
                         thread_id: None,
+                        owned_import_terminated: false,
                     },
                 )
                 .await?;
@@ -1134,6 +1280,7 @@ async fn import_and_verify<R: CodexRpc + Send>(
                         source_session_id: request.source_session_id.clone(),
                         import_id: Some(import_id.clone()),
                         thread_id: None,
+                        owned_import_terminated: false,
                     },
                 )
                 .await?;
@@ -1157,6 +1304,7 @@ async fn import_and_verify<R: CodexRpc + Send>(
                     source_session_id: request.source_session_id.clone(),
                     import_id: Some(import_id),
                     thread_id: Some(thread_id.clone()),
+                    owned_import_terminated: false,
                 },
             )
             .await?;
@@ -1473,7 +1621,10 @@ pub async fn codex_app_inventory_impl(
 
 pub async fn codex_app_task_open_impl(host: &dyn CodexAppHost, thread_id: String) -> Result<Value> {
     let thread_id = validate_thread_id(&thread_id)?;
-    run_cdp_control(host, "task-open", json!({ "threadId": thread_id })).await
+    let deep_link = format!("codex://threads/{thread_id}");
+    host.open_url(&deep_link)
+        .context("failed to open the imported Codex task")?;
+    Ok(json!({ "threadId": thread_id, "deepLink": deep_link }))
 }
 
 /// The `"<command> failed: <cause chain>"` message the desktop's command shells
@@ -1484,9 +1635,8 @@ pub fn command_error(command: &str, error: anyhow::Error) -> String {
 
 /// Hand a conversation to Codex App: normalize and stamp the request, keep a
 /// durable copy of the transcript and a receipt under
-/// `<app_data>/codex-handoffs`, then import it over the control socket
-/// (launching Codex App first when nothing is listening) and verify the thread
-/// it created. One dispatch runs at a time.
+/// `<app_data>/codex-handoffs`, then import through the available native runtime
+/// and verify the thread it created. One dispatch runs at a time.
 pub async fn dispatch_conversation(
     host: &dyn CodexAppHost,
     request: CodexAppDispatchRequest,
@@ -1517,10 +1667,32 @@ pub async fn dispatch_conversation(
         .context("Codex App dispatch preparation task failed")??;
         let socket_path = codex_home()?.join(CONTROL_SOCKET_RELATIVE_PATH);
         let mut rpc = connect_or_launch(host, &socket_path).await?;
+        let prior_receipt = load_receipt(&receipt_path).await?;
         // Keep the private source available while an accepted asynchronous
         // importer may still be reading it, including across timeout/restart.
-        let thread_id =
-            import_and_verify(&mut rpc, &request, &durable_source, Some(&receipt_path)).await?;
+        let imported =
+            import_and_verify(rpc.as_mut(), &request, &durable_source, Some(&receipt_path)).await;
+        let thread_id = match imported {
+            Ok(thread_id) => thread_id,
+            Err(error) => {
+                // Only the held Child handle proves this importer stopped. A
+                // crash or an old App-owned receipt remains uncertain, and
+                // cannot authorize another import just because a scan is empty.
+                if rpc.stop_owned_import().await?
+                    && prior_receipt
+                        .as_ref()
+                        .is_none_or(|receipt| receipt.owned_import_terminated)
+                {
+                    if let Some(mut receipt) = load_receipt(&receipt_path).await? {
+                        if receipt.thread_id.is_none() {
+                            receipt.owned_import_terminated = true;
+                            save_receipt(&receipt_path, receipt).await?;
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        };
         remove_receipt(&durable_source).await?;
         Ok(CodexAppDispatchResult {
             deep_link: format!("codex://threads/{thread_id}"),
@@ -1535,6 +1707,319 @@ pub async fn dispatch_conversation(
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    struct OpenOnlyHost {
+        urls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl CodexAppHost for OpenOnlyHost {
+        fn app_data_dir(&self) -> Result<PathBuf> {
+            bail!("opening a task must not read app data")
+        }
+
+        fn sidecar_dir(&self) -> std::result::Result<PathBuf, String> {
+            Err("opening a task must not require CDP".into())
+        }
+
+        fn open_url(&self, url: &str) -> Result<()> {
+            self.urls.lock().unwrap().push(url.into());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn opening_an_imported_task_uses_the_native_link_without_cdp_or_restart() {
+        let host = OpenOnlyHost {
+            urls: Default::default(),
+        };
+        let id = "01989a8f-7b2b-7aa2-a8b8-c859418ac18f";
+        let result = codex_app_task_open_impl(&host, id.into()).await.unwrap();
+        assert_eq!(
+            result,
+            json!({ "threadId": id, "deepLink": format!("codex://threads/{id}") })
+        );
+        assert_eq!(
+            *host.urls.lock().unwrap(),
+            [format!("codex://threads/{id}")]
+        );
+        assert!(codex_app_task_open_impl(&host, "invalid/task".into())
+            .await
+            .is_err());
+        assert_eq!(host.urls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stdio_rpc_preserves_early_import_completion_and_ignores_server_requests() {
+        let (client, server) = tokio::io::duplex(4096);
+        let (reader, writer) = tokio::io::split(client);
+        let mut rpc = JsonRpc::new(LineTransport {
+            writer,
+            reader: BufReader::new(reader),
+        });
+        let peer = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(server);
+            let mut reader = BufReader::new(reader);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let call: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(call["method"], "externalAgentConfig/import");
+            for message in [
+                json!({ "id": 91, "method": "item/commandExecution/requestApproval", "params": {} }),
+                json!({ "method": "externalAgentConfig/import/completed", "params": { "importId": "import-1", "itemTypeResults": [] } }),
+                json!({ "id": call["id"], "result": { "importId": "import-1" } }),
+            ] {
+                writer
+                    .write_all(format!("{message}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+        });
+        assert_eq!(
+            rpc.request("externalAgentConfig/import", json!({}), RPC_TIMEOUT)
+                .await
+                .unwrap()["importId"],
+            "import-1"
+        );
+        assert_eq!(
+            rpc.wait_for_import_completion("import-1").await.unwrap()["importId"],
+            "import-1"
+        );
+        peer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_rpc_reports_eof_invalid_json_and_timeout() {
+        for payload in [b"invalid\n".as_slice(), b"".as_slice()] {
+            let (client, mut server) = tokio::io::duplex(128);
+            server.write_all(payload).await.unwrap();
+            drop(server);
+            let (reader, writer) = tokio::io::split(client);
+            let mut transport = LineTransport {
+                writer,
+                reader: BufReader::new(reader),
+            };
+            let error = transport
+                .read_json_until(Instant::now() + Duration::from_secs(1))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(if payload.is_empty() {
+                "closed its output"
+            } else {
+                "invalid JSON-RPC"
+            }));
+        }
+        let (client, _server) = tokio::io::duplex(128);
+        let (reader, writer) = tokio::io::split(client);
+        let mut transport = LineTransport {
+            writer,
+            reader: BufReader::new(reader),
+        };
+        assert!(transport
+            .read_json_until(Instant::now() + Duration::from_millis(5))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn stdio_rpc_bounds_writes_to_a_non_draining_process() {
+        let (client, _server) = tokio::io::duplex(1);
+        let (reader, writer) = tokio::io::split(client);
+        let mut rpc = JsonRpc::new(LineTransport {
+            writer,
+            reader: BufReader::new(reader),
+        });
+        let error = timeout(
+            Duration::from_millis(100),
+            rpc.request("initialize", json!({}), Duration::from_millis(5)),
+        )
+        .await
+        .expect("RPC write exceeded its deadline")
+        .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn owned_import_stop_waits_for_the_child_to_exit() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut rpc = ProcessRpc {
+            rpc: JsonRpc::new(LineTransport {
+                writer: child.stdin.take().unwrap(),
+                reader: BufReader::new(child.stdout.take().unwrap()),
+            }),
+            child,
+        };
+        assert!(rpc.child.try_wait().unwrap().is_none());
+        assert!(rpc.stop_owned_import().await.unwrap());
+        assert!(rpc.child.try_wait().unwrap().is_some());
+        assert!(rpc.stop_owned_import().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn terminated_owned_import_can_retry_after_an_empty_recovery_scan() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut request = request(cwd.path());
+        stamp_handoff(&mut request).unwrap();
+        let path = cwd.path().join("receipt.json");
+        std::fs::write(
+            &path,
+            json!({
+                "sourceSessionId": request.source_session_id,
+                "importId": "terminated-import", "threadId": null,
+                "ownedImportTerminated": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let target = "01989a8f-7b2b-7aa2-a8b8-c859418ac18f";
+        let mut rpc = FakeRpc {
+            requests: Vec::new(),
+            responses: VecDeque::from([
+                Ok(json!({ "data": [], "nextCursor": null })),
+                Ok(json!({ "importId": "retry-import" })),
+                Ok(Value::Null),
+                Ok(
+                    json!({ "thread": { "cwd": request.cwd, "turns": [{ "items": [
+                    { "type": "userMessage", "text": request.messages[0].content },
+                    { "type": "agentMessage", "text": "Answer" }
+                ] }] } }),
+                ),
+            ]),
+            completion: Ok(completion("retry-import", target)),
+        };
+        assert_eq!(
+            import_and_verify(
+                &mut rpc,
+                &request,
+                Path::new("/retained-source"),
+                Some(&path)
+            )
+            .await
+            .unwrap(),
+            target
+        );
+        assert_eq!(rpc.requests[0].0, "thread/list");
+        assert_eq!(rpc.requests[1].0, "externalAgentConfig/import");
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_a_partial_marker_match() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut request = request(cwd.path());
+        stamp_handoff(&mut request).unwrap();
+        let mut rpc = FakeRpc {
+            requests: Vec::new(),
+            responses: VecDeque::from([
+                Ok(
+                    json!({ "data": [{ "id": "01989a8f-7b2b-7aa2-a8b8-c859418ac18f", "cwd": request.cwd }] }),
+                ),
+                Ok(
+                    json!({ "thread": { "cwd": request.cwd, "turns": [{ "items": [
+                    { "type": "userMessage", "text": request.messages[0].content }
+                ] }] } }),
+                ),
+            ]),
+            completion: Err(anyhow!("unused")),
+        };
+        assert!(reconcile_import(&mut rpc, &request)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("partial"));
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_a_marker_match_with_a_different_cwd() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut request = request(cwd.path());
+        stamp_handoff(&mut request).unwrap();
+        let mut rpc = FakeRpc {
+            requests: Vec::new(),
+            responses: VecDeque::from([
+                Ok(
+                    json!({ "data": [{ "id": "01989a8f-7b2b-7aa2-a8b8-c859418ac18f", "cwd": "/different" }] }),
+                ),
+                Ok(
+                    json!({ "thread": { "cwd": "/different", "turns": [{ "items": [
+                    { "type": "userMessage", "text": request.messages[0].content },
+                    { "type": "agentMessage", "text": "Answer" }
+                ] }] } }),
+                ),
+            ]),
+            completion: Err(anyhow!("unused")),
+        };
+        assert!(reconcile_import(&mut rpc, &request)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("partial"));
+    }
+
+    /// Opt-in integration against the installed App's actual bundled CLI.
+    /// Creates only a fixture conversation; no model turn is submitted here.
+    #[tokio::test]
+    #[ignore = "requires COGNIA_CODEX_LIVE_CLI and an installed Codex App"]
+    async fn live_installed_codex_import_preserves_snapshot_and_reuses_its_receipt() {
+        struct LiveHost(PathBuf);
+        impl CodexAppHost for LiveHost {
+            fn app_data_dir(&self) -> Result<PathBuf> {
+                Ok(self.0.clone())
+            }
+            fn sidecar_dir(&self) -> std::result::Result<PathBuf, String> {
+                Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sidecar"))
+            }
+            fn open_url(&self, _url: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+        let executable =
+            std::env::var_os("COGNIA_CODEX_LIVE_CLI").expect("set COGNIA_CODEX_LIVE_CLI");
+        // Keep the fixture's working directory and attachment readable so the
+        // imported task can be opened and continued in the actual App after
+        // this test exits. Only the opt-in test creates this retained fixture.
+        let directory = tempfile::Builder::new()
+            .prefix("cognia-codex-handoff-verification-")
+            .tempdir()
+            .unwrap()
+            .keep();
+        let host = LiveHost(directory.join("receipts"));
+        let mut snapshot = request(&directory);
+        snapshot.source_session_id = format!("codex-handoff-verification-{}", uuid::Uuid::new_v4());
+        snapshot.title = "Cognia Codex handoff verification".into();
+        snapshot.messages[0].content = "This is a handoff verification fixture. Reply only COGNIA_HANDOFF_CONTINUED when asked to continue. Do not use tools or change files.".into();
+        snapshot.messages[1].content = "Snapshot ready. Unicode preserved: 投递验证 🦉".into();
+        snapshot.messages[0].attachments.push(DispatchAttachment {
+            data_url: "data:text/plain;base64,aGVsbG8=".into(),
+            filename: "handoff-fixture.txt".into(),
+        });
+        let first = dispatch_conversation(&host, snapshot.clone())
+            .await
+            .unwrap();
+        let second = dispatch_conversation(&host, snapshot).await.unwrap();
+        assert_eq!(first, second);
+        let mut reopened = connect_import_process(Path::new(&executable))
+            .await
+            .unwrap();
+        let read = reopened
+            .request(
+                "thread/read",
+                json!({ "threadId": first.thread_id, "includeTurns": true }),
+                IMPORT_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read["thread"]["name"], "Cognia Codex handoff verification");
+        assert!(!read["thread"]["turns"].as_array().unwrap().is_empty());
+        eprintln!("COGNIA_CODEX_VERIFIED_THREAD={}", first.thread_id);
+        eprintln!("COGNIA_CODEX_FIXTURE_DIR={}", directory.display());
+    }
 
     struct FakeRpc {
         requests: Vec<(String, Value)>,
@@ -1730,6 +2215,7 @@ mod tests {
                 source_session_id: request.source_session_id.clone(),
                 import_id: Some("import-1".into()),
                 thread_id: Some(thread_id.into()),
+                owned_import_terminated: false,
             },
         )
         .unwrap();
@@ -1770,6 +2256,7 @@ mod tests {
                 source_session_id: request.source_session_id.clone(),
                 import_id: None,
                 thread_id: None,
+                owned_import_terminated: false,
             },
         )
         .unwrap();
@@ -1798,6 +2285,7 @@ mod tests {
                 source_session_id: request.source_session_id.clone(),
                 import_id: Some("accepted-before-disconnect".into()),
                 thread_id: None,
+                owned_import_terminated: false,
             },
         )
         .unwrap();
@@ -1942,6 +2430,7 @@ mod tests {
             source_session_id: "source-1".into(),
             import_id: None,
             thread_id: Some("target-1".into()),
+            owned_import_terminated: false,
         };
         write_receipt(&path, &receipt).unwrap();
         let read = read_receipt(&path).unwrap().unwrap();

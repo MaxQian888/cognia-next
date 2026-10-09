@@ -30,6 +30,18 @@ async function* chunks(...parts: string[]): AsyncGenerator<string> {
   for (const part of parts) yield part
 }
 
+test("runtime-path discovers the installed CLI without requiring or restarting CDP", async () => {
+  assert.deepEqual(await dispatch("runtime-path", {}, () => "/bundle/codex"), {
+    executable: "/bundle/codex",
+  })
+  await assert.rejects(
+    dispatch("runtime-path", {}, () => {
+      throw new Error("bundled Codex runtime missing")
+    }),
+    /bundled Codex runtime missing/
+  )
+})
+
 test("normalizedInput folds text, remote media and skills into one prompt plus local files", () => {
   assert.deepEqual(
     normalizedInput([

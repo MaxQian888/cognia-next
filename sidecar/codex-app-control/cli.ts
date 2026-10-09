@@ -23,7 +23,7 @@ import {
   readProjectedRollout,
 } from "./rollout-mirror.ts"
 import type { RolloutEvent } from "./rollout-mirror.ts"
-import { defaultStateDir } from "./shared.ts"
+import { defaultStateDir, resolveCodexAppCli } from "./shared.ts"
 import { listCodexTasks } from "./task-index.ts"
 
 /** A control request as parsed from stdin: validated field by field where read. */
@@ -312,8 +312,14 @@ async function inventory(request: ControlRequest) {
 }
 
 /** Run one control operation. Throws for an unknown operation or an invalid request. */
-export async function dispatch(operation: string, input: ControlRequest): Promise<unknown> {
+export async function dispatch(
+  operation: string,
+  input: ControlRequest,
+  resolveRuntime: () => string = resolveCodexAppCli
+): Promise<unknown> {
   switch (operation) {
+    case "runtime-path":
+      return { executable: resolveRuntime() }
     case "runtime-status": {
       try {
         const runtime = await ensureRuntime(false)

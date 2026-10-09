@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
 import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process"
+import { accessSync, constants, realpathSync, statSync } from "node:fs"
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -7,8 +8,48 @@ import { join, resolve } from "node:path"
 export const APP_PATH = "/Applications/ChatGPT.app"
 export const APP_EXECUTABLE = `${APP_PATH}/Contents/MacOS/ChatGPT`
 export const APP_BUNDLE_ID = "com.openai.codex"
-export const DEFAULT_REAL_CLI = `${APP_PATH}/Contents/Resources/codex`
+export const DEFAULT_REAL_CLI =
+  findBundledCodexCli(APP_PATH) ?? `${APP_PATH}/Contents/Resources/codex`
 export const CDP_ONLY_RELAUNCH_LABEL_PREFIX = "com.cognia.codex-app-control.relaunch"
+
+function bundledCodexCliPaths(appPath: string): string[] {
+  const resources = join(resolve(appPath), "Contents", "Resources")
+  return [
+    join(resources, "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
+    join(resources, "codex-cli", "bin", "codex"),
+    join(resources, "codex"),
+  ]
+}
+
+function executablePath(path: string): string | null {
+  try {
+    if (!statSync(path).isFile()) return null
+    accessSync(path, constants.X_OK)
+    return realpathSync(path)
+  } catch {
+    return null
+  }
+}
+
+function findBundledCodexCli(appPath: string): string | null {
+  for (const candidate of bundledCodexCliPaths(appPath)) {
+    const executable = executablePath(candidate)
+    if (executable) return executable
+  }
+  return null
+}
+
+/** Discover the bundled runtime across the current and legacy macOS App layouts. */
+export function resolveCodexAppCli(appPath: string = APP_PATH, realCli?: string): string {
+  if (realCli) {
+    const executable = executablePath(resolve(realCli))
+    if (executable) return executable
+    throw new Error(`Codex CLI is missing or not executable: ${realCli}`)
+  }
+  const executable = findBundledCodexCli(appPath)
+  if (executable) return executable
+  throw new Error(`No executable bundled Codex CLI found in ${resolve(appPath)}`)
+}
 
 /**
  * The port the retired relay prototype listened on. Still validated so a CDP
@@ -99,17 +140,18 @@ export function commandResult(
   }
 }
 
-export function appProcessIds(): number[] {
+export function appProcessIds(appPath: string = APP_PATH): number[] {
   const result = commandResult("/bin/ps", ["-axo", "pid=,command="])
   if (!result.ok) {
     throw new Error(result.stderr || result.error || "Unable to inspect ChatGPT process")
   }
+  const appExecutable = join(resolve(appPath), "Contents", "MacOS", "ChatGPT")
   return result.stdout
     .split("\n")
     .map((line) => line.trim().match(/^(\d+)\s+(.+)$/))
     .filter((match): match is RegExpMatchArray => {
       const command = match?.[2] ?? ""
-      return command === APP_EXECUTABLE || command.startsWith(`${APP_EXECUTABLE} `)
+      return command === appExecutable || command.startsWith(`${appExecutable} `)
     })
     .map((match) => Number(match[1]))
     .filter((value) => Number.isSafeInteger(value) && value > 0)
@@ -126,29 +168,47 @@ export interface AppServerChild {
  * spawned under `appPids`. Exactly one means the App runs its bundled runtime,
  * which is the only state the controller drives.
  */
-export function appServerChildren({
-  appPids,
-  realCli,
-}: {
-  appPids: readonly number[]
-  realCli: string
-}): AppServerChild[] {
+export function appServerChildren(
+  {
+    appPids,
+    realCli,
+    appPath,
+  }: {
+    appPids: readonly number[]
+    realCli: string
+    appPath?: string
+  },
+  inspectProcesses: typeof commandResult = commandResult
+): AppServerChild[] {
   const owners = new Set(appPids)
-  const listed = commandResult("/bin/ps", ["-axo", "pid=,ppid=,command="])
+  const resourcesIndex = realCli.indexOf("/Contents/Resources/")
+  const bundle = appPath ?? (resourcesIndex >= 0 ? realCli.slice(0, resourcesIndex) : APP_PATH)
+  const executables = new Set([realCli, ...bundledCodexCliPaths(bundle)])
+  for (const path of [...executables]) {
+    const executable = executablePath(path)
+    if (executable) executables.add(executable)
+  }
+  const listed = inspectProcesses("/bin/ps", ["-axo", "pid=,ppid=,command="])
   if (!listed.ok) throw new Error(listed.stderr || listed.error || "Unable to inspect App children")
   return listed.stdout
     .split("\n")
     .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/))
     .filter((match): match is RegExpMatchArray => {
       const command = match?.[3] ?? ""
-      return (
-        owners.has(Number(match?.[2])) &&
-        command.startsWith(
-          `${realCli} -c features.code_mode_host=true app-server --analytics-default-enabled`
-        ) &&
-        !command.includes("--listen") &&
-        !command.includes("relay-shim")
-      )
+      if (!owners.has(Number(match?.[2])) || command.includes("relay-shim")) return false
+      const executable = [...executables].find((path) => command.startsWith(`${path} `))
+      if (!executable) return false
+      const args = command.slice(executable.length).trim().split(/\s+/)
+      if (args.some((arg) => arg === "--listen" || arg.startsWith("--listen="))) return false
+      for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index] ?? ""
+        if (["-c", "--config", "-C", "--cd", "--enable", "--disable"].includes(arg)) {
+          index += 1
+        } else if (!arg.startsWith("-")) {
+          return arg === "app-server"
+        }
+      }
+      return false
     })
     .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] ?? "" }))
 }
@@ -209,6 +269,7 @@ export function parseCommonOptions(argv: readonly string[]): CommonOptions {
     appPath: APP_PATH,
     cdpPort: null,
   }
+  let explicitCli = false
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
     const next = argv[index + 1]
@@ -217,6 +278,7 @@ export function parseCommonOptions(argv: readonly string[]): CommonOptions {
       index += 1
     } else if (argument === "--real-cli" && next) {
       options.realCli = resolve(next)
+      explicitCli = true
       index += 1
     } else if (argument === "--app-path" && next) {
       options.appPath = resolve(next)
@@ -225,6 +287,10 @@ export function parseCommonOptions(argv: readonly string[]): CommonOptions {
       options.cdpPort = Number(next)
       index += 1
     }
+  }
+  if (!explicitCli) {
+    options.realCli =
+      findBundledCodexCli(options.appPath) ?? join(options.appPath, "Contents/Resources/codex")
   }
   if (
     options.cdpPort != null &&

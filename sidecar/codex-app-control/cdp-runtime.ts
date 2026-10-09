@@ -6,10 +6,10 @@ import { inspectTcpListener } from "./listener-safety.ts"
 import type { ListenerAssessment } from "./listener-safety.ts"
 import {
   APP_PATH,
-  DEFAULT_REAL_CLI,
   appProcessIds,
   appServerChildren,
   commandResult,
+  resolveCodexAppCli,
   waitFor,
 } from "./shared.ts"
 import type { AppServerChild } from "./shared.ts"
@@ -24,13 +24,15 @@ export interface RuntimeInspection {
 }
 
 export interface RuntimeDependencies {
-  appProcessIds: () => number[]
+  appProcessIds: typeof appProcessIds
+  resolveCodexAppCli: typeof resolveCodexAppCli
   commandResult: typeof commandResult
   discoverCodexRenderer: (cdpPort: number) => Promise<CdpTarget | null>
   inspectTcpListener: (port: number) => ListenerAssessment
   normalAppServerChildren: (args: {
     appPids: readonly number[]
     realCli: string
+    appPath?: string
   }) => AppServerChild[]
   relaunchCdpApp: (options: CdpRelaunchOptions) => Promise<CdpRelaunchResult>
   waitFor: typeof waitFor
@@ -48,10 +50,11 @@ export interface EnsureRuntimeOptions {
 
 async function inspectRuntime(
   cdpPort: number,
+  appPath: string,
   realCli: string,
   dependencies: RuntimeDependencies
 ): Promise<RuntimeInspection> {
-  const pids = dependencies.appProcessIds()
+  const pids = dependencies.appProcessIds(appPath)
   const listener = dependencies.inspectTcpListener(cdpPort)
   let renderer: CdpTarget | null = null
   let rendererError: string | null = null
@@ -61,7 +64,9 @@ async function inspectRuntime(
     rendererError = error instanceof Error ? error.message : String(error)
   }
   const children =
-    pids.length === 1 ? dependencies.normalAppServerChildren({ appPids: pids, realCli }) : []
+    pids.length === 1
+      ? dependencies.normalAppServerChildren({ appPids: pids, realCli, appPath })
+      : []
   return {
     ready: pids.length === 1 && listener.loopbackOnly && Boolean(renderer) && children.length === 1,
     pids,
@@ -78,7 +83,6 @@ export async function ensureCodexCdpRuntime(
 ) {
   const cdpPort = options.cdpPort ?? 9229
   const appPath = options.appPath ?? APP_PATH
-  const realCli = options.realCli ?? DEFAULT_REAL_CLI
   const stateDir = options.stateDir
   const timeoutMs = options.timeoutMs ?? 60_000
   const autoRestart = options.autoRestart !== false
@@ -87,6 +91,7 @@ export async function ensureCodexCdpRuntime(
   const dependencies: RuntimeDependencies = {
     appProcessIds,
     commandResult,
+    resolveCodexAppCli,
     discoverCodexRenderer: (port) => discoverCodexRenderer(port),
     inspectTcpListener,
     normalAppServerChildren: appServerChildren,
@@ -96,13 +101,22 @@ export async function ensureCodexCdpRuntime(
   }
 
   await onStatus("checking", { cdpPort })
-  const initial = await inspectRuntime(cdpPort, realCli, dependencies)
+  const realCli = dependencies.resolveCodexAppCli(appPath, options.realCli)
+  const initial = await inspectRuntime(cdpPort, appPath, realCli, dependencies)
   if (initial.ready) {
     await onStatus("ready", { restarted: false, ...initial })
     return { ...initial, restarted: false }
   }
   if (initial.pids.length > 1) {
     throw new Error(`Expected at most one Codex App process, found ${initial.pids.length}`)
+  }
+  if (initial.pids.length === 1 && initial.appServerChildren.length !== 1) {
+    throw new Error(
+      `Codex App must own exactly one bundled App Server; found ${initial.appServerChildren.length}`
+    )
+  }
+  if (initial.renderer && initial.pids.length !== 1) {
+    throw new Error("Codex renderer is available but its App process could not be identified")
   }
   if (initial.listener.listening) {
     const reason = initial.listener.loopbackOnly
@@ -134,7 +148,7 @@ export async function ensureCodexCdpRuntime(
     await onStatus("waiting-for-runtime", { cdpPort, timeoutMs })
     const ready = await dependencies.waitFor(
       async () => {
-        const runtime = await inspectRuntime(cdpPort, realCli, dependencies)
+        const runtime = await inspectRuntime(cdpPort, appPath, realCli, dependencies)
         if (runtime.listener.listening && !runtime.listener.loopbackOnly) {
           throw new Error(`CDP listener on port ${cdpPort} is not loopback-only`)
         }

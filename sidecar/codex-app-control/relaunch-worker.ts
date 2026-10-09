@@ -10,6 +10,7 @@ import {
   commandResult,
   parseCommonOptions,
   relayPaths,
+  resolveCodexAppCli,
   sleep,
   waitFor,
   writeJsonAtomic,
@@ -64,8 +65,17 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     })
   }
 
+  try {
+    options.realCli = resolveCodexAppCli(options.appPath, options.realCli)
+  } catch (error) {
+    await record("restart-cancelled-app-still-normal", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return 1
+  }
+
   const requestQuit = async (): Promise<void> => {
-    if (appProcessIds().length === 0) return
+    if (appProcessIds(options.appPath).length === 0) return
     const quit = commandResult("/usr/bin/osascript", [
       "-e",
       `tell application id "${APP_BUNDLE_ID}" to quit`,
@@ -73,9 +83,9 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     await record("waiting-for-app-exit", {
       quitRequest: quit.ok ? "accepted" : "manual-quit-required",
       quitError: quit.ok ? null : quit.stderr || quit.error,
-      currentAppPids: appProcessIds(),
+      currentAppPids: appProcessIds(options.appPath),
     })
-    await waitFor(() => appProcessIds().length === 0, {
+    await waitFor(() => appProcessIds(options.appPath).length === 0, {
       timeoutMs: 180_000,
       intervalMs: 250,
       description: "Codex App graceful or manual exit",
@@ -101,12 +111,12 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     try {
       await requestQuit()
       openNormalApp()
-      await waitFor(() => appProcessIds().length === 1, {
+      await waitFor(() => appProcessIds(options.appPath).length === 1, {
         timeoutMs: 30_000,
         intervalMs: 250,
         description: "normal Codex App rollback launch",
       })
-      await record("auto-rolled-back", { cdpError, appPids: appProcessIds() })
+      await record("auto-rolled-back", { cdpError, appPids: appProcessIds(options.appPath) })
     } catch (rollbackError) {
       await record("rollback-blocked", {
         cdpError,
@@ -116,16 +126,19 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     }
   }
 
-  await record("countdown", { delaySeconds: options.delaySeconds, currentAppPids: appProcessIds() })
+  await record("countdown", {
+    delaySeconds: options.delaySeconds,
+    currentAppPids: appProcessIds(options.appPath),
+  })
   await sleep(options.delaySeconds * 1000)
 
   try {
-    await record("quitting-current-app", { currentAppPids: appProcessIds() })
+    await record("quitting-current-app", { currentAppPids: appProcessIds(options.appPath) })
     await requestQuit()
     appWasStopped = true
     await record("launching-cdp-only-app")
     openCdpOnlyApp()
-    await waitFor(() => appProcessIds().length === 1, {
+    await waitFor(() => appProcessIds(options.appPath).length === 1, {
       timeoutMs: 30_000,
       intervalMs: 250,
       description: "CDP-only Codex App launch",
@@ -144,13 +157,17 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     )
     const children = await waitFor(
       () => {
-        const found = appServerChildren({ appPids: appProcessIds(), realCli: options.realCli })
+        const found = appServerChildren({
+          appPids: appProcessIds(options.appPath),
+          realCli: options.realCli,
+          appPath: options.appPath,
+        })
         return found.length === 1 ? found : null
       },
       { timeoutMs: 30_000, intervalMs: 250, description: "normal App-owned App Server child" }
     )
     await record("ready", {
-      appPids: appProcessIds(),
+      appPids: appProcessIds(options.appPath),
       renderer: { id: renderer.id, url: renderer.url ?? null },
       listener,
       appServerChildren: children,
@@ -163,7 +180,7 @@ export async function runCdpOnlyRelaunchWorker(argv: readonly string[]): Promise
     if (!appWasStopped) {
       await record("restart-cancelled-app-still-normal", {
         error: message,
-        currentAppPids: appProcessIds(),
+        currentAppPids: appProcessIds(options.appPath),
       })
     } else {
       await restoreNormalApp(message)

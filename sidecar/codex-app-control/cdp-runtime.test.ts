@@ -13,6 +13,7 @@ function readyFixture({ initiallyReady = false }: { initiallyReady?: boolean } =
 
   const dependencies: RuntimeDependencies = {
     appProcessIds: () => (running ? [101] : []),
+    resolveCodexAppCli: (_appPath, realCli) => realCli ?? "/app/codex",
     commandResult: (command, args) => {
       commands.push([command, ...args])
       if (command === "/usr/bin/osascript") running = false
@@ -36,7 +37,7 @@ function readyFixture({ initiallyReady = false }: { initiallyReady?: boolean } =
       addresses: cdpReady ? ["127.0.0.1:9229"] : [],
     }),
     normalAppServerChildren: () =>
-      cdpReady ? [{ pid: 202, ppid: 101, command: "codex app-server" }] : [],
+      running ? [{ pid: 202, ppid: 101, command: "codex app-server" }] : [],
     relaunchCdpApp: async () => {
       commands.push(["/usr/bin/osascript", "-e", 'tell application id "com.openai.codex" to quit'])
       running = false
@@ -132,6 +133,41 @@ test("an occupied CDP port without a Codex renderer fails closed", async () => {
     /occupied but does not expose a Codex renderer/
   )
   assert.deepEqual(fixture.commands, [])
+})
+
+test("a missing bundled runtime is reported before any restart is scheduled", async () => {
+  const fixture = readyFixture()
+  fixture.dependencies.resolveCodexAppCli = () => {
+    throw new Error("No executable bundled Codex CLI found in /Applications/ChatGPT.app")
+  }
+  await assert.rejects(
+    ensureCodexCdpRuntime({ cdpPort: 9229 }, fixture.dependencies),
+    /No executable bundled Codex CLI found/
+  )
+  assert.deepEqual(fixture.commands, [])
+  assert.equal(fixture.statuses.includes("restart-required"), false)
+})
+
+test("a healthy renderer with a missing App Server reports the runtime failure without restarting", async () => {
+  const fixture = readyFixture({ initiallyReady: true })
+  fixture.dependencies.normalAppServerChildren = () => []
+  await assert.rejects(
+    ensureCodexCdpRuntime({ cdpPort: 9229, onStatus: fixture.onStatus }, fixture.dependencies),
+    /Codex App must own exactly one bundled App Server; found 0/
+  )
+  assert.deepEqual(fixture.commands, [])
+  assert.deepEqual(fixture.statuses, ["checking"])
+})
+
+test("missing CDP does not trigger a restart when the App Server is already unhealthy", async () => {
+  const fixture = readyFixture()
+  fixture.dependencies.normalAppServerChildren = () => []
+  await assert.rejects(
+    ensureCodexCdpRuntime({ cdpPort: 9229, onStatus: fixture.onStatus }, fixture.dependencies),
+    /Codex App must own exactly one bundled App Server; found 0/
+  )
+  assert.deepEqual(fixture.commands, [])
+  assert.deepEqual(fixture.statuses, ["checking"])
 })
 
 test("a detached relaunch failure is surfaced after the worker rollback", async () => {
