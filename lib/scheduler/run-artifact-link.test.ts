@@ -26,7 +26,7 @@ describe("runArtifactLinks", () => {
     expect(
       runArtifactLinks({ goalId: "goal-1", sessionId: "sess-1", status: "completed", turns: 4 })
     ).toEqual([
-      { kind: "goal", id: "goal-1", href: "/goals" },
+      { kind: "goal", id: "goal-1", href: "/goals?goal=goal-1" },
       { kind: "session", id: "sess-1", href: null },
     ])
   })

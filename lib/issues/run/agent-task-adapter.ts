@@ -29,9 +29,6 @@ import { withRunBrief } from "./types"
 
 export const AGENT_TASK_RUN_ADAPTER_ID = "agent-task"
 
-/** Where the human can watch the task: the Character's task board in Settings. */
-export const AGENT_TASK_BOARD_HREF = "/settings?section=characters"
-
 /** Chat session deep link — same query shape as `lib/chat/message-permalink.ts`. */
 export function sessionHref(sessionId: string): string {
   return `/?session=${encodeURIComponent(sessionId)}`
@@ -189,7 +186,10 @@ export function createAgentTaskRunAdapter(
 }
 
 /** Attempt states whose chat session is still executing. */
-const LIVE_ATTEMPT_STATUSES: ReadonlySet<AgentTaskAttempt["status"]> = new Set(["queued", "running"])
+const LIVE_ATTEMPT_STATUSES: ReadonlySet<AgentTaskAttempt["status"]> = new Set([
+  "queued",
+  "running",
+])
 
 /** `IssuePriority` → `AgentTaskPriority`; `none` reads as `normal`. */
 export function issuePriorityToAgentTaskPriority(

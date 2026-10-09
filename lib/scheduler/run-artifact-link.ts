@@ -14,6 +14,8 @@
  * later can render the same answer differently.
  */
 
+import { goalConsoleHref } from "@/lib/goal/console-prefs"
+
 /** Where a run's product can be opened. */
 export interface RunArtifactLink {
   /** Which surface owns it. Drives the label and the icon. */
@@ -45,7 +47,8 @@ export function runArtifactLinks(output: unknown): RunArtifactLink[] {
   const links: RunArtifactLink[] = []
 
   const goalId = readString(source, "goalId")
-  if (goalId) links.push({ kind: "goal", id: goalId, href: "/goals" })
+  // The console opens that goal in its inspector, not just the goal list.
+  if (goalId) links.push({ kind: "goal", id: goalId, href: goalConsoleHref({ goalId }) })
 
   const planId = readString(source, "planId")
   if (planId) links.push({ kind: "plan", id: planId, href: "/agent-runs" })

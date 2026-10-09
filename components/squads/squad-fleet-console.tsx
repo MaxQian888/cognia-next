@@ -34,9 +34,10 @@
  * the whole reason the sheet was opened.
  */
 
+import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ActivityIcon, PlusIcon, SettingsIcon, SparklesIcon, UsersIcon } from "lucide-react"
+import { ActivityIcon, PlusIcon, SettingsIcon, SparklesIcon } from "lucide-react"
 
 import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
@@ -125,8 +126,8 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
     center = (
       <Empty className="h-full" data-testid="squad-fleet-missing">
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <UsersIcon />
+          <EmptyMedia>
+            <MobileSpotIcon name="agent-teams" size={96} />
           </EmptyMedia>
           <EmptyTitle className="text-sm">{t("detail.missingTitle")}</EmptyTitle>
           <EmptyDescription className="text-xs">{t("detail.missingDescription")}</EmptyDescription>
@@ -142,8 +143,8 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
     center = (
       <Empty className="h-full" data-testid="squad-fleet-onboarding">
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <UsersIcon />
+          <EmptyMedia>
+            <MobileSpotIcon name="agent-teams" size={96} />
           </EmptyMedia>
           <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
           <EmptyDescription>
@@ -204,7 +205,7 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
       header={
         <FeaturePageHeader
           variant="management"
-          icon={<UsersIcon className="size-4" />}
+          icon={<MobileSpotIcon name="agent-teams" size={32} />}
           title={t("title")}
           description={t("description")}
           // Nothing to count yet: the centre already says "No Squads yet", and

@@ -119,6 +119,7 @@ describe("<BuiltInTeamsSection />", () => {
 
   it("lists each Team labelled built-in, with its members and a way to manage them", () => {
     render(<BuiltInTeamsSection teams={[brainstorm, research]} />)
+    expect(screen.getByTestId(`agent-team-avatar-${brainstorm.id}`)).toBeInTheDocument()
     const section = screen.getByRole("region", { name: "Built-in teams" })
     expect(section).toBeInTheDocument()
     expect(screen.getAllByText("Built-in")).toHaveLength(2)

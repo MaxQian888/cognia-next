@@ -21,7 +21,7 @@ import type { IssueSourceAdapter, IssueSourceQuery, UnifiedIssueItem } from "@/t
 import { makeUnifiedIssueId, READ_ONLY_ISSUE_CAPABILITIES } from "@/types/issues/unified"
 import { listAgentTasksByProject } from "@/lib/db/agent-tasks"
 import { mapIssueRunsByTarget } from "@/lib/db/issue-runs"
-import { AGENT_TASK_BOARD_HREF } from "@/lib/issues/run/agent-task-adapter"
+import { agentTaskBoardHref } from "@/lib/agents/routes"
 import { agentTaskPriorityToIssuePriority, agentTaskStatusToIssueStatus } from "./agent-status-map"
 import { getIssueSourceRegistry, type IssueSourceRegistry } from "./registry"
 
@@ -61,7 +61,8 @@ export function toUnifiedAgentTask(task: AgentTask, origin?: OriginIssueRef): Un
     updatedAt: task.updatedAt,
     origin: {
       tableName: "agentTasks",
-      deepLinkHref: AGENT_TASK_BOARD_HREF,
+      // The agent's own board is where the row can be run, paused or commented on.
+      deepLinkHref: agentTaskBoardHref(task.agentId),
       sourceLabel: agentSourceLabel(AGENT_TASK_SOURCE_LABEL, origin),
     },
     capabilities: READ_ONLY_ISSUE_CAPABILITIES,

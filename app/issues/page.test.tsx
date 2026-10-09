@@ -98,6 +98,12 @@ describe("IssuesPage", () => {
     expect(consoleProps).toMatchObject({ initialProjectId: "iprj_9" })
   })
 
+  it("forwards the ?assignee= deep link, which is what an agent's profile links into", () => {
+    search = new URLSearchParams("assignee=agent%3Achar_1")
+    render(<IssuesPage />)
+    expect(consoleProps).toMatchObject({ initialAssignee: "agent:char_1" })
+  })
+
   it("passes undefined when there is no container deep link", () => {
     render(<IssuesPage />)
     expect(consoleProps).toMatchObject({ initialProjectId: undefined })

@@ -11,6 +11,7 @@
  * drawer-closing session select) come in through `host`.
  */
 
+import { AGENTS_ROUTE } from "@/lib/agents/routes"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
@@ -363,8 +364,9 @@ export function useGlobalSearchActions({
         case "manage-api-key":
           host.onOpenSettings("api-key")
           return
-        case "manage-characters":
-          host.onOpenSettings("characters")
+        case "manage-agents":
+          // Agents are managed on their own console (ADR-0220), not in Settings.
+          router.push(AGENTS_ROUTE)
           return
         case "manage-skills":
           host.onOpenSettings("skills")

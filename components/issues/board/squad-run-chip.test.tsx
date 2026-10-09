@@ -15,6 +15,9 @@ const run = { runId: "r1", teamId: "team x", teamName: "Docs squad", status: "ru
 describe("SquadRunChip", () => {
   it("links to the squad's workspace with the team selected", () => {
     render(<SquadRunChip run={run} />)
+    expect(
+      document.querySelector('image[href="/icons/cognia-mobile-spots/png/agent-teams.png"]')
+    ).toBeInTheDocument()
     const chip = screen.getByTestId("squad-run-chip-team x")
     expect(chip).toHaveAttribute("href", "/squads?id=team%20x")
     expect(chip).toHaveTextContent("label:Docs squad")

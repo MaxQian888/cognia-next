@@ -195,6 +195,7 @@ describe("SquadFleetConsole", () => {
     seed([])
     renderConsole(route())
     expect(screen.queryByText(/0 Squads/)).not.toBeInTheDocument()
+    expect(screen.getAllByTestId("mobile-spot-icon-agent-teams")).toHaveLength(2)
   })
 
   it("renders the rail as a real pane, never behind a Sheet glyph", () => {

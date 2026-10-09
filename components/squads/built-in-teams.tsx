@@ -19,18 +19,13 @@
  * The Squad count and empty state keep counting user Squads only.
  */
 
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 import { useId, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import {
-  ChevronRightIcon,
-  CopyIcon,
-  MessagesSquareIcon,
-  SettingsIcon,
-  UsersIcon,
-} from "lucide-react"
+import { ChevronRightIcon, CopyIcon, MessagesSquareIcon, SettingsIcon } from "lucide-react"
 
 import type { Team } from "@cognia/agent-config-types"
 import { useShellNav } from "@/components/shell/use-shell-nav"
@@ -228,7 +223,7 @@ function BuiltInTeamRow({ team }: { team: Team }) {
       data-testid={`squad-builtin-row-${team.id}`}
     >
       <div className="flex min-w-0 flex-1 items-start gap-2.5">
-        <UsersIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+        <AgentTeamAvatar subject={team} className="size-9" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="min-w-0 truncate text-sm font-medium">{team.name}</span>

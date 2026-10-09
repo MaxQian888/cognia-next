@@ -88,6 +88,10 @@ describe("rows", () => {
     render(<SquadListPane fleet={fleet()} route={route()} />)
     expect(screen.getByTestId("squad-fleet-row")).toHaveTextContent("Alpha")
     expect(screen.getByTestId("squad-fleet-row")).toHaveTextContent("2 members")
+    expect(screen.getByTestId("agent-team-avatar-a")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/icons/cognia-agent-team/webp/")
+    )
   })
 
   /**
@@ -247,6 +251,10 @@ describe("loading and empty", () => {
   it("omits the CTA when the host has nowhere to create from", () => {
     render(<SquadListPane fleet={fleet({ squads: [], total: 0 })} route={route()} />)
     expect(screen.queryByTestId("squad-fleet-create")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-agent-teams")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/agent-teams.png"
+    )
   })
 
   /** "New Squad" lives in each host's header, which is always on screen. */

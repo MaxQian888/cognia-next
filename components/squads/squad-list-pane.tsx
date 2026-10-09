@@ -35,7 +35,8 @@
  */
 
 import { useTranslations } from "next-intl"
-import { SearchIcon, UsersIcon } from "lucide-react"
+import { SearchIcon } from "lucide-react"
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 
 import type { Team } from "@cognia/agent-config-types"
 import { BuiltInTeamsSection } from "@/components/squads/built-in-teams"
@@ -209,7 +210,7 @@ export function SquadListPane({
               </p>
             ) : (
               <EmptyState
-                icon={UsersIcon}
+                spotIcon="agent-teams"
                 title={route.narrowed ? t("noMatchesTitle") : t("emptyTitle")}
                 description={emptyDescription}
                 {...(route.narrowed
@@ -282,17 +283,20 @@ function SquadRow({
         selected && "bg-accent hover:bg-accent"
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "mt-1.5 size-2 shrink-0 rounded-full",
-          squad.waiting
-            ? "bg-destructive"
-            : squad.live
-              ? "animate-pulse bg-emerald-500"
-              : "bg-muted-foreground/40"
-        )}
-      />
+      <span className="relative shrink-0">
+        <AgentTeamAvatar subject={squad} className="size-9" />
+        <span
+          aria-hidden
+          className={cn(
+            "absolute bottom-0 right-0 size-2 rounded-full ring-2 ring-background",
+            squad.waiting
+              ? "bg-destructive"
+              : squad.live
+                ? "animate-pulse bg-emerald-500"
+                : "bg-muted-foreground/40"
+          )}
+        />
+      </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{squad.name}</span>

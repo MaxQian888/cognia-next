@@ -117,7 +117,7 @@ function SquadDetailViewContent({
               {t(`tabs.${value}`)}
               {value === "runs" && reviews.length > 0 ? (
                 <span
-                  className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold tabular-nums text-destructive-foreground"
+                  className="rounded-pill bg-destructive px-1.5 text-[10px] font-semibold tabular-nums text-destructive-foreground"
                   aria-label={t("detail.waitingCount", { count: reviews.length })}
                 >
                   {reviews.length}

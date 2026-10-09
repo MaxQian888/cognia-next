@@ -1,3 +1,4 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { KIND_SCOPES, type GlobalSearchKind } from "@/lib/global-search/types"
 
 import { KIND_ICONS, kindIcon } from "./kind-icons"
@@ -36,4 +37,8 @@ describe("kind icons", () => {
   it("falls back to the command icon for an unknown kind", () => {
     expect(kindIcon("nope" as GlobalSearchKind)).toBe(KIND_ICONS.action)
   })
+})
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(KIND_ICONS.squad).toBe(AgentTeamIcon)
 })

@@ -21,6 +21,18 @@ export const ISSUES_HREF = "/issues"
  */
 export const ISSUE_SOURCE_PARAM = "source"
 
+/**
+ * Narrows the console to one assignee. The value is the board's `actorKey`
+ * (`agent:<characterId>`, `human:<id>`), the same key the assignee filter
+ * stores, so the link and the filter chip it produces cannot disagree.
+ */
+export const ISSUE_ASSIGNEE_PARAM = "assignee"
+
+/** The console filtered to the issues (and agent tasks) assigned to one agent. */
+export function agentIssuesHref(agentId: string): string {
+  return `${ISSUES_HREF}?${ISSUE_ASSIGNEE_PARAM}=${encodeURIComponent(`agent:${agentId}`)}`
+}
+
 /** Deep link to an issue, selected. `source` defaults to a local issue. */
 export function issueHref(issueId: string, source: IssueSourceKind = "local"): string {
   const base = `${ISSUES_HREF}?id=${encodeURIComponent(issueId)}`

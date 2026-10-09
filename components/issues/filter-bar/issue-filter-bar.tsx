@@ -82,6 +82,12 @@ export interface IssueFilterBarProps {
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
   cycleNamesById?: ReadonlyMap<string, string>
+  /**
+   * `actorKey` → name for every assignable actor. Labels the chip of an
+   * assignee no scoped item carries yet, e.g. a `?assignee=` deep link to an
+   * agent with nothing on the board, which would otherwise read as a raw key.
+   */
+  knownAssigneeLabels?: ReadonlyMap<string, string>
   /** Focus target for the `/` shortcut. */
   searchRef?: React.Ref<HTMLInputElement>
 }
@@ -102,6 +108,7 @@ export function IssueFilterBar({
   labelsById,
   projectNamesById,
   cycleNamesById,
+  knownAssigneeLabels,
   searchRef,
 }: IssueFilterBarProps) {
   const t = useTranslations("issues.toolbar")
@@ -112,13 +119,13 @@ export function IssueFilterBar({
   const chips = useMemo(() => collectActiveFilterChips(filter), [filter])
   const assigneeLabels = useMemo(
     () =>
-      new Map(
-        options.assignees.map(({ key, actor }) => [
-          key,
-          actor.label ?? tIssues(`actor.${actor.kind}`),
-        ])
-      ),
-    [options.assignees, tIssues]
+      new Map([
+        ...(knownAssigneeLabels ?? []),
+        ...options.assignees.map(
+          ({ key, actor }) => [key, actor.label ?? tIssues(`actor.${actor.kind}`)] as const
+        ),
+      ]),
+    [options.assignees, knownAssigneeLabels, tIssues]
   )
 
   return (

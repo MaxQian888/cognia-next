@@ -11,6 +11,7 @@
  * `kind-icons.test.ts` walking `KIND_SCOPES` is the check that actually holds.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   BotIcon,
   BrainIcon,
@@ -37,7 +38,6 @@ import {
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
-  UsersRoundIcon,
   WorkflowIcon,
   type LucideIcon,
   ShapesIcon,
@@ -60,7 +60,7 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   // different things that both surface in the same result list, and the row
   // text alone does not separate them. Matches the Squads entry on the phone's
   // Me list (`components/mobile/me/me-entries.ts`).
-  squad: UsersRoundIcon,
+  squad: AgentTeamIcon,
   workspace: FolderIcon,
   workflow: WorkflowIcon,
   skill: SparklesIcon,

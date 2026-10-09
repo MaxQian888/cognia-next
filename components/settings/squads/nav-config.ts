@@ -11,8 +11,9 @@
  * store, the router, or a rendered rail.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import type { ComponentType } from "react"
-import { LayoutTemplateIcon, UsersIcon } from "lucide-react"
+import { LayoutTemplateIcon } from "lucide-react"
 
 /** Panels that exist regardless of what the user has created. */
 export type SquadStaticPanelId = "templates"
@@ -36,7 +37,7 @@ export const SQUAD_STATIC_PANELS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>
 }> = [{ id: "templates", icon: LayoutTemplateIcon }]
 
-export const SQUAD_ENTITY_ICON: ComponentType<{ className?: string }> = UsersIcon
+export const SQUAD_ENTITY_ICON: ComponentType<{ className?: string }> = AgentTeamIcon
 
 const STATIC_IDS = new Set<string>(SQUAD_STATIC_PANELS.map((panel) => panel.id))
 

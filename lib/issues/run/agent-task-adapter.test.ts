@@ -5,7 +5,6 @@
 import type { AgentTask, AgentTaskAttempt } from "@/types/agent/agent-task"
 import type { Issue, IssueProject, IssueRun } from "@/types/issues"
 import {
-  AGENT_TASK_BOARD_HREF,
   AGENT_TASK_RUN_ADAPTER_ID,
   agentTaskArtifacts,
   buildAgentTaskDescription,
@@ -168,7 +167,6 @@ describe("helpers", () => {
     expect(agentTaskArtifacts([attempt(), attempt({ attemptNo: 2, sessionId: "s2" })])).toEqual([
       { label: "Session (attempt 2)", href: "/?session=s2" },
     ])
-    expect(AGENT_TASK_BOARD_HREF).toBe("/settings?section=characters")
   })
 })
 

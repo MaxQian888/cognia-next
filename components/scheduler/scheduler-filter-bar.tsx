@@ -136,7 +136,7 @@ export function SchedulerFilterBar({
             {hasMenuFilters && (
               <span
                 data-testid="scheduler-kind-filter-count"
-                className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-medium text-primary-foreground tabular-nums"
+                className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-pill bg-primary px-0.5 text-[9px] font-medium text-primary-foreground tabular-nums"
               >
                 {pinnedCount}
               </span>

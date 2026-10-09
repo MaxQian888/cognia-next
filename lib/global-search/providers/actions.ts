@@ -70,7 +70,7 @@ export type BuiltinCommandId =
   | "check-updates"
   | "open-settings"
   | "manage-api-key"
-  | "manage-characters"
+  | "manage-agents"
   | "manage-skills"
   | "manage-teams"
   | "manage-mcp"
@@ -244,9 +244,9 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       extra: { current: ctx.host.hasApiKey },
     },
     {
-      id: "manage-characters",
-      title: t("globalSearch.actions.manageCharacters"),
-      keywords: ["characters", "persona", "agents", "角色"],
+      id: "manage-agents",
+      title: t("globalSearch.actions.manageAgents"),
+      keywords: ["agents", "characters", "persona", "智能体", "角色"],
       icon: { lucide: UsersRoundIcon },
     },
     {

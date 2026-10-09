@@ -1,3 +1,4 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { CORE_CAPABILITY_IDS, type CapabilityId } from "@/lib/platform/capabilities"
 import {
   SETTINGS_GROUP_ORDER,
@@ -33,7 +34,7 @@ describe("settings-nav-config", () => {
       }
     })
 
-    it("squads sits in the Agents group with Layers3 icon", () => {
+    it("squads sits in the Agents group", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "squads")
       expect(item).toBeDefined()
       expect(item?.group).toBe("agents")
@@ -324,4 +325,8 @@ describe("settings-nav-config", () => {
       }
     })
   })
+})
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(SETTINGS_NAV.find((entry) => entry.id === "squads")?.icon).toBe(AgentTeamIcon)
 })

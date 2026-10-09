@@ -13,9 +13,9 @@
  * press of Space on the focused link would start a drag.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { UsersIcon } from "lucide-react"
 import type { KeyboardEvent, MouseEvent, PointerEvent } from "react"
 
 import { agentTeamWorkspaceHref } from "@/lib/issues/run/agent-team-adapter"
@@ -44,7 +44,7 @@ export function SquadRunChip({ run, inert, className }: SquadRunChipProps) {
   if (inert) {
     return (
       <span className={chipClass} data-testid={`squad-run-chip-${run.teamId}`}>
-        <UsersIcon aria-hidden className="size-3 shrink-0" />
+        <AgentTeamIcon aria-hidden className="size-3 shrink-0" />
         <span className="truncate">{label}</span>
       </span>
     )
@@ -62,7 +62,7 @@ export function SquadRunChip({ run, inert, className }: SquadRunChipProps) {
       onPointerDown={stop}
       onKeyDown={stop}
     >
-      <UsersIcon aria-hidden className="size-3 shrink-0" />
+      <AgentTeamIcon aria-hidden className="size-3 shrink-0" />
       <span className="truncate">{label}</span>
     </Link>
   )

@@ -31,7 +31,8 @@
  * these never lands in the recents list either.
  */
 
-import { PauseIcon, PlayIcon, UsersIcon } from "lucide-react"
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
+import { PauseIcon, PlayIcon } from "lucide-react"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
@@ -154,7 +155,7 @@ function createSquadsListProvider(deps: SquadsProviderDeps) {
       titlePositions: match.positions,
       subtitle: row.description,
       meta: ctx.t("squads.fleet.memberCount", { count: row.memberCount }),
-      icon: { lucide: UsersIcon },
+      icon: { lucide: AgentTeamIcon },
       score: match.score,
       action: { type: "navigate", href: `/squads?id=${encodeURIComponent(row.id)}` },
     }),

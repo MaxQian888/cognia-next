@@ -14,7 +14,7 @@ import RouteBody from "./route-body"
 import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
-import { ISSUE_SOURCE_PARAM } from "@/lib/issues/hrefs"
+import { ISSUE_ASSIGNEE_PARAM, ISSUE_SOURCE_PARAM } from "@/lib/issues/hrefs"
 import { ISSUE_SOURCE_KINDS, type IssueSourceKind } from "@/types/issues/unified"
 
 /** The `?source=` of a deep link, when it names a source this build knows. */
@@ -33,6 +33,7 @@ function IssuesPageInner() {
       initialSelectedSource={initialSelectedSource}
       initialProjectId={params.get("project") ?? undefined}
       initialCycleId={params.get("cycle") ?? undefined}
+      initialAssignee={params.get(ISSUE_ASSIGNEE_PARAM) ?? undefined}
     />
   )
 }

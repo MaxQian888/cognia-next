@@ -153,4 +153,9 @@ describe("setSoleFilterValue", () => {
     expect(setSoleFilterValue(filter, "cycleIds", "c2").cycleIds).toEqual(["c2"])
     expect(setSoleFilterValue(filter, "cycleIds", "c2").issueProjectIds).toEqual([])
   })
+
+  it("covers the assignee facet an agent's profile deep-links through", () => {
+    const filter = { ...EMPTY_ISSUE_FILTER, assignees: ["human:self", "agent:a"] }
+    expect(setSoleFilterValue(filter, "assignees", "agent:b").assignees).toEqual(["agent:b"])
+  })
 })

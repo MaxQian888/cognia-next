@@ -2,6 +2,7 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: { getState: () => ({ teams: {}, teammates: {} }) },
 }))
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   createSquadsProvider,
   loadSquadSearchRows,
@@ -86,6 +87,7 @@ describe("squadsProvider", () => {
    */
   it("matches on the name and opens the Squad, not the list", async () => {
     const result = await search(createSquadsProvider(deps()), "review")
+    expect(result.items[0]?.icon).toEqual({ lucide: AgentTeamIcon })
     expect(result.items[0]).toMatchObject({
       id: "squad:squad-1",
       kind: "squad",

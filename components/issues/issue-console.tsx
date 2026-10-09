@@ -130,6 +130,11 @@ export interface IssueConsoleProps {
   initialProjectId?: string
   /** Deep-linked cycle (`/issues?cycle=…`), from the Cycles tab. */
   initialCycleId?: string
+  /**
+   * Deep-linked assignee (`/issues?assignee=agent:…`), an `actorKey`; what an
+   * agent's profile produces for "view in Issues".
+   */
+  initialAssignee?: string
 }
 
 export function IssueConsole({
@@ -137,6 +142,7 @@ export function IssueConsole({
   initialSelectedSource,
   initialProjectId,
   initialCycleId,
+  initialAssignee,
 }: IssueConsoleProps) {
   const t = useTranslations("issues")
   const projectId = useProjectStore((s) => s.activeProjectId)
@@ -167,7 +173,9 @@ export function IssueConsole({
    */
   const deepLinkApplied = useRef(false)
   useEffect(() => {
-    if (deepLinkApplied.current || (!initialProjectId && !initialCycleId)) return
+    if (deepLinkApplied.current || (!initialProjectId && !initialCycleId && !initialAssignee)) {
+      return
+    }
     deepLinkApplied.current = true
     const current = useIssueViewStore.getState()
     const active = resolveIssueViewPreferences(
@@ -177,8 +185,9 @@ export function IssueConsole({
     let filter = active.filter
     if (initialProjectId) filter = setSoleFilterValue(filter, "issueProjectIds", initialProjectId)
     if (initialCycleId) filter = setSoleFilterValue(filter, "cycleIds", initialCycleId)
+    if (initialAssignee) filter = setSoleFilterValue(filter, "assignees", initialAssignee)
     current.setFilter(current.viewId, filter)
-  }, [initialProjectId, initialCycleId])
+  }, [initialProjectId, initialCycleId, initialAssignee])
 
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialSelectedId
@@ -425,6 +434,16 @@ export function IssueConsole({
   )
   const selection = useIssueSelection(orderedIds)
   const assigneeOptions = useAssigneeOptions()
+  const knownAssigneeLabels = useMemo(
+    () =>
+      new Map(
+        assigneeOptions.map((option) => [
+          option.key,
+          option.actor.label ?? t(`actor.${option.actor.kind}`),
+        ])
+      ),
+    [assigneeOptions, t]
+  )
   const itemsById = useMemo(() => new Map(sorted.map((item) => [item.unifiedId, item])), [sorted])
   const checkedItems = useMemo(
     () =>
@@ -791,6 +810,7 @@ export function IssueConsole({
         labelsById={labelsById}
         projectNamesById={projectNamesById}
         cycleNamesById={cycleNamesById}
+        knownAssigneeLabels={knownAssigneeLabels}
         searchRef={searchRef}
       />
 

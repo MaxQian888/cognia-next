@@ -71,6 +71,7 @@ describe("identity", () => {
     const masthead = screen.getByTestId("squad-fleet-inspector")
     expect(screen.getByRole("heading", { name: "Review Crew" })).toBeInTheDocument()
     expect(masthead).toHaveTextContent("3 members · Reads the diff")
+    expect(screen.getByTestId(`agent-team-avatar-${squad.id}`)).toBeInTheDocument()
   })
 
   it("links configuration to this Squad's panel in Settings", () => {

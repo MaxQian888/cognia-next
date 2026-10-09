@@ -84,7 +84,7 @@ describe("toUnifiedAgentTask", () => {
       updatedAt: 20,
       origin: {
         tableName: "agentTasks",
-        deepLinkHref: "/settings?section=characters",
+        deepLinkHref: "/agents?id=char-1&mode=tasks",
         sourceLabel: AGENT_TASK_SOURCE_LABEL,
       },
     })

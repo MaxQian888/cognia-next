@@ -345,7 +345,6 @@ describe("useGlobalSearchActions", () => {
     for (const [id, tab] of [
       ["open-settings", "general"],
       ["manage-api-key", "api-key"],
-      ["manage-characters", "characters"],
       ["manage-skills", "skills"],
       ["manage-teams", "teams"],
       ["manage-mcp", "mcp"],
@@ -353,6 +352,8 @@ describe("useGlobalSearchActions", () => {
       await run(id)
       expect(host.onOpenSettings).toHaveBeenLastCalledWith(tab)
     }
+    await run("manage-agents")
+    expect(push).toHaveBeenLastCalledWith("/agents")
     await run("clear-recent-searches")
     expect(clearAllRecents).toHaveBeenCalled()
     await run("unknown-command")

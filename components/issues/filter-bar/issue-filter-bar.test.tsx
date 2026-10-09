@@ -87,6 +87,20 @@ describe("IssueFilterBar", () => {
     expect(screen.getByTestId("issue-toolbar-filter")).toHaveTextContent("2")
   })
 
+  it("names a deep-linked assignee that no scoped item carries", () => {
+    render(
+      <IssueFilterBar
+        {...baseProps({
+          items: [],
+          filter: { ...EMPTY_ISSUE_FILTER, assignees: ["agent:char_1"] },
+          knownAssigneeLabels: new Map([["agent:char_1", "Research Analyst"]]),
+        })}
+      />
+    )
+    expect(screen.getByTestId("issue-filter-chips")).toHaveTextContent("Research Analyst")
+    expect(screen.getByTestId("issue-filter-chips")).not.toHaveTextContent("agent:char_1")
+  })
+
   it("switches layout through the toggle group", async () => {
     const user = userEvent.setup()
     const props = baseProps()

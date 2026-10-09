@@ -15,6 +15,7 @@
  * blank cell on screen.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
   CalendarClockIcon,
@@ -24,7 +25,6 @@ import {
   RefreshCwIcon,
   SparklesIcon,
   SquareFunctionIcon,
-  Users2Icon,
   UserRoundPenIcon,
   WorkflowIcon,
   ZapIcon,
@@ -58,7 +58,7 @@ const STATUS_DOT: Record<BotInstallationStatus, string> = {
 
 const EXECUTOR_ICON: Record<PluginBotExecutor, LucideIcon> = {
   workflow: WorkflowIcon,
-  squad: Users2Icon,
+  squad: AgentTeamIcon,
   "agent-turn": SparklesIcon,
   handler: SquareFunctionIcon,
 }

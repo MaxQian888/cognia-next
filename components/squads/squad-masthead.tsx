@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl"
 import { ArrowLeftIcon, InfoIcon, SettingsIcon } from "lucide-react"
 
 import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -91,6 +92,7 @@ export function SquadMasthead({
               <ArrowLeftIcon aria-hidden className="size-4" />
             </Button>
           ) : null}
+          <AgentTeamAvatar subject={squad} className="size-10" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h2 className="min-w-0 truncate text-base font-semibold" data-testid="squad-name">

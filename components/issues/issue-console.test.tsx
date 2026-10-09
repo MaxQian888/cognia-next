@@ -422,6 +422,16 @@ describe("IssueConsole", () => {
       )
     })
 
+    it("applies the ?assignee= deep link from an agent's profile as an assignee filter", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole initialAssignee="agent:char_1" />)
+      await waitFor(() =>
+        expect((filterBarProps.filter as { assignees: string[] }).assignees).toEqual([
+          "agent:char_1",
+        ])
+      )
+    })
+
     it("turns a project click into a filter, not a navigation", async () => {
       render(<IssueConsole />)
       await screen.findByTestId("rail-stub")

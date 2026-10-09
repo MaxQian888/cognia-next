@@ -10,6 +10,7 @@ export interface RouteBodyProps {
   initialSelectedSource?: IssueSourceKind
   initialProjectId?: string
   initialCycleId?: string
+  initialAssignee?: string
 }
 export default function RouteBody(props: RouteBodyProps) {
   const compact = useCompactLayout()

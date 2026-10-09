@@ -1,5 +1,7 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   FALLBACK_SQUAD_PANEL,
+  SQUAD_ENTITY_ICON,
   SQUAD_ROSTER_SETTING_ID,
   parseSquadPanelId,
   resolveSquadPanel,
@@ -78,4 +80,8 @@ describe("SQUAD_ROSTER_SETTING_ID", () => {
   it("does not resolve to a static panel", () => {
     expect(squadPanelForFocusId(SQUAD_ROSTER_SETTING_ID)).toBeNull()
   })
+})
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(SQUAD_ENTITY_ICON).toBe(AgentTeamIcon)
 })

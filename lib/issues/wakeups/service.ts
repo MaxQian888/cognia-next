@@ -25,6 +25,7 @@ import { getIssue } from "@/lib/db/issues"
 import { getIssueProject } from "@/lib/db/issue-projects"
 import { isGithubImportBinding } from "@/lib/issues/sync/bindings"
 import { getDb } from "@/lib/db/schema"
+import { uniqueIndexKeys } from "@/lib/db/unique-keys"
 import {
   compileIssueWakeup,
   isTerminalIssueStatus,
@@ -495,7 +496,7 @@ export async function setChildrenDoneInstruction(
  * was not running.
  */
 export async function reconcileChildrenDoneWakeups(): Promise<number> {
-  const parentIds = (await getDb().issues.orderBy("parentId").uniqueKeys()) as string[]
+  const parentIds = (await uniqueIndexKeys(getDb().issues.orderBy("parentId"))) as string[]
   let created = 0
   for (const parentId of parentIds) {
     if (!parentId) continue

@@ -70,6 +70,10 @@ describe("icons", () => {
         <BotExecutorIcon executor="handler" />
       </>
     )
+    expect(screen.getByRole("img", { name: "Squad" })).toBeInTheDocument()
+    expect(
+      document.querySelector('image[href="/icons/cognia-mobile-spots/png/agent-teams.png"]')
+    ).toBeInTheDocument()
     const paths = [...container.querySelectorAll("svg")].map((svg) => svg.innerHTML)
     expect(new Set(paths).size).toBe(4)
   })
