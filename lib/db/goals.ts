@@ -21,7 +21,12 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { DEFAULT_PROJECT_ID, resolveSessionProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 
-const EVENTS_PER_GOAL_CAP = 5000
+/**
+ * Newest events kept per goal. Exported because a paired client's mirror of
+ * the log (`lib/sync/handlers/goals.ts`) prunes to the same cap, so the two
+ * windows match without a delete crossing the wire.
+ */
+export const EVENTS_PER_GOAL_CAP = 5000
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Goal CRUD
@@ -110,6 +115,64 @@ export async function listAllGoals(limit = 500, projectId?: string): Promise<Goa
       .limit(limit)
       .toArray()
   })
+}
+
+/**
+ * The active workspace's id, read inside a liveQuery without leaving its
+ * observation scope. Same reasoning as {@link listAllGoals}.
+ */
+function activeGoalScope(projectId: string | undefined) {
+  return projectId === undefined
+    ? Dexie.Promise.resolve(getSettings()).then(
+        (settings) => settings.activeProjectId ?? DEFAULT_PROJECT_ID
+      )
+    : Dexie.Promise.resolve(projectId)
+}
+
+/**
+ * Every goal that can still move (`active` / `paused`) in one workspace,
+ * newest first — however old. The Overview used to filter these out of
+ * {@link listAllGoals}'s newest-500 window, so an open goal created before the
+ * 500 most recent ones silently left the console while it kept running. The
+ * `status` index bounds this read by open goals, not by history depth.
+ */
+export async function listOpenGoals(projectId?: string): Promise<Goal[]> {
+  const database = getDb()
+  return activeGoalScope(projectId).then((pid) => {
+    if (getDb() !== database) throw new Dexie.AbortError("Goal query database changed")
+    return database.chatGoals
+      .where("status")
+      .anyOf(["active", "paused"])
+      .filter((goal) => goal.projectId === pid)
+      .toArray()
+      .then((rows) => rows.sort((a, b) => b.createdAt - a.createdAt))
+  })
+}
+
+/** How many goals one workspace holds — what History's "Load more" counts toward. */
+export async function countAllGoals(projectId?: string): Promise<number> {
+  const database = getDb()
+  return activeGoalScope(projectId).then((pid) => {
+    if (getDb() !== database) throw new Dexie.AbortError("Goal query database changed")
+    return database.chatGoals
+      .where("[projectId+createdAt]")
+      .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+      .count()
+  })
+}
+
+/**
+ * Every goal attached to any of `sessionIds`, newest first. Not workspace
+ * scoped: the conversation manager lists every workspace's conversations and
+ * marks the ones running a goal.
+ */
+export async function listGoalsForSessions(sessionIds: readonly string[]): Promise<Goal[]> {
+  if (sessionIds.length === 0) return []
+  const rows = await getDb()
+    .chatGoals.where("sessionId")
+    .anyOf([...sessionIds])
+    .toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt)
 }
 
 export interface GoalUpdatePatch {
@@ -256,10 +319,66 @@ export async function listGoalEvents(goalId: string, limit = 200): Promise<GoalE
 }
 
 /**
+ * The latest judge verdict's reason for each goal that has one. One read for
+ * a whole list: each goal's events are walked newest first and stop at the
+ * first `judge_evaluated`, so the cost is the events since the last verdict,
+ * not the goal's history. The console used to open one live query per card
+ * to find the same thing.
+ */
+export async function latestJudgeReasons(goalIds: readonly string[]): Promise<Map<string, string>> {
+  const db = getDb()
+  const entries = await Promise.all(
+    goalIds.map(async (goalId) => {
+      const event = await db.chatGoalEvents
+        .where("[goalId+ts]")
+        .between([goalId, -Infinity], [goalId, Infinity])
+        .reverse()
+        .filter((ev) => ev.kind === "judge_evaluated")
+        .first()
+      return event?.payload.kind === "judge_evaluated"
+        ? ([goalId, event.payload.reason] as const)
+        : null
+    })
+  )
+  return new Map(entries.filter((entry): entry is readonly [string, string] => entry !== null))
+}
+
+/**
  * Number of events on file for a goal. Used by the Activity tab badge.
  */
 export async function countGoalEvents(goalId: string): Promise<number> {
   return getDb().chatGoalEvents.where("goalId").equals(goalId).count()
+}
+
+/**
+ * Trim each goal in `goalIds` back to its newest `keep` events, in one
+ * transaction. The host trims on every append; a paired client that mirrors
+ * the log calls this after applying a pulled page, so the host's per-goal
+ * prune (which records no tombstones) is mirrored by the same rule.
+ */
+export async function pruneGoalEvents(
+  goalIds: readonly string[],
+  keep: number = EVENTS_PER_GOAL_CAP
+): Promise<void> {
+  const unique = [...new Set(goalIds)]
+  if (unique.length === 0) return
+  const db = getDb()
+  await db.transaction("rw", db.chatGoalEvents, async () => {
+    for (const goalId of unique) await pruneEventsForGoal(goalId, keep, db)
+  })
+}
+
+/**
+ * Remove every event of the given goals. The paired client's half of the
+ * cascade {@link deleteGoal} performs on the host: a goal deletion reaches the
+ * client as a `goals` tombstone, and its events have to go with it.
+ */
+export async function deleteGoalEventsForGoals(goalIds: readonly string[]): Promise<void> {
+  if (goalIds.length === 0) return
+  await getDb()
+    .chatGoalEvents.where("goalId")
+    .anyOf([...goalIds])
+    .delete()
 }
 
 /**

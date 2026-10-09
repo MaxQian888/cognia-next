@@ -14,12 +14,36 @@
 // We can't safely mutate goal state mid-turn — the turn driver is
 // reading the same row. The user gets a clear "wait for current turn"
 // message back instead.
+//
+// Every reply is read by the user (in the chat transcript, or in an IM
+// thread through `lib/connectors/commands/goal.ts`), so it goes through the
+// runtime translator in the locale the UI shows, under `goal.commands`.
+// Status words and activity labels reuse `goal.status` / `goal.activity.kinds`,
+// the same labels the Goals UI renders.
+//
+// Where the goal lives: the loop runs on the conversation's host. On the
+// desktop (and a browser profile, and the IM connector, which runs on the
+// desktop) that is this process, so the subcommands drive `GoalRuntime`
+// directly. On a paired phone (Capacitor shell) the loop runs on the paired
+// desktop, so the same subcommands go over the Companion goal RPCs
+// (`goal_status` / `goal_create` / `goal_pause` / `goal_resume` / `goal_stop` /
+// `goal_update`), the way `useGoalControls` routes the Goals UI's buttons.
+// Writes there need the remote-control grant, asked for up front
+// (`companion_can_control`) so a refusal reads as one, not as a network error;
+// an unreachable desktop answers `goal.remote.failed`. Reads stay local: the
+// phone mirrors the goal event log (`goalEvents`, `lib/sync/handlers/goals.ts`),
+// so a remote status card lists the same recent activity the desktop's does.
 
 import type { SlashContext } from "../builtin"
 import { useSettingsStore } from "@/stores/settings"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { listGoalEvents } from "@/lib/db/goals"
+import { getRuntimeTranslator, type RuntimeTranslator } from "@/lib/i18n/runtime-translator"
+import { isNativeMobile } from "@/lib/platform/detect"
 import type { Goal, GoalEvent } from "@/types/goal"
+
+/** Scoped to `goal` (not `goal.commands`) so status and kind labels resolve too. */
+const translator = () => getRuntimeTranslator("goal")
 
 /**
  * Result returned to the chat composer. When `dispatchPrompt` is set, the
@@ -44,14 +68,142 @@ export interface GoalCommandResult {
  * `.claude/commands/goal-foo.md`).
  */
 export async function dispatchGoalSubcommand(ctx: SlashContext): Promise<GoalCommandResult | null> {
+  const t = await translator()
+  const host = isNativeMobile() ? companionGoalHost : localGoalHost
+  if (!host.remote) return await runGoalSubcommand(ctx, t, host)
+  try {
+    return await runGoalSubcommand(ctx, t, host)
+  } catch {
+    // The desktop did not answer, or refused a call this device may not make.
+    return { system: t("remote.failed") }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Where the goal lives
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The goal operations a subcommand needs, on the host that runs the loop. */
+interface GoalCommandHost {
+  /** The loop runs on the paired desktop; every call is a Companion RPC. */
+  remote: boolean
+  /** Whether this surface may change the goal. Always `true` on the host. */
+  canControl(): Promise<boolean>
+  /** The session's open goal (`active`, else `paused`). */
+  getOpenGoal(sessionId: string): Promise<Goal | undefined>
+  /** Newest-first activity, read from this device's copy of the event log. */
+  recentEvents(goalId: string): Promise<GoalEvent[]>
+  createGoal(input: {
+    sessionId: string
+    characterId?: string
+    rawObjective: string
+  }): Promise<Goal>
+  pauseGoal(goalId: string): Promise<Goal | null>
+  resumeGoal(goalId: string): Promise<Goal | null>
+  stopGoal(goalId: string): Promise<Goal | null>
+  /** `null` when the runtime refused (goal ended, or the objective is unchanged). */
+  updateObjective(
+    goalId: string,
+    rawObjective: string
+  ): Promise<{ goal: Goal; updatePrompt: string } | null>
+}
+
+/** This process runs the loop: the desktop, a browser profile, the IM connector. */
+const localGoalHost: GoalCommandHost = {
+  remote: false,
+  canControl: async () => true,
+  getOpenGoal: (sessionId) => getGoalRuntime().getOpenGoalForSession(sessionId),
+  recentEvents: (goalId) => listGoalEvents(goalId, 10),
+  createGoal: (input) =>
+    getGoalRuntime().createGoal({
+      ...input,
+      appSettings: useSettingsStore.getState().settings ?? null,
+    }),
+  pauseGoal: (goalId) => getGoalRuntime().pauseGoal(goalId),
+  resumeGoal: (goalId) => getGoalRuntime().resumeGoal(goalId),
+  stopGoal: (goalId) => getGoalRuntime().stopGoal(goalId),
+  updateObjective: (goalId, rawObjective) => getGoalRuntime().updateObjective(goalId, rawObjective),
+}
+
+/** Lazy, so the desktop and IM paths never load the Companion transport. */
+async function companionCall<T>(command: string, payload?: Record<string, unknown>): Promise<T> {
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, payload)
+}
+
+/**
+ * A paired phone: the loop runs on the desktop. Each call is the RPC the Goals
+ * UI's own verbs use on this device, run there by the same `GoalRuntime`
+ * method. The desktop loads its own settings for the defaults and the
+ * redaction allowlist; this device's do not travel.
+ */
+const companionGoalHost: GoalCommandHost = {
+  remote: true,
+  canControl: async () => {
+    const result = await companionCall<{ allowed?: boolean } | null>("companion_can_control")
+    return result?.allowed === true
+  },
+  getOpenGoal: async (sessionId) => {
+    const result = await companionCall<{ activeGoal?: Goal | null; goals?: Goal[] } | null>(
+      "goal_status",
+      { sessionId }
+    )
+    // `getOpenGoalForSession` on the desktop: the active goal, else a paused one.
+    return (
+      result?.activeGoal ?? result?.goals?.find((goal) => goal.status === "paused") ?? undefined
+    )
+  },
+  // The event log is a synced table (`goalEvents`), so the phone reads its
+  // mirror rather than asking the desktop.
+  recentEvents: (goalId) => listGoalEvents(goalId, 10),
+  createGoal: async ({ sessionId, characterId, rawObjective }) => {
+    const result = await companionCall<{ goal?: Goal | null } | null>("goal_create", {
+      sessionId,
+      rawObjective,
+      ...(characterId ? { characterId } : {}),
+    })
+    if (!result?.goal) throw new Error("goal_create answered no goal")
+    return result.goal
+  },
+  pauseGoal: async (goalId) =>
+    (await companionCall<{ goal?: Goal | null } | null>("goal_pause", { goalId }))?.goal ?? null,
+  resumeGoal: async (goalId) =>
+    (await companionCall<{ goal?: Goal | null } | null>("goal_resume", { goalId }))?.goal ?? null,
+  stopGoal: async (goalId) =>
+    (await companionCall<{ goal?: Goal | null } | null>("goal_stop", { goalId }))?.goal ?? null,
+  updateObjective: async (goalId, rawObjective) => {
+    const result = await companionCall<{ goal?: Goal | null; updatePrompt?: string } | null>(
+      "goal_update",
+      { goalId, rawObjective }
+    )
+    // The desktop answers the stored row even when it refused the update;
+    // only an applied update carries the model-facing prompt.
+    if (!result?.goal || typeof result.updatePrompt !== "string") return null
+    return { goal: result.goal, updatePrompt: result.updatePrompt }
+  },
+}
+
+/**
+ * The refusal for a write this surface may not make, or `null` to go ahead.
+ * Only a paired phone without the remote-control grant is refused.
+ */
+async function controlRefusal(
+  host: GoalCommandHost,
+  t: RuntimeTranslator
+): Promise<GoalCommandResult | null> {
+  return (await host.canControl()) ? null : { system: t("commands.remoteNotAllowed") }
+}
+
+async function runGoalSubcommand(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult | null> {
   if (!ctx.activeSessionId) {
-    return { system: "Start a chat session first — `/goal` operates inside an active session." }
+    return { system: t("commands.needSession") }
   }
   if (ctx.chatStatus === "streaming") {
-    return {
-      system:
-        "The current turn is still streaming — `/goal` waits for the response to finish before changing the active goal.",
-    }
+    return { system: t("commands.streaming") }
   }
   // The composer hands us everything past `/goal` as `ctx.args`. Split off
   // the (optional) subcommand keyword so the rest can be the objective
@@ -62,27 +214,27 @@ export async function dispatchGoalSubcommand(ctx: SlashContext): Promise<GoalCom
   const rest = space === -1 ? "" : trimmed.slice(space + 1).trim()
 
   // No subcommand keyword → treat the whole `args` as the objective.
-  if (!trimmed) return await commandStatus(ctx)
+  if (!trimmed) return await commandStatus(ctx, t, host)
   switch (head) {
     case "status":
-      return await commandStatus(ctx)
+      return await commandStatus(ctx, t, host)
     case "show":
-      return await commandShow(ctx)
+      return await commandShow(ctx, t, host)
     case "pause":
-      return await commandPause(ctx)
+      return await commandPause(ctx, t, host)
     case "resume":
-      return await commandResume(ctx)
+      return await commandResume(ctx, t, host)
     case "stop":
     case "cancel":
     case "clear":
-      return await commandStop(ctx)
+      return await commandStop(ctx, t, host)
     case "update":
-      return await commandUpdate(ctx, rest)
+      return await commandUpdate(ctx, t, host, rest)
     case "create":
-      return await commandCreate(ctx, rest)
+      return await commandCreate(ctx, t, host, rest)
     default:
       // Treat the entire string as objective text — `/goal write me a haiku`.
-      return await commandCreate(ctx, trimmed)
+      return await commandCreate(ctx, t, host, trimmed)
   }
 }
 
@@ -90,94 +242,127 @@ export async function dispatchGoalSubcommand(ctx: SlashContext): Promise<GoalCom
 // Subcommand implementations
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function commandCreate(ctx: SlashContext, objective: string): Promise<GoalCommandResult> {
+async function commandCreate(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost,
+  objective: string
+): Promise<GoalCommandResult> {
   const text = objective.trim()
   if (!text) {
-    return {
-      system:
-        "Usage: `/goal <what you want to accomplish>`. Example: `/goal write a haiku about winter`.",
-    }
+    return { system: t("commands.createUsage") }
   }
+  const refusal = await controlRefusal(host, t)
+  if (refusal) return refusal
   const sessionId = ctx.activeSessionId!
-  const appSettings = useSettingsStore.getState().settings ?? null
   const characterId = await resolveCharacterForSession(sessionId)
-  const goal = await getGoalRuntime().createGoal({
+  const goal = await host.createGoal({
     sessionId,
     characterId,
     rawObjective: text,
-    appSettings,
   })
   return {
-    system: renderCreatedCard(goal),
+    system: renderCreatedCard(t, goal),
   }
 }
 
-async function commandStatus(ctx: SlashContext): Promise<GoalCommandResult> {
-  const goal = await getGoalRuntime().getOpenGoalForSession(ctx.activeSessionId!)
+async function commandStatus(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult> {
+  const goal = await host.getOpenGoal(ctx.activeSessionId!)
   if (!goal) {
-    return {
-      system:
-        "No active goal in this session. Start one with `/goal <what you want to accomplish>`.",
-    }
+    return { system: t("commands.noActiveGoal") }
   }
-  const events = await listGoalEvents(goal.id, 10)
-  return { system: renderStatusCard(goal, events) }
+  const events = await host.recentEvents(goal.id)
+  return { system: renderStatusCard(t, goal, events) }
 }
 
-async function commandShow(ctx: SlashContext): Promise<GoalCommandResult> {
-  const out = await commandStatus(ctx)
+async function commandShow(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult> {
+  const out = await commandStatus(ctx, t, host)
   return { ...out, openGoalsSettings: true }
 }
 
-async function commandPause(ctx: SlashContext): Promise<GoalCommandResult> {
-  const goal = await getGoalRuntime().getOpenGoalForSession(ctx.activeSessionId!)
-  if (!goal) return { system: "No active goal to pause." }
+async function commandPause(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult> {
+  const goal = await host.getOpenGoal(ctx.activeSessionId!)
+  if (!goal) return { system: t("commands.noGoalToPause") }
   if (goal.status !== "active") {
-    return { system: `Goal is already ${goal.status} — nothing to pause.` }
+    return { system: t("commands.cannotPause", { status: statusLabel(t, goal.status) }) }
   }
-  const updated = await getGoalRuntime().pauseGoal(goal.id)
+  const refusal = await controlRefusal(host, t)
+  if (refusal) return refusal
+  const updated = await host.pauseGoal(goal.id)
   return {
-    system: `Goal paused — ${updated?.turnsUsed ?? 0}/${updated?.config.maxTurns ?? 0} turns used. Resume with \`/goal resume\`.`,
+    system: t("commands.paused", {
+      turns: updated?.turnsUsed ?? 0,
+      maxTurns: updated?.config.maxTurns ?? 0,
+    }),
   }
 }
 
-async function commandResume(ctx: SlashContext): Promise<GoalCommandResult> {
-  const goal = await getGoalRuntime().getOpenGoalForSession(ctx.activeSessionId!)
-  if (!goal) return { system: "No goal to resume." }
+async function commandResume(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult> {
+  const goal = await host.getOpenGoal(ctx.activeSessionId!)
+  if (!goal) return { system: t("commands.noGoalToResume") }
   if (goal.status === "active") {
-    return { system: "Goal is already active." }
+    return { system: t("commands.alreadyActive") }
   }
   if (goal.status !== "paused") {
-    return {
-      system: `Cannot resume a ${goal.status} goal. Create a new one with \`/goal <text>\`.`,
-    }
+    return { system: t("commands.cannotResume", { status: statusLabel(t, goal.status) }) }
   }
-  await getGoalRuntime().resumeGoal(goal.id)
-  return { system: `Goal resumed. The loop will continue on the next turn.` }
+  const refusal = await controlRefusal(host, t)
+  if (refusal) return refusal
+  await host.resumeGoal(goal.id)
+  return { system: t("commands.resumed") }
 }
 
-async function commandStop(ctx: SlashContext): Promise<GoalCommandResult> {
-  const goal = await getGoalRuntime().getOpenGoalForSession(ctx.activeSessionId!)
-  if (!goal) return { system: "No active goal to stop." }
-  await getGoalRuntime().stopGoal(goal.id)
-  return { system: `Goal stopped after ${goal.turnsUsed} turn(s).` }
+async function commandStop(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost
+): Promise<GoalCommandResult> {
+  const goal = await host.getOpenGoal(ctx.activeSessionId!)
+  if (!goal) return { system: t("commands.noGoalToStop") }
+  const refusal = await controlRefusal(host, t)
+  if (refusal) return refusal
+  await host.stopGoal(goal.id)
+  return { system: t("commands.stopped", { turns: goal.turnsUsed }) }
 }
 
-async function commandUpdate(ctx: SlashContext, newObjective: string): Promise<GoalCommandResult> {
+async function commandUpdate(
+  ctx: SlashContext,
+  t: RuntimeTranslator,
+  host: GoalCommandHost,
+  newObjective: string
+): Promise<GoalCommandResult> {
   const text = newObjective.trim()
   if (!text) {
-    return { system: "Usage: `/goal update <new objective>`." }
+    return { system: t("commands.updateUsage") }
   }
-  const goal = await getGoalRuntime().getOpenGoalForSession(ctx.activeSessionId!)
+  const goal = await host.getOpenGoal(ctx.activeSessionId!)
   if (!goal) {
-    return { system: "No active goal — create one first with `/goal <text>`." }
+    return { system: t("commands.updateNoGoal") }
   }
-  const updated = await getGoalRuntime().updateObjective(goal.id, text)
+  const refusal = await controlRefusal(host, t)
+  if (refusal) return refusal
+  const updated = await host.updateObjective(goal.id, text)
   if (!updated) {
-    return { system: "Objective unchanged (matches the current one) or goal is no longer mutable." }
+    return { system: t("commands.objectiveUnchanged") }
   }
   return {
-    system: `Objective updated. The model will be told about the change on the next turn.\n\n> ${updated.goal.safeObjective}`,
+    system: `${t("commands.objectiveUpdated")}\n\n> ${updated.goal.safeObjective}`,
     dispatchPrompt: updated.updatePrompt,
   }
 }
@@ -186,30 +371,51 @@ async function commandUpdate(ctx: SlashContext, newObjective: string): Promise<G
 // Card renderers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderCreatedCard(goal: Goal): string {
+function renderCreatedCard(t: RuntimeTranslator, goal: Goal): string {
   return [
-    `🎯 **Goal active** — ${goal.config.maxTurns} turn budget, ${(goal.config.maxTokens / 1000).toFixed(0)}k token budget.`,
+    t("commands.created", {
+      maxTurns: goal.config.maxTurns,
+      maxTokensK: Math.round(goal.config.maxTokens / 1000),
+    }),
     "",
     `> ${goal.safeObjective}`,
     "",
-    "The agent will continue toward this goal automatically. Pause with `/goal pause` · stop with `/goal stop` · update with `/goal update <new text>`.",
+    t("commands.createdHint"),
   ].join("\n")
 }
 
-function renderStatusCard(goal: Goal, events: GoalEvent[]): string {
+function renderStatusCard(t: RuntimeTranslator, goal: Goal, events: GoalEvent[]): string {
   const minutesElapsed = Math.round((Date.now() - goal.createdAt) / 60_000)
   const lines = [
-    `🎯 **${statusEmoji(goal.status)} ${goal.status.toUpperCase()}** — ${goal.turnsUsed}/${goal.config.maxTurns} turns · ${goal.tokensUsed.toLocaleString()} tokens · ${minutesElapsed}m elapsed`,
+    t("commands.statusHeader", {
+      emoji: statusEmoji(goal.status),
+      // Upper-cased as the card's headline; a no-op for scripts without case.
+      status: statusLabel(t, goal.status).toUpperCase(),
+      turns: goal.turnsUsed,
+      maxTurns: goal.config.maxTurns,
+      tokens: goal.tokensUsed,
+      minutes: minutesElapsed,
+    }),
     "",
     `> ${goal.safeObjective}`,
   ]
   if (events.length > 0) {
-    lines.push("", "**Recent activity:**")
+    lines.push("", t("commands.recentActivity"))
     for (const ev of events.slice(0, 5)) {
-      lines.push(`- \`${ev.kind}\` at ${new Date(ev.ts).toLocaleTimeString()}`)
+      lines.push(
+        t("commands.activityItem", {
+          label: t(`activity.kinds.${ev.kind}`),
+          time: new Date(ev.ts),
+        })
+      )
     }
   }
   return lines.join("\n")
+}
+
+/** The status word the Goals UI shows (`goal.status.*`). */
+function statusLabel(t: RuntimeTranslator, status: Goal["status"]): string {
+  return t(`status.${status}`)
 }
 
 function statusEmoji(status: Goal["status"]): string {

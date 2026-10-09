@@ -1,8 +1,11 @@
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { appendGoalEvent, createGoal } from "@/lib/db/goals"
-import type { Goal } from "@/types/goal"
+import { getDb } from "@/lib/db/schema"
+import { applyGoalEventRows, projectGoalEventForSync } from "@/lib/sync/handlers/goals"
+import type { Goal, GoalEvent } from "@/types/goal"
 import { GoalActivityTab } from "./activity-tab"
 
 const goal: Goal = {
@@ -52,8 +55,80 @@ describe("GoalActivityTab", () => {
     await waitFor(() => expect(screen.getByTestId("goal-activity-list")).toBeInTheDocument())
     const items = screen.getAllByRole("listitem")
     expect(items).toHaveLength(2)
-    // newest first — turn_completed has ts=200, should be on top
-    expect(items[0]?.textContent).toContain("turn_completed")
+    // newest first — turn_completed has ts=200, should be on top. The kind
+    // reads as its translated label, not the raw enum.
+    expect(items[0]).toHaveTextContent("Turn completed")
+    expect(items[0]).toHaveAttribute("data-kind", "turn_completed")
+    expect(items[1]).toHaveTextContent("Turn started")
+    expect(screen.queryByText("turn_completed")).toBeNull()
+  })
+
+  it("prints the event time relative to now, with the absolute time as a tooltip", async () => {
+    await createGoal(goal)
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "user_paused",
+      payload: { kind: "user_paused" },
+      ts: 1_700_000_000_000,
+    })
+    render(<GoalActivityTab goal={goal} />)
+    await waitFor(() => expect(screen.getByTestId("goal-activity-list")).toBeInTheDocument())
+    const item = screen.getByRole("listitem")
+    const time = item.querySelector("time")
+    expect(time).toHaveAttribute("dateTime", new Date(1_700_000_000_000).toISOString())
+    // The jest next-intl formatter renders relativeTime / dateTime as ISO.
+    expect(time).toHaveTextContent(new Date(1_700_000_000_000).toISOString())
+    expect(time).toHaveAttribute("title", new Date(1_700_000_000_000).toISOString())
+    expect(within(item).getByText("Paused")).toBeInTheDocument()
+  })
+
+  it("on a paired phone, lists the events the goalEvents sync mirrored", async () => {
+    // The phone never runs the loop: these arrive projected from the desktop
+    // and are written by the sync handler, not by `appendGoalEvent`.
+    const desktopLog: GoalEvent[] = [
+      {
+        id: "ev-1",
+        goalId: "g1",
+        kind: "judge_parse_failed",
+        ts: 100,
+        payload: { kind: "judge_parse_failed", raw: "{garbled", failureCount: 1 },
+      },
+      {
+        id: "ev-2",
+        goalId: "g1",
+        kind: "judge_evaluated",
+        ts: 200,
+        payload: { kind: "judge_evaluated", done: false, reason: "one test left", judgeTokens: 3 },
+      },
+    ]
+    await applyGoalEventRows(desktopLog.map(projectGoalEventForSync))
+    render(<GoalActivityTab goal={goal} />)
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2))
+    const [newest, oldest] = screen.getAllByRole("listitem")
+    expect(newest).toHaveAttribute("data-kind", "judge_evaluated")
+    expect(newest).toHaveTextContent("one test left")
+    // The emptied raw output was never shown; the failure count still is.
+    expect(oldest).toHaveAttribute("data-kind", "judge_parse_failed")
+    expect(oldest).not.toHaveTextContent("{garbled")
+  })
+
+  it("pages with Show more once there are more events than one page", async () => {
+    await createGoal(goal)
+    const rows: GoalEvent[] = Array.from({ length: 205 }, (_, i) => ({
+      id: `ev-${i}`,
+      goalId: "g1",
+      kind: "turn_started",
+      ts: i + 1,
+      payload: { kind: "turn_started", turnNumber: i + 1 },
+    }))
+    await getDb().chatGoalEvents.bulkPut(rows)
+    const user = userEvent.setup()
+    render(<GoalActivityTab goal={goal} />)
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(200))
+    expect(screen.getByText("Showing 200 of 205")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show more" }))
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(205))
+    expect(screen.queryByTestId("goal-activity-more")).toBeNull()
   })
 
   it("surfaces exit_triggered with the reason in the summary", async () => {
@@ -65,8 +140,9 @@ describe("GoalActivityTab", () => {
     })
     render(<GoalActivityTab goal={goal} />)
     await waitFor(() =>
-      expect(screen.getByText(/turn_limited — budget exhausted/)).toBeInTheDocument()
+      expect(screen.getByText("Turn budget reached — budget exhausted")).toBeInTheDocument()
     )
+    expect(screen.getByText("Goal ended")).toBeInTheDocument()
   })
 
   // ── ADR-0070 Phase 2 — risk-raised ceremony provenance ──────────────────
@@ -196,7 +272,7 @@ describe("GoalActivityTab", () => {
     expect(screen.getByText(/Turn 1 completed/)).toBeInTheDocument()
     expect(screen.getByText(/done=false/)).toBeInTheDocument()
     expect(screen.getByText("Parse failure #1")).toBeInTheDocument()
-    expect(screen.getByText(/judge_done — done/)).toBeInTheDocument()
+    expect(screen.getByText("Judge confirmed done — done")).toBeInTheDocument()
     expect(screen.getByText("User paused")).toBeInTheDocument()
     expect(screen.getByText("User resumed")).toBeInTheDocument()
     expect(screen.getByText("User stopped")).toBeInTheDocument()
@@ -207,11 +283,17 @@ describe("GoalActivityTab", () => {
     expect(screen.getByText(/missing test/)).toBeInTheDocument()
     expect(screen.getByText(/deployment unavailable/)).toBeInTheDocument()
     expect(screen.getByText(/verifier disabled/)).toBeInTheDocument()
+    // Each row is headed by its translated kind label.
+    expect(screen.getByText("Goal created")).toBeInTheDocument()
+    expect(screen.getByText("Judge verdict")).toBeInTheDocument()
+    expect(screen.getByText("Judge reply unreadable")).toBeInTheDocument()
+    expect(screen.getByText("Settings changed")).toBeInTheDocument()
+    expect(screen.getByText("Verifier passed")).toBeInTheDocument()
   })
 
   it("renders the loading state before the live query resolves", () => {
     // No goal row in Dexie yet → useLiveQuery returns undefined first
     render(<GoalActivityTab goal={goal} />)
-    expect(screen.getByText("Loading…")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-activity-loading")).toHaveAttribute("aria-busy", "true")
   })
 })

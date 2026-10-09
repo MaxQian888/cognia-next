@@ -25,24 +25,48 @@ describe("tabs and deep links", () => {
 })
 
 describe("column sorting", () => {
-  it("maps title and created onto the list model's sorts", () => {
+  it("a first click picks the column's natural order", () => {
     expect(sortForColumn("recent", "title")).toBe("title")
+    expect(sortForColumn("createdAsc", "title")).toBe("title")
     expect(sortForColumn("title", "created")).toBe("created")
+    expect(sortForColumn("titleDesc", "created")).toBe("created")
+  })
+
+  it("a click on the column already sorting reverses title (A–Z ⇄ Z–A)", () => {
+    expect(sortForColumn("title", "title")).toBe("titleDesc")
+    expect(sortForColumn("titleDesc", "title")).toBe("title")
+  })
+
+  it("a click on the column already sorting reverses created (newest ⇄ oldest)", () => {
+    expect(sortForColumn("created", "created")).toBe("createdAsc")
+    expect(sortForColumn("createdAsc", "created")).toBe("created")
   })
 
   it("flips last activity between newest and oldest first", () => {
     expect(sortForColumn("recent", "activity")).toBe("oldest")
     expect(sortForColumn("oldest", "activity")).toBe("recent")
     expect(sortForColumn("title", "activity")).toBe("recent")
+    expect(sortForColumn("createdAsc", "activity")).toBe("recent")
   })
 
   it("reports each header's direction for assistive technology", () => {
     expect(ariaSortForColumn("title", "title")).toBe("ascending")
+    expect(ariaSortForColumn("titleDesc", "title")).toBe("descending")
     expect(ariaSortForColumn("recent", "title")).toBe("none")
     expect(ariaSortForColumn("created", "created")).toBe("descending")
+    expect(ariaSortForColumn("createdAsc", "created")).toBe("ascending")
+    expect(ariaSortForColumn("title", "created")).toBe("none")
     expect(ariaSortForColumn("recent", "activity")).toBe("descending")
     expect(ariaSortForColumn("oldest", "activity")).toBe("ascending")
     expect(ariaSortForColumn("unread", "activity")).toBe("none")
+    expect(ariaSortForColumn("titleDesc", "activity")).toBe("none")
+  })
+
+  it("leaves every header unsorted while a search ranks the rows", () => {
+    expect(ariaSortForColumn("title", "title", true)).toBe("none")
+    expect(ariaSortForColumn("createdAsc", "created", true)).toBe("none")
+    expect(ariaSortForColumn("recent", "activity", true)).toBe("none")
+    expect(ariaSortForColumn("recent", "activity", false)).toBe("descending")
   })
 })
 

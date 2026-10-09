@@ -41,8 +41,8 @@ describe("GoalTrackerConfig", () => {
   it("deep-links to the Characters settings section on click", async () => {
     await seedBuiltInCharacters()
     render(<GoalTrackerConfig />)
-    const button = await screen.findByTestId("goal-tracker-open-characters")
+    const button = await screen.findByTestId("goal-tracker-open-agent")
     fireEvent.click(button)
-    expect(push).toHaveBeenCalledWith("/settings?section=characters")
+    expect(push).toHaveBeenCalledWith("/agents?id=char_builtin_goal_tracker&mode=edit")
   })
 })

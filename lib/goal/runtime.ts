@@ -250,12 +250,14 @@ class GoalRuntime {
 
   /**
    * Fire every manual-continue listener for a goal — called by the status
-   * pill's "Continue" button. No-op when nothing is held (the user clicked
-   * with no continuation pending).
+   * pill's "Continue" button, and by the companion `goal_continue` arm when a
+   * paired phone presses it. No-op when nothing is held (the user clicked with
+   * no continuation pending). Returns whether a held turn was released, so a
+   * remote caller can tell "continued" from "nothing was waiting".
    */
-  requestManualContinue(goalId: string): void {
+  requestManualContinue(goalId: string): boolean {
     const set = this.manualContinueListeners.get(goalId)
-    if (!set) return
+    if (!set || set.size === 0) return false
     for (const cb of [...set]) {
       try {
         cb()
@@ -263,6 +265,7 @@ class GoalRuntime {
         // A listener error must not block the others.
       }
     }
+    return true
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -694,6 +697,21 @@ class GoalRuntime {
     if (!changed) return current
     await updateGoal(goalId, { subgoals: next })
     return (await getGoal(goalId)) ?? null
+  }
+
+  /**
+   * Set one subgoal's `done` flag to an explicit value — the idempotent form of
+   * {@link toggleSubgoal}, for callers that may deliver twice (a paired phone's
+   * `goal_subgoal_mark`, retried under one idempotency key, or two devices
+   * checking the same step). Writes only when the flag differs; a missing goal
+   * answers `null`, a missing subgoal the unchanged row.
+   */
+  async setSubgoalDone(goalId: string, subgoalId: string, done: boolean): Promise<Goal | null> {
+    const current = await getGoal(goalId)
+    if (!current) return null
+    const target = current.subgoals?.find((s) => s.id === subgoalId)
+    if (!target || target.done === done) return current
+    return this.toggleSubgoal(goalId, subgoalId)
   }
 
   /** Drop the goal's checklist entirely. */

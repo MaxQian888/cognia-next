@@ -8,15 +8,23 @@ import {
   countGoalEvents,
   createGoal,
   deleteGoal,
+  deleteGoalEventsForGoals,
   deleteGoalsForSession,
+  EVENTS_PER_GOAL_CAP,
   getActiveGoalForSession,
   getGoal,
+  countAllGoals,
   getOpenGoalForSession,
+  latestJudgeReasons,
   listAllGoals,
   listGoalEvents,
   listGoalsBySession,
+  listGoalsForSessions,
+  listOpenGoals,
+  pruneGoalEvents,
   updateGoal,
 } from "./goals"
+import { saveSettings } from "./settings"
 
 const SAMPLE_CONFIG: GoalConfig = {
   maxTurns: 20,
@@ -399,6 +407,37 @@ describe("chatGoalEvents", () => {
 
   it("exports EVENTS_PER_GOAL_CAP as 5000", () => {
     expect(__TESTING__.EVENTS_PER_GOAL_CAP).toBe(5000)
+    expect(EVENTS_PER_GOAL_CAP).toBe(__TESTING__.EVENTS_PER_GOAL_CAP)
+  })
+
+  it("pruneGoalEvents trims every listed goal (once each) and leaves the rest", async () => {
+    for (const goalId of ["g1", "g2", "g3"]) {
+      for (let i = 0; i < 5; i++) {
+        await appendGoalEvent({
+          goalId,
+          kind: "turn_started",
+          payload: { kind: "turn_started", turnNumber: i },
+          ts: i,
+        })
+      }
+    }
+    await pruneGoalEvents(["g1", "g2", "g1"], 2)
+    expect((await listGoalEvents("g1", 0)).map((e) => e.ts)).toEqual([4, 3])
+    expect((await listGoalEvents("g2", 0)).map((e) => e.ts)).toEqual([4, 3])
+    expect(await countGoalEvents("g3")).toBe(5)
+    await pruneGoalEvents([])
+    expect(await countGoalEvents("g3")).toBe(5)
+  })
+
+  it("deleteGoalEventsForGoals removes the listed goals' events only", async () => {
+    for (const goalId of ["g1", "g2", "g3"]) {
+      await appendGoalEvent({ goalId, kind: "user_paused", payload: { kind: "user_paused" } })
+    }
+    await deleteGoalEventsForGoals(["g1", "g3"])
+    await deleteGoalEventsForGoals([])
+    expect(await countGoalEvents("g1")).toBe(0)
+    expect(await countGoalEvents("g2")).toBe(1)
+    expect(await countGoalEvents("g3")).toBe(0)
   })
 })
 
@@ -423,5 +462,160 @@ describe("workspace (project) scoping", () => {
   it("createGoal honours an explicit projectId override", async () => {
     const g = await createGoal({ ...buildGoal({ sessionId: "ses_x" }), projectId: "proj-forced" })
     expect(g.projectId).toBe("proj-forced")
+  })
+})
+
+/** A stored row with explicit timestamps and workspace, bypassing createGoal. */
+function storedGoal(overrides: Partial<Goal> & { id: string; createdAt: number }): Goal {
+  return {
+    ...buildGoal(overrides),
+    projectId: overrides.projectId ?? "proj-A",
+    createdAt: overrides.createdAt,
+    updatedAt: overrides.updatedAt ?? overrides.createdAt,
+    ...(overrides.endedAt !== undefined ? { endedAt: overrides.endedAt } : {}),
+    ...(overrides.awaitingAcceptance !== undefined
+      ? { awaitingAcceptance: overrides.awaitingAcceptance }
+      : {}),
+  }
+}
+
+describe("listOpenGoals", () => {
+  it("lists active and paused goals of one workspace, newest first", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "a-old", status: "active", createdAt: 100 }),
+      storedGoal({ id: "a-paused", status: "paused", createdAt: 300, awaitingAcceptance: true }),
+      storedGoal({ id: "a-new", status: "active", createdAt: 500 }),
+      storedGoal({ id: "a-done", status: "completed", createdAt: 600, endedAt: 700 }),
+      storedGoal({ id: "a-stopped", status: "stopped", createdAt: 650, endedAt: 700 }),
+      storedGoal({ id: "b-open", status: "active", createdAt: 800, projectId: "proj-B" }),
+    ])
+    const open = await listOpenGoals("proj-A")
+    expect(open.map((g) => g.id)).toEqual(["a-new", "a-paused", "a-old"])
+    expect((await listOpenGoals("proj-B")).map((g) => g.id)).toEqual(["b-open"])
+    expect(await listOpenGoals("proj-empty")).toEqual([])
+  })
+
+  it("defaults to the active workspace from settings", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "in-a", status: "active", createdAt: 1, projectId: "proj-A" }),
+      storedGoal({ id: "in-b", status: "paused", createdAt: 2, projectId: "proj-B" }),
+    ])
+    await saveSettings({ activeProjectId: "proj-B" })
+    expect((await listOpenGoals()).map((g) => g.id)).toEqual(["in-b"])
+    await saveSettings({ activeProjectId: "proj-A" })
+    expect((await listOpenGoals()).map((g) => g.id)).toEqual(["in-a"])
+  })
+
+  it("keeps an old open goal that falls outside listAllGoals' newest window", async () => {
+    const rows: Goal[] = [storedGoal({ id: "ancient-open", status: "active", createdAt: 1 })]
+    for (let i = 0; i < 5; i++) {
+      rows.push(
+        storedGoal({ id: `done-${i}`, status: "completed", createdAt: 100 + i, endedAt: 200 + i })
+      )
+    }
+    await getDb().chatGoals.bulkPut(rows)
+    const window = await listAllGoals(3, "proj-A")
+    expect(window.map((g) => g.id)).not.toContain("ancient-open")
+    expect((await listOpenGoals("proj-A")).map((g) => g.id)).toEqual(["ancient-open"])
+  })
+})
+
+describe("countAllGoals", () => {
+  it("counts every goal in one workspace regardless of status", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "a1", status: "active", createdAt: 1 }),
+      storedGoal({ id: "a2", status: "completed", createdAt: 2, endedAt: 3 }),
+      storedGoal({ id: "a3", status: "paused", createdAt: 4 }),
+      storedGoal({ id: "b1", status: "active", createdAt: 5, projectId: "proj-B" }),
+    ])
+    expect(await countAllGoals("proj-A")).toBe(3)
+    expect(await countAllGoals("proj-B")).toBe(1)
+    expect(await countAllGoals("proj-none")).toBe(0)
+  })
+
+  it("defaults to the active workspace from settings", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "a1", status: "active", createdAt: 1 }),
+      storedGoal({ id: "b1", status: "active", createdAt: 2, projectId: "proj-B" }),
+      storedGoal({ id: "b2", status: "stopped", createdAt: 3, projectId: "proj-B" }),
+    ])
+    await saveSettings({ activeProjectId: "proj-B" })
+    expect(await countAllGoals()).toBe(2)
+  })
+})
+
+describe("listGoalsForSessions", () => {
+  it("returns [] for no session ids", async () => {
+    await getDb().chatGoals.put(storedGoal({ id: "g", createdAt: 1 }))
+    expect(await listGoalsForSessions([])).toEqual([])
+  })
+
+  it("returns every goal of the given sessions across workspaces, newest first", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "s1-old", sessionId: "s1", status: "completed", createdAt: 10 }),
+      storedGoal({ id: "s2", sessionId: "s2", createdAt: 20, projectId: "proj-B" }),
+      storedGoal({ id: "s1-new", sessionId: "s1", status: "active", createdAt: 30 }),
+      storedGoal({ id: "s3", sessionId: "s3", createdAt: 40 }),
+    ])
+    const rows = await listGoalsForSessions(["s1", "s2"])
+    expect(rows.map((g) => g.id)).toEqual(["s1-new", "s2", "s1-old"])
+  })
+})
+
+describe("latestJudgeReasons", () => {
+  it("maps each goal to its newest judge_evaluated reason and omits goals without one", async () => {
+    await getDb().chatGoals.bulkPut([
+      storedGoal({ id: "g1", createdAt: 1 }),
+      storedGoal({ id: "g2", createdAt: 2 }),
+      storedGoal({ id: "g3", createdAt: 3 }),
+    ])
+    const judged = (reason: string) => ({
+      kind: "judge_evaluated" as const,
+      done: false,
+      reason,
+      judgeTokens: 10,
+    })
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "judge_evaluated",
+      payload: judged("first"),
+      ts: 100,
+    })
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "judge_evaluated",
+      payload: judged("latest"),
+      ts: 200,
+    })
+    // A newer non-judge event must not hide the latest verdict.
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "turn_started",
+      payload: { kind: "turn_started", turnNumber: 3 },
+      ts: 300,
+    })
+    await appendGoalEvent({
+      goalId: "g2",
+      kind: "judge_evaluated",
+      payload: judged("only"),
+      ts: 50,
+    })
+    await appendGoalEvent({
+      goalId: "g3",
+      kind: "user_paused",
+      payload: { kind: "user_paused" },
+      ts: 60,
+    })
+
+    const reasons = await latestJudgeReasons(["g1", "g2", "g3", "g-missing"])
+    expect(reasons.get("g1")).toBe("latest")
+    expect(reasons.get("g2")).toBe("only")
+    expect(reasons.has("g3")).toBe(false)
+    expect(reasons.has("g-missing")).toBe(false)
+    expect(reasons.size).toBe(2)
+  })
+
+  it("returns an empty map for no goals", async () => {
+    expect((await latestJudgeReasons([])).size).toBe(0)
   })
 })

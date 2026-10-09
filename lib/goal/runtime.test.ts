@@ -579,6 +579,34 @@ describe("GoalRuntime — abort controller registry", () => {
   })
 })
 
+describe("GoalRuntime.requestManualContinue", () => {
+  it("reports false when no turn is held for the goal", () => {
+    expect(getGoalRuntime().requestManualContinue("g_none")).toBe(false)
+  })
+
+  it("releases every held listener and reports true", () => {
+    const rt = getGoalRuntime()
+    const first = jest.fn()
+    const second = jest.fn(() => {
+      throw new Error("listener failure must not block the others")
+    })
+    const third = jest.fn()
+    rt.onManualContinue("g1", first)
+    rt.onManualContinue("g1", second)
+    rt.onManualContinue("g1", third)
+    expect(rt.requestManualContinue("g1")).toBe(true)
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(third).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports false again once the listener unsubscribed", () => {
+    const rt = getGoalRuntime()
+    const unsubscribe = rt.onManualContinue("g1", jest.fn())
+    unsubscribe()
+    expect(rt.requestManualContinue("g1")).toBe(false)
+  })
+})
+
 describe("GoalRuntime — pass-through readers + delete", () => {
   it("getActiveGoalForSession / listGoalsBySession honour session boundaries", async () => {
     const rt = getGoalRuntime()
@@ -643,6 +671,26 @@ describe("GoalRuntime — subgoals", () => {
     expect(toggled?.subgoals?.find((s) => s.id === targetId)?.done).toBe(true)
     const back = await rt.toggleSubgoal(goal.id, targetId)
     expect(back?.subgoals?.find((s) => s.id === targetId)?.done).toBe(false)
+  })
+
+  it("setSubgoalDone sets the flag idempotently and ignores unknown ids", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "ship it" })
+    const withSubs = await rt.generateSubgoals(
+      goal.id,
+      client(jest.fn().mockResolvedValue('{"steps": ["A", "B"]}'))
+    )
+    const targetId = withSubs!.subgoals![1].id
+    const done = await rt.setSubgoalDone(goal.id, targetId, true)
+    expect(done?.subgoals?.find((s) => s.id === targetId)?.done).toBe(true)
+    // A replay of the same verdict leaves it done instead of flipping it back.
+    const again = await rt.setSubgoalDone(goal.id, targetId, true)
+    expect(again?.subgoals?.find((s) => s.id === targetId)?.done).toBe(true)
+    const undone = await rt.setSubgoalDone(goal.id, targetId, false)
+    expect(undone?.subgoals?.find((s) => s.id === targetId)?.done).toBe(false)
+    const unknown = await rt.setSubgoalDone(goal.id, "missing-step", true)
+    expect(unknown?.subgoals?.every((s) => !s.done)).toBe(true)
+    expect(await rt.setSubgoalDone("missing-goal", targetId, true)).toBeNull()
   })
 
   it("clearSubgoals empties the checklist", async () => {

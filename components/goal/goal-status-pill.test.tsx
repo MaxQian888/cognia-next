@@ -12,6 +12,11 @@ jest.mock("@/hooks/ui/use-breakpoint", () => ({
   useBreakpoint: () => useBreakpointMock(),
 }))
 
+// The detail sheet's panel resolves the goal's agent through the data adapter.
+jest.mock("@/lib/data-hooks/context", () => ({
+  useCharacter: () => undefined,
+}))
+
 // next-intl is globally mocked in jest.setup.ts (key-resolving translator backed by
 // i18n/messages/en.json). Inline override removed — this suite asserts on goal fixture
 // fields (objective, status), not translation strings.
@@ -84,15 +89,47 @@ describe("GoalStatusPill", () => {
     })
   })
 
-  it("clicking Stop calls runtime.stopGoal", async () => {
+  it("Stop asks for confirmation first, then stops through the runtime", async () => {
+    const user = userEvent.setup()
     await getGoalRuntime().createGoal({ sessionId: "ses_a", rawObjective: "x" })
     const goal = (await getGoalRuntime().getActiveGoalForSession("ses_a"))!
     render(<GoalStatusPill sessionId="ses_a" goalOverride={goal} />)
-    fireEvent.click(screen.getByTestId("goal-stop-button"))
+    await user.click(screen.getByTestId("goal-stop-button"))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Stop this goal?")
+    // Not stopped until confirmed.
+    expect((await getGoalRuntime().listGoalsBySession("ses_a"))[0]?.status).toBe("active")
+    await user.click(screen.getByTestId("goal-stop-confirm-action"))
     await waitFor(async () => {
       const updated = await getGoalRuntime().listGoalsBySession("ses_a")
       expect(updated[0]?.status).toBe("stopped")
     })
+  })
+
+  it("cancelling the stop confirmation keeps the goal running", async () => {
+    const user = userEvent.setup()
+    await getGoalRuntime().createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    const goal = (await getGoalRuntime().getActiveGoalForSession("ses_a"))!
+    const stopSpy = jest.spyOn(getGoalRuntime(), "stopGoal")
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={goal} />)
+    await user.click(screen.getByTestId("goal-stop-button"))
+    await user.click(await screen.findByRole("button", { name: "Keep running" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(stopSpy).not.toHaveBeenCalled()
+    expect((await getGoalRuntime().listGoalsBySession("ses_a"))[0]?.status).toBe("active")
+    stopSpy.mockRestore()
+  })
+
+  it("offers no Resume for a goal waiting on the acceptance verdict", () => {
+    render(
+      <GoalStatusPill
+        sessionId="ses_a"
+        goalOverride={{ ...baseGoal, status: "paused", awaitingAcceptance: true }}
+      />
+    )
+    expect(screen.queryByTestId("goal-resume-button")).toBeNull()
+    expect(screen.queryByTestId("goal-pause-button")).toBeNull()
+    expect(screen.getByTestId("goal-stop-button")).toBeInTheDocument()
   })
 
   it("clicking the search icon opens the detail sheet", () => {

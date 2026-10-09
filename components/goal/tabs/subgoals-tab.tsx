@@ -6,22 +6,39 @@
  * manual toggles + a progress bar. The judge can also auto-mark steps complete
  * over the loop (see `turn-driver`). Subscribes to the live goal row so checks
  * land immediately whether toggled here or by the judge.
+ *
+ * "Clear" removes the checklist (`clearSubgoals`), which used to be reachable
+ * only from the plugin API and the workflow node.
+ *
+ * Every write goes through `useGoalControls`, so on a paired phone the
+ * checklist is generated, checked and cleared ON THE DESKTOP that runs the
+ * loop (`goal_subgoals_generate` / `goal_subgoal_mark` / `goal_subgoals_clear`),
+ * with the desktop's model and key and behind its PII gate, and only by a
+ * device holding the remote-control grant; the result reaches this device on
+ * the goal row's sync, which the live query below already follows.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { motion } from "motion/react"
-import { Loader2Icon, SparklesIcon } from "lucide-react"
+import { EraserIcon, Loader2Icon, SparklesIcon } from "lucide-react"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
+import { useGoalControls } from "@/hooks/goal/use-goal-controls"
 import { getGoal } from "@/lib/db/goals"
-import { getSession } from "@/lib/db/sessions"
-import { getGoalRuntime } from "@/lib/goal/runtime"
-import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
-import { useSettingsStore } from "@/stores/settings/settings-store"
 import { STAGGER_CHILD, STAGGER_CONTAINER, useReducedMotionVariants } from "@/lib/ui/motion"
 import type { Goal } from "@/types/goal"
 
@@ -31,7 +48,10 @@ interface Props {
 
 export function GoalSubgoalsTab({ goal }: Props) {
   const t = useTranslations("goal")
-  const appSettings = useSettingsStore((s) => s.settings)
+  const controls = useGoalControls(goal)
+  // A paired phone without the remote-control grant sees the checklist but
+  // cannot change it (the desktop would refuse every write).
+  const readOnly = !controls.allowed
   const containerVariants = useReducedMotionVariants(STAGGER_CONTAINER)
   const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
@@ -45,6 +65,10 @@ export function GoalSubgoalsTab({ goal }: Props) {
   // Distinct from `error`: no model with a usable API key is resolvable, so
   // retrying can't succeed. Renders the non-retryable `unavailable` copy.
   const [unavailable, setUnavailable] = useState(false)
+  // Companion only: the desktop answered before its model did. The checklist
+  // lands on the synced goal row; cleared on the next generate.
+  const [running, setRunning] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const done = subgoals.filter((s) => s.done).length
   const total = subgoals.length
@@ -54,31 +78,34 @@ export function GoalSubgoalsTab({ goal }: Props) {
     setBusy(true)
     setError(false)
     setUnavailable(false)
+    setRunning(false)
     try {
-      const session = await getSession(current.sessionId)
-      const client = buildRendererLlmClient({
-        session,
-        appSettings,
-        featureId: "goal-subgoals",
-      })
-      if (!client) {
-        // No resolvable model/API key — surface the non-retryable reason
-        // instead of the generic "try again" error.
-        setUnavailable(true)
-        return
-      }
-      const updated = await getGoalRuntime().generateSubgoals(current.id, client)
-      // Fail-OPEN: decomposition returns an empty checklist when the model
-      // produced nothing parseable — surface that as a retryable error.
-      if ((updated?.subgoals?.length ?? 0) === 0) setError(true)
-    } catch {
-      setError(true)
+      const outcome = await controls.generateSubgoals()
+      // No resolvable model/API key on the host that runs the loop: the
+      // non-retryable reason instead of the generic "try again" error.
+      if (outcome === "unavailable") setUnavailable(true)
+      else if (outcome === "running") setRunning(true)
+      // Fail-OPEN decomposition (nothing parseable, prior checklist kept), a
+      // goal deleted underneath, or a failed call: retryable.
+      else if (outcome !== "generated") setError(true)
     } finally {
       setBusy(false)
     }
   }
 
   const hasSubgoals = total > 0
+
+  async function clear() {
+    setConfirmClear(false)
+    // Failures are reported by the verb (under "Couldn't clear the checklist"
+    // here, as the remote message on a phone).
+    await controls.clearSubgoals()
+  }
+
+  async function toggle(subgoalId: string, done: boolean) {
+    // The wanted state, not a flip: a retried companion call cannot undo it.
+    await controls.setSubgoalDone(subgoalId, done)
+  }
 
   return (
     <div className="space-y-4" data-testid="goal-subgoals-tab">
@@ -87,25 +114,51 @@ export function GoalSubgoalsTab({ goal }: Props) {
           <p className="text-sm font-medium">{t("subgoals.title")}</p>
           <p className="text-xs text-muted-foreground">{t("subgoals.description")}</p>
         </div>
-        <Button
-          size="sm"
-          variant={hasSubgoals ? "outline" : "default"}
-          onClick={() => void generate()}
-          disabled={busy}
-          data-testid="goal-subgoals-generate"
-        >
-          {busy ? (
-            <Loader2Icon className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <SparklesIcon className="size-4" aria-hidden />
-          )}
-          {busy
-            ? t("subgoals.generating")
-            : hasSubgoals
-              ? t("subgoals.regenerate")
-              : t("subgoals.generate")}
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {hasSubgoals ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirmClear(true)}
+              disabled={busy || readOnly}
+              data-testid="goal-subgoals-clear"
+            >
+              <EraserIcon className="size-4" aria-hidden />
+              {t("subgoals.clear")}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant={hasSubgoals ? "outline" : "default"}
+            onClick={() => void generate()}
+            disabled={busy || readOnly}
+            data-testid="goal-subgoals-generate"
+          >
+            {busy ? (
+              <Loader2Icon className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <SparklesIcon className="size-4" aria-hidden />
+            )}
+            {busy
+              ? t("subgoals.generating")
+              : hasSubgoals
+                ? t("subgoals.regenerate")
+                : t("subgoals.generate")}
+          </Button>
+        </div>
       </div>
+
+      {readOnly && (
+        <p className="text-xs text-muted-foreground" data-testid="goal-subgoals-read-only">
+          {t("subgoals.remoteNotAllowed")}
+        </p>
+      )}
+
+      {running && (
+        <p className="text-xs text-muted-foreground" data-testid="goal-subgoals-running">
+          {t("subgoals.running")}
+        </p>
+      )}
 
       {error && (
         <p className="text-xs text-destructive" data-testid="goal-subgoals-error">
@@ -132,7 +185,7 @@ export function GoalSubgoalsTab({ goal }: Props) {
             <Progress value={pct} data-testid="goal-subgoals-progress" />
           </div>
           <motion.ul
-            className="space-y-1.5"
+            className="divide-y divide-border/60 border-y border-border/60"
             variants={containerVariants}
             initial="initial"
             animate="animate"
@@ -142,12 +195,13 @@ export function GoalSubgoalsTab({ goal }: Props) {
               <motion.li
                 key={s.id}
                 variants={childVariants}
-                className="flex items-start gap-2 rounded-md border bg-card/50 px-3 py-2"
+                className="flex items-start gap-2.5 py-2"
                 data-testid="goal-subgoal-item"
               >
                 <Checkbox
                   checked={s.done}
-                  onCheckedChange={() => void getGoalRuntime().toggleSubgoal(current.id, s.id)}
+                  onCheckedChange={(checked) => void toggle(s.id, checked === true)}
+                  disabled={readOnly}
                   aria-label={s.text}
                   className="mt-0.5"
                   data-testid="goal-subgoal-checkbox"
@@ -161,7 +215,8 @@ export function GoalSubgoalsTab({ goal }: Props) {
         </>
       ) : (
         !error &&
-        !unavailable && (
+        !unavailable &&
+        !running && (
           <p
             className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
             data-testid="goal-subgoals-empty"
@@ -170,6 +225,24 @@ export function GoalSubgoalsTab({ goal }: Props) {
           </p>
         )
       )}
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent data-testid="goal-subgoals-clear-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("subgoals.clearTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("subgoals.clearBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("history.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => void clear()}
+              data-testid="goal-subgoals-clear-confirm"
+            >
+              {t("subgoals.clear")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

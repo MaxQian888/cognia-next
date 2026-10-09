@@ -487,6 +487,9 @@ describe("section-key helpers for date runs", () => {
   it("orders date headers newest first unless the sort is oldest-first", () => {
     expect(dateBucketOrderFor("recent")).toEqual(DATE_BUCKET_ORDER)
     expect(dateBucketOrderFor("oldest")).toEqual([...DATE_BUCKET_ORDER].reverse())
+    expect(dateBucketOrderFor("createdAsc")).toEqual([...DATE_BUCKET_ORDER].reverse())
+    expect(dateBucketOrderFor("created")).toEqual(DATE_BUCKET_ORDER)
+    expect(dateBucketOrderFor("titleDesc")).toEqual(DATE_BUCKET_ORDER)
   })
 })
 
@@ -535,7 +538,19 @@ describe("date buckets follow the sort axis", () => {
     expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:today"])
   })
 
-  it.each(["title", "unread"] as const)(
+  it("buckets by creation time oldest-first under createdAsc, headers reversed with the rows", () => {
+    const { sections, orderedIds } = buildConversationSections(
+      [stale, fresh],
+      [],
+      opts({ groupBy: "date", sortBy: "createdAsc" })
+    )
+    // Creation axis: `stale` was created 40 days ago, `fresh` today.
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:older", "date:today"])
+    expect(sections[0]!.sessions.map((s) => s.id)).toEqual(["stale"])
+    expect(orderedIds).toEqual(["stale", "fresh"])
+  })
+
+  it.each(["title", "titleDesc", "unread"] as const)(
     "renders one flat section under %s, which has no date axis",
     (sortBy) => {
       const sessions = [session("b"), session("a", { updatedAt: NOW - 40 * DAY })]
@@ -1456,8 +1471,47 @@ describe("sortBy", () => {
     expect(flat("created")).toEqual(["alpha", "gamma", "beta"])
   })
 
+  it("reverses creation time to oldest created first", () => {
+    expect(flat("createdAsc")).toEqual(["beta", "gamma", "alpha"])
+  })
+
+  it("breaks createdAsc ties by most recent activity", () => {
+    const tied = [
+      session("older-activity", { createdAt: NOW - DAY, updatedAt: NOW - 3 * DAY }),
+      session("newer-activity", { createdAt: NOW - DAY, updatedAt: NOW - DAY }),
+      session("first-created", { createdAt: NOW - 9 * DAY, updatedAt: NOW - 5 * DAY }),
+    ]
+    expect(
+      buildConversationSections(tied, [], opts({ groupBy: "none", sortBy: "createdAsc" }))
+        .orderedIds
+    ).toEqual(["first-created", "newer-activity", "older-activity"])
+  })
+
   it("sorts titles A→Z", () => {
     expect(flat("title")).toEqual(["alpha", "beta", "gamma"])
+  })
+
+  it("sorts titles Z→A under titleDesc, still naturally", () => {
+    expect(flat("titleDesc")).toEqual(["gamma", "beta", "alpha"])
+    const numbered = [session("s2", { title: "Draft 2" }), session("s10", { title: "Draft 10" })]
+    expect(
+      buildConversationSections(numbered, [], opts({ groupBy: "none", sortBy: "titleDesc" }))
+        .orderedIds
+    ).toEqual(["s10", "s2"])
+  })
+
+  it("breaks titleDesc ties by most recent activity, not reversed", () => {
+    const tied = [
+      session("old", { title: "Same", updatedAt: NOW - 2 * DAY }),
+      session("new", { title: "Same", updatedAt: NOW }),
+      session("zed", { title: "Zed", updatedAt: NOW - 5 * DAY }),
+    ]
+    for (const input of [tied, [...tied].reverse()]) {
+      expect(
+        buildConversationSections(input, [], opts({ groupBy: "none", sortBy: "titleDesc" }))
+          .orderedIds
+      ).toEqual(["zed", "new", "old"])
+    }
   })
 
   it("orders titles naturally, not lexicographically", () => {

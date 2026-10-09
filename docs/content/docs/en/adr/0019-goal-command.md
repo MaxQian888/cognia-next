@@ -59,17 +59,31 @@ lib/slash-commands/
 └── actions/goal.ts     — 7 subcommands (create / status / show / pause / resume / stop / update) + 3 aliases (cancel, clear)
 
 components/goal/
-├── goal-status-pill.tsx  — composer-mounted pill (objective + progress + pause/resume/stop/show)
-├── goal-detail-sheet.tsx — right-side Sheet with 4 tabs (Overview / Subgoals / Activity / Settings)
-├── tabs/                  — overview / subgoals (Phase 2 placeholder) / activity / settings forms
-└── use-active-goal.ts    — Dexie live-query hooks
+├── goal-status-pill.tsx    — composer-mounted pill (objective + progress + pause/resume/stop/show)
+├── goal-detail-panel.tsx   — one goal, live by id: status, editable objective, conversation link,
+│                             controls, acceptance verdict, tabs (Overview / Subgoals / Activity / Settings)
+├── goal-detail-sheet.tsx   — the panel as an overlay (Sheet on desktop, Drawer on a phone)
+├── goal-control-bar.tsx    — continue / pause / resume / stop (stop always confirms)
+├── goal-actions-menu.tsx   — open conversation / run again / copy / delete
+├── tabs/                   — overview / subgoals / activity / settings
+├── console/                — the /goals console: Overview (summary strip, "Needs you", open goals
+│                             list ⇄ grid), History, Analytics, Configure; selected goal in an inspector
+└── use-active-goal.ts      — Dexie live-query hooks
+
+hooks/goal/use-goal-controls.ts — the verbs over the right transport (local runtime, or the
+                                  companion RPCs on a paired phone)
 
 components/settings/goals/
-├── goals-section.tsx       — Settings → Goals tab with 3 sub-tabs (History / Tracker / Defaults)
-├── history-table.tsx       — newest-first table of every persisted goal
+├── goals-section.tsx       — Settings → Goals: a launcher into /goals plus the tracker
 ├── goal-tracker-config.tsx — read-only view of the built-in character
-└── goal-defaults-form.tsx  — global AppSettings.goals editor
+├── goal-templates-manager.tsx, goal-defaults-form.tsx — rendered by /goals → Configure
 ```
+
+The console's tabs are Overview · History · Analytics · Configure. Templates,
+defaults, the tracker and the console preferences are panels of Configure; old
+`?tab=templates|defaults|tracker` links resolve to them, and `?goal=<id>`
+opens one goal in the inspector (layout and flow:
+`docs/superpowers/specs/2026-10-09-goals-and-conversations-console-ux-design.md`).
 
 ### Data flow (single turn)
 

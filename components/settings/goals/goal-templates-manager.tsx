@@ -3,12 +3,26 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { StarIcon, PencilIcon, Trash2Icon, PlusIcon } from "lucide-react"
+import { toast } from "sonner"
+import { PencilIcon, PlayIcon, PlusIcon, StarIcon, Trash2Icon } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { GoalQuickCreateDialog } from "@/components/goal/goal-quick-create-dialog"
 import { cn } from "@/lib/utils"
 import type { GoalTemplate } from "@/types/goal"
 import {
@@ -28,11 +42,19 @@ interface EditorState {
 /**
  * CRUD manager for goal templates (ADR-0019 Phase 2). Built-ins are
  * clone-on-edit (editing one creates a new user copy) and cannot be deleted.
+ *
+ * One list with hairline rows rather than a bordered box per template, and
+ * every row says what it does on hover: Use (opens New goal with the template
+ * picked), Edit, Delete (asks first — it used to delete on the first click).
+ * The editor opens inline above the list, in place of a row, so the page does
+ * not grow a second frame.
  */
 export function GoalTemplatesManager() {
   const t = useTranslations("goal")
   const templates = useLiveQuery(() => listGoalTemplates(), [])
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<GoalTemplate | null>(null)
+  const [useTemplateId, setUseTemplateId] = useState<string | null>(null)
 
   function openNew() {
     setEditor({ source: null, title: "", objectiveText: "" })
@@ -62,39 +84,85 @@ export function GoalTemplatesManager() {
       createdAt: src && !isClone ? src.createdAt : now,
       updatedAt: now,
     }
-    await upsertGoalTemplate(row)
-    setEditor(null)
+    try {
+      await upsertGoalTemplate(row)
+      setEditor(null)
+      toast.success(t("templates.saved"))
+    } catch (error) {
+      toast.error(t("templates.saveFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  async function handleDelete(tpl: GoalTemplate) {
+    try {
+      await deleteGoalTemplate(tpl.id)
+      setPendingDelete(null)
+    } catch (error) {
+      toast.error(t("templates.deleteFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  async function toggleFavorite(tpl: GoalTemplate) {
+    try {
+      await setTemplateFavorite(tpl.id, !tpl.isFavorite)
+    } catch (error) {
+      toast.error(t("templates.saveFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   return (
     <div className="space-y-3" data-testid="goal-templates-manager">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium">{t("templates.heading")}</h3>
-        <Button size="sm" variant="outline" onClick={openNew} data-testid="goal-template-new">
+      {/* The Configure panel above already says what templates are for. */}
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={openNew}
+          disabled={editor !== null}
+          data-testid="goal-template-new"
+        >
           <PlusIcon className="size-3.5" aria-hidden />
           {t("templates.add")}
         </Button>
       </div>
 
       {editor && (
-        <div className="space-y-2 rounded-md border p-3" data-testid="goal-template-editor">
-          <div>
-            <Label className="text-xs font-medium">{t("templates.titleField")}</Label>
+        <div
+          className="space-y-3 border-l-2 border-primary/50 py-1 pl-3"
+          data-testid="goal-template-editor"
+        >
+          <div className="space-y-1">
+            <Label htmlFor="goal-template-title" className="text-xs font-medium">
+              {t("templates.titleField")}
+            </Label>
             <Input
+              id="goal-template-title"
               value={editor.title}
               onChange={(e) => setEditor({ ...editor, title: e.target.value })}
               data-testid="goal-template-title"
             />
           </div>
-          <div>
-            <Label className="text-xs font-medium">{t("templates.objectiveField")}</Label>
+          <div className="space-y-1">
+            <Label htmlFor="goal-template-objective" className="text-xs font-medium">
+              {t("templates.objectiveField")}
+            </Label>
             <Textarea
+              id="goal-template-objective"
               rows={3}
               value={editor.objectiveText}
               onChange={(e) => setEditor({ ...editor, objectiveText: e.target.value })}
               data-testid="goal-template-objective"
             />
           </div>
+          {editor.source?.builtin ? (
+            <p className="text-[11px] text-muted-foreground">{t("templates.cloneNote")}</p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="ghost" onClick={() => setEditor(null)}>
               {t("templates.cancel")}
@@ -112,20 +180,27 @@ export function GoalTemplatesManager() {
       )}
 
       {!templates ? (
-        <p className="text-sm text-muted-foreground">{t("activity.loading")}</p>
+        <div className="space-y-2" aria-busy>
+          {Array.from({ length: 3 }, (_, index) => (
+            <Skeleton key={index} className="h-12 w-full" />
+          ))}
+        </div>
       ) : templates.length === 0 ? (
         <p
-          className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
+          className="py-6 text-center text-sm text-muted-foreground"
           data-testid="goal-templates-empty"
         >
           {t("templates.empty")}
         </p>
       ) : (
-        <ul className="space-y-2" data-testid="goal-templates-list">
+        <ul
+          className="divide-y divide-border/60 border-y border-border/60"
+          data-testid="goal-templates-list"
+        >
           {templates.map((tpl) => (
             <li
               key={tpl.id}
-              className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-sm"
+              className="group/template flex items-start gap-2 py-2.5 text-sm"
               data-testid="goal-template-row"
             >
               <Button
@@ -133,8 +208,9 @@ export function GoalTemplatesManager() {
                 variant="ghost"
                 size="icon"
                 aria-label={t("templates.favorite")}
-                onClick={() => void setTemplateFavorite(tpl.id, !tpl.isFavorite)}
-                className="mt-0.5 size-6"
+                aria-pressed={tpl.isFavorite}
+                onClick={() => void toggleFavorite(tpl)}
+                className="mt-0.5 size-6 shrink-0"
                 data-testid="goal-template-favorite"
               >
                 <StarIcon
@@ -154,39 +230,112 @@ export function GoalTemplatesManager() {
                     </Badge>
                   )}
                 </div>
-                <p className="truncate text-xs text-muted-foreground" title={tpl.objectiveText}>
+                <p className="line-clamp-2 text-xs text-muted-foreground" title={tpl.objectiveText}>
                   {tpl.objectiveText}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-0.5">
                 <Button
-                  size="icon"
+                  size="sm"
                   variant="ghost"
-                  className="size-7"
-                  aria-label={t("templates.edit")}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setUseTemplateId(tpl.id)}
+                  data-testid="goal-template-use"
+                >
+                  <PlayIcon className="size-3.5" aria-hidden />
+                  {t("templates.use")}
+                </Button>
+                <RowIconButton
+                  label={t("templates.edit")}
                   onClick={() => openEdit(tpl)}
-                  data-testid="goal-template-edit"
+                  testId="goal-template-edit"
                 >
                   <PencilIcon className="size-3.5" aria-hidden />
-                </Button>
+                </RowIconButton>
                 {!tpl.builtin && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7"
-                    aria-label={t("templates.delete")}
-                    onClick={() => void deleteGoalTemplate(tpl.id)}
-                    data-testid="goal-template-delete"
+                  <RowIconButton
+                    label={t("templates.delete")}
+                    onClick={() => setPendingDelete(tpl)}
+                    testId="goal-template-delete"
+                    destructive
                   >
                     <Trash2Icon className="size-3.5" aria-hidden />
-                  </Button>
+                  </RowIconButton>
                 )}
               </div>
             </li>
           ))}
         </ul>
       )}
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => !next && setPendingDelete(null)}
+      >
+        <AlertDialogContent data-testid="goal-template-delete-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("templates.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("templates.deleteBody", { title: pendingDelete?.title ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("templates.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => pendingDelete && void handleDelete(pendingDelete)}
+              data-testid="goal-template-delete-confirm"
+            >
+              {t("templates.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {useTemplateId ? (
+        <GoalQuickCreateDialog
+          open
+          onOpenChange={(next) => !next && setUseTemplateId(null)}
+          initialTemplateId={useTemplateId}
+          showTrigger={false}
+        />
+      ) : null}
     </div>
+  )
+}
+
+function RowIconButton({
+  label,
+  onClick,
+  testId,
+  destructive = false,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  testId: string
+  destructive?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="icon"
+          variant="ghost"
+          className={cn(
+            "size-7 text-muted-foreground hover:text-foreground",
+            destructive && "hover:text-destructive"
+          )}
+          aria-label={label}
+          onClick={onClick}
+          data-testid={testId}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

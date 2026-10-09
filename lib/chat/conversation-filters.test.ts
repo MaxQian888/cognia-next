@@ -437,21 +437,39 @@ describe("activity window", () => {
 })
 
 describe("sort axis → time basis", () => {
-  it("reads creation time only under the created sort", () => {
+  it("lists every sort mode, both directions of title and created included", () => {
+    expect(CONVERSATION_SORT_BY_OPTIONS).toEqual([
+      "recent",
+      "oldest",
+      "created",
+      "createdAsc",
+      "title",
+      "titleDesc",
+      "unread",
+    ])
+  })
+
+  it("reads creation time only under the created sorts, in either direction", () => {
     expect(resolveConversationTimeBasis("created")).toBe("created")
-    for (const sortBy of CONVERSATION_SORT_BY_OPTIONS.filter((s) => s !== "created")) {
+    expect(resolveConversationTimeBasis("createdAsc")).toBe("created")
+    for (const sortBy of CONVERSATION_SORT_BY_OPTIONS.filter(
+      (s) => s !== "created" && s !== "createdAsc"
+    )) {
       expect(resolveConversationTimeBasis(sortBy)).toBe("activity")
     }
   })
 
   it("admits date buckets only for the modes that have a date axis", () => {
-    // `title` and `unread` order by something that is not time; bucketing them
-    // by date would put headers on a list the headers do not explain.
+    // `title`, `titleDesc` and `unread` order by something that is not time;
+    // bucketing them by date would put headers on a list the headers do not explain.
     expect(CONVERSATION_SORT_BY_OPTIONS.filter(sortSupportsDateBuckets)).toEqual([
       "recent",
       "oldest",
       "created",
+      "createdAsc",
     ])
+    expect(sortSupportsDateBuckets("createdAsc")).toBe(true)
+    expect(sortSupportsDateBuckets("titleDesc")).toBe(false)
   })
 })
 

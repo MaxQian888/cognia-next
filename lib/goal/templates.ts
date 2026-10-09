@@ -7,7 +7,7 @@
  */
 
 import type { AppSettings } from "@cognia/agent-config-types"
-import type { Goal } from "@/types/goal"
+import type { Goal, GoalConfig } from "@/types/goal"
 import { getGoalTemplate } from "@/lib/db/goal-templates"
 import { getGoalRuntime } from "./runtime"
 
@@ -17,6 +17,24 @@ export class GoalTemplateNotFound extends Error {
     super(`goal template not found: ${templateId}`)
     this.name = "GoalTemplateNotFound"
     this.templateId = templateId
+  }
+}
+
+/**
+ * What a template contributes to a new goal: its objective and its config
+ * overrides. Shared by `createGoalFromTemplate` (the goal is created here) and
+ * the paired phone, which reads the template locally and sends the same two
+ * fields to its desktop over `goal_create`. Throws `GoalTemplateNotFound` for
+ * an unknown id.
+ */
+export async function resolveGoalTemplate(
+  templateId: string
+): Promise<{ rawObjective: string; config?: Partial<GoalConfig> }> {
+  const template = await getGoalTemplate(templateId)
+  if (!template) throw new GoalTemplateNotFound(templateId)
+  return {
+    rawObjective: template.objectiveText,
+    ...(template.configOverrides ? { config: template.configOverrides } : {}),
   }
 }
 
@@ -31,13 +49,12 @@ export async function createGoalFromTemplate(input: {
   characterId?: string
   appSettings?: AppSettings | null
 }): Promise<Goal> {
-  const template = await getGoalTemplate(input.templateId)
-  if (!template) throw new GoalTemplateNotFound(input.templateId)
+  const { rawObjective, config } = await resolveGoalTemplate(input.templateId)
   return getGoalRuntime().createGoal({
     sessionId: input.sessionId,
     characterId: input.characterId,
-    rawObjective: template.objectiveText,
-    config: template.configOverrides,
+    rawObjective,
+    config,
     appSettings: input.appSettings ?? null,
   })
 }

@@ -15,7 +15,12 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 
 export type GoalConsoleView = "grid" | "list"
 
-export const DEFAULT_GOAL_CONSOLE_VIEW: GoalConsoleView = "grid"
+/**
+ * The list is the default: two lines per goal let a dozen open goals fit on
+ * one screen beside the inspector, where the grid fit three. A user who picked
+ * the grid keeps it (only an absent setting falls back here).
+ */
+export const DEFAULT_GOAL_CONSOLE_VIEW: GoalConsoleView = "list"
 
 const VALID_VIEWS: readonly GoalConsoleView[] = ["grid", "list"]
 

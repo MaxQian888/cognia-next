@@ -5,14 +5,16 @@
  * `ToggleGroup` bound to `useGoalConsoleView`, which persists the active mode
  * to `AppSettings` (cross-device).
  *
- * Labels collapse to icon-only below `sm` so the toggle never crowds the
- * console header on narrow screens.
+ * Icon-only, each with its label as the accessible name and a tooltip: the
+ * toggle sits on the section heading row, where two worded buttons competed
+ * with the heading for attention.
  */
 
 import { useTranslations } from "next-intl"
 import { LayoutGridIcon, Rows3Icon } from "lucide-react"
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   isGoalConsoleView,
   useGoalConsoleView,
@@ -24,8 +26,8 @@ export interface GoalConsoleViewToggleProps {
 }
 
 const ITEMS: { value: GoalConsoleView; icon: typeof LayoutGridIcon; key: string }[] = [
-  { value: "grid", icon: LayoutGridIcon, key: "grid" },
   { value: "list", icon: Rows3Icon, key: "list" },
+  { value: "grid", icon: LayoutGridIcon, key: "grid" },
 ]
 
 export function GoalConsoleViewToggle({ className }: GoalConsoleViewToggleProps) {
@@ -45,16 +47,19 @@ export function GoalConsoleViewToggle({ className }: GoalConsoleViewToggleProps)
       data-testid="goal-console-view-toggle"
     >
       {ITEMS.map(({ value, icon: Icon, key }) => (
-        <ToggleGroupItem
-          key={value}
-          value={value}
-          aria-label={t(key)}
-          data-testid={`goal-console-view-${value}`}
-          className="gap-1.5"
-        >
-          <Icon className="size-3.5" aria-hidden="true" />
-          <span className="hidden text-xs sm:inline">{t(key)}</span>
-        </ToggleGroupItem>
+        <Tooltip key={value}>
+          <TooltipTrigger asChild>
+            <ToggleGroupItem
+              value={value}
+              aria-label={t(key)}
+              data-testid={`goal-console-view-${value}`}
+              className="size-7 px-0"
+            >
+              <Icon className="size-3.5" aria-hidden="true" />
+            </ToggleGroupItem>
+          </TooltipTrigger>
+          <TooltipContent>{t(key)}</TooltipContent>
+        </Tooltip>
       ))}
     </ToggleGroup>
   )

@@ -81,3 +81,39 @@ export function goalStatusStyle(status: GoalStatus): GoalStatusStyle {
   const tone = TONE_BY_STATUS[status] ?? "neutral"
   return { tone, pulse: tone === "active", ...STYLE_BY_TONE[tone] }
 }
+
+/**
+ * Chart fill for a status: the status's own tone (as a CSS variable, so it
+ * follows the theme) at an opacity that tells apart statuses sharing a tone —
+ * `active` from `completed`, the three limit exits from each other. The
+ * analytics donut used to colour slices from a generic palette by position, so
+ * "completed" could be orange in the chart and green everywhere else.
+ */
+export interface GoalStatusChartColor {
+  fill: string
+  opacity: number
+}
+
+const TONE_VAR: Record<GoalTone, string> = {
+  active: "var(--success)",
+  done: "var(--success)",
+  paused: "var(--warning)",
+  halted: "var(--destructive)",
+  neutral: "var(--muted-foreground)",
+}
+
+const STATUS_OPACITY: Record<GoalStatus, number> = {
+  active: 1,
+  completed: 0.55,
+  paused: 1,
+  budget_limited: 1,
+  turn_limited: 0.7,
+  timed_out: 0.45,
+  stopped: 0.8,
+  preempted: 0.45,
+}
+
+export function goalStatusChartColor(status: GoalStatus): GoalStatusChartColor {
+  const tone = TONE_BY_STATUS[status] ?? "neutral"
+  return { fill: TONE_VAR[tone], opacity: STATUS_OPACITY[status] ?? 1 }
+}

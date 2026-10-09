@@ -1,33 +1,28 @@
 "use client"
 
 /**
- * Overview section of the Goals console (ADR-0019) — the live-operations
- * dashboard: the two-cluster stat row plus the searchable / sortable open-goals
- * list. Extracted from `goal-console.tsx` so the console shell stays a thin
- * header + segmented-tab frame.
+ * Overview section of the Goals console (ADR-0019) — what is running and what
+ * needs the user, with as little chrome as possible ahead of it.
  *
- * Adaptive by *container* width (`@container/goal-console`), not the viewport,
- * so the grids reflow correctly whether the route is full-width or embedded in
- * a narrow pane. A Skeleton grid covers the `useLiveQuery` undefined→loaded
- * frame so the empty state never flashes before data arrives.
+ *   lifetime strip      Completed n/finished · Avg turns · Avg tokens · Spend
+ *   Needs you (n)       goals parked for an acceptance verdict, with Accept /
+ *                       Request changes inline — only when there are some
+ *   Open goals          search · All / Active / Paused (with counts) · sort ·
+ *                       list ⇄ grid, then the goals
+ *
+ * Selecting a row hands the goal to the console's inspector (`onSelect`); ↑/↓
+ * move the selection through the list the way they move through a mailbox.
+ *
+ * Sized by its own container (`@container/console-pane`, `@container/goal-
+ * list`), not the viewport, so it reflows the same whether the inspector is
+ * open beside it or not.
  */
 
-import { useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
-import { motion, AnimatePresence } from "motion/react"
-import { ArrowDownIcon, ArrowUpIcon, SearchIcon, TargetIcon } from "lucide-react"
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useNow, useTranslations } from "next-intl"
+import { ArrowDownIcon, ArrowUpIcon, SearchIcon, TargetIcon, XIcon } from "lucide-react"
 
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Card } from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Empty,
   EmptyContent,
@@ -36,212 +31,326 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { computeGoalAnalytics } from "@/lib/goal/analytics"
-import { filterAndSortGoals, type GoalSortKey, type SortDir } from "@/lib/goal/history-filter"
-import type { Goal, GoalStatus } from "@/types/goal"
 import {
-  STAGGER_CHILD,
-  STAGGER_CONTAINER,
-  mobileTransition,
-  useReducedMotionTransition,
-  useReducedMotionVariants,
-} from "@/lib/ui/motion"
-import { ActiveGoalCard } from "@/components/goal/views/active-goal-card"
-import { GoalConsoleViewToggle } from "@/components/goal/goal-console-view-toggle"
-import { GoalQuickCreateDialog } from "@/components/goal/goal-quick-create-dialog"
-import { GoalStatRow } from "@/components/goal/console/goal-stat-row"
-import { useGoalConsoleView } from "@/hooks/goal/use-goal-console-view"
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Surface } from "@/components/surface/surface"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useGoalConsolePrefs } from "@/hooks/goal/use-goal-console-prefs"
-import type { GoalConsoleTab } from "@/lib/goal/console-prefs"
+import { useGoalConsoleView } from "@/hooks/goal/use-goal-console-view"
+import { useGoalRowContext } from "@/hooks/goal/use-goal-row-context"
+import type { GoalAnalytics } from "@/lib/goal/analytics"
+import type { GoalSortKey, SortDir } from "@/lib/goal/history-filter"
+import {
+  OPEN_GOAL_SCOPES,
+  countOpenGoalScopes,
+  filterOpenGoals,
+  isOpenGoalScope,
+  splitOpenGoals,
+  type OpenGoalScope,
+} from "@/lib/goal/overview-filter"
+import { cn } from "@/lib/utils"
+import type { Goal } from "@/types/goal"
 
-/** Sentinel for "any open status" in the toolbar's status filter. */
-const ALL_OPEN = "__all__"
-/** Only active/paused goals ever appear in the open-goals section. */
-const OPEN_STATUSES: readonly GoalStatus[] = ["active", "paused"]
+import { GoalConsoleViewToggle } from "../goal-console-view-toggle"
+import { GoalQuickCreateDialog } from "../goal-quick-create-dialog"
+import { GoalGridTile } from "./goal-grid-tile"
+import { GoalListRow } from "./goal-list-row"
+import { GoalSummaryStrip } from "./goal-summary-strip"
+
+const SORT_KEYS: readonly GoalSortKey[] = ["created", "turns", "tokens"]
 
 export interface GoalOverviewSectionProps {
-  /** All goals (already resolved; `[]` while loading). */
-  goals: Goal[]
-  /** `true` until the first Dexie snapshot arrives. */
-  loading: boolean
-  /** Switch the console's top section (used by the metric stat cards). */
-  onSwitchSection: (tab: GoalConsoleTab) => void
+  /** Every open goal of the workspace; `undefined` until the first read lands. */
+  openGoals: Goal[] | undefined
+  /** Lifetime aggregates for the strip. */
+  analytics: GoalAnalytics
+  analyticsLoading: boolean
+  selectedGoalId: string | null
+  onSelect: (goalId: string) => void
+  /** A goal was deleted from a row; drop it from the selection. */
+  onDeleted: (goalId: string) => void
+  onOpenCompleted: () => void
+  onOpenAnalytics: () => void
 }
 
-export function GoalOverviewSection({ goals, loading, onSwitchSection }: GoalOverviewSectionProps) {
+export function GoalOverviewSection({
+  openGoals,
+  analytics,
+  analyticsLoading,
+  selectedGoalId,
+  onSelect,
+  onDeleted,
+  onOpenCompleted,
+  onOpenAnalytics,
+}: GoalOverviewSectionProps) {
   const t = useTranslations("goal")
   const { view } = useGoalConsoleView()
   const { prefs } = useGoalConsolePrefs()
+  const now = useNow({ updateInterval: 30_000 }).getTime()
+  const loading = openGoals === undefined
 
-  const analytics = useMemo(() => computeGoalAnalytics(goals), [goals])
-  const openGoals = useMemo(
-    () => goals.filter((g) => g.status === "active" || g.status === "paused"),
-    [goals]
-  )
-
-  // Open-goals toolbar state (sort seeds from the persisted prefs).
   const [query, setQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>(ALL_OPEN)
+  const [scope, setScope] = useState<OpenGoalScope>("all")
   const [sort, setSort] = useState<GoalSortKey>(() => prefs.openGoalsSort)
   const [dir, setDir] = useState<SortDir>(() => prefs.openGoalsDir)
 
-  const filteredOpen = useMemo(
-    () =>
-      filterAndSortGoals(openGoals, {
-        query,
-        statuses: statusFilter === ALL_OPEN ? [...OPEN_STATUSES] : [statusFilter as GoalStatus],
-        sort,
-        dir,
-      }),
-    [openGoals, query, statusFilter, sort, dir]
+  const { awaiting, running } = useMemo(() => splitOpenGoals(openGoals ?? []), [openGoals])
+  const counts = useMemo(() => countOpenGoalScopes(running), [running])
+  const visible = useMemo(
+    () => filterOpenGoals(running, { scope, query, sort, dir }),
+    [running, scope, query, sort, dir]
+  )
+  const context = useGoalRowContext(openGoals, { judgeNotes: true })
+
+  // ↑/↓ walk the selection through what is drawn, awaiting goals first.
+  const order = useMemo(() => [...awaiting, ...visible].map((goal) => goal.id), [awaiting, visible])
+  const listRef = useRef<HTMLDivElement>(null)
+  const onListKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+      const target = event.target as HTMLElement
+      const current = target.closest<HTMLElement>("[data-goal-select]")?.dataset.goalSelect
+      if (!current) return
+      const index = order.indexOf(current)
+      const next = order[index + (event.key === "ArrowDown" ? 1 : -1)]
+      if (!next) return
+      event.preventDefault()
+      onSelect(next)
+      listRef.current
+        ?.querySelector<HTMLElement>(`[data-goal-select="${CSS.escape(next)}"]`)
+        ?.focus()
+    },
+    [order, onSelect]
   )
 
-  const containerVariants = useReducedMotionVariants(STAGGER_CONTAINER)
-  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
-  const switchTransition = useReducedMotionTransition(mobileTransition("fast"))
+  const renderGoal = (goal: Goal) => {
+    const shared = {
+      goal,
+      session: context.sessionFor(goal),
+      agentName: context.agentNameFor(goal),
+      judgeNote: context.judgeNoteFor(goal),
+      selected: goal.id === selectedGoalId,
+      onSelect,
+      onDeleted,
+      now,
+    }
+    return view === "grid" ? (
+      <GoalGridTile key={goal.id} {...shared} />
+    ) : (
+      <GoalListRow key={goal.id} {...shared} />
+    )
+  }
 
-  /** Toggle a status shortcut: click the active card again to clear the scope. */
-  const scopeStatus = (status: GoalStatus) =>
-    setStatusFilter((prev) => (prev === status ? ALL_OPEN : status))
+  /**
+   * The list is one surface with hairline rows; the grid is tiles on the page
+   * ground, each its own surface (`GoalGridTile`) — never tiles in a frame.
+   */
+  const renderList = (goals: Goal[], label: string, testId?: string) =>
+    view === "grid" ? (
+      <ul
+        className="grid gap-3 @lg/goal-list:grid-cols-2 @4xl/goal-list:grid-cols-3"
+        aria-label={label}
+        data-view={view}
+        data-testid={testId}
+      >
+        {goals.map(renderGoal)}
+      </ul>
+    ) : (
+      <Surface layer="raised" radius="panel" className="overflow-hidden border">
+        <ul aria-label={label} data-view={view} data-testid={testId}>
+          {goals.map(renderGoal)}
+        </ul>
+      </Surface>
+    )
+
+  const noOpenGoals = !loading && awaiting.length === 0 && running.length === 0
 
   return (
-    <div className="@container/goal-console space-y-8">
-      <GoalStatRow
+    <div
+      className="@container/console-pane space-y-6"
+      data-testid="goal-overview-section"
+      ref={listRef}
+      onKeyDown={onListKeyDown}
+    >
+      <GoalSummaryStrip
         analytics={analytics}
-        statusFilter={statusFilter}
-        onScope={scopeStatus}
-        onSwitchSection={onSwitchSection}
+        loading={analyticsLoading}
+        onOpenCompleted={onOpenCompleted}
+        onOpenAnalytics={onOpenAnalytics}
       />
 
-      <section>
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {awaiting.length > 0 ? (
+        <section aria-labelledby="goal-needs-you-heading" data-testid="goal-needs-you">
+          <SectionHeading id="goal-needs-you-heading" count={awaiting.length} tone="attention">
+            {t("console.needsYou")}
+          </SectionHeading>
+          <p className="mb-2 text-xs text-muted-foreground">{t("console.needsYouHint")}</p>
+          <div className="@container/goal-list">
+            {renderList(awaiting, t("console.needsYou"), "goal-needs-you-list")}
+          </div>
+        </section>
+      ) : null}
+
+      <section aria-labelledby="goal-open-heading">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <SectionHeading id="goal-open-heading" count={loading ? undefined : running.length}>
             {t("console.openGoalsHeading")}
-          </h2>
-          {!loading && openGoals.length > 0 && <GoalConsoleViewToggle />}
+          </SectionHeading>
+          {!loading && running.length > 0 ? <GoalConsoleViewToggle /> : null}
         </div>
 
         {loading ? (
           <OverviewSkeleton />
-        ) : openGoals.length === 0 ? (
+        ) : noOpenGoals ? (
           <Empty
-            className="rounded-xl border border-dashed bg-muted/20"
+            className="rounded-panel border border-dashed"
             data-testid="goal-console-active-empty"
           >
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <TargetIcon className="size-5" aria-hidden />
               </EmptyMedia>
-              <EmptyTitle>{t("console.openGoalsHeading")}</EmptyTitle>
+              <EmptyTitle>{t("console.emptyTitle")}</EmptyTitle>
               <EmptyDescription>{t("console.activeEmpty")}</EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              <GoalQuickCreateDialog />
+              <GoalQuickCreateDialog
+                triggerTestId="goal-console-empty-create"
+                triggerVariant="outline"
+              />
             </EmptyContent>
           </Empty>
+        ) : running.length === 0 ? (
+          // Everything open is waiting on a verdict, listed above.
+          <p className="text-sm text-muted-foreground" data-testid="goal-console-only-awaiting">
+            {t("console.onlyAwaiting")}
+          </p>
         ) : (
           <>
             <div
               className="mb-3 flex flex-wrap items-center gap-2"
               data-testid="goal-console-open-toolbar"
             >
-              <div className="relative min-w-0 flex-1 basis-48">
-                <SearchIcon
-                  className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden
-                />
-                <Input
+              <InputGroup className="h-8 min-w-0 flex-1 basis-48">
+                <InputGroupAddon>
+                  <SearchIcon className="size-4" aria-hidden />
+                </InputGroupAddon>
+                <InputGroupInput
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && query) {
+                      event.preventDefault()
+                      setQuery("")
+                    }
+                  }}
                   placeholder={t("history.search")}
                   aria-label={t("history.search")}
-                  className="pl-8"
                   data-testid="goal-console-open-search"
                 />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger
-                  className="w-32"
-                  aria-label={t("history.filterStatus")}
-                  data-testid="goal-console-open-status"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_OPEN}>{t("history.all")}</SelectItem>
-                  {OPEN_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {t(`status.${s}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={sort} onValueChange={(v) => setSort(v as GoalSortKey)}>
-                <SelectTrigger
-                  className="w-32"
-                  aria-label={t("history.sortBy")}
-                  data-testid="goal-console-open-sort"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(["created", "turns", "tokens"] as GoalSortKey[]).map((k) => (
-                    <SelectItem key={k} value={k}>
-                      {t(`history.sort${k.charAt(0).toUpperCase()}${k.slice(1)}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
+                {query ? (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      onClick={() => setQuery("")}
+                      aria-label={t("console.clearSearch")}
+                    >
+                      <XIcon className="size-3.5" />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                ) : null}
+              </InputGroup>
+              <ToggleGroup
+                type="single"
+                size="sm"
                 variant="outline"
-                size="icon"
-                aria-label={dir === "asc" ? t("history.dirAsc") : t("history.dirDesc")}
-                onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
-                data-testid="goal-console-open-dir"
+                value={scope}
+                onValueChange={(value) => {
+                  if (isOpenGoalScope(value)) setScope(value)
+                }}
+                aria-label={t("history.filterStatus")}
+                data-testid="goal-console-open-scope"
               >
-                {dir === "asc" ? (
-                  <ArrowUpIcon className="size-4" aria-hidden />
-                ) : (
-                  <ArrowDownIcon className="size-4" aria-hidden />
-                )}
-              </Button>
+                {OPEN_GOAL_SCOPES.map((id) => (
+                  <ToggleGroupItem
+                    key={id}
+                    value={id}
+                    className="gap-1.5 px-2.5 text-xs"
+                    data-testid={`goal-console-scope-${id}`}
+                  >
+                    {t(`console.scopes.${id}`)}
+                    <span className="tabular-nums text-muted-foreground">{counts[id]}</span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              <div className="flex items-center gap-1">
+                <Select value={sort} onValueChange={(value) => setSort(value as GoalSortKey)}>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-32"
+                    aria-label={t("history.sortBy")}
+                    data-testid="goal-console-open-sort"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_KEYS.map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {t(`history.sort${key.charAt(0).toUpperCase()}${key.slice(1)}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={dir === "asc" ? t("history.dirAsc") : t("history.dirDesc")}
+                  onClick={() => setDir((current) => (current === "asc" ? "desc" : "asc"))}
+                  data-testid="goal-console-open-dir"
+                >
+                  {dir === "asc" ? (
+                    <ArrowUpIcon className="size-4" aria-hidden />
+                  ) : (
+                    <ArrowDownIcon className="size-4" aria-hidden />
+                  )}
+                </Button>
+              </div>
             </div>
 
-            {filteredOpen.length === 0 ? (
-              <p
-                className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
+            {visible.length === 0 ? (
+              <div
+                className="flex flex-wrap items-center gap-2 py-6 text-sm text-muted-foreground"
                 data-testid="goal-console-open-no-results"
               >
-                {t("history.noResults")}
-              </p>
-            ) : (
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={view}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 6 }}
-                  transition={switchTransition}
+                <span>{t("history.noResults")}</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => {
+                    setQuery("")
+                    setScope("all")
+                  }}
                 >
-                  <motion.div
-                    className={
-                      view === "grid"
-                        ? "grid gap-3 @lg/goal-console:grid-cols-2 @4xl/goal-console:grid-cols-3"
-                        : "flex flex-col gap-2"
-                    }
-                    variants={containerVariants}
-                    initial="initial"
-                    animate="animate"
-                    data-testid="goal-console-open-list"
-                  >
-                    {filteredOpen.map((g) => (
-                      <motion.div key={g.id} variants={childVariants} layout>
-                        <ActiveGoalCard goal={g} variant={view === "list" ? "compact" : "card"} />
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                </motion.div>
-              </AnimatePresence>
+                  {t("console.clearFilters")}
+                </Button>
+              </div>
+            ) : (
+              <div className="@container/goal-list">
+                {renderList(visible, t("console.openGoalsHeading"), "goal-console-open-list")}
+              </div>
             )}
           </>
         )}
@@ -250,30 +359,50 @@ export function GoalOverviewSection({ goals, loading, onSwitchSection }: GoalOve
   )
 }
 
-/** Card-grid placeholder mirroring the open-goals grid while data loads. */
+function SectionHeading({
+  id,
+  count,
+  tone = "neutral",
+  children,
+}: {
+  id: string
+  count?: number
+  tone?: "neutral" | "attention"
+  children: React.ReactNode
+}) {
+  return (
+    <h2 id={id} className="mb-1 flex items-center gap-2 text-sm font-semibold">
+      {children}
+      {count !== undefined ? (
+        <span
+          className={cn(
+            "rounded-pill px-1.5 text-[11px] font-medium tabular-nums",
+            tone === "attention" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground"
+          )}
+        >
+          {count}
+        </span>
+      ) : null}
+    </h2>
+  )
+}
+
+/** List-shaped placeholder while the first read is in flight. */
 function OverviewSkeleton() {
   return (
     <div
-      className="grid gap-3 @lg/goal-console:grid-cols-2 @4xl/goal-console:grid-cols-3"
+      className="overflow-hidden rounded-panel border"
       aria-busy
       data-testid="goal-console-overview-skeleton"
     >
-      {Array.from({ length: 3 }, (_, i) => (
-        <Card key={i} className="space-y-3 p-4 pl-5">
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-3 w-12" />
+      {Array.from({ length: 3 }, (_, index) => (
+        <div key={index} className="space-y-2 border-b px-4 py-3 last:border-b-0">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-4 w-14 rounded-full" />
+            <Skeleton className="h-4 w-2/3" />
           </div>
-          <Skeleton className="h-4 w-4/5" />
-          <div className="space-y-2">
-            <Skeleton className="h-1.5 w-full rounded-full" />
-            <Skeleton className="h-1.5 w-full rounded-full" />
-          </div>
-          <div className="flex justify-end gap-1 pt-1">
-            <Skeleton className="size-8 rounded-md" />
-            <Skeleton className="size-8 rounded-md" />
-          </div>
-        </Card>
+          <Skeleton className="h-3 w-1/3" />
+        </div>
       ))}
     </div>
   )

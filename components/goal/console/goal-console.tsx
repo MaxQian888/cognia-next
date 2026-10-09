@@ -1,127 +1,255 @@
 "use client"
 
 /**
- * Unified Goals console — "Mission Control" dashboard (ADR-0019 Phase 3).
+ * The Goals console (`/goals`, ADR-0019).
  *
- * The standalone `/goals` route hosts it full-height. Mirrors the `/performance`
- * dashboard chrome: a header (quick-create + preferences gear), a top-level
- * segmented tab bar, then a single scroll region holding one section at a time.
+ *   ┌ header ─ Goals · Overview  History  Analytics  Configure ·  [plugins] [+ New goal] ┐
+ *   │ center: one section at a time                     │ inspector: the selected goal │
+ *   └───────────────────────────────────────────────────┴──────────────────────────────┘
  *
- * Sections (all first-class, no longer buried under the goals list):
- *  - **Overview** — the live-operations dashboard: the two-cluster stat row +
- *    the searchable/sortable open-goals list (`GoalOverviewSection`).
- *  - **History / Analytics / Templates / Defaults / Tracker** — the management
- *    surfaces, each re-parenting the same component Settings uses.
+ * Built on `FeaturePageShell` like the other management routes: the header
+ * carries the tabs inline, the center scrolls one section, and a selected goal
+ * opens beside the list as the inspector pane (`GoalDetailPanel`) — or, below
+ * the shell's desktop tier, as a sheet over it. Selecting from Overview or
+ * History does the same thing, where History used to open a modal and the
+ * Overview a sheet per card.
  *
- * Interactions:
- *  - The Overview metric stat cards deep-link into a section (Completed →
- *    History; the averages → Analytics) via `setTab`; the Active/Paused cards
- *    scope the open-goals list in place.
- *  - The tab bar is controlled and honours a `?tab=` deep link (`initialTab`)
- *    plus the persisted `goalConsolePrefs.defaultTab` (defaults to Overview).
+ * Where you are is an address: `?tab=` (with `?section=` on Configure) and
+ * `?goal=` for the inspector. The console reads them through its props
+ * (`location`, `selectedGoalId`) and writes them back with `onNavigate`, so
+ * Back closes what a click opened and a scheduler run or a conversation row can
+ * link to one goal. Old `?tab=templates|defaults|tracker` links land on the
+ * matching Configure panel.
  */
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { TargetIcon } from "lucide-react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { TargetIcon } from "lucide-react"
 
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
-import { listAllGoals } from "@/lib/db/goals"
-import { GoalAnalyticsPanel } from "@/components/goal/analytics/goal-analytics-panel"
-import { GoalQuickCreateDialog } from "@/components/goal/goal-quick-create-dialog"
-import { GoalConsolePrefsPopover } from "@/components/goal/console/goal-console-prefs-popover"
-import { GoalOverviewSection } from "@/components/goal/console/goal-overview-section"
-import { useGoalConsolePrefs } from "@/hooks/goal/use-goal-console-prefs"
-import { GOAL_CONSOLE_TABS, type GoalConsoleTab } from "@/lib/goal/console-prefs"
-import { GoalsHistoryTable } from "@/components/settings/goals/history-table"
-import { GoalTemplatesManager } from "@/components/settings/goals/goal-templates-manager"
-import { GoalDefaultsForm } from "@/components/settings/goals/goal-defaults-form"
-import { GoalTrackerConfig } from "@/components/settings/goals/goal-tracker-config"
+import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useBreakpoint } from "@/hooks/ui"
+import { getGoal, listAllGoals, listOpenGoals } from "@/lib/db/goals"
+import { computeGoalAnalytics } from "@/lib/goal/analytics"
+import {
+  GOAL_CONSOLE_TABS,
+  isGoalConsoleTab,
+  type GoalConfigSection as GoalConfigSectionId,
+  type GoalConsoleLocation,
+  type GoalConsoleTab,
+} from "@/lib/goal/console-prefs"
+import { useGoalConsolePrefs } from "@/hooks/goal/use-goal-console-prefs"
+import { splitOpenGoals } from "@/lib/goal/overview-filter"
 
-export interface GoalConsoleProps {
-  /** Initial section (deep link `?tab=` / bridge nav). Falls back to prefs. */
-  initialTab?: GoalConsoleTab
+import { GoalAnalyticsPanel } from "../analytics/goal-analytics-panel"
+import { GoalDetailPanel } from "../goal-detail-panel"
+import { GoalDetailSheet } from "../goal-detail-sheet"
+import { GoalQuickCreateDialog } from "../goal-quick-create-dialog"
+import { GoalConfigSection } from "./goal-config-section"
+import { ALL_GOAL_STATUSES, GoalHistorySection } from "./goal-history-section"
+import { GoalOverviewSection } from "./goal-overview-section"
+
+/** Goals read for the lifetime numbers and the charts. */
+const ANALYTICS_WINDOW = 500
+
+export interface GoalConsolePlace {
+  tab: GoalConsoleTab
+  section?: GoalConfigSectionId
+  goalId?: string | null
 }
 
-export function GoalConsole({ initialTab }: GoalConsoleProps) {
+export interface GoalConsoleProps {
+  /** Tab (and Configure panel) from the address; `null` → the user's default tab. */
+  location: GoalConsoleLocation | null
+  /** `?goal=` — the goal the inspector shows. */
+  selectedGoalId: string | null
+  /** Write a new place to the address. `replace` for selection moves. */
+  onNavigate: (place: GoalConsolePlace, options?: { replace?: boolean }) => void
+}
+
+export function GoalConsole({ location, selectedGoalId, onNavigate }: GoalConsoleProps) {
   const t = useTranslations("goal")
   const { prefs } = useGoalConsolePrefs()
-  const allGoals = useLiveQuery(() => listAllGoals(500), [])
-  const goals = useMemo(() => allGoals ?? [], [allGoals])
+  const overlay = useBreakpoint() !== "desktop"
 
-  // ── Controlled section (deep link wins → prefs default → overview) ─────────
-  const [tab, setTab] = useState<GoalConsoleTab>(() => initialTab ?? prefs.defaultTab)
-  const [prevInitialTab, setPrevInitialTab] = useState(initialTab)
-  if (initialTab !== prevInitialTab) {
-    // Follow later deep links (navigating /goals?tab=x while already mounted).
-    // Adjusted during render per React's "derive from prop change" pattern.
-    setPrevInitialTab(initialTab)
-    if (initialTab) setTab(initialTab)
-  }
+  const tab = location?.tab ?? prefs.defaultTab
+  const section = location?.section ?? "defaults"
+
+  const openGoals = useLiveQuery(() => listOpenGoals(), [])
+  const recentGoals = useLiveQuery(() => listAllGoals(ANALYTICS_WINDOW), [])
+  const analytics = useMemo(() => computeGoalAnalytics(recentGoals ?? []), [recentGoals])
+  const awaitingCount = useMemo(() => splitOpenGoals(openGoals ?? []).awaiting.length, [openGoals])
+
+  // History's status filter lives here so the lifetime strip's "Completed"
+  // cell can open History already filtered.
+  const [historyStatus, setHistoryStatus] = useState<string>(ALL_GOAL_STATUSES)
+
+  const go = useCallback(
+    (next: Partial<GoalConsolePlace>, options?: { replace?: boolean }) =>
+      onNavigate(
+        {
+          tab: next.tab ?? tab,
+          // A panel only belongs to Configure; other tabs carry none.
+          section: (next.tab ?? tab) === "config" ? (next.section ?? section) : undefined,
+          goalId: next.goalId === undefined ? selectedGoalId : next.goalId,
+        },
+        options
+      ),
+    [onNavigate, tab, section, selectedGoalId]
+  )
+
+  const select = useCallback((goalId: string) => go({ goalId }, { replace: true }), [go])
+  const clearSelection = useCallback(() => go({ goalId: null }, { replace: true }), [go])
+  const dropIfSelected = useCallback(
+    (goalId: string) => {
+      if (goalId === selectedGoalId) clearSelection()
+    },
+    [clearSelection, selectedGoalId]
+  )
+
+  const header = (
+    <FeaturePageHeader
+      icon={<TargetIcon />}
+      title={t("console.title")}
+      description={t("console.subtitle")}
+      navigationPlacement="inline"
+      navigation={
+        <Tabs
+          value={tab}
+          onValueChange={(value) => {
+            if (isGoalConsoleTab(value)) go({ tab: value })
+          }}
+        >
+          <TabsList aria-label={t("console.sectionsAria")}>
+            {GOAL_CONSOLE_TABS.map((id) => (
+              <TabsTrigger key={id} value={id} data-testid={`goal-console-tab-${id}`}>
+                {t(`console.tabs.${id}`)}
+                {id === "overview" && awaitingCount > 0 ? (
+                  // Visible from every tab: something is waiting on a verdict.
+                  <span
+                    className="ml-1 rounded-pill bg-warning/15 px-1.5 text-[11px] text-warning tabular-nums"
+                    aria-label={t("console.needsYouCount", { count: awaitingCount })}
+                    data-testid="goal-console-needs-you-badge"
+                  >
+                    {awaitingCount}
+                  </span>
+                ) : null}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      }
+      actions={
+        <div className="flex items-center gap-2">
+          <PluginExtensionSlot
+            point="goal.toolbar"
+            className="flex items-center gap-2 empty:hidden"
+          />
+          <GoalQuickCreateDialog />
+        </div>
+      }
+      testId="goal-console-header"
+    />
+  )
+
+  // The inspector beside the list on desktop; a sheet over it below that.
+  const inspectorOpen = selectedGoalId !== null && tab !== "config"
+  const inspectorPane =
+    inspectorOpen && !overlay
+      ? {
+          label: t("inspector.title"),
+          content: (
+            <GoalDetailPanel
+              key={selectedGoalId}
+              goalId={selectedGoalId}
+              initialGoal={openGoals?.find((goal) => goal.id === selectedGoalId)}
+              onClose={clearSelection}
+              onDeleted={clearSelection}
+            />
+          ),
+          defaultSize: 34,
+          minSize: 26,
+          maxSize: 48,
+        }
+      : undefined
+
+  const scrollBody = (children: React.ReactNode) => (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-6xl p-4 md:p-6">{children}</div>
+    </div>
+  )
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-testid="goal-console">
-      <FeaturePageHeader
-        icon={<TargetIcon />}
-        title={t("console.title")}
-        description={t("console.subtitle")}
-        actions={
-          <div className="flex items-center gap-2">
-            <PluginExtensionSlot
-              point="goal.toolbar"
-              className="flex items-center gap-2 empty:hidden"
-            />
-            <GoalConsolePrefsPopover />
-            <GoalQuickCreateDialog />
-          </div>
-        }
-      />
-
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as GoalConsoleTab)}
-        className="flex min-h-0 flex-1 flex-col"
+      <FeaturePageShell
+        storageId="goals"
+        header={header}
+        centerClassName="min-h-0"
+        rightPane={inspectorPane}
       >
-        <TabsList className="mx-6 mt-4 w-fit">
-          {GOAL_CONSOLE_TABS.map((id) => (
-            <TabsTrigger key={id} value={id} data-testid={`goal-console-tab-${id}`}>
-              {t(`console.tabs.${id}`)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="p-6">
-            <TabsContent value="overview" className="mt-0">
-              <GoalOverviewSection
-                goals={goals}
-                loading={allGoals === undefined}
-                onSwitchSection={setTab}
-              />
-            </TabsContent>
-            <TabsContent value="history" className="mt-0">
-              <GoalsHistoryTable />
-            </TabsContent>
-            <TabsContent value="analytics" className="mt-0">
-              <GoalAnalyticsPanel goals={goals} />
-            </TabsContent>
-            <TabsContent value="templates" className="mt-0">
-              <GoalTemplatesManager />
-            </TabsContent>
-            <TabsContent value="defaults" className="mt-0">
-              <GoalDefaultsForm />
-            </TabsContent>
-            <TabsContent value="tracker" className="mt-0">
-              <GoalTrackerConfig />
-            </TabsContent>
+        {tab === "overview" ? (
+          scrollBody(
+            <GoalOverviewSection
+              openGoals={openGoals}
+              analytics={analytics}
+              analyticsLoading={recentGoals === undefined}
+              selectedGoalId={selectedGoalId}
+              onSelect={select}
+              onDeleted={dropIfSelected}
+              onOpenCompleted={() => {
+                setHistoryStatus("completed")
+                go({ tab: "history" })
+              }}
+              onOpenAnalytics={() => go({ tab: "analytics" })}
+            />
+          )
+        ) : tab === "history" ? (
+          scrollBody(
+            <GoalHistorySection
+              selectedGoalId={selectedGoalId}
+              onSelect={select}
+              onDeleted={dropIfSelected}
+              statusFilter={historyStatus}
+              onStatusFilterChange={setHistoryStatus}
+            />
+          )
+        ) : tab === "analytics" ? (
+          scrollBody(
+            <GoalAnalyticsPanel goals={recentGoals ?? []} loading={recentGoals === undefined} />
+          )
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col p-4 md:p-6">
+            <GoalConfigSection
+              section={section}
+              onSectionChange={(next) => go({ tab: "config", section: next }, { replace: true })}
+            />
           </div>
-        </ScrollArea>
-      </Tabs>
+        )}
+      </FeaturePageShell>
+
+      {inspectorOpen && overlay ? (
+        <OverlayInspector goalId={selectedGoalId} onClose={clearSelection} />
+      ) : null}
     </div>
+  )
+}
+
+/** Below the desktop tier: the selected goal as a sheet over the console. */
+function OverlayInspector({ goalId, onClose }: { goalId: string; onClose: () => void }) {
+  const goal = useLiveQuery(() => getGoal(goalId), [goalId])
+  if (!goal) return null
+  return (
+    <GoalDetailSheet
+      goal={goal}
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      onDeleted={onClose}
+    />
   )
 }
 

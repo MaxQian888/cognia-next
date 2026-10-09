@@ -57,17 +57,28 @@ lib/slash-commands/
 └── actions/goal.ts     — 7 个子命令(create/status/show/pause/resume/stop/update)+ 3 别名(cancel/clear)
 
 components/goal/
-├── goal-status-pill.tsx  — composer 上方微胶囊(objective + 进度 + pause/resume/stop/show)
-├── goal-detail-sheet.tsx — 右侧 Sheet,4 个 tabs(Overview / Subgoals / Activity / Settings)
-├── tabs/                  — overview / subgoals(Phase 2 占位)/ activity / settings 表单
-└── use-active-goal.ts    — Dexie 实时查询 hook
+├── goal-status-pill.tsx    — composer 上方微胶囊(objective + 进度 + pause/resume/stop/show)
+├── goal-detail-panel.tsx   — 按 id 实时读取单个目标:状态、可编辑的目标描述、会话链接、
+│                             控制按钮、验收、tabs(Overview / Subgoals / Activity / Settings)
+├── goal-detail-sheet.tsx   — 以浮层呈现该面板(桌面 Sheet,手机 Drawer)
+├── goal-control-bar.tsx    — 继续 / 暂停 / 恢复 / 停止(停止必先确认)
+├── goal-actions-menu.tsx   — 打开会话 / 再次运行 / 复制 / 删除
+├── tabs/                   — overview / subgoals / activity / settings
+├── console/                — /goals 控制台:概览(摘要条、"需要你处理"、进行中目标 列表⇄网格)、
+│                             历史、分析、配置;选中的目标在侧边检查器中打开
+└── use-active-goal.ts      — Dexie 实时查询 hook
+
+hooks/goal/use-goal-controls.ts — 按传输选择执行(本机 runtime,或已配对手机上的 companion RPC)
 
 components/settings/goals/
-├── goals-section.tsx       — Settings → Goals tab,3 个子 tab(History / Tracker / Defaults)
-├── history-table.tsx       — 全量历史 goal 表格,newest-first
+├── goals-section.tsx       — Settings → Goals:进入 /goals 的入口 + tracker
 ├── goal-tracker-config.tsx — 内置 character 只读卡
-└── goal-defaults-form.tsx  — 全局 AppSettings.goals 编辑器
+├── goal-templates-manager.tsx、goal-defaults-form.tsx — 由 /goals → 配置 渲染
 ```
+
+控制台的标签为 概览 · 历史 · 分析 · 配置。模板、默认值、tracker 与控制台偏好是"配置"的面板;
+旧的 `?tab=templates|defaults|tracker` 链接会落到对应面板,`?goal=<id>` 在检查器中打开单个目标
+(布局与交互动线见 `docs/superpowers/specs/2026-10-09-goals-and-conversations-console-ux-design.md`)。
 
 ### 单 turn 数据流
 

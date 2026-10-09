@@ -6,9 +6,17 @@
  * means every conversation the view holds — not only the page drawn.
  *
  * Columns give way to the title as the page narrows (container queries on
- * `@container/conversations`): cost, then turns and tokens, then the agent,
- * the workspace and the creation date; the title, the last activity and the
- * row's menu always stay.
+ * `@container/conversations`), and each one arrives only once the title still
+ * has ~20rem beside it: the agent at `@2xl`, usage (turns · tokens · cost in
+ * one cell, where three thin columns used to sit) at `@4xl`, the creation date
+ * at `@5xl`, and the workspace at `@6xl` — and only when the rows actually
+ * span more than one workspace, since a column repeating "Default" on every
+ * row says nothing. The title, the last activity and the row's menu always
+ * stay. At 900px the old order showed five metadata columns and cut titles to
+ * "Refac…".
+ *
+ * While a search query ranks the rows by relevance, the headers say so rather
+ * than claim the order they would sort by.
  */
 
 import { useTranslations } from "next-intl"
@@ -29,6 +37,7 @@ import {
 } from "@/lib/conversations/conversation-manager"
 import type { SessionUsageSummary } from "@/lib/usage/session-analytics"
 import type { ChatStatus } from "@/stores/chat/chat-store"
+import type { SessionGoalMap } from "@/hooks/conversations/use-session-goals"
 import { cn } from "@/lib/utils"
 
 import { ConversationManagerRow, type ConversationRowSelectEvent } from "./conversation-manager-row"
@@ -45,6 +54,12 @@ export interface ConversationManagerTableProps {
   onClearSelection: () => void
   sortBy: ConversationSortBy
   onSortBy: (sortBy: ConversationSortBy) => void
+  /** A search query is ordering the rows by relevance; the sort only breaks ties. */
+  ranked: boolean
+  /** The rows span more than one workspace, so the workspace column says something. */
+  showWorkspace: boolean
+  /** The goal each drawn conversation runs (or last ran). */
+  goals: SessionGoalMap
   decorations: RowDecorations
   workspaceNameById: ReadonlyMap<string, string>
   folders: readonly SessionFolder[]
@@ -69,6 +84,9 @@ export function ConversationManagerTable({
   onClearSelection,
   sortBy,
   onSortBy,
+  ranked,
+  showWorkspace,
+  goals,
   decorations,
   workspaceNameById,
   folders,
@@ -86,7 +104,7 @@ export function ConversationManagerTable({
   const someSelected = selectedCount > 0 && !allSelected
 
   const sortHeader = (column: ConversationManagerSortColumn, label: string, className?: string) => {
-    const direction = ariaSortForColumn(sortBy, column)
+    const direction = ariaSortForColumn(sortBy, column, ranked)
     const Arrow =
       direction === "ascending"
         ? ArrowUpIcon
@@ -99,6 +117,7 @@ export function ConversationManagerTable({
           type="button"
           onClick={() => onSortBy(sortForColumn(sortBy, column))}
           aria-label={t("sortBy", { column: label })}
+          title={ranked ? t("rankedHint") : undefined}
           className={cn(
             "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
             direction !== "none" && "text-foreground"
@@ -127,26 +146,22 @@ export function ConversationManagerTable({
               />
             </TableHead>
             {sortHeader("title", t("columns.title"), "w-auto")}
-            <TableHead className="hidden w-36 @3xl/conversations:table-cell">
-              {t("columns.workspace")}
-            </TableHead>
             <TableHead className="hidden w-40 @2xl/conversations:table-cell">
               {t("columns.agent")}
             </TableHead>
-            {sortHeader("activity", t("columns.activity"), "w-32")}
+            {showWorkspace ? (
+              <TableHead className="hidden w-36 @6xl/conversations:table-cell">
+                {t("columns.workspace")}
+              </TableHead>
+            ) : null}
+            {sortHeader("activity", t("columns.activity"), "w-28")}
             {sortHeader(
               "created",
               t("columns.created"),
-              "hidden w-32 @4xl/conversations:table-cell"
+              "hidden w-28 @5xl/conversations:table-cell"
             )}
-            <TableHead className="hidden w-16 text-right @xl/conversations:table-cell">
-              {t("columns.turns")}
-            </TableHead>
-            <TableHead className="hidden w-20 text-right @xl/conversations:table-cell">
-              {t("columns.tokens")}
-            </TableHead>
-            <TableHead className="hidden w-24 text-right @lg/conversations:table-cell">
-              {t("columns.cost")}
+            <TableHead className="hidden w-40 text-right @4xl/conversations:table-cell">
+              {t("columns.usage")}
             </TableHead>
             <TableHead className="w-10">
               <span className="sr-only">{t("columns.actions")}</span>
@@ -164,6 +179,8 @@ export function ConversationManagerTable({
               workspaceName={
                 session.projectId ? workspaceNameById.get(session.projectId) : undefined
               }
+              showWorkspace={showWorkspace}
+              goal={goals.get(session.id)}
               folders={folders}
               usage={usage.get(session.id)}
               runStatus={runStatusById.get(session.id)}

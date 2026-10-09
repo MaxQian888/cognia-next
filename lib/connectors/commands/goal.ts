@@ -26,7 +26,7 @@
 
 import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
-import type { Goal } from "@/types/goal"
+import type { Goal, GoalStatus } from "@/types/goal"
 import type { SlashContext } from "@/lib/slash-commands/builtin"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
@@ -254,9 +254,7 @@ export function startConnectorGoalDriver(
         workspace: "none",
       })
       if (isTerminalGoalStatus(result.status)) {
-        await post(
-          `🎯 目标已${result.status} / Goal ${result.status} — ${result.turns} 回合 / turn(s).`
-        ).catch(() => undefined)
+        await post(terminalGoalLine(result.status, result.turns)).catch(() => undefined)
       } else if (result.exit === "needs_approval") {
         // An approval card went unanswered (or could not be shown), so the
         // tool was denied and the goal paused. Say so: the pause is otherwise
@@ -276,6 +274,30 @@ export function startConnectorGoalDriver(
       runningDrivers.delete(args.goalId)
     }
   })()
+}
+
+/**
+ * Both halves of the bilingual terminal line name the outcome in their own
+ * language. The status code itself (`budget_limited`, `timed_out`) is not a
+ * word in either one, and an IM reply has no locale to translate against, so
+ * the line follows the other connector replies: Chinese, then English.
+ */
+const TERMINAL_GOAL_LABELS: Record<Exclude<GoalStatus, "active" | "paused">, [string, string]> = {
+  completed: ["已完成", "completed"],
+  stopped: ["已停止", "stopped"],
+  budget_limited: ["因预算耗尽而结束", "ended: budget used up"],
+  turn_limited: ["因回合数达到上限而结束", "ended: turn limit reached"],
+  timed_out: ["因超时而结束", "ended: timed out"],
+  preempted: ["已被新目标取代", "superseded by a newer goal"],
+}
+
+/** The line posted when a connector-driven goal reaches a terminal status. */
+export function terminalGoalLine(status: GoalStatus, turns: number): string {
+  if (status === "active" || status === "paused") {
+    throw new Error(`terminalGoalLine called with a non-terminal status: ${status}`)
+  }
+  const [zh, en] = TERMINAL_GOAL_LABELS[status]
+  return `🎯 目标${zh}，共 ${turns} 回合 / Goal ${en} after ${turns} ${turns === 1 ? "turn" : "turns"}.`
 }
 
 /** True when a driver is currently running for `goalId` — tests only. */

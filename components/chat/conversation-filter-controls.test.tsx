@@ -207,7 +207,9 @@ describe("ConversationFilterMenu (desktop)", () => {
       "sort.options.recent",
       "sort.options.oldest",
       "sort.options.created",
+      "sort.options.createdAsc",
       "sort.options.title",
+      "sort.options.titleDesc",
       "sort.options.unread",
     ])
     expect(screen.getByRole("menuitemradio", { name: "sort.options.recent" })).toHaveAttribute(

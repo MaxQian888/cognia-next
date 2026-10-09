@@ -3,7 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { toast } from "sonner"
 import { GoalDefaultsForm } from "./goal-defaults-form"
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 const saveMock = jest.fn()
 let mockedSettings: Record<string, unknown> | null = null
@@ -26,6 +29,8 @@ beforeEach(async () => {
   saveMock.mockReset()
   saveMock.mockResolvedValue(undefined)
   mockedSettings = null
+  ;(toast.success as jest.Mock).mockClear()
+  ;(toast.error as jest.Mock).mockClear()
 })
 
 describe("GoalDefaultsForm", () => {
@@ -175,5 +180,55 @@ describe("GoalDefaultsForm", () => {
     rerender(<GoalDefaultsForm />)
     const turnsAfter = screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement
     expect(turnsAfter.value).toBe("99")
+  })
+
+  it("confirms a successful save with a toast", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.change(screen.getByTestId("goal-defaults-max-turns"), { target: { value: "42" } })
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Defaults saved"))
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("reports a failed save with a toast and keeps the edit", async () => {
+    saveMock.mockRejectedValueOnce(new Error("disk full"))
+    render(<GoalDefaultsForm />)
+    const turns = screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement
+    fireEvent.change(turns, { target: { value: "42" } })
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't save the settings", {
+        description: "disk full",
+      })
+    )
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(turns.value).toBe("42")
+    // Still dirty, so the user can retry.
+    await waitFor(() => expect(screen.getByTestId("goal-defaults-save")).not.toBeDisabled())
+  })
+
+  it("does not save or toast when nothing changed", () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("persists quiet hours once enabled and edited", async () => {
+    render(<GoalDefaultsForm />)
+    expect(screen.queryByTestId("goal-defaults-quiet-from")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("goal-defaults-quiet-hours"))
+    fireEvent.change(screen.getByTestId("goal-defaults-quiet-from"), { target: { value: "23:00" } })
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          goals: expect.objectContaining({
+            quietHours: expect.objectContaining({ from: "23:00", to: "07:00" }),
+          }),
+        })
+      )
+    })
   })
 })

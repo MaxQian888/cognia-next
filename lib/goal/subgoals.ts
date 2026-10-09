@@ -9,9 +9,14 @@
  *   - is abort-aware via an optional `AbortSignal`.
  *
  * Only `safeObjective` (already PII-redacted) is ever sent — never
- * `rawObjective`.
+ * `rawObjective` — and the rendered prompt still passes the PII gate
+ * (`hasNoLeakingPii`) before the call, as the judge's does: a gate failure is
+ * one more fail-OPEN `[]`. Every caller reaches the model through here (the
+ * Subgoals tab, a paired phone's `goal_subgoals_generate` run on the desktop,
+ * the plugin API and the workflow node), so the gate holds for all of them.
  */
 
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type { Goal, GoalSubgoal } from "@/types/goal"
@@ -48,9 +53,14 @@ export async function decomposeObjective(input: DecomposeObjectiveInput): Promis
   const { goal, client, signal, maxTokens, temperature } = input
   if (signal?.aborted) return []
 
+  const userPrompt = renderSubgoalDecomposeUserPrompt(goal)
+  if (!hasNoLeakingPii(userPrompt) || !hasNoLeakingPii(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT)) {
+    return []
+  }
+
   let raw: string
   try {
-    raw = await client.complete(renderSubgoalDecomposeUserPrompt(goal), {
+    raw = await client.complete(userPrompt, {
       system: SUBGOAL_DECOMPOSE_SYSTEM_PROMPT,
       maxTokens: maxTokens ?? 400,
       temperature: temperature ?? 0.2,

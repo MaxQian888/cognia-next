@@ -56,6 +56,7 @@ import type {
 } from "@/hooks/chat/use-conversation-row-actions"
 import type { RowDecorations } from "@/components/desktop/channel-list/row-decorations"
 import type { SessionUsageSummary } from "@/lib/usage/session-analytics"
+import type { Goal } from "@/types/goal"
 import {
   ConversationManagerRow,
   type ConversationManagerRowProps,
@@ -103,6 +104,7 @@ function setup(over: Partial<ConversationManagerRowProps> = {}) {
     onToggleSelect: jest.fn(),
     decorations,
     workspaceName: "Cognia",
+    showWorkspace: true,
     folders,
     usage: undefined,
     runStatus: undefined,
@@ -147,8 +149,65 @@ describe("ConversationManagerRow", () => {
     expect(within(row).getByText("Opus")).toBeInTheDocument()
     expect(within(row).getByText("rel(60000)")).toBeInTheDocument()
     expect(within(row).getByText(`dt(${NOW.getTime() - 86_400_000})`)).toBeInTheDocument()
-    expect(within(row).getByText("4")).toBeInTheDocument()
-    expect(within(row).getByText("12.3K")).toBeInTheDocument()
+    // Turns, tokens and cost share one usage cell.
+    expect(screen.getByTestId("conversation-row-usage-s1")).toHaveTextContent(
+      /^usage:\{"turns":4,"tokens":"12\.3K","cost":".*0\.42"\}$/
+    )
+  })
+
+  it("leaves the workspace cell out when the table shows no workspace column", () => {
+    setup({ showWorkspace: false })
+    const row = screen.getByTestId("conversation-row-s1")
+    expect(within(row).queryByText("Cognia")).not.toBeInTheDocument()
+    expect(within(row).getAllByRole("cell")).toHaveLength(7)
+  })
+
+  it("marks the row itself, so focus anywhere in it finds the conversation", () => {
+    setup()
+    const row = screen.getByTestId("conversation-row-s1")
+    expect(row.tagName).toBe("TR")
+    expect(row).toHaveAttribute("data-conversation-row", "s1")
+    expect(screen.getByTestId("conversation-row-open-s1")).not.toHaveAttribute(
+      "data-conversation-row"
+    )
+    expect(
+      screen.getByTestId("conversation-row-select-s1").closest("[data-conversation-row]")
+    ).toBe(row)
+  })
+
+  it("keeps a plain row to one line: no facts, no facts line", () => {
+    setup({ runStatus: "idle" })
+    const title = screen.getByTestId("conversation-row-open-s1")
+    expect(title.parentElement!.children).toHaveLength(1)
+  })
+
+  it("draws the pin inside the title button", () => {
+    setup({ session: session({ pinned: true }) })
+    const title = screen.getByTestId("conversation-row-open-s1")
+    expect(within(title).getByLabelText("pinned")).toBeInTheDocument()
+    // A pin alone is not a fact for the line under the title.
+    expect(title.parentElement!.children).toHaveLength(1)
+  })
+
+  it("puts the goal the conversation runs on its facts line, linking to the goal", () => {
+    const goal = {
+      id: "g1",
+      sessionId: "s1",
+      status: "active",
+      awaitingAcceptance: false,
+      turnsUsed: 4,
+      config: { maxTurns: 20 },
+      safeObjective: "Ship the release",
+      createdAt: 1,
+    } as unknown as Goal
+    setup({ goal })
+    const chip = screen.getByTestId("conversation-goal-chip-g1")
+    expect(chip).toHaveAttribute("href", "/goals?goal=g1")
+    expect(chip).toHaveTextContent("4/20")
+    const title = screen.getByTestId("conversation-row-open-s1")
+    expect(title.parentElement!.children).toHaveLength(2)
+    // A link of its own beside the title button, not nested in it.
+    expect(title).not.toContainElement(chip)
   })
 
   it("names a conversation with no agent by its model alone", () => {
@@ -167,8 +226,9 @@ describe("ConversationManagerRow", () => {
     setup({ workspaceName: undefined, decorations: { ...decorations, metadataFor: () => [] } })
     const row = screen.getByTestId("conversation-row-s1")
     expect(within(row).getByText("noWorkspace")).toBeInTheDocument()
-    // agent, tokens and cost read "none" for a conversation with no turns
-    expect(within(row).getAllByText("none")).toHaveLength(3)
+    // the agent, and the usage of a conversation with no turns, read "none"
+    expect(within(row).getAllByText("none")).toHaveLength(2)
+    expect(screen.getByTestId("conversation-row-usage-s1")).toHaveTextContent("none")
   })
 
   it("opens the conversation from its title", () => {
@@ -287,6 +347,21 @@ describe("ConversationManagerRow", () => {
     expect(within(menu).queryByText("moveToFolder")).not.toBeInTheDocument()
     await user.click(within(menu).getByRole("menuitem", { name: /^unarchive/ }))
     expect(props.rowActions.onUnarchive).toHaveBeenCalledWith("s1")
+  })
+
+  // Regression: the row menu's Rename used to close the menu, which handed
+  // focus back to its trigger, blurred the new field and cancelled the rename.
+  it("renames in place from the row menu", async () => {
+    const user = userEvent.setup()
+    const props = setup()
+    await user.click(screen.getByTestId("conversation-row-actions-s1"))
+    await user.click(await screen.findByTestId("session-row-dropdown-rename-s1"))
+    const input = await screen.findByTestId("conversation-row-rename-s1", undefined, {
+      timeout: 500,
+    })
+    fireEvent.change(input, { target: { value: "Q3 plan" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(props.rowActions.onRename).toHaveBeenCalledWith("s1", "Q3 plan")
   })
 
   it("confirms a delete before it writes", async () => {

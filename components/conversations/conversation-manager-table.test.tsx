@@ -3,6 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { Goal } from "@/types/goal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -39,6 +40,9 @@ function setup(over: Partial<ConversationManagerTableProps> = {}) {
     onClearSelection: jest.fn(),
     sortBy: "recent",
     onSortBy: jest.fn(),
+    ranked: false,
+    showWorkspace: true,
+    goals: new Map(),
     decorations: { iconFor: () => undefined, accentFor: () => undefined, metadataFor: () => [] },
     workspaceNameById: new Map([["p1", "Cognia"]]),
     folders: [],
@@ -70,6 +74,7 @@ describe("ConversationManagerTable", () => {
     expect(a).toMatchObject({
       selected: true,
       workspaceName: "Cognia",
+      showWorkspace: true,
       unread: 2,
       contentMatch: false,
     })
@@ -129,6 +134,70 @@ describe("ConversationManagerTable", () => {
     fireEvent.click(all)
     expect(props.onClearSelection).toHaveBeenCalled()
     expect(props.onSelectAll).not.toHaveBeenCalled()
+  })
+
+  it("hands each row the goal its conversation runs", () => {
+    const goal = { id: "g1", sessionId: "a", status: "active" } as Goal
+    setup({ goals: new Map([["a", goal]]) })
+    const [a, b] = mockRowProps.mock.calls.map(([props]) => props)
+    expect(a.goal).toBe(goal)
+    expect(b.goal).toBeUndefined()
+  })
+
+  it("draws the columns in order, with usage merged into one", () => {
+    setup()
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "",
+      "columns.title",
+      "columns.agent",
+      "columns.workspace",
+      "columns.activity",
+      "columns.created",
+      "columns.usage",
+      "columns.actions",
+    ])
+    expect(screen.queryByText("columns.turns")).not.toBeInTheDocument()
+    expect(screen.queryByText("columns.tokens")).not.toBeInTheDocument()
+    expect(screen.queryByText("columns.cost")).not.toBeInTheDocument()
+  })
+
+  it("leaves the workspace column out when the rows share one workspace", () => {
+    setup({ showWorkspace: false })
+    expect(screen.queryByText("columns.workspace")).not.toBeInTheDocument()
+    expect(mockRowProps.mock.calls.every(([props]) => props.showWorkspace === false)).toBe(true)
+  })
+
+  it("claims no sort order while a query ranks the rows, and says why", () => {
+    const props = setup({ ranked: true, sortBy: "recent" })
+    for (const column of ["title", "activity", "created"]) {
+      const button = screen.getByTestId(`conversation-table-sort-${column}`)
+      expect(button.closest("th")).toHaveAttribute("aria-sort", "none")
+      expect(button).toHaveAttribute("title", "rankedHint")
+    }
+    // The sort still applies — it breaks ties among equally relevant rows.
+    fireEvent.click(screen.getByTestId("conversation-table-sort-activity"))
+    expect(props.onSortBy).toHaveBeenCalledWith("oldest")
+  })
+
+  it("gives the headers no hint when nothing ranks the rows", () => {
+    setup()
+    expect(screen.getByTestId("conversation-table-sort-activity")).not.toHaveAttribute("title")
+  })
+
+  it("reads the reverse title sort as a descending title column", () => {
+    setup({ sortBy: "titleDesc" })
+    expect(screen.getByTestId("conversation-table-sort-title").closest("th")).toHaveAttribute(
+      "aria-sort",
+      "descending"
+    )
+  })
+
+  it("reads oldest-created as an ascending created column", () => {
+    setup({ sortBy: "createdAsc" })
+    expect(screen.getByTestId("conversation-table-sort-created").closest("th")).toHaveAttribute(
+      "aria-sort",
+      "ascending"
+    )
   })
 
   it("cannot select all from an empty view", () => {

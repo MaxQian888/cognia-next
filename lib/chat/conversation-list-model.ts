@@ -359,6 +359,17 @@ function byRecent(a: ChatSession, b: ChatSession): number {
  * that tie on the primary key can come back from a live-query refresh in a
  * different order and visibly swap while the user is reading the list.
  */
+/**
+ * `numeric` so "Draft 2" sorts before "Draft 10"; `base` sensitivity so case
+ * and accents don't split otherwise-adjacent titles.
+ */
+function byTitle(a: ChatSession, b: ChatSession): number {
+  return (a.title ?? "").localeCompare(b.title ?? "", undefined, {
+    numeric: true,
+    sensitivity: "base",
+  })
+}
+
 function comparatorFor(
   sortBy: ConversationSortBy,
   unreadIds: ReadonlySet<string> | undefined
@@ -371,14 +382,13 @@ function comparatorFor(
         a.id.localeCompare(b.id)
     case "created":
       return (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || byRecent(a, b)
+    case "createdAsc":
+      return (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || byRecent(a, b)
     case "title":
-      return (a, b) =>
-        // `numeric` so "Draft 2" sorts before "Draft 10"; `base` sensitivity so
-        // case and accents don't split otherwise-adjacent titles.
-        (a.title ?? "").localeCompare(b.title ?? "", undefined, {
-          numeric: true,
-          sensitivity: "base",
-        }) || byRecent(a, b)
+      return (a, b) => byTitle(a, b) || byRecent(a, b)
+    case "titleDesc":
+      // Only the title reverses; ties still fall to the most recent first.
+      return (a, b) => byTitle(b, a) || byRecent(a, b)
     case "unread":
       return (a, b) => {
         const au = unreadIds?.has(a.id) ? 0 : 1
@@ -429,10 +439,12 @@ const OLDEST_FIRST_BUCKET_ORDER: readonly DateBucket[] = [...DATE_BUCKET_ORDER].
 
 /**
  * The order date headers run in under `sortBy`: newest first, except
- * oldest-first, which reverses the headers along with the rows.
+ * the oldest-first orders, which reverse the headers along with the rows.
  */
 export function dateBucketOrderFor(sortBy: ConversationSortBy): readonly DateBucket[] {
-  return sortBy === "oldest" ? OLDEST_FIRST_BUCKET_ORDER : DATE_BUCKET_ORDER
+  return sortBy === "oldest" || sortBy === "createdAsc"
+    ? OLDEST_FIRST_BUCKET_ORDER
+    : DATE_BUCKET_ORDER
 }
 
 /** Separates a group's key from its nested date run's in a section key. */

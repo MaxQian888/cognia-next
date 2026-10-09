@@ -10,12 +10,15 @@
  * the delete goes through `ConversationDeleteConfirm`, and every write goes
  * through the list's write boundary (`useConversationRowActions`).
  *
- * The facts a sidebar shows as places are facts here: a pin is a glyph, a
- * folder is a chip — in the archive both are frozen (ADR-0213) and still
- * shown, because they are where the row returns to on restore.
+ * The facts a sidebar shows as places are facts here: a pin is a glyph beside
+ * the title, a folder is a chip — in the archive both are frozen (ADR-0213)
+ * and still shown, because they are where the row returns to on restore. The
+ * facts line under the title only renders when there is a fact to put on it,
+ * so a plain row stays one line instead of carrying an empty second one. A
+ * conversation running a goal says so with a chip that opens the goal.
  */
 
-import { memo, useState, type MouseEvent as ReactMouseEvent } from "react"
+import { memo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import {
@@ -60,6 +63,9 @@ import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { formatTokens } from "@/lib/observability/format-utils"
 import { formatBucketCost, type SessionUsageSummary } from "@/lib/usage/session-analytics"
 import type { ChatStatus } from "@/stores/chat/chat-store"
+import type { Goal } from "@/types/goal"
+
+import { ConversationGoalChip } from "./conversation-goal-chip"
 
 /** Selection click, with the modifiers a range selection reads. */
 export interface ConversationRowSelectEvent {
@@ -74,6 +80,10 @@ export interface ConversationManagerRowProps {
   onToggleSelect: (id: string, event: ConversationRowSelectEvent) => void
   decorations: RowDecorations
   workspaceName: string | undefined
+  /** Render the workspace cell (the table shows the column). */
+  showWorkspace: boolean
+  /** The goal this conversation runs, or last ran. */
+  goal?: Goal
   /** Folders of the profile; the menu offers those that can hold this row. */
   folders: readonly SessionFolder[]
   usage: SessionUsageSummary | undefined
@@ -95,6 +105,8 @@ function ConversationManagerRowImpl({
   onToggleSelect,
   decorations,
   workspaceName,
+  showWorkspace,
+  goal,
   folders,
   usage,
   runStatus,
@@ -112,6 +124,12 @@ function ConversationManagerRowImpl({
   const archiveShortcutAria = useAppShortcutLabel("shell.conversation.toggleArchive").aria
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  // The row menu's Rename only marks the request; the field opens once the
+  // menu has closed (`onCloseAutoFocus`). Opened while the menu was still up,
+  // the menu's focus trap pulled focus back and its return-focus went to the
+  // trigger, and either blur committed the untouched field: a cancelled
+  // rename before anything could be typed.
+  const renameFromMenuRef = useRef(false)
   const [handoffDialogOpen, setHandoffDialogOpen] = useState(false)
 
   const id = session.id
@@ -149,6 +167,13 @@ function ConversationManagerRowImpl({
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
   const activityAt = conversationLastActivityAt(session)
   const turns = usage?.turns ?? 0
+  const hasFacts =
+    Boolean(goal) ||
+    Boolean(folderName) ||
+    locked ||
+    contentMatch ||
+    (runStatus !== undefined && runStatus !== "idle") ||
+    (!archived && unread > 0)
 
   const bind = (handler: ((id: string) => void) | undefined) =>
     handler ? () => handler(id) : undefined
@@ -157,6 +182,9 @@ function ConversationManagerRowImpl({
     <TableRow
       data-state={selected ? "selected" : undefined}
       data-testid={`conversation-row-${id}`}
+      // On the row, not the title button: the page's archive chord reads the
+      // focused row, and focus is as often on the checkbox or the ⋯ button.
+      data-conversation-row={id}
       className="group"
     >
       <TableCell className="w-10 pr-0">
@@ -213,55 +241,57 @@ function ConversationManagerRowImpl({
                 aria-keyshortcuts={
                   archiveShortcutAria ? `F2 Delete ${archiveShortcutAria}` : "F2 Delete"
                 }
-                data-conversation-row={id}
-                className="block w-full truncate rounded-sm text-left text-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left text-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
                 data-testid={`conversation-row-open-${id}`}
               >
-                {title}
+                <span className="truncate">{title}</span>
+                {session.pinned ? (
+                  <PinIcon
+                    className="size-3 shrink-0 text-muted-foreground"
+                    aria-label={tRow("pinned")}
+                  />
+                ) : null}
               </button>
             )}
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              {session.pinned ? (
-                <PinIcon className="size-3 shrink-0" aria-label={tRow("pinned")} />
-              ) : null}
-              {folderName ? (
-                <span
-                  className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-muted/60 px-1"
-                  data-testid={`conversation-row-folder-${id}`}
-                >
-                  <FolderIcon className="size-3 shrink-0" aria-hidden />
-                  <span className="truncate">{t("inFolder", { name: folderName })}</span>
-                </span>
-              ) : null}
-              {locked ? (
-                <LockKeyholeIcon
-                  className="size-3 shrink-0 text-amber-600"
-                  aria-label={tRow("handoffReadonly")}
+            {hasFacts ? (
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                {goal ? <ConversationGoalChip goal={goal} /> : null}
+                {folderName ? (
+                  <span
+                    className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-muted/60 px-1"
+                    data-testid={`conversation-row-folder-${id}`}
+                  >
+                    <FolderIcon className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{t("inFolder", { name: folderName })}</span>
+                  </span>
+                ) : null}
+                {locked ? (
+                  <LockKeyholeIcon
+                    className="size-3 shrink-0 text-amber-600"
+                    aria-label={tRow("handoffReadonly")}
+                  />
+                ) : null}
+                {contentMatch ? (
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <MessageSquareTextIcon className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{t("contentMatch")}</span>
+                  </span>
+                ) : null}
+                <SessionRunIndicator
+                  status={runStatus ?? "idle"}
+                  testIdPrefix={`conversation-row-run-${id}`}
                 />
-              ) : null}
-              {contentMatch ? (
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  <MessageSquareTextIcon className="size-3 shrink-0" aria-hidden />
-                  <span className="truncate">{t("contentMatch")}</span>
-                </span>
-              ) : null}
-              <SessionRunIndicator
-                status={runStatus ?? "idle"}
-                testIdPrefix={`conversation-row-run-${id}`}
-              />
-              {!archived ? (
-                <CountPill
-                  count={unread}
-                  srLabel={tRail("unreadCount", { count: unread })}
-                  testId={`conversation-row-unread-${id}`}
-                />
-              ) : null}
-            </div>
+                {!archived ? (
+                  <CountPill
+                    count={unread}
+                    srLabel={tRail("unreadCount", { count: unread })}
+                    testId={`conversation-row-unread-${id}`}
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
-      </TableCell>
-      <TableCell className="hidden max-w-0 text-xs text-muted-foreground @3xl/conversations:table-cell">
-        <span className="block truncate">{workspaceName ?? t("noWorkspace")}</span>
       </TableCell>
       <TableCell className="hidden max-w-0 text-xs @2xl/conversations:table-cell">
         {/* A conversation with no agent is named by its model alone, not by a
@@ -271,6 +301,11 @@ function ConversationManagerRowImpl({
           <span className="block truncate text-[11px] text-muted-foreground">{modelName}</span>
         ) : null}
       </TableCell>
+      {showWorkspace ? (
+        <TableCell className="hidden max-w-0 text-xs text-muted-foreground @6xl/conversations:table-cell">
+          <span className="block truncate">{workspaceName ?? t("noWorkspace")}</span>
+        </TableCell>
+      ) : null}
       <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
         {activityAt > 0 ? (
           <time
@@ -286,7 +321,7 @@ function ConversationManagerRowImpl({
           t("none")
         )}
       </TableCell>
-      <TableCell className="hidden text-xs whitespace-nowrap text-muted-foreground @4xl/conversations:table-cell">
+      <TableCell className="hidden text-xs whitespace-nowrap text-muted-foreground @5xl/conversations:table-cell">
         {session.createdAt ? (
           <time dateTime={new Date(session.createdAt).toISOString()}>
             {format.dateTime(new Date(session.createdAt), { dateStyle: "medium" })}
@@ -295,15 +330,16 @@ function ConversationManagerRowImpl({
           t("none")
         )}
       </TableCell>
-      <TableCell className="hidden text-right text-xs tabular-nums @xl/conversations:table-cell">
-        {turns}
-      </TableCell>
-      <TableCell className="hidden text-right text-xs tabular-nums @xl/conversations:table-cell">
-        {turns > 0 ? formatTokens(usage?.tokens ?? 0) : t("none")}
-      </TableCell>
-      <TableCell className="hidden text-right text-xs tabular-nums @lg/conversations:table-cell">
+      <TableCell
+        className="hidden text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground @4xl/conversations:table-cell"
+        data-testid={`conversation-row-usage-${id}`}
+      >
         {usage && turns > 0
-          ? formatBucketCost(usage.costUsd, usage.unpricedTurns, turns)
+          ? t("usage", {
+              turns,
+              tokens: formatTokens(usage.tokens ?? 0),
+              cost: formatBucketCost(usage.costUsd, usage.unpricedTurns, turns),
+            })
           : t("none")}
       </TableCell>
       <TableCell className="w-10 text-right">
@@ -319,7 +355,16 @@ function ConversationManagerRowImpl({
               <MoreHorizontalIcon className="size-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuContent
+            align="end"
+            className="w-60"
+            onCloseAutoFocus={(event) => {
+              if (!renameFromMenuRef.current) return
+              renameFromMenuRef.current = false
+              event.preventDefault()
+              startRename()
+            }}
+          >
             <SessionRowMenuItems
               kit={DROPDOWN_MENU_KIT}
               surface="dropdown"
@@ -329,7 +374,9 @@ function ConversationManagerRowImpl({
               onToggleSelection={() =>
                 onToggleSelect(id, { ctrlKey: true, metaKey: false, shiftKey: false })
               }
-              onRename={startRename}
+              onRename={() => {
+                renameFromMenuRef.current = true
+              }}
               onTogglePinned={
                 rowActions.onTogglePinned
                   ? () => void rowActions.onTogglePinned!(id, !session.pinned)
@@ -381,6 +428,3 @@ function ConversationManagerRowImpl({
 }
 
 export const ConversationManagerRow = memo(ConversationManagerRowImpl)
-
-/** Class for the row cells' container queries — set on the table's wrapper. */
-export const CONVERSATION_TABLE_CONTAINER = "@container/conversations"

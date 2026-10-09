@@ -1,22 +1,29 @@
 "use client"
 
 /**
- * Analytics panel for the Goals console (ADR-0019 — Analytics tab).
+ * Analytics for the Goals console (ADR-0019 — Analytics tab).
  *
- * Pure-data aggregates (`lib/goal/analytics.ts`) → a headline StatCard row plus
- * three theme-aware Recharts visuals: a status-distribution donut, a
- * goals-created area chart, and a token-spend bar chart. Reuses the shared
- * scheduler `StatCard` and the observability charting primitives
- * (`useThemeColors` / `paletteColor` / `TOOLTIP_STYLE`) — the genuinely
- * reusable bits — rather than the observability panel chrome.
+ * Pure-data aggregates (`lib/goal/analytics.ts`) → a hairline headline strip
+ * (the shared `StatStrip`) and three Recharts views that share one divided
+ * panel: status distribution, goals created per day, tokens spent per day.
+ *
+ * What changed from the card grid it replaces, and why:
+ *  - The donut colours each status in the tone it has everywhere else
+ *    (`goalStatusChartColor`); a positional palette painted "completed" orange.
+ *  - Goals created per day are bars. A smoothed area over sparse integer
+ *    counts drew a sine wave between the days a goal was created.
+ *  - The token axis is wide enough for its labels and uses the same compact
+ *    format as every other token count; at 28px it clipped them to "‹".
+ *  - The x axes show dates.
+ *  - While the first read is in flight it says so (`loading`), instead of
+ *    painting the "no goals yet" empty state for a frame.
+ *  - Five stat cards became one six-cell strip (total spend joined them, so
+ *    the strip divides evenly at every width), and three cards one panel.
  */
 
 import { useMemo } from "react"
-import { useTranslations } from "next-intl"
-import { motion } from "motion/react"
+import { useFormatter, useLocale, useTranslations } from "next-intl"
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   Cell,
@@ -27,44 +34,52 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { ActivityIcon, CheckCircle2Icon, CoinsIcon, RepeatIcon, TargetIcon } from "lucide-react"
+import { TargetIcon } from "lucide-react"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { StatCard } from "@/components/scheduler/stat-card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Surface } from "@/components/surface/surface"
+import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { useThemeColors } from "@/hooks/logging/use-theme-colors"
-import { paletteColor } from "@/lib/observability/chart-palette"
 import { TOOLTIP_STYLE } from "@/lib/observability/chart-config"
-import { STAGGER_CHILD, STAGGER_CONTAINER, useReducedMotionVariants } from "@/lib/ui/motion"
 import { computeGoalAnalytics } from "@/lib/goal/analytics"
+import { formatGoalTokens } from "@/lib/goal/format"
 import type { Goal } from "@/types/goal"
+
+import { goalStatusChartColor } from "../goal-status-style"
 
 interface Props {
   goals: Goal[]
+  /** The first read is still in flight. */
+  loading?: boolean
   /** Injectable clock for deterministic tests. Defaults to `Date.now()`. */
   now?: number
-}
-
-function kfmt(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
-  return String(Math.round(n))
 }
 
 function pctText(ratio: number): string {
   return `${Math.round(ratio * 100)}%`
 }
 
-export function GoalAnalyticsPanel({ goals, now }: Props) {
+const AXIS_TICK = { fontSize: 11, fill: "var(--muted-foreground)" }
+
+export function GoalAnalyticsPanel({ goals, loading = false, now }: Props) {
   const t = useTranslations("goal")
-  const colors = useThemeColors()
-  const containerVariants = useReducedMotionVariants(STAGGER_CONTAINER)
-  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const format = useFormatter()
+  const locale = useLocale()
 
   const analytics = useMemo(() => computeGoalAnalytics(goals, { now }), [goals, now])
 
+  if (loading) {
+    return (
+      <div className="space-y-6" aria-busy data-testid="goal-analytics-loading">
+        <Skeleton className="h-14 w-full rounded-panel" />
+        <Skeleton className="h-64 w-full rounded-panel" />
+      </div>
+    )
+  }
+
   if (analytics.total === 0) {
     return (
-      <Empty data-testid="goal-analytics-empty">
+      <Empty className="rounded-panel border border-dashed" data-testid="goal-analytics-empty">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <TargetIcon className="size-5" aria-hidden />
@@ -76,90 +91,67 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
     )
   }
 
-  const donutData = analytics.statusDistribution.map((s, i) => ({
-    key: t(`status.${s.status}`),
-    value: s.count,
-    color: paletteColor(colors, i),
+  const donutData = analytics.statusDistribution.map((slice) => ({
+    status: slice.status,
+    key: t(`status.${slice.status}`),
+    value: slice.count,
+    ...goalStatusChartColor(slice.status),
   }))
 
-  return (
-    <div className="space-y-6" data-testid="goal-analytics-panel">
-      <motion.div
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
-        variants={containerVariants}
-        initial="initial"
-        animate="animate"
-      >
-        <motion.div variants={childVariants}>
-          <StatCard
-            label={t("analytics.totalGoals")}
-            value={analytics.total}
-            icon={<TargetIcon className="h-5 w-5 text-muted-foreground" aria-hidden />}
-            valueClassName="text-foreground"
-            accentGradient="from-border to-border/50"
-            iconBgClassName="bg-muted/50"
-            testid="goal-analytics-stat-total"
-          />
-        </motion.div>
-        <motion.div variants={childVariants}>
-          <StatCard
-            label={t("analytics.completionRate")}
-            value={pctText(analytics.completionRate)}
-            icon={<CheckCircle2Icon className="h-5 w-5 text-green-500" aria-hidden />}
-            valueClassName="text-green-500"
-            accentGradient="from-green-500 to-emerald-400"
-            iconBgClassName="bg-green-500/10"
-            testid="goal-analytics-stat-completion"
-          />
-        </motion.div>
-        <motion.div variants={childVariants}>
-          <StatCard
-            label={t("analytics.avgTurns")}
-            value={analytics.avgTurns.toFixed(1)}
-            icon={<RepeatIcon className="h-5 w-5 text-blue-500" aria-hidden />}
-            valueClassName="text-blue-500"
-            accentGradient="from-blue-500 to-sky-400"
-            iconBgClassName="bg-blue-500/10"
-            testid="goal-analytics-stat-avg-turns"
-          />
-        </motion.div>
-        <motion.div variants={childVariants}>
-          <StatCard
-            label={t("analytics.avgTokens")}
-            value={kfmt(analytics.avgTokens)}
-            icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
-            valueClassName="text-violet-500"
-            accentGradient="from-violet-500 to-purple-400"
-            iconBgClassName="bg-violet-500/10"
-            testid="goal-analytics-stat-avg-tokens"
-          />
-        </motion.div>
-        <motion.div variants={childVariants}>
-          <StatCard
-            label={t("analytics.judgeFailureRate")}
-            value={pctText(analytics.judgeFailureRate)}
-            icon={<ActivityIcon className="h-5 w-5 text-amber-500" aria-hidden />}
-            valueClassName="text-amber-500"
-            accentGradient="from-amber-500 to-yellow-400"
-            iconBgClassName="bg-amber-500/10"
-            testid="goal-analytics-stat-judge-failure"
-          />
-        </motion.div>
-      </motion.div>
+  const stats: StatStripItem[] = [
+    { id: "total", label: t("analytics.totalGoals"), value: analytics.total },
+    {
+      id: "completion",
+      label: t("analytics.completionRate"),
+      value: analytics.terminal > 0 ? pctText(analytics.completionRate) : "—",
+      tone: analytics.terminal > 0 ? "positive" : "neutral",
+    },
+    { id: "avg-turns", label: t("analytics.avgTurns"), value: analytics.avgTurns.toFixed(1) },
+    {
+      id: "avg-tokens",
+      label: t("analytics.avgTokens"),
+      value: formatGoalTokens(analytics.avgTokens, locale),
+    },
+    {
+      id: "token-spend",
+      label: t("analytics.tokenSpend"),
+      value: formatGoalTokens(analytics.totalTokens, locale),
+    },
+    {
+      id: "judge-failure",
+      label: t("analytics.judgeFailureRate"),
+      value: pctText(analytics.judgeFailureRate),
+      tone: analytics.judgeFailureRate > 0.25 ? "attention" : "neutral",
+    },
+  ]
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("analytics.statusDistribution")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-48" data-testid="goal-analytics-donut">
+  const dayLabel = (ts: number) =>
+    format.dateTime(new Date(ts), { month: "numeric", day: "numeric" })
+
+  return (
+    <div className="@container/console-pane space-y-6" data-testid="goal-analytics-panel">
+      <StatStrip
+        stats={stats}
+        pane="console-pane"
+        testId="goal-analytics-stats"
+        cellTestIdPrefix="goal-analytics-stat"
+      />
+
+      {/* One panel, three views divided by hairlines — not three cards. */}
+      <Surface
+        layer="raised"
+        radius="panel"
+        className="@container/goal-charts overflow-hidden border"
+      >
+        <div className="grid divide-y @3xl/goal-charts:grid-cols-3 @3xl/goal-charts:divide-x @3xl/goal-charts:divide-y-0">
+          <ChartFigure title={t("analytics.statusDistribution")}>
+            <div className="h-44" data-testid="goal-analytics-donut">
               <ResponsiveContainer
                 width="100%"
                 height="100%"
                 minWidth={1}
                 minHeight={1}
-                initialDimension={{ width: 320, height: 192 }}
+                initialDimension={{ width: 320, height: 176 }}
               >
                 <PieChart>
                   <Pie
@@ -168,13 +160,14 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
                     nameKey="key"
                     cx="50%"
                     cy="50%"
-                    innerRadius="55%"
-                    outerRadius="80%"
+                    innerRadius="58%"
+                    outerRadius="85%"
                     paddingAngle={2}
+                    stroke="var(--card)"
                     isAnimationActive={false}
                   >
-                    {donutData.map((d) => (
-                      <Cell key={d.key} fill={d.color} />
+                    {donutData.map((slice) => (
+                      <Cell key={slice.status} fill={slice.fill} fillOpacity={slice.opacity} />
                     ))}
                   </Pie>
                   <Tooltip
@@ -184,94 +177,133 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {donutData.map((d) => (
+            <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              {donutData.map((slice) => (
                 <li
-                  key={d.key}
-                  className="flex items-center gap-1.5"
+                  key={slice.status}
+                  className="flex min-w-0 items-center gap-1.5"
                   data-testid="goal-analytics-legend"
                 >
-                  <span className="size-2 rounded-sm" style={{ backgroundColor: d.color }} />
-                  <span className="text-muted-foreground">{d.key}</span>
-                  <span className="tabular-nums">{d.value}</span>
+                  <span
+                    className="size-2 shrink-0 rounded-sm"
+                    style={{ backgroundColor: slice.fill, opacity: slice.opacity }}
+                    aria-hidden
+                  />
+                  <span className="truncate text-muted-foreground first-letter:uppercase">
+                    {slice.key}
+                  </span>
+                  <span className="ml-auto tabular-nums">{slice.value}</span>
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+          </ChartFigure>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("analytics.goalsOverTime")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-48" data-testid="goal-analytics-created-chart">
+          <ChartFigure title={t("analytics.goalsOverTime")}>
+            <div className="h-52" data-testid="goal-analytics-created-chart">
               <ResponsiveContainer
                 width="100%"
                 height="100%"
                 minWidth={1}
                 minHeight={1}
-                initialDimension={{ width: 320, height: 192 }}
-              >
-                <AreaChart
-                  data={analytics.timeline}
-                  margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
-                >
-                  <XAxis dataKey="day" hide />
-                  <YAxis allowDecimals={false} width={28} tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={TOOLTIP_STYLE.contentStyle}
-                    labelStyle={TOOLTIP_STYLE.labelStyle}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="created"
-                    stroke={paletteColor(colors, 1)}
-                    fill={paletteColor(colors, 1)}
-                    fillOpacity={0.2}
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("analytics.tokensOverTime")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-48" data-testid="goal-analytics-tokens-chart">
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-                minWidth={1}
-                minHeight={1}
-                initialDimension={{ width: 320, height: 192 }}
+                initialDimension={{ width: 320, height: 208 }}
               >
                 <BarChart
                   data={analytics.timeline}
-                  margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+                  margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
                 >
-                  <XAxis dataKey="day" hide />
+                  <XAxis
+                    dataKey="ts"
+                    tickFormatter={(value) => dayLabel(Number(value))}
+                    tick={AXIS_TICK}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={24}
+                  />
                   <YAxis
-                    width={28}
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(v) => kfmt(Number(v))}
+                    allowDecimals={false}
+                    width={24}
+                    tick={AXIS_TICK}
+                    tickLine={false}
+                    axisLine={false}
                   />
                   <Tooltip
+                    cursor={{ fill: "var(--muted)", opacity: 0.4 }}
                     contentStyle={TOOLTIP_STYLE.contentStyle}
                     labelStyle={TOOLTIP_STYLE.labelStyle}
+                    labelFormatter={(value) => dayLabel(Number(value))}
+                    formatter={(value) => [value, t("analytics.createdSeries")]}
                   />
-                  <Bar dataKey="tokens" fill={paletteColor(colors, 4)} isAnimationActive={false} />
+                  <Bar
+                    dataKey="created"
+                    fill="var(--chart-2)"
+                    radius={[3, 3, 0, 0]}
+                    isAnimationActive={false}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </ChartFigure>
+
+          <ChartFigure title={t("analytics.tokensOverTime")}>
+            <div className="h-52" data-testid="goal-analytics-tokens-chart">
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 208 }}
+              >
+                <BarChart
+                  data={analytics.timeline}
+                  margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
+                >
+                  <XAxis
+                    dataKey="ts"
+                    tickFormatter={(value) => dayLabel(Number(value))}
+                    tick={AXIS_TICK}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    width={44}
+                    tick={AXIS_TICK}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => formatGoalTokens(Number(value), locale)}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                    contentStyle={TOOLTIP_STYLE.contentStyle}
+                    labelStyle={TOOLTIP_STYLE.labelStyle}
+                    labelFormatter={(value) => dayLabel(Number(value))}
+                    formatter={(value) => [
+                      format.number(Number(value)),
+                      t("analytics.tokensSeries"),
+                    ]}
+                  />
+                  <Bar
+                    dataKey="tokens"
+                    fill="var(--chart-1)"
+                    radius={[3, 3, 0, 0]}
+                    isAnimationActive={false}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </ChartFigure>
+        </div>
+      </Surface>
     </div>
+  )
+}
+
+function ChartFigure({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <figure className="min-w-0 p-4">
+      <figcaption className="mb-3 text-sm font-medium">{title}</figcaption>
+      {children}
+    </figure>
   )
 }
 

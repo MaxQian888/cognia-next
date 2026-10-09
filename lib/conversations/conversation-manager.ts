@@ -35,8 +35,9 @@ export type ConversationManagerSortColumn = (typeof CONVERSATION_MANAGER_SORT_CO
 /**
  * The order a click on `column`'s header asks for. Every column maps onto the
  * list model's own sorts (`ConversationSortBy`), so the filter menu's sort
- * section and the headers stay one control: title A–Z, creation newest first,
- * and last activity, which flips between newest and oldest on a second click.
+ * section and the headers stay one control. A first click picks the column's
+ * natural order — title A–Z, newest created, most recent activity — and a
+ * click on the column already sorting reverses it.
  */
 export function sortForColumn(
   current: ConversationSortBy,
@@ -44,24 +45,33 @@ export function sortForColumn(
 ): ConversationSortBy {
   switch (column) {
     case "title":
-      return "title"
+      return current === "title" ? "titleDesc" : "title"
     case "created":
-      return "created"
+      return current === "created" ? "createdAsc" : "created"
     case "activity":
       return current === "recent" ? "oldest" : "recent"
   }
 }
 
-/** `aria-sort` for `column`'s header under `sortBy`. */
+/**
+ * `aria-sort` for `column`'s header under `sortBy`. `ranked` (a search query
+ * is ordering rows by relevance, with the sort only breaking ties) leaves every
+ * header unsorted, so a header never claims an order the rows do not follow.
+ */
 export function ariaSortForColumn(
   sortBy: ConversationSortBy,
-  column: ConversationManagerSortColumn
+  column: ConversationManagerSortColumn,
+  ranked = false
 ): "ascending" | "descending" | "none" {
-  if (column === "title") return sortBy === "title" ? "ascending" : "none"
-  if (column === "created") return sortBy === "created" ? "descending" : "none"
-  if (sortBy === "recent") return "descending"
-  if (sortBy === "oldest") return "ascending"
-  return "none"
+  if (ranked) return "none"
+  switch (column) {
+    case "title":
+      return sortBy === "title" ? "ascending" : sortBy === "titleDesc" ? "descending" : "none"
+    case "created":
+      return sortBy === "created" ? "descending" : sortBy === "createdAsc" ? "ascending" : "none"
+    case "activity":
+      return sortBy === "recent" ? "descending" : sortBy === "oldest" ? "ascending" : "none"
+  }
 }
 
 export interface ConversationManagerCounts {

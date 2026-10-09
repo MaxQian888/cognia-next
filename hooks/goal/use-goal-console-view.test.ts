@@ -22,13 +22,25 @@ describe("useGoalConsoleView", () => {
     useSettingsStore.setState({ settings: null })
   })
 
-  it("defaults to grid when unset", () => {
+  it("defaults to list when unset", () => {
     const { result } = renderHook(() => useGoalConsoleView())
     expect(result.current.view).toBe(DEFAULT_GOAL_CONSOLE_VIEW)
+    expect(result.current.view).toBe("list")
+  })
+
+  it("defaults to list when settings exist without a view", () => {
+    useSettingsStore.setState({ settings: {} as never })
+    const { result } = renderHook(() => useGoalConsoleView())
+    expect(result.current.view).toBe("list")
+  })
+
+  it("keeps a persisted grid choice", () => {
+    useSettingsStore.setState({ settings: { goalConsoleView: "grid" } as never })
+    const { result } = renderHook(() => useGoalConsoleView())
     expect(result.current.view).toBe("grid")
   })
 
-  it("reflects the persisted view", () => {
+  it("reflects the persisted list view", () => {
     useSettingsStore.setState({ settings: { goalConsoleView: "list" } as never })
     const { result } = renderHook(() => useGoalConsoleView())
     expect(result.current.view).toBe("list")
@@ -39,8 +51,8 @@ describe("useGoalConsoleView", () => {
     useSettingsStore.setState({ settings: {} as never, save })
     const { result } = renderHook(() => useGoalConsoleView())
     await act(async () => {
-      await result.current.setView("list")
+      await result.current.setView("grid")
     })
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ goalConsoleView: "list" }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ goalConsoleView: "grid" }))
   })
 })

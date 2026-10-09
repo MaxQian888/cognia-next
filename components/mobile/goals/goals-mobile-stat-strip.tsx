@@ -19,14 +19,18 @@ import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 export interface GoalsMobileStatStripProps {
   active: number
   paused: number
-  done: number
+  /** Goals that completed (judge or acceptance) … */
+  completed: number
+  /** … out of every goal that finished, however it ended. */
+  finished: number
   className?: string
 }
 
 export function GoalsMobileStatStrip({
   active,
   paused,
-  done,
+  completed,
+  finished,
   className,
 }: GoalsMobileStatStripProps) {
   const t = useTranslations("goal")
@@ -47,10 +51,15 @@ export function GoalsMobileStatStrip({
       tone: paused > 0 ? "attention" : "neutral",
     },
     {
+      // Completed out of finished, the desktop strip's meaning. This cell
+      // used to count every terminal status — stopped, timed out, over budget
+      // — as "Done", so phone and desktop printed different numbers under
+      // the same word.
       id: "done",
       label: t("console.stats.done"),
-      value: done,
-      tone: "neutral",
+      value: completed,
+      total: finished,
+      tone: completed > 0 ? "positive" : "neutral",
     },
   ]
 

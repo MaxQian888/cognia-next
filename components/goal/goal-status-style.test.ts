@@ -1,4 +1,4 @@
-import { goalStatusStyle } from "./goal-status-style"
+import { goalStatusChartColor, goalStatusStyle } from "./goal-status-style"
 import type { GoalStatus } from "@/types/goal"
 
 describe("goalStatusStyle", () => {
@@ -49,5 +49,73 @@ describe("goalStatusStyle", () => {
       expect(s.rail).toBeTruthy()
       expect(s.chip).toBeTruthy()
     }
+  })
+})
+
+describe("goalStatusChartColor", () => {
+  const ALL: GoalStatus[] = [
+    "active",
+    "paused",
+    "completed",
+    "stopped",
+    "budget_limited",
+    "turn_limited",
+    "timed_out",
+    "preempted",
+  ]
+
+  it("fills each status with its own tone's theme variable", () => {
+    const toneVar = {
+      active: "var(--success)",
+      done: "var(--success)",
+      paused: "var(--warning)",
+      halted: "var(--destructive)",
+      neutral: "var(--muted-foreground)",
+    } as const
+    for (const status of ALL) {
+      expect(goalStatusChartColor(status).fill).toBe(toneVar[goalStatusStyle(status).tone])
+    }
+  })
+
+  it("keeps completed on the success tone everywhere, not a palette slot", () => {
+    expect(goalStatusChartColor("completed").fill).toBe("var(--success)")
+  })
+
+  it("tells apart active and completed, which share a tone, by opacity", () => {
+    const active = goalStatusChartColor("active")
+    const completed = goalStatusChartColor("completed")
+    expect(active.fill).toBe(completed.fill)
+    expect(active.opacity).toBe(1)
+    expect(completed.opacity).toBeLessThan(active.opacity)
+    expect(active).not.toEqual(completed)
+  })
+
+  it("tells apart the three limit exits from each other", () => {
+    const limits = (["budget_limited", "turn_limited", "timed_out"] as const).map(
+      goalStatusChartColor
+    )
+    expect(new Set(limits.map((c) => c.fill))).toEqual(new Set(["var(--destructive)"]))
+    expect(new Set(limits.map((c) => c.opacity)).size).toBe(3)
+  })
+
+  it("tells apart stopped and preempted, which share the neutral tone", () => {
+    expect(goalStatusChartColor("stopped").opacity).not.toBe(
+      goalStatusChartColor("preempted").opacity
+    )
+  })
+
+  it("returns an opacity within (0, 1] for every status", () => {
+    for (const status of ALL) {
+      const { opacity } = goalStatusChartColor(status)
+      expect(opacity).toBeGreaterThan(0)
+      expect(opacity).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it("falls back to the neutral tone at full opacity for an unknown status", () => {
+    expect(goalStatusChartColor("from_the_future" as GoalStatus)).toEqual({
+      fill: "var(--muted-foreground)",
+      opacity: 1,
+    })
   })
 })

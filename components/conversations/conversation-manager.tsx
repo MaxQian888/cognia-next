@@ -16,6 +16,12 @@
  *
  * `?tab=archived` opens the archive — the sidebar's "Manage conversations…"
  * and Settings → Agent runtime → Sessions link here that way.
+ *
+ * Layout follows the room it has. A desktop-width page is a table whose
+ * columns arrive only while the title keeps its space; a phone-width page
+ * (`useCompactLayout`) is a two-line list with a Select mode for bulk work,
+ * and the search field gets its own row under the tabs instead of shrinking to
+ * a glyph beside them. Rows running a goal carry a chip into the Goals console.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -23,6 +29,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useNow, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
+  CheckSquareIcon,
   HistoryIcon,
   PlusIcon,
   SearchIcon,
@@ -57,6 +64,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toggle } from "@/components/ui/toggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConversationManager } from "@/hooks/conversations/use-conversation-manager"
+import { useSessionGoals } from "@/hooks/conversations/use-session-goals"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useSessionUsageSummaries } from "@/hooks/usage/use-session-usage-summaries"
 import { useRangeSelection } from "@/hooks/ui/use-range-selection"
@@ -75,6 +84,7 @@ import { trackConversationViewChanged } from "@/lib/telemetry/conversation-list-
 import { cn } from "@/lib/utils"
 
 import { AutoArchiveControl } from "./auto-archive-control"
+import { ConversationManagerList } from "./conversation-manager-list"
 import { ConversationManagerTable } from "./conversation-manager-table"
 
 export function ConversationManager() {
@@ -144,12 +154,25 @@ export function ConversationManager() {
   )
 
   // Selection spans the whole view (every filtered row, not the page drawn),
-  // and is dropped whenever the view changes under it.
+  // and is dropped whenever the view changes under it — the tab, the query or
+  // the filters. `useRangeSelection` only hides ids that left the view, so
+  // without this a row selected, filtered out and filtered back in came back
+  // selected. A sort change keeps it: the same rows, in another order.
   const selection = useRangeSelection(model.orderedIds)
   const { clear: clearSelection } = selection
+  const selectionScope = `${tab}|${query}|${JSON.stringify(filterController.filters)}`
   useEffect(() => {
     clearSelection()
-  }, [tab, clearSelection])
+  }, [selectionScope, clearSelection])
+
+  // Phone width: a list instead of the table, with selection as a mode.
+  const compact = useCompactLayout()
+  const [selecting, setSelecting] = useState(false)
+  const selectionActive = selecting || selection.selected.size > 0
+  const stopSelecting = useCallback(() => {
+    setSelecting(false)
+    clearSelection()
+  }, [clearSelection])
 
   const [limit, setLimit] = useState({ for: "", count: CONVERSATION_MANAGER_PAGE_SIZE })
   const viewKey = `${tab}|${query}|${sortBy}|${JSON.stringify(filterController.filters)}`
@@ -157,7 +180,14 @@ export function ConversationManager() {
   const page = useMemo(() => rows.slice(0, shown), [rows, shown])
   const pageIds = useMemo(() => page.map((session) => session.id), [page])
   const { summaries: usage } = useSessionUsageSummaries(pageIds)
+  const goals = useSessionGoals(pageIds)
   const now = useNow({ updateInterval: 60_000 })
+  // A workspace column only says something when the rows span several.
+  const showWorkspace = useMemo(
+    () => new Set(rows.map((session) => session.projectId ?? "")).size > 1,
+    [rows]
+  )
+  const ranked = query.trim() !== ""
 
   const [emptyArchiveOpen, setEmptyArchiveOpen] = useState(false)
 
@@ -187,14 +217,71 @@ export function ConversationManager() {
     [searchContent]
   )
 
+  const searchField = (
+    <InputGroup className={cn("h-8 min-w-0 flex-1", compact ? "h-10" : "max-w-md")}>
+      <InputGroupAddon>
+        <SearchIcon className="size-4" aria-hidden />
+      </InputGroupAddon>
+      <InputGroupInput
+        value={field}
+        onChange={(event) => updateField(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && field) {
+            event.preventDefault()
+            clearSearch()
+          }
+        }}
+        placeholder={t("searchPlaceholder")}
+        aria-label={t("searchAria")}
+        data-testid="conversation-manager-search"
+      />
+      {field ? (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            size="icon-xs"
+            onClick={clearSearch}
+            aria-label={t("searchClear")}
+            data-testid="conversation-manager-search-clear"
+          >
+            <XIcon className="size-3.5" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      ) : null}
+    </InputGroup>
+  )
+
+  const searchTools = (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Toggle
+            size="sm"
+            pressed={searchContent}
+            onPressedChange={setSearchContent}
+            aria-label={t("searchContent")}
+            className={compact ? "size-10" : "size-8"}
+            data-testid="conversation-manager-search-content"
+          >
+            <TextSearchIcon className="size-4" />
+          </Toggle>
+        </TooltipTrigger>
+        <TooltipContent>{t("searchContent")}</TooltipContent>
+      </Tooltip>
+      <ConversationFilterMenu
+        model={filterController}
+        side="bottom"
+        triggerClassName={compact ? "size-10 rounded-md" : "size-8 rounded-md"}
+        testId="conversation-manager-filter"
+      />
+    </>
+  )
+
+  // Tabs already carry both counts; the header no longer repeats them.
   const header = (
     <FeaturePageHeader
       icon={<HistoryIcon className="size-5" aria-hidden />}
       title={t("title")}
       description={t("description")}
-      summary={
-        loading ? undefined : t("summary", { active: counts.active, archived: counts.archived })
-      }
       navigation={
         <Tabs
           value={tab}
@@ -219,59 +306,12 @@ export function ConversationManager() {
         </Tabs>
       }
       controls={
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <InputGroup className="h-8 max-w-md min-w-0 flex-1">
-            <InputGroupAddon>
-              <SearchIcon className="size-4" aria-hidden />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={field}
-              onChange={(event) => updateField(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && field) {
-                  event.preventDefault()
-                  clearSearch()
-                }
-              }}
-              placeholder={t("searchPlaceholder")}
-              aria-label={t("searchAria")}
-              data-testid="conversation-manager-search"
-            />
-            {field ? (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton
-                  size="icon-xs"
-                  onClick={clearSearch}
-                  aria-label={t("searchClear")}
-                  data-testid="conversation-manager-search-clear"
-                >
-                  <XIcon className="size-3.5" />
-                </InputGroupButton>
-              </InputGroupAddon>
-            ) : null}
-          </InputGroup>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Toggle
-                size="sm"
-                pressed={searchContent}
-                onPressedChange={setSearchContent}
-                aria-label={t("searchContent")}
-                className="size-8"
-                data-testid="conversation-manager-search-content"
-              >
-                <TextSearchIcon className="size-4" />
-              </Toggle>
-            </TooltipTrigger>
-            <TooltipContent>{t("searchContent")}</TooltipContent>
-          </Tooltip>
-          <ConversationFilterMenu
-            model={filterController}
-            side="bottom"
-            triggerClassName="size-8 rounded-md"
-            testId="conversation-manager-filter"
-          />
-        </div>
+        compact ? undefined : (
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            {searchField}
+            {searchTools}
+          </div>
+        )
       }
       primaryAction={
         tab === "active"
@@ -297,6 +337,19 @@ export function ConversationManager() {
   )
 
   const narrowed = model.total > 0 && model.filteredCount === 0
+  const rowProps = {
+    decorations,
+    folders,
+    usage,
+    runStatusById,
+    unreadCountById,
+    contentOnlyIds: model.contentOnlyIds,
+    goals,
+    now,
+    rowActions,
+    extraActions,
+    onOpen: openConversation,
+  }
   const body = loading ? (
     <div className="space-y-2 p-4" aria-busy="true" aria-label={t("loading")}>
       {Array.from({ length: 8 }, (_, index) => (
@@ -311,7 +364,18 @@ export function ConversationManager() {
       onShowActive={tab === "archived" ? () => chooseTab("active") : undefined}
       className="flex-1"
     />
-  ) : narrowed && !content.pending ? (
+  ) : narrowed && content.pending ? (
+    // Nothing matched by title yet and the message search is still running:
+    // say so, rather than draw an empty table under the status line.
+    <div
+      className="flex flex-col items-center gap-2 px-4 py-16 text-sm text-muted-foreground"
+      role="status"
+      data-testid="conversation-manager-searching"
+    >
+      <Skeleton className="h-3 w-40" />
+      {tList("searchingMessages")}
+    </div>
+  ) : narrowed ? (
     <ConversationNarrowedEmptyState
       query={query.trim()}
       activeFilters={model.activeFilterCount}
@@ -322,6 +386,20 @@ export function ConversationManager() {
       onWiden={(patch) => {
         if (patch.content) setSearchContent(true)
       }}
+    />
+  ) : compact ? (
+    <ConversationManagerList
+      rows={page}
+      selecting={selectionActive}
+      onStartSelecting={(id) => {
+        setSelecting(true)
+        if (!selection.isSelected(id)) {
+          selection.handleClick(id, { ctrlKey: true, metaKey: false, shiftKey: false })
+        }
+      }}
+      isSelected={selection.isSelected}
+      onToggleSelect={selection.handleClick}
+      {...rowProps}
     />
   ) : (
     <ConversationManagerTable
@@ -334,17 +412,10 @@ export function ConversationManager() {
       onClearSelection={clearSelection}
       sortBy={sortBy}
       onSortBy={setSortBy}
-      decorations={decorations}
+      ranked={ranked}
+      showWorkspace={showWorkspace}
       workspaceNameById={workspaceNameById}
-      folders={folders}
-      usage={usage}
-      runStatusById={runStatusById}
-      unreadCountById={unreadCountById}
-      contentOnlyIds={model.contentOnlyIds}
-      now={now}
-      rowActions={rowActions}
-      extraActions={extraActions}
-      onOpen={openConversation}
+      {...rowProps}
     />
   )
 
@@ -352,10 +423,38 @@ export function ConversationManager() {
     <>
       <FeaturePageShell storageId="conversations" header={header} centerClassName="min-h-0">
         <div className="flex h-full min-h-0 flex-col" data-testid="conversation-manager">
+          {compact ? (
+            // On a phone the search gets a row of its own under the tabs, and
+            // Select turns the list into a selection.
+            <div
+              className="flex items-center gap-1.5 px-3 pt-3"
+              data-testid="conversation-manager-compact-tools"
+            >
+              {searchField}
+              {searchTools}
+              {/* Once something is selected the bulk bar carries Done; one is enough. */}
+              {selection.selected.size === 0 ? (
+                <Button
+                  type="button"
+                  variant={selectionActive ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-10 shrink-0"
+                  onClick={() => (selectionActive ? stopSelecting() : setSelecting(true))}
+                  aria-pressed={selectionActive}
+                  data-testid="conversation-manager-select-mode"
+                >
+                  <CheckSquareIcon className="size-4" aria-hidden />
+                  {selectionActive ? t("selectDone") : t("select")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-2 px-4 pt-3 empty:hidden">
             {tab === "archived" ? (
+              // A hairline bar, not a box: the note and the policy belong to
+              // the list below, not to a panel of their own.
               <div
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border bg-muted/30 px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 pb-2"
                 data-testid="conversation-manager-archive-panel"
               >
                 <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("archivedNote")}</p>
@@ -386,7 +485,7 @@ export function ConversationManager() {
               onMoveToFolder={rowActions.onBulkAssignToFolder}
               onSelectAll={selection.selectAll}
               onDeselectAll={clearSelection}
-              onClear={clearSelection}
+              onClear={compact ? stopSelecting : clearSelection}
             />
             {content.belowMinQuery ? (
               <p className="text-[11px] text-muted-foreground" role="status">
@@ -403,6 +502,14 @@ export function ConversationManager() {
             ) : content.truncated ? (
               <p className="text-[11px] text-muted-foreground" role="status">
                 {tList("searchTruncated")}
+              </p>
+            ) : ranked && !compact && model.filteredCount > 1 ? (
+              // The headers stop claiming an order while a query ranks rows.
+              <p
+                className="text-[11px] text-muted-foreground"
+                data-testid="conversation-manager-ranked"
+              >
+                {t("rankedHint")}
               </p>
             ) : null}
           </div>

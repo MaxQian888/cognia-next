@@ -49,6 +49,7 @@ import {
   __isConnectorGoalDriverRunningForTesting,
   __resetConnectorGoalDriversForTesting,
   __testing__,
+  terminalGoalLine,
 } from "./goal"
 import { GoalImBlocked, getGoalRuntime } from "@/lib/goal/runtime"
 import { dispatchGoalSubcommand } from "@/lib/slash-commands/actions/goal"
@@ -278,7 +279,7 @@ describe("startConnectorGoalDriver", () => {
 
     const texts = enqueue.mock.calls.map((c) => c[0].request.segments[0].text)
     expect(texts).toContain("turn one")
-    expect(texts.some((t: string) => t.includes("completed"))).toBe(true)
+    expect(texts).toContain("🎯 目标已完成，共 2 回合 / Goal completed after 2 turns.")
     expect(texts).not.toContain("   ")
     expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(false)
   })
@@ -517,5 +518,37 @@ describe("startConnectorGoalDriver — IM tool approvals", () => {
     const ctx = (makeResponder.mock.calls[0] as unknown[])[0] as Record<string, unknown>
     expect(ctx).not.toHaveProperty("initiatorUserId")
     expect(ctx).not.toHaveProperty("deliveryTarget")
+  })
+})
+
+describe("terminalGoalLine", () => {
+  it("names every terminal status in both languages, never as a raw code", () => {
+    const statuses = [
+      "completed",
+      "stopped",
+      "budget_limited",
+      "turn_limited",
+      "timed_out",
+      "preempted",
+    ] as const
+    for (const status of statuses) {
+      const line = terminalGoalLine(status, 3)
+      expect(line).not.toContain(status.includes("_") ? status : `目标${status}`)
+      expect(line).toMatch(/^🎯 目标\S+，共 3 回合 \/ Goal .+ after 3 turns\.$/)
+    }
+    expect(terminalGoalLine("budget_limited", 4)).toBe(
+      "🎯 目标因预算耗尽而结束，共 4 回合 / Goal ended: budget used up after 4 turns."
+    )
+  })
+
+  it("uses the singular for one turn", () => {
+    expect(terminalGoalLine("stopped", 1)).toBe(
+      "🎯 目标已停止，共 1 回合 / Goal stopped after 1 turn."
+    )
+  })
+
+  it("refuses a non-terminal status", () => {
+    expect(() => terminalGoalLine("paused", 1)).toThrow(/non-terminal/)
+    expect(() => terminalGoalLine("active", 1)).toThrow(/non-terminal/)
   })
 })

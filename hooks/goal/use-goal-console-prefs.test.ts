@@ -23,10 +23,28 @@ describe("useGoalConsolePrefs", () => {
     expect(result.current.prefs.openGoalsSort).toBe(DEFAULT_GOAL_CONSOLE_PREFS.openGoalsSort)
   })
 
-  it("merges a partial patch over current prefs before persisting", async () => {
+  it("rewrites a retired default tab as the tab that absorbed it", async () => {
     const save = jest.fn().mockResolvedValue(undefined)
     useSettingsStore.setState({
       settings: { goalConsolePrefs: { defaultTab: "templates" } } as never,
+      save,
+    })
+    const { result } = renderHook(() => useGoalConsolePrefs())
+    expect(result.current.prefs.defaultTab).toBe("config")
+    await act(async () => {
+      await result.current.setPrefs({ openGoalsDir: "asc" })
+    })
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith({
+        goalConsolePrefs: { defaultTab: "config", openGoalsSort: "created", openGoalsDir: "asc" },
+      })
+    )
+  })
+
+  it("merges a partial patch over current prefs before persisting", async () => {
+    const save = jest.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({
+      settings: { goalConsolePrefs: { defaultTab: "history" } } as never,
       save,
     })
     const { result } = renderHook(() => useGoalConsolePrefs())
@@ -36,7 +54,7 @@ describe("useGoalConsolePrefs", () => {
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith({
         goalConsolePrefs: {
-          defaultTab: "templates",
+          defaultTab: "history",
           openGoalsSort: "tokens",
           openGoalsDir: "desc",
         },

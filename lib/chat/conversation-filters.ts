@@ -30,7 +30,9 @@ export const CONVERSATION_SORT_BY_OPTIONS: readonly ConversationSortBy[] = [
   "recent",
   "oldest",
   "created",
+  "createdAsc",
   "title",
+  "titleDesc",
   "unread",
 ] as const
 
@@ -57,7 +59,7 @@ export type ConversationTimeBasis = "activity" | "created"
 
 /** The basis a sort mode implies — creation order reads creation time. */
 export function resolveConversationTimeBasis(sortBy: ConversationSortBy): ConversationTimeBasis {
-  return sortBy === "created" ? "created" : "activity"
+  return sortBy === "created" || sortBy === "createdAsc" ? "created" : "activity"
 }
 
 /**
@@ -71,7 +73,9 @@ export function resolveConversationTimeBasis(sortBy: ConversationSortBy): Conver
  * modes render one flat section instead — see `buildConversationSections`.
  */
 export function sortSupportsDateBuckets(sortBy: ConversationSortBy): boolean {
-  return sortBy === "recent" || sortBy === "oldest" || sortBy === "created"
+  return (
+    sortBy === "recent" || sortBy === "oldest" || sortBy === "created" || sortBy === "createdAsc"
+  )
 }
 
 /** Render order for the last-activity selector. */

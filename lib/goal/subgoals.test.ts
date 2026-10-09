@@ -81,6 +81,19 @@ describe("decomposeObjective", () => {
     expect(complete).not.toHaveBeenCalled()
   })
 
+  it("fails OPEN without calling the model when the prompt would leak PII", async () => {
+    // A safeObjective that still carries an unredacted e-mail (a row written
+    // before redaction, or a redaction miss) never reaches the provider.
+    const complete = jest.fn().mockResolvedValue('{"steps": ["a"]}')
+    expect(
+      await decomposeObjective({
+        goal: goal({ safeObjective: "mail alice@example.com the report" }),
+        client: client(complete),
+      })
+    ).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it("returns [] when steps is missing or not an array", async () => {
     const complete = jest.fn().mockResolvedValue('{"foo": "bar"}')
     expect(await decomposeObjective({ goal: goal(), client: client(complete) })).toEqual([])

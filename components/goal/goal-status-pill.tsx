@@ -13,6 +13,10 @@
  * No keyboard shortcut wiring here — the user already has `/goal pause`
  * / `/goal stop` slash commands. The pill is an at-a-glance affordance,
  * not the primary control surface.
+ *
+ * The verbs go through `useGoalControls`, the same path every goal surface
+ * uses (local runtime, or the companion RPC on a paired phone, with failures
+ * reported), and Stop — terminal, unlike Pause — asks first.
  */
 
 import { useState } from "react"
@@ -26,8 +30,9 @@ import {
   TargetIcon,
 } from "lucide-react"
 import { ActivityPill, type ActivityPillAction } from "@/components/shared/activity-pill"
-import { getGoalRuntime } from "@/lib/goal/runtime"
+import { useGoalControls } from "@/hooks/goal/use-goal-controls"
 import type { Goal } from "@/types/goal"
+import { GoalStopConfirm } from "./goal-stop-confirm"
 import { useOpenGoal } from "./use-active-goal"
 import { goalStatusStyle } from "./goal-status-style"
 import { GoalDetailSheet } from "./goal-detail-sheet"
@@ -44,6 +49,8 @@ export function GoalStatusPill({ sessionId, goalOverride, className }: Props) {
   const liveGoal = useOpenGoal(sessionId)
   const goal = goalOverride !== undefined ? goalOverride : (liveGoal ?? null)
   const [open, setOpen] = useState(false)
+  const [confirmStop, setConfirmStop] = useState(false)
+  const controls = useGoalControls(goal)
 
   if (!goal) return null
 
@@ -71,51 +78,51 @@ export function GoalStatusPill({ sessionId, goalOverride, className }: Props) {
       : undefined
 
   const actions: ActivityPillAction[] = []
-  if (isActive && goal.config.manualContinue) {
+  if (controls.canContinue) {
     actions.push({
       id: "continue",
       icon: <StepForwardIcon />,
       label: t("pill.continue"),
       onClick: () => {
-        getGoalRuntime().requestManualContinue(goal.id)
+        void controls.continueTurn()
       },
       testId: "goal-continue-button",
       primary: true,
     })
   }
-  if (isActive) {
+  if (isActive && controls.allowed) {
     actions.push({
       id: "pause",
       icon: <PauseIcon />,
       label: t("pill.pause"),
       onClick: () => {
-        void getGoalRuntime().pauseGoal(goal.id)
+        void controls.pause()
       },
       testId: "goal-pause-button",
       primary: true,
     })
   }
-  if (isPaused) {
+  if (isPaused && !goal.awaitingAcceptance && controls.allowed) {
     actions.push({
       id: "resume",
       icon: <PlayIcon />,
       label: t("pill.resume"),
       onClick: () => {
-        void getGoalRuntime().resumeGoal(goal.id)
+        void controls.resume()
       },
       testId: "goal-resume-button",
       primary: true,
     })
   }
-  actions.push({
-    id: "stop",
-    icon: <SquareIcon />,
-    label: t("pill.stop"),
-    onClick: () => {
-      void getGoalRuntime().stopGoal(goal.id)
-    },
-    testId: "goal-stop-button",
-  })
+  if (controls.allowed) {
+    actions.push({
+      id: "stop",
+      icon: <SquareIcon />,
+      label: t("pill.stop"),
+      onClick: () => setConfirmStop(true),
+      testId: "goal-stop-button",
+    })
+  }
   actions.push({
     id: "details",
     icon: <SearchIcon />,
@@ -145,6 +152,15 @@ export function GoalStatusPill({ sessionId, goalOverride, className }: Props) {
         data-testid="goal-status-pill"
       />
       <GoalDetailSheet goal={goal} open={open} onOpenChange={setOpen} />
+      <GoalStopConfirm
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        objective={goal.safeObjective}
+        onConfirm={() => {
+          setConfirmStop(false)
+          void controls.stop()
+        }}
+      />
     </>
   )
 }

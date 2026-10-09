@@ -1,40 +1,52 @@
 "use client"
 
-import { Suspense } from "react"
-import { useSearchParams } from "next/navigation"
+import { Suspense, useCallback } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 
-import { GoalConsole } from "@/components/goal/console/goal-console"
+import { GoalConsole, type GoalConsolePlace } from "@/components/goal/console/goal-console"
 import { GoalsMobileBody } from "@/components/mobile/goals/goals-mobile-body"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
-import { isGoalConsoleTab } from "@/lib/goal/console-prefs"
+import { goalConsoleHref, resolveGoalConsoleLocation } from "@/lib/goal/console-prefs"
 
 /**
  * Dedicated full-page Goals console route (ADR-0019 Phase 3). Reached from the
- * guild-rail "Goals" entry. The console owns its own chrome; this page just
- * hosts it full-height (mirrors `/performance`).
+ * guild-rail "Goals" entry. The console owns its own chrome (it renders inside
+ * `FeaturePageShell`, which also owns the wallpaper marker).
  *
  * On a narrow viewport the desktop console has no usable layout, so the
  * phone-shaped `GoalsMobileBody` renders instead (reached via /me). Keyed on
  * width rather than on the Capacitor runtime, so a 375px browser gets it too.
  *
- * Static-export-safe deep link: the initial bottom tab rides in `?tab=` (read
- * via `useSearchParams` inside a `<Suspense>` boundary), used by the Settings
- * launcher and plugin bridges to land users on a specific management tab.
+ * Static-export-safe addressing: `?tab=` (+ `?section=` on Configure) and
+ * `?goal=` are read via `useSearchParams` inside a `<Suspense>` boundary and
+ * written back with the router, so a deep link opens one tab, panel or goal
+ * and Back undoes a tab switch. Selecting a goal replaces rather than pushes:
+ * walking a list with ↑/↓ must not fill the history.
  */
 function GoalsRoute() {
   const params = useSearchParams()
-  const tabParam = params.get("tab")
-  return <GoalConsole initialTab={isGoalConsoleTab(tabParam) ? tabParam : undefined} />
+  const router = useRouter()
+  const location = resolveGoalConsoleLocation(params.get("tab"), params.get("section"))
+  const selectedGoalId = params.get("goal")
+
+  const navigate = useCallback(
+    (place: GoalConsolePlace, options?: { replace?: boolean }) => {
+      const href = goalConsoleHref(place)
+      if (options?.replace) router.replace(href, { scroll: false })
+      else router.push(href, { scroll: false })
+    },
+    [router]
+  )
+
+  return <GoalConsole location={location} selectedGoalId={selectedGoalId} onNavigate={navigate} />
 }
 
 export default function GoalsPage() {
   const compact = useCompactLayout()
   if (compact) return <GoalsMobileBody />
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-bg-target="chat">
-      <Suspense fallback={null}>
-        <GoalsRoute />
-      </Suspense>
-    </div>
+    <Suspense fallback={null}>
+      <GoalsRoute />
+    </Suspense>
   )
 }

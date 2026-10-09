@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ExternalLinkIcon } from "lucide-react"
 import { getCharacter } from "@/lib/db/characters"
+import { agentHref } from "@/lib/agents/routes"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
@@ -13,10 +14,9 @@ const GOAL_TRACKER_ID = "char_builtin_goal_tracker"
 /**
  * Settings → Goals → Tracker tab. Phase 1 surfaces the built-in Goal
  * Tracker character so the user can confirm it's installed and inspect
- * the canonical systemPrompt. Editing the character (model, custom
- * prompt, tools) is done via the regular Settings → Characters surface;
- * the button at the foot of the card deep-links there
- * (`/settings?section=characters`).
+ * the canonical systemPrompt. The tracker is a built-in agent, so it is
+ * customised by duplicating it on the agents console (ADR-0220); the button
+ * at the foot of the card opens its Settings tab there, which offers that.
  */
 export function GoalTrackerConfig() {
   const t = useTranslations("goal")
@@ -75,11 +75,11 @@ export function GoalTrackerConfig() {
         variant="outline"
         size="sm"
         className="self-start"
-        onClick={() => router.push("/settings?section=characters")}
-        data-testid="goal-tracker-open-characters"
+        onClick={() => router.push(agentHref(GOAL_TRACKER_ID, "edit"))}
+        data-testid="goal-tracker-open-agent"
       >
         <ExternalLinkIcon className="size-4" aria-hidden />
-        {t("tracker.openCharacters")}
+        {t("tracker.openAgent")}
       </Button>
     </div>
   )

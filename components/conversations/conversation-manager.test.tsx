@@ -31,6 +31,21 @@ jest.mock("@/hooks/usage/use-session-usage-summaries", () => ({
   },
 }))
 
+const mockGoalIds = jest.fn()
+let mockGoals: ReadonlyMap<string, unknown> = new Map()
+jest.mock("@/hooks/conversations/use-session-goals", () => ({
+  useSessionGoals: (ids: string[]) => {
+    mockGoalIds(ids)
+    return mockGoals
+  },
+}))
+let mockCompact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => mockCompact,
+}))
+
+// Each row is marked on its container, as the real table row is, with a
+// checkbox and a title button inside it.
 const mockTableProps = jest.fn()
 jest.mock("./conversation-manager-table", () => ({
   ConversationManagerTable: (props: { rows: ChatSession[] }) => {
@@ -39,12 +54,20 @@ jest.mock("./conversation-manager-table", () => ({
       <div data-testid="table">
         {props.rows.length}
         {props.rows.map((row) => (
-          <button key={row.id} type="button" data-conversation-row={row.id}>
-            {row.id}
-          </button>
+          <div key={row.id} data-conversation-row={row.id}>
+            <input type="checkbox" aria-label={`select ${row.id}`} />
+            <button type="button">{row.id}</button>
+          </div>
         ))}
       </div>
     )
+  },
+}))
+const mockListProps = jest.fn()
+jest.mock("./conversation-manager-list", () => ({
+  ConversationManagerList: (props: { rows: ChatSession[] }) => {
+    mockListProps(props)
+    return <div data-testid="list">{props.rows.length}</div>
   },
 }))
 jest.mock("./auto-archive-control", () => ({
@@ -140,7 +163,32 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockParams = new URLSearchParams()
   mockData = data()
+  mockGoals = new Map()
+  mockCompact = false
 })
+
+type SelectFn = (id: string, event: object) => void
+const lastTable = () =>
+  mockTableProps.mock.lastCall![0] as {
+    onToggleSelect: SelectFn
+    showWorkspace: boolean
+    ranked: boolean
+    goals: ReadonlyMap<string, unknown>
+  }
+const lastList = () =>
+  mockListProps.mock.lastCall![0] as {
+    selecting: boolean
+    onStartSelecting: (id: string) => void
+    onToggleSelect: SelectFn
+    goals: ReadonlyMap<string, unknown>
+  }
+const lastBulk = () =>
+  mockBulkProps.mock.lastCall![0] as {
+    visible: boolean
+    selected: Set<string>
+    onClear: () => void
+  }
+const toggle = { ctrlKey: true, metaKey: false, shiftKey: false }
 
 describe("ConversationManager", () => {
   it("names the page, and counts each tab", () => {
@@ -148,7 +196,8 @@ describe("ConversationManager", () => {
     expect(screen.getByRole("heading", { name: "Conversations" })).toBeInTheDocument()
     expect(screen.getByTestId("conversation-manager-tab-count-active")).toHaveTextContent("2")
     expect(screen.getByTestId("conversation-manager-tab-count-archived")).toHaveTextContent("1")
-    expect(screen.getByText("2 active · 1 archived")).toBeInTheDocument()
+    // The tabs carry both counts; the header no longer repeats them.
+    expect(screen.queryByText(/2 active/)).not.toBeInTheDocument()
   })
 
   it("opens the tab its address names, and the Active tab without one", () => {
@@ -398,6 +447,206 @@ describe("ConversationManager", () => {
     screen.getByRole("button", { name: "old" }).focus()
     fire()
     expect(onUnarchive).toHaveBeenCalledWith("old")
+  })
+
+  it("archives the row whose checkbox has focus, not only its title", () => {
+    const onArchive = jest.fn()
+    mockData = data({ rowActions: { onArchive } })
+    render(<ConversationManager />)
+    screen.getByRole("checkbox", { name: "select b" }).focus()
+    act(() =>
+      getAppRegistration("shell.conversation.toggleArchive")!.handler(
+        new KeyboardEvent("keydown", { key: "Backspace", ctrlKey: true, shiftKey: true })
+      )
+    )
+    expect(onArchive).toHaveBeenCalledWith("b")
+  })
+
+  it("loads goals for the drawn page and hands them to the table", () => {
+    const goal = { id: "g1", sessionId: "a" }
+    mockGoals = new Map([["a", goal]])
+    render(<ConversationManager />)
+    expect(mockGoalIds).toHaveBeenLastCalledWith(["a", "b"])
+    expect(lastTable().goals.get("a")).toBe(goal)
+  })
+
+  it("shows the workspace column only when the rows span several workspaces", () => {
+    mockData = data({
+      rows: [session("a", { projectId: "p1" }), session("b", { projectId: "p1" })],
+    })
+    const { unmount } = render(<ConversationManager />)
+    expect(lastTable().showWorkspace).toBe(false)
+    unmount()
+    mockData = data({ rows: [session("a", { projectId: "p1" }), session("b")] })
+    render(<ConversationManager />)
+    expect(lastTable().showWorkspace).toBe(true)
+  })
+
+  it("says the rows are ranked while a query orders them", () => {
+    jest.useFakeTimers()
+    try {
+      render(<ConversationManager />)
+      expect(lastTable().ranked).toBe(false)
+      expect(screen.queryByTestId("conversation-manager-ranked")).not.toBeInTheDocument()
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "plan" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      expect(lastTable().ranked).toBe(true)
+      expect(screen.getByTestId("conversation-manager-ranked")).toHaveTextContent(
+        "Sorted by relevance while searching"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("leaves the ranked hint out when one row or fewer matches", () => {
+    jest.useFakeTimers()
+    try {
+      mockData = data({ rows: [session("a")] })
+      render(<ConversationManager />)
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "plan" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      expect(lastTable().ranked).toBe(true)
+      expect(screen.queryByTestId("conversation-manager-ranked")).not.toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("says it is still searching messages rather than drawing nothing", () => {
+    const base = narrowed("active", 0)
+    mockData = {
+      ...base,
+      content: { belowMinQuery: false, pending: true, failed: false, truncated: false },
+    }
+    render(<ConversationManager />)
+    expect(screen.getByTestId("conversation-manager-searching")).toHaveTextContent(
+      /Searching messages/i
+    )
+    expect(screen.queryByTestId("channel-list-empty-narrowed")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("table")).not.toBeInTheDocument()
+  })
+
+  it("drops the selection when the query changes", () => {
+    jest.useFakeTimers()
+    try {
+      render(<ConversationManager />)
+      act(() => lastTable().onToggleSelect("a", toggle))
+      expect(lastBulk().visible).toBe(true)
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "a" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      expect(lastBulk().visible).toBe(false)
+      expect(lastBulk().selected.size).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops the selection when the filters change, but keeps it across a sort", () => {
+    const { rerender } = render(<ConversationManager />)
+    act(() => lastTable().onToggleSelect("a", toggle))
+    expect(lastBulk().visible).toBe(true)
+
+    mockData = { ...mockData, sortBy: "title" }
+    rerender(<ConversationManager />)
+    expect([...lastBulk().selected]).toEqual(["a"])
+
+    mockData = {
+      ...mockData,
+      filterController: { filters: { pinned: true }, actions: { reset: jest.fn() } },
+    }
+    rerender(<ConversationManager />)
+    expect(lastBulk().visible).toBe(false)
+    expect(lastBulk().selected.size).toBe(0)
+  })
+
+  describe("on a phone-width page", () => {
+    beforeEach(() => {
+      mockCompact = true
+    })
+
+    it("draws the list instead of the table, with the search on its own row", () => {
+      const goal = { id: "g1", sessionId: "a" }
+      mockGoals = new Map([["a", goal]])
+      render(<ConversationManager />)
+      expect(screen.getByTestId("list")).toHaveTextContent("2")
+      expect(screen.queryByTestId("table")).not.toBeInTheDocument()
+      const tools = screen.getByTestId("conversation-manager-compact-tools")
+      expect(within(tools).getByTestId("conversation-manager-search")).toBeInTheDocument()
+      expect(within(tools).getByTestId("conversation-manager-search-content")).toBeInTheDocument()
+      expect(within(tools).getByTestId("filter-menu")).toBeInTheDocument()
+      // Only once: not also in the header.
+      expect(screen.getAllByTestId("conversation-manager-search")).toHaveLength(1)
+      expect(lastList().goals.get("a")).toBe(goal)
+      expect(lastList().selecting).toBe(false)
+    })
+
+    it("turns selection on and off from Select", () => {
+      render(<ConversationManager />)
+      const select = screen.getByTestId("conversation-manager-select-mode")
+      expect(select).toHaveTextContent("Select")
+      expect(select).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(select)
+      expect(lastList().selecting).toBe(true)
+      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveTextContent("Done")
+      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      fireEvent.click(screen.getByTestId("conversation-manager-select-mode"))
+      expect(lastList().selecting).toBe(false)
+    })
+
+    it("hides Select once something is selected, leaving Done to the bulk bar", () => {
+      render(<ConversationManager />)
+      act(() => lastList().onStartSelecting("a"))
+      expect(lastList().selecting).toBe(true)
+      expect([...lastBulk().selected]).toEqual(["a"])
+      expect(screen.queryByTestId("conversation-manager-select-mode")).not.toBeInTheDocument()
+
+      // The bar's Done leaves the mode and drops the selection.
+      act(() => lastBulk().onClear())
+      expect(lastList().selecting).toBe(false)
+      expect(lastBulk().selected.size).toBe(0)
+      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveTextContent("Select")
+    })
+
+    it("selects a long-pressed row once, without toggling it back off", () => {
+      render(<ConversationManager />)
+      act(() => lastList().onToggleSelect("a", toggle))
+      act(() => lastList().onStartSelecting("a"))
+      expect([...lastBulk().selected]).toEqual(["a"])
+      act(() => lastList().onStartSelecting("b"))
+      expect([...lastBulk().selected].sort()).toEqual(["a", "b"])
+    })
+
+    it("does not show the ranked hint over the list", () => {
+      jest.useFakeTimers()
+      try {
+        render(<ConversationManager />)
+        fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+          target: { value: "plan" },
+        })
+        act(() => {
+          jest.advanceTimersByTime(150)
+        })
+        expect(screen.queryByTestId("conversation-manager-ranked")).not.toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
   })
 
   it("exports the conversation the row asked for", () => {

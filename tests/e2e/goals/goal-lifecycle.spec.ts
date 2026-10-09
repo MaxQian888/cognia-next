@@ -3,9 +3,13 @@
  *
  * This owns the portable management contract on `/goals`: create through the
  * real quick-create UI, observe the open goal, pause it, verify the persisted
- * lifecycle audit, restore the paused state after a full reload, then resume
- * and stop it into durable history. It deliberately does not fake an LLM turn
- * or judge result; model-driven progress belongs to the runtime harness.
+ * lifecycle audit in the inspector, restore the paused state after a full
+ * reload, then resume and stop it (through the stop confirmation) into
+ * durable history. It deliberately does not fake an LLM turn or judge result;
+ * model-driven progress belongs to the runtime harness.
+ *
+ * Runs at the default desktop viewport, so a selected goal opens as the
+ * console's inspector pane (`GoalDetailPanel`) beside the list, not a sheet.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -24,46 +28,78 @@ test.describe("goals — product lifecycle", () => {
   })
 
   test("@critical creates, pauses, restores, resumes, and stops a goal", async ({ page }) => {
-    const consoleHeader = page.getByTestId("goal-console").locator("header")
-    await consoleHeader.getByTestId("goal-quick-create-trigger").click()
+    await page.getByTestId("goal-console-header").getByTestId("goal-quick-create-trigger").click()
 
     const createDialog = page.getByTestId("goal-quick-create-dialog")
     await createDialog.getByTestId("goal-quick-create-objective").fill(OBJECTIVE)
     await createDialog.getByTestId("goal-quick-create-submit").click()
 
-    await expect(page).toHaveURL(/\/$/)
+    // Creating a goal opens the new conversation the loop runs in.
+    await expect(page).toHaveURL(/\/\?session=[^&]+$/)
     await page.goBack({ waitUntil: "domcontentloaded" })
     await expect(page).toHaveURL(/\/goals$/)
 
-    const goalCard = page.getByTestId("active-goal-card").filter({ hasText: OBJECTIVE })
-    await expect(goalCard).toHaveCount(1)
-    await expect(goalCard).toContainText("active")
-    await goalCard.getByTestId("active-card-pause").click()
+    const goalRow = page.getByTestId("goal-list-row").filter({ hasText: OBJECTIVE })
+    await expect(goalRow).toHaveCount(1)
+    await expect(goalRow.getByTestId("goal-status-chip")).toHaveAttribute("data-status", "active")
+    await goalRow.getByTestId("goal-control-pause").click()
 
-    await expect(goalCard).toContainText("paused")
-    await expect(goalCard.getByTestId("active-card-resume")).toBeVisible()
-    await goalCard.getByTestId("active-card-details").click()
-    await page.getByTestId("goal-tab-activity").click()
+    await expect(goalRow.getByTestId("goal-status-chip")).toHaveAttribute("data-status", "paused")
+    await expect(goalRow.getByTestId("goal-control-resume")).toBeVisible()
+    await expect(goalRow.getByTestId("goal-control-pause")).toHaveCount(0)
 
-    const activity = page.getByTestId("goal-activity-list")
-    await expect(activity).toContainText("goal_created")
-    await expect(activity).toContainText("user_paused", { timeout: 20_000 })
+    // Selecting the row opens it in the inspector and puts it in the address.
+    await goalRow.getByTestId("goal-list-row-select").click()
+    await expect(page).toHaveURL(/[?&]goal=/)
+    const inspector = page.getByTestId("goal-detail-panel")
+    await expect(inspector).toBeVisible()
+    await expect(inspector).toContainText(OBJECTIVE)
+    await inspector.getByTestId("goal-tab-activity").click()
+
+    const activity = inspector.getByTestId("goal-activity-list")
+    await expect(activity.locator('[data-kind="goal_created"]')).toHaveCount(1)
+    await expect(activity).toContainText("Goal created")
+    await expect(activity.locator('[data-kind="user_paused"]')).toHaveCount(1, {
+      timeout: 20_000,
+    })
+    await expect(activity).toContainText("Paused")
     await expect(activity).toContainText("User paused")
-    await page.keyboard.press("Escape")
+
+    // Closing the inspector clears the selection from the address.
+    await inspector.getByTestId("goal-detail-close").click()
+    await expect(inspector).toHaveCount(0)
+    await expect(page).not.toHaveURL(/[?&]goal=/)
 
     await page.reload({ waitUntil: "domcontentloaded" })
 
-    const restoredCard = page.getByTestId("active-goal-card").filter({ hasText: OBJECTIVE })
-    await expect(restoredCard).toHaveCount(1)
-    await expect(restoredCard).toContainText("paused")
-    await restoredCard.getByTestId("active-card-resume").click()
-    await expect(restoredCard).toContainText("active")
-    await restoredCard.getByTestId("active-card-stop").click()
+    const restoredRow = page.getByTestId("goal-list-row").filter({ hasText: OBJECTIVE })
+    await expect(restoredRow).toHaveCount(1)
+    await expect(restoredRow.getByTestId("goal-status-chip")).toHaveAttribute(
+      "data-status",
+      "paused"
+    )
+    await restoredRow.getByTestId("goal-control-resume").click()
+    await expect(restoredRow.getByTestId("goal-status-chip")).toHaveAttribute(
+      "data-status",
+      "active"
+    )
 
-    await expect(restoredCard).toHaveCount(0)
+    // Stop is terminal, so it asks first.
+    await restoredRow.getByTestId("goal-control-stop").click()
+    const stopConfirm = page.getByTestId("goal-stop-confirm")
+    await expect(stopConfirm).toBeVisible()
+    await expect(stopConfirm).toContainText(OBJECTIVE)
+    await stopConfirm.getByTestId("goal-stop-confirm-action").click()
+
+    await expect(restoredRow).toHaveCount(0)
     await page.getByTestId("goal-console-tab-history").click()
+    await expect(page).toHaveURL(/[?&]tab=history/)
     const historyRow = page.getByTestId("goals-history-row").filter({ hasText: OBJECTIVE })
     await expect(historyRow).toHaveCount(1)
-    await expect(historyRow).toContainText("stopped")
+    await expect(historyRow.getByTestId("goal-status-chip")).toHaveAttribute(
+      "data-status",
+      "stopped"
+    )
+    await expect(historyRow.getByTestId("goal-status-chip")).toContainText("stopped")
   })
 })
