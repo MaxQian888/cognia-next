@@ -1,3 +1,4 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ME_ENTRIES,
   ME_SECTION_ORDER,
@@ -236,7 +237,8 @@ describe("me-entries registry", () => {
 
   it("surfaces the platform-agnostic desktop-parity sections", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
-    expect(byId("characters")).toMatchObject({ href: "/me/characters", section: "connection" })
+    expect(byId("agents")).toMatchObject({ href: "/agents", section: "connection" })
+    expect(byId("characters")).toBeUndefined()
     expect(byId("skills")).toMatchObject({ href: "/me/skills", section: "connection" })
     expect(byId("teams")).toMatchObject({ href: "/me/teams", section: "connection" })
     expect(byId("agent-modes")).toMatchObject({ href: "/me/agent-modes", section: "connection" })
@@ -331,3 +333,7 @@ describe("isMeEntryOffered", () => {
   })
 })
 
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(ME_ENTRIES.find((entry) => entry.id === "squads")?.icon).toBe(AgentTeamIcon)
+})

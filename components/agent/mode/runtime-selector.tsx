@@ -79,7 +79,7 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useAgentRuntimeCatalog } from "@/hooks/agent/use-agent-runtime-catalog"
 import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
 import { ensureExternalAgentReady } from "@/lib/agent/ensure-external-agent-ready"
-import { BUILTIN_RUNTIME_REF } from "@/lib/ai/agent/runtime-catalog/types"
+import { BUILTIN_RUNTIME_REF, findRuntimeByKey } from "@/lib/ai/agent/runtime-catalog/types"
 import type { AgentRuntimeDescriptor, AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 interface Props {
@@ -111,6 +111,26 @@ interface Props {
    * chip gives up the label and keeps the answer.
    */
   dense?: boolean
+  /**
+   * Controlled mode (ADR-0220): pick a lane for something other than a live
+   * conversation — an agent's default runtime. The chip then reads and writes
+   * nothing in the runtime stores: `selectedKey` (a `runtimeRefKey`) names the
+   * marked row and `onSelectRuntime` receives the picked one. Absent, the chip
+   * is the composer's session/app-default selector exactly as before.
+   */
+  controlled?: {
+    selectedKey: string | undefined
+    onSelectRuntime: (row: AgentRuntimeDescriptor) => void
+    /**
+     * A first row meaning "no choice of my own" (follow the app default).
+     * `active` marks it; picking it calls `onSelect`.
+     */
+    defaultOption?: { label: string; description?: string; active: boolean; onSelect: () => void }
+    /** Trigger label when the selected key names no row here (a removed agent). */
+    unavailableLabel?: string
+  }
+  /** `chip` is the composer's compact trigger; `field` is a full-width form control. */
+  variant?: "chip" | "field"
 }
 
 export function AgentRuntimeSelector({
@@ -119,6 +139,8 @@ export function AgentRuntimeSelector({
   disabled,
   providerId,
   sessionId,
+  controlled,
+  variant = "chip",
 }: Props) {
   const t = useTranslations("agentRuntime")
   const tExternal = useTranslations("externalAgent")
@@ -142,10 +164,17 @@ export function AgentRuntimeSelector({
     [sessionId, setSessionRuntimeRef, setDefaultRuntimeRef]
   )
 
-  const { runtimes, selected, externalEnabled, configuredExternalCount } = useAgentRuntimeCatalog(
-    providerId,
-    sessionId
-  )
+  const {
+    runtimes,
+    selected: sessionSelected,
+    externalEnabled,
+    configuredExternalCount,
+  } = useAgentRuntimeCatalog(providerId, sessionId)
+  const selected = controlled
+    ? controlled.selectedKey
+      ? findRuntimeByKey(runtimes, controlled.selectedKey)
+      : undefined
+    : sessionSelected
 
   const externalRows = runtimes.filter((row) => row.group === "external")
   const hostRows = runtimes.filter((row) => row.group === "host")
@@ -177,38 +206,60 @@ export function AgentRuntimeSelector({
   // authoritative right now. A HOST selection with no row is not, because the
   // host configuration list loads asynchronously and a valid selection has no
   // row during its first frames.
-  const missingLocalAgent = runtimeRef.kind === "external" && !selected
-  const settledBlock = !!selected?.blockedReason && selected.blockTransient !== true
+  // A controlled chip names a stored default, not a live lane: a missing target
+  // is shown as unavailable and left for the person to change, never rewritten.
+  const missingLocalAgent = !controlled && runtimeRef.kind === "external" && !selected
+  const settledBlock = !controlled && !!selected?.blockedReason && selected.blockTransient !== true
   const needsFallback = missingLocalAgent || settledBlock
   useEffect(() => {
     if (needsFallback) setRuntimeRef(BUILTIN_RUNTIME_REF)
   }, [needsFallback, setRuntimeRef])
 
-  const onBuiltin = runtimeRef.kind === "builtin"
-  const value = selected?.key ?? (onBuiltin ? "builtin" : "")
-  const Icon = onBuiltin ? BotIcon : PlugZapIcon
-  const label = onBuiltin
-    ? t("cogniaAgent")
-    : // The cached host label covers the frames before the host list resolves,
-      // where the descriptor does not exist yet but the selection is valid.
-      (selected?.name ??
-      (runtimeRef.kind === "host" ? runtimeRef.name : undefined) ??
-      t("externalUnconfigured"))
+  const onDefaultOption = controlled?.defaultOption?.active === true
+  const onBuiltin = controlled
+    ? !onDefaultOption && controlled.selectedKey === "builtin"
+    : runtimeRef.kind === "builtin"
+  const value = controlled
+    ? onDefaultOption
+      ? DEFAULT_OPTION_VALUE
+      : (selected?.key ?? controlled.selectedKey ?? "")
+    : (selected?.key ?? (onBuiltin ? "builtin" : ""))
+  const Icon = onBuiltin || onDefaultOption ? BotIcon : PlugZapIcon
+  const label = onDefaultOption
+    ? (controlled?.defaultOption?.label ?? t("cogniaAgent"))
+    : onBuiltin
+      ? t("cogniaAgent")
+      : controlled
+        ? (selected?.name ?? controlled.unavailableLabel ?? t("externalUnconfigured"))
+        : // The cached host label covers the frames before the host list resolves,
+          // where the descriptor does not exist yet but the selection is valid.
+          (selected?.name ??
+          (runtimeRef.kind === "host" ? runtimeRef.name : undefined) ??
+          t("externalUnconfigured"))
   // Off the default lane the agent's NAME is the whole point of the chip, so
   // it is spelled out while there is room. Once `dense` says there is not,
   // every lane goes glyph-only — a long external agent name ellipsizing to
   // "Def…" teaches less than the plug icon plus its tooltip, and it cannot
   // spill past its box. The tooltip and the aria-label carry the wording in
   // both states, so nothing is only visual.
-  const namesAChoice = !dense
+  const namesAChoice = !dense || variant === "field"
 
   const handleValueChange = (next: string) => {
+    if (next === DEFAULT_OPTION_VALUE && controlled?.defaultOption) {
+      setOpen(false)
+      controlled.defaultOption.onSelect()
+      return
+    }
     const row = runtimes.find((candidate) => candidate.key === next)
     // cmdk will not fire `onSelect` for a disabled item, but the guard stays:
     // it is the same guard the menu had, and it is what makes a blocked row
     // inert to a programmatic select too.
     if (!row || row.blockedReason) return
     setOpen(false)
+    if (controlled) {
+      controlled.onSelectRuntime(row)
+      return
+    }
     // `selectExternalAgent` writes the external-agent store too, which is what
     // keeps the manager's idea of "active" and chat dispatch's idea of "which
     // agent" the same thing. It only retargets an already-external lane, so the
@@ -257,7 +308,7 @@ export function AgentRuntimeSelector({
           title={t("label")}
           description={t("tooltip")}
           align="start"
-          side="top"
+          side={variant === "field" ? "bottom" : "top"}
           contentClassName="w-80"
           testId="agent-runtime-panel"
           trigger={
@@ -266,7 +317,9 @@ export function AgentRuntimeSelector({
                 type="button"
                 disabled={disabled}
                 className={cn(
-                  "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground outline-none transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+                  variant === "field"
+                    ? "flex h-9 w-full min-w-0 items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-colors hover:bg-muted/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                    : "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground outline-none transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
                   className,
                   // Glyph-only on the default runtime: square it up so it reads
                   // as a peer of the other icon-sized status controls rather
@@ -284,7 +337,11 @@ export function AgentRuntimeSelector({
                     {/* Same weight as every other chip on the row: a bold runtime
                         name read as the row's heading rather than as one of its
                         answers. */}
-                    <span className="min-w-0 truncate">{label}</span>
+                    <span
+                      className={cn("min-w-0 truncate", variant === "field" && "flex-1 text-left")}
+                    >
+                      {label}
+                    </span>
                     <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
                   </>
                 ) : null}
@@ -297,6 +354,26 @@ export function AgentRuntimeSelector({
             <CommandEmpty>{t("noMatches")}</CommandEmpty>
 
             <CommandGroup heading={t("label")}>
+              {controlled?.defaultOption ? (
+                <CommandItem
+                  value={`${DEFAULT_OPTION_VALUE} ${controlled.defaultOption.label}`}
+                  onSelect={() => handleValueChange(DEFAULT_OPTION_VALUE)}
+                  data-testid="runtime-default-option"
+                  aria-current={controlled.defaultOption.active || undefined}
+                  className="items-start gap-2 px-2 py-2"
+                >
+                  <BotIcon className="size-4 shrink-0" />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm">{controlled.defaultOption.label}</span>
+                    {controlled.defaultOption.description ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        {controlled.defaultOption.description}
+                      </span>
+                    ) : null}
+                  </span>
+                  <PickerCheck active={controlled.defaultOption.active} />
+                </CommandItem>
+              ) : null}
               {runtimes
                 .filter((row) => row.group === "builtin")
                 .map((row) => (
@@ -426,7 +503,10 @@ export function AgentRuntimeSelector({
           closes the picker, and on a phone that unmounts the picker's subtree. */}
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent
-          className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl"
+          // Landscape and fixed-height on purpose: a roster column beside the
+          // selected agent's tabs needs the width, and a dialog that grew and
+          // shrank with each tab made the header jump while switching.
+          className="flex h-[min(46rem,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-4 sm:max-w-5xl sm:p-6"
           // The default open-focus lands on the body's first control — the
           // Refresh button — and its tooltip pops the instant the dialog
           // appears. Leave focus on the content instead.
@@ -440,9 +520,10 @@ export function AgentRuntimeSelector({
           </DialogHeader>
           <ExternalAgentManager
             className="min-h-0 flex-1"
+            onOpenedInChat={() => setManageOpen(false)}
             headerActions={
               <DialogClose asChild>
-                <Button variant="ghost" size="icon" aria-label={tCommon("close")}>
+                <Button variant="ghost" size="icon-sm" aria-label={tCommon("close")}>
                   <XIcon className="size-4" />
                 </Button>
               </DialogClose>
@@ -453,6 +534,9 @@ export function AgentRuntimeSelector({
     </>
   )
 }
+
+/** The controlled chip's "follow the app default" row; never a `runtimeRefKey`. */
+const DEFAULT_OPTION_VALUE = "__app-default__"
 
 /**
  * Above this many rows the list stops fitting in view and a filter starts

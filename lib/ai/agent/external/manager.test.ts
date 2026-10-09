@@ -506,6 +506,38 @@ describe("the session a model surface should describe", () => {
     expect(manager.getAgent("agent-1")?.sessions.has("external-a")).toBe(false)
   })
 
+  it("binds a live native session to a conversation so its next turn continues it", async () => {
+    // "Open in chat" hands an agent-side session to a new conversation. The
+    // marker it writes is the one `execute` reads, so the first turn resumes
+    // this session instead of opening another.
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.sessions.set("native-1", {
+      id: "native-1",
+      status: "idle",
+      metadata: { title: "kept" },
+    } as never)
+    expect(manager.resolveConversationSessionId("agent-1", "chat-new")).toBeNull()
+
+    expect(manager.bindSessionToConversation("agent-1", "native-1", "chat-new")).toBe(true)
+    expect(manager.resolveConversationSessionId("agent-1", "chat-new")).toBe("native-1")
+    // Existing metadata survives the stamp.
+    expect(currentMock.sessions.get("native-1")?.metadata).toEqual({
+      title: "kept",
+      cogniaSessionId: "chat-new",
+    })
+  })
+
+  it("refuses to bind a session that is not live, or a gateway task", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    expect(manager.bindSessionToConversation("agent-1", "never-resumed", "chat-new")).toBe(false)
+    expect(manager.bindSessionToConversation("missing-agent", "native-1", "chat-new")).toBe(false)
+    expect(
+      manager.bindSessionToConversation("agent-1", "cognia-gateway:managed:task-1", "chat-new")
+    ).toBe(false)
+  })
+
   it("forgets sessions from a process that died, rather than reusing their ids", async () => {
     // The ids name state inside an agent process. After it exits, a reconnect
     // gets a fresh process, and handing one of the old ids back as a session

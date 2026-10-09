@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import zh from "@/i18n/messages/zh-CN.json"
@@ -97,6 +97,33 @@ describe("ExternalAgentCapabilityMatrix", () => {
 
     rerender(wrap(<ExternalAgentCapabilityMatrix profile={{ ...declared, negotiated: true }} />))
     expect(screen.getByText("Negotiated")).toBeInTheDocument()
+  })
+
+  it("counts rows per level and filters to one level at a time", () => {
+    const profile = negotiateCapabilityProfile({ protocol: "a2a", liveFacts: {} })
+    render(wrap(<ExternalAgentCapabilityMatrix profile={profile} />))
+    const filters = within(screen.getByTestId("capability-filters"))
+    const all = filters.getByRole("button", { name: /^All/ })
+    expect(all).toHaveAttribute("aria-pressed", "true")
+    expect(all).toHaveTextContent(String(EXTERNAL_AGENT_CAPABILITY_IDS.length))
+
+    const unsupportedCount = EXTERNAL_AGENT_CAPABILITY_IDS.filter(
+      (id) => profile.effective[id].level === "unsupported"
+    ).length
+    const unsupported = filters.getByRole("button", { name: /^Unsupported/ })
+    expect(unsupported).toHaveTextContent(String(unsupportedCount))
+
+    fireEvent.click(unsupported)
+    expect(unsupported).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getAllByTestId(/^capability-(?!filters)/)).toHaveLength(unsupportedCount)
+    expect(screen.getByTestId("capability-mcp")).toBeInTheDocument()
+
+    // Pressing the active level again goes back to every row.
+    fireEvent.click(unsupported)
+    expect(all).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getAllByTestId(/^capability-(?!filters)/)).toHaveLength(
+      EXTERNAL_AGENT_CAPABILITY_IDS.length
+    )
   })
 
   it("hides unsupported capabilities while retaining unverified ones", () => {

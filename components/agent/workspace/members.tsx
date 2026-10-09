@@ -1,16 +1,10 @@
 "use client"
 
+import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
-import {
-  CrownIcon,
-  MoreHorizontalIcon,
-  PlusIcon,
-  Settings2Icon,
-  Trash2Icon,
-  UsersIcon,
-} from "lucide-react"
+import { CrownIcon, MoreHorizontalIcon, PlusIcon, Settings2Icon, Trash2Icon } from "lucide-react"
 
 import {
   MOBILE_SPRING,
@@ -203,8 +197,8 @@ export function AgentTeamMembers({
   if (teammates.length === 0) {
     return (
       <Empty className="mx-auto w-full max-w-lg">
-        <EmptyMedia variant="icon">
-          <UsersIcon />
+        <EmptyMedia>
+          <MobileSpotIcon name="agent-teams" size={96} />
         </EmptyMedia>
         <EmptyHeader>
           <EmptyTitle>{t("empty")}</EmptyTitle>

@@ -828,3 +828,379 @@ describe("AgentRuntimeSelector — which lane is active", () => {
     expect(screen.getAllByTestId("picker-check")).toHaveLength(1)
   })
 })
+
+describe("AgentRuntimeSelector — controlled mode (ADR-0220)", () => {
+  type Controlled = NonNullable<React.ComponentProps<typeof AgentRuntimeSelector>["controlled"]>
+
+  function makeControlled(over: Partial<Controlled> = {}): Controlled & {
+    onSelectRuntime: jest.Mock
+  } {
+    return {
+      selectedKey: undefined,
+      onSelectRuntime: jest.fn(),
+      ...over,
+    } as Controlled & { onSelectRuntime: jest.Mock }
+  }
+
+  function defaultOption(active: boolean, over: Record<string, unknown> = {}) {
+    return {
+      label: "Follow app default",
+      description: "Uses whatever the app is set to",
+      active,
+      onSelect: jest.fn(),
+      ...over,
+    }
+  }
+
+  describe("independence from the runtime stores", () => {
+    it("does not run the fallback effect for a stored agent that has no row", () => {
+      // Uncontrolled this is `missingLocalAgent` and rewrites the lane to builtin.
+      runtimeState.runtimeRef = { kind: "external", agentId: "ghost" }
+      render(
+        <AgentRuntimeSelector controlled={makeControlled({ selectedKey: "external:ghost" })} />
+      )
+      expect(mockSetRuntimeRef).not.toHaveBeenCalled()
+      expect(mockSetSessionRuntimeRef).not.toHaveBeenCalled()
+      expect(fellBackToBuiltin()).toBe(false)
+    })
+
+    it("does not run the fallback effect for a settled-blocked stored agent", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex", false) }
+      render(
+        <AgentRuntimeSelector
+          sessionId="s1"
+          controlled={makeControlled({ selectedKey: "external:a1" })}
+        />
+      )
+      expect(mockSetRuntimeRef).not.toHaveBeenCalled()
+      expect(mockSetSessionRuntimeRef).not.toHaveBeenCalled()
+    })
+
+    it("sanity: the same blocked selection IS rewritten without controlled", () => {
+      runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+      externalAgentState.agents = { a1: agent("a1", "Codex", false) }
+      render(<AgentRuntimeSelector />)
+      expect(fellBackToBuiltin()).toBe(true)
+    })
+
+    it("ignores the session lane when deciding what is selected", () => {
+      runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "builtin" })} />)
+      const trigger = screen.getByTestId("agent-runtime-trigger")
+      expect(trigger).toHaveTextContent("cogniaAgent")
+      expect(screen.getByTestId("runtime-builtin")).toHaveAttribute("aria-current", "true")
+      expect(screen.getByTestId("runtime-external-a1")).not.toHaveAttribute("aria-current")
+    })
+
+    it("never writes a store nor connects the agent when a row is picked", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      render(
+        <AgentRuntimeSelector
+          sessionId="s1"
+          controlled={makeControlled({ selectedKey: "builtin" })}
+        />
+      )
+      fireEvent.click(screen.getByTestId("runtime-external-a1"))
+      expect(mockSetRuntimeRef).not.toHaveBeenCalled()
+      expect(mockSetSessionRuntimeRef).not.toHaveBeenCalled()
+      expect(mockSelectExternalAgent).not.toHaveBeenCalled()
+      expect(mockEnsureReady).not.toHaveBeenCalled()
+      expect(mockToastError).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("selecting", () => {
+    it("hands the picked external descriptor to onSelectRuntime", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      const controlled = makeControlled({ selectedKey: "builtin" })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-external-a1"))
+      expect(controlled.onSelectRuntime).toHaveBeenCalledTimes(1)
+      expect(controlled.onSelectRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "external:a1",
+          name: "Codex",
+          ref: { kind: "external", agentId: "a1" },
+        })
+      )
+    })
+
+    it("hands the builtin descriptor over when the builtin row is picked", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      const controlled = makeControlled({ selectedKey: "external:a1" })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-builtin"))
+      expect(controlled.onSelectRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({ key: "builtin", ref: { kind: "builtin" } })
+      )
+    })
+
+    it("hands over a host configuration with its admission stamp", () => {
+      hostConfigsState.configs = [
+        hostConfig("eac_1", "Pi", { revision: "eacr_7", lifecycleGeneration: 4 }),
+      ]
+      const controlled = makeControlled({ selectedKey: "builtin" })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-host:eac_1"))
+      expect(controlled.onSelectRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "host:eac_1",
+          ref: {
+            kind: "host",
+            configId: "eac_1",
+            revision: "eacr_7",
+            lifecycleGeneration: 4,
+            name: "Pi",
+          },
+        })
+      )
+    })
+
+    it("ignores a click on a blocked row", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex", false) }
+      const controlled = makeControlled({ selectedKey: "builtin" })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-external-a1"))
+      expect(controlled.onSelectRuntime).not.toHaveBeenCalled()
+    })
+
+    it("marks the row named by selectedKey, and only that row", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex"), a2: agent("a2", "Gemini") }
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "external:a2" })} />)
+      expect(screen.getByTestId("runtime-external-a2")).toHaveAttribute("aria-current", "true")
+      expect(screen.getByTestId("runtime-external-a1")).not.toHaveAttribute("aria-current")
+      expect(screen.getByTestId("runtime-builtin")).not.toHaveAttribute("aria-current")
+      expect(screen.getAllByTestId("picker-check")).toHaveLength(1)
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("Gemini")
+    })
+
+    it("marks a host row named by selectedKey", () => {
+      hostConfigsState.configs = [hostConfig("eac_1", "Pi on the box")]
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "host:eac_1" })} />)
+      expect(screen.getByTestId("runtime-host:eac_1")).toHaveAttribute("aria-current", "true")
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("Pi on the box")
+    })
+  })
+
+  describe("the app-default option", () => {
+    it("renders no default row unless a defaultOption is supplied", () => {
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "builtin" })} />)
+      expect(screen.queryByTestId("runtime-default-option")).toBeNull()
+    })
+
+    it("renders the default row first with its label and description", () => {
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: undefined,
+            defaultOption: defaultOption(true),
+          })}
+        />
+      )
+      const row = screen.getByTestId("runtime-default-option")
+      expect(row).toHaveTextContent("Follow app default")
+      expect(row).toHaveTextContent("Uses whatever the app is set to")
+      const options = screen.getAllByRole("option")
+      expect(options[0]).toBe(row)
+    })
+
+    it("omits the description line when none is given", () => {
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            defaultOption: defaultOption(false, { description: undefined }),
+          })}
+        />
+      )
+      expect(screen.getByTestId("runtime-default-option")).toHaveTextContent(/^Follow app default$/)
+    })
+
+    it("marks the default row, not the builtin row, while it is active", () => {
+      // `selectedKey` would also read "builtin" for an unset binding; active wins.
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "builtin",
+            defaultOption: defaultOption(true),
+          })}
+        />
+      )
+      expect(screen.getByTestId("runtime-default-option")).toHaveAttribute("aria-current", "true")
+      expect(screen.getByTestId("runtime-builtin")).not.toHaveAttribute("aria-current")
+      expect(screen.getAllByTestId("picker-check")).toHaveLength(1)
+    })
+
+    it("reads the default label on the trigger while it is active", () => {
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "builtin",
+            defaultOption: defaultOption(true),
+          })}
+        />
+      )
+      const trigger = screen.getByTestId("agent-runtime-trigger")
+      expect(trigger).toHaveTextContent("Follow app default")
+      expect(trigger.getAttribute("aria-label")).toContain("Follow app default")
+    })
+
+    it("leaves the default row unmarked and the chosen lane marked when inactive", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "external:a1",
+            defaultOption: defaultOption(false),
+          })}
+        />
+      )
+      expect(screen.getByTestId("runtime-default-option")).not.toHaveAttribute("aria-current")
+      expect(screen.getByTestId("runtime-external-a1")).toHaveAttribute("aria-current", "true")
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("Codex")
+    })
+
+    it("maps __app-default__ to defaultOption.onSelect, not to onSelectRuntime", () => {
+      const option = defaultOption(false)
+      const controlled = makeControlled({ selectedKey: "builtin", defaultOption: option })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-default-option"))
+      expect(option.onSelect).toHaveBeenCalledTimes(1)
+      expect(controlled.onSelectRuntime).not.toHaveBeenCalled()
+      expect(mockSetRuntimeRef).not.toHaveBeenCalled()
+    })
+
+    it("still lets a concrete runtime be picked while the default is active", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      const option = defaultOption(true)
+      const controlled = makeControlled({ selectedKey: undefined, defaultOption: option })
+      render(<AgentRuntimeSelector controlled={controlled} />)
+      fireEvent.click(screen.getByTestId("runtime-external-a1"))
+      expect(controlled.onSelectRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({ key: "external:a1" })
+      )
+      expect(option.onSelect).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("a stored target that has no row here", () => {
+    it("shows unavailableLabel on the trigger", () => {
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "external:ghost",
+            unavailableLabel: "Ghost (unavailable)",
+          })}
+        />
+      )
+      const trigger = screen.getByTestId("agent-runtime-trigger")
+      expect(trigger).toHaveTextContent("Ghost (unavailable)")
+      expect(trigger.getAttribute("aria-label")).toContain("Ghost (unavailable)")
+    })
+
+    it("marks no row as the active lane", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "external:ghost",
+            unavailableLabel: "Ghost (unavailable)",
+          })}
+        />
+      )
+      expect(screen.queryAllByTestId("picker-check")).toHaveLength(0)
+      expect(screen.getByTestId("runtime-builtin")).not.toHaveAttribute("aria-current")
+      expect(screen.getByTestId("runtime-external-a1")).not.toHaveAttribute("aria-current")
+    })
+
+    it("falls back to the 'unconfigured' wording without an unavailableLabel", () => {
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "host:gone" })} />)
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("externalUnconfigured")
+    })
+
+    it("reads 'unconfigured' when nothing is selected and no default option exists", () => {
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: undefined })} />)
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("externalUnconfigured")
+    })
+
+    it("prefers the real row's name over unavailableLabel when the row exists", () => {
+      externalAgentState.agents = { a1: agent("a1", "Codex") }
+      render(
+        <AgentRuntimeSelector
+          controlled={makeControlled({
+            selectedKey: "external:a1",
+            unavailableLabel: "Stale cached name",
+          })}
+        />
+      )
+      const trigger = screen.getByTestId("agent-runtime-trigger")
+      expect(trigger).toHaveTextContent("Codex")
+      expect(trigger).not.toHaveTextContent("Stale cached name")
+    })
+  })
+
+  describe("builtin selection", () => {
+    it("reads the Cognia agent label for selectedKey builtin", () => {
+      render(<AgentRuntimeSelector controlled={makeControlled({ selectedKey: "builtin" })} />)
+      expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("cogniaAgent")
+      expect(screen.getByTestId("runtime-builtin")).toHaveAttribute("aria-current", "true")
+    })
+  })
+})
+
+describe('AgentRuntimeSelector — variant="field"', () => {
+  it("is a full-width control rather than the compact chip", () => {
+    const { rerender } = render(<AgentRuntimeSelector variant="field" />)
+    const field = screen.getByTestId("agent-runtime-trigger")
+    expect(field.className).toContain("w-full")
+    expect(field.className).toContain("h-9")
+
+    rerender(<AgentRuntimeSelector />)
+    const chip = screen.getByTestId("agent-runtime-trigger")
+    expect(chip.className).toContain("h-7")
+    expect(chip.className).not.toContain("w-full")
+  })
+
+  it("keeps its label even where the chip would go glyph-only (dense)", () => {
+    render(<AgentRuntimeSelector variant="field" dense />)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).toHaveAttribute("data-labelled", "true")
+    expect(trigger).toHaveTextContent("cogniaAgent")
+    expect(trigger.className).not.toContain("w-7")
+  })
+
+  it("left-aligns and stretches the label inside the field", () => {
+    render(<AgentRuntimeSelector variant="field" />)
+    const label = within(screen.getByTestId("agent-runtime-trigger")).getByText("cogniaAgent")
+    expect(label.className).toContain("flex-1")
+    expect(label.className).toContain("text-left")
+  })
+
+  it("does not stretch the label in the chip variant", () => {
+    render(<AgentRuntimeSelector />)
+    const label = within(screen.getByTestId("agent-runtime-trigger")).getByText("cogniaAgent")
+    expect(label.className).not.toContain("flex-1")
+  })
+
+  it("forwards className and disabled", () => {
+    render(<AgentRuntimeSelector variant="field" className="extra-class" disabled />)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).toHaveClass("extra-class")
+    expect(trigger).toBeDisabled()
+  })
+
+  it("composes with controlled mode", () => {
+    render(
+      <AgentRuntimeSelector
+        variant="field"
+        dense
+        controlled={{
+          selectedKey: "external:ghost",
+          onSelectRuntime: jest.fn(),
+          unavailableLabel: "Ghost (unavailable)",
+        }}
+      />
+    )
+    expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("Ghost (unavailable)")
+  })
+})

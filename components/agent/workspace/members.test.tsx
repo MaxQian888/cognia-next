@@ -139,6 +139,7 @@ beforeEach(() => {
 describe("AgentTeamMembers", () => {
   it("renders the empty state when there are no teammates", () => {
     render(<AgentTeamMembers teamId="team_x" teammates={[]} leadId="" />)
+    expect(screen.getByTestId("mobile-spot-icon-agent-teams")).toBeInTheDocument()
     // Empty state uses the agentTeamsWorkspace.members.empty key.
     expect(document.body.textContent ?? "").toMatch(/No members yet/i)
   })

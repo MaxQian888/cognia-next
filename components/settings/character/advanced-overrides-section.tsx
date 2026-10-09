@@ -26,7 +26,7 @@ import { OptionalNumberInput } from "@/components/settings/common/optional-numbe
 import { useUtilityProviderOptions } from "@/components/settings/common/model-override-fields"
 import { OUTPUT_STYLE_IDS, type OutputStyleId } from "@/lib/claude/output-styles"
 import { DEFAULT_CATALOG_ID, getCatalog, getRegisteredCatalogIds } from "@/lib/a2ui/catalog"
-import { countAgentOverrides, type AgentOverrides } from "./agent-overrides"
+import { countAgentOverrides, type AgentOverrides } from "@/lib/agents/agent-overrides"
 import { CompactionOverride, parseBoundedInteger } from "./compaction-override"
 import { InheritBooleanSelect, InheritSelect } from "./inherit-select"
 import { InstructionsOverride } from "./instructions-override"

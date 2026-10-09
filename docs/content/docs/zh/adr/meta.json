@@ -214,6 +214,7 @@
     "0216-each-agent-configuration-keeps-its-own-state",
     "0217-agent-integrations-are-packages-behind-host-ports",
     "0218-chat-reading-surface-links-blocks-and-charts",
-    "0219-pet-console-remote-care"
+    "0219-pet-console-remote-care",
+    "0220-agents-console-and-builder"
   ]
 }

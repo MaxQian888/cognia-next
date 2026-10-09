@@ -22,6 +22,39 @@ import {
 import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 
 const mockUseExternalAgent = jest.fn()
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+// The production wiring reaches into the manager singleton, Dexie and the
+// runtime store; the orchestration itself is covered in its own suite. Here
+// the deps are fakes around the hook's own `resumeSession`.
+const mockOpenDeps = {
+  findChat: jest.fn(async () => null as string | null),
+  startChat: jest.fn(async () => ({ id: "chat-9" })),
+  setRuntime: jest.fn(),
+  setLink: jest.fn(),
+  bind: jest.fn(() => true),
+}
+jest.mock("@/lib/ai/agent/external/session/open-native-session-in-chat", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/session/open-native-session-in-chat")
+  return {
+    ...actual,
+    createOpenNativeSessionInChatDeps: async (resume: unknown) => ({
+      ...mockOpenDeps,
+      isLive: () => false,
+      resume,
+    }),
+  }
+})
+
+/** Radix tabs switch on mousedown, not click. */
+function openTab(name: string) {
+  fireEvent.mouseDown(screen.getByRole("tab", { name: new RegExp(name) }), { button: 0 })
+}
 
 jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
   CogniaModelPicker: ({ onChange }: { onChange: (binding: unknown) => void }) => (
@@ -297,20 +330,23 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(en.externalAgent.statusConnected)).toBeInTheDocument()
   })
 
-  it("puts the status badge and the card actions on the same flex line", () => {
+  it("keeps the name and card actions on one line, with status badges below", () => {
     const agent = makeAgent()
     agent.connectionStatus = "connected"
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent] })
     render(wrap(<ExternalAgentManager />))
-    const badge = screen.getByText(en.externalAgent.statusConnected)
-    const disconnect = screen.getByRole("button", {
+    const card = screen.getByTestId("agent-card-agent-1")
+    const name = within(card).getByRole("button", { name: "Codex" })
+    const disconnect = within(card).getByRole("button", {
       name: en.externalAgent.settings.disconnect,
     })
-    // One flat `items-center` row — previously the badge lived in the title
-    // line and the buttons in a sibling column, so the two centered against
-    // different heights and the pill floated a half-line high.
-    expect(badge.parentElement).toHaveClass("items-center")
-    expect(badge.parentElement).toContainElement(disconnect)
+    // A narrow roster column must not squeeze the name to make room for the
+    // badges, so the name shares its `items-center` row with the actions only.
+    const nameRow = name.parentElement!
+    expect(nameRow).toHaveClass("items-center")
+    expect(nameRow).toContainElement(disconnect)
+    const badge = within(card).getByText(en.externalAgent.statusConnected)
+    expect(nameRow).not.toContainElement(badge)
   })
 
   it("opens the add-agent dialog from the header button", () => {
@@ -336,11 +372,14 @@ describe("ExternalAgentManager", () => {
       activeAgentId: "agent-1",
     })
     render(wrap(<ExternalAgentManager />))
-    fireEvent.click(
-      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
-    )
-    expect(screen.getByTestId("external-agent-diagnostics")).toBeInTheDocument()
-    expect(screen.getByText(/Protocol\/Transport: ACP via stdio/)).toBeInTheDocument()
+    // Sessions is the default tab; diagnostics are one tab away.
+    expect(screen.queryByTestId("external-agent-diagnostics")).not.toBeInTheDocument()
+    openTab(en.externalAgent.manager.tabDiagnostics)
+    const panel = screen.getByTestId("external-agent-diagnostics")
+    expect(
+      within(panel).getByText(en.externalAgent.manager.diagnostics.field.protocol)
+    ).toBeInTheDocument()
+    expect(within(panel).getByText("ACP via stdio")).toBeInTheDocument()
   })
 
   it("resolves every runtime-diagnostics label to its value (guards ICU param/placeholder drift)", () => {
@@ -384,38 +423,38 @@ describe("ExternalAgentManager", () => {
       },
     })
     render(wrap(<ExternalAgentManager />))
-    fireEvent.click(
-      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
+    openTab(en.externalAgent.manager.tabDiagnostics)
+    const diag = en.externalAgent.manager.diagnostics
+    /** The value cell next to a label, so a row cannot pass on another row's text. */
+    const valueOf = (label: string) => screen.getByText(label).nextElementSibling as HTMLElement
+    expect(valueOf(diag.field.adapter)).toHaveTextContent("ClaudeAdapter")
+    expect(valueOf(diag.field.surface)).toHaveTextContent("Cognia Desktop")
+    expect(valueOf(diag.field.supportTier)).toHaveTextContent("guided")
+    expect(valueOf(diag.field.prerequisites)).toHaveTextContent("action-required")
+    expect(valueOf(diag.field.contractVersion)).toHaveTextContent("3")
+    expect(valueOf(diag.field.blockedStage)).toHaveTextContent("recovery")
+    expect(valueOf(diag.field.branchOutcome)).toHaveTextContent("fallback")
+    expect(valueOf(diag.field.authMethods)).toHaveTextContent("oauth")
+    expect(valueOf(diag.field.correlation)).toHaveTextContent("session sess-abc · turn turn-9")
+    // Lifecycle stage is a status tile rather than a row.
+    expect(screen.getByText(diag.field.lifecycleStage).nextElementSibling).toHaveTextContent(
+      "execution"
     )
-    expect(screen.getByText(/Adapter: ClaudeAdapter/)).toBeInTheDocument()
-    expect(screen.getByText(/Surface: Cognia Desktop/)).toBeInTheDocument()
-    expect(screen.getByText(/Support tier: guided/)).toBeInTheDocument()
-    expect(screen.getByText(/Prerequisite status: action-required/)).toBeInTheDocument()
-    expect(screen.getByText(/Contract version: 3/)).toBeInTheDocument()
-    expect(screen.getByText(/Lifecycle stage: execution/)).toBeInTheDocument()
-    expect(screen.getByText(/Blocked stage: recovery/)).toBeInTheDocument()
-    expect(screen.getByText(/Branch outcome: fallback/)).toBeInTheDocument()
     // The reason CODE is a machine identifier; the panel resolves it through the
     // shared diagnostic vocabulary instead of printing `extension_unsupported`
     // at the user — this was the only place in the app that leaked a raw
     // snake_case token into the UI.
-    expect(
-      screen.getByText(/Canonical reason: Not supported by this agent — Listing unsupported/)
-    ).toBeInTheDocument()
+    expect(valueOf(diag.field.reason)).toHaveTextContent(
+      "Not supported by this agent — Listing unsupported"
+    )
     expect(screen.queryByText(/extension_unsupported/)).not.toBeInTheDocument()
     // A `{ id }` entry resolves through the message catalogue; a legacy prose
     // entry is shown as-is, because there is no key to translate it by.
     expect(screen.getByText(/Install "claude"/)).toBeInTheDocument()
-    expect(screen.getByText(/Install the CLI/)).toBeInTheDocument()
+    expect(screen.getByText("Install the CLI")).toBeInTheDocument()
     expect(screen.queryByText(/installCommand/)).not.toBeInTheDocument()
-    expect(screen.getByText(/Auth methods: oauth/)).toBeInTheDocument()
-    expect(screen.getByText(/Correlation — session sess-abc, turn turn-9/)).toBeInTheDocument()
-    expect(
-      screen.getByText(/Recovery hints: Restart the agent \| Re-run health check/)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/Recommended actions: Install "claude", .* \| Install the CLI/)
-    ).toBeInTheDocument()
+    expect(screen.getByText("Restart the agent")).toBeInTheDocument()
+    expect(screen.getByText("Re-run health check")).toBeInTheDocument()
     // No label may fall back to its raw i18n key path.
     expect(screen.queryByText(/externalAgent\.manager\.diagnostics\./)).not.toBeInTheDocument()
   })
@@ -438,12 +477,17 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
-    // Benchmark adaptation is a collapsed-by-default section; expand it first.
+    // The tab carries the entry count so it is discoverable without opening it.
+    openTab(en.externalAgent.manager.tabCompatibility)
     expect(screen.getByTestId("external-agent-benchmark-adaptation")).toBeInTheDocument()
-    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
     expect(screen.getByText("ACP validity projection")).toBeInTheDocument()
-    expect(screen.getByText(/Gap: minor/)).toBeInTheDocument()
-    expect(screen.getByText(/Evidence: manager\.test\.ts/)).toBeInTheDocument()
+    expect(
+      screen.getByText(en.externalAgent.manager.diagnostics.gapGrade.minor)
+    ).toBeInTheDocument()
+    // Evidence is detail, behind the entry's own toggle.
+    expect(screen.queryByText("manager.test.ts")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /ACP validity projection/ }))
+    expect(screen.getByText("manager.test.ts")).toBeInTheDocument()
   })
 
   it("shows the status the rest of the app shows, not this panel's own copy", () => {
@@ -596,9 +640,11 @@ describe("ExternalAgentManager", () => {
     })
     expect(screen.getByText("Resumable")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: en.externalAgent.manager.resume })
+      screen.getByRole("button", { name: en.externalAgent.manager.openInChat })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: en.externalAgent.manager.fork })).toBeInTheDocument()
+    // Says what the list is and what opening one does.
+    expect(screen.getByText(en.externalAgent.manager.sessionsHint)).toBeInTheDocument()
   })
 
   it("caps the session list at a preview and expands on demand", async () => {
@@ -711,9 +757,7 @@ describe("ExternalAgentManager", () => {
     const buttons = screen.getAllByRole("button")
     const disconnectBtn = buttons.find((b) => {
       const svg = b.querySelector("svg")
-      return (
-        svg !== null && svg.classList.contains("text-destructive") && b.classList.contains("h-7")
-      )
+      return svg !== null && svg.classList.contains("text-destructive")
     })
     expect(disconnectBtn).toBeDefined()
     await act(async () => {
@@ -837,10 +881,22 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
-    // Expand the collapsed-by-default benchmark section before asserting content.
-    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
+    openTab(en.externalAgent.manager.tabCompatibility)
+    expect(
+      screen.getByText(
+        en.externalAgent.manager.diagnostics.compatibilityStatus["intentional-deviation"],
+        {
+          selector: "[data-testid=compatibility-summary] *",
+        }
+      )
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Preferred fallback policy/ }))
     expect(screen.getByText(/We deviate to prevent retry loops/)).toBeInTheDocument()
-    expect(screen.getByText(/Review: @security/)).toBeInTheDocument()
+    expect(screen.getByText("Lower error noise.")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "@security" })).toHaveAttribute(
+      "href",
+      "https://example.com"
+    )
   })
 
   it("renders the last-run snapshot section when present", () => {
@@ -859,12 +915,14 @@ describe("ExternalAgentManager", () => {
       },
     })
     render(wrap(<ExternalAgentManager />))
-    fireEvent.click(
-      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
-    )
-    expect(screen.getByText(/Latest run: success/)).toBeInTheDocument()
-    expect(screen.getByText(/Trace: trace-1/)).toBeInTheDocument()
-    expect(screen.getByText(/Session: session-1/)).toBeInTheDocument()
+    openTab(en.externalAgent.manager.tabDiagnostics)
+    expect(
+      screen.getByText(en.externalAgent.manager.diagnostics.sectionLatestRun)
+    ).toBeInTheDocument()
+    // An outcome with no label of its own is shown as-is.
+    expect(screen.getByText("success")).toBeInTheDocument()
+    expect(screen.getByText("trace-1")).toBeInTheDocument()
+    expect(screen.getByText("session-1")).toBeInTheDocument()
     expect(screen.getByText(/Run completed cleanly/)).toBeInTheDocument()
   })
 
@@ -1477,8 +1535,8 @@ describe("ExternalAgentManager", () => {
     expect(toast.error).toHaveBeenCalledWith("disk failure")
   })
 
-  it("invokes resumeSession when the resume button is clicked", async () => {
-    const resumeSession = jest.fn().mockResolvedValue(undefined)
+  it("opens a listed session as a conversation: resume, bind, navigate, close", async () => {
+    const resumeSession = jest.fn().mockResolvedValue({ id: "s1" })
     const listSessions = jest.fn().mockResolvedValue([
       {
         sessionId: "s1",
@@ -1512,16 +1570,61 @@ describe("ExternalAgentManager", () => {
       listSessions,
       resumeSession,
     })
+    mockRouterPush.mockClear()
+    const onOpenedInChat = jest.fn()
     await act(async () => {
-      render(wrap(<ExternalAgentManager />))
+      render(wrap(<ExternalAgentManager onOpenedInChat={onOpenedInChat} />))
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.resume }))
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.openInChat }))
     })
     expect(resumeSession).toHaveBeenCalledWith("s1", {
       cwd: "/work",
       additionalDirectories: ["/shared"],
     })
+    expect(mockOpenDeps.startChat).toHaveBeenCalledWith({ title: "Saved", workingDir: "/work" })
+    expect(mockOpenDeps.bind).toHaveBeenCalledWith("agent-1", "s1", "chat-9")
+    expect(onOpenedInChat).toHaveBeenCalledTimes(1)
+    expect(mockRouterPush).toHaveBeenCalledWith("/?session=chat-9")
+  })
+
+  it("stays put and says so when a session cannot be opened in chat", async () => {
+    ;(toast.error as jest.Mock).mockClear()
+    const resumeSession = jest.fn().mockRejectedValue(new Error("agent refused"))
+    const listSessions = jest.fn().mockResolvedValue([{ sessionId: "s1", title: "Saved" }])
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: "agent-1",
+      activeAgentValidity: {
+        executable: true,
+        contractVersion: 1,
+        sessionExtensions: {
+          "session/list": { state: "supported" },
+          "session/resume": { state: "supported" },
+        },
+        lifecycleStage: "execution",
+        canonicalReasonCode: "ok",
+        canonicalReason: "ok",
+      },
+      listSessions,
+      resumeSession,
+    })
+    mockRouterPush.mockClear()
+    mockOpenDeps.startChat.mockClear()
+    const onOpenedInChat = jest.fn()
+    await act(async () => {
+      render(wrap(<ExternalAgentManager onOpenedInChat={onOpenedInChat} />))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.openInChat }))
+    })
+    expect(toast.error).toHaveBeenCalledWith("agent refused")
+    expect(mockOpenDeps.startChat).not.toHaveBeenCalled()
+    expect(onOpenedInChat).not.toHaveBeenCalled()
+    expect(mockRouterPush).not.toHaveBeenCalled()
   })
 
   it("restores listed archived history without resuming it", async () => {

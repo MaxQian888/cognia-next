@@ -229,6 +229,8 @@ describe("AgentTeamTemplatesSection", () => {
     render(<AgentTeamTemplatesSection runtime={makeRuntime().runtime} />)
     expect(screen.getByTestId(`agent-team-template-row-${builtIn.id}`)).toBeInTheDocument()
     expect(screen.getByTestId(`agent-team-template-row-${userTpl.id}`)).toBeInTheDocument()
+    expect(screen.getByTestId(`agent-team-avatar-${builtIn.id}`)).toBeInTheDocument()
+    expect(screen.getByTestId(`agent-team-avatar-${userTpl.id}`)).toBeInTheDocument()
   })
 
   // jsdom does no layout, so this pins the classes that let the actions drop

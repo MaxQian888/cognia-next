@@ -25,7 +25,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { AdvancedOverridesFields, AdvancedOverridesSection } from "./advanced-overrides-section"
-import { emptyAgentOverrides, pickAgentOverrides, type AgentOverrides } from "./agent-overrides"
+import {
+  emptyAgentOverrides,
+  pickAgentOverrides,
+  type AgentOverrides,
+} from "@/lib/agents/agent-overrides"
 
 /** Blur commits through an async draft; settle it inside act. */
 async function commitBlur(element: HTMLElement) {

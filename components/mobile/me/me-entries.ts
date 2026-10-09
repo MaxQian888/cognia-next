@@ -11,6 +11,7 @@
  * equivalent scoped to this namespace.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import type { LucideIcon } from "lucide-react"
 import type { MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import type { Platform } from "@/lib/platform/detect"
@@ -530,7 +531,7 @@ export const ME_ENTRIES: MeEntry[] = [
     // ADR-0140 made a Squad host-neutral: `/squads` declares `standalone:
     // "full"`, carries no `isTauri` gate, and reads a persisted store.
     id: "squads",
-    icon: UsersRoundIcon,
+    icon: AgentTeamIcon,
     spotIcon: "agent-teams",
     labelKey: "squadsRow",
     href: "/squads",
@@ -588,14 +589,17 @@ export const ME_ENTRIES: MeEntry[] = [
       "常用语",
     ],
   },
+  // The agents console (ADR-0220) is the one place agents are listed and
+  // edited, on the phone too; the old `/me/characters` copy of the settings
+  // list is gone.
   {
-    id: "characters",
+    id: "agents",
     spotIcon: "characters",
     icon: DramaIcon,
-    labelKey: "charactersRow",
-    href: "/me/characters",
+    labelKey: "agentsRow",
+    href: "/agents",
     section: "connection",
-    keywords: ["character", "persona", "role", "角色", "人格"],
+    keywords: ["agent", "agents", "character", "persona", "role", "智能体", "角色", "人格"],
   },
   {
     id: "skills",

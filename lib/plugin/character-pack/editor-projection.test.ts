@@ -137,6 +137,14 @@ describe("characterToPackDef", () => {
     expect("id" in def).toBe(false)
   })
 
+  it("never exports an agent's default runtime, which names this device's agents (ADR-0220)", () => {
+    const def = characterToPackDef({
+      ...base,
+      runtime: { kind: "external", agentId: "codex-local" },
+    } as Character)
+    expect("runtime" in def).toBe(false)
+  })
+
   it("carries the v2 fields through when present", () => {
     const def = characterToPackDef({
       ...base,

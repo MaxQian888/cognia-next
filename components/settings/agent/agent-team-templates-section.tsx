@@ -30,6 +30,8 @@
  * every one of those, so it replaced it rather than joining it.
  */
 
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { useMemo, useRef, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -44,7 +46,6 @@ import {
   Trash2Icon,
   UploadIcon,
   UploadCloudIcon,
-  UsersIcon,
 } from "lucide-react"
 import { nanoid } from "nanoid"
 
@@ -410,7 +411,7 @@ export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSection
       >
         <div className="min-w-0 flex-1 basis-60 space-y-1">
           <Label className="flex items-center gap-2">
-            <UsersIcon className="size-4" />
+            <AgentTeamIcon className="size-4" />
             {t("title")}
           </Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
@@ -665,12 +666,7 @@ function TemplateRow({
           beside the text, they left a phone a 120px column in which the name
           broke over two lines and the description showed two words. */}
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base"
-          aria-hidden
-        >
-          {template.icon?.charAt(0) ?? template.name.charAt(0).toUpperCase()}
-        </span>
+        <AgentTeamAvatar subject={template} className="size-10" />
         <div className="min-w-0 flex-1 basis-48">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{template.name}</p>

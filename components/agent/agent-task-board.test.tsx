@@ -58,7 +58,7 @@ jest.mock("@/components/chat/skill-suggestion-card", () => ({
   SkillSuggestionCard: (props: unknown) => skillSuggestionCardMock(props),
 }))
 
-import { AgentTaskBoard, AgentTaskBoardDialog } from "./agent-task-board"
+import { AgentTaskBoard, AgentTaskCreateForm } from "./agent-task-board"
 
 const baseTask: AgentTask = {
   id: "task-1",
@@ -146,8 +146,58 @@ it("offers successful run attempts to the Skill review flow", async () => {
   )
 })
 
-it("opens the selected Agent's board from the Agent row action", () => {
-  render(<AgentTaskBoardDialog agentId="agent-1" agentName="Ada" />)
-  fireEvent.click(screen.getByRole("button", { name: "Open Ada's task board" }))
-  expect(screen.getByRole("dialog")).toHaveTextContent("Ada task board")
+it("hands the created task to the host of the standalone form", async () => {
+  const onCreated = jest.fn()
+  render(<AgentTaskCreateForm agentId="agent-1" onCreated={onCreated} />)
+  fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Research" } })
+  fireEvent.click(screen.getByRole("button", { name: "Add task" }))
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith(baseTask))
+})
+
+it("leaves the form out when the host opens it elsewhere", () => {
+  render(<AgentTaskBoard agentId="agent-1" showCreateForm={false} />)
+  expect(screen.queryByTestId("agent-task-create-form")).not.toBeInTheDocument()
+})
+
+it("shows the host's empty state instead of its own panel when there are no tasks", () => {
+  render(
+    <AgentTaskBoard
+      agentId="agent-1"
+      showCreateForm={false}
+      emptyState={<p data-testid="host-empty">nothing yet</p>}
+    />
+  )
+  expect(screen.getByTestId("host-empty")).toBeInTheDocument()
+  expect(screen.queryByText("No tasks yet")).not.toBeInTheDocument()
+})
+
+it("draws a dense card: priority glyph, title, schedule and dependencies, run counters", () => {
+  useLiveQueryMock.mockImplementation((_query: unknown, deps: unknown[]) =>
+    deps[0] === "agent-1"
+      ? [{ ...baseTask, scheduledFor: Date.UTC(2026, 0, 2), dependencies: ["task-0"] }]
+      : []
+  )
+  render(<AgentTaskBoard agentId="agent-1" showCreateForm={false} />)
+  const card = screen.getByTestId("agent-task-task-1")
+  expect(
+    card.querySelector('[title="High"] [data-testid="issue-priority-icon-high"]')
+  ).not.toBeNull()
+  expect(card).toHaveTextContent("Research")
+  expect(card).toHaveTextContent("Find sources")
+  expect(card).toHaveTextContent("1 dependencies")
+  const details = screen.getByRole("button", { name: "0 attempts · 0 comments" })
+  expect(details).toHaveAttribute("aria-expanded", "false")
+  fireEvent.click(details)
+  expect(details).toHaveAttribute("aria-expanded", "true")
+})
+
+it("heads each column with the tracker's status glyph and lets a host bound its height", () => {
+  useLiveQueryMock.mockImplementation((_query: unknown, deps: unknown[]) =>
+    deps[0] === "agent-1" ? [baseTask] : []
+  )
+  render(<AgentTaskBoard agentId="agent-1" showCreateForm={false} className="flex-1" />)
+  expect(screen.getByTestId("agent-task-board")).toHaveClass("flex-1", "min-h-0")
+  const pending = screen.getByTestId("agent-task-column-pending")
+  expect(pending.querySelector('[data-testid="issue-status-icon-backlog"]')).not.toBeNull()
+  expect(screen.getByTestId("agent-task-column-review")).toHaveTextContent("No tasks")
 })

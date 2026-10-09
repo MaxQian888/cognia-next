@@ -19,7 +19,7 @@
  *     means the row needs updating and not that the session is broken.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import {
@@ -28,14 +28,25 @@ import {
   type ExternalAgentCapabilityId,
   type ExternalAgentCapabilityProfileV1,
 } from "@cognia/agent-config-types/external-agent-capability"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
-const LEVEL_CLASS: Record<ExternalAgentCapabilityCell["level"], string> = {
+type CapabilityLevel = ExternalAgentCapabilityCell["level"]
+
+/** Filter chip order: what the agent can do first, refusals last. */
+const LEVEL_ORDER: readonly CapabilityLevel[] = ["native", "equivalent", "unknown", "unsupported"]
+
+const LEVEL_CLASS: Record<CapabilityLevel, string> = {
   native: "text-emerald-700 dark:text-emerald-400",
   equivalent: "text-sky-700 dark:text-sky-400",
   unknown: "text-amber-700 dark:text-amber-400",
   unsupported: "text-muted-foreground",
+}
+
+const LEVEL_DOT: Record<CapabilityLevel, string> = {
+  native: "bg-emerald-500",
+  equivalent: "bg-sky-500",
+  unknown: "bg-amber-500",
+  unsupported: "bg-muted-foreground/40",
 }
 
 /**
@@ -68,6 +79,9 @@ export function ExternalAgentCapabilityMatrix({
   className,
 }: ExternalAgentCapabilityMatrixProps) {
   const t = useTranslations("externalAgent.capabilities")
+  // One level at a time, or every row. Thirty-odd rows of equal weight read as
+  // a dump; a count per level answers "what can it do" before any row does.
+  const [levelFilter, setLevelFilter] = useState<CapabilityLevel | null>(null)
 
   const rows = useMemo(() => {
     if (!profile) return []
@@ -77,27 +91,39 @@ export function ExternalAgentCapabilityMatrix({
     })).filter(({ cell }) => !onlyAvailable || cell.level !== "unsupported")
   }, [profile, onlyAvailable])
 
+  const counts = useMemo(() => {
+    const byLevel = new Map<CapabilityLevel, number>()
+    for (const { cell } of rows) byLevel.set(cell.level, (byLevel.get(cell.level) ?? 0) + 1)
+    return LEVEL_ORDER.flatMap((level) => {
+      const count = byLevel.get(level)
+      return count ? [{ level, count }] : []
+    })
+  }, [rows])
+
   if (!profile) {
     // Not an error state: a profile only exists after the handshake, and saying
     // "no capabilities" here would be a claim nobody has earned.
     return <p className="text-xs text-muted-foreground">{t("notNegotiated")}</p>
   }
 
+  const visible = levelFilter ? rows.filter(({ cell }) => cell.level === levelFilter) : rows
+
   return (
-    <div className={cn("grid gap-2 text-xs", className)} data-testid="external-agent-capabilities">
+    <div className={cn("grid gap-3 text-xs", className)} data-testid="external-agent-capabilities">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{t("protocol", { protocol: profile.protocol })}</Badge>
-        <Badge variant={profile.negotiated ? "secondary" : "outline"}>
+        <span className="font-medium">{t("protocol", { protocol: profile.protocol })}</span>
+        <span className="text-muted-foreground">·</span>
+        <span className={profile.negotiated ? "text-foreground" : "text-muted-foreground"}>
           {profile.negotiated ? t("negotiated") : t("declaredOnly")}
-        </Badge>
-        <span className="text-muted-foreground">
+        </span>
+        <span className="ml-auto font-mono text-[11px] text-muted-foreground">
           {t("digest", { digest: profile.digest.slice(0, 14) })}
         </span>
       </div>
 
       {profile.drift.length > 0 && (
         <p
-          className="text-amber-700 dark:text-amber-400"
+          className="border-l-2 border-amber-500/70 py-0.5 pl-3 text-amber-700 dark:text-amber-400"
           data-testid="external-agent-capability-drift"
         >
           {t("drift", {
@@ -114,22 +140,84 @@ export function ExternalAgentCapabilityMatrix({
         </p>
       )}
 
-      <ul className="grid gap-1">
-        {rows.map(({ id, cell }) => (
+      <div
+        className="flex flex-wrap gap-1.5"
+        role="group"
+        aria-label={t("filterLabel")}
+        data-testid="capability-filters"
+      >
+        <FilterChip active={levelFilter === null} onClick={() => setLevelFilter(null)}>
+          {t("filterAll")}
+          <span className="font-medium tabular-nums">{rows.length}</span>
+        </FilterChip>
+        {counts.map(({ level, count }) => (
+          <FilterChip
+            key={level}
+            active={levelFilter === level}
+            className={levelFilter === level ? undefined : LEVEL_CLASS[level]}
+            onClick={() => setLevelFilter(levelFilter === level ? null : level)}
+          >
+            {t(`level.${level}`)}
+            <span className="font-medium tabular-nums">{count}</span>
+          </FilterChip>
+        ))}
+      </div>
+
+      <ul className="grid gap-x-8 lg:grid-cols-2">
+        {visible.map(({ id, cell }) => (
           <li
             key={id}
-            className="flex flex-wrap items-baseline gap-x-2"
+            className="flex min-w-0 items-start gap-2.5 border-b border-border/50 py-2"
             data-testid={`capability-${id}`}
           >
-            <span className="font-mono">{id}</span>
-            <span className={LEVEL_CLASS[cell.level]}>{t(`level.${cell.level}`)}</span>
-            <span className="text-muted-foreground">{t(`evidence.${cell.evidence}`)}</span>
-            {cell.reasonKey && (
-              <span className="text-muted-foreground">{reasonText(t, cell.reasonKey)}</span>
-            )}
+            <span
+              className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", LEVEL_DOT[cell.level])}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={id}>
+                  {id}
+                </span>
+                <span className={cn("shrink-0 text-[11px]", LEVEL_CLASS[cell.level])}>
+                  {t(`level.${cell.level}`)}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                {t(`evidence.${cell.evidence}`)}
+                {cell.reasonKey && <> · {reasonText(t, cell.reasonKey)}</>}
+              </p>
+            </div>
           </li>
         ))}
       </ul>
     </div>
+  )
+}
+
+function FilterChip({
+  active,
+  onClick,
+  className,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-6 items-center gap-1.5 rounded-pill bg-muted/60 px-2.5 text-[11px] transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+        active && "bg-foreground text-background hover:bg-foreground/90"
+      )}
+    >
+      {children}
+    </button>
   )
 }

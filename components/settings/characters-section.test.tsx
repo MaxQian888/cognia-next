@@ -1,602 +1,92 @@
 /**
  * @jest-environment jsdom
  *
- * Focused coverage for the ADR-0030 v2 fields added to `CharacterEditor`
- * (persona / voice / avatar image / platform availability). The pure
- * state→output projection is tested in
- * `lib/plugin/character-pack/editor-projection.test.ts`; this exercises the
- * editor wiring — that the form hydrates from `initial` and `onSave` receives
- * the projected v2 shapes.
+ * Settings → Agent packs & knowledge (ADR-0220): the agents themselves live on
+ * `/agents`, so this section shows an entry card that leads there, the
+ * character packs, and the reusable knowledge bases.
  */
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values && "count" in values ? `${key}:${String(values.count)}` : key,
 }))
 
-jest.mock("@/components/settings/character/twin-binding-section", () => ({
-  TwinBindingSection: () => null,
-}))
-
-jest.mock("@/components/settings/speech/test-tts-button", () => ({
-  TestTtsButton: () => null,
+jest.mock("next/link", () => ({
+  __esModule: true,
+  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
 }))
 
 jest.mock("@/components/settings/knowledge-base-manager", () => ({
   KnowledgeBaseManager: () => null,
 }))
 
-jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
-  listNativeAnthropicToolEntries: () => [],
-  listNativeAnthropicToolIds: () => [],
-}))
-
-jest.mock("@/lib/subscription/core/transport", () => ({
-  listAccounts: jest.fn(async () => []),
-  listSubscriptionProviderIds: jest.fn(async () => [
-    "anthropic",
-    "codex",
-    "opencode",
-    "commandcode",
-    "custom-service",
-  ]),
-}))
-
-let mockSubscriptionAccounts: Record<
-  string,
-  { accounts: Array<{ id: string; label?: string; email?: string }> }
-> = {}
-jest.mock("@/lib/subscription/core/hooks", () => ({
-  useSubscriptionAccounts: () => ({ byProvider: mockSubscriptionAccounts, providers: [] }),
-}))
-
-const mockSaveAgentEnvSecret = jest.fn(async (..._args: unknown[]) => undefined)
-jest.mock("@/lib/agent/agent-env-keyring", () => ({
-  createAgentEnvSecretRef: (agentId: string, name: string) => `${agentId}:${name}:new`,
-  saveAgentEnvSecret: (...args: unknown[]) => mockSaveAgentEnvSecret(...args),
-}))
-
-// --- Mounting <CharactersSection> needs the data layer stubbed. -------------
-// `mock`-prefixed names are the only out-of-scope refs jest allows inside a
-// hoisted factory.
-let mockCharacterList: Character[] = []
-const mockDeleteCharacter = jest.fn(async (_id: string) => undefined)
-const mockCreateCharacterVariant = jest.fn(async (..._args: unknown[]) => ({}) as Character)
-const mockDetachCharacterVariant = jest.fn(async (_id: string) => ({}) as Character)
-const mockResetCharacterVariant = jest.fn(async (_id: string) => ({}) as Character)
-const mockToastError = jest.fn()
-const mockToastSuccess = jest.fn()
-const mockDownloadBlob = jest.fn()
-let mockKnowledgeBases: Array<{
-  id: string
-  name: string
-  createdAt: number
-  updatedAt: number
-}> = []
+let mockAgentCount = 0
+let mockKnowledgeBases: Array<{ id: string; name: string; createdAt: number; updatedAt: number }> =
+  []
 const mockCreateKnowledgeBase = jest.fn(async (..._args: unknown[]) => undefined)
-const mockDeleteKnowledgeBase = jest.fn(async (..._args: unknown[]) => undefined)
 
 jest.mock("dexie-react-hooks", () => ({
-  // The three useLiveQuery calls (characters/skills/mcp) read synchronous
-  // mock data — invoke the query fn and return its result directly.
-  useLiveQuery: (fn: () => unknown) => fn(),
-}))
-
-// The `useLiveQuery` stub above ignores the initial-value argument, so the
-// sandbox hook's own `?? []` never applies and its query Promise would reach
-// the picker. Supply the list directly, which also lets the cua-desktop tier
-// tests exercise a bound desktop.
-jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
-  useSandboxConnections: () => ({
-    connections: [{ id: "connection-1", name: "docker desktop" }],
-    create: jest.fn(),
-    update: jest.fn(),
-    remove: jest.fn(),
-    provision: jest.fn(),
-    start: jest.fn(),
-    suspend: jest.fn(),
-    resume: jest.fn(),
-    stop: jest.fn(),
-    refreshHealth: jest.fn(),
-  }),
-}))
-
-jest.mock("sonner", () => ({
-  toast: {
-    error: (...a: unknown[]) => mockToastError(...a),
-    success: (...a: unknown[]) => mockToastSuccess(...a),
+  // Synchronous stand-in: the query fns below return plain values.
+  useLiveQuery: (fn: () => unknown) => {
+    const value = fn()
+    return value instanceof Promise ? mockAgentCount : value
   },
 }))
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
 
 jest.mock("@/lib/db/characters", () => ({
-  CharacterHasVariantsError: class CharacterHasVariantsError extends Error {
-    variantNames: string[]
-    constructor(id: string, names: string[]) {
-      super(id)
-      this.variantNames = names
-    }
-  },
-  listCharacters: () => mockCharacterList,
-  listResolvedCharacters: () => mockCharacterList,
-  createCharacterVariant: (...a: unknown[]) => mockCreateCharacterVariant(...a),
-  detachCharacterVariant: (id: string) => mockDetachCharacterVariant(id),
-  resetCharacterVariant: (id: string) => mockResetCharacterVariant(id),
-  createCharacter: jest.fn(async () => ({ id: "new" })),
-  updateCharacter: jest.fn(async () => undefined),
-  deleteCharacter: (id: string) => mockDeleteCharacter(id),
-  duplicateCharacter: jest.fn(async () => ({ id: "dup" })),
-  applyPackUpdate: jest.fn(async () => undefined),
-  applyPackUpdateForPack: jest.fn(async () => undefined),
-  dismissPackUpdate: jest.fn(async () => undefined),
+  listResolvedCharacters: async () => Array.from({ length: mockAgentCount }),
 }))
-
-jest.mock("@/lib/db/skills", () => ({ listSkills: () => [] }))
-jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: () => [] }))
 jest.mock("@/lib/db/knowledge-bases", () => ({
   listKnowledgeBases: () => mockKnowledgeBases,
   createKnowledgeBase: (...args: unknown[]) => mockCreateKnowledgeBase(...args),
-  deleteKnowledgeBase: (...args: unknown[]) => mockDeleteKnowledgeBase(...args),
   getKnowledgeBaseReferences: jest.fn(async () => []),
 }))
 jest.mock("@/lib/knowledge-base/ingest/ingest-source", () => ({
-  removeKnowledgeBase: (...args: unknown[]) => mockDeleteKnowledgeBase(...args),
+  removeKnowledgeBase: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
   tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
 }))
 jest.mock("@/hooks/plugins/use-plugin-metadata", () => ({ usePluginMetadata: () => undefined }))
-jest.mock("@/stores/ui/ui-store", () => ({
-  useUIStore: (
-    sel: (s: { pendingCreateRequest: undefined; clearPendingCreate: () => void }) => unknown
-  ) => sel({ pendingCreateRequest: undefined, clearPendingCreate: () => {} }),
-}))
-// Only consulted once a tool-filter override is opened in the advanced area.
-jest.mock("@/lib/tools/tool-catalog", () => ({
-  getToolCatalog: jest.fn(async () => []),
-  searchToolCatalog: (entries: unknown[]) => entries,
-}))
-jest.mock("@/lib/files/download", () => ({
-  downloadBlob: (...a: unknown[]) => mockDownloadBlob(...a),
-}))
 
+import type React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 
-import { CharacterEditor, CharactersSection, type EditorState } from "./characters-section"
-import type { Character } from "@cognia/agent-config-types"
+import { CharactersSection } from "./characters-section"
 import {
   __resetCharacterPacksForTesting,
   refreshAllPackWarnings,
   registerCharacterPack,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
-import {
-  AGENT_OVERRIDE_FIELDS,
-  emptyAgentOverrides,
-  pickAgentOverrides,
-} from "@/components/settings/character/agent-overrides"
-import { createCharacter, updateCharacter } from "@/lib/db/characters"
 
 afterEach(() => {
   __resetCharacterPacksForTesting()
   __resetSkillsForTesting()
-  mockSaveAgentEnvSecret.mockClear()
-  mockSubscriptionAccounts = {}
+  mockAgentCount = 0
   mockKnowledgeBases = []
   mockCreateKnowledgeBase.mockClear()
-  mockDeleteKnowledgeBase.mockClear()
 })
 
-// Narrow view of the EditorOutput payload the assertions read.
-type SavePayload = {
-  model?: string
-  modelRouting?: Character["modelRouting"]
-  executionPolicy?: Character["executionPolicy"]
-  persona?: unknown
-  voiceProfile?: unknown
-  avatarImage?: { webDataUrl?: string }
-  availableOnPlatforms?: unknown
-  knowledgeBaseIds?: string[]
-  pluginSkillIds?: string[]
-  memoryPolicy?: Character["memoryPolicy"]
-}
-
-function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
-  return {
-    name: "Tutor",
-    description: "",
-    avatarColor: "oklch(0.7 0 0)",
-    avatarEmoji: "🐙",
-    systemPrompt: "You are a tutor.",
-    model: "",
-    planModel: "",
-    utilityModel: "",
-    executionEffort: "inherit",
-    executionMaxTurns: "",
-    executionEnvBindings: undefined,
-    computerUseTarget: "local",
-    permissionMode: undefined,
-    allowedTools: [],
-    disallowedTools: [],
-    mcpServerIds: undefined,
-    skillIds: [],
-    pluginSkillIds: [],
-    knowledgeBaseIds: [],
-    memoryRecall: true,
-    memoryCreate: true,
-    memoryUpdate: true,
-    memoryForget: true,
-    memoryAutoLearn: true,
-    memoryReadableScopes: ["global", "workspace", "character", "agent"],
-    memoryWritableScopes: ["global", "workspace", "character", "agent"],
-    workingDir: "",
-    bareMode: false,
-    debugMode: false,
-    briefMode: false,
-    twinId: undefined,
-    twinSettings: undefined,
-    enableComputerUse: false,
-    enableBrowserTools: false,
-    computerUseSettings: undefined,
-    sandboxEnabled: false,
-    sandboxTier: "inherit",
-    accountIdOverride: "inherit",
-    personaTone: "",
-    personaPersonality: "",
-    openingMessage: "",
-    exemplarPromptsText: "",
-    avatarImageDataUrl: "",
-    voiceProvider: "none",
-    voiceId: "",
-    voiceRate: 1,
-    voicePitch: 1,
-    voiceVolume: 1,
-    availablePlatforms: [],
-    overrides: emptyAgentOverrides(),
-    ...overrides,
-  }
-}
-
-function renderEditor(
-  initial: EditorState,
-  knowledgeBaseCatalog: Array<{
-    id: string
-    name: string
-    description?: string
-    createdAt: number
-    updatedAt: number
-  }> = []
-) {
-  const onSave = jest.fn(async (_data: SavePayload) => undefined)
-  render(
-    <CharacterEditor
-      initial={initial}
-      skillsCatalog={[]}
-      mcpCatalog={[]}
-      knowledgeBaseCatalog={knowledgeBaseCatalog}
-      submitLabel="Save"
-      onCancel={() => undefined}
-      onSave={onSave}
-    />
-  )
-  return { onSave }
-}
-
-describe("CharacterEditor — v2 fields", () => {
-  it("keeps the cua-desktop tier visible but disabled while nothing is bound", async () => {
-    // The tier runs shell and file work inside the bound desktop, so without
-    // one it can only ever be refused at send time. Disabled and explained
-    // rather than hidden, so the requirement is discoverable.
-    renderEditor(baseInitial({ sandboxTier: "cua-desktop", computerUseTarget: "local" }))
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(screen.getByText("tier.cuaDesktopNeedsBoundDesktop")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("character-sandbox-tier"))
-    expect(screen.getByRole("option", { name: "tier.cuaDesktop" })).toHaveAttribute(
-      "aria-disabled",
-      "true"
+describe("CharactersSection", () => {
+  it("leads to the agents console, saying how many agents are there", () => {
+    mockAgentCount = 4
+    render(<CharactersSection />)
+    expect(screen.getByTestId("agents-entry-card")).toHaveTextContent("agentsEntry.description:4")
+    expect(screen.getByRole("link", { name: /agentsEntry\.open/ })).toHaveAttribute(
+      "href",
+      "/agents"
     )
   })
 
-  it("offers the cua-desktop tier once a desktop is bound", async () => {
-    // `docker exec` carries shell and file work into the container, so the
-    // tier is selectable. Leaving it permanently disabled would ship the whole
-    // path unreachable.
-    renderEditor(
-      baseInitial({
-        sandboxTier: "cua-desktop",
-        enableComputerUse: true,
-        computerUseTarget: "connection-1",
-      })
-    )
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(screen.queryByText("tier.cuaDesktopNeedsBoundDesktop")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("character-sandbox-tier"))
-    expect(screen.getByRole("option", { name: "tier.cuaDesktop" })).not.toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
-  })
-
-  it("hydrates persona, voice, avatar image, and platform fields from initial and saves them", async () => {
-    const { onSave } = renderEditor(
-      baseInitial({
-        personaTone: "warm",
-        personaPersonality: "Patient teacher",
-        openingMessage: "Hi there!",
-        exemplarPromptsText: "Explain X\nDraft Y",
-        avatarImageDataUrl: "data:image/png;base64,AAAA",
-        voiceProvider: "openai",
-        voiceId: "alloy",
-        availablePlatforms: ["tauri"],
-      })
-    )
-
-    // Persona inputs hydrate.
-    expect(screen.getByDisplayValue("warm")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("Patient teacher")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("Hi there!")).toBeInTheDocument()
-    // Avatar image renders.
-    expect(document.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAAA")
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    const payload = onSave.mock.calls[0][0]
-    expect(payload.persona).toEqual({
-      tone: "warm",
-      personality: "Patient teacher",
-      openingMessage: "Hi there!",
-      exemplarPrompts: ["Explain X", "Draft Y"],
-    })
-    expect(payload.voiceProfile).toEqual({
-      provider: "openai",
-      voiceId: "alloy",
-      rate: 1,
-      pitch: 1,
-      volume: 1,
-    })
-    expect(payload.avatarImage).toEqual({ webDataUrl: "data:image/png;base64,AAAA" })
-    expect(payload.availableOnPlatforms).toEqual(["tauri"])
-  })
-
-  it("omits the v2 fields when blank (no persona / voice / image / platform restriction)", async () => {
-    const { onSave } = renderEditor(baseInitial())
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    const payload = onSave.mock.calls[0][0]
-    expect(payload.persona).toBeUndefined()
-    expect(payload.voiceProfile).toBeUndefined()
-    expect(payload.avatarImage).toBeUndefined()
-    expect(payload.availableOnPlatforms).toBeUndefined()
-  })
-
-  it("toggles a platform restriction via the badge", async () => {
-    const { onSave } = renderEditor(baseInitial())
-    fireEvent.click(screen.getByText("platforms.tauri"))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["tauri"])
-  })
-
-  it("can restrict a character to the mobile platform", async () => {
-    const { onSave } = renderEditor(baseInitial())
-    fireEvent.click(screen.getByText("platforms.mobile"))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["mobile"])
-  })
-
-  it("clears the avatar image via the remove button", async () => {
-    const { onSave } = renderEditor(
-      baseInitial({ avatarImageDataUrl: "data:image/png;base64,AAAA" })
-    )
-    expect(document.querySelector("img")).not.toBeNull()
-    fireEvent.click(screen.getByText("avatarImage.clear"))
-    expect(document.querySelector("img")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].avatarImage).toBeUndefined()
-  })
-
-  it("reads an uploaded image file into a data URL", async () => {
-    const { onSave } = renderEditor(baseInitial())
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
-    const file = new File(["binary"], "avatar.png", { type: "image/png" })
-    fireEvent.change(fileInput, { target: { files: [file] } })
-    // FileReader.readAsDataURL is async — wait for the avatar img to appear.
-    await waitFor(() =>
-      expect(document.querySelector("img")?.getAttribute("src")).toMatch(/^data:/)
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].avatarImage?.webDataUrl).toMatch(/^data:/)
-  })
-})
-
-describe("CharacterEditor — Agent profile", () => {
-  it("persists Agent memory operations, scopes, and automatic learning", async () => {
-    const { onSave } = renderEditor(baseInitial())
-
-    fireEvent.click(screen.getByRole("switch", { name: "operations.recall" }))
-    fireEvent.click(screen.getByRole("switch", { name: "operations.autoLearn" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "readableScopes: scopes.global" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "writableScopes: scopes.workspace" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].memoryPolicy).toEqual({
-      operations: {
-        recall: false,
-        create: true,
-        update: true,
-        forget: true,
-      },
-      readableScopes: ["workspace", "character", "agent"],
-      writableScopes: ["global", "character", "agent"],
-      autoLearn: false,
-    })
-  })
-
-  it("binds multiple reusable Knowledge Bases to the Agent", async () => {
-    const { onSave } = renderEditor(baseInitial(), [
-      { id: "kb-product", name: "Product docs", createdAt: 1, updatedAt: 1 },
-      { id: "kb-support", name: "Support notes", createdAt: 1, updatedAt: 1 },
-    ])
-
-    fireEvent.click(screen.getByRole("button", { name: "Product docs" }))
-    fireEvent.click(screen.getByRole("button", { name: "Support notes" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].knowledgeBaseIds).toEqual(["kb-product", "kb-support"])
-  })
-
-  it("attaches a plugin skill and keeps ids of plugins that are currently off", async () => {
-    const { registerSkill, unregisterSkillsByPlugin } = jest.requireActual<
-      typeof import("@/lib/plugin/registries/skill-registry")
-    >("@/lib/plugin/registries/skill-registry")
-    registerSkill(
-      "acme:review",
-      {
-        id: "acme:review",
-        name: "Acme review",
-        description: "Reviews a diff",
-        source: { kind: "inline", markdown: "# review" },
-      },
-      { pluginId: "acme" }
-    )
-    try {
-      const { onSave } = renderEditor(baseInitial({ pluginSkillIds: ["offline:skill"] }))
-      fireEvent.click(screen.getByRole("button", { name: "Acme review" }))
-      fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-      expect(onSave.mock.calls[0][0].pluginSkillIds).toEqual(["offline:skill", "acme:review"])
-    } finally {
-      unregisterSkillsByPlugin("acme")
-    }
-  })
-
-  it("saves semantic model targets and Agent execution defaults", async () => {
-    const { onSave } = renderEditor(
-      baseInitial({
-        planModel: "planner-alias",
-        model: "executor-alias",
-        utilityModel: "fast-alias",
-        executionEffort: "high",
-        executionMaxTurns: "24",
-      })
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0]).toEqual(
-      expect.objectContaining({
-        model: "executor-alias",
-        modelRouting: {
-          plan: "planner-alias",
-          execute: "executor-alias",
-          utility: "fast-alias",
-        },
-        executionPolicy: { effort: "high", maxTurns: 24, envBindings: undefined },
-      })
-    )
-  })
-
-  it("preserves existing secure environment references when editing other defaults", async () => {
-    const envBindings = [{ name: "TOKEN", kind: "secret" as const, secretRef: "agent-1:TOKEN" }]
-    const { onSave } = renderEditor(
-      baseInitial({ executionMaxTurns: "8", executionEnvBindings: envBindings })
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].executionPolicy).toEqual({
-      effort: undefined,
-      maxTurns: 8,
-      envBindings,
-    })
-  })
-
-  it("saves plain environment bindings with the Agent profile", async () => {
-    const { onSave } = renderEditor(baseInitial({ executionMaxTurns: "8" }))
-
-    fireEvent.click(screen.getByRole("button", { name: "execution.addEnv" }))
-    fireEvent.change(screen.getByLabelText("execution.envName"), {
-      target: { value: "API_BASE_URL" },
-    })
-    fireEvent.change(screen.getByLabelText("execution.envValue"), {
-      target: { value: "https://example.test" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(onSave.mock.calls[0][0].executionPolicy?.envBindings).toEqual([
-      { name: "API_BASE_URL", kind: "plain", value: "https://example.test" },
-    ])
-    expect(mockSaveAgentEnvSecret).not.toHaveBeenCalled()
-  })
-
-  it("updates a secure environment value in the keyring without persisting the value", async () => {
-    const envBindings = [{ name: "TOKEN", kind: "secret" as const, secretRef: "agent-1:TOKEN" }]
-    const { onSave } = renderEditor(baseInitial({ executionEnvBindings: envBindings }))
-
-    fireEvent.change(screen.getByLabelText("execution.envValue"), {
-      target: { value: "super-secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    expect(mockSaveAgentEnvSecret).toHaveBeenCalledWith("agent-1:TOKEN", "super-secret")
-    expect(onSave.mock.calls[0][0].executionPolicy?.envBindings).toEqual(envBindings)
-    expect(JSON.stringify(onSave.mock.calls[0][0])).not.toContain("super-secret")
-  })
-
-  it("rejects a max-turn value outside the runtime range", async () => {
-    const { onSave } = renderEditor(baseInitial({ executionMaxTurns: "101" }))
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).not.toHaveBeenCalled())
-  })
-})
-
-describe("CharactersSection — list, search & bulk (C2/C3)", () => {
-  beforeEach(() => {
-    mockCharacterList = [
-      {
-        id: "char_a",
-        name: "Coder",
-        systemPrompt: "x",
-        avatarColor: "#abc",
-        isBuiltIn: true,
-        createdAt: 0,
-        updatedAt: 0,
-      },
-      {
-        id: "char_b",
-        name: "Helper",
-        description: "writes docs",
-        systemPrompt: "x",
-        avatarColor: "#abc",
-        createdAt: 0,
-        updatedAt: 0,
-      },
-      {
-        id: "char_c",
-        name: "Researcher",
-        systemPrompt: "x",
-        avatarColor: "#abc",
-        createdAt: 0,
-        updatedAt: 0,
-      },
-    ] as Character[]
-    mockDeleteCharacter.mockReset().mockResolvedValue(undefined)
-    mockDownloadBlob.mockReset()
+  it("no longer lists or edits agents itself", () => {
+    render(<CharactersSection />)
+    expect(screen.queryByPlaceholderText("searchPlaceholder")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "newCharacter" })).not.toBeInTheDocument()
   })
 
   it("creates a reusable Knowledge Base from the Agent settings surface", async () => {
@@ -610,59 +100,6 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
     await waitFor(() =>
       expect(mockCreateKnowledgeBase).toHaveBeenCalledWith({ name: "Product docs" })
     )
-  })
-
-  it("renders all characters and filters by search query (name + description)", () => {
-    render(<CharactersSection />)
-    expect(screen.getByText("Coder")).toBeInTheDocument()
-    expect(screen.getByText("Helper")).toBeInTheDocument()
-    expect(screen.getByText("Researcher")).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText("searchPlaceholder"), { target: { value: "doc" } })
-    expect(screen.queryByText("Coder")).not.toBeInTheDocument()
-    expect(screen.getByText("Helper")).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText("searchPlaceholder"), { target: { value: "zzz" } })
-    expect(screen.getByText("noMatches")).toBeInTheDocument()
-  })
-
-  it("bulk-deletes selected characters, tolerating ones that can't be deleted", async () => {
-    mockDeleteCharacter.mockImplementation(async (id: string) => {
-      if (id === "char_a") throw new Error("built-in")
-    })
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "bulk.select" }))
-    const checkboxes = screen.getAllByRole("checkbox")
-    expect(checkboxes).toHaveLength(3)
-    checkboxes.forEach((cb) => fireEvent.click(cb))
-    fireEvent.click(screen.getByRole("button", { name: /bulk\.deleteSelected/ }))
-    await waitFor(() => expect(mockDeleteCharacter).toHaveBeenCalledTimes(3))
-    expect(mockDeleteCharacter).toHaveBeenCalledWith("char_a")
-    expect(mockDeleteCharacter).toHaveBeenCalledWith("char_b")
-    // Exits selection mode without crashing despite the rejected delete.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "bulk.select" })).toBeInTheDocument()
-    )
-  })
-
-  it("bulk-exports selected characters as a .cognia-pack.json download", () => {
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "bulk.select" }))
-    fireEvent.click(screen.getAllByRole("checkbox")[1]) // Helper
-    fireEvent.click(screen.getByRole("button", { name: /bulk\.exportSelected/ }))
-    expect(mockDownloadBlob).toHaveBeenCalledTimes(1)
-    const [blob, filename] = mockDownloadBlob.mock.calls[0]
-    expect(blob).toBeInstanceOf(Blob)
-    expect(filename).toMatch(/\.cognia-pack\.json$/)
-  })
-
-  it("disables the bulk actions until at least one character is selected", () => {
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "bulk.select" }))
-    expect(screen.getByRole("button", { name: /bulk\.deleteSelected/ })).toBeDisabled()
-    expect(screen.getByRole("button", { name: /bulk\.exportSelected/ })).toBeDisabled()
-    fireEvent.click(screen.getAllByRole("checkbox")[0])
-    expect(screen.getByRole("button", { name: /bulk\.deleteSelected/ })).toBeEnabled()
   })
 
   it("immediately renders packs registered after the settings screen mounted", () => {
@@ -701,7 +138,7 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
         { pluginId: "test-plugin" }
       )
     })
-    expect(screen.getByText("badge.missingDep")).toBeInTheDocument()
+    expect(screen.getByText(/badge\.missingDep/)).toBeInTheDocument()
 
     act(() => {
       registerSkill("later-skill", {
@@ -713,225 +150,6 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
       refreshAllPackWarnings()
     })
 
-    expect(screen.queryByText("badge.missingDep")).not.toBeInTheDocument()
-  })
-})
-
-it("includes registry-backed accounts in the character subscription picker", async () => {
-  mockSubscriptionAccounts = {
-    "custom-service": { accounts: [{ id: "cc-character", label: "Custom work" }] },
-  }
-  renderEditor(baseInitial())
-  fireEvent.click(screen.getByTestId("character-account-override"))
-  expect(await screen.findByRole("option", { name: "optionLabel" })).toBeInTheDocument()
-})
-
-describe("CharactersSection — agent variants", () => {
-  const base: Character = {
-    id: "char_base",
-    name: "Reviewer",
-    systemPrompt: "x",
-    avatarColor: "#abc",
-    createdAt: 0,
-    updatedAt: 0,
-  }
-  const variant: Character = {
-    id: "char_variant",
-    name: "Reviewer (strict)",
-    systemPrompt: "x",
-    avatarColor: "#abc",
-    variant: { baseId: "char_base", ownFields: ["model"] },
-    createdAt: 0,
-    updatedAt: 0,
-  }
-
-  beforeEach(() => {
-    mockCharacterList = [base, variant]
-    mockCreateCharacterVariant.mockReset().mockResolvedValue({ ...variant, id: "char_new" })
-    mockDetachCharacterVariant.mockReset().mockResolvedValue(base)
-    mockResetCharacterVariant.mockReset().mockResolvedValue(variant)
-    mockDeleteCharacter.mockReset().mockResolvedValue(undefined)
-    mockToastError.mockReset()
-    mockToastSuccess.mockReset()
-  })
-
-  it("creates a variant of the chosen agent under a translated default name", async () => {
-    render(<CharactersSection />)
-    fireEvent.click(screen.getAllByRole("button", { name: "variants.createAria" })[0]!)
-    await waitFor(() =>
-      expect(mockCreateCharacterVariant).toHaveBeenCalledWith("char_base", "variants.defaultName")
-    )
-    expect(mockToastSuccess).toHaveBeenCalledWith("variants.createdToast")
-  })
-
-  it("badges a variant and offers reset and detach only on variants", async () => {
-    render(<CharactersSection />)
-    expect(screen.getByText("variants.badge")).toBeInTheDocument()
-    expect(screen.getAllByRole("button", { name: "variants.resetAria" })).toHaveLength(1)
-
-    fireEvent.click(screen.getByRole("button", { name: "variants.resetAria" }))
-    await waitFor(() => expect(mockResetCharacterVariant).toHaveBeenCalledWith("char_variant"))
-
-    fireEvent.click(screen.getByRole("button", { name: "variants.detachAria" }))
-    await waitFor(() => expect(mockDetachCharacterVariant).toHaveBeenCalledWith("char_variant"))
-  })
-
-  it("disables reset when the variant overrides nothing", () => {
-    mockCharacterList = [base, { ...variant, variant: { baseId: "char_base", ownFields: [] } }]
-    render(<CharactersSection />)
-    expect(screen.getByRole("button", { name: "variants.resetAria" })).toBeDisabled()
-  })
-
-  it("tells the editor it is editing a variant", () => {
-    render(<CharactersSection />)
-    const editButtons = screen.getAllByRole("button", { name: "editAria" })
-    fireEvent.click(editButtons[1]!)
-    expect(screen.getByTestId("variant-editor-notice")).toHaveTextContent("variants.editorNotice")
-  })
-
-  it("explains why a base with variants cannot be deleted", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { CharacterHasVariantsError } = require("@/lib/db/characters")
-    mockDeleteCharacter.mockRejectedValue(new CharacterHasVariantsError("char_base", ["Strict"]))
-    render(<CharactersSection />)
-    fireEvent.click(screen.getAllByRole("button", { name: "deleteAria" })[0]!)
-    fireEvent.click(await screen.findByRole("button", { name: "remove" }))
-    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("variants.deleteBlocked"))
-  })
-})
-
-describe("CharacterEditor — advanced overrides", () => {
-  // One value for every override the editor owns, each deliberately NOT the
-  // default a control would seed, so a round trip that normalised anything
-  // would show up as a diff.
-  const everyOverride = {
-    providerId: "openrouter",
-    sandboxPolicy: { maxCpuSeconds: 30, network: "allowlist", networkAllowlist: ["api.test"] },
-    toolFilter: { mode: "deny", tools: ["Bash"], mcpServerIds: ["github"] },
-    toolSearchRuntimeOverride: { enabled: false, alwaysLoadTools: ["read_file"] },
-    compactionOverride: { compressionEnabled: false, tokenThreshold: 70 },
-    instructionsOverride: { enabled: true, mode: "nearest", fileNames: ["RULES.md"] },
-    outputStyle: "some-pack-style",
-    customOutputStyle: "  Keep it short.  ",
-    maxThinkingTokens: 0,
-    a2uiEnabled: false,
-    // A pack catalog that is not registered here must still round-trip.
-    a2uiCatalogId: "pack-financial-catalog",
-    enableOcr: false,
-    enableBuiltInSkills: true,
-    disablePluginTools: false,
-    workspaceConfinementEnabled: false,
-    platformDefaults: { mode: "draft", trigger: { storeUnmatchedInDraftMode: true } },
-  } satisfies Partial<Character>
-
-  const agent = (extra: Partial<Character> = {}): Character => ({
-    id: "char_full",
-    name: "Full",
-    systemPrompt: "x",
-    avatarColor: "#abc",
-    createdAt: 0,
-    updatedAt: 0,
-    ...extra,
-  })
-
-  const updateMock = updateCharacter as jest.Mock
-  const createMock = createCharacter as jest.Mock
-
-  beforeEach(() => {
-    updateMock.mockClear()
-    createMock.mockClear()
-  })
-
-  it("covers every override field in the round-trip fixture", () => {
-    expect(Object.keys(everyOverride).sort()).toEqual([...AGENT_OVERRIDE_FIELDS].sort())
-  })
-
-  it("loads an agent with every override set and saves each one back identical", async () => {
-    mockCharacterList = [agent(everyOverride)]
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-
-    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
-    const [id, patch] = updateMock.mock.calls[0] as [string, Partial<Character>]
-    expect(id).toBe("char_full")
-    for (const field of AGENT_OVERRIDE_FIELDS) {
-      // Same reference, not merely equal: nothing was rebuilt on the way through.
-      expect(patch[field]).toBe(everyOverride[field])
-    }
-  })
-
-  it("round-trips them unchanged even with every override control mounted", async () => {
-    const user = userEvent.setup()
-    mockCharacterList = [agent(everyOverride)]
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
-    await user.click(screen.getByTestId("agent-advanced-overrides"))
-    expect(screen.getByTestId("agent-override-tool-filter")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "save" }))
-
-    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
-    const patch = updateMock.mock.calls[0]![1] as Partial<Character>
-    for (const field of AGENT_OVERRIDE_FIELDS) expect(patch[field]).toBe(everyOverride[field])
-  })
-
-  it("saves none of them for an agent that sets none", async () => {
-    mockCharacterList = [agent()]
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "editAria" }))
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-
-    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1))
-    const patch = updateMock.mock.calls[0]![1] as Partial<Character>
-    expect(pickAgentOverrides(patch)).toEqual(emptyAgentOverrides())
-  })
-
-  it("creates a new agent without inventing any override", async () => {
-    mockCharacterList = []
-    render(<CharactersSection />)
-    fireEvent.click(screen.getByRole("button", { name: "newCharacter" }))
-    // The knowledge-base form above shares both keys; the editor renders last.
-    fireEvent.change(screen.getAllByPlaceholderText("namePlaceholder").at(-1)!, {
-      target: { value: "New" },
-    })
-    fireEvent.change(screen.getByPlaceholderText("systemPromptPlaceholder"), {
-      target: { value: "Be helpful." },
-    })
-    fireEvent.click(screen.getAllByRole("button", { name: "create" }).at(-1)!)
-
-    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1))
-    const draft = createMock.mock.calls[0]![0] as Partial<Character>
-    for (const field of AGENT_OVERRIDE_FIELDS) expect(draft[field]).toBeUndefined()
-  })
-
-  it("keeps the overrides collapsed until opened, then saves an edit made there", async () => {
-    const user = userEvent.setup()
-    const { onSave } = renderEditor(baseInitial())
-    expect(screen.queryByRole("combobox", { name: "ocr.label" })).not.toBeInTheDocument()
-
-    await user.click(screen.getByTestId("agent-advanced-overrides"))
-    await user.click(screen.getByRole("combobox", { name: "ocr.label" }))
-    await user.click(screen.getByRole("option", { name: "off" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    const payload = onSave.mock.calls[0]![0] as Partial<Character>
-    expect(payload.enableOcr).toBe(false)
-    expect(payload.providerId).toBeUndefined()
-  })
-
-  it("clears a stored override that is switched back to inherit", async () => {
-    const user = userEvent.setup()
-    const { onSave } = renderEditor(
-      baseInitial({ overrides: pickAgentOverrides({ workspaceConfinementEnabled: false }) })
-    )
-    await user.click(screen.getByTestId("agent-advanced-overrides"))
-    await user.click(screen.getByRole("combobox", { name: "workspaceConfinement.label" }))
-    await user.click(screen.getByRole("option", { name: "inherit" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    const payload = onSave.mock.calls[0]![0] as Partial<Character>
-    expect(payload).toHaveProperty("workspaceConfinementEnabled", undefined)
+    expect(screen.queryByText(/badge\.missingDep/)).not.toBeInTheDocument()
   })
 })

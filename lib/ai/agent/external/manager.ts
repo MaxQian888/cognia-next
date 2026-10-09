@@ -3930,6 +3930,28 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Hand one live native session to a Cognia conversation.
+   *
+   * Stamps the same `cogniaSessionId` marker `resolveExecutionSession` writes
+   * after a turn, so {@link resolveConversationSessionId} and the reuse lookup
+   * in `execute` both answer with this session for that conversation's next
+   * native turn instead of opening a fresh one. `false` when the session is
+   * not live on this agent (resume it first) or is a gateway task, which a
+   * native conversation must never continue.
+   */
+  bindSessionToConversation(agentId: string, sessionId: string, chatSessionId: string): boolean {
+    if (sessionId.startsWith("cognia-gateway:")) return false
+    const session = this.liveSessions(agentId).find((candidate) => candidate.id === sessionId)
+    if (!session) return false
+    session.metadata = { ...(session.metadata ?? {}), cogniaSessionId: chatSessionId }
+    const cached = this.instances.get(agentId)?.sessions.get(sessionId)
+    if (cached && cached !== session) {
+      cached.metadata = { ...(cached.metadata ?? {}), cogniaSessionId: chatSessionId }
+    }
+    return true
+  }
+
+  /**
    * Get a session by ID
    */
   getSession(agentId: string, sessionId: string): ExternalAgentSession | undefined {
