@@ -967,6 +967,9 @@ pub fn plugin_python_list_for_state(state: &PythonRuntimeState) -> Vec<String> {
 
 /// Store the probe outcome. `None` (no usable interpreter) is a supported
 /// configuration: warn once and report `available: false` — never an error.
+/// Test-only: production `initialize` runs the probe and script write off the
+/// async core and calls [`record_interpreter`] directly.
+#[cfg(test)]
 fn apply_initialize(state: &PythonRuntimeState, interpreter: Option<Interpreter>) -> Result<()> {
     if interpreter.is_some() {
         write_host_script(&state.python_dir, &state.host_script_path())?;

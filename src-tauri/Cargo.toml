@@ -181,7 +181,7 @@ cognia-sandbox-pool = { path = "../crates/cognia-sandbox-pool" }
 # which is the metadata reader the sandbox-pool crate defers to.
 cognia-environment = { path = "../crates/cognia-environment", default-features = false, features = ["store", "registry"] }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
-# uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
+# uiautomation/enigo/xcap/objc2-application-services/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
 # libc stay below (shared with pet_window/fleet/scheduler/etc.).
 cognia-automation = { path = "../crates/cognia-automation", features = ["tauri-host"] }
@@ -496,9 +496,9 @@ objc2-web-kit = { version = "0.3.2", features = [
   "WKWebsiteDataStore",
   "block2",
 ] }
-# ADR-0067 Phase 5 — the macOS Accessibility (AX) element tree (ADR-0020) and
-# the raw `core-foundation-sys` C types it needed moved to
-# `crates/cognia-automation` with `accessibility` + `accessibility-sys`.
+# ADR-0067 Phase 5 — the macOS Accessibility (AX) element tree (ADR-0020) moved
+# to `crates/cognia-automation`, which binds it through
+# `objc2-application-services`.
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the

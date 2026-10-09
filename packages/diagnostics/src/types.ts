@@ -323,6 +323,14 @@ export type DiagnosticCode =
    */
   | "hostSessionRefused"
   /**
+   * A new conversation with an agent whose default runtime (ADR-0220) is not
+   * resolvable here: the external agent was removed or disabled on this
+   * device, or the host no longer has the configuration. The conversation was
+   * still created, on the app default, so this reports a substitution the user
+   * did not ask for rather than a failure.
+   */
+  | "agentRuntimeUnavailable"
+  /**
    * The working copy exists and resolves fine — it is simply held by a turn
    * that has not finished. Split out of `workspaceUnavailable` because the two
    * want opposite advice: `workspaceUnavailable` tells the reader to bind a

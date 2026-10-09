@@ -7,7 +7,14 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { DEV_TAURI_CONFIG, withDevResourceEnv, withFailFastDev } from "./tauri.mjs"
+import {
+  DEV_TAURI_CONFIG,
+  cargoPrepareScripts,
+  devPrepareScripts,
+  resolveBeforeDevCommand,
+  withDevResourceEnv,
+  withFailFastDev,
+} from "./tauri.mjs"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
 const wrapperPath = fileURLToPath(new URL("./tauri.mjs", import.meta.url))
@@ -179,4 +186,80 @@ test("shares one TAURI_CONFIG value with the headless build", async () => {
   assert.ok(match, "headless.mjs no longer defines HEADLESS_TAURI_CONFIG")
   assert.equal(match[1].trim(), "JSON.stringify({ bundle: { resources: [] } })")
   assert.equal(DEV_TAURI_CONFIG, JSON.stringify({ bundle: { resources: [] } }))
+})
+
+test("pre-builds only the cargo steps of beforeDevCommand", () => {
+  const scripts = {
+    "host:prepare:dev": "cargo build --bin host",
+    "agent:prepare:dev": "cargo build --locked -p agent",
+    "node:prepare": "node prepare.mjs",
+    dev: "next dev",
+  }
+
+  assert.deepEqual(
+    cargoPrepareScripts(
+      "pnpm host:prepare:dev && pnpm run agent:prepare:dev && pnpm node:prepare && node free-port.mjs 3000 && pnpm dev",
+      scripts
+    ),
+    ["host:prepare:dev", "agent:prepare:dev"]
+  )
+  assert.deepEqual(cargoPrepareScripts("pnpm missing && pnpm dev", scripts), [])
+  assert.deepEqual(cargoPrepareScripts(undefined, scripts), [])
+})
+
+test("the real dev chain pre-builds every cargo helper ahead of the frontend wait", () => {
+  const scripts = devPrepareScripts(["dev"], root)
+
+  assert.ok(scripts.includes("terminal-host:prepare:dev"), scripts.join(", "))
+  assert.deepEqual(devPrepareScripts(["dev", "--", "--profile", "dev-full"], root), scripts)
+})
+
+test("skips the cargo pre-step outside watched dev runs", () => {
+  assert.deepEqual(devPrepareScripts(["build"], root), [])
+  assert.deepEqual(devPrepareScripts(["info"], root), [])
+  assert.deepEqual(devPrepareScripts(["dev", "--help"], root), [])
+})
+
+test("follows --config overrides of beforeDevCommand", async (t) => {
+  const base = { build: { beforeDevCommand: "pnpm host:prepare:dev && pnpm dev" } }
+
+  assert.equal(resolveBeforeDevCommand(["dev"], base, root), base.build.beforeDevCommand)
+  assert.equal(
+    resolveBeforeDevCommand(
+      ["dev", "--config", JSON.stringify({ build: { beforeDevCommand: "node a.mjs" } })],
+      base,
+      root
+    ),
+    "node a.mjs"
+  )
+  assert.equal(
+    resolveBeforeDevCommand(
+      [
+        "dev",
+        `--config=${JSON.stringify({ build: { beforeDevCommand: { script: "node b.mjs" } } })}`,
+      ],
+      base,
+      root
+    ),
+    "node b.mjs"
+  )
+  assert.equal(
+    resolveBeforeDevCommand(["dev", "-c", JSON.stringify({ app: {} })], base, root),
+    base.build.beforeDevCommand
+  )
+  // Arguments after `--` belong to cargo, not the Tauri CLI.
+  assert.equal(
+    resolveBeforeDevCommand(["dev", "--", "--config", "x"], base, root),
+    base.build.beforeDevCommand
+  )
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "cognia-tauri-config-"))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const file = path.join(dir, "override.json")
+  await writeFile(file, JSON.stringify({ build: { beforeDevCommand: "node c.mjs" } }))
+  assert.equal(resolveBeforeDevCommand(["dev", "--config", file], base, root), "node c.mjs")
+
+  // Formats the wrapper cannot read make it skip the pre-step rather than guess.
+  assert.equal(resolveBeforeDevCommand(["dev", "--config", "override.toml"], base, root), null)
+  assert.equal(resolveBeforeDevCommand(["dev", "--config"], base, root), null)
 })

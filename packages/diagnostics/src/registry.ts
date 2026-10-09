@@ -76,6 +76,15 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "view-logs" }],
     icon: "settings",
   },
+  // The chat exists and works, just not where the agent asked to run. The fix
+  // is either the agent's runtime field or the external agent itself.
+  agentRuntimeUnavailable: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "agents" }, { kind: "view-logs" }],
+    icon: "settings",
+  },
   workspaceBusy: {
     severity: "error",
     retryable: true,

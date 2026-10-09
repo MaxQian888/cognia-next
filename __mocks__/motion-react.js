@@ -21,6 +21,7 @@ const MOTION_ONLY_PROPS = new Set([
   "animate",
   "initial",
   "exit",
+  "custom",
   "transition",
   "variants",
   "whileHover",
@@ -163,6 +164,14 @@ const noopMotionValue = (initial) => {
 module.exports = {
   motion,
   m: motion,
+  // Imperative animations have no loop to run on here; resolve immediately
+  // with the controls shape callers stop on cleanup.
+  animate: jest.fn(() => ({
+    stop: jest.fn(),
+    cancel: jest.fn(),
+    complete: jest.fn(),
+    then: (resolve) => Promise.resolve().then(resolve),
+  })),
   AnimatePresence,
   LazyMotion,
   LayoutGroup,

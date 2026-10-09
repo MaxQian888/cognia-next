@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "katex": "*"
+    "katex": "^0.19.0"
   },
   "engines": {
     "node": ">=26.0.0"

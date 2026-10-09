@@ -94,6 +94,10 @@ const OPTIONAL_SERVER_PACKAGES = ["langfuse"]
 
 const PIXI_PREBUNDLED_ABS = path.resolve(process.cwd(), "node_modules/pixi.js/dist/pixi.mjs")
 const FOLLOW_UPS_MOCK = path.resolve(process.cwd(), "hooks/chat/use-follow-up-suggestions.mock.ts")
+const CHAT_PANE_RUNTIME_MOCK = path.resolve(
+  process.cwd(),
+  ".storybook/mocks/use-chat-pane-runtime.ts"
+)
 
 // `@storybook/nextjs` 10.6's App Router mock predates Next 16.4's
 // `LayoutRouterContext.parentRenderTree`, so `useRouter()` in the framework's
@@ -265,6 +269,9 @@ const config: StorybookConfig = {
       // Replace the LLM-backed follow-ups hook with a controllable mock so the
       // follow-up-suggestions story never calls a model.
       "@/hooks/chat/use-follow-up-suggestions$": FOLLOW_UPS_MOCK,
+      // ChatPane reads the app-wide chat controller through this hook, which
+      // needs the bootstrap-only ClaudeChatRuntimeProvider; see the mock.
+      "@/hooks/chat/use-chat-pane-runtime$": CHAT_PANE_RUNTIME_MOCK,
     }
     return cfg
   },

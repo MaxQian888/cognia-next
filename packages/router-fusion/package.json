@@ -31,7 +31,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@xmldom/xmldom": "*",
+    "@xmldom/xmldom": "^0.9.12",
     "zod": "*"
   },
   "devDependencies": {
