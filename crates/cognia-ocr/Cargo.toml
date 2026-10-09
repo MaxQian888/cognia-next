@@ -40,7 +40,7 @@ tempfile.workspace = true
 # (best CJK accuracy). `image` is the shared decoder for both.
 ocrs           = { version = "0.13", optional = true }
 rten           = { version = "0.26", optional = true, default-features = false }
-rten-imageproc = { version = "0.26", optional = true }
+rten-imageproc = { version = "0.27", optional = true }
 oar-ocr        = { version = "0.9.2", optional = true, default-features = false, features = ["download-binaries", "simd"] }
 image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
