@@ -2902,15 +2902,11 @@
     "dependencyCount": "{count} dependencies",
     "descriptionLabel": "Instructions",
     "details": "{attempts} attempts · {comments} comments",
-    "dialogDescription": "Queue, schedule, run, review, pause, and retry this Agent's durable tasks.",
-    "dialogTitle": "{name} task board",
     "emptyColumn": "No tasks",
     "emptyDescription": "Add a task above to build this Agent's queue.",
     "emptyTitle": "No tasks yet",
     "error": "Task action failed: {message}",
     "moveDenied": "That move is owned by dependencies or the running Agent.",
-    "open": "Task board",
-    "openAria": "Open {name}'s task board",
     "pause": "Pause",
     "priority": {
       "critical": "Critical",
@@ -4172,6 +4168,268 @@
     "title": "Agent threads",
     "trigger": "Threads"
   },
+  "agentsConsole": {
+    "actions": {
+      "chat": "Chat with agent",
+      "chatFailed": "Couldn't start a conversation with this agent",
+      "chatTitle": "Chat with {name}",
+      "menuAria": "More actions for {name}"
+    },
+    "assign": {
+      "assigned": "Assigned “{title}”",
+      "description": "Give this agent a durable task. It runs now or at the planned time, with the approval policy you choose.",
+      "issueHint": "To assign an issue instead, set this agent as the assignee in the issue tracker.",
+      "openIssues": "Open issues",
+      "title": "Assign work to {name}"
+    },
+    "builder": {
+      "backToAgents": "Back to agents",
+      "cancel": "Cancel",
+      "create": "Create & open agent",
+      "created": "Created {name}",
+      "createdBody": "The draft is closed. Further changes happen in the agent's Settings.",
+      "createdTitle": "Agent created",
+      "discard": "Discard",
+      "discardBody": "The draft and this builder conversation will be deleted. This can't be undone.",
+      "discardFailed": "Couldn't discard the draft: {message}",
+      "discardTitle": "Discard this draft?",
+      "emptySubtitle": "Describe what this agent should do. The builder fills in the configuration on the right as you talk.",
+      "emptyTitle": "What should this agent do?",
+      "loading": "Loading the builder…",
+      "missingBody": "This conversation isn't building an agent, or it was deleted.",
+      "missingTitle": "Draft not found",
+      "openAgent": "Open agent",
+      "panelDescription": "Updated as you talk. You can edit the draft directly.",
+      "panelTitle": "Agent configuration",
+      "starters": {
+        "heading": "Start from an example",
+        "planPrompt": "Build an agent that helps our team turn ideas into clear project briefs, actionable plans and written project docs.",
+        "planTitle": "Help our team plan and write projects",
+        "researchPrompt": "Build an agent that researches competitors and summarizes their positioning, features, pricing, strengths and gaps, citing current sources.",
+        "researchTitle": "Research competitors and summarize findings",
+        "reviewPrompt": "Build an agent that reviews frontend pull requests for actionable bugs, accessibility issues and maintainability problems.",
+        "reviewTitle": "Review frontend pull requests"
+      },
+      "tabChat": "Chat",
+      "tabDraft": "Draft",
+      "title": "Agent Builder",
+      "toolsUnsupported": "This runtime can't edit the draft — fill it in yourself",
+      "updatedByBuilder": "Updated by the builder (revision {revision})"
+    },
+    "builderSetup": {
+      "description": "This runtime powers the builder conversation and becomes the new agent's default runtime.",
+      "failed": "Couldn't prepare the builder: {reason}",
+      "model": "Model",
+      "noToolsWarning": "This runtime can't call Cognia's tools, so the builder can only suggest a configuration in chat. You'll fill in the draft yourself.",
+      "preparing": "Preparing…",
+      "runtime": "Runtime",
+      "runtimeHint": "Any configured external agent can run the builder; the built-in Cognia agent always can.",
+      "sessionTitle": "Agent Builder",
+      "start": "Start conversation",
+      "title": "Choose a runtime for Agent Builder"
+    },
+    "capabilities": {
+      "allEnabledServers": "Every enabled MCP server",
+      "allowed": "Allowed tools",
+      "allowedAll": "No limit",
+      "denied": "Denied tools",
+      "deniedNone": "None",
+      "edit": "Edit",
+      "inherit": "App default",
+      "knowledgeBases": "Knowledge bases",
+      "mcpServers": "MCP servers",
+      "memory": "Memory",
+      "memoryDefault": "Follows the app's memory settings.",
+      "memoryOp": {
+        "create": "Create",
+        "forget": "Forget",
+        "recall": "Recall",
+        "update": "Update"
+      },
+      "memorySummary": "Reads {read} · writes {write} · auto-learn {autoLearn}",
+      "missing": "Not available on this device",
+      "none": "None",
+      "off": "Off",
+      "on": "On",
+      "power": {
+        "browserTools": "Browser tools",
+        "builtInSkills": "Built-in skills",
+        "computerUse": "Computer use",
+        "ocr": "OCR",
+        "sandbox": "Sandbox"
+      },
+      "powers": "Built-in capabilities",
+      "skills": "Skills",
+      "title": "Capabilities"
+    },
+    "chooser": {
+      "aiDescription": "Describe what it should do; the builder fills in an editable configuration as you talk.",
+      "aiTitle": "Build with AI",
+      "blankDescription": "Set the name, instructions, runtime and capabilities yourself.",
+      "blankTitle": "Start blank",
+      "createDescription": "Describe it and let the agent builder set it up, or fill in the form yourself.",
+      "createTitle": "New agent",
+      "emptyDescription": "An agent is a reusable assistant with its own instructions, runtime, skills and tools.",
+      "emptyTitle": "No agents yet",
+      "homeDescription": "{count, plural, one {Open the agent in the list to chat with it, assign it work or change how it behaves.} other {Open any of the # agents in the list to chat with it, assign it work or change how it behaves.}}",
+      "homeTitle": "Pick an agent, or make a new one",
+      "recommended": "Recommended"
+    },
+    "create": {
+      "aiTitle": "Build with AI",
+      "back": "Back",
+      "blankTitle": "Start blank"
+    },
+    "detail": {
+      "assignWork": "Assign work",
+      "backToProfile": "Back to profile",
+      "chat": "Chat",
+      "duplicateToEdit": "Duplicate to edit",
+      "edit": "Edit",
+      "editing": "Editing {name}",
+      "noDescription": "No description.",
+      "sourceUser": "Created by you",
+      "tasksEmpty": "No tasks yet. Use “Assign work” to give it one.",
+      "tasksTitle": "{name} · Task board"
+    },
+    "drafts": {
+      "cancel": "Cancel",
+      "discard": "Discard",
+      "discardAria": "Discard draft {name}",
+      "discardBody": "The draft and its builder conversation will be deleted. This can't be undone.",
+      "discardFailed": "Couldn't discard the draft: {message}",
+      "discardTitle": "Discard this draft?",
+      "edited": "Edited {when}",
+      "resume": "Resume",
+      "resumeAria": "Resume draft {name}",
+      "title": "{count, plural, one {Unfinished draft} other {Unfinished drafts (#)}}",
+      "untitled": "Untitled draft"
+    },
+    "edit": {
+      "duplicateToEdit": "Duplicate to edit",
+      "lockedTitle": "This agent can't be edited"
+    },
+    "header": {
+      "back": "Back",
+      "buildWithAi": "Build with AI",
+      "count": "{count, plural, one {# agent} other {# agents}}",
+      "createTitle": "Create an agent",
+      "description": "Reusable agents with their own instructions, runtime, skills and tools. Chat with one, or assign it work.",
+      "new": "New agent",
+      "packs": "Agent packs",
+      "summary": "{total, plural, one {# agent} other {# agents}}{live, plural, =0 {} other { · # working}}",
+      "title": "Agents"
+    },
+    "listPane": {
+      "builtIn": "Built-in",
+      "bulk": {
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "confirmBody": "Built-in agents, agents a plugin provides, and agents other agents are variants of are skipped.",
+        "confirmTitle": "{count, plural, one {Delete # agent?} other {Delete # agents?}}",
+        "count": "{count, plural, =0 {None selected} other {# selected}}",
+        "delete": "Delete",
+        "done": "Done",
+        "export": "Export",
+        "select": "Select",
+        "selectAll": "Select all shown"
+      },
+      "clearFilters": "Clear filters",
+      "create": "New agent",
+      "emptyDescription": "Start blank, or describe one and let the agent builder set it up.",
+      "emptyTitle": "No agents yet",
+      "label": "Agents",
+      "lastActive": "Active {when}",
+      "needsAttention": "Missing a dependency",
+      "neverActive": "Not used yet",
+      "noMatches": "No agents match.",
+      "searchPlaceholder": "Search agents…",
+      "sort": {
+        "name": "Name",
+        "recent": "Last active",
+        "updated": "Recently edited"
+      },
+      "sortLabel": "Sort agents",
+      "source": {
+        "all": "All",
+        "builtin": "Built-in",
+        "plugin": "Plugin",
+        "user": "Mine"
+      },
+      "sourceCountAria": "{label}: {count}",
+      "sourceLabel": "Filter by source",
+      "status": {
+        "awaiting": "Needs you",
+        "running": "Working"
+      },
+      "updateAvailable": "Pack update available"
+    },
+    "loading": "Loading agents…",
+    "notFound": {
+      "back": "All agents",
+      "description": "It may have been deleted, or it belongs to a plugin that is turned off.",
+      "title": "Agent not found"
+    },
+    "profile": {
+      "about": {
+        "inherit": "Follows the app",
+        "model": "Model",
+        "modelDefault": "Default",
+        "permission": "Permission",
+        "planModel": "Plan model",
+        "runtime": "Runtime",
+        "source": "Source",
+        "title": "About",
+        "updated": "Updated",
+        "utilityModel": "Utility model",
+        "workingDir": "Working dir"
+      },
+      "activity": {
+        "archived": "Archived",
+        "awaiting": "Needs approval",
+        "empty": "Nothing yet. Chat with it or assign it work, and what it does shows up here.",
+        "live": "{count, plural, one {# live} other {# live}}",
+        "running": "Running",
+        "showAll": "Show all {count}",
+        "showLess": "Show less",
+        "title": "Activity",
+        "untitled": "Untitled conversation"
+      },
+      "stats": {
+        "completed": "Completed",
+        "conversations": "Conversations",
+        "cost": "Cost",
+        "title": "Last 30 days",
+        "tokens": "Tokens",
+        "turns": "Turns"
+      },
+      "work": {
+        "board": "Task board",
+        "empty": "No open work. Use “Assign work” to give it a task, or assign it an issue in Issues.",
+        "open": "{count} open",
+        "task": "Task",
+        "title": "Open work",
+        "viewInIssues": "View in Issues"
+      }
+    },
+    "runtime": {
+      "appDefault": "App default",
+      "unavailable": "{name} (unavailable)"
+    },
+    "runtimeField": {
+      "appDefault": "Follow the app default",
+      "appDefaultDescription": "Whatever runtime new chats use",
+      "description": "Where a new conversation with this agent runs. You can still switch it in the composer.",
+      "label": "Default runtime",
+      "unavailableHint": "This runtime isn't available on this device. New conversations will use the app default until you pick another.",
+      "unavailableLabel": "{name} (unavailable)"
+    },
+    "status": {
+      "awaiting": "Needs approval",
+      "idle": "Idle",
+      "running": "Running"
+    }
+  },
   "aiElements": {
     "agent": {
       "noDescription": "No description"
@@ -4828,6 +5086,17 @@
       "elementDetails": "Element Details",
       "elementDetailsDescription": "Canonical handle, properties, expansion, and action verification.",
       "emptyResult": "No elements returned.",
+      "errors": {
+        "backend": "Accessibility back-end error: {message}",
+        "elementNotFound": "Element not found.",
+        "internal": "Internal error: {message}",
+        "killSwitchActive": "The automation kill switch is engaged. Re-enable the automation engine in Overview to continue.",
+        "permissionDenied": "Permission denied: {reason}",
+        "staleElement": "That element is out of date. Capture the state again.",
+        "unsupportedPlatform": "Desktop automation isn't supported on this platform.",
+        "userDeclined": "The request was declined.",
+        "whitelistMiss": "This window isn't on the automation whitelist."
+      },
       "events": {
         "action": "Action returned {status}.",
         "capture": "Captured revision {revision}.",
@@ -4846,6 +5115,11 @@
       "noScreenshot": "This revision has no matching screenshot.",
       "none": "none",
       "pageSummary": "Page {page} of {pages}",
+      "permissionNotice": {
+        "action": "Open Permissions",
+        "description": "Listing applications always works here, but a capture includes a window screenshot, so it goes through the automation permission gate. Make sure the automation engine is enabled in Overview, and in Permissions set the Default Tier or the Workflow override to anything other than Off. Then capture again.",
+        "title": "Capturing needs automation permission"
+      },
       "previousPage": "Previous",
       "query": "Query elements",
       "queryFailed": "Element query failed",
@@ -8317,10 +8591,12 @@
           "placeholder": "Choose a workspace",
           "refused": {
             "same-workspace": "The conversation is already in that workspace.",
+            "session-archived": "Archived conversations stay in their workspace. Unarchive it first.",
             "session-locked": "This conversation was handed off to another host and is read-only here.",
             "session-running": "Stop the running turn before moving the conversation.",
             "unknown-workspace": "That workspace no longer exists."
-          }
+          },
+          "sentToHost": "Sent to your Host, which will move the conversation"
         }
       },
       "showArtifacts": "Show artifacts panel",
@@ -12216,9 +12492,11 @@
       "label": "Sort by",
       "options": {
         "created": "Date created",
+        "createdAsc": "Date created (oldest first)",
         "oldest": "Oldest activity",
         "recent": "Recent activity",
         "title": "Title (A–Z)",
+        "titleDesc": "Title (Z–A)",
         "unread": "Unread first"
       }
     },
@@ -12314,39 +12592,45 @@
         "actions": "Actions",
         "activity": "Last activity",
         "agent": "Agent",
-        "cost": "Cost",
         "created": "Created",
         "selectAll": "Select every conversation in this view",
         "title": "Conversation",
-        "tokens": "Tokens",
-        "turns": "Turns",
+        "usage": "Usage",
         "workspace": "Workspace"
       },
       "contentMatch": "Matched in the messages",
       "description": "Every conversation across your workspaces. Find, rename, file, archive and restore them in one place.",
       "emptyArchive": "Empty archive…",
+      "goal": {
+        "open": "Goal {status}: {objective}. Open it in Goals"
+      },
       "inFolder": "In {name}",
+      "listAria": "Conversations",
       "loading": "Loading conversations",
       "newChat": "New chat",
       "noWorkspace": "No workspace",
       "none": "—",
       "openRow": "Open {title}",
+      "rankedHint": "Sorted by relevance while searching",
       "rowActions": "Actions for {title}",
       "rowSelect": "Select {title}",
       "searchAria": "Search conversations",
       "searchClear": "Clear search",
       "searchContent": "Search message content",
       "searchPlaceholder": "Search conversations…",
+      "select": "Select",
+      "selectDone": "Done",
       "showMore": "Show {count} more",
       "shownOf": "Showing {shown} of {total}",
       "sortBy": "Sort by {column}",
-      "summary": "{active, plural, one {# active} other {# active}} · {archived, plural, one {# archived} other {# archived}}",
       "tabs": {
         "active": "Active",
         "archived": "Archived"
       },
       "tabsAria": "Which conversations to show",
-      "title": "Conversations"
+      "title": "Conversations",
+      "usage": "{turns, plural, one {# turn} other {# turns}} · {tokens} · {cost}",
+      "usageCompact": "{turns, plural, one {# turn} other {# turns}} · {tokens}"
     }
   },
   "crashDialog": {
@@ -12875,6 +13159,7 @@
     "guildRail": {
       "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
+      "agents": "Agents",
       "aliases": {
         "conversations": "History, chat history, sessions, archive, archived conversations, transcripts",
         "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
@@ -13147,8 +13432,8 @@
       },
       "file": {
         "label": "File",
+        "newAgent": "New Agent",
         "newAgentTeam": "New Agent Team",
-        "newCharacter": "New Character",
         "newChat": "Quick Chat",
         "newWorkflow": "New Workflow",
         "openLogs": "Open Logs",
@@ -14111,6 +14396,10 @@
       "agentProcessBusy": {
         "hint": "This conversation's agent is still running in another process, so a second copy was not started. Wait for that run to finish, then retry.",
         "label": "Agent already running"
+      },
+      "agentRuntimeUnavailable": {
+        "hint": "This agent is set to run on a runtime that isn't available on this device, so the conversation started on the default runtime. Pick another runtime in the agent's settings, or re-enable the external agent.",
+        "label": "Agent's runtime unavailable"
       },
       "agentUnavailable": {
         "hint": "The external agent isn't responding — reconnect, or fall back to the built-in agent.",
@@ -16082,6 +16371,8 @@
         "user-declared": "you told us",
         "vendor-certified": "certified by the vendor"
       },
+      "filterAll": "All",
+      "filterLabel": "Filter capabilities by level",
       "level": {
         "equivalent": "Equivalent",
         "native": "Native",
@@ -16334,14 +16625,17 @@
       "addExternalAgent": "Add External Agent",
       "addingAgent": "Adding…",
       "advancedOptions": "Advanced",
+      "agentsHeading": "Agents",
       "aiderEnvVarHint": "DeepSeek example: args --model deepseek/deepseek-flash and environment variable DEEPSEEK_API_KEY. Use your provider’s Aider model ID and key for other services.",
       "aiderSetupHint": "Install with uv tool install --force --python python3.12 --with pip aider-chat==0.86.2. Set --model and the provider API key here. Cognia isolates native .aider.conf.yml, dotenv and OAuth key discovery, and owns per-session history. Only sandboxed automatic confirmations and read-only Plan are supported. Update with the same uv command; deleting an agent keeps the system installation.",
+      "archivedSession": "Archived",
       "autoSpawnServer": "Auto-spawn server",
       "autoSpawnServerHint": "Launch a local `opencode serve` process automatically (desktop only).",
       "clineEnvVarHint": "Saved OAuth login, or CLINE_API_KEY with CLINE_PROVIDER and CLINE_MODEL. Optional CLINE_DIR selects state. Pinning CLINE_PROVIDER disables provider switching.",
       "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
       "configureNewExternalAgentConnection": "Configure a new external agent connection.",
       "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
+      "currentSession": "Current session",
       "customConfiguration": "Custom configuration",
       "customProtocolComingSoon": "Custom (coming soon)",
       "defaultModel": "Default model",
@@ -16361,57 +16655,92 @@
       },
       "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
       "diagnostics": {
-        "adapter": "Adapter: {name}",
-        "authMethods": "Auth methods: {methods}",
-        "authRequired": "Auth required: {value}",
-        "benchmarkAdaptation": "Benchmark adaptation",
-        "blockedStage": "Blocked stage: {stage}",
-        "blockingReason": "Blocking reason: {reason}",
-        "branchOutcome": "Branch outcome: {outcome}",
-        "canonicalReason": "Canonical reason: {code}",
-        "canonicalReasonWithText": "Canonical reason: {code} — {reason}",
-        "compactionUpdates": "ACP compaction updates: {count}",
+        "acpActivityValue": "{rich} content blocks · {compaction} compactions · {nes} edit suggestions",
+        "compatibilityDesc": "How closely this integration follows the protocol's reference behaviour. Validated items are covered by tests; deviations are deliberate trade-offs, each recorded with its reason.",
+        "compatibilityField": {
+          "cognia": "Cognia behaviour",
+          "evidence": "Evidence",
+          "rationale": "Why",
+          "reference": "Reference behaviour",
+          "review": "Reviewed by",
+          "target": "Adaptation target",
+          "tradeOff": "Trade-off",
+          "userImpact": "User impact"
+        },
+        "compatibilityStatus": {
+          "in-progress": "In progress",
+          "intentional-deviation": "Intentional deviation",
+          "not-started": "Not started",
+          "validated": "Validated"
+        },
         "connectAgentToList": "Connect an agent to list sessions.",
-        "contractVersion": "Contract version: {version}",
-        "correlation": "Correlation — session {session}, turn {turn}",
-        "evidence": "Evidence: {evidence}",
+        "correlationValue": "session {session} · turn {turn}",
         "evidenceMissing": "missing",
-        "executable": "Executable: {value}",
-        "executableWithCode": "Executable: {value} ({code})",
+        "field": {
+          "acpActivity": "ACP activity",
+          "adapter": "Adapter",
+          "authMethods": "Sign-in methods",
+          "authRequired": "Sign-in required",
+          "blockedStage": "Blocked stage",
+          "blockingReason": "Blocking reason",
+          "branchOutcome": "Branch outcome",
+          "contractVersion": "Contract version",
+          "correlation": "Correlation",
+          "executable": "Executable",
+          "health": "Health",
+          "lifecycleStage": "Lifecycle stage",
+          "prerequisites": "Prerequisites",
+          "protocol": "Protocol",
+          "reason": "Reason",
+          "recommendedActions": "Recommended actions",
+          "recoveryHints": "Recovery hints",
+          "session": "Session",
+          "sessionSupport": "Session support",
+          "supportTier": "Support tier",
+          "surface": "Surface",
+          "trace": "Trace"
+        },
         "forkUnsupported": "Fork unsupported: {reason}",
         "forkUnsupportedDefault": "Reason not provided.",
-        "gap": "Gap: {grade}",
-        "health": "Health: {value}",
-        "latestRun": "Latest run: {outcome}",
-        "lifecycleStage": "Lifecycle stage: {stage}",
+        "gapGrade": {
+          "blocking": "Blocking gap",
+          "major": "Major gap",
+          "minor": "Minor gap"
+        },
+        "hideDetails": "Hide details",
         "naLabel": "n/a",
-        "nesSuggestions": "ACP next edit suggestions: {count}",
         "no": "no",
-        "noBenchmarkAdaptation": "No benchmark adaptations recorded.",
+        "noBenchmarkAdaptation": "No compatibility records for this agent yet.",
         "noBlockingReason": "No blocking reason recorded.",
         "none": "none",
         "notExecutable": "Agent is not executable.",
-        "prerequisiteStatus": "Prerequisite status: {status}",
-        "protocolTransport": "Protocol/Transport: {protocol} via {transport}",
-        "rationale": "{rationale}",
-        "recommendedActions": "Recommended actions: {actions}",
-        "recoveryHints": "Recovery hints: {hints}",
+        "protocolValue": "{protocol} via {transport}",
+        "reasonValue": "{code} — {reason}",
         "resumeUnsupported": "Resume unsupported: {reason}",
         "resumeUnsupportedDefault": "Reason not provided.",
-        "review": "Review: {reviewedBy}",
-        "reviewWithLink": "Review: {reviewedBy} ({link})",
-        "richContentBlocks": "Rich ACP content blocks: {count}",
-        "runtimeDiagnostics": "Runtime diagnostics",
-        "session": "Session: {session}",
+        "runOutcome": {
+          "error": "Failed",
+          "ok": "Succeeded"
+        },
+        "sectionCapabilities": "Capabilities",
+        "sectionContract": "Contract",
+        "sectionLatestRun": "Latest run",
+        "sectionNextSteps": "What to do next",
+        "sectionRuntime": "Runtime",
+        "sectionStatus": "Status",
         "sessionListingUnsupported": "Session listing is unsupported on this agent.",
-        "sessionSupport": "Session support — list {list}, fork {fork}, resume {resume}",
-        "supportTier": "Support tier: {tier}",
-        "surface": "Surface: {name}",
-        "target": "Target: {target}",
-        "trace": "Trace: {trace}",
-        "tradeOff": "Trade-off: {tradeOff}",
+        "sessionMethod": {
+          "fork": "Fork",
+          "list": "List",
+          "resume": "Resume"
+        },
+        "showDetails": "Details",
+        "supportState": {
+          "supported": "supported",
+          "unknown": "unknown",
+          "unsupported": "unsupported"
+        },
         "unknown": "unknown",
-        "userImpact": "User impact: {impact}",
         "yes": "yes"
       },
       "fork": "Fork",
@@ -16428,6 +16757,8 @@
       "noResumableSessions": "No resumable sessions yet.",
       "noteLabel": "Note",
       "officialDocs": "Official docs",
+      "openInChat": "Open in chat",
+      "openInChatFailed": "Couldn't open this session in a chat.",
       "opencodeAutoSpawnNeedsAProcess": "Auto-spawning an OpenCode server starts a local process.",
       "otherOfficialSurfaces": "Other official surfaces",
       "pluginProtocolContributed": "Contributed by a plugin",
@@ -16446,8 +16777,8 @@
       "refreshSessionsFailed": "Failed to refresh sessions.",
       "removeAgentConfirm": "Remove this external agent? You can re-add it later.",
       "removeAgentFailed": "Failed to remove external agent.",
-      "resume": "Resume",
       "resumeSessionFailed": "Failed to resume session.",
+      "selectAgentHint": "Select an agent to see its sessions and diagnostics.",
       "selectPresetOrConfigureManually": "Select a preset or configure manually",
       "serverHostname": "Server hostname",
       "serverPassword": "Server password",
@@ -16455,14 +16786,20 @@
       "serverPort": "Server port",
       "serverUsername": "Server username",
       "sessions": "Sessions",
+      "sessionsHint": "Sessions this agent keeps on its own side. Open one to continue it as a chat — the agent keeps its earlier context.",
       "showAllSessions": "Show all {count} sessions",
       "showFewerSessions": "Show fewer sessions",
       "stdioNeedsAProcess": "Stdio starts a local process.",
+      "tabCompatibility": "Compatibility",
+      "tabDiagnostics": "Diagnostics",
+      "tabSessions": "Sessions",
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
       "transportStdioLocal": "stdio (local)",
       "transportWebsocket": "WebSocket",
       "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
+      "untitledSession": "Untitled session",
+      "updatedAt": "Updated {time}",
       "websocketProtocolComingSoon": "WebSocket (coming soon)"
     },
     "placement": {
@@ -17563,8 +17900,8 @@
       "hideNavRail": "Hide navigation rail",
       "hidePage": "Hide {page} from navigation",
       "hidePageHint": "Bring it back from Customize navigation",
+      "manageAgents": "Manage agents",
       "manageApiKey": "Manage API key",
-      "manageCharacters": "Manage characters",
       "manageMcp": "Manage MCP servers",
       "manageSkills": "Manage skills",
       "manageTeams": "Manage teams",
@@ -17756,9 +18093,22 @@
   "goal": {
     "acceptance": {
       "accept": "Accept",
+      "accepted": "Accepted — the goal is complete.",
+      "changesRequested": "Changes requested — the goal resumed.",
       "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
+      "failed": "Couldn't record your verdict",
       "requestChanges": "Request changes",
       "title": "Awaiting your acceptance"
+    },
+    "actions": {
+      "copied": "Objective copied",
+      "copyFailed": "Couldn't copy the objective",
+      "copyObjective": "Copy objective",
+      "deleteFailed": "Couldn't delete the goal",
+      "deleted": "Goal deleted",
+      "menu": "Goal actions",
+      "openConversation": "Open conversation",
+      "runAgain": "Run again"
     },
     "activity": {
       "acceptance_accepted": "Result accepted — goal completed",
@@ -17767,10 +18117,46 @@
       "config_updated": "Config updated",
       "empty": "No activity yet.",
       "exit_triggered": "{exit} — {reason}",
+      "exits": {
+        "budget_limited": "Token budget reached",
+        "cost_limited": "Cost ceiling reached",
+        "judge_done": "Judge confirmed done",
+        "judge_failed_too_many": "Too many unreadable judge replies",
+        "needs_approval": "Needs approval",
+        "preempted": "Preempted by a new message",
+        "timed_out": "Timed out",
+        "turn_limited": "Turn budget reached",
+        "user_stopped": "Stopped by you"
+      },
       "goal_created": "Created with {turns}-turn / {tokens}-token budget",
       "judge_evaluated": "done={done} — {reason}",
       "judge_parse_failed": "Parse failure #{n}",
-      "loading": "Loading…",
+      "kinds": {
+        "acceptance_requested": "Awaiting acceptance",
+        "acceptance_resolved": "Acceptance resolved",
+        "config_updated": "Settings changed",
+        "exit_triggered": "Goal ended",
+        "goal_created": "Goal created",
+        "judge_evaluated": "Judge verdict",
+        "judge_parse_failed": "Judge reply unreadable",
+        "objective_updated": "Objective updated",
+        "pacing_decided": "Next turn scheduled",
+        "promise_confirmed": "Completion confirmed",
+        "promise_denied": "Completion withheld",
+        "promise_requested": "Verification requested",
+        "subgoals_generated": "Checklist generated",
+        "turn_completed": "Turn completed",
+        "turn_started": "Turn started",
+        "user_paused": "Paused",
+        "user_resumed": "Resumed",
+        "user_stopped": "Stopped",
+        "verification_disabled": "Verifier disabled",
+        "verification_error": "Verifier error",
+        "verification_failed": "Verifier rejected",
+        "verification_passed": "Verifier passed",
+        "verification_requested": "Verifier requested",
+        "verification_started": "Verifier started"
+      },
       "objective_updated": "Objective replaced",
       "pacing_decided": "Next continuation at {time} ({source})",
       "promise_confirmed": "Completion promise confirmed (turn {n})",
@@ -17778,6 +18164,8 @@
       "promise_denied_overridden": "Promise withheld {n} times — gate overridden, goal completed",
       "promise_requested": "Verification turn requested (turn {n})",
       "riskGate": "{tier}: approval required for {surfaces}",
+      "showMore": "Show more",
+      "shownOf": "Showing {shown} of {total}",
       "subgoals_generated": "Generated subgoals",
       "turn_completed": "Turn {n} completed ({tokens} tok)",
       "turn_started": "Turn {n} started",
@@ -17795,6 +18183,7 @@
       "avgTokens": "Avg tokens",
       "avgTurns": "Avg turns",
       "completionRate": "Completion rate",
+      "createdSeries": "Goals created",
       "empty": "No goals yet — analytics will appear once you start running goals.",
       "goalsOverTime": "Goals created",
       "judgeFailureRate": "Judge failure rate",
@@ -17802,31 +18191,47 @@
       "title": "Analytics",
       "tokenSpend": "Token spend",
       "tokensOverTime": "Token spend over time",
+      "tokensSeries": "Tokens",
       "totalGoals": "Total goals"
     },
     "card": {
-      "elapsed": "{minutes}m",
+      "inlineBudget": "{turns} turns · {tokens} tokens",
+      "runningFor": "Running for",
       "tokens": "Tokens",
-      "turns": "Turns"
+      "turns": "Turns",
+      "turnsInline": "{used}/{max} turns"
     },
     "commands": {
-      "createUsage": "Usage: type /goal followed by what you want to accomplish.",
-      "created": "🎯 **Goal active** — {maxTurns} turn budget, {maxTokensK}k token budget.",
-      "needSession": "Start a chat session first — /goal operates inside an active session.",
-      "noActiveGoal": "No active goal in this session. Start one with the /goal command.",
-      "objectiveUpdated": "Objective updated. The model will be told on the next turn.",
-      "paused": "Goal paused — {turns}/{maxTurns} turns used. Resume with /goal resume.",
-      "recentActivity": "Recent activity:",
+      "activityItem": "- **{label}** at {time, time, medium}",
+      "alreadyActive": "Goal is already active.",
+      "cannotPause": "Goal is already {status} — nothing to pause.",
+      "cannotResume": "Cannot resume a {status} goal. Create a new one with `/goal '<'text>`.",
+      "createUsage": "Usage: `/goal '<'what you want to accomplish>`. Example: `/goal write a haiku about winter`.",
+      "created": "🎯 **Goal active** — {maxTurns, plural, one {# turn} other {# turns}} budget, {maxTokensK, number}k token budget.",
+      "createdHint": "The agent will continue toward this goal automatically. Pause with `/goal pause` · stop with `/goal stop` · update with `/goal update '<'new text>`.",
+      "needSession": "Start a chat session first — `/goal` operates inside an active session.",
+      "noActiveGoal": "No active goal in this session. Start one with `/goal '<'what you want to accomplish>`.",
+      "noGoalToPause": "No active goal to pause.",
+      "noGoalToResume": "No goal to resume.",
+      "noGoalToStop": "No active goal to stop.",
+      "objectiveUnchanged": "Objective unchanged (matches the current one) or goal is no longer mutable.",
+      "objectiveUpdated": "Objective updated. The model will be told about the change on the next turn.",
+      "paused": "Goal paused — {turns}/{maxTurns} turns used. Resume with `/goal resume`.",
+      "recentActivity": "**Recent activity:**",
+      "remoteNotAllowed": "Changing a goal from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
       "resumed": "Goal resumed. The loop will continue on the next turn.",
-      "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} turns · {tokens} tokens · {minutes}m elapsed",
-      "stopped": "Goal stopped after {turns} turn(s).",
-      "streaming": "The current turn is still streaming — let it finish, then run /goal."
+      "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} turns · {tokens, number} tokens · {minutes}m elapsed",
+      "stopped": "Goal stopped after {turns, plural, one {# turn} other {# turns}}.",
+      "streaming": "The current turn is still streaming — `/goal` waits for the response to finish before changing the active goal.",
+      "updateNoGoal": "No active goal — create one first with `/goal '<'text>`.",
+      "updateUsage": "Usage: `/goal update '<'new objective>`."
     },
     "config": {
       "adaptivePacing": "Adaptive pacing",
       "adaptivePacingHint": "The model suggests the next continuation delay (1–60 min); it can only slow the loop, never speed it below the minimum interval.",
       "completionPromise": "Completion promise",
       "completionPromiseHint": "When set, the goal only completes after the model emits this exact token in a verification turn — guards against false 'done' verdicts.",
+      "discard": "Discard",
       "inlineStop": "Inline stop condition",
       "inlineStopHint": "Appended to the system prompt. Example: 'or after producing 3 haikus'.",
       "maxBudgetUsd": "Max cost per turn (USD)",
@@ -17839,50 +18244,89 @@
       "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
       "maxTurns": "Max turns",
       "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
+      "readOnly": "This goal has ended — its settings are kept as a record and can't be changed.",
       "requireAcceptance": "Require acceptance",
       "requireAcceptanceHint": "A judged completion pauses for your accept / request-changes instead of finishing on its own.",
       "riskGating": "Risk-based gating",
       "riskGatingHint": "Automatically require acceptance (and, for high-risk goals you run yourself, a per-turn hold) when the objective or this session's tools look risky. Turning this off never removes a checkpoint you set yourself.",
       "save": "Save changes",
+      "saveFailed": "Couldn't save the settings",
+      "saved": "Settings saved",
       "saving": "Saving…",
       "timeout": "Timeout (minutes)",
       "timeoutHint": "Wall-clock cap from goal creation.",
+      "unsaved": "Unsaved changes",
       "verification": {
+        "disable": "Remove verifier",
         "disableConfirm": "Disable this verifier? The goal will resume as active, and the current completion candidate will not be completed automatically.",
+        "disableTitle": "Remove the completion verifier?",
         "disabled": "No workflow verifier",
         "hint": "Only published Workflows whose input and output schemas match the Goal verification contract are available.",
         "label": "Completion verification workflow",
+        "optionsFailed": "Couldn't load the desktop's verifiers.",
         "placeholder": "Select a published verifier",
         "retry": "Retry verification",
         "retryPassed": "Verification passed",
+        "retryRunning": "Verification is still running on the desktop. Its result will show here when it finishes.",
         "retrying": "Retrying…"
+      }
+    },
+    "configure": {
+      "groups": {
+        "console": "Console",
+        "goals": "Goals"
+      },
+      "mobileTrigger": "Sections",
+      "navTitle": "Configure goals",
+      "sections": {
+        "console": {
+          "description": "Where the console opens and how open goals sort.",
+          "label": "Console"
+        },
+        "defaults": {
+          "description": "Budgets, judge and pacing every new goal starts with.",
+          "label": "Defaults"
+        },
+        "templates": {
+          "description": "Reusable objectives to start goals from.",
+          "label": "Templates"
+        },
+        "tracker": {
+          "description": "The built-in agent that pairs with /goal.",
+          "label": "Goal Tracker"
+        }
       }
     },
     "console": {
       "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
-      "newGoal": "New goal",
+      "clearFilters": "Clear filters",
+      "clearSearch": "Clear search",
+      "emptyTitle": "Nothing running",
+      "needsYou": "Needs you",
+      "needsYouCount": "{count, plural, one {# goal needs you} other {# goals need you}}",
+      "needsYouHint": "The judge considers these done. Accept to complete them, or request changes to keep them running.",
+      "onlyAwaiting": "Every open goal is waiting on your verdict above.",
       "openChat": "Open chat",
       "openGoalsHeading": "Open goals",
       "prefs": {
         "defaultTab": "Default tab",
-        "description": "Choose where the console opens and how open goals sort.",
+        "defaultTabHint": "Shown when you open Goals without a link to a specific tab.",
+        "direction": "Sort direction",
         "openGoalsSort": "Open-goals sort",
-        "title": "Console preferences"
+        "openGoalsSortHint": "How the open-goals list sorts when the console opens."
+      },
+      "scopes": {
+        "active": "Active",
+        "all": "All",
+        "paused": "Paused"
       },
       "sectionsAria": "Goal sections",
-      "statActive": "{count} active",
-      "statDone": "{count} done",
-      "statGroups": {
-        "lifetime": "Lifetime",
-        "open": "Open"
-      },
-      "statPaused": "{count} paused",
       "stats": {
         "active": "Active",
+        "avgTokens": "Avg tokens",
         "avgTurns": "Avg turns",
+        "completedOfFinished": "Completed of finished",
         "done": "Completed",
-        "filterActive": "Show only active goals",
-        "filterPaused": "Show only paused goals",
         "openAnalytics": "Open the Analytics tab",
         "openHistory": "Open the History tab",
         "paused": "Paused",
@@ -17891,11 +18335,9 @@
       "subtitle": "Persistent objectives the agent works toward automatically.",
       "tabs": {
         "analytics": "Analytics",
-        "defaults": "Defaults",
+        "config": "Configure",
         "history": "History",
-        "overview": "Overview",
-        "templates": "Templates",
-        "tracker": "Tracker"
+        "overview": "Overview"
       },
       "title": "Goals",
       "view": {
@@ -17903,6 +18345,15 @@
         "grid": "Grid",
         "list": "List"
       }
+    },
+    "controls": {
+      "failed": "Couldn't update the goal",
+      "groupAria": "Goal controls"
+    },
+    "conversation": {
+      "loading": "Loading…",
+      "missing": "Conversation deleted",
+      "open": "Open conversation “{title}”"
     },
     "defaults": {
       "budgetHeading": "Budget & limits",
@@ -17919,6 +18370,7 @@
       "maxTurnsHint": "Hard cap on continuation turns for a new goal.",
       "reset": "Reset to defaults",
       "save": "Save defaults",
+      "saved": "Defaults saved",
       "saving": "Saving…",
       "startPaused": "Start new goals paused",
       "startPausedHint": "When on, new goals require a /goal resume before the loop begins.",
@@ -17935,21 +18387,25 @@
       "title": "Goal · {status}"
     },
     "history": {
-      "all": "All",
+      "allStatuses": "All statuses",
       "cancel": "Cancel",
+      "count": "{count, plural, one {# goal} other {# goals}}",
       "created": "Created",
       "delete": "Delete",
       "deleteBody": "This permanently removes the goal and its activity log.",
       "deleteConfirm": "Delete",
-      "deleteFailed": "Could not delete the goal: {message}",
       "deleteTitle": "Delete goal?",
       "dirAsc": "Ascending",
       "dirDesc": "Descending",
+      "duration": "Duration",
       "empty": "No goals yet. Use the /goal command in a chat to start one.",
+      "emptyTitle": "No goals yet",
       "filterStatus": "Status",
+      "loadMore": "Load more",
+      "loadedOf": "Showing {shown} of {total}",
+      "matching": "{shown} of {total}",
       "noResults": "No goals match your filters.",
       "objective": "Objective",
-      "open": "Open",
       "search": "Search objectives",
       "sortBy": "Sort by",
       "sortCreated": "Created",
@@ -17958,6 +18414,19 @@
       "status": "Status",
       "tokens": "Tokens",
       "turns": "Turns"
+    },
+    "inspector": {
+      "agent": "Agent",
+      "close": "Close details",
+      "conversation": "Conversation",
+      "defaultAgent": "Default agent",
+      "ended": "Ended",
+      "missing": "It was deleted, or it belongs to another workspace.",
+      "missingTitle": "Goal not found",
+      "ranFor": "ran {duration}",
+      "running": "Running for",
+      "started": "Started",
+      "title": "Goal details"
     },
     "judge": {
       "heading": "Judge",
@@ -17979,16 +18448,28 @@
       "open": "Open Goals console",
       "title": "Goals"
     },
+    "objective": {
+      "cancel": "Cancel",
+      "edit": "Edit objective",
+      "hint": "The agent is told about the change on its next turn. ⌘/Ctrl + Enter saves.",
+      "label": "Objective",
+      "save": "Save objective",
+      "unchanged": "Nothing changed — the objective is the same, or the goal has ended.",
+      "updated": "Objective updated. The agent will see it on its next turn."
+    },
     "overview": {
       "awaitingPromise": "Awaiting completion confirmation",
-      "createdBadge": "Created: {date}",
-      "endedBadge": "Ended: {date}",
+      "budgetHeading": "Budget",
+      "costCeiling": "Each turn is capped at {amount}.",
       "exitReason": "Exit reason",
       "foregroundDormancy": "Interactive goals advance only while the app is open; closing it pauses progress until you reopen this chat. Scheduled and headless goals continue on their own.",
+      "judgeHeading": "Judge",
       "lastJudgeReason": "Last judge reason",
-      "objective": "Objective",
+      "loopHeading": "Loop",
       "reasonQuoted": "“{reason}”",
-      "statusBadge": "Status: {status}",
+      "timeBudgetAria": "Time budget used",
+      "timeLeft": "Time left",
+      "timeUp": "Time limit reached",
       "tokenBudgetAria": "Token budget used",
       "tokens": "Tokens",
       "turnBudgetAria": "Turn budget used",
@@ -18030,6 +18511,7 @@
       "failed": "Couldn't start the goal",
       "objectiveLabel": "Objective",
       "objectivePlaceholder": "Describe what you want the agent to achieve…",
+      "remoteNotAllowed": "Starting a goal from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
       "templateLabel": "Template",
       "templateNone": "No template — write my own",
       "templatePlaceholder": "Pick a template…",
@@ -18039,10 +18521,11 @@
     "remote": {
       "applied": "Applied on desktop.",
       "failed": "Couldn't reach the desktop — try again.",
-      "notAllowed": "This device doesn't have remote-control permission."
+      "nothingToContinue": "The desktop has no turn waiting to continue."
     },
     "status": {
       "active": "active",
+      "awaitingAcceptance": "awaiting acceptance",
       "budget_limited": "budget limited",
       "completed": "completed",
       "paused": "paused",
@@ -18051,38 +18534,57 @@
       "timed_out": "timed out",
       "turn_limited": "turn limited"
     },
+    "stopConfirm": {
+      "body": "A stopped goal can't be resumed. You can run it again later as a new goal.",
+      "cancel": "Keep running",
+      "confirm": "Stop goal",
+      "title": "Stop this goal?"
+    },
     "subgoals": {
+      "clear": "Clear",
+      "clearBody": "The checklist is removed from this goal. You can generate a new one afterwards.",
+      "clearFailed": "Couldn't clear the checklist",
+      "clearTitle": "Clear the checklist?",
+      "count": "{done}/{total}",
       "description": "Break the objective into a checklist the agent works through.",
       "empty": "No subgoals yet. Generate a checklist from the objective.",
       "error": "Couldn't generate a checklist. Try again.",
       "generate": "Generate checklist",
       "generating": "Generating…",
+      "inline": "Subgoals {done}/{total}",
       "progress": "{done}/{total} complete",
       "regenerate": "Regenerate",
+      "remoteNotAllowed": "Changing the checklist from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
+      "running": "The desktop is still generating the checklist. It will appear here when it is ready.",
       "title": "Subgoals",
+      "toggleFailed": "Couldn't update the step",
       "unavailable": "Subgoal generation needs a model with an API key available in the app."
     },
     "templates": {
       "add": "New template",
       "builtinBadge": "Built-in",
       "cancel": "Cancel",
+      "cloneNote": "Built-in templates aren't edited in place — saving creates your own copy.",
       "delete": "Delete",
+      "deleteBody": "“{title}” will be removed. Goals already started from it are not affected.",
+      "deleteFailed": "Couldn't delete the template",
+      "deleteTitle": "Delete this template?",
       "edit": "Edit",
       "empty": "No templates yet.",
       "favorite": "Favourite",
-      "heading": "Goal templates",
-      "needSession": "Open a chat session first, then use a template.",
       "objectiveField": "Objective",
       "save": "Save template",
+      "saveFailed": "Couldn't save the template",
+      "saved": "Template saved",
       "titleField": "Title",
       "use": "Use"
     },
     "tracker": {
       "builtin": "Built-in (cannot be deleted)",
-      "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker.",
+      "customise": "Want to customise this agent's prompt? Open it on the Agents page and duplicate the Goal Tracker.",
       "loading": "Loading…",
       "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
-      "openCharacters": "Open Characters settings",
+      "openAgent": "Open in Agents",
       "permissionMode": "Permission mode: {mode}",
       "systemPrompt": "System prompt"
     }
@@ -20613,6 +21115,7 @@
       },
       "capabilitiesReady": "{ready} of {total} runtimes ready",
       "description": "Loading your interface, preferences, and recent context",
+      "elapsed": "{seconds}s elapsed",
       "milestoneDuration": "{seconds}s",
       "milestones": {
         "accounts": {
@@ -23528,6 +24031,7 @@
           "conversationOverrides": "Conversation overrides",
           "executionRunBindings": "Run delivery bindings",
           "executionRuns": "Execution runs",
+          "goalEvents": "Goal activity",
           "goals": "Goals",
           "issueCycles": "Issue cycles",
           "issueEvents": "Issue events",
@@ -24236,6 +24740,7 @@
       "actionPair": "Pair now",
       "agentModesRow": "Agent modes",
       "agentRow": "Agent defaults",
+      "agentsRow": "Agents",
       "appSecurity": "App security",
       "appearanceBackAria": "Back to Me",
       "appearanceLink": "Theme & wallpaper",
@@ -24252,7 +24757,6 @@
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
       "canvasRow": "Canvas",
-      "charactersRow": "Characters",
       "chatTemplatesRow": "Chat templates",
       "cloudAccountRow": "Cloud account",
       "commandHistoryRow": "Command history",
@@ -32122,25 +32626,22 @@
       "addFileToChat": "Add File to Chat",
       "addSelectionToChat": "Add Selection to Chat",
       "addToChat": "Add to Chat",
-      "changeAllOccurrences": "Change All Occurrences",
       "copy": "Copy",
       "copyPath": "Copy Path",
       "copyRelativePath": "Copy Relative Path",
       "cut": "Cut",
       "findInFolder": "Find in Folder…",
       "format": "Format Document",
-      "goToImplementation": "Go to Implementation",
-      "goToReferences": "Go to References",
       "open": "Open",
       "openToSide": "Open to the Side",
       "paste": "Paste",
-      "renameSymbol": "Rename Symbol",
       "revealInExplorer": "Reveal in Explorer View",
       "revealInFileExplorer": "Reveal in File Explorer",
       "save": "Save",
       "searchProject": "Search in Project"
     },
     "agent": {
+      "addToChatFailed": "Couldn't add {name} to the chat",
       "addedToChat": "Added {name} to chat context"
     },
     "breadcrumbs": {
@@ -32453,6 +32954,12 @@
     "searchScope": "Searching in: {path}",
     "searchScopeClear": "Clear search scope",
     "searchTab": "Search",
+    "selectionToolbar": {
+      "addToChat": "Add to chat",
+      "aria": "Selection actions",
+      "askAi": "Ask AI",
+      "comment": "Comment"
+    },
     "sidebar": {
       "aria": "Editor sidebar",
       "collapse": "Collapse Sidebar",
@@ -32550,6 +33057,7 @@
       "inspect": "Inspect",
       "language": "Language",
       "mobileTab": "Tools",
+      "noFile": "Open a file to use this panel.",
       "outline": "Outline",
       "outlineEmpty": "No symbols are available for this file.",
       "path": "Path",
@@ -41026,15 +41534,16 @@
       "actions": {
         "applyUpdate": "Apply update",
         "applyUpdateBatch": "Apply to all ({count})",
-        "applyUpdateBatchTitle": "Apply the pack update to every clone you have from this pack",
-        "applyUpdateTitle": "Pull pack-managed fields from the new version while keeping your edits",
         "dismissUpdate": "Dismiss",
-        "dismissUpdateTitle": "Stop showing the update-available indicator for this clone",
         "exportPack": "Export pack",
-        "recloneFromPack": "Re-clone",
-        "recloneFromPackTitle": "Replace this clone with a fresh copy from the updated pack"
+        "recloneFromPack": "Re-clone"
       },
       "addedToast": "Added \"{name}\".",
+      "agentsEntry": {
+        "description": "{count, plural, one {Manage # agent — its detail, runtime, work, and AI-assisted creation — on the Agents page.} other {Manage # agents — their detail, runtime, work, and AI-assisted creation — on the Agents page.}}",
+        "open": "Open Agents",
+        "title": "Agents moved to their own page"
+      },
       "applyUpdateDialog": {
         "cancel": "Cancel",
         "confirm": "Apply update",
@@ -41059,28 +41568,20 @@
       },
       "builtIn": "Built-in",
       "builtInReadOnly": "Built-in characters are read-only — duplicate first",
-      "builtInUndeletable": "Built-in characters can't be deleted",
       "bulk": {
-        "deleteSelected": "Delete ({count})",
         "deletedToast": "Deleted {count} character(s).",
-        "done": "Done",
         "exportPackName": "Exported characters",
-        "exportSelected": "Export ({count})",
-        "exportedToast": "Exported {count} character(s).",
-        "select": "Select",
-        "selectRow": "Select {name}"
+        "exportedToast": "Exported {count} character(s)."
       },
       "cancel": "Cancel",
       "create": "Create",
       "delete": "Delete",
       "deleteAria": "Delete {name}",
-      "description": "Reusable personas. Each character carries its own system prompt, model, MCP subset, and skills. Pick one when you start a new chat.",
+      "description": "The character packs agents are cloned from, and knowledge bases any agent can bind. The agents themselves are managed on the Agents page.",
       "dismissUpdateToast": "Update indicator dismissed.",
       "duplicate": "Duplicate",
-      "duplicateAria": "Duplicate {name}",
       "duplicatedToast": "Duplicated as \"{name}\".",
       "edit": "Edit",
-      "editAria": "Edit {name}",
       "editor": {
         "account": {
           "description": "Pin sends from this character to a specific provider account. Inherit uses the session / settings default.",
@@ -41234,6 +41735,11 @@
           "description": "Where this character's computer-use actions run. Pick a configured cua sandbox to run them in an isolated Docker desktop instead of this machine. Manage sandboxes under Settings → Automation → Sandboxes.",
           "label": "Execution target",
           "local": "Local (this machine)"
+        },
+        "computerUseToggle": {
+          "aria": "Toggle computer use",
+          "description": "Let this character see and control the desktop through the Computer Use plugin (screenshots, mouse, keyboard). Desktop only.",
+          "label": "Computer use"
         },
         "description": "Description",
         "descriptionPlaceholder": "(optional) one-line summary",
@@ -41417,16 +41923,8 @@
         "workingDir": "Working directory",
         "workingDirPlaceholder": "/path/to/project (optional)"
       },
-      "emptyHint": "No characters yet. The built-ins should appear here automatically.",
       "exportPackAria": "Export source pack for {name}",
       "exportPackUnavailable": "Could not resolve a pack to export.",
-      "filter": {
-        "all": "All sources",
-        "builtin": "Built-in",
-        "label": "Filter by source",
-        "plugin": "Plugin",
-        "user": "Custom"
-      },
       "knowledgeBases": {
         "cancel": "Cancel",
         "create": "Create",
@@ -41536,10 +42034,7 @@
         "noneDefined": "(none defined yet)",
         "reorder": "Reorder:"
       },
-      "newCharacter": "New character",
-      "noMatches": "No characters match your search.",
       "overlayReadOnly": "Plugin-provided characters are read-only — duplicate first",
-      "overlayUndeletable": "Plugin-provided characters cannot be deleted — disable the plugin instead",
       "packs": {
         "characterCount": "{count, plural, =1 {# character} other {# characters}}",
         "collapseAria": "Hide characters in pack {id}",
@@ -41569,9 +42064,7 @@
       "removedToast": "Removed \"{name}\".",
       "save": "Save",
       "saving": "Saving…",
-      "searchPlaceholder": "Search characters…",
-      "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
-      "title": "Characters",
+      "title": "Agent packs & knowledge",
       "trust": {
         "rejectedToast": "Pack “{id}” was rejected: its signature did not verify ({reason}).",
         "skippedSignature": "{count, plural, =1 {1 signed pack failed verification and was not loaded} other {# signed packs failed verification and were not loaded}}",
@@ -41589,16 +42082,13 @@
         "badge": "Variant of {base}",
         "badgeTitle": "{count, plural, =0 {Follows its base for everything} one {Overrides # field; follows its base for the rest} other {Overrides # fields; follows its base for the rest}}",
         "create": "Create variant",
-        "createAria": "Create a variant of {name}",
         "createdToast": "Created {name}",
         "defaultName": "{name} (variant)",
         "deleteBlocked": "{count, plural, one {This agent is the base of # variant} other {This agent is the base of # variants}} ({names}). Detach or delete them first.",
         "detach": "Detach from base",
-        "detachAria": "Detach {name} from its base",
         "detachedToast": "{name} no longer follows its base",
         "editorNotice": "Variant of {base}. Fields you change here override the base; every other field keeps following it.",
         "reset": "Reset overrides",
-        "resetAria": "Reset the overrides of {name}",
         "resetToast": "{name} follows its base again"
       },
       "warning": {
@@ -45486,7 +45976,7 @@
       "automation": "Desktop UI automation — screenshot, find element, click, type, send keys. Disabled by default; gated by a three-tier permission policy with a global kill switch.",
       "canvas": "Monaco-based code/document editor with AI actions, version history, inline suggestions, sandboxed execution and collaboration.",
       "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
-      "characters": "Reusable personas with their own model and skills.",
+      "characters": "Character packs agents are cloned from, and reusable knowledge bases.",
       "chatTemplates": "Saved messages with parameters — insert them from the / menu and fill in the blanks.",
       "companion": "Mobile companion server — bind mode (loopback / LAN), QR pairing, paired devices, and revocation.",
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
@@ -49090,12 +49580,19 @@
           "heading": "Custom instructions",
           "placeholder": "Extra guidance for the model (tone, scope conventions, language…)"
         },
-        "description": "Show a button in the commit box to draft a message from the staged diff.",
+        "description": "Show a Generate button in the commit box that drafts a message from the staged diff.",
         "heading": "AI commit messages",
         "model": {
           "model": "Model",
           "provider": "Provider",
           "useDefault": "Use chat default"
+        },
+        "source": {
+          "agent": "Selected agent",
+          "agentDescription": "Uses the agent selected in the chat composer. Codex, Claude Code and other local agents read the repository in read-only plan mode; the built-in agent uses the model below.",
+          "heading": "Generate with",
+          "model": "Utility model",
+          "modelDescription": "Always uses the model below, whichever agent is selected."
         }
       },
       "description": "AI commit-message generation and other Git panel preferences.",
@@ -49682,7 +50179,7 @@
       "automation": "UI Automation",
       "canvas": "Canvas",
       "ccswitch": "CCSwitch",
-      "characters": "Characters",
+      "characters": "Agent packs",
       "chatTemplates": "Chat templates",
       "companion": "Mobile companion",
       "connections": "Connections",
@@ -52456,17 +52953,26 @@
     "commit": {
       "ai": {
         "failed": "Failed to generate commit message",
+        "generate": "Generate",
+        "generateWith": "Generate a message with {agent}",
         "generating": "Generating message…",
+        "hostAgent": "Host agent",
         "noStaged": "Stage changes first to generate a message",
-        "redacted": "Sensitive data was redacted before sending to the model"
+        "redacted": "Sensitive data was redacted before sending to the model",
+        "stop": "Stop generating",
+        "writingWith": "{agent} is writing…"
       },
       "amend": "Commit (Amend)",
       "autoGenerateAI": "Generate message with AI",
       "commit": "Commit",
+      "commitAll": "Commit all {count, plural, one {# file} other {# files}}",
       "commitAndPush": "Commit & Push",
       "commitAndSync": "Commit & Sync",
+      "commitCount": "Commit {count, plural, one {# file} other {# files}}",
+      "messageLabel": "Commit message",
       "more": "More commit actions",
-      "placeholder": "Message (Ctrl+Enter to commit)",
+      "placeholder": "Describe what changed and why",
+      "shortcutHint": "to commit",
       "signoff": "Sign Off"
     },
     "commitDetail": {
@@ -52544,10 +53050,12 @@
     },
     "emptyState": {
       "initRepo": "Initialize Repository",
-      "noChanges": "No changes",
+      "noChanges": "Working tree clean",
+      "noChangesDescription": "Nothing to commit. Edits in this repository will show up here.",
       "noFolder": "No folder open",
       "notARepo": "This folder is not a Git repository",
-      "openFolder": "Open Folder"
+      "openFolder": "Open Folder",
+      "viewHistory": "View history"
     },
     "errors": {
       "checkoutFailed": "Switch branch failed: {message}",
@@ -52682,6 +53190,7 @@
       "hunkLabel": "Hunk @ line {line}",
       "reject": "Reject hunk",
       "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
+      "short": "Review",
       "showInDiff": "Show in diff",
       "title": "Review hunks"
     },
@@ -52808,6 +53317,27 @@
     "statusBar": {
       "openSourceControl": "Open Source Control"
     },
+    "sync": {
+      "describe": {
+        "fetch": "Fetch new commits from the remotes",
+        "fetchUpToDate": "Up to date with {upstream}. Fetch to check for new commits",
+        "publish": "Publish {branch} to the remote and track it",
+        "pull": "Pull {count, plural, one {# commit} other {# commits}} from {upstream}",
+        "push": "Push {count, plural, one {# commit} other {# commits}} to {upstream}",
+        "sync": "Pull {behind, plural, one {# commit} other {# commits}} and push {ahead, plural, one {# commit} other {# commits}} with {upstream}"
+      },
+      "intent": {
+        "fetch": "Fetch",
+        "publish": "Publish",
+        "pull": "Pull",
+        "push": "Push",
+        "sync": "Sync"
+      },
+      "menu": "More sync actions",
+      "noUpstreamLabel": "No upstream branch",
+      "theRemote": "the remote",
+      "trackingLabel": "Tracking {upstream}"
+    },
     "tags": {
       "create": "Create Tag",
       "delete": "Delete Tag",
@@ -52830,6 +53360,10 @@
       "viewList": "List view"
     },
     "title": "Source Control",
+    "tools": {
+      "commits": "Commits",
+      "repository": "Repository"
+    },
     "viewSettings": {
       "branchSort": "Branch order",
       "branchSortMode": {
@@ -54854,9 +55388,13 @@
       "unknown": "Unknown host"
     },
     "hostState": {
+      "authorizationFailed": "Authorization did not complete. You can try again.",
+      "authorize": "Authorize access",
+      "authorizing": "Authorizing…",
       "openSettings": "Open settings",
       "retry": "Retry",
       "state": {
+        "credential_unavailable": "The terminal host cannot access its saved credentials. Authorize access on the host device.",
         "incompatible": "The terminal host is incompatible with this app build.",
         "offline": "The terminal host is offline.",
         "reconnecting": "Reconnecting to the terminal host…",

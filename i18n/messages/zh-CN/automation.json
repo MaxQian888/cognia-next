@@ -201,6 +201,17 @@
     "elementDetails": "元素详情",
     "elementDetailsDescription": "查看 canonical handle、属性、展开结果与操作验证。",
     "emptyResult": "未返回任何元素。",
+    "errors": {
+      "unsupportedPlatform": "当前平台不支持桌面自动化。",
+      "killSwitchActive": "自动化急停已启用。请在“概览”中重新启用自动化引擎后再继续。",
+      "permissionDenied": "权限被拒绝：{reason}",
+      "userDeclined": "请求已被拒绝。",
+      "whitelistMiss": "该窗口不在自动化白名单中。",
+      "elementNotFound": "未找到元素。",
+      "staleElement": "该元素已过期，请重新捕获状态。",
+      "backend": "无障碍后端错误：{message}",
+      "internal": "内部错误：{message}"
+    },
     "events": {
       "action": "操作返回 {status}。",
       "capture": "已捕获 revision {revision}。",
@@ -219,6 +230,11 @@
     "noScreenshot": "此 revision 没有匹配的截图。",
     "none": "无",
     "pageSummary": "第 {page} / {pages} 页",
+    "permissionNotice": {
+      "title": "捕获需要自动化权限",
+      "description": "在这里列出应用始终可用，但捕获会包含窗口截图，因此要经过自动化权限门。请确认已在“概览”中启用自动化引擎，并在“权限”中把默认等级或工作流的按界面覆盖设为“关闭”以外的值，然后重新捕获。",
+      "action": "打开权限"
+    },
     "previousPage": "上一页",
     "query": "查询元素",
     "queryFailed": "查询元素失败",

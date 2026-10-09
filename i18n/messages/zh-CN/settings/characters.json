@@ -2,15 +2,16 @@
   "actions": {
     "applyUpdate": "应用更新",
     "applyUpdateBatch": "全部应用（{count}）",
-    "applyUpdateBatchTitle": "把更新应用到来自该角色包的每一个克隆",
-    "applyUpdateTitle": "从新版角色包拉取受管字段，同时保留你的修改",
     "dismissUpdate": "忽略",
-    "dismissUpdateTitle": "不再为此克隆显示更新提示",
     "exportPack": "导出角色包",
-    "recloneFromPack": "重新克隆",
-    "recloneFromPackTitle": "用新版本的角色包覆盖当前克隆"
+    "recloneFromPack": "重新克隆"
   },
   "addedToast": "已添加「{name}」。",
+  "agentsEntry": {
+    "description": "{count, plural, other {在「智能体」页面管理 # 个智能体：详情、运行时、工作以及 AI 辅助创建。}}",
+    "open": "打开智能体",
+    "title": "智能体已移至独立页面"
+  },
   "applyUpdateDialog": {
     "cancel": "取消",
     "confirm": "应用更新",
@@ -35,28 +36,20 @@
   },
   "builtIn": "内置",
   "builtInReadOnly": "内置角色为只读——请先复制",
-  "builtInUndeletable": "内置角色无法删除",
   "bulk": {
-    "deleteSelected": "删除（{count}）",
     "deletedToast": "已删除 {count} 个角色。",
-    "done": "完成",
     "exportPackName": "导出的角色",
-    "exportSelected": "导出（{count}）",
-    "exportedToast": "已导出 {count} 个角色。",
-    "select": "多选",
-    "selectRow": "选择 {name}"
+    "exportedToast": "已导出 {count} 个角色。"
   },
   "cancel": "取消",
   "create": "创建",
   "delete": "删除",
   "deleteAria": "删除 {name}",
-  "description": "可复用的人设。每个角色携带自己的系统提示词、模型、MCP 子集与技能。新建会话时可以选择一个使用。",
+  "description": "智能体可从中克隆的角色包，以及任意智能体都可绑定的知识库。智能体本身在「智能体」页面管理。",
   "dismissUpdateToast": "已忽略更新提示。",
   "duplicate": "复制",
-  "duplicateAria": "复制 {name}",
   "duplicatedToast": "已复制为「{name}」。",
   "edit": "编辑",
-  "editAria": "编辑 {name}",
   "editor": {
     "account": {
       "description": "为该角色固定使用某个具体账号。选择继承时使用会话 / 设置中的默认账号。",
@@ -64,230 +57,6 @@
       "label": "账号覆盖",
       "optionLabel": "{provider}：{label}"
     },
-    "allowedTools": "允许的工具（用逗号分隔）",
-    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
-    "avatarEmoji": "头像 Emoji",
-    "avatarEmojiPlaceholder": "🤖",
-    "avatarImage": {
-      "clear": "移除图片",
-      "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
-      "upload": "上传图片"
-    },
-    "browserToolsToggle": {
-      "aria": "切换智能体浏览器工具",
-      "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
-      "label": "智能体浏览器工具"
-    },
-    "computerUseSubSettings": {
-      "allowedToolIds": {
-        "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
-        "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。",
-        "label": "允许的原生工具"
-      },
-      "chatConsentMode": {
-        "description": "聊天内 canUseTool 弹窗的行为。与 Rust 网关相互独立，两端都可能弹。",
-        "label": "聊天侧弹窗策略",
-        "options": {
-          "always-ask": "每次询问",
-          "auto": "自动（交给 Rust 网关）",
-          "session-grant": "本次会话记住"
-        }
-      },
-      "requireConsent": {
-        "description": "无论「设置 → 自动化 → 权限」如何配置，本角色发出的每条 Computer Use 驱动调用都强制走同意浮层。对行为还不熟悉的新角色尤其有用。",
-        "label": "每次调用前都征求同意"
-      },
-      "screenOffMode": {
-        "description": "在显示器关闭或休眠（会话需保持解锁）时，通过捆绑的虚拟显示器路由截图，让 Computer Use 持续可用。需要先在「设置 → 自动化」中安装虚拟显示器驱动。默认关闭。",
-        "label": "熄屏模式（Windows）"
-      }
-    },
-    "computerUseTarget": {
-      "description": "本角色的 computer-use 动作在哪里执行。选择一个已配置的 cua 沙箱即可让动作在隔离的 Docker 桌面里运行，而不是本机。沙箱在「设置 → 自动化 → 沙箱」中管理。",
-      "label": "执行目标",
-      "local": "本机（这台设备）"
-    },
-    "description": "描述",
-    "descriptionPlaceholder": "（可选）一句话说明",
-    "disallowedTools": "禁用的工具（用逗号分隔）",
-    "disallowedToolsPlaceholder": "Bash",
-    "execution": {
-      "addEnv": "添加变量",
-      "effort": "推理强度",
-      "effortValues": {
-        "high": "高",
-        "low": "低",
-        "max": "最高",
-        "medium": "中",
-        "xhigh": "超高"
-      },
-      "envDescription": "普通值随 Agent 保存；敏感值写入设备 keyring，保存或导出的仅是不透明引用。",
-      "envKind": "类型",
-      "envName": "名称",
-      "envNameDuplicate": "环境变量 {name} 重复定义。",
-      "envNameInvalid": "{name} 不是有效的环境变量名称。",
-      "envNamePlaceholder": "API_BASE_URL",
-      "envPlain": "普通",
-      "envPlainPlaceholder": "变量值",
-      "envSecret": "敏感",
-      "envSecretPlaceholder": "留空以保留已保存的密钥",
-      "envSecretRequired": "请输入 {name} 的敏感值。",
-      "envSecretSaveFailed": "无法将 {name} 的敏感值保存到设备 keyring。",
-      "envTitle": "环境变量",
-      "envValue": "值",
-      "inherit": "继承应用默认值",
-      "maxTurns": "最大轮数",
-      "maxTurnsHint": "每次运行最多允许 1 到 100 个智能体轮次。",
-      "maxTurnsInvalid": "最大轮数必须是 1 到 100 之间的整数。",
-      "maxTurnsPlaceholder": "使用应用默认值",
-      "removeEnv": "移除环境变量 {name}"
-    },
-    "knowledgeBases": "知识库",
-    "knowledgeBasesEmptyHint": "此 Agent 尚未绑定可复用知识库。",
-    "knowledgeBasesHint": "可绑定一个或多个可复用知识库；检索会独立查询所有已选知识库。",
-    "mcpServers": "MCP 服务器",
-    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
-    "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
-    "memoryPolicy": {
-      "description": "选择此 Agent 可执行的长期记忆操作，以及允许访问的作用域。",
-      "globalCeiling": "应用级记忆与隐私设置始终是权限上限。此策略只能收紧权限，不能启用全局或当前会话已禁用的访问。",
-      "operations": {
-        "autoLearn": "自动学习",
-        "create": "创建记忆",
-        "forget": "遗忘记忆",
-        "recall": "召回记忆",
-        "update": "更新记忆"
-      },
-      "readableScopes": "可读作用域",
-      "scopes": {
-        "agent": "Agent",
-        "character": "角色",
-        "global": "全局",
-        "workspace": "工作区"
-      },
-      "title": "记忆策略",
-      "writableScopes": "可写作用域"
-    },
-    "model": "模型",
-    "modelIdPlaceholder": "或粘贴模型 id",
-    "name": "名称",
-    "namePlaceholder": "Coding Assistant",
-    "permissionMode": "权限模式",
-    "persona": {
-      "description": "可选的语气与性格，会织入系统提示；另含开场白与起手 prompt。",
-      "exemplarPrompts": "起手 prompt",
-      "exemplarPromptsHint": "每行一条——新会话时作为快捷起手卡片展示。",
-      "exemplarPromptsPlaceholder": "审查我的 PR\n起草发布说明",
-      "openingMessage": "开场白",
-      "openingMessagePlaceholder": "你好！今天我们做点什么？",
-      "personality": "性格",
-      "personalityPlaceholder": "曾任教师，偏好用类比讲解",
-      "title": "人设",
-      "tone": "语气",
-      "tonePlaceholder": "温暖、鼓励"
-    },
-    "pickColor": "选择颜色 {color}",
-    "platforms": {
-      "browser": "Web",
-      "description": "将该角色限定到特定平台。全部不选则在所有平台显示。",
-      "mobile": "移动端",
-      "tauri": "桌面端",
-      "title": "可用平台"
-    },
-    "routing": {
-      "description": "分别为规划、执行和轻量 utility 任务选择模型。现有路由器继续支持模型别名与 Auto。",
-      "execute": "执行模型",
-      "plan": "规划模型",
-      "planPlaceholder": "使用应用默认规划模型",
-      "title": "语义模型路由",
-      "utility": "Utility 模型",
-      "utilityPlaceholder": "使用应用默认 utility 模型"
-    },
-    "sandbox": {
-      "enable": {
-        "aria": "启用沙盒",
-        "description": "为该角色用 sandbox_* 替换 SDK 内建工具。",
-        "label": "沙盒化 Bash / Edit / Write"
-      },
-      "tier": {
-        "cuaDesktop": "绑定的沙箱桌面",
-        "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
-        "inherit": "继承应用默认",
-        "label": "沙盒层级",
-        "microvm": "microVM（e2b）",
-        "os": "OS 沙盒",
-        "cuaDesktopNeedsBoundDesktop": "让 shell 与文件操作在绑定的桌面内执行。需要一台所属 provider 支持该能力的已绑定机器，请先在「Computer Use」下选择一个沙盒连接。"
-      }
-    },
-    "skills": "技能",
-    "skillsHint": "顺序很重要——靠前的技能会先附加到系统提示词。",
-    "systemPrompt": "系统提示词",
-    "systemPromptPlaceholder": "你是…",
-    "twinBinding": {
-      "cancel": "取消",
-      "citationStyleLabel": "引用格式",
-      "citationStyleSimple": "简洁",
-      "confirmBind": "绑定",
-      "createNew": "新建孪生",
-      "enableCitations": "来源引用",
-      "enableCitationsHint": "为检索到的片段附上格式化引用（仅展示，不改变提示词）。",
-      "enableCorrectiveFilter": "纠错过滤",
-      "enableCorrectiveFilterHint": "在片段进入提示词前，用启发式评分器剔除相关性低的检索片段。",
-      "enableHybrid": "混合关键词检索",
-      "enableHybridHint": "将 BM25 关键词检索与向量检索融合，避免漏掉精确的名称、ID 和文件引用。",
-      "enableQueryExpansion": "查询扩展",
-      "enableQueryExpansionHint": "用同义词扩展提升召回（在孪生运行时设置中配置后，还可启用 LLM HyDE/回退查询）。",
-      "enableRag": "启用 RAG",
-      "enableRagHint": "发送时检索 top-K 个孪生切片，注入到系统提示词。",
-      "enableStyleFewShot": "风格少样本",
-      "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
-      "hybridKeywordWeight": "关键词权重",
-      "never": "（暂无）",
-      "newTwinId": "孪生 ID",
-      "newTwinIdHint": "支持字母、数字与下划线。必须在所有角色中唯一。",
-      "newTwinIdPlaceholder": "twin_xxxxxxxx",
-      "openWorkbench": "打开工作台",
-      "pickExisting": "选择已有的孪生",
-      "pickExistingPlaceholder": "请选择…",
-      "ragTopK": "检索 top K",
-      "runtimeTitle": "运行时",
-      "statsChunks": "切片",
-      "statsLastDistilled": "档案更新",
-      "statsPlaybooks": "Playbook",
-      "statsSources": "源数",
-      "statsStyleSamples": "风格样本",
-      "styleSamplesK": "每次发送的样本数",
-      "titleBound": "数字孪生",
-      "titleUnbound": "数字孪生（可选）",
-      "unbind": "解绑孪生",
-      "unbindBody": "孪生的数据会保留，仅断开当前角色与它之间的关联。",
-      "unbindConfirm": "解绑",
-      "unbindTitle": "确认解绑孪生？",
-      "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。",
-      "embeddingLabel": "嵌入",
-      "embeddingValue": "{provider} · {model}",
-      "embeddingSourceTwin": "分身单独设置",
-      "embeddingSourceGlobal": "分身运行时默认值",
-      "embeddingNoCredentials": "分身的嵌入提供商缺少凭据，将跳过分身知识检索。",
-      "embeddingRebuildRequired": "分身的索引由其他模型构建，在工作台中重建之前将跳过分身知识检索。",
-      "embeddingHint": "嵌入设置属于分身，由绑定它的所有智能体共享，请在工作台中修改。"
-    },
-    "useDefault": "使用应用默认值",
-    "voice": {
-      "description": "可选的角色专属朗读语音。保持「继承」时使用全局语音设置。",
-      "inherit": "继承全局",
-      "pitch": "音调",
-      "provider": "提供商",
-      "rate": "语速",
-      "title": "语音",
-      "voiceId": "音色",
-      "voiceIdPlaceholder": "音色 id",
-      "volume": "音量"
-    },
-    "workingDir": "工作目录",
-    "workingDirPlaceholder": "/path/to/project（可选）",
-    "pluginSkills": "插件技能",
-    "pluginSkillsHint": "由已启用插件提供的技能，会与该角色的对话技能一起加入它的每次回复。",
     "advanced": {
       "title": "高级覆盖",
       "count": "{count} 项覆盖",
@@ -391,18 +160,239 @@
           "storeUnmatched": "单独决定是否保留未匹配的消息"
         }
       }
-    }
+    },
+    "allowedTools": "允许的工具（用逗号分隔）",
+    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
+    "avatarEmoji": "头像 Emoji",
+    "avatarEmojiPlaceholder": "🤖",
+    "avatarImage": {
+      "clear": "移除图片",
+      "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
+      "upload": "上传图片"
+    },
+    "browserToolsToggle": {
+      "aria": "切换智能体浏览器工具",
+      "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
+      "label": "智能体浏览器工具"
+    },
+    "computerUseSubSettings": {
+      "allowedToolIds": {
+        "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
+        "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。",
+        "label": "允许的原生工具"
+      },
+      "chatConsentMode": {
+        "description": "聊天内 canUseTool 弹窗的行为。与 Rust 网关相互独立，两端都可能弹。",
+        "label": "聊天侧弹窗策略",
+        "options": {
+          "always-ask": "每次询问",
+          "auto": "自动（交给 Rust 网关）",
+          "session-grant": "本次会话记住"
+        }
+      },
+      "requireConsent": {
+        "description": "无论「设置 → 自动化 → 权限」如何配置，本角色发出的每条 Computer Use 驱动调用都强制走同意浮层。对行为还不熟悉的新角色尤其有用。",
+        "label": "每次调用前都征求同意"
+      },
+      "screenOffMode": {
+        "description": "在显示器关闭或休眠（会话需保持解锁）时，通过捆绑的虚拟显示器路由截图，让 Computer Use 持续可用。需要先在「设置 → 自动化」中安装虚拟显示器驱动。默认关闭。",
+        "label": "熄屏模式（Windows）"
+      }
+    },
+    "computerUseTarget": {
+      "description": "本角色的 computer-use 动作在哪里执行。选择一个已配置的 cua 沙箱即可让动作在隔离的 Docker 桌面里运行，而不是本机。沙箱在「设置 → 自动化 → 沙箱」中管理。",
+      "label": "执行目标",
+      "local": "本机（这台设备）"
+    },
+    "computerUseToggle": {
+      "aria": "切换电脑操作",
+      "description": "允许该角色通过电脑操作插件查看并控制桌面（截图、鼠标、键盘）。仅限桌面端。",
+      "label": "电脑操作"
+    },
+    "description": "描述",
+    "descriptionPlaceholder": "（可选）一句话说明",
+    "disallowedTools": "禁用的工具（用逗号分隔）",
+    "disallowedToolsPlaceholder": "Bash",
+    "execution": {
+      "addEnv": "添加变量",
+      "effort": "推理强度",
+      "effortValues": {
+        "high": "高",
+        "low": "低",
+        "max": "最高",
+        "medium": "中",
+        "xhigh": "超高"
+      },
+      "envDescription": "普通值随 Agent 保存；敏感值写入设备 keyring，保存或导出的仅是不透明引用。",
+      "envKind": "类型",
+      "envName": "名称",
+      "envNameDuplicate": "环境变量 {name} 重复定义。",
+      "envNameInvalid": "{name} 不是有效的环境变量名称。",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "普通",
+      "envPlainPlaceholder": "变量值",
+      "envSecret": "敏感",
+      "envSecretPlaceholder": "留空以保留已保存的密钥",
+      "envSecretRequired": "请输入 {name} 的敏感值。",
+      "envSecretSaveFailed": "无法将 {name} 的敏感值保存到设备 keyring。",
+      "envTitle": "环境变量",
+      "envValue": "值",
+      "inherit": "继承应用默认值",
+      "maxTurns": "最大轮数",
+      "maxTurnsHint": "每次运行最多允许 1 到 100 个智能体轮次。",
+      "maxTurnsInvalid": "最大轮数必须是 1 到 100 之间的整数。",
+      "maxTurnsPlaceholder": "使用应用默认值",
+      "removeEnv": "移除环境变量 {name}"
+    },
+    "knowledgeBases": "知识库",
+    "knowledgeBasesEmptyHint": "此 Agent 尚未绑定可复用知识库。",
+    "knowledgeBasesHint": "可绑定一个或多个可复用知识库；检索会独立查询所有已选知识库。",
+    "mcpServers": "MCP 服务器",
+    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+    "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
+    "memoryPolicy": {
+      "description": "选择此 Agent 可执行的长期记忆操作，以及允许访问的作用域。",
+      "globalCeiling": "应用级记忆与隐私设置始终是权限上限。此策略只能收紧权限，不能启用全局或当前会话已禁用的访问。",
+      "operations": {
+        "autoLearn": "自动学习",
+        "create": "创建记忆",
+        "forget": "遗忘记忆",
+        "recall": "召回记忆",
+        "update": "更新记忆"
+      },
+      "readableScopes": "可读作用域",
+      "scopes": {
+        "agent": "Agent",
+        "character": "角色",
+        "global": "全局",
+        "workspace": "工作区"
+      },
+      "title": "记忆策略",
+      "writableScopes": "可写作用域"
+    },
+    "model": "模型",
+    "modelIdPlaceholder": "或粘贴模型 id",
+    "name": "名称",
+    "namePlaceholder": "Coding Assistant",
+    "permissionMode": "权限模式",
+    "persona": {
+      "description": "可选的语气与性格，会织入系统提示；另含开场白与起手 prompt。",
+      "exemplarPrompts": "起手 prompt",
+      "exemplarPromptsHint": "每行一条——新会话时作为快捷起手卡片展示。",
+      "exemplarPromptsPlaceholder": "审查我的 PR\n起草发布说明",
+      "openingMessage": "开场白",
+      "openingMessagePlaceholder": "你好！今天我们做点什么？",
+      "personality": "性格",
+      "personalityPlaceholder": "曾任教师，偏好用类比讲解",
+      "title": "人设",
+      "tone": "语气",
+      "tonePlaceholder": "温暖、鼓励"
+    },
+    "pickColor": "选择颜色 {color}",
+    "platforms": {
+      "browser": "Web",
+      "description": "将该角色限定到特定平台。全部不选则在所有平台显示。",
+      "mobile": "移动端",
+      "tauri": "桌面端",
+      "title": "可用平台"
+    },
+    "pluginSkills": "插件技能",
+    "pluginSkillsHint": "由已启用插件提供的技能，会与该角色的对话技能一起加入它的每次回复。",
+    "routing": {
+      "description": "分别为规划、执行和轻量 utility 任务选择模型。现有路由器继续支持模型别名与 Auto。",
+      "execute": "执行模型",
+      "plan": "规划模型",
+      "planPlaceholder": "使用应用默认规划模型",
+      "title": "语义模型路由",
+      "utility": "Utility 模型",
+      "utilityPlaceholder": "使用应用默认 utility 模型"
+    },
+    "sandbox": {
+      "enable": {
+        "aria": "启用沙盒",
+        "description": "为该角色用 sandbox_* 替换 SDK 内建工具。",
+        "label": "沙盒化 Bash / Edit / Write"
+      },
+      "tier": {
+        "cuaDesktop": "绑定的沙箱桌面",
+        "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
+        "inherit": "继承应用默认",
+        "label": "沙盒层级",
+        "microvm": "microVM（e2b）",
+        "os": "OS 沙盒",
+        "cuaDesktopNeedsBoundDesktop": "让 shell 与文件操作在绑定的桌面内执行。需要一台所属 provider 支持该能力的已绑定机器，请先在「Computer Use」下选择一个沙盒连接。"
+      }
+    },
+    "skills": "技能",
+    "skillsHint": "顺序很重要——靠前的技能会先附加到系统提示词。",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "你是…",
+    "twinBinding": {
+      "cancel": "取消",
+      "citationStyleLabel": "引用格式",
+      "citationStyleSimple": "简洁",
+      "confirmBind": "绑定",
+      "createNew": "新建孪生",
+      "enableCitations": "来源引用",
+      "enableCitationsHint": "为检索到的片段附上格式化引用（仅展示，不改变提示词）。",
+      "enableCorrectiveFilter": "纠错过滤",
+      "enableCorrectiveFilterHint": "在片段进入提示词前，用启发式评分器剔除相关性低的检索片段。",
+      "enableHybrid": "混合关键词检索",
+      "enableHybridHint": "将 BM25 关键词检索与向量检索融合，避免漏掉精确的名称、ID 和文件引用。",
+      "enableQueryExpansion": "查询扩展",
+      "enableQueryExpansionHint": "用同义词扩展提升召回（在孪生运行时设置中配置后，还可启用 LLM HyDE/回退查询）。",
+      "enableRag": "启用 RAG",
+      "enableRagHint": "发送时检索 top-K 个孪生切片，注入到系统提示词。",
+      "enableStyleFewShot": "风格少样本",
+      "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
+      "hybridKeywordWeight": "关键词权重",
+      "never": "（暂无）",
+      "newTwinId": "孪生 ID",
+      "newTwinIdHint": "支持字母、数字与下划线。必须在所有角色中唯一。",
+      "newTwinIdPlaceholder": "twin_xxxxxxxx",
+      "openWorkbench": "打开工作台",
+      "pickExisting": "选择已有的孪生",
+      "pickExistingPlaceholder": "请选择…",
+      "ragTopK": "检索 top K",
+      "runtimeTitle": "运行时",
+      "statsChunks": "切片",
+      "statsLastDistilled": "档案更新",
+      "statsPlaybooks": "Playbook",
+      "statsSources": "源数",
+      "statsStyleSamples": "风格样本",
+      "styleSamplesK": "每次发送的样本数",
+      "titleBound": "数字孪生",
+      "titleUnbound": "数字孪生（可选）",
+      "unbind": "解绑孪生",
+      "unbindBody": "孪生的数据会保留，仅断开当前角色与它之间的关联。",
+      "unbindConfirm": "解绑",
+      "unbindTitle": "确认解绑孪生？",
+      "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。",
+      "embeddingLabel": "嵌入",
+      "embeddingValue": "{provider} · {model}",
+      "embeddingSourceTwin": "分身单独设置",
+      "embeddingSourceGlobal": "分身运行时默认值",
+      "embeddingNoCredentials": "分身的嵌入提供商缺少凭据，将跳过分身知识检索。",
+      "embeddingRebuildRequired": "分身的索引由其他模型构建，在工作台中重建之前将跳过分身知识检索。",
+      "embeddingHint": "嵌入设置属于分身，由绑定它的所有智能体共享，请在工作台中修改。"
+    },
+    "useDefault": "使用应用默认值",
+    "voice": {
+      "description": "可选的角色专属朗读语音。保持「继承」时使用全局语音设置。",
+      "inherit": "继承全局",
+      "pitch": "音调",
+      "provider": "提供商",
+      "rate": "语速",
+      "title": "语音",
+      "voiceId": "音色",
+      "voiceIdPlaceholder": "音色 id",
+      "volume": "音量"
+    },
+    "workingDir": "工作目录",
+    "workingDirPlaceholder": "/path/to/project（可选）"
   },
-  "emptyHint": "暂无角色。内置角色应该会自动出现在这里。",
   "exportPackAria": "导出 {name} 的源角色包",
   "exportPackUnavailable": "找不到可导出的角色包。",
-  "filter": {
-    "all": "全部来源",
-    "builtin": "内置",
-    "label": "按来源筛选",
-    "plugin": "插件",
-    "user": "自定义"
-  },
   "knowledgeBases": {
     "cancel": "取消",
     "create": "创建",
@@ -512,10 +502,7 @@
     "noneDefined": "（暂未定义）",
     "reorder": "重排："
   },
-  "newCharacter": "新建角色",
-  "noMatches": "没有匹配的角色。",
   "overlayReadOnly": "插件提供的角色为只读——请先复制",
-  "overlayUndeletable": "插件提供的角色无法删除——请禁用对应插件",
   "packs": {
     "characterCount": "{count} 个角色",
     "collapseAria": "收起角色包 {id} 中的角色",
@@ -545,9 +532,7 @@
   "removedToast": "已删除「{name}」。",
   "save": "保存",
   "saving": "保存中…",
-  "searchPlaceholder": "搜索角色…",
-  "skillsCount": "{count} 项技能",
-  "title": "角色",
+  "title": "角色包与知识库",
   "trust": {
     "rejectedToast": "角色包「{id}」已被拒绝：签名验证未通过（{reason}）。",
     "skippedSignature": "{count} 个已签名角色包验证失败，未加载",
@@ -576,16 +561,13 @@
     "badge": "{base} 的变体",
     "badgeTitle": "{count, plural, =0 {所有字段都沿用基础智能体} other {覆盖了 # 个字段，其余沿用基础智能体}}",
     "create": "创建变体",
-    "createAria": "为 {name} 创建变体",
     "createdToast": "已创建 {name}",
     "defaultName": "{name}（变体）",
     "deleteBlocked": "{count, plural, other {该智能体是 # 个变体的基础}}（{names}）。请先解除关联或删除这些变体。",
     "detach": "与基础智能体解除关联",
-    "detachAria": "将 {name} 与其基础智能体解除关联",
     "detachedToast": "{name} 已不再跟随其基础智能体",
     "editorNotice": "{base} 的变体。你在这里修改的字段会覆盖基础智能体，其余字段继续跟随它。",
     "reset": "重置覆盖项",
-    "resetAria": "重置 {name} 的覆盖项",
     "resetToast": "{name} 已重新完全跟随其基础智能体"
   }
 }

@@ -310,6 +310,7 @@
       "executionRunBindings": "Run delivery bindings",
       "executionRuns": "Execution runs",
       "goals": "Goals",
+      "goalEvents": "Goal activity",
       "issueCycles": "Issue cycles",
       "issueEvents": "Issue events",
       "issueProjects": "Issue projects",

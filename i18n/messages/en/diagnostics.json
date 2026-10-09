@@ -421,6 +421,10 @@
       "label": "Agent already running",
       "hint": "This conversation's agent is still running in another process, so a second copy was not started. Wait for that run to finish, then retry."
     },
+    "agentRuntimeUnavailable": {
+      "label": "Agent's runtime unavailable",
+      "hint": "This agent is set to run on a runtime that isn't available on this device, so the conversation started on the default runtime. Pick another runtime in the agent's settings, or re-enable the external agent."
+    },
     "hostSessionRefused": {
       "label": "Conversation not created on the host",
       "hint": "The paired host refused this new chat — usually this device doesn't have Agent Control on that host. Ask the host's owner to grant it, then start the chat again."

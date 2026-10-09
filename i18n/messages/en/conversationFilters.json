@@ -82,9 +82,11 @@
     "label": "Sort by",
     "options": {
       "created": "Date created",
+      "createdAsc": "Date created (oldest first)",
       "oldest": "Oldest activity",
       "recent": "Recent activity",
       "title": "Title (A–Z)",
+      "titleDesc": "Title (Z–A)",
       "unread": "Unread first"
     }
   },

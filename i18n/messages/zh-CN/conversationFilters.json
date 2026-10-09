@@ -82,9 +82,11 @@
     "label": "排序方式",
     "options": {
       "created": "创建时间",
+      "createdAsc": "创建时间（最早优先）",
       "oldest": "最早活动",
       "recent": "最近活动",
       "title": "标题（A–Z）",
+      "titleDesc": "标题（Z–A）",
       "unread": "未读优先"
     }
   },

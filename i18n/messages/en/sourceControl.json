@@ -80,7 +80,12 @@
       "failed": "Failed to generate commit message",
       "generating": "Generating message…",
       "noStaged": "Stage changes first to generate a message",
-      "redacted": "Sensitive data was redacted before sending to the model"
+      "redacted": "Sensitive data was redacted before sending to the model",
+      "generate": "Generate",
+      "generateWith": "Generate a message with {agent}",
+      "hostAgent": "Host agent",
+      "stop": "Stop generating",
+      "writingWith": "{agent} is writing…"
     },
     "amend": "Commit (Amend)",
     "autoGenerateAI": "Generate message with AI",
@@ -88,8 +93,12 @@
     "commitAndPush": "Commit & Push",
     "commitAndSync": "Commit & Sync",
     "more": "More commit actions",
-    "placeholder": "Message (Ctrl+Enter to commit)",
-    "signoff": "Sign Off"
+    "placeholder": "Describe what changed and why",
+    "signoff": "Sign Off",
+    "commitAll": "Commit all {count, plural, one {# file} other {# files}}",
+    "commitCount": "Commit {count, plural, one {# file} other {# files}}",
+    "messageLabel": "Commit message",
+    "shortcutHint": "to commit"
   },
   "commitDetail": {
     "backToChanges": "Back to changes",
@@ -166,10 +175,12 @@
   },
   "emptyState": {
     "initRepo": "Initialize Repository",
-    "noChanges": "No changes",
+    "noChanges": "Working tree clean",
     "noFolder": "No folder open",
     "notARepo": "This folder is not a Git repository",
-    "openFolder": "Open Folder"
+    "openFolder": "Open Folder",
+    "noChangesDescription": "Nothing to commit. Edits in this repository will show up here.",
+    "viewHistory": "View history"
   },
   "errors": {
     "checkoutFailed": "Switch branch failed: {message}",
@@ -305,7 +316,8 @@
     "reject": "Reject hunk",
     "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
     "title": "Review hunks",
-    "showInDiff": "Show in diff"
+    "showInDiff": "Show in diff",
+    "short": "Review"
   },
   "roots": {
     "primary": "primary",
@@ -515,5 +527,30 @@
     "removeTitle": "Remove worktree?",
     "removed": "Worktree removed",
     "title": "Worktrees"
+  },
+  "sync": {
+    "describe": {
+      "fetch": "Fetch new commits from the remotes",
+      "fetchUpToDate": "Up to date with {upstream}. Fetch to check for new commits",
+      "publish": "Publish {branch} to the remote and track it",
+      "pull": "Pull {count, plural, one {# commit} other {# commits}} from {upstream}",
+      "push": "Push {count, plural, one {# commit} other {# commits}} to {upstream}",
+      "sync": "Pull {behind, plural, one {# commit} other {# commits}} and push {ahead, plural, one {# commit} other {# commits}} with {upstream}"
+    },
+    "intent": {
+      "fetch": "Fetch",
+      "publish": "Publish",
+      "pull": "Pull",
+      "push": "Push",
+      "sync": "Sync"
+    },
+    "menu": "More sync actions",
+    "noUpstreamLabel": "No upstream branch",
+    "theRemote": "the remote",
+    "trackingLabel": "Tracking {upstream}"
+  },
+  "tools": {
+    "commits": "Commits",
+    "repository": "Repository"
   }
 }

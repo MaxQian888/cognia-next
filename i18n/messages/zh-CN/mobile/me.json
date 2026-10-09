@@ -10,6 +10,7 @@
   "actionPair": "去配对",
   "agentModesRow": "代理模式",
   "agentRow": "Agent 默认设置",
+  "agentsRow": "智能体",
   "appSecurity": "应用安全",
   "appearanceBackAria": "返回个人",
   "appearanceLink": "主题与壁纸",
@@ -26,7 +27,6 @@
   "biometricToggle": "启用生物识别解锁",
   "biometricUnavailable": "本设备未注册生物识别。",
   "canvasRow": "画布",
-  "charactersRow": "角色",
   "cloudAccountRow": "云账号",
   "commandHistoryRow": "命令历史",
   "computerUse": {

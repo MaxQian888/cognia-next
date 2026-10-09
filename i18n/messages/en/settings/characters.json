@@ -2,15 +2,16 @@
   "actions": {
     "applyUpdate": "Apply update",
     "applyUpdateBatch": "Apply to all ({count})",
-    "applyUpdateBatchTitle": "Apply the pack update to every clone you have from this pack",
-    "applyUpdateTitle": "Pull pack-managed fields from the new version while keeping your edits",
     "dismissUpdate": "Dismiss",
-    "dismissUpdateTitle": "Stop showing the update-available indicator for this clone",
     "exportPack": "Export pack",
-    "recloneFromPack": "Re-clone",
-    "recloneFromPackTitle": "Replace this clone with a fresh copy from the updated pack"
+    "recloneFromPack": "Re-clone"
   },
   "addedToast": "Added \"{name}\".",
+  "agentsEntry": {
+    "description": "{count, plural, one {Manage # agent — its detail, runtime, work, and AI-assisted creation — on the Agents page.} other {Manage # agents — their detail, runtime, work, and AI-assisted creation — on the Agents page.}}",
+    "open": "Open Agents",
+    "title": "Agents moved to their own page"
+  },
   "applyUpdateDialog": {
     "cancel": "Cancel",
     "confirm": "Apply update",
@@ -35,28 +36,20 @@
   },
   "builtIn": "Built-in",
   "builtInReadOnly": "Built-in characters are read-only — duplicate first",
-  "builtInUndeletable": "Built-in characters can't be deleted",
   "bulk": {
-    "deleteSelected": "Delete ({count})",
     "deletedToast": "Deleted {count} character(s).",
-    "done": "Done",
     "exportPackName": "Exported characters",
-    "exportSelected": "Export ({count})",
-    "exportedToast": "Exported {count} character(s).",
-    "select": "Select",
-    "selectRow": "Select {name}"
+    "exportedToast": "Exported {count} character(s)."
   },
   "cancel": "Cancel",
   "create": "Create",
   "delete": "Delete",
   "deleteAria": "Delete {name}",
-  "description": "Reusable personas. Each character carries its own system prompt, model, MCP subset, and skills. Pick one when you start a new chat.",
+  "description": "The character packs agents are cloned from, and knowledge bases any agent can bind. The agents themselves are managed on the Agents page.",
   "dismissUpdateToast": "Update indicator dismissed.",
   "duplicate": "Duplicate",
-  "duplicateAria": "Duplicate {name}",
   "duplicatedToast": "Duplicated as \"{name}\".",
   "edit": "Edit",
-  "editAria": "Edit {name}",
   "editor": {
     "account": {
       "description": "Pin sends from this character to a specific provider account. Inherit uses the session / settings default.",
@@ -64,230 +57,6 @@
       "label": "Account override",
       "optionLabel": "{provider}: {label}"
     },
-    "allowedTools": "Allowed tools (comma-sep)",
-    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
-    "avatarEmoji": "Avatar emoji",
-    "avatarEmojiPlaceholder": "🤖",
-    "avatarImage": {
-      "clear": "Remove image",
-      "large": "Avatar image is large — a smaller image keeps the character data lean.",
-      "upload": "Upload image"
-    },
-    "browserToolsToggle": {
-      "aria": "Toggle agent browser tools",
-      "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
-      "label": "Agent browser tools"
-    },
-    "computerUseSubSettings": {
-      "allowedToolIds": {
-        "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",
-        "empty": "No native Anthropic tools registered yet — install the Computer Use plugin to expose computer / bash / text_editor.",
-        "label": "Allowed native tools"
-      },
-      "chatConsentMode": {
-        "description": "How the in-chat canUseTool modal behaves. Independent of the Rust gate — both can prompt.",
-        "label": "Chat-side prompt behaviour",
-        "options": {
-          "always-ask": "Always ask",
-          "auto": "Auto (Rust gate decides)",
-          "session-grant": "Remember for session"
-        }
-      },
-      "requireConsent": {
-        "description": "Force every driving Computer Use call to the consent overlay for this character, regardless of Settings → Automation → Permissions. Useful for new characters whose behaviour you're still learning.",
-        "label": "Always ask before each call"
-      },
-      "screenOffMode": {
-        "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked) by routing capture through a bundled virtual display. Requires the virtual-display driver — set it up under Settings → Automation. Off by default.",
-        "label": "Screen-off mode (Windows)"
-      }
-    },
-    "computerUseTarget": {
-      "description": "Where this character's computer-use actions run. Pick a configured cua sandbox to run them in an isolated Docker desktop instead of this machine. Manage sandboxes under Settings → Automation → Sandboxes.",
-      "label": "Execution target",
-      "local": "Local (this machine)"
-    },
-    "description": "Description",
-    "descriptionPlaceholder": "(optional) one-line summary",
-    "disallowedTools": "Disallowed tools (comma-sep)",
-    "disallowedToolsPlaceholder": "Bash",
-    "execution": {
-      "addEnv": "Add variable",
-      "effort": "Reasoning effort",
-      "effortValues": {
-        "high": "High",
-        "low": "Low",
-        "max": "Maximum",
-        "medium": "Medium",
-        "xhigh": "Extra high"
-      },
-      "envDescription": "Plain values are stored with the Agent. Secret values are written to the device keyring; only an opaque reference is saved or exported.",
-      "envKind": "Type",
-      "envName": "Name",
-      "envNameDuplicate": "Environment variable {name} is defined more than once.",
-      "envNameInvalid": "{name} is not a valid environment variable name.",
-      "envNamePlaceholder": "API_BASE_URL",
-      "envPlain": "Plain",
-      "envPlainPlaceholder": "Value",
-      "envSecret": "Secret",
-      "envSecretPlaceholder": "Leave blank to keep the saved secret",
-      "envSecretRequired": "Enter a secret value for {name}.",
-      "envSecretSaveFailed": "Could not save the secret for {name} to the device keyring.",
-      "envTitle": "Environment variables",
-      "envValue": "Value",
-      "inherit": "Inherit app default",
-      "maxTurns": "Maximum turns",
-      "maxTurnsHint": "Hard ceiling from 1 to 100 agentic turns per run.",
-      "maxTurnsInvalid": "Maximum turns must be a whole number from 1 to 100.",
-      "maxTurnsPlaceholder": "App default",
-      "removeEnv": "Remove environment variable {name}"
-    },
-    "knowledgeBases": "Knowledge Bases",
-    "knowledgeBasesEmptyHint": "No reusable library is bound to this Agent.",
-    "knowledgeBasesHint": "Bind one or more reusable libraries. Retrieval searches all selected libraries independently.",
-    "mcpServers": "MCP servers",
-    "mcpServersEmptyHint": "(uses all enabled MCP servers)",
-    "mcpServersHint": "Leave all unselected to mean \"use every enabled server\".",
-    "memoryPolicy": {
-      "description": "Choose which long-term memory actions this Agent may perform and which scopes it may access.",
-      "globalCeiling": "App-wide memory and privacy settings remain the upper bound. This policy can restrict access, but cannot grant access disabled globally or for the current session.",
-      "operations": {
-        "autoLearn": "Automatic learning",
-        "create": "Create memories",
-        "forget": "Forget memories",
-        "recall": "Recall memories",
-        "update": "Update memories"
-      },
-      "readableScopes": "Readable scopes",
-      "scopes": {
-        "agent": "Agent",
-        "character": "Character",
-        "global": "Global",
-        "workspace": "Workspace"
-      },
-      "title": "Memory policy",
-      "writableScopes": "Writable scopes"
-    },
-    "model": "Model",
-    "modelIdPlaceholder": "Or paste a model id",
-    "name": "Name",
-    "namePlaceholder": "Coding Assistant",
-    "permissionMode": "Permission mode",
-    "persona": {
-      "description": "Optional tone and personality woven into the system prompt, plus a greeting and starter prompts.",
-      "exemplarPrompts": "Starter prompts",
-      "exemplarPromptsHint": "One prompt per line — shown as quick-start chips on a new chat.",
-      "exemplarPromptsPlaceholder": "Review my pull request\nDraft release notes",
-      "openingMessage": "Opening message",
-      "openingMessagePlaceholder": "Hi! What are we working on today?",
-      "personality": "Personality",
-      "personalityPlaceholder": "Former teacher who prefers analogies",
-      "title": "Persona",
-      "tone": "Tone",
-      "tonePlaceholder": "warm, encouraging"
-    },
-    "pickColor": "Pick color {color}",
-    "platforms": {
-      "browser": "Web",
-      "description": "Restrict this character to specific platforms. Leave all off to show it everywhere.",
-      "mobile": "Mobile",
-      "tauri": "Desktop",
-      "title": "Available on"
-    },
-    "routing": {
-      "description": "Choose separate targets for planning, execution, and lightweight utility work. Model aliases and Auto are supported by the existing router.",
-      "execute": "Execute model",
-      "plan": "Planning model",
-      "planPlaceholder": "App default planning model",
-      "title": "Semantic model routing",
-      "utility": "Utility model",
-      "utilityPlaceholder": "App default utility model"
-    },
-    "sandbox": {
-      "enable": {
-        "aria": "Enable sandbox",
-        "description": "Replace SDK builtins with sandbox_* equivalents for this character.",
-        "label": "Sandbox Bash / Edit / Write"
-      },
-      "tier": {
-        "cuaDesktop": "Bound sandbox desktop",
-        "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
-        "inherit": "Inherit app default",
-        "label": "Sandbox tier",
-        "microvm": "microVM (e2b)",
-        "os": "OS sandbox",
-        "cuaDesktopNeedsBoundDesktop": "Runs shell and file work inside the bound desktop. Needs a bound machine whose provider carries it, so pick a sandbox connection under Computer Use first."
-      }
-    },
-    "skills": "Skills",
-    "skillsHint": "Order matters — earlier skills are appended first to the system prompt.",
-    "systemPrompt": "System prompt",
-    "systemPromptPlaceholder": "You are…",
-    "twinBinding": {
-      "cancel": "Cancel",
-      "citationStyleLabel": "Citation style",
-      "citationStyleSimple": "Simple",
-      "confirmBind": "Bind",
-      "createNew": "Create new twin",
-      "enableCitations": "Source citations",
-      "enableCitationsHint": "Attach formatted citations for the retrieved chunks to the Twin-RAG sources (display only — never changes the prompt).",
-      "enableCorrectiveFilter": "Corrective filtering",
-      "enableCorrectiveFilterHint": "Drop low-relevance retrieved chunks with a heuristic grader before they reach the prompt.",
-      "enableHybrid": "Hybrid keyword search",
-      "enableHybridHint": "Blend BM25 keyword retrieval with the vector search so verbatim names, ids, and file references aren't missed.",
-      "enableQueryExpansion": "Query expansion",
-      "enableQueryExpansionHint": "Widen recall with synonym expansion (and optional LLM HyDE/step-back when configured in twin runtime settings).",
-      "enableRag": "Enable RAG",
-      "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
-      "enableStyleFewShot": "Style few-shot",
-      "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
-      "hybridKeywordWeight": "Keyword weight",
-      "never": "(never)",
-      "newTwinId": "Twin id",
-      "newTwinIdHint": "Letters, digits, and underscores. Must be unique across your characters.",
-      "newTwinIdPlaceholder": "twin_xxxxxxxx",
-      "openWorkbench": "Open workbench",
-      "pickExisting": "Use an existing twin",
-      "pickExistingPlaceholder": "Choose…",
-      "ragTopK": "Retrieve top K",
-      "runtimeTitle": "Runtime",
-      "statsChunks": "Chunks",
-      "statsLastDistilled": "Profile updated",
-      "statsPlaybooks": "Playbooks",
-      "statsSources": "Sources",
-      "statsStyleSamples": "Style samples",
-      "styleSamplesK": "Samples per send",
-      "titleBound": "Digital twin",
-      "titleUnbound": "Digital twin (optional)",
-      "unbind": "Unbind twin",
-      "unbindBody": "The twin's data is preserved — only this character's link to it is removed.",
-      "unbindConfirm": "Unbind",
-      "unbindTitle": "Unbind twin?",
-      "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send.",
-      "embeddingLabel": "Embedding",
-      "embeddingValue": "{provider} · {model}",
-      "embeddingSourceTwin": "Set on this twin",
-      "embeddingSourceGlobal": "Twin runtime default",
-      "embeddingNoCredentials": "The twin's embedding provider has no credentials, so twin knowledge is skipped.",
-      "embeddingRebuildRequired": "The twin's index was built with another model, so twin knowledge is skipped until it is rebuilt in the Workbench.",
-      "embeddingHint": "Embedding belongs to the twin and is shared by every agent bound to it. Change it in the Workbench."
-    },
-    "useDefault": "Use app default",
-    "voice": {
-      "description": "Optional per-character voice for read-aloud. Inherits the global speech settings when left on Inherit.",
-      "inherit": "Inherit global",
-      "pitch": "Pitch",
-      "provider": "Provider",
-      "rate": "Rate",
-      "title": "Voice",
-      "voiceId": "Voice",
-      "voiceIdPlaceholder": "Voice id",
-      "volume": "Volume"
-    },
-    "workingDir": "Working directory",
-    "workingDirPlaceholder": "/path/to/project (optional)",
-    "pluginSkills": "Plugin skills",
-    "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills.",
     "advanced": {
       "title": "Advanced overrides",
       "count": "{count, plural, one {# override} other {# overrides}}",
@@ -391,18 +160,239 @@
           "storeUnmatched": "Decide separately whether to keep unmatched messages"
         }
       }
-    }
+    },
+    "allowedTools": "Allowed tools (comma-sep)",
+    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
+    "avatarEmoji": "Avatar emoji",
+    "avatarEmojiPlaceholder": "🤖",
+    "avatarImage": {
+      "clear": "Remove image",
+      "large": "Avatar image is large — a smaller image keeps the character data lean.",
+      "upload": "Upload image"
+    },
+    "browserToolsToggle": {
+      "aria": "Toggle agent browser tools",
+      "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
+      "label": "Agent browser tools"
+    },
+    "computerUseSubSettings": {
+      "allowedToolIds": {
+        "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",
+        "empty": "No native Anthropic tools registered yet — install the Computer Use plugin to expose computer / bash / text_editor.",
+        "label": "Allowed native tools"
+      },
+      "chatConsentMode": {
+        "description": "How the in-chat canUseTool modal behaves. Independent of the Rust gate — both can prompt.",
+        "label": "Chat-side prompt behaviour",
+        "options": {
+          "always-ask": "Always ask",
+          "auto": "Auto (Rust gate decides)",
+          "session-grant": "Remember for session"
+        }
+      },
+      "requireConsent": {
+        "description": "Force every driving Computer Use call to the consent overlay for this character, regardless of Settings → Automation → Permissions. Useful for new characters whose behaviour you're still learning.",
+        "label": "Always ask before each call"
+      },
+      "screenOffMode": {
+        "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked) by routing capture through a bundled virtual display. Requires the virtual-display driver — set it up under Settings → Automation. Off by default.",
+        "label": "Screen-off mode (Windows)"
+      }
+    },
+    "computerUseTarget": {
+      "description": "Where this character's computer-use actions run. Pick a configured cua sandbox to run them in an isolated Docker desktop instead of this machine. Manage sandboxes under Settings → Automation → Sandboxes.",
+      "label": "Execution target",
+      "local": "Local (this machine)"
+    },
+    "computerUseToggle": {
+      "aria": "Toggle computer use",
+      "description": "Let this character see and control the desktop through the Computer Use plugin (screenshots, mouse, keyboard). Desktop only.",
+      "label": "Computer use"
+    },
+    "description": "Description",
+    "descriptionPlaceholder": "(optional) one-line summary",
+    "disallowedTools": "Disallowed tools (comma-sep)",
+    "disallowedToolsPlaceholder": "Bash",
+    "execution": {
+      "addEnv": "Add variable",
+      "effort": "Reasoning effort",
+      "effortValues": {
+        "high": "High",
+        "low": "Low",
+        "max": "Maximum",
+        "medium": "Medium",
+        "xhigh": "Extra high"
+      },
+      "envDescription": "Plain values are stored with the Agent. Secret values are written to the device keyring; only an opaque reference is saved or exported.",
+      "envKind": "Type",
+      "envName": "Name",
+      "envNameDuplicate": "Environment variable {name} is defined more than once.",
+      "envNameInvalid": "{name} is not a valid environment variable name.",
+      "envNamePlaceholder": "API_BASE_URL",
+      "envPlain": "Plain",
+      "envPlainPlaceholder": "Value",
+      "envSecret": "Secret",
+      "envSecretPlaceholder": "Leave blank to keep the saved secret",
+      "envSecretRequired": "Enter a secret value for {name}.",
+      "envSecretSaveFailed": "Could not save the secret for {name} to the device keyring.",
+      "envTitle": "Environment variables",
+      "envValue": "Value",
+      "inherit": "Inherit app default",
+      "maxTurns": "Maximum turns",
+      "maxTurnsHint": "Hard ceiling from 1 to 100 agentic turns per run.",
+      "maxTurnsInvalid": "Maximum turns must be a whole number from 1 to 100.",
+      "maxTurnsPlaceholder": "App default",
+      "removeEnv": "Remove environment variable {name}"
+    },
+    "knowledgeBases": "Knowledge Bases",
+    "knowledgeBasesEmptyHint": "No reusable library is bound to this Agent.",
+    "knowledgeBasesHint": "Bind one or more reusable libraries. Retrieval searches all selected libraries independently.",
+    "mcpServers": "MCP servers",
+    "mcpServersEmptyHint": "(uses all enabled MCP servers)",
+    "mcpServersHint": "Leave all unselected to mean \"use every enabled server\".",
+    "memoryPolicy": {
+      "description": "Choose which long-term memory actions this Agent may perform and which scopes it may access.",
+      "globalCeiling": "App-wide memory and privacy settings remain the upper bound. This policy can restrict access, but cannot grant access disabled globally or for the current session.",
+      "operations": {
+        "autoLearn": "Automatic learning",
+        "create": "Create memories",
+        "forget": "Forget memories",
+        "recall": "Recall memories",
+        "update": "Update memories"
+      },
+      "readableScopes": "Readable scopes",
+      "scopes": {
+        "agent": "Agent",
+        "character": "Character",
+        "global": "Global",
+        "workspace": "Workspace"
+      },
+      "title": "Memory policy",
+      "writableScopes": "Writable scopes"
+    },
+    "model": "Model",
+    "modelIdPlaceholder": "Or paste a model id",
+    "name": "Name",
+    "namePlaceholder": "Coding Assistant",
+    "permissionMode": "Permission mode",
+    "persona": {
+      "description": "Optional tone and personality woven into the system prompt, plus a greeting and starter prompts.",
+      "exemplarPrompts": "Starter prompts",
+      "exemplarPromptsHint": "One prompt per line — shown as quick-start chips on a new chat.",
+      "exemplarPromptsPlaceholder": "Review my pull request\nDraft release notes",
+      "openingMessage": "Opening message",
+      "openingMessagePlaceholder": "Hi! What are we working on today?",
+      "personality": "Personality",
+      "personalityPlaceholder": "Former teacher who prefers analogies",
+      "title": "Persona",
+      "tone": "Tone",
+      "tonePlaceholder": "warm, encouraging"
+    },
+    "pickColor": "Pick color {color}",
+    "platforms": {
+      "browser": "Web",
+      "description": "Restrict this character to specific platforms. Leave all off to show it everywhere.",
+      "mobile": "Mobile",
+      "tauri": "Desktop",
+      "title": "Available on"
+    },
+    "pluginSkills": "Plugin skills",
+    "pluginSkillsHint": "Skills contributed by enabled plugins. They join this character's turns alongside its chat skills.",
+    "routing": {
+      "description": "Choose separate targets for planning, execution, and lightweight utility work. Model aliases and Auto are supported by the existing router.",
+      "execute": "Execute model",
+      "plan": "Planning model",
+      "planPlaceholder": "App default planning model",
+      "title": "Semantic model routing",
+      "utility": "Utility model",
+      "utilityPlaceholder": "App default utility model"
+    },
+    "sandbox": {
+      "enable": {
+        "aria": "Enable sandbox",
+        "description": "Replace SDK builtins with sandbox_* equivalents for this character.",
+        "label": "Sandbox Bash / Edit / Write"
+      },
+      "tier": {
+        "cuaDesktop": "Bound sandbox desktop",
+        "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
+        "inherit": "Inherit app default",
+        "label": "Sandbox tier",
+        "microvm": "microVM (e2b)",
+        "os": "OS sandbox",
+        "cuaDesktopNeedsBoundDesktop": "Runs shell and file work inside the bound desktop. Needs a bound machine whose provider carries it, so pick a sandbox connection under Computer Use first."
+      }
+    },
+    "skills": "Skills",
+    "skillsHint": "Order matters — earlier skills are appended first to the system prompt.",
+    "systemPrompt": "System prompt",
+    "systemPromptPlaceholder": "You are…",
+    "twinBinding": {
+      "cancel": "Cancel",
+      "citationStyleLabel": "Citation style",
+      "citationStyleSimple": "Simple",
+      "confirmBind": "Bind",
+      "createNew": "Create new twin",
+      "enableCitations": "Source citations",
+      "enableCitationsHint": "Attach formatted citations for the retrieved chunks to the Twin-RAG sources (display only — never changes the prompt).",
+      "enableCorrectiveFilter": "Corrective filtering",
+      "enableCorrectiveFilterHint": "Drop low-relevance retrieved chunks with a heuristic grader before they reach the prompt.",
+      "enableHybrid": "Hybrid keyword search",
+      "enableHybridHint": "Blend BM25 keyword retrieval with the vector search so verbatim names, ids, and file references aren't missed.",
+      "enableQueryExpansion": "Query expansion",
+      "enableQueryExpansionHint": "Widen recall with synonym expansion (and optional LLM HyDE/step-back when configured in twin runtime settings).",
+      "enableRag": "Enable RAG",
+      "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
+      "enableStyleFewShot": "Style few-shot",
+      "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
+      "hybridKeywordWeight": "Keyword weight",
+      "never": "(never)",
+      "newTwinId": "Twin id",
+      "newTwinIdHint": "Letters, digits, and underscores. Must be unique across your characters.",
+      "newTwinIdPlaceholder": "twin_xxxxxxxx",
+      "openWorkbench": "Open workbench",
+      "pickExisting": "Use an existing twin",
+      "pickExistingPlaceholder": "Choose…",
+      "ragTopK": "Retrieve top K",
+      "runtimeTitle": "Runtime",
+      "statsChunks": "Chunks",
+      "statsLastDistilled": "Profile updated",
+      "statsPlaybooks": "Playbooks",
+      "statsSources": "Sources",
+      "statsStyleSamples": "Style samples",
+      "styleSamplesK": "Samples per send",
+      "titleBound": "Digital twin",
+      "titleUnbound": "Digital twin (optional)",
+      "unbind": "Unbind twin",
+      "unbindBody": "The twin's data is preserved — only this character's link to it is removed.",
+      "unbindConfirm": "Unbind",
+      "unbindTitle": "Unbind twin?",
+      "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send.",
+      "embeddingLabel": "Embedding",
+      "embeddingValue": "{provider} · {model}",
+      "embeddingSourceTwin": "Set on this twin",
+      "embeddingSourceGlobal": "Twin runtime default",
+      "embeddingNoCredentials": "The twin's embedding provider has no credentials, so twin knowledge is skipped.",
+      "embeddingRebuildRequired": "The twin's index was built with another model, so twin knowledge is skipped until it is rebuilt in the Workbench.",
+      "embeddingHint": "Embedding belongs to the twin and is shared by every agent bound to it. Change it in the Workbench."
+    },
+    "useDefault": "Use app default",
+    "voice": {
+      "description": "Optional per-character voice for read-aloud. Inherits the global speech settings when left on Inherit.",
+      "inherit": "Inherit global",
+      "pitch": "Pitch",
+      "provider": "Provider",
+      "rate": "Rate",
+      "title": "Voice",
+      "voiceId": "Voice",
+      "voiceIdPlaceholder": "Voice id",
+      "volume": "Volume"
+    },
+    "workingDir": "Working directory",
+    "workingDirPlaceholder": "/path/to/project (optional)"
   },
-  "emptyHint": "No characters yet. The built-ins should appear here automatically.",
   "exportPackAria": "Export source pack for {name}",
   "exportPackUnavailable": "Could not resolve a pack to export.",
-  "filter": {
-    "all": "All sources",
-    "builtin": "Built-in",
-    "label": "Filter by source",
-    "plugin": "Plugin",
-    "user": "Custom"
-  },
   "knowledgeBases": {
     "cancel": "Cancel",
     "create": "Create",
@@ -512,10 +502,7 @@
     "noneDefined": "(none defined yet)",
     "reorder": "Reorder:"
   },
-  "newCharacter": "New character",
-  "noMatches": "No characters match your search.",
   "overlayReadOnly": "Plugin-provided characters are read-only — duplicate first",
-  "overlayUndeletable": "Plugin-provided characters cannot be deleted — disable the plugin instead",
   "packs": {
     "characterCount": "{count, plural, =1 {# character} other {# characters}}",
     "collapseAria": "Hide characters in pack {id}",
@@ -545,9 +532,7 @@
   "removedToast": "Removed \"{name}\".",
   "save": "Save",
   "saving": "Saving…",
-  "searchPlaceholder": "Search characters…",
-  "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
-  "title": "Characters",
+  "title": "Agent packs & knowledge",
   "trust": {
     "rejectedToast": "Pack “{id}” was rejected: its signature did not verify ({reason}).",
     "skippedSignature": "{count, plural, =1 {1 signed pack failed verification and was not loaded} other {# signed packs failed verification and were not loaded}}",
@@ -576,16 +561,13 @@
     "badge": "Variant of {base}",
     "badgeTitle": "{count, plural, =0 {Follows its base for everything} one {Overrides # field; follows its base for the rest} other {Overrides # fields; follows its base for the rest}}",
     "create": "Create variant",
-    "createAria": "Create a variant of {name}",
     "createdToast": "Created {name}",
     "defaultName": "{name} (variant)",
     "deleteBlocked": "{count, plural, one {This agent is the base of # variant} other {This agent is the base of # variants}} ({names}). Detach or delete them first.",
     "detach": "Detach from base",
-    "detachAria": "Detach {name} from its base",
     "detachedToast": "{name} no longer follows its base",
     "editorNotice": "Variant of {base}. Fields you change here override the base; every other field keeps following it.",
     "reset": "Reset overrides",
-    "resetAria": "Reset the overrides of {name}",
     "resetToast": "{name} follows its base again"
   }
 }

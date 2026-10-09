@@ -19,12 +19,19 @@
       "heading": "Custom instructions",
       "placeholder": "Extra guidance for the model (tone, scope conventions, language…)"
     },
-    "description": "Show a button in the commit box to draft a message from the staged diff.",
+    "description": "Show a Generate button in the commit box that drafts a message from the staged diff.",
     "heading": "AI commit messages",
     "model": {
       "model": "Model",
       "provider": "Provider",
       "useDefault": "Use chat default"
+    },
+    "source": {
+      "agent": "Selected agent",
+      "agentDescription": "Uses the agent selected in the chat composer. Codex, Claude Code and other local agents read the repository in read-only plan mode; the built-in agent uses the model below.",
+      "heading": "Generate with",
+      "model": "Utility model",
+      "modelDescription": "Always uses the model below, whichever agent is selected."
     }
   },
   "description": "AI commit-message generation and other Git panel preferences.",

@@ -1502,8 +1502,10 @@
         "label": "工作区",
         "moved": "会话已迁移",
         "placeholder": "选择工作区",
+        "sentToHost": "已发送到主机，将由主机迁移会话",
         "refused": {
           "same-workspace": "会话已经在该工作区了。",
+          "session-archived": "已归档的会话固定在原工作区，请先取消归档。",
           "session-locked": "该会话已移交给另一台主机，在此为只读。",
           "session-running": "请先停止正在进行的回合再迁移会话。",
           "unknown-workspace": "该工作区已不存在。"

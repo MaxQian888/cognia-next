@@ -19,12 +19,19 @@
       "heading": "自定义指令",
       "placeholder": "给模型的额外指引（语气、scope 约定、语言…）"
     },
-    "description": "在提交框显示一个按钮，根据已暂存的 diff 起草提交信息。",
+    "description": "在提交框中显示“生成”按钮，根据已暂存的差异起草提交信息。",
     "heading": "AI 提交信息",
     "model": {
       "model": "模型",
       "provider": "服务商",
       "useDefault": "使用聊天默认"
+    },
+    "source": {
+      "agent": "当前选择的智能体",
+      "agentDescription": "使用聊天输入框中选择的智能体。Codex、Claude Code 等本地智能体以只读的规划模式读取仓库；内置智能体使用下方的模型。",
+      "heading": "生成方式",
+      "model": "辅助模型",
+      "modelDescription": "无论选择了哪个智能体，都使用下方的模型。"
     }
   },
   "description": "AI 提交信息生成及其他 Git 面板偏好。",

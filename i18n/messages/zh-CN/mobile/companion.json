@@ -310,6 +310,7 @@
       "executionRunBindings": "运行投递绑定",
       "executionRuns": "执行记录",
       "goals": "目标",
+      "goalEvents": "目标动态",
       "issueCycles": "议题周期",
       "issueEvents": "议题事件",
       "issueProjects": "议题项目",

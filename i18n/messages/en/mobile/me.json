@@ -10,6 +10,7 @@
   "actionPair": "Pair now",
   "agentModesRow": "Agent modes",
   "agentRow": "Agent defaults",
+  "agentsRow": "Agents",
   "appSecurity": "App security",
   "appearanceBackAria": "Back to Me",
   "appearanceLink": "Theme & wallpaper",
@@ -26,7 +27,6 @@
   "biometricToggle": "Require biometric to unlock",
   "biometricUnavailable": "This device has no biometric enrolled.",
   "canvasRow": "Canvas",
-  "charactersRow": "Characters",
   "cloudAccountRow": "Cloud account",
   "commandHistoryRow": "Command history",
   "computerUse": {

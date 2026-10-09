@@ -3,26 +3,23 @@
     "addFileToChat": "Add File to Chat",
     "addSelectionToChat": "Add Selection to Chat",
     "addToChat": "Add to Chat",
-    "changeAllOccurrences": "Change All Occurrences",
     "copy": "Copy",
     "copyPath": "Copy Path",
     "copyRelativePath": "Copy Relative Path",
     "cut": "Cut",
     "findInFolder": "Find in Folder…",
     "format": "Format Document",
-    "goToImplementation": "Go to Implementation",
-    "goToReferences": "Go to References",
     "open": "Open",
     "openToSide": "Open to the Side",
     "paste": "Paste",
-    "renameSymbol": "Rename Symbol",
     "revealInExplorer": "Reveal in Explorer View",
     "revealInFileExplorer": "Reveal in File Explorer",
     "save": "Save",
     "searchProject": "Search in Project"
   },
   "agent": {
-    "addedToChat": "Added {name} to chat context"
+    "addedToChat": "Added {name} to chat context",
+    "addToChatFailed": "Couldn't add {name} to the chat"
   },
   "breadcrumbs": {
     "empty": "Empty folder",
@@ -392,6 +389,7 @@
     "inspect": "Inspect",
     "language": "Language",
     "mobileTab": "Tools",
+    "noFile": "Open a file to use this panel.",
     "outline": "Outline",
     "outlineEmpty": "No symbols are available for this file.",
     "path": "Path",
@@ -438,5 +436,11 @@
     "close": "Close Panel",
     "empty": "No problems have been detected in the workspace so far.",
     "noMatch": "No results found with the provided filter criteria."
+  },
+  "selectionToolbar": {
+    "aria": "Selection actions",
+    "addToChat": "Add to chat",
+    "askAi": "Ask AI",
+    "comment": "Comment"
   }
 }

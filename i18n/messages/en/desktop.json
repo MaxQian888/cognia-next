@@ -246,6 +246,7 @@
   "guildRail": {
     "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
+    "agents": "Agents",
     "aliases": {
       "conversations": "History, chat history, sessions, archive, archived conversations, transcripts",
       "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
@@ -518,8 +519,8 @@
     },
     "file": {
       "label": "File",
+      "newAgent": "New Agent",
       "newAgentTeam": "New Agent Team",
-      "newCharacter": "New Character",
       "newChat": "Quick Chat",
       "newWorkflow": "New Workflow",
       "openLogs": "Open Logs",

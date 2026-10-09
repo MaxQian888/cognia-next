@@ -201,8 +201,12 @@
       "remote_access_disabled": "Remote terminal access is switched off on the host.",
       "resource_limited": "The terminal host has reached its resource limit.",
       "unauthorized": "This device is not allowed to use remote terminals.",
-      "unpaired": "Pair this device before opening a remote terminal."
-    }
+      "unpaired": "Pair this device before opening a remote terminal.",
+      "credential_unavailable": "The terminal host cannot access its saved credentials. Authorize access on the host device."
+    },
+    "authorize": "Authorize access",
+    "authorizing": "Authorizing…",
+    "authorizationFailed": "Authorization did not complete. You can try again."
   },
   "popup": {
     "hint": "↑↓ navigate · Enter accept · Esc close",

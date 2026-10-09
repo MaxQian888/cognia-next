@@ -246,6 +246,7 @@
   "guildRail": {
     "a2ui": "小应用",
     "agentRuns": "智能体运行",
+    "agents": "智能体",
     "aliases": {
       "conversations": "历史, 聊天记录, 会话记录, 会话, 归档, 已归档会话, conversations, history",
       "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts",
@@ -518,8 +519,8 @@
     },
     "file": {
       "label": "文件",
+      "newAgent": "新建智能体",
       "newAgentTeam": "新建智能体团队",
-      "newCharacter": "新建角色",
       "newChat": "快速对话",
       "newWorkflow": "新建工作流",
       "openLogs": "打开日志",

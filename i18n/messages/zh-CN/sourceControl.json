@@ -80,7 +80,12 @@
       "failed": "生成提交信息失败",
       "generating": "正在生成提交信息…",
       "noStaged": "请先暂存更改再生成信息",
-      "redacted": "已脱敏敏感数据后再发送给模型"
+      "redacted": "已脱敏敏感数据后再发送给模型",
+      "generate": "生成",
+      "generateWith": "用 {agent} 生成提交信息",
+      "hostAgent": "主机智能体",
+      "stop": "停止生成",
+      "writingWith": "{agent} 正在撰写…"
     },
     "amend": "提交（修订）",
     "autoGenerateAI": "用 AI 生成信息",
@@ -88,8 +93,12 @@
     "commitAndPush": "提交并推送",
     "commitAndSync": "提交并同步",
     "more": "更多提交操作",
-    "placeholder": "提交信息（Ctrl+Enter 提交）",
-    "signoff": "添加签署"
+    "placeholder": "描述改了什么、为什么改",
+    "signoff": "添加签署",
+    "commitAll": "全部提交（{count} 个文件）",
+    "commitCount": "提交 {count} 个文件",
+    "messageLabel": "提交信息",
+    "shortcutHint": "提交"
   },
   "commitDetail": {
     "backToChanges": "返回改动列表",
@@ -166,10 +175,12 @@
   },
   "emptyState": {
     "initRepo": "初始化仓库",
-    "noChanges": "没有更改",
+    "noChanges": "工作区无改动",
     "noFolder": "未打开文件夹",
     "notARepo": "该文件夹不是 Git 仓库",
-    "openFolder": "打开文件夹"
+    "openFolder": "打开文件夹",
+    "noChangesDescription": "没有可提交的内容。此仓库中的修改会显示在这里。",
+    "viewHistory": "查看历史"
   },
   "errors": {
     "checkoutFailed": "切换分支失败：{message}",
@@ -305,7 +316,8 @@
     "reject": "拒绝此块",
     "remapNotice": "{count} 条早先的决策与当前 diff 不再匹配，已跳过。",
     "title": "审阅代码块",
-    "showInDiff": "在差异中显示"
+    "showInDiff": "在差异中显示",
+    "short": "审查"
   },
   "roots": {
     "primary": "主",
@@ -515,5 +527,30 @@
     "removeTitle": "移除工作树？",
     "removed": "工作树已移除",
     "title": "工作树"
+  },
+  "sync": {
+    "describe": {
+      "fetch": "从远程获取新提交",
+      "fetchUpToDate": "已与 {upstream} 保持一致，获取以检查新提交",
+      "publish": "将 {branch} 发布到远程并跟踪",
+      "pull": "从 {upstream} 拉取 {count} 个提交",
+      "push": "向 {upstream} 推送 {count} 个提交",
+      "sync": "与 {upstream} 同步：拉取 {behind} 个提交，推送 {ahead} 个提交"
+    },
+    "intent": {
+      "fetch": "获取",
+      "publish": "发布",
+      "pull": "拉取",
+      "push": "推送",
+      "sync": "同步"
+    },
+    "menu": "更多同步操作",
+    "noUpstreamLabel": "没有上游分支",
+    "theRemote": "远程",
+    "trackingLabel": "跟踪 {upstream}"
+  },
+  "tools": {
+    "commits": "提交",
+    "repository": "仓库"
   }
 }

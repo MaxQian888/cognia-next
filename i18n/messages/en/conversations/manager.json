@@ -4,37 +4,43 @@
     "actions": "Actions",
     "activity": "Last activity",
     "agent": "Agent",
-    "cost": "Cost",
     "created": "Created",
     "selectAll": "Select every conversation in this view",
     "title": "Conversation",
-    "tokens": "Tokens",
-    "turns": "Turns",
+    "usage": "Usage",
     "workspace": "Workspace"
   },
   "contentMatch": "Matched in the messages",
   "description": "Every conversation across your workspaces. Find, rename, file, archive and restore them in one place.",
   "emptyArchive": "Empty archive…",
+  "goal": {
+    "open": "Goal {status}: {objective}. Open it in Goals"
+  },
   "inFolder": "In {name}",
+  "listAria": "Conversations",
   "loading": "Loading conversations",
   "newChat": "New chat",
   "noWorkspace": "No workspace",
   "none": "—",
   "openRow": "Open {title}",
+  "rankedHint": "Sorted by relevance while searching",
   "rowActions": "Actions for {title}",
   "rowSelect": "Select {title}",
   "searchAria": "Search conversations",
   "searchClear": "Clear search",
   "searchContent": "Search message content",
   "searchPlaceholder": "Search conversations…",
+  "select": "Select",
+  "selectDone": "Done",
   "showMore": "Show {count} more",
   "shownOf": "Showing {shown} of {total}",
   "sortBy": "Sort by {column}",
-  "summary": "{active, plural, one {# active} other {# active}} · {archived, plural, one {# archived} other {# archived}}",
   "tabs": {
     "active": "Active",
     "archived": "Archived"
   },
   "tabsAria": "Which conversations to show",
-  "title": "Conversations"
+  "title": "Conversations",
+  "usage": "{turns, plural, one {# turn} other {# turns}} · {tokens} · {cost}",
+  "usageCompact": "{turns, plural, one {# turn} other {# turns}} · {tokens}"
 }

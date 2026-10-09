@@ -3,26 +3,23 @@
     "addFileToChat": "将文件添加到聊天",
     "addSelectionToChat": "将所选内容添加到聊天",
     "addToChat": "添加到聊天",
-    "changeAllOccurrences": "更改所有匹配项",
     "copy": "复制",
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
     "cut": "剪切",
     "findInFolder": "在文件夹中查找…",
     "format": "格式化文档",
-    "goToImplementation": "转到实现",
-    "goToReferences": "转到引用",
     "open": "打开",
     "openToSide": "在侧边打开",
     "paste": "粘贴",
-    "renameSymbol": "重命名符号",
     "revealInExplorer": "在资源管理器视图中显示",
     "revealInFileExplorer": "在文件管理器中显示",
     "save": "保存",
     "searchProject": "在项目中搜索"
   },
   "agent": {
-    "addedToChat": "已将 {name} 添加到聊天上下文"
+    "addedToChat": "已将 {name} 添加到聊天上下文",
+    "addToChatFailed": "无法将 {name} 添加到聊天"
   },
   "breadcrumbs": {
     "empty": "空文件夹",
@@ -392,6 +389,7 @@
     "inspect": "检查",
     "language": "语言",
     "mobileTab": "工具",
+    "noFile": "打开一个文件以使用此面板。",
     "outline": "大纲",
     "outlineEmpty": "当前文件没有可用的符号。",
     "path": "路径",
@@ -438,5 +436,11 @@
     "close": "关闭面板",
     "empty": "目前在工作区中没有检测到问题。",
     "noMatch": "没有符合筛选条件的结果。"
+  },
+  "selectionToolbar": {
+    "aria": "选区操作",
+    "addToChat": "添加到聊天",
+    "askAi": "问 AI",
+    "comment": "评论"
   }
 }

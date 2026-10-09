@@ -1,0 +1,262 @@
+{
+  "actions": {
+    "chat": "Chat with agent",
+    "chatFailed": "Couldn't start a conversation with this agent",
+    "chatTitle": "Chat with {name}",
+    "menuAria": "More actions for {name}"
+  },
+  "assign": {
+    "assigned": "Assigned “{title}”",
+    "description": "Give this agent a durable task. It runs now or at the planned time, with the approval policy you choose.",
+    "issueHint": "To assign an issue instead, set this agent as the assignee in the issue tracker.",
+    "openIssues": "Open issues",
+    "title": "Assign work to {name}"
+  },
+  "builder": {
+    "backToAgents": "Back to agents",
+    "cancel": "Cancel",
+    "create": "Create & open agent",
+    "created": "Created {name}",
+    "createdBody": "The draft is closed. Further changes happen in the agent's Settings.",
+    "createdTitle": "Agent created",
+    "discard": "Discard",
+    "discardBody": "The draft and this builder conversation will be deleted. This can't be undone.",
+    "discardFailed": "Couldn't discard the draft: {message}",
+    "discardTitle": "Discard this draft?",
+    "emptySubtitle": "Describe what this agent should do. The builder fills in the configuration on the right as you talk.",
+    "emptyTitle": "What should this agent do?",
+    "loading": "Loading the builder…",
+    "missingBody": "This conversation isn't building an agent, or it was deleted.",
+    "missingTitle": "Draft not found",
+    "openAgent": "Open agent",
+    "panelDescription": "Updated as you talk. You can edit the draft directly.",
+    "panelTitle": "Agent configuration",
+    "starters": {
+      "heading": "Start from an example",
+      "planPrompt": "Build an agent that helps our team turn ideas into clear project briefs, actionable plans and written project docs.",
+      "planTitle": "Help our team plan and write projects",
+      "researchPrompt": "Build an agent that researches competitors and summarizes their positioning, features, pricing, strengths and gaps, citing current sources.",
+      "researchTitle": "Research competitors and summarize findings",
+      "reviewPrompt": "Build an agent that reviews frontend pull requests for actionable bugs, accessibility issues and maintainability problems.",
+      "reviewTitle": "Review frontend pull requests"
+    },
+    "tabChat": "Chat",
+    "tabDraft": "Draft",
+    "title": "Agent Builder",
+    "toolsUnsupported": "This runtime can't edit the draft — fill it in yourself",
+    "updatedByBuilder": "Updated by the builder (revision {revision})"
+  },
+  "builderSetup": {
+    "description": "This runtime powers the builder conversation and becomes the new agent's default runtime.",
+    "failed": "Couldn't prepare the builder: {reason}",
+    "model": "Model",
+    "noToolsWarning": "This runtime can't call Cognia's tools, so the builder can only suggest a configuration in chat. You'll fill in the draft yourself.",
+    "preparing": "Preparing…",
+    "runtime": "Runtime",
+    "runtimeHint": "Any configured external agent can run the builder; the built-in Cognia agent always can.",
+    "sessionTitle": "Agent Builder",
+    "start": "Start conversation",
+    "title": "Choose a runtime for Agent Builder"
+  },
+  "capabilities": {
+    "allEnabledServers": "Every enabled MCP server",
+    "allowed": "Allowed tools",
+    "allowedAll": "No limit",
+    "denied": "Denied tools",
+    "deniedNone": "None",
+    "edit": "Edit",
+    "inherit": "App default",
+    "knowledgeBases": "Knowledge bases",
+    "mcpServers": "MCP servers",
+    "memory": "Memory",
+    "memoryDefault": "Follows the app's memory settings.",
+    "memoryOp": {
+      "create": "Create",
+      "forget": "Forget",
+      "recall": "Recall",
+      "update": "Update"
+    },
+    "memorySummary": "Reads {read} · writes {write} · auto-learn {autoLearn}",
+    "missing": "Not available on this device",
+    "none": "None",
+    "off": "Off",
+    "on": "On",
+    "power": {
+      "browserTools": "Browser tools",
+      "builtInSkills": "Built-in skills",
+      "computerUse": "Computer use",
+      "ocr": "OCR",
+      "sandbox": "Sandbox"
+    },
+    "powers": "Built-in capabilities",
+    "skills": "Skills",
+    "title": "Capabilities"
+  },
+  "chooser": {
+    "aiDescription": "Describe what it should do; the builder fills in an editable configuration as you talk.",
+    "aiTitle": "Build with AI",
+    "blankDescription": "Set the name, instructions, runtime and capabilities yourself.",
+    "blankTitle": "Start blank",
+    "createDescription": "Describe it and let the agent builder set it up, or fill in the form yourself.",
+    "createTitle": "New agent",
+    "emptyDescription": "An agent is a reusable assistant with its own instructions, runtime, skills and tools.",
+    "emptyTitle": "No agents yet",
+    "homeDescription": "{count, plural, one {Open the agent in the list to chat with it, assign it work or change how it behaves.} other {Open any of the # agents in the list to chat with it, assign it work or change how it behaves.}}",
+    "homeTitle": "Pick an agent, or make a new one",
+    "recommended": "Recommended"
+  },
+  "create": {
+    "aiTitle": "Build with AI",
+    "back": "Back",
+    "blankTitle": "Start blank"
+  },
+  "detail": {
+    "assignWork": "Assign work",
+    "backToProfile": "Back to profile",
+    "chat": "Chat",
+    "duplicateToEdit": "Duplicate to edit",
+    "edit": "Edit",
+    "editing": "Editing {name}",
+    "noDescription": "No description.",
+    "sourceUser": "Created by you",
+    "tasksEmpty": "No tasks yet. Use “Assign work” to give it one.",
+    "tasksTitle": "{name} · Task board"
+  },
+  "drafts": {
+    "cancel": "Cancel",
+    "discard": "Discard",
+    "discardAria": "Discard draft {name}",
+    "discardBody": "The draft and its builder conversation will be deleted. This can't be undone.",
+    "discardFailed": "Couldn't discard the draft: {message}",
+    "discardTitle": "Discard this draft?",
+    "edited": "Edited {when}",
+    "resume": "Resume",
+    "resumeAria": "Resume draft {name}",
+    "title": "{count, plural, one {Unfinished draft} other {Unfinished drafts (#)}}",
+    "untitled": "Untitled draft"
+  },
+  "edit": {
+    "duplicateToEdit": "Duplicate to edit",
+    "lockedTitle": "This agent can't be edited"
+  },
+  "header": {
+    "back": "Back",
+    "buildWithAi": "Build with AI",
+    "count": "{count, plural, one {# agent} other {# agents}}",
+    "createTitle": "Create an agent",
+    "description": "Reusable agents with their own instructions, runtime, skills and tools. Chat with one, or assign it work.",
+    "new": "New agent",
+    "packs": "Agent packs",
+    "summary": "{total, plural, one {# agent} other {# agents}}{live, plural, =0 {} other { · # working}}",
+    "title": "Agents"
+  },
+  "listPane": {
+    "builtIn": "Built-in",
+    "bulk": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "confirmBody": "Built-in agents, agents a plugin provides, and agents other agents are variants of are skipped.",
+      "confirmTitle": "{count, plural, one {Delete # agent?} other {Delete # agents?}}",
+      "count": "{count, plural, =0 {None selected} other {# selected}}",
+      "delete": "Delete",
+      "done": "Done",
+      "export": "Export",
+      "select": "Select",
+      "selectAll": "Select all shown"
+    },
+    "clearFilters": "Clear filters",
+    "create": "New agent",
+    "emptyDescription": "Start blank, or describe one and let the agent builder set it up.",
+    "emptyTitle": "No agents yet",
+    "label": "Agents",
+    "lastActive": "Active {when}",
+    "needsAttention": "Missing a dependency",
+    "neverActive": "Not used yet",
+    "noMatches": "No agents match.",
+    "searchPlaceholder": "Search agents…",
+    "sort": {
+      "name": "Name",
+      "recent": "Last active",
+      "updated": "Recently edited"
+    },
+    "sortLabel": "Sort agents",
+    "source": {
+      "all": "All",
+      "builtin": "Built-in",
+      "plugin": "Plugin",
+      "user": "Mine"
+    },
+    "sourceCountAria": "{label}: {count}",
+    "sourceLabel": "Filter by source",
+    "status": {
+      "awaiting": "Needs you",
+      "running": "Working"
+    },
+    "updateAvailable": "Pack update available"
+  },
+  "loading": "Loading agents…",
+  "notFound": {
+    "back": "All agents",
+    "description": "It may have been deleted, or it belongs to a plugin that is turned off.",
+    "title": "Agent not found"
+  },
+  "profile": {
+    "about": {
+      "inherit": "Follows the app",
+      "model": "Model",
+      "modelDefault": "Default",
+      "permission": "Permission",
+      "planModel": "Plan model",
+      "runtime": "Runtime",
+      "source": "Source",
+      "title": "About",
+      "updated": "Updated",
+      "utilityModel": "Utility model",
+      "workingDir": "Working dir"
+    },
+    "activity": {
+      "archived": "Archived",
+      "awaiting": "Needs approval",
+      "empty": "Nothing yet. Chat with it or assign it work, and what it does shows up here.",
+      "live": "{count, plural, one {# live} other {# live}}",
+      "running": "Running",
+      "showAll": "Show all {count}",
+      "showLess": "Show less",
+      "title": "Activity",
+      "untitled": "Untitled conversation"
+    },
+    "stats": {
+      "completed": "Completed",
+      "conversations": "Conversations",
+      "cost": "Cost",
+      "title": "Last 30 days",
+      "tokens": "Tokens",
+      "turns": "Turns"
+    },
+    "work": {
+      "board": "Task board",
+      "empty": "No open work. Use “Assign work” to give it a task, or assign it an issue in Issues.",
+      "open": "{count} open",
+      "task": "Task",
+      "title": "Open work",
+      "viewInIssues": "View in Issues"
+    }
+  },
+  "runtime": {
+    "appDefault": "App default",
+    "unavailable": "{name} (unavailable)"
+  },
+  "runtimeField": {
+    "appDefault": "Follow the app default",
+    "appDefaultDescription": "Whatever runtime new chats use",
+    "description": "Where a new conversation with this agent runs. You can still switch it in the composer.",
+    "label": "Default runtime",
+    "unavailableHint": "This runtime isn't available on this device. New conversations will use the app default until you pick another.",
+    "unavailableLabel": "{name} (unavailable)"
+  },
+  "status": {
+    "awaiting": "Needs approval",
+    "idle": "Idle",
+    "running": "Running"
+  }
+}

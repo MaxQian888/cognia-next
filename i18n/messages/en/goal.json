@@ -1,9 +1,22 @@
 {
   "acceptance": {
     "accept": "Accept",
+    "accepted": "Accepted — the goal is complete.",
+    "changesRequested": "Changes requested — the goal resumed.",
     "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
+    "failed": "Couldn't record your verdict",
     "requestChanges": "Request changes",
     "title": "Awaiting your acceptance"
+  },
+  "actions": {
+    "copied": "Objective copied",
+    "copyFailed": "Couldn't copy the objective",
+    "copyObjective": "Copy objective",
+    "deleteFailed": "Couldn't delete the goal",
+    "deleted": "Goal deleted",
+    "menu": "Goal actions",
+    "openConversation": "Open conversation",
+    "runAgain": "Run again"
   },
   "activity": {
     "acceptance_accepted": "Result accepted — goal completed",
@@ -12,10 +25,46 @@
     "config_updated": "Config updated",
     "empty": "No activity yet.",
     "exit_triggered": "{exit} — {reason}",
+    "exits": {
+      "budget_limited": "Token budget reached",
+      "cost_limited": "Cost ceiling reached",
+      "judge_done": "Judge confirmed done",
+      "judge_failed_too_many": "Too many unreadable judge replies",
+      "needs_approval": "Needs approval",
+      "preempted": "Preempted by a new message",
+      "timed_out": "Timed out",
+      "turn_limited": "Turn budget reached",
+      "user_stopped": "Stopped by you"
+    },
     "goal_created": "Created with {turns}-turn / {tokens}-token budget",
     "judge_evaluated": "done={done} — {reason}",
     "judge_parse_failed": "Parse failure #{n}",
-    "loading": "Loading…",
+    "kinds": {
+      "acceptance_requested": "Awaiting acceptance",
+      "acceptance_resolved": "Acceptance resolved",
+      "config_updated": "Settings changed",
+      "exit_triggered": "Goal ended",
+      "goal_created": "Goal created",
+      "judge_evaluated": "Judge verdict",
+      "judge_parse_failed": "Judge reply unreadable",
+      "objective_updated": "Objective updated",
+      "pacing_decided": "Next turn scheduled",
+      "promise_confirmed": "Completion confirmed",
+      "promise_denied": "Completion withheld",
+      "promise_requested": "Verification requested",
+      "subgoals_generated": "Checklist generated",
+      "turn_completed": "Turn completed",
+      "turn_started": "Turn started",
+      "user_paused": "Paused",
+      "user_resumed": "Resumed",
+      "user_stopped": "Stopped",
+      "verification_disabled": "Verifier disabled",
+      "verification_error": "Verifier error",
+      "verification_failed": "Verifier rejected",
+      "verification_passed": "Verifier passed",
+      "verification_requested": "Verifier requested",
+      "verification_started": "Verifier started"
+    },
     "objective_updated": "Objective replaced",
     "pacing_decided": "Next continuation at {time} ({source})",
     "promise_confirmed": "Completion promise confirmed (turn {n})",
@@ -23,6 +72,8 @@
     "promise_denied_overridden": "Promise withheld {n} times — gate overridden, goal completed",
     "promise_requested": "Verification turn requested (turn {n})",
     "riskGate": "{tier}: approval required for {surfaces}",
+    "showMore": "Show more",
+    "shownOf": "Showing {shown} of {total}",
     "subgoals_generated": "Generated subgoals",
     "turn_completed": "Turn {n} completed ({tokens} tok)",
     "turn_started": "Turn {n} started",
@@ -40,6 +91,7 @@
     "avgTokens": "Avg tokens",
     "avgTurns": "Avg turns",
     "completionRate": "Completion rate",
+    "createdSeries": "Goals created",
     "empty": "No goals yet — analytics will appear once you start running goals.",
     "goalsOverTime": "Goals created",
     "judgeFailureRate": "Judge failure rate",
@@ -47,31 +99,47 @@
     "title": "Analytics",
     "tokenSpend": "Token spend",
     "tokensOverTime": "Token spend over time",
+    "tokensSeries": "Tokens",
     "totalGoals": "Total goals"
   },
   "card": {
-    "elapsed": "{minutes}m",
+    "inlineBudget": "{turns} turns · {tokens} tokens",
+    "runningFor": "Running for",
     "tokens": "Tokens",
-    "turns": "Turns"
+    "turns": "Turns",
+    "turnsInline": "{used}/{max} turns"
   },
   "commands": {
-    "createUsage": "Usage: type /goal followed by what you want to accomplish.",
-    "created": "🎯 **Goal active** — {maxTurns} turn budget, {maxTokensK}k token budget.",
-    "needSession": "Start a chat session first — /goal operates inside an active session.",
-    "noActiveGoal": "No active goal in this session. Start one with the /goal command.",
-    "objectiveUpdated": "Objective updated. The model will be told on the next turn.",
-    "paused": "Goal paused — {turns}/{maxTurns} turns used. Resume with /goal resume.",
-    "recentActivity": "Recent activity:",
+    "activityItem": "- **{label}** at {time, time, medium}",
+    "alreadyActive": "Goal is already active.",
+    "cannotPause": "Goal is already {status} — nothing to pause.",
+    "cannotResume": "Cannot resume a {status} goal. Create a new one with `/goal '<'text>`.",
+    "createUsage": "Usage: `/goal '<'what you want to accomplish>`. Example: `/goal write a haiku about winter`.",
+    "created": "🎯 **Goal active** — {maxTurns, plural, one {# turn} other {# turns}} budget, {maxTokensK, number}k token budget.",
+    "createdHint": "The agent will continue toward this goal automatically. Pause with `/goal pause` · stop with `/goal stop` · update with `/goal update '<'new text>`.",
+    "needSession": "Start a chat session first — `/goal` operates inside an active session.",
+    "noActiveGoal": "No active goal in this session. Start one with `/goal '<'what you want to accomplish>`.",
+    "noGoalToPause": "No active goal to pause.",
+    "noGoalToResume": "No goal to resume.",
+    "noGoalToStop": "No active goal to stop.",
+    "objectiveUnchanged": "Objective unchanged (matches the current one) or goal is no longer mutable.",
+    "objectiveUpdated": "Objective updated. The model will be told about the change on the next turn.",
+    "paused": "Goal paused — {turns}/{maxTurns} turns used. Resume with `/goal resume`.",
+    "recentActivity": "**Recent activity:**",
+    "remoteNotAllowed": "Changing a goal from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
     "resumed": "Goal resumed. The loop will continue on the next turn.",
-    "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} turns · {tokens} tokens · {minutes}m elapsed",
-    "stopped": "Goal stopped after {turns} turn(s).",
-    "streaming": "The current turn is still streaming — let it finish, then run /goal."
+    "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} turns · {tokens, number} tokens · {minutes}m elapsed",
+    "stopped": "Goal stopped after {turns, plural, one {# turn} other {# turns}}.",
+    "streaming": "The current turn is still streaming — `/goal` waits for the response to finish before changing the active goal.",
+    "updateNoGoal": "No active goal — create one first with `/goal '<'text>`.",
+    "updateUsage": "Usage: `/goal update '<'new objective>`."
   },
   "config": {
     "adaptivePacing": "Adaptive pacing",
     "adaptivePacingHint": "The model suggests the next continuation delay (1–60 min); it can only slow the loop, never speed it below the minimum interval.",
     "completionPromise": "Completion promise",
     "completionPromiseHint": "When set, the goal only completes after the model emits this exact token in a verification turn — guards against false 'done' verdicts.",
+    "discard": "Discard",
     "inlineStop": "Inline stop condition",
     "inlineStopHint": "Appended to the system prompt. Example: 'or after producing 3 haikus'.",
     "maxBudgetUsd": "Max cost per turn (USD)",
@@ -84,50 +152,89 @@
     "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
     "maxTurns": "Max turns",
     "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
+    "readOnly": "This goal has ended — its settings are kept as a record and can't be changed.",
     "requireAcceptance": "Require acceptance",
     "requireAcceptanceHint": "A judged completion pauses for your accept / request-changes instead of finishing on its own.",
     "riskGating": "Risk-based gating",
     "riskGatingHint": "Automatically require acceptance (and, for high-risk goals you run yourself, a per-turn hold) when the objective or this session's tools look risky. Turning this off never removes a checkpoint you set yourself.",
     "save": "Save changes",
+    "saveFailed": "Couldn't save the settings",
+    "saved": "Settings saved",
     "saving": "Saving…",
     "timeout": "Timeout (minutes)",
     "timeoutHint": "Wall-clock cap from goal creation.",
+    "unsaved": "Unsaved changes",
     "verification": {
+      "disable": "Remove verifier",
       "disableConfirm": "Disable this verifier? The goal will resume as active, and the current completion candidate will not be completed automatically.",
+      "disableTitle": "Remove the completion verifier?",
       "disabled": "No workflow verifier",
       "hint": "Only published Workflows whose input and output schemas match the Goal verification contract are available.",
       "label": "Completion verification workflow",
+      "optionsFailed": "Couldn't load the desktop's verifiers.",
       "placeholder": "Select a published verifier",
       "retry": "Retry verification",
       "retryPassed": "Verification passed",
+      "retryRunning": "Verification is still running on the desktop. Its result will show here when it finishes.",
       "retrying": "Retrying…"
+    }
+  },
+  "configure": {
+    "groups": {
+      "console": "Console",
+      "goals": "Goals"
+    },
+    "mobileTrigger": "Sections",
+    "navTitle": "Configure goals",
+    "sections": {
+      "console": {
+        "description": "Where the console opens and how open goals sort.",
+        "label": "Console"
+      },
+      "defaults": {
+        "description": "Budgets, judge and pacing every new goal starts with.",
+        "label": "Defaults"
+      },
+      "templates": {
+        "description": "Reusable objectives to start goals from.",
+        "label": "Templates"
+      },
+      "tracker": {
+        "description": "The built-in agent that pairs with /goal.",
+        "label": "Goal Tracker"
+      }
     }
   },
   "console": {
     "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
-    "newGoal": "New goal",
+    "clearFilters": "Clear filters",
+    "clearSearch": "Clear search",
+    "emptyTitle": "Nothing running",
+    "needsYou": "Needs you",
+    "needsYouCount": "{count, plural, one {# goal needs you} other {# goals need you}}",
+    "needsYouHint": "The judge considers these done. Accept to complete them, or request changes to keep them running.",
+    "onlyAwaiting": "Every open goal is waiting on your verdict above.",
     "openChat": "Open chat",
     "openGoalsHeading": "Open goals",
     "prefs": {
       "defaultTab": "Default tab",
-      "description": "Choose where the console opens and how open goals sort.",
+      "defaultTabHint": "Shown when you open Goals without a link to a specific tab.",
+      "direction": "Sort direction",
       "openGoalsSort": "Open-goals sort",
-      "title": "Console preferences"
+      "openGoalsSortHint": "How the open-goals list sorts when the console opens."
+    },
+    "scopes": {
+      "active": "Active",
+      "all": "All",
+      "paused": "Paused"
     },
     "sectionsAria": "Goal sections",
-    "statActive": "{count} active",
-    "statDone": "{count} done",
-    "statGroups": {
-      "lifetime": "Lifetime",
-      "open": "Open"
-    },
-    "statPaused": "{count} paused",
     "stats": {
       "active": "Active",
+      "avgTokens": "Avg tokens",
       "avgTurns": "Avg turns",
+      "completedOfFinished": "Completed of finished",
       "done": "Completed",
-      "filterActive": "Show only active goals",
-      "filterPaused": "Show only paused goals",
       "openAnalytics": "Open the Analytics tab",
       "openHistory": "Open the History tab",
       "paused": "Paused",
@@ -136,11 +243,9 @@
     "subtitle": "Persistent objectives the agent works toward automatically.",
     "tabs": {
       "analytics": "Analytics",
-      "defaults": "Defaults",
+      "config": "Configure",
       "history": "History",
-      "overview": "Overview",
-      "templates": "Templates",
-      "tracker": "Tracker"
+      "overview": "Overview"
     },
     "title": "Goals",
     "view": {
@@ -148,6 +253,15 @@
       "grid": "Grid",
       "list": "List"
     }
+  },
+  "controls": {
+    "failed": "Couldn't update the goal",
+    "groupAria": "Goal controls"
+  },
+  "conversation": {
+    "loading": "Loading…",
+    "missing": "Conversation deleted",
+    "open": "Open conversation “{title}”"
   },
   "defaults": {
     "budgetHeading": "Budget & limits",
@@ -164,6 +278,7 @@
     "maxTurnsHint": "Hard cap on continuation turns for a new goal.",
     "reset": "Reset to defaults",
     "save": "Save defaults",
+    "saved": "Defaults saved",
     "saving": "Saving…",
     "startPaused": "Start new goals paused",
     "startPausedHint": "When on, new goals require a /goal resume before the loop begins.",
@@ -180,21 +295,25 @@
     "title": "Goal · {status}"
   },
   "history": {
-    "all": "All",
+    "allStatuses": "All statuses",
     "cancel": "Cancel",
+    "count": "{count, plural, one {# goal} other {# goals}}",
     "created": "Created",
     "delete": "Delete",
     "deleteBody": "This permanently removes the goal and its activity log.",
     "deleteConfirm": "Delete",
-    "deleteFailed": "Could not delete the goal: {message}",
     "deleteTitle": "Delete goal?",
     "dirAsc": "Ascending",
     "dirDesc": "Descending",
+    "duration": "Duration",
     "empty": "No goals yet. Use the /goal command in a chat to start one.",
+    "emptyTitle": "No goals yet",
     "filterStatus": "Status",
+    "loadMore": "Load more",
+    "loadedOf": "Showing {shown} of {total}",
+    "matching": "{shown} of {total}",
     "noResults": "No goals match your filters.",
     "objective": "Objective",
-    "open": "Open",
     "search": "Search objectives",
     "sortBy": "Sort by",
     "sortCreated": "Created",
@@ -203,6 +322,19 @@
     "status": "Status",
     "tokens": "Tokens",
     "turns": "Turns"
+  },
+  "inspector": {
+    "agent": "Agent",
+    "close": "Close details",
+    "conversation": "Conversation",
+    "defaultAgent": "Default agent",
+    "ended": "Ended",
+    "missing": "It was deleted, or it belongs to another workspace.",
+    "missingTitle": "Goal not found",
+    "ranFor": "ran {duration}",
+    "running": "Running for",
+    "started": "Started",
+    "title": "Goal details"
   },
   "judge": {
     "heading": "Judge",
@@ -224,16 +356,28 @@
     "open": "Open Goals console",
     "title": "Goals"
   },
+  "objective": {
+    "cancel": "Cancel",
+    "edit": "Edit objective",
+    "hint": "The agent is told about the change on its next turn. ⌘/Ctrl + Enter saves.",
+    "label": "Objective",
+    "save": "Save objective",
+    "unchanged": "Nothing changed — the objective is the same, or the goal has ended.",
+    "updated": "Objective updated. The agent will see it on its next turn."
+  },
   "overview": {
     "awaitingPromise": "Awaiting completion confirmation",
-    "createdBadge": "Created: {date}",
-    "endedBadge": "Ended: {date}",
+    "budgetHeading": "Budget",
+    "costCeiling": "Each turn is capped at {amount}.",
     "exitReason": "Exit reason",
     "foregroundDormancy": "Interactive goals advance only while the app is open; closing it pauses progress until you reopen this chat. Scheduled and headless goals continue on their own.",
+    "judgeHeading": "Judge",
     "lastJudgeReason": "Last judge reason",
-    "objective": "Objective",
+    "loopHeading": "Loop",
     "reasonQuoted": "“{reason}”",
-    "statusBadge": "Status: {status}",
+    "timeBudgetAria": "Time budget used",
+    "timeLeft": "Time left",
+    "timeUp": "Time limit reached",
     "tokenBudgetAria": "Token budget used",
     "tokens": "Tokens",
     "turnBudgetAria": "Turn budget used",
@@ -275,6 +419,7 @@
     "failed": "Couldn't start the goal",
     "objectiveLabel": "Objective",
     "objectivePlaceholder": "Describe what you want the agent to achieve…",
+    "remoteNotAllowed": "Starting a goal from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
     "templateLabel": "Template",
     "templateNone": "No template — write my own",
     "templatePlaceholder": "Pick a template…",
@@ -284,10 +429,11 @@
   "remote": {
     "applied": "Applied on desktop.",
     "failed": "Couldn't reach the desktop — try again.",
-    "notAllowed": "This device doesn't have remote-control permission."
+    "nothingToContinue": "The desktop has no turn waiting to continue."
   },
   "status": {
     "active": "active",
+    "awaitingAcceptance": "awaiting acceptance",
     "budget_limited": "budget limited",
     "completed": "completed",
     "paused": "paused",
@@ -296,38 +442,57 @@
     "timed_out": "timed out",
     "turn_limited": "turn limited"
   },
+  "stopConfirm": {
+    "body": "A stopped goal can't be resumed. You can run it again later as a new goal.",
+    "cancel": "Keep running",
+    "confirm": "Stop goal",
+    "title": "Stop this goal?"
+  },
   "subgoals": {
+    "clear": "Clear",
+    "clearBody": "The checklist is removed from this goal. You can generate a new one afterwards.",
+    "clearFailed": "Couldn't clear the checklist",
+    "clearTitle": "Clear the checklist?",
+    "count": "{done}/{total}",
     "description": "Break the objective into a checklist the agent works through.",
     "empty": "No subgoals yet. Generate a checklist from the objective.",
     "error": "Couldn't generate a checklist. Try again.",
     "generate": "Generate checklist",
     "generating": "Generating…",
+    "inline": "Subgoals {done}/{total}",
     "progress": "{done}/{total} complete",
     "regenerate": "Regenerate",
+    "remoteNotAllowed": "Changing the checklist from this device needs remote control. Turn it on for this device in the desktop's paired devices.",
+    "running": "The desktop is still generating the checklist. It will appear here when it is ready.",
     "title": "Subgoals",
+    "toggleFailed": "Couldn't update the step",
     "unavailable": "Subgoal generation needs a model with an API key available in the app."
   },
   "templates": {
     "add": "New template",
     "builtinBadge": "Built-in",
     "cancel": "Cancel",
+    "cloneNote": "Built-in templates aren't edited in place — saving creates your own copy.",
     "delete": "Delete",
+    "deleteBody": "“{title}” will be removed. Goals already started from it are not affected.",
+    "deleteFailed": "Couldn't delete the template",
+    "deleteTitle": "Delete this template?",
     "edit": "Edit",
     "empty": "No templates yet.",
     "favorite": "Favourite",
-    "heading": "Goal templates",
-    "needSession": "Open a chat session first, then use a template.",
     "objectiveField": "Objective",
     "save": "Save template",
+    "saveFailed": "Couldn't save the template",
+    "saved": "Template saved",
     "titleField": "Title",
     "use": "Use"
   },
   "tracker": {
     "builtin": "Built-in (cannot be deleted)",
-    "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker.",
+    "customise": "Want to customise this agent's prompt? Open it on the Agents page and duplicate the Goal Tracker.",
     "loading": "Loading…",
     "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
-    "openCharacters": "Open Characters settings",
+    "openAgent": "Open in Agents",
     "permissionMode": "Permission mode: {mode}",
     "systemPrompt": "System prompt"
   }

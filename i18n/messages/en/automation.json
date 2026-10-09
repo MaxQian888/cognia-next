@@ -201,6 +201,17 @@
     "elementDetails": "Element Details",
     "elementDetailsDescription": "Canonical handle, properties, expansion, and action verification.",
     "emptyResult": "No elements returned.",
+    "errors": {
+      "unsupportedPlatform": "Desktop automation isn't supported on this platform.",
+      "killSwitchActive": "The automation kill switch is engaged. Re-enable the automation engine in Overview to continue.",
+      "permissionDenied": "Permission denied: {reason}",
+      "userDeclined": "The request was declined.",
+      "whitelistMiss": "This window isn't on the automation whitelist.",
+      "elementNotFound": "Element not found.",
+      "staleElement": "That element is out of date. Capture the state again.",
+      "backend": "Accessibility back-end error: {message}",
+      "internal": "Internal error: {message}"
+    },
     "events": {
       "action": "Action returned {status}.",
       "capture": "Captured revision {revision}.",
@@ -219,6 +230,11 @@
     "noScreenshot": "This revision has no matching screenshot.",
     "none": "none",
     "pageSummary": "Page {page} of {pages}",
+    "permissionNotice": {
+      "title": "Capturing needs automation permission",
+      "description": "Listing applications always works here, but a capture includes a window screenshot, so it goes through the automation permission gate. Make sure the automation engine is enabled in Overview, and in Permissions set the Default Tier or the Workflow override to anything other than Off. Then capture again.",
+      "action": "Open Permissions"
+    },
     "previousPage": "Previous",
     "query": "Query elements",
     "queryFailed": "Element query failed",

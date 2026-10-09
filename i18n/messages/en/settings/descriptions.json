@@ -12,7 +12,7 @@
   "automation": "Desktop UI automation — screenshot, find element, click, type, send keys. Disabled by default; gated by a three-tier permission policy with a global kill switch.",
   "canvas": "Monaco-based code/document editor with AI actions, version history, inline suggestions, sandboxed execution and collaboration.",
   "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
-  "characters": "Reusable personas with their own model and skills.",
+  "characters": "Character packs agents are cloned from, and reusable knowledge bases.",
   "chatTemplates": "Saved messages with parameters — insert them from the / menu and fill in the blanks.",
   "companion": "Mobile companion server — bind mode (loopback / LAN), QR pairing, paired devices, and revocation.",
   "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",

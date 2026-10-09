@@ -13,6 +13,7 @@
     },
     "capabilitiesReady": "{ready} of {total} runtimes ready",
     "description": "Loading your interface, preferences, and recent context",
+    "elapsed": "{seconds}s elapsed",
     "milestoneDuration": "{seconds}s",
     "milestones": {
       "accounts": {

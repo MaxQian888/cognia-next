@@ -201,8 +201,12 @@
       "remote_access_disabled": "主机已关闭远程终端访问。",
       "resource_limited": "终端主机已达到资源上限。",
       "unauthorized": "此设备没有远程终端权限。",
-      "unpaired": "请先配对此设备，再打开远程终端。"
-    }
+      "unpaired": "请先配对此设备，再打开远程终端。",
+      "credential_unavailable": "终端主机无法访问已保存的凭据，请在主机设备上授权访问。"
+    },
+    "authorize": "授权访问",
+    "authorizing": "正在授权…",
+    "authorizationFailed": "授权未完成，可以重试。"
   },
   "popup": {
     "hint": "↑↓ 选择 · Enter 接受 · Esc 关闭",

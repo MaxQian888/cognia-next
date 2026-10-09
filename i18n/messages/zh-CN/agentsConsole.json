@@ -1,0 +1,262 @@
+{
+  "actions": {
+    "chat": "与智能体对话",
+    "chatFailed": "无法与该智能体开始对话",
+    "chatTitle": "与 {name} 对话",
+    "menuAria": "{name} 的更多操作"
+  },
+  "assign": {
+    "assigned": "已分配「{title}」",
+    "description": "给该智能体一个持久任务。它会立即运行或在计划时间运行，并遵循你选择的审批策略。",
+    "issueHint": "如需分配议题，请在议题追踪中将该智能体设为负责人。",
+    "openIssues": "打开议题",
+    "title": "给 {name} 分配工作"
+  },
+  "builder": {
+    "backToAgents": "返回智能体",
+    "cancel": "取消",
+    "create": "创建并打开智能体",
+    "created": "已创建 {name}",
+    "createdBody": "草稿已关闭。后续修改请在智能体的设置中进行。",
+    "createdTitle": "智能体已创建",
+    "discard": "放弃",
+    "discardBody": "草稿和这段构建对话将被删除，且无法恢复。",
+    "discardFailed": "无法放弃草稿：{message}",
+    "discardTitle": "放弃这个草稿？",
+    "emptySubtitle": "描述这个智能体要做什么，构建助手会在右侧边聊边填写配置。",
+    "emptyTitle": "这个智能体要做什么？",
+    "loading": "正在加载构建助手…",
+    "missingBody": "这段对话不是在构建智能体，或已被删除。",
+    "missingTitle": "未找到草稿",
+    "openAgent": "打开智能体",
+    "panelDescription": "随对话实时更新，也可以直接编辑草稿。",
+    "panelTitle": "智能体配置",
+    "starters": {
+      "heading": "从示例开始",
+      "planPrompt": "构建一个帮助团队把想法整理成清晰的项目简报、可执行计划和项目文档的智能体。",
+      "planTitle": "帮助团队规划和撰写项目",
+      "researchPrompt": "构建一个调研竞品的智能体，总结它们的定位、功能、定价、优势与不足，并引用最新来源。",
+      "researchTitle": "调研竞品并总结发现",
+      "reviewPrompt": "构建一个审查前端 Pull Request 的智能体，找出可操作的缺陷、无障碍问题和可维护性问题。",
+      "reviewTitle": "审查前端 Pull Request"
+    },
+    "tabChat": "对话",
+    "tabDraft": "草稿",
+    "title": "智能体构建助手",
+    "toolsUnsupported": "该运行时无法编辑草稿，请手动填写",
+    "updatedByBuilder": "构建助手已更新（第 {revision} 版）"
+  },
+  "builderSetup": {
+    "description": "该运行时驱动构建对话，并作为新智能体的默认运行时。",
+    "failed": "无法准备构建助手：{reason}",
+    "model": "模型",
+    "noToolsWarning": "该运行时无法调用 Cognia 的工具，构建助手只能在对话中给出配置建议，草稿需要你手动填写。",
+    "preparing": "准备中…",
+    "runtime": "运行时",
+    "runtimeHint": "任何已配置的外部智能体都可以运行构建助手，内置的 Cognia 智能体始终可用。",
+    "sessionTitle": "智能体构建助手",
+    "start": "开始对话",
+    "title": "为智能体构建助手选择运行时"
+  },
+  "capabilities": {
+    "allEnabledServers": "所有已启用的 MCP 服务器",
+    "allowed": "允许的工具",
+    "allowedAll": "不限制",
+    "denied": "禁用的工具",
+    "deniedNone": "无",
+    "edit": "编辑",
+    "inherit": "跟随应用",
+    "knowledgeBases": "知识库",
+    "mcpServers": "MCP 服务器",
+    "memory": "记忆",
+    "memoryDefault": "跟随应用的记忆设置。",
+    "memoryOp": {
+      "create": "创建",
+      "forget": "遗忘",
+      "recall": "召回",
+      "update": "更新"
+    },
+    "memorySummary": "可读 {read} · 可写 {write} · 自动学习 {autoLearn}",
+    "missing": "此设备上不可用",
+    "none": "无",
+    "off": "关",
+    "on": "开",
+    "power": {
+      "browserTools": "浏览器工具",
+      "builtInSkills": "内置技能",
+      "computerUse": "电脑操作",
+      "ocr": "OCR 文字识别",
+      "sandbox": "沙箱"
+    },
+    "powers": "内置能力",
+    "skills": "技能",
+    "title": "能力"
+  },
+  "chooser": {
+    "aiDescription": "描述它要做什么，构建助手会边聊边填好一份可编辑的配置。",
+    "aiTitle": "用 AI 创建",
+    "blankDescription": "自己设置名称、指令、运行时和能力。",
+    "blankTitle": "从空白开始",
+    "createDescription": "描述它要做什么，让构建助手帮你配置；或者自己填写表单。",
+    "createTitle": "新建智能体",
+    "emptyDescription": "智能体是可复用的助手，拥有各自的指令、运行时、技能和工具。",
+    "emptyTitle": "还没有智能体",
+    "homeDescription": "从左侧的 {count} 个智能体中打开一个，与它对话、给它分配工作，或调整它的行为。",
+    "homeTitle": "选择一个智能体，或新建一个",
+    "recommended": "推荐"
+  },
+  "create": {
+    "aiTitle": "用 AI 创建",
+    "back": "返回",
+    "blankTitle": "从空白开始"
+  },
+  "detail": {
+    "assignWork": "分配工作",
+    "backToProfile": "返回概况",
+    "chat": "对话",
+    "duplicateToEdit": "复制后编辑",
+    "edit": "编辑",
+    "editing": "编辑 {name}",
+    "noDescription": "暂无描述。",
+    "sourceUser": "由你创建",
+    "tasksEmpty": "还没有任务。点击「分配工作」给它一个。",
+    "tasksTitle": "{name} · 任务看板"
+  },
+  "drafts": {
+    "cancel": "取消",
+    "discard": "放弃",
+    "discardAria": "放弃草稿 {name}",
+    "discardBody": "草稿及其构建对话将被删除，且无法恢复。",
+    "discardFailed": "无法放弃草稿：{message}",
+    "discardTitle": "放弃这个草稿？",
+    "edited": "编辑于 {when}",
+    "resume": "继续",
+    "resumeAria": "继续草稿 {name}",
+    "title": "{count, plural, other {未完成的草稿（#）}}",
+    "untitled": "未命名草稿"
+  },
+  "edit": {
+    "duplicateToEdit": "复制后编辑",
+    "lockedTitle": "该智能体不可编辑"
+  },
+  "header": {
+    "back": "返回",
+    "buildWithAi": "用 AI 创建",
+    "count": "{count, plural, other {# 个智能体}}",
+    "createTitle": "创建智能体",
+    "description": "可复用的智能体，拥有各自的指令、运行时、技能和工具。可以与它对话，或给它分配工作。",
+    "new": "新建智能体",
+    "packs": "角色包",
+    "summary": "{total} 个智能体{live, plural, =0 {} other { · # 个工作中}}",
+    "title": "智能体"
+  },
+  "listPane": {
+    "builtIn": "内置",
+    "bulk": {
+      "cancel": "取消",
+      "confirm": "删除",
+      "confirmBody": "内置智能体、插件提供的智能体，以及作为其他智能体变体基础的智能体会被跳过。",
+      "confirmTitle": "{count, plural, other {删除 # 个智能体？}}",
+      "count": "{count, plural, =0 {未选择} other {已选 # 个}}",
+      "delete": "删除",
+      "done": "完成",
+      "export": "导出",
+      "select": "多选",
+      "selectAll": "全选当前列表"
+    },
+    "clearFilters": "清除筛选",
+    "create": "新建智能体",
+    "emptyDescription": "从空白创建，或描述它并让构建助手帮你配置。",
+    "emptyTitle": "还没有智能体",
+    "label": "智能体",
+    "lastActive": "{when}活跃",
+    "needsAttention": "缺少依赖",
+    "neverActive": "尚未使用",
+    "noMatches": "没有匹配的智能体。",
+    "searchPlaceholder": "搜索智能体…",
+    "sort": {
+      "name": "名称",
+      "recent": "上次活跃",
+      "updated": "最近编辑"
+    },
+    "sortLabel": "排序",
+    "source": {
+      "all": "全部",
+      "builtin": "内置",
+      "plugin": "插件",
+      "user": "我的"
+    },
+    "sourceCountAria": "{label}：{count}",
+    "sourceLabel": "按来源筛选",
+    "status": {
+      "awaiting": "等你处理",
+      "running": "工作中"
+    },
+    "updateAvailable": "角色包有更新"
+  },
+  "loading": "正在加载智能体…",
+  "notFound": {
+    "back": "全部智能体",
+    "description": "它可能已被删除，或属于一个已关闭的插件。",
+    "title": "未找到该智能体"
+  },
+  "profile": {
+    "about": {
+      "inherit": "跟随应用",
+      "model": "模型",
+      "modelDefault": "默认",
+      "permission": "权限",
+      "planModel": "规划模型",
+      "runtime": "运行时",
+      "source": "来源",
+      "title": "概况",
+      "updated": "更新于",
+      "utilityModel": "辅助模型",
+      "workingDir": "工作目录"
+    },
+    "activity": {
+      "archived": "已归档",
+      "awaiting": "等待审批",
+      "empty": "还没有动态。与它对话或给它分配工作后，它做的事会显示在这里。",
+      "live": "{count} 项进行中",
+      "running": "运行中",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起",
+      "title": "动态",
+      "untitled": "未命名对话"
+    },
+    "stats": {
+      "completed": "已完成",
+      "conversations": "对话",
+      "cost": "费用",
+      "title": "最近 30 天",
+      "tokens": "Token",
+      "turns": "轮次"
+    },
+    "work": {
+      "board": "任务看板",
+      "empty": "暂无进行中的工作。点击「分配工作」给它一个任务，或在议题中把议题分配给它。",
+      "open": "{count} 项未完成",
+      "task": "任务",
+      "title": "进行中的工作",
+      "viewInIssues": "在议题中查看"
+    }
+  },
+  "runtime": {
+    "appDefault": "跟随应用默认",
+    "unavailable": "{name}（不可用）"
+  },
+  "runtimeField": {
+    "appDefault": "跟随应用默认",
+    "appDefaultDescription": "与新对话使用的运行时一致",
+    "description": "与该智能体的新对话在哪里运行。仍可在输入框中切换。",
+    "label": "默认运行时",
+    "unavailableHint": "该运行时在此设备上不可用。在你选择其他运行时之前，新对话将使用应用默认运行时。",
+    "unavailableLabel": "{name}（不可用）"
+  },
+  "status": {
+    "awaiting": "待审批",
+    "idle": "空闲",
+    "running": "运行中"
+  }
+}

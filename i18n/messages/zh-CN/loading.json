@@ -13,6 +13,7 @@
     },
     "capabilitiesReady": "运行时就绪 {ready}/{total}",
     "description": "正在加载界面、偏好设置和最近使用的内容",
+    "elapsed": "已用 {seconds} 秒",
     "milestoneDuration": "{seconds} 秒",
     "milestones": {
       "accounts": {
