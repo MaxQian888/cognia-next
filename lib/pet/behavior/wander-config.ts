@@ -5,7 +5,7 @@
 import type { PetWanderFrequency } from "@/types/pet"
 
 /** Resolved wander pacing. Speeds are LOGICAL px/s — scale by the monitor's
- * scale factor before feeding the FSM (positions are physical px). */
+ * scale factor before feeding the FSM (positions are desktop units). */
 export interface WanderTuning {
   /** Inclusive rest-interval bounds between walks, ms. */
   restMinMs: number

@@ -77,15 +77,18 @@ export interface UsePetLocomotionArgs {
 
 export interface UsePetLocomotionResult {
   locomotion: PetLocomotion
-  /** Monitor scale factor (physical = logical × scale); 1 until known. */
+  /**
+   * Desktop units per logical px on the pet's monitor (1 on macOS, the
+   * monitor's scale factor elsewhere); 1 until known.
+   */
   scaleFactor: number
   /**
-   * Hand off a drag release: window position + release velocity in physical
-   * px(/s). Enters the falling mode regardless of the wander switch.
+   * Hand off a drag release: window position + release velocity in desktop
+   * units(/s). Enters the falling mode regardless of the wander switch.
    */
   beginThrow: (x: number, y: number, vx: number, vy: number) => void
   /**
-   * Hand off a gentle drag release: the user parked the window at physical
+   * Hand off a gentle drag release: the user parked the window at desktop-unit
    * `(x, y)`. The engine adopts it as the new resting spot, so the next wander
    * starts from there (dropping first when it is mid-air) instead of snapping
    * back to where the pet stood before the drag. Also re-reads the work area,
@@ -220,7 +223,7 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
         windowWidth: logical.width * scale,
         windowHeight: logical.height * scale,
         tuning: { ...tuning, walkSpeedPxPerSec: tuning.walkSpeedPxPerSec * scale },
-        // Surfaces + work area are already physical px (only the window *size* is
+        // Surfaces + work area are already desktop units (only the window *size* is
         // scaled above) — never scale the platforms, or every perch offsets.
         platforms: surfacesRef.current,
         climbEnabled: a.enabled && a.wander.enabled && (a.wander.climbWindows ?? false),

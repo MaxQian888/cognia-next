@@ -11,14 +11,26 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import type { PetPositionSpace } from "@/types/pet"
 import { safeUnlisten } from "./safe-unlisten"
+
+// Every screen coordinate below is in DESKTOP UNITS: points on macOS,
+// physical pixels on Windows and Linux (Rust `desktop_space`). Logical (CSS)
+// sizes convert into them by `PetWorkArea.scaleFactor`.
 
 /** Options for opening the desktop-pet overlay window. */
 export interface PetWindowOpts {
+  /** Logical window size. */
   width: number
   height: number
+  /** Saved top-left, if the user has placed the pet before. */
   x?: number
   y?: number
+  /**
+   * The space `x` / `y` are in: the saved position's own marker. Absent means
+   * a position saved before positions were desktop units, which Rust converts.
+   */
+  positionSpace?: PetPositionSpace
   clickThrough: boolean
 }
 
@@ -70,7 +82,7 @@ export async function setPetClickThrough(ignore: boolean): Promise<boolean> {
   }
 }
 
-/** Move the overlay window to an absolute screen position. */
+/** Move the overlay window to a top-left in desktop units. */
 export async function setPetWindowPosition(x: number, y: number): Promise<boolean> {
   if (!isTauri()) return false
   try {
@@ -99,7 +111,7 @@ export async function setPetWindowSize(width: number, height: number): Promise<b
   }
 }
 
-/** Read the overlay window's current absolute screen position. */
+/** Read the overlay window's current top-left in desktop units. */
 export async function getPetWindowPosition(): Promise<{ x: number; y: number } | null> {
   if (!isTauri()) return null
   try {
@@ -110,7 +122,7 @@ export async function getPetWindowPosition(): Promise<{ x: number; y: number } |
   }
 }
 
-/** Read the global cursor position for local-only gaze tracking. */
+/** Read the global cursor position (desktop units) for local-only gaze tracking. */
 export async function getPetCursorPosition(): Promise<{ x: number; y: number } | null> {
   if (!isTauri()) return null
   try {
@@ -122,14 +134,18 @@ export async function getPetCursorPosition(): Promise<{ x: number; y: number } |
 }
 
 /**
- * Work area of the monitor the pet window sits on (physical px + scale
- * factor). Mirrors the Rust `PetWorkArea` DTO. `null` off Tauri / headless.
+ * Work area of the monitor the pet window sits on, in desktop units. Mirrors
+ * the Rust `PetWorkArea` DTO. `null` off Tauri / headless.
  */
 export interface PetWorkArea {
   x: number
   y: number
   width: number
   height: number
+  /**
+   * Desktop units per logical (CSS) px on this monitor: 1 on macOS (points),
+   * the monitor's scale factor elsewhere.
+   */
   scaleFactor: number
 }
 
@@ -145,7 +161,7 @@ export async function getPetWorkArea(): Promise<PetWorkArea | null> {
 }
 
 /**
- * One perchable window-top surface (physical px). Mirrors the Rust `PetSurface`
+ * One perchable window-top surface (desktop units). Mirrors the Rust `PetSurface`
  * DTO. `y` is the window's top edge; `x`/`width` its horizontal span.
  */
 export interface PetSurface {
@@ -185,7 +201,7 @@ export async function isPetWindowOpen(): Promise<boolean> {
 }
 
 /**
- * Physical rectangle of the pet's own box on screen. Mirrors the Rust
+ * The pet's own box on screen, in desktop units. Mirrors the Rust
  * `PetPopupAnchor` DTO; see `popupAnchorForPetBox` in
  * `lib/pet/overlay-geometry.ts`.
  */

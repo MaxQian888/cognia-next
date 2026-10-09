@@ -15,7 +15,7 @@
 //! clicking anywhere else dismisses it exactly like a system context menu.
 //!
 //! Placement is owned HERE, not by the renderer. The sprite passes the
-//! physical rectangle of the pet's own box (the anchor); this module resolves
+//! rectangle of the pet's own box (the anchor); this module resolves
 //! where the popup goes — centered over the pet, above it, flipped below when
 //! there is no room, clamped inside the work area of the monitor the pet is
 //! on — and re-resolves it on every resize. A renderer-side placement could
@@ -23,28 +23,38 @@
 //! itself to its card it grew from a fixed top-left: a talk composer opening
 //! on a popup placed below the pet ran off the bottom of the screen, and a
 //! card shorter than the estimate left a gap between the pet and its menu.
+//! Placement happens in desktop units (`desktop_space`: points on macOS,
+//! physical pixels elsewhere), the space the sprite window reports its own
+//! position in, and is applied with the selection toolbar's `place_window`.
+//! tao's "physical" rects are each display's points times its OWN scale on
+//! macOS, so comparing the anchor with them directly picked the wrong monitor
+//! beside a Retina laptop, and a physical position was divided by the scale of
+//! the display the popup was last on.
 //! The pure placement math is unit-tested; the live window ops are
 //! smoke-tested via `pnpm tauri dev`.
 
 use std::sync::Mutex;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WindowEvent};
 
-use super::{monitor_containing_physical_point, monitor_work_area, set_fixed_logical_size};
+use super::set_fixed_logical_size;
+use crate::automation::platform::shared::desktop_space::{self, DesktopMonitor};
+use crate::automation::types::Rect as DesktopRect;
+use crate::selection_toolbar::{desktop_monitors, place_window};
 
 /// Window label of the click popup. Kept in sync with `lib/pet/window-role.ts`
 /// (`PET_POPUP_WINDOW_LABEL`) so the popup webview resolves the "popup" role and
 /// `PetMount` contributes nothing there.
 pub(crate) const PET_POPUP_LABEL: &str = "pet-popup";
 
-/// Gap (physical px at 1x, scaled by the monitor) between the popup and the
-/// pet it belongs to.
+/// Gap (logical px, scaled into desktop units by the monitor) between the
+/// popup and the pet it belongs to.
 const POPUP_GAP: f64 = 12.0;
 
-/// Physical rectangle of the pet's own box on screen (not the whole sprite
-/// window, whose transparent headroom for the speech bubble would push the
-/// popup well above the pet's head). Mirrors the TS `PetPopupAnchor`.
+/// The pet's own box on screen, in desktop units (not the whole sprite window,
+/// whose transparent headroom for the speech bubble would push the popup well
+/// above the pet's head). Mirrors the TS `PetPopupAnchor`.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PetPopupAnchor {
@@ -78,7 +88,7 @@ fn current_anchor() -> Option<PetPopupAnchor> {
     *POPUP_ANCHOR.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Resolve the popup's physical top-left.
+/// Resolve the popup's top-left.
 ///
 /// - Horizontally centered over the anchor, then clamped inside the work area.
 /// - Above the anchor by `gap`; flipped below it when the top would cross the
@@ -87,7 +97,8 @@ fn current_anchor() -> Option<PetPopupAnchor> {
 ///   (when neither side fully fits it pins to an edge instead of leaving the
 ///   screen).
 ///
-/// All values are physical pixels. Pure so every branch is unit-tested.
+/// All values are in one unit (desktop units). Pure so every branch is
+/// unit-tested.
 fn resolve_popup_placement(
     anchor: PetPopupAnchor,
     popup: (f64, f64),
@@ -109,6 +120,44 @@ fn resolve_popup_placement(
     (x.round(), y.round())
 }
 
+/// Used only when no display is reported at all (headless, shutdown).
+const FALLBACK_WORK_AREA: (f64, f64, f64, f64) = (0.0, 0.0, 1920.0, 1080.0);
+
+/// The popup's top-left in desktop units, for an `anchor` in desktop units and
+/// a popup of `logical` px (scaled by the anchor's display).
+fn popup_position(
+    anchor: PetPopupAnchor,
+    logical: (f64, f64),
+    monitors: &[DesktopMonitor],
+) -> (i32, i32) {
+    let rect = DesktopRect {
+        x: anchor.x.round() as i32,
+        y: anchor.y.round() as i32,
+        width: anchor.width.round() as i32,
+        height: anchor.height.round() as i32,
+    };
+    let (work_area, content_scale) =
+        desktop_space::monitor_for(rect, monitors).map_or((FALLBACK_WORK_AREA, 1.0), |monitor| {
+            let work = monitor.work;
+            (
+                (
+                    f64::from(work.x),
+                    f64::from(work.y),
+                    f64::from(work.width),
+                    f64::from(work.height),
+                ),
+                monitor.content_scale,
+            )
+        });
+    let (x, y) = resolve_popup_placement(
+        anchor,
+        (logical.0 * content_scale, logical.1 * content_scale),
+        work_area,
+        POPUP_GAP * content_scale,
+    );
+    (x as i32, y as i32)
+}
+
 /// Size the popup to `logical` and place it against `anchor` on the monitor
 /// that holds the pet, in one step so a size write can never race a position
 /// write.
@@ -118,27 +167,9 @@ fn place_popup<R: Runtime>(
     anchor: PetPopupAnchor,
     logical: (f64, f64),
 ) -> Result<(), String> {
-    let center = (
-        anchor.x + anchor.width / 2.0,
-        anchor.y + anchor.height / 2.0,
-    );
-    let monitor = monitor_containing_physical_point(app, center)
-        .or_else(|| app.primary_monitor().ok().flatten());
-    let (area_x, area_y, area_w, area_h, scale) = match monitor.as_ref() {
-        Some(monitor) => monitor_work_area(monitor),
-        None => (0.0, 0.0, 1920.0, 1080.0, 1.0),
-    };
-    let physical = (logical.0 * scale, logical.1 * scale);
-    let (x, y) = resolve_popup_placement(
-        anchor,
-        physical,
-        (area_x, area_y, area_w, area_h),
-        POPUP_GAP * scale,
-    );
+    let (x, y) = popup_position(anchor, logical, &desktop_monitors(app));
     set_fixed_logical_size(window, logical.0, logical.1)?;
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
+    place_window(window, x, y)
 }
 
 /// Hide the popup window (toggle / blur). Cheap to re-show, so we hide rather
@@ -419,6 +450,87 @@ mod tests {
         let (_, y) =
             resolve_popup_placement(anchor(800.0, 600.0), (320.0, 2000.0), AREA, POPUP_GAP);
         assert_eq!(y, 0.0);
+    }
+
+    fn drect(x: i32, y: i32, width: i32, height: i32) -> DesktopRect {
+        DesktopRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// A 1512×982pt Retina laptop (scale 2) and a 2560×1440pt 1x display to
+    /// its right, as tao reports them on macOS.
+    fn mac_pair() -> Vec<DesktopMonitor> {
+        vec![
+            DesktopMonitor::from_tao(drect(0, 0, 3024, 1964), drect(0, 50, 3024, 1914), 2.0, true),
+            DesktopMonitor::from_tao(
+                drect(1512, 0, 2560, 1440),
+                drect(1512, 25, 2560, 1415),
+                1.0,
+                true,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_pet_on_the_1x_external_display_gets_its_popup_there_in_points() {
+        // The pet's box at (2400, 700)pt on the 1x display. In tao's numbers
+        // that is also inside the Retina laptop's (0, 0, 3024, 1964) rect:
+        // the old lookup put the popup on the laptop.
+        let (x, y) = popup_position(anchor(2400.0, 700.0), POPUP, &mac_pair());
+        assert_eq!(x, 2400 + 64 - 160);
+        assert_eq!(y, 700 - POPUP_GAP as i32 - 400);
+    }
+
+    #[test]
+    fn a_pet_on_the_retina_laptop_is_placed_in_points_not_pixels() {
+        // The pet's box at (600, 500)pt on the scale-2 laptop: the work area
+        // and the gap are points too, nothing doubles.
+        let (x, y) = popup_position(anchor(600.0, 500.0), POPUP, &mac_pair());
+        assert_eq!(x, 600 + 64 - 160);
+        assert_eq!(y, 500 - POPUP_GAP as i32 - 400);
+    }
+
+    #[test]
+    fn a_pet_near_the_retina_top_flips_below_inside_the_points_work_area() {
+        // (600, 40)pt: no room above, so below the pet; the work area's top
+        // is the menu bar's 25pt, not tao's 50.
+        let (_, y) = popup_position(anchor(600.0, 40.0), POPUP, &mac_pair());
+        assert_eq!(y, 40 + 128 + POPUP_GAP as i32);
+        // A popup taller than the laptop pins to its work-area top.
+        let (_, y) = popup_position(anchor(600.0, 40.0), (320.0, 2000.0), &mac_pair());
+        assert_eq!(y, 25);
+    }
+
+    #[test]
+    fn pixel_platforms_scale_the_popup_by_the_pet_s_monitor() {
+        let monitors = vec![
+            DesktopMonitor::from_tao(drect(0, 0, 2880, 1800), drect(0, 0, 2880, 1728), 1.5, false),
+            DesktopMonitor::from_tao(
+                drect(2880, 0, 1920, 1080),
+                drect(2880, 0, 1920, 1040),
+                1.0,
+                false,
+            ),
+        ];
+        // On the 150% laptop: the popup and the gap are scaled by 1.5.
+        let (x, y) = popup_position(anchor(1000.0, 1000.0), POPUP, &monitors);
+        assert_eq!(x, 1000 + 64 - 240);
+        assert_eq!(y, 1000 - 18 - 600);
+        // On the 1x display: unscaled.
+        let (x, y) = popup_position(anchor(3500.0, 700.0), POPUP, &monitors);
+        assert_eq!(x, 3500 + 64 - 160);
+        assert_eq!(y, 700 - 12 - 400);
+    }
+
+    #[test]
+    fn no_reported_display_falls_back_to_a_plain_1080p_area() {
+        let (x, y) = popup_position(anchor(1880.0, 600.0), POPUP, &[]);
+        assert_eq!(x, 1920 - 320);
+        assert_eq!(y, 600 - POPUP_GAP as i32 - 400);
     }
 
     #[test]

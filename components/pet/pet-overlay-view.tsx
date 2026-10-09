@@ -9,9 +9,9 @@
 //  - Make the window paint through to the desktop (`data-pet-overlay` on <html>).
 //  - Render the pet (effective skin) + its speech bubble, centered.
 //  - Drag the OS window with a small movement threshold (rAF-throttled),
-//    converting the pointer's CSS-pixel deltas to the physical pixels every
-//    window coordinate uses, and persist the resting position into
-//    PetSettings on pointer-up.
+//    converting the pointer's CSS-pixel deltas to the desktop units every
+//    window coordinate uses (points on macOS, physical pixels elsewhere), and
+//    persist the resting position into PetSettings on pointer-up.
 //  - Follow pet-settings writes made in the other windows (size, wander,
 //    gaze, click-through), so this long-lived webview never runs on the copy
 //    it booted with.
@@ -57,8 +57,9 @@ import type { PetConsoleTab } from "@/lib/pet/console-tabs"
 import {
   MIN_THROW_SPEED,
   petBoxScreenRect,
-  resolveCssToPhysicalScale,
+  resolveCssToDesktopScale,
 } from "@/lib/pet/overlay-geometry"
+import { isMacOs } from "@/lib/platform/os"
 import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import { POPUP_INITIAL_HEIGHT, POPUP_INITIAL_WIDTH } from "@/lib/pet/popup-geometry"
 import { reactionForZone, resolveHitZone } from "@/lib/pet/interaction/hit-zones"
@@ -118,16 +119,17 @@ export function PetOverlayView() {
       offResume()
     }
   }, [])
-  // The native cursor is PHYSICAL screen pixels, so the pet's box must be
-  // too: the window's CSS-pixel screen origin scaled by this webview's pixel
-  // ratio, plus the box's inset (it is centered horizontally and
+  // The native cursor is in desktop units, so the pet's box must be too: the
+  // window's CSS-pixel screen origin converted to desktop units (unchanged on
+  // macOS, where both are points; times this webview's pixel ratio
+  // elsewhere), plus the box's inset (it is centered horizontally and
   // bottom-anchored inside the window's bubble headroom).
   const nativeLookTarget = usePetLookTarget({
     enabled: pet.gazeFollowing !== false && !reduced,
     native: true,
     suspended: hidden || nativeSuspended || desktopPet.clickThrough,
     getBounds: () => {
-      const scale = resolveCssToPhysicalScale(null, window.devicePixelRatio)
+      const scale = resolveCssToDesktopScale(null, window.devicePixelRatio, isMacOs())
       return {
         left: (window.screenX + Math.max(0, window.innerWidth - size) / 2) * scale,
         top: (window.screenY + Math.max(0, window.innerHeight - size)) * scale,
@@ -198,7 +200,7 @@ export function PetOverlayView() {
   // Right-click opens the click popup in its own "pet-popup" window (the menu +
   // interaction panel + talk composer live there). The sprite window never
   // resizes or shifts for a menu. The popup is anchored to the pet's own box
-  // (physical pixels, scaled by the monitor this window is on); the native
+  // (desktop units, its insets scaled by the monitor this window is on); the native
   // side places it above the pet (below when there is no room), clamps it to
   // that monitor's work area, and re-places it whenever it fits itself to its
   // card. Left-click (pet/drag) and the bubble are untouched.
@@ -207,7 +209,11 @@ export function PetOverlayView() {
     void (async () => {
       const [pos, workArea] = await Promise.all([getPetWindowPosition(), getPetWorkArea()])
       if (!pos) return
-      const scale = resolveCssToPhysicalScale(workArea?.scaleFactor, window.devicePixelRatio)
+      const scale = resolveCssToDesktopScale(
+        workArea?.scaleFactor,
+        window.devicePixelRatio,
+        isMacOs()
+      )
       await openPetPopup({
         width: POPUP_INITIAL_WIDTH,
         height: POPUP_INITIAL_HEIGHT,
@@ -222,7 +228,10 @@ export function PetOverlayView() {
   // since this overlay opened (wander settles long after the closure that
   // scheduled them was rendered, and `save` replaces `petSettings` whole).
   const persistOverlayPosition = async (x: number, y: number) => {
-    await updateDesktopPetSettings(() => ({ position: { x, y } }), DEFAULT_PET_DESKTOP_OVERLAY)
+    await updateDesktopPetSettings(
+      () => ({ position: { x, y, space: "desktop" } }),
+      DEFAULT_PET_DESKTOP_OVERLAY
+    )
   }
   const persistRef = useRef(persistOverlayPosition)
   useEffect(() => {
@@ -255,10 +264,12 @@ export function PetOverlayView() {
   // relative to it once it lands.
   //
   // Units: the gesture reports CSS-pixel deltas (pointer `screenX`/`screenY`)
-  // while the window origin and every position command are PHYSICAL pixels.
-  // The scale is captured with the origin (the monitor's factor, falling
-  // back to this webview's pixel ratio); without it the pet slid out from
-  // under the cursor at half speed on a 2x display.
+  // while the window origin and every position command are desktop units
+  // (points on macOS, physical pixels elsewhere). The scale is captured with
+  // the origin (the work area's factor, else 1 on macOS / this webview's pixel
+  // ratio elsewhere); without it the pet slid out from under the cursor at
+  // half speed on a 2x Windows display. On macOS it stays 1 on every display,
+  // so a drag across a Retina and a 1x screen tracks the cursor throughout.
   const originRef = useRef<{
     pointerId: number
     winX: number | null
@@ -330,7 +341,7 @@ export function PetOverlayView() {
       pointerId: id,
       winX: null,
       winY: null,
-      scale: resolveCssToPhysicalScale(null, window.devicePixelRatio),
+      scale: resolveCssToDesktopScale(null, window.devicePixelRatio, isMacOs()),
     }
     void (async () => {
       const [winPos, workArea] = await Promise.all([getPetWindowPosition(), getPetWorkArea()])
@@ -339,7 +350,11 @@ export function PetOverlayView() {
       if (o && o.pointerId === id) {
         o.winX = base.x
         o.winY = base.y
-        o.scale = resolveCssToPhysicalScale(workArea?.scaleFactor, window.devicePixelRatio)
+        o.scale = resolveCssToDesktopScale(
+          workArea?.scaleFactor,
+          window.devicePixelRatio,
+          isMacOs()
+        )
       }
     })()
     dragGesture.onPointerDown(e)

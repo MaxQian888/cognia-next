@@ -98,13 +98,20 @@ describe("toggleDesktopPetWindow", () => {
         enabled: true,
         anchor: "bottom-right",
         size: 96,
-        desktopPet: { enabled: false, clickThrough: true, size: 160, position: { x: 5, y: 9 } },
+        desktopPet: {
+          enabled: false,
+          clickThrough: true,
+          size: 160,
+          position: { x: 5, y: 9, space: "desktop" },
+        },
       },
     }
     const result = await toggleDesktopPetWindow()
     expect(result).toBe(true)
+    // The saved position's space travels with it, so Rust knows it is
+    // already in desktop units.
     expect(openPetWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ x: 5, y: 9, clickThrough: true })
+      expect.objectContaining({ x: 5, y: 9, positionSpace: "desktop", clickThrough: true })
     )
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -15,15 +15,16 @@ export function overlayWindowSize(petSize: number): { width: number; height: num
 }
 
 /**
- * Physical rectangle of the pet's own box inside the overlay window. The pet is
+ * Screen rectangle of the pet's own box inside the overlay window. The pet is
  * bottom-anchored and horizontally centered (see `PetOverlayView`), so the box
  * sits `OVERLAY_CHROME_W / 2` in from each side and `OVERLAY_CHROME_H` below
  * the window top. This, not the whole window, is what the click popup anchors
  * to: the window's transparent headroom exists for the speech bubble, and
  * anchoring to it parked the popup ~160px above the pet's head.
  *
- * `windowPos` is the window's PHYSICAL top-left (`pet_window_get_position`);
- * `scale` is the monitor scale factor.
+ * `windowPos` is the window's top-left in desktop units
+ * (`pet_window_get_position`); `scale` is desktop units per CSS px
+ * (`resolveCssToDesktopScale`).
  */
 export function petBoxScreenRect(
   windowPos: { x: number; y: number },
@@ -40,20 +41,25 @@ export function petBoxScreenRect(
 }
 
 /**
- * Pick the scale factor that converts this webview's CSS pixels to physical
- * screen pixels: the monitor's reported factor when known, else the webview's
- * `devicePixelRatio` (the pet windows apply no page zoom, so the two agree),
- * else 1. Pointer `screenX`/`screenY` deltas are CSS pixels while every
- * window coordinate the pet moves through is physical; adding the two
- * unconverted moved the pet half as far as the cursor on a 2x display.
+ * Pick the factor that converts this webview's CSS pixels to the desktop units
+ * every pet window coordinate is in (points on macOS, physical pixels
+ * elsewhere): the work area's reported `scaleFactor` when known; else 1 where
+ * desktop units are points (a CSS px IS a point there, on every display);
+ * else the webview's `devicePixelRatio` (the pet windows apply no page zoom,
+ * so it matches the monitor's factor); else 1. Pointer `screenX`/`screenY`
+ * deltas are CSS pixels; adding them unconverted moved the pet half as far as
+ * the cursor on a 2x Windows display, and multiplying them by the pixel ratio
+ * on macOS moved it twice as far.
  */
-export function resolveCssToPhysicalScale(
-  monitorScale: number | null | undefined,
-  devicePixelRatio: number | null | undefined
+export function resolveCssToDesktopScale(
+  contentScale: number | null | undefined,
+  devicePixelRatio: number | null | undefined,
+  desktopUnitsArePoints: boolean
 ): number {
-  if (typeof monitorScale === "number" && Number.isFinite(monitorScale) && monitorScale > 0) {
-    return monitorScale
+  if (typeof contentScale === "number" && Number.isFinite(contentScale) && contentScale > 0) {
+    return contentScale
   }
+  if (desktopUnitsArePoints) return 1
   if (
     typeof devicePixelRatio === "number" &&
     Number.isFinite(devicePixelRatio) &&
@@ -65,7 +71,7 @@ export function resolveCssToPhysicalScale(
 }
 
 /**
- * Work-area rectangle of one monitor (taskbar excluded), in PHYSICAL pixels —
+ * Work-area rectangle of one monitor (taskbar excluded), in desktop units —
  * the same unit `pet_window_set_position` consumes. Reported by the Rust
  * `pet_window_get_work_area` command.
  */
@@ -79,7 +85,7 @@ export interface WorkAreaRect {
 /**
  * Window-top Y that rests the window bottom on the work-area bottom (the pet
  * is bottom-anchored inside the overlay, so its feet land on the taskbar
- * edge). Physical pixels.
+ * edge). Desktop units.
  */
 export function resolveGroundTop(workArea: WorkAreaRect, windowHeight: number): number {
   return workArea.y + workArea.height - windowHeight
@@ -87,7 +93,7 @@ export function resolveGroundTop(workArea: WorkAreaRect, windowHeight: number): 
 
 /**
  * A perchable "platform" — the top edge of a real desktop window the pet can
- * climb onto and walk along (Shimeji-style). Physical pixels; `y` is the
+ * climb onto and walk along (Shimeji-style). Desktop units; `y` is the
  * window's top edge, `x`/`width` its horizontal span. Reported by the Rust
  * `pet_window_get_surfaces` command.
  */
@@ -209,7 +215,7 @@ export function clampWalkTargetX(
   return Math.min(maxX, Math.max(minX, targetX))
 }
 
-/** One pointer-position sample captured while dragging (physical px). */
+/** One pointer-position sample captured while dragging (desktop units). */
 export interface PointerSample {
   x: number
   y: number

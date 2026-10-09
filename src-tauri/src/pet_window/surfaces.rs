@@ -14,8 +14,10 @@
 
 use serde::Serialize;
 
-/// One perchable platform: the top edge of a window. Physical pixels; `y` is the
-/// window's top, `x`/`width` its horizontal span.
+/// One perchable platform: the top edge of a window. Desktop units (points on
+/// macOS, physical pixels elsewhere; see `desktop_space`), the same space as
+/// the pet window's position and work area; `y` is the window's top,
+/// `x`/`width` its horizontal span.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PetSurface {
@@ -465,36 +467,32 @@ mod platform {
 
 use tauri::{AppHandle, Manager, Runtime};
 
-/// Physical-pixel bounds of the monitor the pet window sits on (falls back to
-/// primary, then a sane default), plus its scale factor.
-fn pet_monitor_bounds<R: Runtime>(app: &AppHandle<R>) -> (i32, i32, i32, i32, f64) {
-    let monitor = app
-        .get_webview_window("pet")
-        .and_then(|w| w.current_monitor().ok().flatten())
-        .or_else(|| app.primary_monitor().ok().flatten());
-    if let Some(m) = monitor {
-        let pos = m.position();
-        let size = m.size();
-        (
-            pos.x,
-            pos.y,
-            size.width as i32,
-            size.height as i32,
-            m.scale_factor(),
-        )
-    } else {
-        (0, 0, 1920, 1080, 1.0)
-    }
+use crate::automation::platform::shared::desktop_space::{self, DesktopMonitor};
+use crate::automation::types::Rect as DesktopRect;
+
+/// Desktop-unit bounds of the display the pet window sits on (the one holding
+/// its centre, else the primary display, else a sane default).
+fn pet_monitor_bounds(
+    pet_frame: Option<DesktopRect>,
+    monitors: &[DesktopMonitor],
+) -> (i32, i32, i32, i32) {
+    let monitor = match pet_frame {
+        Some(frame) => desktop_space::monitor_for(frame, monitors),
+        None => monitors.first(),
+    };
+    monitor.map_or((0, 0, 1920, 1080), |monitor| {
+        let bounds = monitor.bounds;
+        (bounds.x, bounds.y, bounds.width, bounds.height)
+    })
 }
 
-/// Scale candidate rects from logical points to physical pixels. macOS
-/// `CGWindowBounds` is in logical points, but the `PetSurface` contract — and
-/// the Tauri monitor geometry candidates are filtered against — is physical
-/// pixels; on any Retina display an unscaled candidate landed the pet mid-air
-/// at 1/scale of the target. Scaling by the pet monitor's factor is exact for
-/// candidates on the pet's own monitor — the only ones that survive the
-/// monitor-bounds filter (mixed-DPI setups may mis-scale windows on *other*
-/// monitors, which are rejected anyway).
+/// Scale candidate rects from logical points to tao "physical" pixels for one
+/// display's `scale`. Only `enumerate_scaled_candidates` (the fleet island,
+/// which compares against tao monitor rects) uses it; the pet's surfaces stay
+/// in desktop units and are never scaled. Exact for candidates on the display
+/// whose scale is passed; windows on displays of another scale come out
+/// mis-scaled, which that caller tolerates because it only inspects its own
+/// display.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn scale_candidates(
     candidates: Vec<WindowCandidate>,
@@ -553,15 +551,20 @@ pub(crate) fn enumerate_scaled_candidates(scale: f64) -> Vec<WindowCandidate> {
 }
 
 /// Enumerate perchable window-top surfaces on the pet's monitor.
+///
+/// No scaling: the platform layer reports window bounds in desktop units
+/// already (`CGWindowBounds` points on macOS, per-monitor-DPI-aware physical
+/// pixels on Windows), and the monitor bounds and the wander loop are in
+/// desktop units too.
 #[tauri::command]
 pub async fn pet_window_get_surfaces(app: AppHandle) -> Result<PetSurfaces, String> {
-    let (mx, my, mw, mh, _scale) = pet_monitor_bounds(&app);
+    let pet_frame = app
+        .get_webview_window("pet")
+        .and_then(|window| super::window_frame(&window).ok());
+    let (mx, my, mw, mh) =
+        pet_monitor_bounds(pet_frame, &crate::selection_toolbar::desktop_monitors(&app));
     let hwnds = self_hwnds(&app);
     let candidates = platform::enumerate();
-    // macOS reports window bounds in logical points; convert to the physical
-    // pixel space everything downstream (monitor bounds, wander loop) uses.
-    #[cfg(target_os = "macos")]
-    let candidates = scale_candidates(candidates, _scale);
     let surfaces = filter_and_sort_surfaces(
         &candidates,
         &hwnds,
@@ -851,6 +854,80 @@ mod tests {
         // 1.0 scale is an identity pass-through.
         let same = scale_candidates(vec![candidate()], 1.0);
         assert_eq!(same[0].left, 200);
+    }
+
+    #[test]
+    fn the_pet_s_display_bounds_are_points_on_a_retina_and_1x_pair() {
+        let monitors = vec![
+            DesktopMonitor::from_tao(
+                DesktopRect {
+                    x: 0,
+                    y: 0,
+                    width: 3024,
+                    height: 1964,
+                },
+                DesktopRect {
+                    x: 0,
+                    y: 50,
+                    width: 3024,
+                    height: 1914,
+                },
+                2.0,
+                true,
+            ),
+            DesktopMonitor::from_tao(
+                DesktopRect {
+                    x: 1512,
+                    y: 0,
+                    width: 2560,
+                    height: 1440,
+                },
+                DesktopRect {
+                    x: 1512,
+                    y: 25,
+                    width: 2560,
+                    height: 1415,
+                },
+                1.0,
+                true,
+            ),
+        ];
+        let pet = |x, y| {
+            Some(DesktopRect {
+                x,
+                y,
+                width: 224,
+                height: 288,
+            })
+        };
+        // On the external display: its bounds, so a window there (points,
+        // straight from `CGWindowBounds`) is a perch.
+        let external = pet_monitor_bounds(pet(2400, 700), &monitors);
+        assert_eq!(external, (1512, 0, 2560, 1440));
+        let window = WindowCandidate {
+            left: 2000,
+            top: 400,
+            right: 2900,
+            bottom: 1100,
+            ..candidate()
+        };
+        let surfaces = filter_and_sort_surfaces(&[window], &[], external, 120, 8);
+        assert_eq!(
+            surfaces,
+            vec![PetSurface {
+                x: 2000.0,
+                y: 400.0,
+                width: 900.0
+            }]
+        );
+        // On the laptop: tao's 3024x1964 in points.
+        assert_eq!(
+            pet_monitor_bounds(pet(600, 500), &monitors),
+            (0, 0, 1512, 982)
+        );
+        // No pet window: the primary display; no display: a 1080p default.
+        assert_eq!(pet_monitor_bounds(None, &monitors), (0, 0, 1512, 982));
+        assert_eq!(pet_monitor_bounds(None, &[]), (0, 0, 1920, 1080));
     }
 
     #[test]

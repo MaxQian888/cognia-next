@@ -96,6 +96,7 @@ export async function openDesktopPetWindow(): Promise<boolean> {
       ...overlayWindowSize(desktop.size),
       x: desktop.position?.x,
       y: desktop.position?.y,
+      positionSpace: desktop.position?.space,
       clickThrough: desktop.clickThrough,
     })
     // Persisting `desktopPet.enabled` for a window that never appeared would

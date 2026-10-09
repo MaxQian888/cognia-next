@@ -112,6 +112,15 @@ jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => mockIsTauri,
 }))
 
+// OS family: desktop units are points on macOS (one per CSS px on every
+// display), physical pixels elsewhere. Default "not macOS" so the existing
+// suite exercises the pixel path; the macOS cases flip it.
+let mockIsMacOs = false
+jest.mock("@/lib/platform/os", () => ({
+  ...jest.requireActual("@/lib/platform/os"),
+  isMacOs: () => mockIsMacOs,
+}))
+
 // Tauri window API used by the post-paint reveal effect (dynamic import).
 const revealShowMock = jest.fn().mockResolvedValue(undefined)
 const revealInnerSizeMock = jest.fn().mockResolvedValue({ width: 200, height: 240 })
@@ -199,6 +208,7 @@ jest.mock("@/lib/pet/settings-sync", () => ({
 }))
 
 import { PetOverlayView } from "./pet-overlay-view"
+import { getPetCursorPosition } from "@/lib/tauri/pet-window"
 import { POPUP_INITIAL_HEIGHT, POPUP_INITIAL_WIDTH } from "@/lib/pet/popup-geometry"
 import { petBoxScreenRect } from "@/lib/pet/overlay-geometry"
 
@@ -219,6 +229,8 @@ const rafCallbacks: FrameRequestCallback[] = []
 
 beforeEach(() => {
   mockIsTauri = false
+  mockIsMacOs = false
+  ;(getPetCursorPosition as jest.Mock).mockResolvedValue(null)
   animationStateValue = "idle"
   revealShowMock.mockClear()
   revealInnerSizeMock.mockClear()
@@ -504,7 +516,7 @@ describe("PetOverlayView", () => {
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         petSettings: expect.objectContaining({
-          desktopPet: expect.objectContaining({ position: { x: 140, y: 230 } }),
+          desktopPet: expect.objectContaining({ position: { x: 140, y: 230, space: "desktop" } }),
         }),
       })
     )
@@ -514,7 +526,7 @@ describe("PetOverlayView", () => {
     expect(beginThrowMock).not.toHaveBeenCalled()
   })
 
-  it("converts CSS-pixel drag deltas to physical pixels on a 2x display", async () => {
+  it("converts CSS-pixel drag deltas to desktop pixels on a 2x Windows display", async () => {
     withPet()
     workAreaValue = { x: 0, y: 0, width: 3456, height: 2234, scaleFactor: 2 }
     render(<PetOverlayView />)
@@ -557,6 +569,71 @@ describe("PetOverlayView", () => {
       flushRaf()
     })
     expect(setPetWindowPosition).toHaveBeenCalledWith(160, 230)
+  })
+
+  it("drags 1:1 in points on a Retina Mac, whatever the pixel ratio", async () => {
+    // macOS reports positions in points and one point per CSS px on every
+    // display, so a Retina pixel ratio must not double the drag (the pet
+    // used to jump ahead of the cursor, then snap when it crossed onto a 1x
+    // display).
+    withPet()
+    mockIsMacOs = true
+    workAreaValue = { x: 0, y: 25, width: 1512, height: 957, scaleFactor: 1 }
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true })
+    render(<PetOverlayView />)
+    const pet = screen.getByTestId("pet-overlay-pet")
+    await act(async () => {
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 33, screenX: 500, screenY: 500 })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => {
+      fireEvent.pointerMove(pet, { pointerId: 33, screenX: 540, screenY: 530 })
+      flushRaf()
+    })
+    expect(setPetWindowPosition).toHaveBeenCalledWith(140, 230)
+  })
+
+  it("keeps a macOS drag in points before the work area is known", async () => {
+    withPet()
+    mockIsMacOs = true
+    workAreaValue = null
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true })
+    render(<PetOverlayView />)
+    const pet = screen.getByTestId("pet-overlay-pet")
+    await act(async () => {
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 34, screenX: 0, screenY: 0 })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => {
+      fireEvent.pointerMove(pet, { pointerId: 34, screenX: 40, screenY: 20 })
+      flushRaf()
+    })
+    expect(setPetWindowPosition).toHaveBeenCalledWith(140, 220)
+  })
+
+  it("aims the gaze at the native cursor in points on a Retina Mac", async () => {
+    // jsdom: the window sits at screen (0, 0) and is 1024×768 CSS px, so the
+    // 160px pet box is centered at (512, 688). On macOS the cursor comes back
+    // in points too; scaling the box by the pixel ratio put it at twice its
+    // spot and the pet looked away from a cursor right on top of it.
+    withPet()
+    mockIsMacOs = true
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true })
+    ;(getPetCursorPosition as jest.Mock).mockResolvedValue({ x: 512, y: 688 })
+    await act(async () => {
+      render(<PetOverlayView />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    const lookTarget = (
+      rendererProps.mock.calls.at(-1)![0] as { lookTarget?: { x: number; y: number } }
+    ).lookTarget
+    expect(lookTarget?.x).toBeCloseTo(0)
+    expect(lookTarget?.y).toBeCloseTo(0)
   })
 
   it("a click (no drag) sends a 'petted' interaction and does not persist", async () => {
@@ -651,7 +728,7 @@ describe("PetOverlayView", () => {
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         petSettings: expect.objectContaining({
-          desktopPet: expect.objectContaining({ position: { x: 140, y: 240 } }),
+          desktopPet: expect.objectContaining({ position: { x: 140, y: 240, space: "desktop" } }),
         }),
       })
     )
@@ -796,6 +873,22 @@ describe("PetOverlayView", () => {
       )
     })
 
+    it("anchors the popup in points on a Retina Mac", async () => {
+      withPet()
+      mockIsMacOs = true
+      workAreaValue = { x: 0, y: 25, width: 1512, height: 957, scaleFactor: 1 }
+      Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true })
+      render(<PetOverlayView />)
+      await act(async () => {
+        fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(openPetPopup).toHaveBeenCalledWith(
+        expect.objectContaining({ anchor: petBoxScreenRect({ x: 100, y: 200 }, 160, 1) })
+      )
+    })
+
     it("still opens with the pixel-ratio scale when the work area is unknown", async () => {
       withPet()
       workAreaValue = null
@@ -859,7 +952,7 @@ describe("PetOverlayView", () => {
       expect(settleAtMock).not.toHaveBeenCalled()
     })
 
-    it("hands a throw physical-pixel velocity on a 2x display", async () => {
+    it("hands a throw desktop-pixel velocity on a 2x Windows display", async () => {
       withPet()
       workAreaValue = { x: 0, y: 0, width: 3456, height: 2234, scaleFactor: 2 }
       render(<PetOverlayView />)
@@ -914,7 +1007,9 @@ describe("PetOverlayView", () => {
       expect(saveMock).toHaveBeenCalledWith(
         expect.objectContaining({
           petSettings: expect.objectContaining({
-            desktopPet: expect.objectContaining({ position: { x: 111, y: 222 } }),
+            desktopPet: expect.objectContaining({
+              position: { x: 111, y: 222, space: "desktop" },
+            }),
           }),
         })
       )

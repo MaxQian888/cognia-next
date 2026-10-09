@@ -51,6 +51,7 @@ export type {
   PetMotionPreference,
   PetSettings,
   PetDesktopOverlaySettings,
+  PetPositionSpace,
   PetWanderFrequency,
   PetWanderRange,
   PetWanderSettings,

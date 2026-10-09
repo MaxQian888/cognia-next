@@ -253,7 +253,7 @@ describe("PetMount", () => {
           enabled: true,
           clickThrough: true,
           size: 160,
-          position: { x: 120, y: 240 },
+          position: { x: 120, y: 240, space: "desktop" },
         },
       },
     }
@@ -269,9 +269,35 @@ describe("PetMount", () => {
         height: 320,
         x: 120,
         y: 240,
+        positionSpace: "desktop",
         clickThrough: true,
       })
     })
+  })
+
+  it("restores a position saved before desktop units unmarked, for Rust to convert", async () => {
+    settingsValue = {
+      petSettings: {
+        ...ENABLED_SETTINGS.petSettings,
+        desktopPet: {
+          enabled: true,
+          clickThrough: false,
+          size: 160,
+          position: { x: 2400, y: 1400 },
+        },
+      },
+    }
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+
+    render(<PetMount />)
+
+    await waitFor(() => {
+      expect(openPetWindow).toHaveBeenCalledTimes(1)
+    })
+    const opts = openPetWindow.mock.calls[0][0] as Record<string, unknown>
+    expect(opts).toMatchObject({ x: 2400, y: 1400 })
+    expect(opts.positionSpace).toBeUndefined()
   })
 
   it("never re-opens an already-visible desktop-pet window", async () => {

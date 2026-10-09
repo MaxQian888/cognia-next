@@ -46,6 +46,9 @@ export interface PetWanderSettings {
  * The overlay window's screen position is the single source of truth here —
  * the window-state plugin denylists the "pet" window so this field owns it.
  */
+/** The coordinate space of a saved desktop-pet position (see `position`). */
+export type PetPositionSpace = "desktop"
+
 export interface PetDesktopOverlaySettings {
   /**
    * Whether the desktop-pet overlay window is open. Opening it is a summon, so
@@ -57,8 +60,14 @@ export interface PetDesktopOverlaySettings {
   clickThrough: boolean
   /** Render box size in px for the overlay pet. */
   size: number
-  /** Persisted absolute screen position, or null to center on first open. */
-  position?: { x: number; y: number } | null
+  /**
+   * Persisted top-left of the overlay window, or null to center on first open.
+   * In desktop units when `space` is `"desktop"`: points on macOS, physical
+   * pixels elsewhere. A position without `space` was saved before that, in the
+   * native shell's per-display "physical" pixels; the native open converts it
+   * once and the next settle re-saves it marked.
+   */
+  position?: { x: number; y: number; space?: PetPositionSpace } | null
   /** Autonomous wandering preferences. Absent = defaults (disabled). */
   wander?: PetWanderSettings
 }

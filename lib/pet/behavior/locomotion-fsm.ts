@@ -29,11 +29,11 @@ export type LocomotionMode = "resting" | "walking" | "falling" | "climbing"
 
 /** Base duration of the hop-up climb tween, ms (short rises). */
 export const CLIMB_MS_BASE = 280
-/** Extra climb time per physical px of rise (taller hops take longer). */
+/** Extra climb time per desktop unit of rise (taller hops take longer). */
 export const CLIMB_MS_PER_PX = 1.2
 /** Climb duration ceiling, ms. */
 export const CLIMB_MS_MAX = 700
-/** Max vertical rise the pet will hop up to perch on a platform, physical px. */
+/** Max vertical rise the pet will hop up to perch on a platform, desktop units. */
 export const HOP_RISE_PX = 160
 /** Chance per rest cycle (floor only) of attempting a climb when one is reachable. */
 export const CLIMB_PROBABILITY = 0.35
@@ -71,7 +71,7 @@ export function resolveWalkSpeedFactor(
 export interface LocomotionFsmState {
   mode: LocomotionMode
   facing: PetFacing
-  /** Window top-left, physical px. */
+  /** Window top-left, desktop units. */
   x: number
   y: number
   /** Velocity while falling, px/s. */
@@ -101,12 +101,12 @@ export interface LocomotionInput {
   lastInteractionAtMs: number | null
   range: PetWanderRange
   workArea: WorkAreaRect
-  /** Overlay window size, physical px. */
+  /** Overlay window size, desktop units. */
   windowWidth: number
   windowHeight: number
-  /** Wander pacing with `walkSpeedPxPerSec` already scaled to physical px. */
+  /** Wander pacing with `walkSpeedPxPerSec` already scaled to desktop units. */
   tuning: WanderTuning
-  /** Perchable window-top platforms (physical px). Empty = floor-only behavior. */
+  /** Perchable window-top platforms (desktop units). Empty = floor-only behavior. */
   platforms: Platform[]
   /** Climb-onto-windows opt-in. False (or empty platforms) = today's behavior. */
   climbEnabled: boolean

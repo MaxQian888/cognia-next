@@ -1,6 +1,6 @@
 // Pure ballistic stepper for the drag-throw physics: gravity fall with
 // diminishing ground bounces, wall bounces, and ground friction until the
-// window settles. All units are physical px / seconds; the caller owns the
+// window settles. All units are desktop units / seconds; the caller owns the
 // clock and feeds frame deltas.
 
 /** Mutable physics snapshot (window top-left position + velocity). */

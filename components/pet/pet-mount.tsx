@@ -174,6 +174,7 @@ export function PetMount() {
         ...overlayWindowSize(desktopPet.size),
         x: desktopPet.position?.x,
         y: desktopPet.position?.y,
+        positionSpace: desktopPet.position?.space,
         clickThrough: desktopPet.clickThrough,
       })
     })

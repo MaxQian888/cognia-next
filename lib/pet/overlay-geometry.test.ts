@@ -11,7 +11,7 @@ import {
   platformBoundsX,
   reachablePlatformAbove,
   releaseVelocityFromSamples,
-  resolveCssToPhysicalScale,
+  resolveCssToDesktopScale,
   resolveGroundTop,
   resolvePlatformTop,
   samePlatform,
@@ -61,20 +61,27 @@ describe("petBoxScreenRect", () => {
   })
 })
 
-describe("resolveCssToPhysicalScale", () => {
-  it("prefers the monitor's reported scale factor", () => {
-    expect(resolveCssToPhysicalScale(1.5, 2)).toBe(1.5)
+describe("resolveCssToDesktopScale", () => {
+  it("prefers the work area's reported factor", () => {
+    expect(resolveCssToDesktopScale(1.5, 2, false)).toBe(1.5)
+    // macOS reports 1 (points) even on a Retina display.
+    expect(resolveCssToDesktopScale(1, 2, true)).toBe(1)
   })
 
-  it("falls back to devicePixelRatio when the monitor is unknown", () => {
-    expect(resolveCssToPhysicalScale(null, 2)).toBe(2)
-    expect(resolveCssToPhysicalScale(undefined, 1.25)).toBe(1.25)
+  it("is 1 on macOS when the work area is unknown: a CSS px is a point there", () => {
+    expect(resolveCssToDesktopScale(null, 2, true)).toBe(1)
+    expect(resolveCssToDesktopScale(undefined, 1, true)).toBe(1)
+  })
+
+  it("falls back to devicePixelRatio elsewhere when the monitor is unknown", () => {
+    expect(resolveCssToDesktopScale(null, 2, false)).toBe(2)
+    expect(resolveCssToDesktopScale(undefined, 1.25, false)).toBe(1.25)
   })
 
   it("rejects non-positive or non-finite values and ends at 1", () => {
-    expect(resolveCssToPhysicalScale(0, Number.NaN)).toBe(1)
-    expect(resolveCssToPhysicalScale(-2, 0)).toBe(1)
-    expect(resolveCssToPhysicalScale(Number.POSITIVE_INFINITY, undefined)).toBe(1)
+    expect(resolveCssToDesktopScale(0, Number.NaN, false)).toBe(1)
+    expect(resolveCssToDesktopScale(-2, 0, false)).toBe(1)
+    expect(resolveCssToDesktopScale(Number.POSITIVE_INFINITY, undefined, false)).toBe(1)
   })
 })
 

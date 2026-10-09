@@ -15,6 +15,16 @@
 //! `tauri-plugin-window-state` — `lib.rs` denylists `"pet"` so the plugin
 //! never fights the saved overlay coordinates.
 //!
+//! Every coordinate crossing the IPC boundary — window position, work area,
+//! cursor, perch surfaces, the saved spot — is in desktop units
+//! (`desktop_space`: points on macOS, physical pixels elsewhere), and windows
+//! are moved with the selection toolbar's `place_window`. tao's "physical"
+//! numbers are not one space on macOS (each display's points times its OWN
+//! scale, a window's frame times the window's current scale, the cursor times
+//! the primary display's scale), so a pet dragged, thrown or reopened across a
+//! Retina laptop and a 1x external display jumped to the wrong spot or the
+//! wrong screen.
+//!
 //! Live window manipulation can't be unit-tested here: it needs a
 //! `tauri::test::mock_app()` runtime which fails on this project's Windows
 //! toolchain (see `plugin_api/window_ops.rs:46` for the same convention).
@@ -25,7 +35,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, Webview};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Runtime, Webview};
+
+use crate::automation::platform::shared::desktop_space::{self, DesktopMonitor};
+use crate::automation::types::Rect as DesktopRect;
+use crate::selection_toolbar::{desktop_monitors, place_window};
 
 mod macos_panel;
 mod popup;
@@ -61,8 +75,8 @@ pub(crate) use macos_panel::{
 #[cfg(test)]
 pub(crate) use macos_panel::lock_panel_state_for_test as lock_overlay_panel_state_for_test;
 
-/// Margin (in physical pixels) kept between the overlay and the work-area
-/// edges when falling back to the bottom-right corner.
+/// Margin (in desktop units) kept between the overlay and the work-area edges
+/// when falling back to the bottom-right corner.
 const EDGE_MARGIN: f64 = 24.0;
 
 /// How long an open waits for a concurrent build / re-show / destroy of the
@@ -78,8 +92,8 @@ const LIFECYCLE_WAIT_STEPS: u32 = 200;
 /// rectangle. Reset on every new build and on destroy.
 static SPRITE_FIRST_PAINT_DONE: AtomicBool = AtomicBool::new(false);
 
-/// Physical rectangle `(x, y, width, height)`.
-pub(crate) type PhysicalRect = (f64, f64, f64, f64);
+/// tao "physical" rectangle `(x, y, width, height)`.
+type PhysicalRect = (f64, f64, f64, f64);
 
 /// Index of the first rectangle containing `point` (half-open on the far
 /// edges, so two monitors that touch never both claim the seam). Pure so the
@@ -90,40 +104,77 @@ fn index_of_rect_containing(point: (f64, f64), rects: &[PhysicalRect]) -> Option
     })
 }
 
-/// The monitor whose PHYSICAL bounds contain `point`.
+/// Convert a saved position persisted before saved positions were desktop
+/// units (`PetPositionSpace::Legacy`) into desktop units.
 ///
-/// `AppHandle::monitor_from_point` is not usable with the pet's coordinates:
-/// on macOS tao tests the point against `CGDisplayBounds`, which are logical
-/// points, while every coordinate the pet stores (window positions, the
-/// persisted drag spot) is physical. With a Retina laptop beside an external
-/// display that picked the wrong monitor and clamped the pet onto it.
-pub(crate) fn monitor_containing_physical_point<R: Runtime>(
-    app: &AppHandle<R>,
-    point: (f64, f64),
-) -> Option<tauri::Monitor> {
-    let monitors = app.available_monitors().ok()?;
-    let rects: Vec<PhysicalRect> = monitors
-        .iter()
-        .map(|m| {
-            let p = m.position();
-            let s = m.size();
-            (p.x as f64, p.y as f64, s.width as f64, s.height as f64)
-        })
-        .collect();
-    let index = index_of_rect_containing(point, &rects)?;
-    monitors.into_iter().nth(index)
+/// Those were tao "physical" pixels: on macOS the spot's points times the
+/// scale of the display the pet stood on. The display is found the way the
+/// pre-desktop-units open found it — the first tao rect containing `probe`
+/// (the window's approximate centre) — and its scale divided back out; with
+/// none containing it, `fallback_scale` (the primary display's). Elsewhere
+/// tao's physical pixels already are desktop units.
+fn legacy_position_to_desktop(
+    saved: (f64, f64),
+    probe: (f64, f64),
+    tao_monitors: &[(PhysicalRect, f64)],
+    fallback_scale: f64,
+    units_are_points: bool,
+) -> (f64, f64) {
+    if !units_are_points {
+        return saved;
+    }
+    let rects: Vec<PhysicalRect> = tao_monitors.iter().map(|(rect, _)| *rect).collect();
+    let scale = index_of_rect_containing(probe, &rects)
+        .map_or(fallback_scale, |index| tao_monitors[index].1);
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (saved.0 / scale, saved.1 / scale)
 }
 
-/// Work area of a monitor as `(x, y, width, height, scale)` in physical px.
-pub(crate) fn monitor_work_area(monitor: &tauri::Monitor) -> (f64, f64, f64, f64, f64) {
-    let rect = monitor.work_area();
-    (
-        rect.position.x as f64,
-        rect.position.y as f64,
-        rect.size.width as f64,
-        rect.size.height as f64,
-        monitor.scale_factor(),
-    )
+/// The pet window's outer frame in desktop units.
+fn window_frame<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<DesktopRect, String> {
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    Ok(desktop_space::window_frame(
+        (position.x, position.y),
+        (size.width, size.height),
+        scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    ))
+}
+
+/// Work area `(x, y, width, height)` in desktop units plus desktop units per
+/// logical px, of the display holding `rect`'s centre (or the nearest one);
+/// the primary display when `rect` is `None`. A sane default when no display
+/// is reported at all (headless, shutdown).
+fn work_area_for(
+    rect: Option<DesktopRect>,
+    monitors: &[DesktopMonitor],
+) -> ((f64, f64, f64, f64), f64) {
+    let monitor = match rect {
+        Some(rect) => desktop_space::monitor_for(rect, monitors),
+        None => monitors.first(),
+    };
+    monitor.map_or(((0.0, 0.0, 1920.0, 1080.0), 1.0), |monitor| {
+        let work = monitor.work;
+        (
+            (
+                f64::from(work.x),
+                f64::from(work.y),
+                f64::from(work.width),
+                f64::from(work.height),
+            ),
+            monitor.content_scale,
+        )
+    })
+}
+
+fn rounded(point: (f64, f64)) -> (i32, i32) {
+    (point.0.round() as i32, point.1.round() as i32)
 }
 
 /// Resize a non-resizable overlay to a logical size.
@@ -179,6 +230,20 @@ fn monitor_key(monitor: &tauri::Monitor) -> MonitorKey {
     )
 }
 
+/// The coordinate space of a saved pet position. Mirrors the TS
+/// `PetPositionSpace` (`PetDesktopOverlaySettings.position.space`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PetPositionSpace {
+    /// Saved before positions were desktop units, as tao "physical" pixels.
+    /// What an unmarked position means; `legacy_position_to_desktop` converts
+    /// it on open, and the next settle re-saves it marked `Desktop`.
+    #[default]
+    Legacy,
+    /// Desktop units (`desktop_space`).
+    Desktop,
+}
+
 /// Options the renderer passes when opening / re-showing the pet window.
 /// Mirrors the TS wrapper in `lib/tauri/pet-window.ts`.
 #[derive(Debug, Clone, Deserialize)]
@@ -186,12 +251,15 @@ fn monitor_key(monitor: &tauri::Monitor) -> MonitorKey {
 pub struct PetWindowOpts {
     pub width: f64,
     pub height: f64,
-    /// Saved top-left X in physical pixels, if the user has dragged before.
+    /// Saved top-left X, if the user has dragged before.
     #[serde(default)]
     pub x: Option<f64>,
-    /// Saved top-left Y in physical pixels, if the user has dragged before.
+    /// Saved top-left Y, if the user has dragged before.
     #[serde(default)]
     pub y: Option<f64>,
+    /// The space `x` / `y` are in.
+    #[serde(default)]
+    pub position_space: PetPositionSpace,
     /// When true the window ignores cursor events (click-through mode).
     #[serde(default)]
     pub click_through: bool,
@@ -231,41 +299,42 @@ fn resolve_initial_position(
     }
 }
 
-/// Scale a logical overlay size up to physical pixels. The window's
-/// `inner_size` stays logical, but the bottom-right placement math runs in
-/// physical pixels (monitor geometry + persisted drag coords are physical), so
-/// the size used for clamping must be physical too. Pure so the Retina-scale
-/// case is unit-tested without a live window.
-fn physical_overlay_size(logical: (f64, f64), scale: f64) -> (f64, f64) {
-    (logical.0 * scale, logical.1 * scale)
+/// Scale a logical overlay size into desktop units. The window's `inner_size`
+/// stays logical, but the placement math runs in desktop units (monitor
+/// geometry and persisted drag coords), so the size used for clamping must be
+/// too: times the display's scale where desktop units are pixels, unchanged
+/// where they are points. Pure so the scaled case is unit-tested without a
+/// live window.
+fn desktop_overlay_size(logical: (f64, f64), content_scale: f64) -> (f64, f64) {
+    (logical.0 * content_scale, logical.1 * content_scale)
 }
 
-/// Work area (taskbar/dock excluded, physical pixels) plus scale factor of the
-/// monitor that should host the pet: the monitor containing the saved position
-/// when one contains it (so a pet dragged to a secondary monitor reopens
-/// there), else the primary monitor, else a sane fallback (headless / during
-/// shutdown). The scale factor is needed because the renderer-supplied overlay
-/// size is logical while the monitor geometry — and the persisted drag
-/// position — are physical; mixing the two placed the window at `scale`× the
-/// intended spot on Retina (it landed fully off-screen on macOS).
+/// The sprite's top-left in desktop units: `saved` clamped into the work area
+/// of the display holding the window, or the primary display's bottom-right
+/// corner when nothing is saved. The display is picked by the window's centre
+/// at its logical size (exact where desktop units are points; within one
+/// display's scale of it elsewhere), so a pet dragged to a secondary monitor
+/// reopens there.
 ///
-/// Uses `Monitor::work_area()` — NOT full `position()`/`size()` bounds — so the
-/// bottom-right fallback and saved-position clamping never tuck the pet under
-/// the taskbar (`pet_window_get_work_area` already used the work area; the
-/// placement math previously disagreed with it).
-fn work_area_for<R: Runtime>(
-    app: &AppHandle<R>,
+/// Uses the work area — NOT the full display bounds — so the corner fallback
+/// and the clamp never tuck the pet under the taskbar or dock.
+fn resolve_sprite_position(
     saved: Option<(f64, f64)>,
-) -> (f64, f64, f64, f64, f64) {
-    let monitor = saved
-        .and_then(|point| monitor_containing_physical_point(app, point))
-        .or_else(|| app.primary_monitor().ok().flatten());
-    if let Some(monitor) = monitor {
-        monitor_work_area(&monitor)
-    } else {
-        // Conservative default desktop size; keeps the fallback corner sane.
-        (0.0, 0.0, 1920.0, 1080.0, 1.0)
-    }
+    logical: (f64, f64),
+    monitors: &[DesktopMonitor],
+) -> (i32, i32) {
+    let probe = saved.map(|(x, y)| DesktopRect {
+        x: x.round() as i32,
+        y: y.round() as i32,
+        width: logical.0.round() as i32,
+        height: logical.1.round() as i32,
+    });
+    let (area, scale) = work_area_for(probe, monitors);
+    rounded(resolve_initial_position(
+        saved,
+        area,
+        desktop_overlay_size(logical, scale),
+    ))
 }
 
 /// Payload of the `pet://state-changed` event — lets the renderer's settings
@@ -324,17 +393,17 @@ fn open_pet_window_claimed<R: Runtime>(
         // Re-validate the position before revealing: monitors may have been
         // unplugged / rearranged / DPI-changed while the window sat hidden
         // (the window-state plugin is denylisted for "pet", so nothing else
-        // ever rescues stale physical coordinates). Clamp against the work
-        // area of whichever monitor now contains the window's center.
-        if let Ok(pos) = window.outer_position() {
-            let saved = (pos.x as f64, pos.y as f64);
-            let probe = (saved.0 + opts.width / 2.0, saved.1 + opts.height / 2.0);
-            let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, Some(probe));
-            let size = physical_overlay_size((opts.width, opts.height), scale);
-            let (x, y) =
-                resolve_initial_position(Some(saved), (area_x, area_y, area_w, area_h), size);
-            if x != saved.0 || y != saved.1 {
-                let _ = window.set_position(PhysicalPosition::new(x, y));
+        // ever rescues stale coordinates). Clamp against the work area of
+        // whichever monitor now contains the window's center.
+        if let Ok(frame) = window_frame(&window) {
+            let saved = (f64::from(frame.x), f64::from(frame.y));
+            let (x, y) = resolve_sprite_position(
+                Some(saved),
+                (opts.width, opts.height),
+                &desktop_monitors(app),
+            );
+            if (x, y) != (frame.x, frame.y) {
+                let _ = place_window(&window, x, y);
             }
         }
         apply_click_through(&window, opts.click_through)?;
@@ -368,23 +437,17 @@ fn open_pet_window_claimed<R: Runtime>(
 
     let generation = macos_panel::begin_panel_open(macos_panel::PetPanelRole::Sprite);
 
-    let probe = opts
-        .x
-        .zip(opts.y)
-        .map(|(x, y)| (x + opts.width / 2.0, y + opts.height / 2.0));
-    let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, probe);
-    // The monitor work area and any persisted drag position are PHYSICAL pixels,
-    // but `inner_size` (and `opts.width/height`) are LOGICAL. Resolve placement
-    // entirely in physical pixels — converting the logical overlay size up by
-    // `scale` — then apply it via `set_position(Physical…)`. Using the builder's
-    // logical `.position()` with physical inputs put the window at `scale`× the
-    // target on Retina, which on macOS is fully off-screen (looks like "no
-    // window opened").
-    let (x, y) = resolve_initial_position(
-        opts.x.zip(opts.y),
-        (area_x, area_y, area_w, area_h),
-        physical_overlay_size((opts.width, opts.height), scale),
-    );
+    // The monitor work area and any persisted drag position are desktop
+    // units, but `inner_size` (and `opts.width/height`) are LOGICAL. Resolve
+    // placement entirely in desktop units — converting the logical overlay size
+    // by the display's scale — then apply it with `place_window`, never the
+    // builder's `.position()` (logical everywhere, so on a Windows display at
+    // 150% it would land at 1/1.5 of the target).
+    let saved = opts.x.zip(opts.y).map(|saved| match opts.position_space {
+        PetPositionSpace::Desktop => saved,
+        PetPositionSpace::Legacy => legacy_position(app, saved, (opts.width, opts.height)),
+    });
+    let (x, y) = resolve_sprite_position(saved, (opts.width, opts.height), &desktop_monitors(app));
 
     let window =
         tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("pet-overlay".into()))
@@ -428,9 +491,7 @@ fn open_pet_window_claimed<R: Runtime>(
         // reveal. No-op on macOS (the menu there is app-global, never per-window).
         let _ = window.remove_menu();
 
-        window
-            .set_position(PhysicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
+        place_window(&window, x, y)?;
 
         // Apply click-through before the first paint (Linux-tolerant).
         apply_click_through(&window, opts.click_through)?;
@@ -788,13 +849,15 @@ pub async fn pet_window_set_ignore_cursor_events(
     set_pet_click_through_inner(&app, ignore)
 }
 
-/// Move the pet window to an absolute physical position (drag persistence).
+/// Move the pet window to a top-left in desktop units (drag, throw, wander).
 #[tauri::command]
 pub async fn pet_window_set_position(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
+    if !(x.is_finite() && y.is_finite()) {
+        return Err(format!("pet: invalid window position {x},{y}"));
+    }
     if let Some(window) = app.get_webview_window("pet") {
-        window
-            .set_position(PhysicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
+        let (x, y) = rounded((x, y));
+        place_window(&window, x, y)?;
     }
     Ok(())
 }
@@ -815,26 +878,66 @@ pub async fn pet_window_set_size(app: AppHandle, width: f64, height: f64) -> Res
     let Some(window) = app.get_webview_window("pet") else {
         return Ok(());
     };
-    let position = window.outer_position().map_err(|e| e.to_string())?;
-    let old_size = window.outer_size().map_err(|e| e.to_string())?;
-    let monitor = window.current_monitor().ok().flatten();
-    let (area_x, area_y, area_w, area_h, scale) = match monitor.as_ref() {
-        Some(monitor) => monitor_work_area(monitor),
-        None => work_area_for(&app, None),
-    };
-    let new_size = physical_overlay_size((width, height), scale);
+    let frame = window_frame(&window)?;
+    let (area, scale) = work_area_for(Some(frame), &desktop_monitors(&app));
+    let (x, y) = resize_position(frame, (width, height), area, scale);
+    set_fixed_logical_size(&window, width, height)?;
+    place_window(&window, x, y)
+}
+
+/// The top-left (desktop units) after resizing the window in `frame` (desktop
+/// units) to `logical`: bottom-center kept, then clamped into `area`. Pure.
+fn resize_position(
+    frame: DesktopRect,
+    logical: (f64, f64),
+    area: (f64, f64, f64, f64),
+    content_scale: f64,
+) -> (i32, i32) {
+    let new_size = desktop_overlay_size(logical, content_scale);
     let anchored = resize_anchored_bottom_center(
-        (position.x as f64, position.y as f64),
-        (old_size.width as f64, old_size.height as f64),
+        (f64::from(frame.x), f64::from(frame.y)),
+        (f64::from(frame.width), f64::from(frame.height)),
         new_size,
     );
-    let (x, y) =
-        resolve_initial_position(Some(anchored), (area_x, area_y, area_w, area_h), new_size);
-    set_fixed_logical_size(&window, width, height)?;
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    rounded(resolve_initial_position(Some(anchored), area, new_size))
+}
+
+/// A legacy saved position (see `legacy_position_to_desktop`) in desktop units.
+fn legacy_position<R: Runtime>(
+    app: &AppHandle<R>,
+    saved: (f64, f64),
+    logical: (f64, f64),
+) -> (f64, f64) {
+    let tao_monitors: Vec<(PhysicalRect, f64)> = app
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            (
+                (
+                    f64::from(position.x),
+                    f64::from(position.y),
+                    f64::from(size.width),
+                    f64::from(size.height),
+                ),
+                monitor.scale_factor(),
+            )
+        })
+        .collect();
+    let fallback_scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map_or(1.0, |monitor| monitor.scale_factor());
+    legacy_position_to_desktop(
+        saved,
+        (saved.0 + logical.0 / 2.0, saved.1 + logical.1 / 2.0),
+        &tao_monitors,
+        fallback_scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    )
 }
 
 /// Named position DTO — a bare Rust tuple would serialize as a JSON array,
@@ -846,29 +949,45 @@ pub struct PetWindowPosition {
     pub y: i32,
 }
 
-/// Global cursor position used only by the local pet WebView for gaze. The
-/// command returns coordinates and performs no persistence, telemetry, or I/O.
-fn pet_cursor_position(x: f64, y: f64) -> PetWindowPosition {
-    PetWindowPosition {
-        x: x.round() as i32,
-        y: y.round() as i32,
-    }
+/// Global cursor position, in desktop units, used only by the local pet
+/// WebView for gaze. The command returns coordinates and performs no
+/// persistence, telemetry, or I/O.
+fn pet_cursor_position(
+    cursor: (f64, f64),
+    primary_scale: f64,
+    units_are_points: bool,
+) -> PetWindowPosition {
+    let (x, y) = desktop_space::cursor_point(cursor, primary_scale, units_are_points);
+    PetWindowPosition { x, y }
 }
 
 #[tauri::command]
 pub async fn pet_window_get_cursor_position(app: AppHandle) -> Result<PetWindowPosition, String> {
     let pos = app.cursor_position().map_err(|e| e.to_string())?;
-    Ok(pet_cursor_position(pos.x, pos.y))
+    let primary_scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map_or(1.0, |monitor| monitor.scale_factor());
+    Ok(pet_cursor_position(
+        (pos.x, pos.y),
+        primary_scale,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    ))
 }
 
-/// Read the pet window's current outer position. `None` when the window is
-/// absent (so the renderer can fall back to its persisted coordinates).
+/// Read the pet window's current top-left in desktop units. `None` when the
+/// window is absent (so the renderer can fall back to its persisted
+/// coordinates).
 #[tauri::command]
 pub async fn pet_window_get_position(app: AppHandle) -> Result<Option<PetWindowPosition>, String> {
     match app.get_webview_window("pet") {
         Some(window) => {
-            let pos = window.outer_position().map_err(|e| e.to_string())?;
-            Ok(Some(PetWindowPosition { x: pos.x, y: pos.y }))
+            let frame = window_frame(&window)?;
+            Ok(Some(PetWindowPosition {
+                x: frame.x,
+                y: frame.y,
+            }))
         }
         None => Ok(None),
     }
@@ -880,9 +999,10 @@ pub async fn is_pet_window_open(app: AppHandle) -> bool {
     is_pet_window_open_inner(&app)
 }
 
-/// Work area of one monitor in physical pixels (taskbar excluded), plus its
-/// scale factor so the renderer can convert logical window sizes. Mirrors the
-/// TS `PetWorkArea` in `lib/tauri/pet-window.ts`.
+/// Work area of one monitor in desktop units (taskbar excluded), plus desktop
+/// units per logical px there so the renderer can convert logical window
+/// sizes and CSS-pixel pointer deltas. Mirrors the TS `PetWorkArea` in
+/// `lib/tauri/pet-window.ts`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PetWorkArea {
@@ -890,18 +1010,26 @@ pub struct PetWorkArea {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// Desktop units per logical (CSS) px: 1 where desktop units are points
+    /// (macOS), the display's scale factor elsewhere.
     pub scale_factor: f64,
 }
 
-/// Pure DTO assembly from raw monitor numbers (unit-tested without a window).
-fn work_area_dto(pos: (i32, i32), size: (u32, u32), scale_factor: f64) -> PetWorkArea {
-    PetWorkArea {
-        x: pos.0 as f64,
-        y: pos.1 as f64,
-        width: size.0 as f64,
-        height: size.1 as f64,
-        scale_factor,
-    }
+/// The work area of the display holding `frame` (the pet window, desktop
+/// units), else the primary display; `None` with no display (headless). Pure
+/// so the multi-display pick is unit-tested without a window.
+fn work_area_dto(frame: Option<DesktopRect>, monitors: &[DesktopMonitor]) -> Option<PetWorkArea> {
+    let monitor = match frame {
+        Some(frame) => desktop_space::monitor_for(frame, monitors),
+        None => monitors.first(),
+    }?;
+    Some(PetWorkArea {
+        x: f64::from(monitor.work.x),
+        y: f64::from(monitor.work.y),
+        width: f64::from(monitor.work.width),
+        height: f64::from(monitor.work.height),
+        scale_factor: monitor.content_scale,
+    })
 }
 
 /// Work area of the monitor the pet window currently sits on (falls back to
@@ -909,18 +1037,10 @@ fn work_area_dto(pos: (i32, i32), size: (u32, u32), scale_factor: f64) -> PetWor
 /// wander loop keeps the pet inside this rectangle.
 #[tauri::command]
 pub async fn pet_window_get_work_area(app: AppHandle) -> Result<Option<PetWorkArea>, String> {
-    let monitor = app
+    let frame = app
         .get_webview_window("pet")
-        .and_then(|w| w.current_monitor().ok().flatten())
-        .or_else(|| app.primary_monitor().ok().flatten());
-    Ok(monitor.map(|m| {
-        let rect = m.work_area();
-        work_area_dto(
-            (rect.position.x, rect.position.y),
-            (rect.size.width, rect.size.height),
-            m.scale_factor(),
-        )
-    }))
+        .and_then(|window| window_frame(&window).ok());
+    Ok(work_area_dto(frame, &desktop_monitors(&app)))
 }
 
 /// Surface the main window (used by the overlay's "show main window" menu
@@ -938,30 +1058,171 @@ mod tests {
     const WORK_AREA: (f64, f64, f64, f64) = (0.0, 0.0, 1920.0, 1080.0);
     const WIN: (f64, f64) = (280.0, 320.0);
 
+    fn drect(x: i32, y: i32, width: i32, height: i32) -> DesktopRect {
+        DesktopRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// A 1512×982pt Retina laptop (scale 2, primary) and a 2560×1440pt 1x
+    /// display to its right, as tao reports them on macOS.
+    fn mac_pair() -> Vec<DesktopMonitor> {
+        vec![
+            DesktopMonitor::from_tao(drect(0, 0, 3024, 1964), drect(0, 50, 3024, 1914), 2.0, true),
+            DesktopMonitor::from_tao(
+                drect(1512, 0, 2560, 1440),
+                drect(1512, 25, 2560, 1415),
+                1.0,
+                true,
+            ),
+        ]
+    }
+
+    /// The same pair in tao's numbers, for the legacy-position conversion.
+    fn mac_pair_tao() -> Vec<(PhysicalRect, f64)> {
+        vec![
+            ((0.0, 0.0, 3024.0, 1964.0), 2.0),
+            ((1512.0, 0.0, 2560.0, 1440.0), 1.0),
+        ]
+    }
+
+    /// A 150% laptop (primary) and a 1x display to its right, as tao reports
+    /// them on Windows: already physical pixels.
+    fn windows_pair() -> Vec<DesktopMonitor> {
+        vec![
+            DesktopMonitor::from_tao(drect(0, 0, 2880, 1800), drect(0, 0, 2880, 1728), 1.5, false),
+            DesktopMonitor::from_tao(
+                drect(2880, 0, 1920, 1080),
+                drect(2880, 0, 1920, 1040),
+                1.0,
+                false,
+            ),
+        ]
+    }
+
     #[test]
-    fn physical_overlay_size_scales_logical_by_factor() {
-        // 1x display: logical == physical.
-        assert_eq!(physical_overlay_size((280.0, 320.0), 1.0), (280.0, 320.0));
-        // 2x Retina: the placement math must see the doubled physical size, or
+    fn desktop_overlay_size_scales_logical_by_content_scale() {
+        // Points (macOS, any display) and 1x pixels: the logical size.
+        assert_eq!(desktop_overlay_size((280.0, 320.0), 1.0), (280.0, 320.0));
+        // A 2x pixel display: the placement math must see the doubled size, or
         // the bottom-right fallback under-reserves and the window lands
-        // off-screen (the macOS "no window opened" bug).
-        assert_eq!(physical_overlay_size((280.0, 320.0), 2.0), (560.0, 640.0));
+        // partly off-screen.
+        assert_eq!(desktop_overlay_size((280.0, 320.0), 2.0), (560.0, 640.0));
     }
 
     #[test]
     fn retina_unsaved_fallback_stays_on_screen() {
-        // Regression: a 280x320 logical overlay on a 3456x2234 physical Retina
-        // (2x) display must reserve the *physical* 560x640, landing the window
-        // fully on-screen at the bottom-right corner — not at scale x the spot
-        // (which is off-screen). Mirrors the live-verified fix.
-        let area = (0.0, 0.0, 3456.0, 2234.0);
-        let win_phys = physical_overlay_size((280.0, 320.0), 2.0);
-        let (x, y) = resolve_initial_position(None, area, win_phys);
-        assert_eq!(x, 3456.0 - 560.0 - EDGE_MARGIN);
-        assert_eq!(y, 2234.0 - 640.0 - EDGE_MARGIN);
-        // Window fully within the monitor bounds.
-        assert!(x + win_phys.0 <= 3456.0);
-        assert!(y + win_phys.1 <= 2234.0);
+        // Regression: a 280x320 overlay with nothing saved lands fully on the
+        // primary Retina display's bottom-right corner, in points — not at
+        // twice the spot (off-screen), and above the dock's work-area edge.
+        let (x, y) = resolve_sprite_position(None, WIN, &mac_pair());
+        assert_eq!(x, 1512 - 280 - EDGE_MARGIN as i32);
+        assert_eq!(y, 25 + 957 - 320 - EDGE_MARGIN as i32);
+    }
+
+    #[test]
+    fn a_pet_saved_on_the_1x_external_display_reopens_there() {
+        // In tao's numbers this spot is also inside the Retina laptop's
+        // (0, 0, 3024, 1964) rect, which is where the old lookup clamped it.
+        assert_eq!(
+            resolve_sprite_position(Some((2400.0, 700.0)), (224.0, 288.0), &mac_pair()),
+            (2400, 700)
+        );
+        // Past the external display's bottom edge: clamped into ITS work area.
+        assert_eq!(
+            resolve_sprite_position(Some((2400.0, 1400.0)), (224.0, 288.0), &mac_pair()),
+            (2400, 25 + 1415 - 288)
+        );
+    }
+
+    #[test]
+    fn a_pet_saved_on_the_retina_laptop_reopens_at_its_points() {
+        assert_eq!(
+            resolve_sprite_position(Some((600.0, 500.0)), (224.0, 288.0), &mac_pair()),
+            (600, 500)
+        );
+        // Low on the laptop: clamped to the work area above the dock, in
+        // points (the work area ends at 982pt, not tao's 1964).
+        assert_eq!(
+            resolve_sprite_position(Some((600.0, 900.0)), (224.0, 288.0), &mac_pair()),
+            (600, 25 + 957 - 288)
+        );
+    }
+
+    #[test]
+    fn pixel_platforms_reserve_the_scaled_window_on_its_display() {
+        // Nothing saved: the 150% primary's corner, the window 1.5x its
+        // logical size.
+        assert_eq!(
+            resolve_sprite_position(None, WIN, &windows_pair()),
+            (
+                2880 - 420 - EDGE_MARGIN as i32,
+                1728 - 480 - EDGE_MARGIN as i32
+            )
+        );
+        // Saved on the 1x display: unscaled there.
+        assert_eq!(
+            resolve_sprite_position(Some((4700.0, 900.0)), WIN, &windows_pair()),
+            (4800 - 280, 1040 - 320)
+        );
+    }
+
+    #[test]
+    fn no_reported_display_falls_back_to_a_plain_1080p_area() {
+        assert_eq!(
+            resolve_sprite_position(None, WIN, &[]),
+            (
+                1920 - 280 - EDGE_MARGIN as i32,
+                1080 - 320 - EDGE_MARGIN as i32
+            )
+        );
+    }
+
+    #[test]
+    fn a_legacy_saved_position_is_divided_by_its_display_s_scale() {
+        // A pet saved at (600, 500)pt on the Retina laptop was stored as
+        // tao's (1200, 1000).
+        assert_eq!(
+            legacy_position_to_desktop(
+                (1200.0, 1000.0),
+                (1312.0, 1144.0),
+                &mac_pair_tao(),
+                2.0,
+                true
+            ),
+            (600.0, 500.0)
+        );
+        // Below the external display's tao rect and outside the laptop's: the
+        // primary display's scale.
+        assert_eq!(
+            legacy_position_to_desktop(
+                (3200.0, 2000.0),
+                (3312.0, 2144.0),
+                &mac_pair_tao(),
+                2.0,
+                true
+            ),
+            (1600.0, 1000.0)
+        );
+        // A broken scale is treated as one.
+        assert_eq!(
+            legacy_position_to_desktop((100.0, 100.0), (150.0, 150.0), &[], 0.0, true),
+            (100.0, 100.0)
+        );
+        // Pixel platforms: tao's physical pixels already are desktop units.
+        assert_eq!(
+            legacy_position_to_desktop(
+                (1200.0, 1000.0),
+                (1312.0, 1144.0),
+                &mac_pair_tao(),
+                2.0,
+                false
+            ),
+            (1200.0, 1000.0)
+        );
     }
 
     #[test]
@@ -1031,9 +1292,8 @@ mod tests {
 
     #[test]
     fn rect_lookup_uses_physical_bounds_and_half_open_seams() {
-        // A 2x Retina laptop (3456x2234 physical) with a 1x external display to
-        // its right. The external display's physical origin is the laptop's
-        // physical width — the point a logical-points lookup got wrong.
+        // The legacy-position lookup over tao rects. A 2x Retina laptop
+        // (3456x2234 physical) with a 1x external display to its right.
         let rects = [(0.0, 0.0, 3456.0, 2234.0), (3456.0, 0.0, 1920.0, 1080.0)];
         assert_eq!(index_of_rect_containing((100.0, 100.0), &rects), Some(0));
         assert_eq!(index_of_rect_containing((3500.0, 200.0), &rects), Some(1));
@@ -1071,6 +1331,32 @@ mod tests {
     }
 
     #[test]
+    fn resizing_on_the_1x_external_display_keeps_the_feet_in_points() {
+        // A 224x288pt pet standing at (2400, 700)pt on the external display
+        // grows to 288x352: feet stay put, nothing is doubled.
+        let frame = drect(2400, 700, 224, 288);
+        let (area, scale) = work_area_for(Some(frame), &mac_pair());
+        assert_eq!(scale, 1.0);
+        assert_eq!(
+            resize_position(frame, (288.0, 352.0), area, scale),
+            (2368, 636)
+        );
+    }
+
+    #[test]
+    fn resizing_on_a_scaled_pixel_display_grows_by_its_scale() {
+        // 150%: 224x288 logical is 336x432 physical; growing to 288x352
+        // logical (432x528) keeps the bottom-center.
+        let frame = drect(1000, 700, 336, 432);
+        let (area, scale) = work_area_for(Some(frame), &windows_pair());
+        assert_eq!(scale, 1.5);
+        assert_eq!(
+            resize_position(frame, (288.0, 352.0), area, scale),
+            (952, 604)
+        );
+    }
+
+    #[test]
     fn position_serializes_as_named_object_not_tuple() {
         // Regression: a tuple here became a JSON array and broke the `{x, y}`
         // contract of the TS wrapper (drag read undefined coordinates).
@@ -1082,24 +1368,61 @@ mod tests {
 
     #[test]
     fn cursor_position_rounds_native_coordinates_into_the_wire_dto() {
-        let position = pet_cursor_position(120.6, -45.4);
+        let position = pet_cursor_position((120.6, -45.4), 1.0, false);
         assert_eq!(position.x, 121);
         assert_eq!(position.y, -45);
+        // macOS: tao's cursor is points times the PRIMARY display's scale, even
+        // over the 1x external display; the DTO carries the points.
+        let position = pet_cursor_position((6000.0, 1400.0), 2.0, true);
+        assert_eq!((position.x, position.y), (3000, 700));
     }
 
     #[test]
     fn work_area_dto_maps_raw_monitor_numbers() {
-        let dto = work_area_dto((-1920, 50), (1920, 1040), 1.5);
+        let monitors = [DesktopMonitor::from_tao(
+            drect(-1920, 0, 1920, 1080),
+            drect(-1920, 50, 1920, 1040),
+            1.5,
+            false,
+        )];
+        let dto = work_area_dto(None, &monitors).unwrap();
         assert_eq!(dto.x, -1920.0);
         assert_eq!(dto.y, 50.0);
         assert_eq!(dto.width, 1920.0);
         assert_eq!(dto.height, 1040.0);
         assert_eq!(dto.scale_factor, 1.5);
+        assert!(work_area_dto(None, &[]).is_none());
+    }
+
+    #[test]
+    fn work_area_follows_the_pet_across_a_retina_and_a_1x_display() {
+        let monitors = mac_pair();
+        // On the external display: its work area, and CSS px are points.
+        let dto = work_area_dto(Some(drect(2400, 700, 224, 288)), &monitors).unwrap();
+        assert_eq!(
+            (dto.x, dto.y, dto.width, dto.height, dto.scale_factor),
+            (1512.0, 25.0, 2560.0, 1415.0, 1.0)
+        );
+        // On the Retina laptop: tao's (0, 50, 3024, 1914) in points, and
+        // still one point per CSS px.
+        let dto = work_area_dto(Some(drect(600, 500, 224, 288)), &monitors).unwrap();
+        assert_eq!(
+            (dto.x, dto.y, dto.width, dto.height, dto.scale_factor),
+            (0.0, 25.0, 1512.0, 957.0, 1.0)
+        );
+        // No pet window: the primary display.
+        assert_eq!(work_area_dto(None, &monitors).unwrap().width, 1512.0);
     }
 
     #[test]
     fn work_area_serializes_camel_case() {
-        let dto = work_area_dto((0, 0), (2560, 1400), 1.25);
+        let monitors = [DesktopMonitor::from_tao(
+            drect(0, 0, 2560, 1440),
+            drect(0, 0, 2560, 1400),
+            1.25,
+            false,
+        )];
+        let dto = work_area_dto(None, &monitors).unwrap();
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["x"], 0.0);
         assert_eq!(json["width"], 2560.0);
@@ -1119,6 +1442,17 @@ mod tests {
         assert_eq!(opts.x, Some(120.0));
         assert_eq!(opts.y, Some(80.0));
         assert!(opts.click_through);
+        // An unmarked position is a pre-desktop-units one.
+        assert_eq!(opts.position_space, PetPositionSpace::Legacy);
+        let opts: PetWindowOpts = serde_json::from_str(
+            r#"{"width":300,"height":340,"x":120,"y":80,"positionSpace":"desktop"}"#,
+        )
+        .unwrap();
+        assert_eq!(opts.position_space, PetPositionSpace::Desktop);
+        assert!(serde_json::from_str::<PetWindowOpts>(
+            r#"{"width":300,"height":340,"positionSpace":"pixels"}"#
+        )
+        .is_err());
     }
 
     #[test]
