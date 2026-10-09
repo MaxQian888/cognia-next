@@ -79,4 +79,55 @@ describe("planSessionMove", () => {
     if (!plan.ok) throw new Error("expected a plan")
     expect(plan.executionContext.location).toBe("managedWorktree")
   })
+
+  it("refuses an archived conversation, which stays frozen in place", () => {
+    expect(
+      planSessionMove({
+        ...base,
+        session: { ...session, archivedAt: 500 } as unknown as ChatSession,
+      })
+    ).toEqual({ ok: false, reason: "session-archived" })
+    // Archived wins over running: the row is frozen either way.
+    expect(
+      planSessionMove({
+        ...base,
+        running: true,
+        session: { ...session, archivedAt: 0 } as unknown as ChatSession,
+      })
+    ).toEqual({ ok: false, reason: "session-archived" })
+  })
+
+  it("moves a conversation whose archivedAt is null", () => {
+    const plan = planSessionMove({
+      ...base,
+      session: { ...session, archivedAt: null } as unknown as ChatSession,
+    })
+    expect(plan.ok).toBe(true)
+  })
+
+  describe("clearFolder", () => {
+    const clearFolderOf = (folder: Parameters<typeof planSessionMove>[0]["folder"]) => {
+      const plan = planSessionMove({ ...base, folder })
+      if (!plan.ok) throw new Error("expected a plan")
+      return plan.clearFolder
+    }
+
+    it("unfiles a folder scoped to another workspace", () => {
+      expect(clearFolderOf({ projectId: "project-a" })).toBe(true)
+    })
+
+    it("keeps a folder already scoped to the destination", () => {
+      expect(clearFolderOf({ projectId: "project-b" })).toBe(false)
+    })
+
+    it("keeps an unscoped folder, which takes any conversation", () => {
+      expect(clearFolderOf({ projectId: undefined })).toBe(false)
+      expect(clearFolderOf({} as { projectId?: string })).toBe(false)
+    })
+
+    it("has nothing to clear without a folder", () => {
+      expect(clearFolderOf(undefined)).toBe(false)
+      expect(clearFolderOf(null)).toBe(false)
+    })
+  })
 })

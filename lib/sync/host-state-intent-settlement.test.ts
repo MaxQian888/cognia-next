@@ -24,6 +24,13 @@ jest.mock("@/lib/chat/session-deletion", () => ({
   deleteSessionsWithTeardown: (...args: unknown[]) => deleteSessionsWithTeardown(...args),
 }))
 
+const moveSessionWorkspaceLocally = jest.fn(async (..._args: unknown[]): Promise<unknown> => ({
+  status: "moved",
+}))
+jest.mock("@/lib/chat/session-workspace-move-writes", () => ({
+  moveSessionWorkspaceLocally: (...args: unknown[]) => moveSessionWorkspaceLocally(...args),
+}))
+
 const folderRows = new Map<string, unknown>()
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({ sessionFolders: { get: async (id: string) => folderRows.get(id) } }),
@@ -53,6 +60,7 @@ function action(intent: AllowedHostStateIntent, sessionId?: string): HostStateAc
 beforeEach(() => {
   for (const mock of [...Object.values(folders), ...Object.values(sessions)]) mock.mockClear()
   deleteSessionsWithTeardown.mockClear()
+  moveSessionWorkspaceLocally.mockReset().mockResolvedValue({ status: "moved" })
   folderRows.clear()
 })
 
@@ -96,6 +104,28 @@ describe("a Host too old to know the intent", () => {
     expect(deleteSessionsWithTeardown).toHaveBeenCalledWith(["s1"])
   })
 
+  it("replays a workspace move locally, re-planned on this device", async () => {
+    await settleRejectedHostStateIntent(
+      action({ kind: "session.workspace", projectId: "p2" }, "s1"),
+      HOST_STATE_UNSUPPORTED_SUBMIT_CODE
+    )
+    expect(moveSessionWorkspaceLocally).toHaveBeenCalledWith("s1", "p2")
+  })
+
+  it("drops a workspace move this device's plan now refuses", async () => {
+    moveSessionWorkspaceLocally.mockResolvedValueOnce({
+      status: "refused",
+      reason: "session-running",
+    })
+    await expect(
+      settleRejectedHostStateIntent(
+        action({ kind: "session.workspace", projectId: "p2" }, "s1"),
+        HOST_STATE_UNSUPPORTED_SUBMIT_CODE
+      )
+    ).resolves.toBeUndefined()
+    expect(moveSessionWorkspaceLocally).toHaveBeenCalledTimes(1)
+  })
+
   it("keeps an optimistic folder, and restores it only if it went missing", async () => {
     const create = action({ kind: "folder.create", folderId: "f1", projectId: "p1", name: "Work" })
     folderRows.set("f1", { id: "f1" })
@@ -129,9 +159,15 @@ describe("a Host that understood and refused", () => {
       action({ kind: "session.pin", pinned: true }, "s1"),
       "host_state_forbidden"
     )
+    // The Host's refusal of a move (a turn it is running) is the answer.
+    await settleRejectedHostStateIntent(
+      action({ kind: "session.workspace", projectId: "p2" }, "s1"),
+      "host_state_move_session_running"
+    )
     for (const mock of [...Object.values(folders), ...Object.values(sessions)]) {
       expect(mock).not.toHaveBeenCalled()
     }
+    expect(moveSessionWorkspaceLocally).not.toHaveBeenCalled()
   })
 })
 

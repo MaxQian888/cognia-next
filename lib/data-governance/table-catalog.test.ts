@@ -92,8 +92,14 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 55 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(55)
+  it("maps all 56 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(56)
+    // The goal event log, so a paired phone's goal detail, judge notes and
+    // `/goal status` read the desktop's history. It leaves with its goal's
+    // tombstone and is capped per goal on both sides, so it has none of its own.
+    expect(policyForTable("chatGoalEvents")?.syncPolicy.mode).toBe("companion-readonly")
+    expect(COMPANION_SYNC_PROTOCOL_TABLE_NAMES).toContain("goalEvents")
+    expect(COMPANION_SYNC_DELETE_STRATEGY.goalEvents).toBe("retention-pruned")
     // Remote pet care (ADR-0219): the phone mirrors the desktop pet read-only.
     // Chat history and the model/sprite blobs deliberately stay host-local.
     for (const table of [

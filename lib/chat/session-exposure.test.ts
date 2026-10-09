@@ -30,6 +30,13 @@ describe("session exposure policy", () => {
     expect(isSessionExposed(session({ kind: "direct" }), "main-list")).toBe(true)
   })
 
+  it("keeps an agent-builder conversation out of every listing even without the flag", () => {
+    const builder = session({ kind: "agent-builder" })
+    expect(isEmbeddedSession(builder)).toBe(true)
+    expect(isSessionExposed(builder, "main-list")).toBe(false)
+    expect(isSessionExposed(builder, "global-search")).toBe(false)
+  })
+
   it("recognizes visibility-only embeddings and filters ordinary lists", () => {
     const ordinary = session({ id: "ordinary", kind: "direct" })
     const embedded = session({ id: "embedded", visibility: "embedded" })

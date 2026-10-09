@@ -16,20 +16,17 @@
  *
  * Each entry carries where to watch it, by run kind:
  * - `agent-task`  → the newest attempt's chat session; before the first
- *                   attempt has a session, the Character task board.
+ *                   attempt has a session, the agent's task board.
  * - `agent-team`  → the Squad workspace for the team.
  * - `github-loop` → the issue itself (its detail panel shows the live run).
  */
 
 import { getIssue } from "@/lib/db/issues"
 import { listIssueRuns } from "@/lib/db/issue-runs"
-import { listAgentTaskAttempts } from "@/lib/db/agent-tasks"
+import { getAgentTask, listAgentTaskAttempts } from "@/lib/db/agent-tasks"
+import { AGENTS_ROUTE, agentTaskBoardHref } from "@/lib/agents/routes"
 import { issueHref } from "@/lib/issues/hrefs"
-import {
-  AGENT_TASK_BOARD_HREF,
-  AGENT_TASK_RUN_ADAPTER_ID,
-  sessionHref,
-} from "@/lib/issues/run/agent-task-adapter"
+import { AGENT_TASK_RUN_ADAPTER_ID, sessionHref } from "@/lib/issues/run/agent-task-adapter"
 import {
   AGENT_TEAM_RUN_ADAPTER_ID,
   agentTeamWorkspaceHref,
@@ -63,6 +60,8 @@ export interface ActiveAgentRunDeps {
   getIssue: (issueId: string) => Promise<Issue | undefined>
   /** Newest chat session of an AgentTask's attempts, if any attempt has one. */
   latestTaskSessionId: (taskId: string) => Promise<string | undefined>
+  /** The agent (Character id) an AgentTask belongs to, while the task exists. */
+  taskAgentId: (taskId: string) => Promise<string | undefined>
 }
 
 async function defaultListActiveRuns(projectId: string): Promise<IssueRun[]> {
@@ -88,6 +87,7 @@ const defaultDeps: ActiveAgentRunDeps = {
   listActiveRuns: defaultListActiveRuns,
   getIssue,
   latestTaskSessionId: defaultLatestTaskSessionId,
+  taskAgentId: async (taskId) => (await getAgentTask(taskId))?.agentId,
 }
 
 async function watchLink(
@@ -96,9 +96,12 @@ async function watchLink(
 ): Promise<{ href: string; linkKind: ActiveAgentRunLinkKind }> {
   if (run.adapterId === AGENT_TASK_RUN_ADAPTER_ID) {
     const sessionId = await deps.latestTaskSessionId(run.targetId)
-    return sessionId
-      ? { href: sessionHref(sessionId), linkKind: "session" }
-      : { href: AGENT_TASK_BOARD_HREF, linkKind: "agent-board" }
+    if (sessionId) return { href: sessionHref(sessionId), linkKind: "session" }
+    const agentId = await deps.taskAgentId(run.targetId)
+    return {
+      href: agentId ? agentTaskBoardHref(agentId) : AGENTS_ROUTE,
+      linkKind: "agent-board",
+    }
   }
   if (run.adapterId === AGENT_TEAM_RUN_ADAPTER_ID) {
     return { href: agentTeamWorkspaceHref(run.targetId), linkKind: "squad" }

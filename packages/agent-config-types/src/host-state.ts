@@ -187,6 +187,18 @@ export type AllowedHostStateIntent =
    */
   | { kind: "session.order"; manualOrder: number; sectionKey: string }
   /**
+   * Move the conversation to another of the Host's workspaces. The Host
+   * re-plans the move against its own rows (`planSessionMove` in
+   * `lib/chat/move-session-workspace.ts`): it rebuilds the session's execution
+   * context against the destination's root, unfiles it from a folder of the
+   * old workspace, relinks both workspace rosters, and refuses what a desktop
+   * move refuses — an unknown or same workspace, an archived, handed-off or
+   * running conversation. Like the list-organization intents it commits with
+   * no channel mutation: the channel carries none of those fields, and every
+   * replica learns the moved row through `sessions` table sync.
+   */
+  | { kind: "session.workspace"; projectId: string }
+  /**
    * Delete the conversation on the Host, with the same cascade and teardown a
    * desktop delete runs. Confirmed as `session.tombstoned`.
    */
@@ -260,6 +272,7 @@ const INTENT_KINDS: readonly HostStateIntentKind[] = [
   "session.pin",
   "session.folder",
   "session.order",
+  "session.workspace",
   "session.delete",
   "folder.create",
   "folder.rename",
@@ -301,6 +314,7 @@ export function intentRequiresRuntimeDispatch(kind: HostStateIntentKind): boolea
     case "session.pin":
     case "session.folder":
     case "session.order":
+    case "session.workspace":
     case "session.delete":
     case "folder.create":
     case "folder.rename":
@@ -341,6 +355,7 @@ export function hostStateIntentTargetsSessionIndex(kind: HostStateIntentKind): b
     case "session.pin":
     case "session.folder":
     case "session.order":
+    case "session.workspace":
     case "session.delete":
     case "draft.replace":
     case "message.enqueue":
@@ -420,6 +435,11 @@ export function hostStateIntentKindCapability(
     case "session.pin":
     case "session.folder":
     case "session.order":
+    // Moving a conversation between the Host's own workspaces re-points
+    // where its NEXT turn runs, never the turn in flight (a running session is
+    // refused), and the owner can move it back. Remote Control can already
+    // send that next turn, so the move costs no more than sending it does.
+    case "session.workspace":
     // Folders are the same organization one level up. Deleting one unfiles its
     // conversations and deletes none of them, so it stays Remote Control too.
     case "folder.create":
@@ -490,6 +510,7 @@ export function hostStateIntentRequiresLiveControl(kind: HostStateIntentKind): b
     case "session.pin":
     case "session.folder":
     case "session.order":
+    case "session.workspace":
     case "session.delete":
     case "folder.create":
     case "folder.rename":
@@ -1436,6 +1457,7 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
     case "session.pin":
     case "session.folder":
     case "session.order":
+    case "session.workspace":
     case "session.delete":
     // Folder intents address the session index, which this reducer leaves to
     // the Host (see the early return above); listed for exhaustiveness.
@@ -1859,6 +1881,10 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
         nonNegativeInteger(value.manualOrder) &&
         nonEmptyString(value.sectionKey)
       )
+    case "session.workspace":
+      // Required: a conversation always belongs to a workspace once moved, and
+      // detaching it from every workspace is not something a move does.
+      return hasOnlyKeys(value, ["kind", "projectId"]) && nonEmptyString(value.projectId)
     case "session.delete":
       return hasOnlyKeys(value, ["kind"])
     case "folder.create":

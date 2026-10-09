@@ -7,6 +7,7 @@ import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { clearBrowserPreviewData } from "@/lib/browser/preview-data"
 import { getDb } from "@/lib/db/schema"
 import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
+import { uniqueIndexKeys } from "@/lib/db/unique-keys"
 import { clearDraft } from "@/lib/db/chat-drafts"
 import { preserveGeneratedVideoRecords } from "@/lib/db/files-library-items"
 import {
@@ -65,13 +66,13 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
         // before the refs and jobs below go.
         await preserveGeneratedVideoRecords(
           db,
-          (await db.mediaGenerationJobs.orderBy("sessionId").uniqueKeys()) as string[]
+          (await uniqueIndexKeys(db.mediaGenerationJobs.orderBy("sessionId"))) as string[]
         )
         const messageIds = await db.messages.toCollection().primaryKeys()
         const stateIds = await db.sessionState.toCollection().primaryKeys()
         const draftIds = await db.chatDrafts.toCollection().primaryKeys()
         for (const id of [...sessionIds, ...draftIds]) draftSessionIds.add(id)
-        for (const hash of await db.messageMediaRefs.orderBy("hash").uniqueKeys()) {
+        for (const hash of await uniqueIndexKeys(db.messageMediaRefs.orderBy("hash"))) {
           orphanCandidates.add(String(hash))
         }
         // Files (ADR-0200) owns `library:` rows: its pins and its own uploads

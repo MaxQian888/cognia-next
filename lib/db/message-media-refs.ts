@@ -1,6 +1,7 @@
 import { collectOrphanedMedia, parseMediaRef } from "./message-media"
 import { getDb } from "./schema"
 import type { SessionAsset } from "./session-assets"
+import { uniqueIndexKeys } from "./unique-keys"
 
 /** Reserved ledger owners are never chat message ids. */
 export const SESSION_ASSET_OWNER_PREFIX = "session-asset:"
@@ -99,7 +100,7 @@ export async function collectUnreferencedMessageMedia(
     return db.transaction("rw", db.messageMediaRefs, db.messageMedia, async () => {
       // Keep the reference check and deletion atomic while reading only candidate blobs.
       const referencedHashes = new Set(
-        await db.messageMediaRefs.where("hash").anyOf(hashes).uniqueKeys()
+        await uniqueIndexKeys(db.messageMediaRefs.where("hash").anyOf(hashes))
       )
       const rows = await db.messageMedia.bulkGet(
         hashes.filter((hash) => !referencedHashes.has(hash))
@@ -113,7 +114,7 @@ export async function collectUnreferencedMessageMedia(
       return doomed.length
     })
   }
-  const referencedHashes = await db.messageMediaRefs.orderBy("hash").uniqueKeys()
+  const referencedHashes = await uniqueIndexKeys(db.messageMediaRefs.orderBy("hash"))
   return collectOrphanedMedia(
     [...referencedHashes].map((hash) => `cognia-media:${String(hash)}`),
     options

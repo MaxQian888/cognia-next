@@ -319,6 +319,22 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
       )
     }
     const deletedMessageIds = await db.messages.where("projectId").equals(projectId).primaryKeys()
+    // Synced tables whose own deletes tombstone (`lib/db/goals.ts`,
+    // `lib/db/plans.ts`, `lib/db/workflows.ts`); a workspace delete must too, or
+    // a paired phone keeps the workspace's goals, plans and runs forever. A
+    // goal tombstone also takes the goal's synced events with it on the phone.
+    const deletedGoalIds = (await db.chatGoals
+      .where("projectId")
+      .equals(projectId)
+      .primaryKeys()) as string[]
+    const deletedPlanIds = (await db.agentPlans
+      .where("projectId")
+      .equals(projectId)
+      .primaryKeys()) as string[]
+    const deletedRunIds = (await db.workflowRuns
+      .where("projectId")
+      .equals(projectId)
+      .primaryKeys()) as string[]
     if (sessionIds.length > 0) {
       const refs = await db.messageMediaRefs.where("sessionId").anyOf(sessionIds).toArray()
       for (const ref of refs) orphanCandidates.add(ref.hash)
@@ -345,6 +361,9 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
       ...sessionIds.map((id) => ({ table: "sessions" as const, id, deletedAt: at })),
       ...sessionIds.map((id) => ({ table: "sessionState" as const, id, deletedAt: at })),
       ...deletedMessageIds.map((id) => ({ table: "messages" as const, id, deletedAt: at })),
+      ...deletedGoalIds.map((id) => ({ table: "goals" as const, id, deletedAt: at })),
+      ...deletedPlanIds.map((id) => ({ table: "plans" as const, id, deletedAt: at })),
+      ...deletedRunIds.map((id) => ({ table: "workflowRuns" as const, id, deletedAt: at })),
     ])
   })
 

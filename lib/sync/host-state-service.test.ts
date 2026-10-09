@@ -1105,6 +1105,187 @@ describe("HostStateService", () => {
       expect((await getDb().sessions.get("session-1"))?.pinned).toBeUndefined()
     })
 
+    describe("session.workspace", () => {
+      beforeEach(async () => {
+        await getDb().projects.bulkPut([
+          {
+            id: "project-1",
+            name: "One",
+            roots: [{ id: "r1", path: "/host/one", isPrimary: true }],
+            sessionIds: ["session-1"],
+          },
+          {
+            id: "project-2",
+            name: "Two",
+            roots: [{ id: "r2", path: "/host/two", isPrimary: true }],
+            sessionIds: [],
+          },
+        ] as never)
+      })
+
+      function moveService(relinkSessionRoster: jest.Mock) {
+        const publish = jest.fn(async (_topic: string, _event: HostStateAppliedAction) => undefined)
+        const service = createHostStateService({
+          ...scope,
+          hostId,
+          ownerId: "brain-a",
+          now: () => 100,
+          publish,
+          relinkSessionRoster,
+        })
+        return { service, publish }
+      }
+
+      it("moves the Host's row from Remote Control and relinks both rosters once", async () => {
+        const relink = jest.fn(async () => undefined)
+        const { service, publish } = moveService(relink)
+        await service.start({ now: 0, heartbeat: false })
+        const request = {
+          ...scope,
+          actions: [
+            action(
+              { kind: "session.workspace", projectId: "project-2" },
+              { actionId: "move-1", baseRevision: undefined }
+            ),
+          ],
+        }
+
+        const response = await service.submit(request, controller)
+
+        expect(response.results).toEqual([
+          expect.objectContaining({ actionId: "move-1", outcome: "applied" }),
+        ])
+        expect(await getDb().sessions.get("session-1")).toMatchObject({
+          projectId: "project-2",
+          updatedAt: 100,
+          executionContext: expect.objectContaining({ projectRoot: "/host/two" }),
+        })
+        // The workspace it left, read before the commit rewrote the row.
+        expect(relink).toHaveBeenCalledWith("session-1", "project-1", "project-2")
+        // No channel mutation: the moved row reaches replicas through sync.
+        const broadcast = publish.mock.calls.map(([, event]) => event)
+        expect(broadcast).toHaveLength(1)
+        expect(broadcast[0].mutation).toBeUndefined()
+
+        // A redelivery is answered by the ledger and relinks nothing again.
+        const redelivered = await service.submit(request, controller)
+        expect(redelivered.results).toEqual([
+          expect.objectContaining({ actionId: "move-1", outcome: "duplicate" }),
+        ])
+        expect(relink).toHaveBeenCalledTimes(1)
+      })
+
+      it("commits a refused move as a rejection and relinks nothing", async () => {
+        const relink = jest.fn(async () => undefined)
+        const { service } = moveService(relink)
+        await service.start({ now: 0, heartbeat: false })
+
+        const response = await service.submit(
+          {
+            ...scope,
+            actions: [
+              action(
+                { kind: "session.workspace", projectId: "project-1" },
+                { actionId: "same", clientSeq: 1, baseRevision: undefined }
+              ),
+              action(
+                { kind: "session.workspace", projectId: "project-missing" },
+                { actionId: "missing", clientSeq: 2, baseRevision: undefined }
+              ),
+            ],
+          },
+          controller
+        )
+
+        expect(response.results).toEqual([
+          expect.objectContaining({
+            outcome: "rejected",
+            rejection: expect.objectContaining({ code: "host_state_move_same_workspace" }),
+          }),
+          expect.objectContaining({
+            outcome: "rejected",
+            rejection: expect.objectContaining({ code: "host_state_move_unknown_workspace" }),
+          }),
+        ])
+        expect((await getDb().sessions.get("session-1"))?.projectId).toBe("project-1")
+        expect(relink).not.toHaveBeenCalled()
+      })
+
+      it("answers a move that turns invalid between validation and commit with a rejection", async () => {
+        const relink = jest.fn(async () => undefined)
+        const { service } = moveService(relink)
+        await service.start({ now: 0, heartbeat: false })
+        // Validation sees the destination; the commit's re-plan, inside the
+        // ledger transaction, finds it deleted.
+        const projects = getDb().projects
+        const realGet = projects.get.bind(projects)
+        let destinationReads = 0
+        const get = jest
+          .spyOn(projects, "get")
+          .mockImplementation(((key: string) =>
+            key === "project-2" && ++destinationReads > 1
+              ? Promise.resolve(undefined)
+              : realGet(key)) as never)
+
+        try {
+          const response = await service.submit(
+            {
+              ...scope,
+              actions: [
+                action(
+                  { kind: "session.workspace", projectId: "project-2" },
+                  { actionId: "move-race", baseRevision: undefined }
+                ),
+              ],
+            },
+            controller
+          )
+
+          expect(destinationReads).toBe(2)
+          expect(response.results).toEqual([
+            expect.objectContaining({
+              actionId: "move-race",
+              outcome: "rejected",
+              rejection: expect.objectContaining({ code: "host_state_move_unknown_workspace" }),
+            }),
+          ])
+        } finally {
+          get.mockRestore()
+        }
+        expect(await getDb().sessions.get("session-1")).toMatchObject({ projectId: "project-1" })
+        expect(relink).not.toHaveBeenCalled()
+        // The refusal is in the ledger, so a redelivery is a duplicate.
+        await expect(getDb().hostStateActions.count()).resolves.toBe(1)
+      })
+
+      it("keeps the applied move when the roster relink fails", async () => {
+        const relink = jest.fn(async () => {
+          throw new Error("store unavailable")
+        })
+        const { service } = moveService(relink)
+        await service.start({ now: 0, heartbeat: false })
+
+        const response = await service.submit(
+          {
+            ...scope,
+            actions: [
+              action(
+                { kind: "session.workspace", projectId: "project-2" },
+                { actionId: "move-1", baseRevision: undefined }
+              ),
+            ],
+          },
+          controller
+        )
+
+        expect(response.results).toEqual([
+          expect.objectContaining({ actionId: "move-1", outcome: "applied" }),
+        ])
+        expect((await getDb().sessions.get("session-1"))?.projectId).toBe("project-2")
+        expect(relink).toHaveBeenCalledTimes(1)
+      })
+    })
+
     it("deletes the conversation before committing its tombstone", async () => {
       const ledgerRowsAtDelete: number[] = []
       const deleteSessions = jest.fn(async (ids: readonly string[]) => {

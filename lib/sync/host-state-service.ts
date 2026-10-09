@@ -49,6 +49,7 @@ import {
   getHostStateAction,
   getHostStateMeta,
   getHostStateSnapshot,
+  HostSessionMoveRefusedError,
   hostStateActionPayloadSize,
   listHostStateSessionChannels,
   listPendingHostStateActions,
@@ -397,6 +398,16 @@ export interface HostStateServiceOptions {
    * sidecar and store side effects.
    */
   deleteSessions?: (sessionIds: readonly string[]) => Promise<void>
+  /**
+   * Relinks both workspace rosters after an applied `session.workspace` move.
+   * Defaults to `relinkMovedSessionRoster` — the project-store writes a desktop
+   * move makes. Injectable so the ledger can be tested without the store.
+   */
+  relinkSessionRoster?: (
+    sessionId: string,
+    previousProjectId: string | undefined,
+    projectId: string
+  ) => Promise<void>
 }
 
 export interface HostStateService {
@@ -1067,14 +1078,30 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
           action.action.kind === "session.create" && decision.mutation
             ? await ownedSessionSeed(action.action.seed)
             : undefined
-        const committed = await commitHostStateAction({
-          action,
-          ...(sessionSeed ? { sessionSeed } : {}),
-          mutation: decision.mutation,
-          rejection: decision.rejection,
-          runtimeDispatchRequired: requiresRuntimeDispatch(action),
-          now: now(),
-        })
+        // The workspace the conversation is leaving, read before the commit
+        // rewrites the row, for the roster relink below.
+        const movedFrom =
+          action.action.kind === "session.workspace" && !decision.rejection
+            ? { projectId: (await getDb().sessions.get(action.sessionId!))?.projectId }
+            : undefined
+        const committed = await commitMovingRace(action, snapshot.revision, () =>
+          commitHostStateAction({
+            action,
+            ...(sessionSeed ? { sessionSeed } : {}),
+            mutation: decision.mutation,
+            rejection: decision.rejection,
+            runtimeDispatchRequired: requiresRuntimeDispatch(action),
+            now: now(),
+          })
+        )
+        if (
+          movedFrom &&
+          action.action.kind === "session.workspace" &&
+          committed.event.outcome === "applied" &&
+          !committed.duplicate
+        ) {
+          await relinkRoster(action.sessionId!, movedFrom.projectId, action.action.projectId)
+        }
         const row = await getHostStateAction(action.hostGeneration, action.actionId)
         if (!row) throw new Error("host_state_ledger_missing")
         await processRow(row)
@@ -1181,6 +1208,73 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
           currentRevision,
         },
       }
+    }
+  }
+
+  /**
+   * Commit an action, turning a workspace move that went invalid between
+   * validation and commit into the rejection validation would have returned.
+   * The commit re-plans inside its transaction and rolls back; without this the
+   * whole submit batch would error, and the client would see a transport
+   * failure for what is an ordinary refusal. A handoff lock taken in the same
+   * window is a refusal too. Any other failure still throws.
+   */
+  async function commitMovingRace(
+    action: HostStateAction,
+    currentRevision: number,
+    commit: () => ReturnType<typeof commitHostStateAction>
+  ): ReturnType<typeof commitHostStateAction> {
+    try {
+      return await commit()
+    } catch (error) {
+      if (action.action.kind !== "session.workspace") throw error
+      const rejection =
+        error instanceof HostSessionMoveRefusedError
+          ? error.rejection
+          : error instanceof SessionHandoffLockedError
+            ? { code: error.code, message: "The session is read-only during a handoff." }
+            : null
+      if (!rejection) throw error
+      loggers.sync.warn("[host-state] session move refused at commit", {
+        sessionId: action.sessionId,
+        code: rejection.code,
+      })
+      return commitHostStateAction({
+        action,
+        rejection: { ...rejection, currentRevision },
+        runtimeDispatchRequired: requiresRuntimeDispatch(action),
+        now: now(),
+      })
+    }
+  }
+
+  /**
+   * Relink the workspace rosters of a committed move. After the commit, not in
+   * it: the rosters live in the project store, whose rows its own `persist()`
+   * writes, and a ledger-transaction write would be overwritten by the next
+   * one. A roster that fails to relink is logged and left: the move itself is
+   * committed and broadcast, the session's `projectId` is what every list and
+   * count reads, and failing the receipt would invite a retry the ledger
+   * already answers as a duplicate.
+   */
+  async function relinkRoster(
+    sessionId: string,
+    previousProjectId: string | undefined,
+    projectId: string
+  ): Promise<void> {
+    const relink =
+      options.relinkSessionRoster ??
+      (async (id: string, previous: string | undefined, next: string) => {
+        const { relinkMovedSessionRoster } = await import("./host-state-session-move")
+        await relinkMovedSessionRoster(id, previous, next)
+      })
+    try {
+      await relink(sessionId, previousProjectId, projectId)
+    } catch (error) {
+      loggers.sync.warn("[host-state] workspace roster relink failed", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -1733,6 +1827,9 @@ function mutationForAction(
     case "session.pin":
     case "session.folder":
     case "session.order":
+    // A workspace move lands on the `sessions` row too (`projectId`,
+    // `executionContext`, `folderId`); the channel carries none of them.
+    case "session.workspace":
       return {}
     // Folder intents address the session index, which returns above before
     // this switch; listed so a new intent cannot fall through unpriced.

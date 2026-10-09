@@ -591,6 +591,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     "goal_pause",
     "goal_resume",
     "goal_stop",
+    // The rest of a goal's lifecycle from a paired device: the acceptance
+    // verdict, delete, releasing a held manual-continue turn, and re-running a
+    // failed completion verifier. Same bridge and same control gate as the
+    // three above (see CONTROL_COMMANDS).
+    "goal_accept",
+    "goal_delete",
+    "goal_continue",
+    "goal_verify_retry",
+    // The goal's subgoal checklist from a paired device: generate it (the
+    // model runs on the host, behind the same PII gate as the desktop's own
+    // Subgoals tab), check a step, clear it. Same bridge, same control gate.
+    "goal_subgoals_generate",
+    "goal_subgoal_mark",
+    "goal_subgoals_clear",
     // Agent-Team board control (team-board CQRS, Dexie v104). State flows to
     // the phone via the read-only `agentTeamBoard` sync mirror; these commands
     // are the write path back. The TS arms validate every move through the
@@ -1065,6 +1079,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "goal_create",
     "goal_update",
     "goal_status",
+    // The verifier workflows this host can bind to a goal. A pure read: the
+    // binding pins a deployment and a dependency lock only the host can build,
+    // so a paired device picks from this list and sends it back on
+    // `goal_update`, which re-resolves it against the same list.
+    "goal_verification_options",
     // Long-term memory (ADR-0069). Reads (search / list) + writes
     // (store / update / forget). Writes carry `external` provenance and are
     // PII-gated on the TS side; store/update/forget are CONTROL commands.
@@ -1466,6 +1485,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "twin_job_status",
     // Goal status is a pure read (same goalId/sessionId returns current state).
     "goal_status",
+    // The host's verifier catalog is a pure read of its published workflows.
+    "goal_verification_options",
     // Memory listing is a pure read (same filter returns the same rows).
     // `memory_search` is deliberately NOT here: a search bumps each hit's
     // `lastAccessedAt`/`accessCount` (the recency signal), so it must not be
@@ -1592,6 +1613,18 @@ const CONTROL_COMMANDS: &[&str] = &[
     "goal_pause",
     "goal_resume",
     "goal_stop",
+    // Accepting a goal completes it, rejecting resumes it, continue releases a
+    // held turn, delete drops it, and a verifier retry runs a workflow on the
+    // host: each steers or ends an autonomous loop, so the same elevation.
+    "goal_accept",
+    "goal_delete",
+    "goal_continue",
+    "goal_verify_retry",
+    // Rewriting the checklist the judge steers the loop by (and spending the
+    // host's model budget to generate it) steers the same loop.
+    "goal_subgoals_generate",
+    "goal_subgoal_mark",
+    "goal_subgoals_clear",
     // Agent-Team board control — moving tasks / driving runs steers host
     // agent execution, same elevation as the goal loop controls above.
     "team_task_move",

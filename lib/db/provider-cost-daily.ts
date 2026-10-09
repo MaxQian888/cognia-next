@@ -9,6 +9,7 @@
  */
 
 import { getDb } from "./schema"
+import { uniqueIndexKeys } from "./unique-keys"
 
 export interface ProviderCostDailyRow {
   /** `${day}|${providerId}|${modelId}`. */
@@ -163,7 +164,7 @@ export async function getCostRange(
  */
 export async function getLastUsedByProvider(): Promise<Record<string, number>> {
   const table = getDb().providerCostDaily
-  const providerIds = (await table.orderBy("providerId").uniqueKeys()) as string[]
+  const providerIds = (await uniqueIndexKeys(table.orderBy("providerId"))) as string[]
   const remaining = new Set(providerIds)
   const lastUsed: Record<string, number> = {}
   if (remaining.size === 0) return lastUsed

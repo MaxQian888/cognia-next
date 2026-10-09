@@ -11,10 +11,14 @@
  * copy of the three writes a move is: the `projectId` column, an execution
  * context rebuilt against the destination's root, and the roster on both sides.
  *
- * The refusals and the rebuilt context come from `planSessionMove`; this owns
- * the writes and says what happened. The planner, the broker and the session
- * table are loaded on the first move rather than with the hook: every row of
- * the conversation list mounts it, and almost none of them ever moves.
+ * The refusals and the rebuilt context come from `planSessionMove`; the routed
+ * writer (`lib/chat/session-workspace-move-writes.ts`) hands the move to the
+ * Host on a paired client — the Host owns the rows there, exactly as it does
+ * for archive, delete, rename and pin — and writes it here otherwise. This
+ * hook says what happened. The writer, with the planner, the broker and the
+ * session table behind it, is loaded on the first move rather than with the
+ * hook: every row of the conversation list mounts it, and almost none of them
+ * ever moves.
  */
 
 import { useCallback, useMemo, useState } from "react"
@@ -22,15 +26,15 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { useProjectStore } from "@/stores/project/project-store"
-import type { ChatSession } from "@cognia/agent-config-types"
+import type { MovableSession } from "@/lib/chat/session-workspace-move-writes"
 
-export type MovableSession = Pick<
-  ChatSession,
-  "id" | "projectId" | "executionContext" | "handoffLock"
->
+export type { MovableSession }
 
 export interface MoveSessionWorkspace {
-  /** Resolves true when the conversation moved, false when it was refused or failed. */
+  /**
+   * Resolves true when the conversation moved, or was handed to the Host that
+   * moves it; false when it was refused or the write failed.
+   */
   move: (session: MovableSession, targetId: string) => Promise<boolean>
   busy: boolean
 }
@@ -41,41 +45,25 @@ export function useMoveSessionWorkspace(): MoveSessionWorkspace {
 
   const move = useCallback(
     async (session: MovableSession, targetId: string) => {
-      // The roster writes below persist through the project store, whose own
-      // `persist()` is gated on `loaded`. A move issued before the boot
-      // initializer hydrated it would write the column and reach no roster.
-      await useProjectStore.getState().load()
-      const store = useProjectStore.getState()
-      const [{ planSessionMove }, { getExecutionBroker }, { updateSession }] = await Promise.all([
-        import("@/lib/chat/move-session-workspace"),
-        import("@/lib/execution/broker"),
-        import("@/lib/db/sessions"),
-      ])
-      const plan = planSessionMove({
-        session,
-        target: store.projects.find((project) => project.id === targetId) ?? null,
-        // The broker rather than the store slice: a conversation with no open
-        // pane keeps streaming into Dexie, so a store-only check would call a
-        // running background turn idle and let the move land underneath it.
-        running: getExecutionBroker().hasActiveSession(session.id),
-        now: Date.now(),
-      })
-      if (!plan.ok) {
-        toast.error(t(`refused.${plan.reason}`))
-        return false
-      }
       setBusy(true)
       try {
-        await updateSession(session.id, {
-          projectId: plan.projectId,
-          executionContext: plan.executionContext,
-        })
-        if (plan.previousProjectId) {
-          store.removeSessionFromProject(plan.previousProjectId, session.id)
+        const { moveSessionWorkspaceRouted } =
+          await import("@/lib/chat/session-workspace-move-writes")
+        const result = await moveSessionWorkspaceRouted(session, targetId)
+        switch (result.status) {
+          case "refused":
+            toast.error(t(`refused.${result.reason}`))
+            return false
+          // Not "moved": the Host has yet to apply it, and may still refuse a
+          // move this device could not see was wrong (a turn the Host is
+          // running). Its row arrives through sync either way.
+          case "sent-to-host":
+            toast.success(t("sentToHost"))
+            return true
+          case "moved":
+            toast.success(t("moved"))
+            return true
         }
-        store.addSessionToProject(plan.projectId, session.id)
-        toast.success(t("moved"))
-        return true
       } catch (error) {
         toast.error(t("failed", { error: error instanceof Error ? error.message : String(error) }))
         return false
@@ -113,7 +101,10 @@ export function useSessionWorkspaceMoveMenu(session: MovableSession): SessionWor
   const { move, busy } = useMoveSessionWorkspace()
   return {
     workspaceTargets,
-    canMoveWorkspace: workspaceTargets.some((workspace) => workspace.id !== session.projectId),
+    // An archived row is frozen in place (ADR-0213), workspace included.
+    canMoveWorkspace:
+      session.archivedAt == null &&
+      workspaceTargets.some((workspace) => workspace.id !== session.projectId),
     movingWorkspace: busy,
     onMoveWorkspace: (workspaceId) => void move(session, workspaceId),
   }

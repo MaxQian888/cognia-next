@@ -5068,3 +5068,35 @@ fn pet_remote_care_commands_are_bridged_and_bind_the_caller() {
         );
     }
 }
+
+/// The goal lifecycle a paired phone drives beyond pause/resume/stop: the
+/// acceptance verdict, delete, a held manual-continue turn, a verifier retry,
+/// the subgoal checklist (generate / mark a step / clear), and the verifier
+/// catalog a device picks from. All ride the generic desktop-writes bridge;
+/// the mutations carry the same remote-control gate as `goal_pause`, and only
+/// the catalog read skips the idempotency cache.
+#[test]
+fn goal_lifecycle_commands_are_bridged_and_control_gated_like_goal_pause() {
+    let writes = [
+        "goal_accept",
+        "goal_delete",
+        "goal_continue",
+        "goal_verify_retry",
+        "goal_subgoals_generate",
+        "goal_subgoal_mark",
+        "goal_subgoals_clear",
+    ];
+    for command in writes {
+        assert!(KNOWN_COMMANDS_SET.contains(command), "{command} is known");
+        assert!(data_sync::COMMANDS.contains(&command), "{command} is bridged");
+        assert!(is_control_command(command), "{command} needs remote control");
+        assert!(!READ_ONLY_COMMANDS_SET.contains(command), "{command} mutates");
+    }
+    assert!(is_control_command("goal_pause"));
+
+    let read = "goal_verification_options";
+    assert!(KNOWN_COMMANDS_SET.contains(read));
+    assert!(data_sync::COMMANDS.contains(&read));
+    assert!(READ_ONLY_COMMANDS_SET.contains(read));
+    assert!(!is_control_command(read), "a catalog read is not remote control");
+}

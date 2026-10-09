@@ -50,7 +50,7 @@ import { invoke } from "@tauri-apps/api/core"
 import Dexie from "dexie"
 
 import { readTombstonesSince } from "./tombstones"
-import type { SyncDelta, SyncableTable } from "./types"
+import { PAGED_SYNC_TABLES, type SyncDelta, type SyncableTable } from "./types"
 import { portableExecutionContext } from "@/lib/task-workspace/managed-workspace"
 import { createProfileDekStore, type ProfileDekHandle } from "@/lib/rag/profile-dek-store"
 import { createMemorySyncRowV1, MEMORY_SYNC_PROFILE_ID } from "./memory-content-protocol"
@@ -60,6 +60,8 @@ import {
   projectPetBindingForSync,
   projectPetProfileForSync,
 } from "./handlers/pet"
+import { projectGoalEventForSync } from "./handlers/goals"
+import type { GoalEvent } from "@/types/goal"
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
@@ -174,7 +176,7 @@ export async function readDexieDelta(
     throw new Error("upgrade_required: retrieval content protocol v1 is required")
   }
   if (cursor !== undefined) {
-    if (!["messages", "executionRuns", "workflowRuns", "connectorHeartbeats"].includes(table)) {
+    if (!PAGED_SYNC_TABLES.includes(table as SyncableTable)) {
       throw new Error("unsupported sync cursor table")
     }
     return readCursorDelta(table as SyncableTable, since, cursor)
@@ -234,6 +236,8 @@ export async function readDexieDelta(
       return readIssueCyclesDelta(since)
     case "goals":
       return readGoalsDelta(since)
+    case "goalEvents":
+      return readGoalEventsDelta(since)
     case "plans":
       return readPlansDelta(since)
     case "memories":
@@ -456,6 +460,21 @@ async function readCursorDelta(
       .toArray()
     hasMore = page.length > RUN_PAGE_SIZE
     rows = page.slice(0, RUN_PAGE_SIZE)
+  } else if (table === "goalEvents") {
+    // Appended once, never edited: `ts` is the position and the event id
+    // breaks ties (the `ts` index orders equal keys by primary key), so a page
+    // boundary inside one millisecond neither repeats nor skips an event.
+    cursorOf = (row) => (row as unknown as GoalEvent).ts
+    const page = await db.chatGoalEvents
+      .where("ts")
+      .aboveOrEqual(cursor.at)
+      .filter((event) => after(event as unknown as UpdatedAtRow))
+      .limit(GOAL_EVENTS_PAGE_SIZE + 1)
+      .toArray()
+    hasMore = page.length > GOAL_EVENTS_PAGE_SIZE
+    rows = page
+      .slice(0, GOAL_EVENTS_PAGE_SIZE)
+      .map(projectGoalEventForSync) as unknown as UpdatedAtRow[]
   } else if (table === "connectorHeartbeats") {
     cursorOf = (row) => (row as unknown as ConnectorHeartbeatRow).at
     if (!token && since === 0) cursor.at = Math.max(0, Date.now() - HEARTBEAT_FIRST_SYNC_WINDOW_MS)
@@ -1266,6 +1285,41 @@ async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
   // so pull only the rows past the cursor instead of scanning the whole table.
   const rows = await getDb().chatGoals.where("updatedAt").above(since).toArray()
   return finalizeDelta("goals", rows as UpdatedAtRow[], since)
+}
+
+/** Goal events one pull carries at most; a page boundary never splits a timestamp. */
+export const GOAL_EVENTS_PAGE_SIZE = 500
+
+/**
+ * The goal event log (`chatGoalEvents`, wire name `goalEvents`), for a client
+ * that did not negotiate the paged cursor (`readCursorDelta` is the normal
+ * path). Events are appended once and never edited, so the indexed `ts` is
+ * the watermark. A numeric cursor cannot split a timestamp tie, so a full
+ * page is extended to the end of its last millisecond, the way the legacy
+ * `messages` reader does, and `has_more` tells the client to keep pulling.
+ *
+ * Deletion needs no tombstone here: every host path that deletes events also
+ * deletes and tombstones their goal, and the client drops a tombstoned goal's
+ * events (`handlers/goals.ts`). The per-goal cap is mirrored client-side.
+ */
+async function readGoalEventsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const table = getDb().chatGoalEvents
+  const page = await table.where("ts").above(since).limit(GOAL_EVENTS_PAGE_SIZE).toArray()
+  let hasMore = false
+  if (page.length === GOAL_EVENTS_PAGE_SIZE) {
+    const boundary = page[page.length - 1].ts
+    const seen = new Set(page.map((event) => event.id))
+    const remainder = await table.where("ts").equals(boundary).toArray()
+    page.push(...remainder.filter((event) => !seen.has(event.id)))
+    hasMore = Boolean(await table.where("ts").above(boundary).first())
+  }
+  return finalizeDelta(
+    "goalEvents",
+    page.map(projectGoalEventForSync) as unknown as UpdatedAtRow[],
+    since,
+    hasMore,
+    (row) => (row as unknown as GoalEvent).ts
+  )
 }
 
 async function readPlansDelta(since: number): Promise<SyncDelta<unknown>> {

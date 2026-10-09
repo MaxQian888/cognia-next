@@ -86,6 +86,13 @@ pub(super) const COMMANDS: &[&str] = &[
     "goal_pause",
     "goal_resume",
     "goal_stop",
+    "goal_accept",
+    "goal_delete",
+    "goal_continue",
+    "goal_verify_retry",
+    "goal_subgoals_generate",
+    "goal_subgoal_mark",
+    "goal_subgoals_clear",
     "team_task_move",
     "team_task_create",
     "team_task_comment",
@@ -147,6 +154,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "goal_create",
     "goal_update",
     "goal_status",
+    "goal_verification_options",
     "memory_search",
     "memory_list",
     "memory_store",
@@ -829,6 +837,18 @@ pub(super) async fn dispatch(
         | "goal_pause"
         | "goal_resume"
         | "goal_stop"
+        // The rest of the goal lifecycle (`lib/companion/desktop-write-source.ts`
+        // goal arms). Gated by CONTROL_COMMANDS like the three above.
+        | "goal_accept"
+        | "goal_delete"
+        | "goal_continue"
+        | "goal_verify_retry"
+        // The subgoal checklist (same file's `goal_subgoal*` arms): generation
+        // calls the model in the renderer, through the Subgoals tab's own
+        // generator and PII gate. Gated by CONTROL_COMMANDS.
+        | "goal_subgoals_generate"
+        | "goal_subgoal_mark"
+        | "goal_subgoals_clear"
         // Agent-Team board control (team-board CQRS) — same generic bridge;
         // TS arms in `lib/companion/agent-team-write-handlers.ts` validate
         // through the shared `canMoveTask` guard. Gated by CONTROL_COMMANDS.
@@ -912,6 +932,7 @@ pub(super) async fn dispatch(
         | "goal_create"
         | "goal_update"
         | "goal_status"
+        | "goal_verification_options"
         // Long-term memory (ADR-0069) — same generic bridge; TS-side dispatch
         // arms in `lib/companion/desktop-write-source.ts` delegate to the
         // shared `lib/memory/api/*` helpers (PII gate, `external` provenance,

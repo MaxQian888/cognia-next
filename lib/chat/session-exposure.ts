@@ -44,6 +44,7 @@ export function isEmbeddedSession(session: ExposableSession): boolean {
     session.visibility === "embedded" ||
     session.kind === "resource-workbench" ||
     session.kind === "workflow-editor" ||
+    session.kind === "agent-builder" ||
     session.kind === "subagent"
   )
 }

@@ -565,6 +565,12 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "settings",
   "conversationOverrides",
   "chatGoals",
+  // The goal event log, so a paired phone's goal detail (Activity, Overview),
+  // judge notes and `/goal status` read the history the desktop does. Paged
+  // on `ts` + id; a deleted goal's events leave with the goal's tombstone and
+  // the per-goal cap is mirrored client-side (`lib/sync/handlers/goals.ts`).
+  // `judge_parse_failed.raw` (the judge's unparsed output) is emptied.
+  "chatGoalEvents",
   "agentPlans",
   "memories",
   "executionRuns",
@@ -671,8 +677,9 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
 ])
 
 /**
- * Public protocol names. `goals` is the stable wire alias for `chatGoals`, and
- * `plans` the alias for `agentPlans` (ADR-0045).
+ * Public protocol names. `goals` is the stable wire alias for `chatGoals`,
+ * `goalEvents` the alias for `chatGoalEvents`, and `plans` the alias for
+ * `agentPlans` (ADR-0045).
  */
 export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "characters",
@@ -688,6 +695,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "settings",
   "conversationOverrides",
   "goals",
+  "goalEvents",
   "plans",
   "memories",
   "executionRuns",
@@ -771,6 +779,11 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   settings: "singleton",
   conversationOverrides: "tombstoned",
   goals: "tombstoned",
+  // Capped at the newest `EVENTS_PER_GOAL_CAP` per goal on the host without
+  // tombstones, and the client trims its mirror to the same cap. Every delete
+  // path that removes events also deletes and tombstones their goal, and the
+  // client drops a tombstoned goal's events with it.
+  goalEvents: "retention-pruned",
   plans: "tombstoned",
   memories: "tombstoned",
   executionRuns: "never-deleted",

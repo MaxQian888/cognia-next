@@ -32,7 +32,7 @@ description: 桌面 ↔ 手机的 sync-down 协议。Host 的 Dexie 是权威数
 | 场景 | 表 | 阶段 |
 | --- | --- | --- |
 | 打开应用即看到会话列表 | `settings`、`characters`、`sessions`、`sessionState`、`sessionFolders`、`conversationOverrides` | `critical` |
-| 阅读对话及其运行 | `messages`（分页）、`executionRuns`、`executionRunBindings`、`workflowRuns`、`plans`、`goals`、`agentTasks`、`agentTaskAttempts`、`agentTeamBoard` | `interactive` |
+| 阅读对话及其运行 | `messages`（分页）、`executionRuns`、`executionRunBindings`、`workflowRuns`、`plans`、`goals`、`goalEvents`（分页）、`agentTasks`、`agentTaskAttempts`、`agentTeamBoard` | `interactive` |
 | 处理收件箱 | `connectorDrafts`、`outboundQueue`、`connectorHeartbeats`、`projects`、`botInstallations`、`botEventDeliveries` | `interactive` |
 | 浏览议题 | `labels`、`issueProjects`、`issues`、`issueEvents`、`issueRuns`、`issueCycles` | `background` |
 | 孪生、角色与模板 | `twinProfile`、`twins`、`twinDrafts`、`chatTemplates`、`templateDefinitions`、`templatePackages`、`templateInstances` | `background` |
@@ -197,14 +197,14 @@ sequenceDiagram
 
 ## 表与游标策略
 
-48 张表即 `lib/data-governance/table-catalog.ts` 中的 `COMPANION_SYNC_PROTOCOL_TABLE_NAMES`，同一组表也是 `sync_registry.rs` 中的 `default_tables()`。有两个线上名称与 Dexie 表名不同：`goals` 对应 `chatGoals`，`plans` 对应 `agentPlans`。
+48 张表即 `lib/data-governance/table-catalog.ts` 中的 `COMPANION_SYNC_PROTOCOL_TABLE_NAMES`，同一组表也是 `sync_registry.rs` 中的 `default_tables()`。有三个线上名称与 Dexie 表名不同：`goals` 对应 `chatGoals`，`goalEvents` 对应 `chatGoalEvents`，`plans` 对应 `agentPlans`。
 
 ### 阶段与依赖
 
 | 阶段 | 表 | `after` 边 |
 | --- | --- | --- |
 | `critical`（6） | settings、characters、sessions、conversationOverrides、sessionState、sessionFolders | sessions → characters |
-| `interactive`（15） | messages、agentTasks、agentTaskAttempts、plans、goals、agentTeamBoard、executionRuns、workflowRuns、connectorDrafts、outboundQueue、projects、botInstallations、botEventDeliveries、executionRunBindings、connectorHeartbeats | agentTaskAttempts → agentTasks；botEventDeliveries → botInstallations；executionRunBindings → executionRuns |
+| `interactive`（16） | messages、agentTasks、agentTaskAttempts、plans、goals、goalEvents、agentTeamBoard、executionRuns、workflowRuns、connectorDrafts、outboundQueue、projects、botInstallations、botEventDeliveries、executionRunBindings、connectorHeartbeats | agentTaskAttempts → agentTasks；goalEvents → goals；botEventDeliveries → botInstallations；executionRunBindings → executionRuns |
 | `background`（27） | skills、workflows、twinProfile、twins、twinDrafts、labels、issueProjects、issues、issueEvents、issueRuns、issueCycles、plugins、adapterInstances、platformIdentities、connectorCallbackBindings、workflowDeployments、memories、mcpServers、terminalHistory、chatTemplates、templateDefinitions、templatePackages、templateInstances、agentTeams、agentTeammates、agentTeamTasks、botDefinitions | twins → twinProfile；twinDrafts → twins；issueProjects → labels；issues → issueProjects；issueEvents、issueRuns、issueCycles → issues；platformIdentities、connectorCallbackBindings、workflowDeployments → adapterInstances；templateInstances → templateDefinitions + templatePackages；agentTeammates、agentTeamTasks → agentTeams |
 
 `runHandlerGraph` 在一张表 `after` 中列出的表都完成后才启动它，每个传输与 Host 同时最多 `SYNC_MAX_CONCURRENT_PULLS = 6` 个拉取（`withPullBudget`）。指向本次运行之外的表的边会被忽略，环会在最早注册的 handler 处断开。结果按注册顺序返回。
@@ -214,7 +214,7 @@ sequenceDiagram
 | 类型 | 表 | 如何前进 |
 | --- | --- | --- |
 | 水位 | 44 张表 | `since` 是见过的最大 `updatedAt`（否则 `createdAt`）与最新墓碑 `deletedAt` 中较晚者。Host 返回其上的行 |
-| 不透明、分页 | `messages`、`executionRuns`、`workflowRuns`、`connectorHeartbeats`（`PAGED_SYNC_TABLES`） | 客户端发送 `cursor`（从空字符串开始）；Host 返回 `next_cursor` 与 `has_more`。游标是包含版本、表、位置、id 与墓碑水位的 JSON，上限 4096 字节 |
+| 不透明、分页 | `messages`、`executionRuns`、`workflowRuns`、`connectorHeartbeats`、`goalEvents`（`PAGED_SYNC_TABLES`） | 客户端发送 `cursor`（从空字符串开始）；Host 返回 `next_cursor` 与 `has_more`。游标是包含版本、表、位置、id 与墓碑水位的 JSON，上限 4096 字节 |
 
 分页表（由 `readCursorDelta` 读取）：
 
@@ -222,6 +222,7 @@ sequenceDiagram
 - **`executionRuns`**：按 `updatedAt` 与 id 每页 200 条。
 - **`workflowRuns`**：按 `[syncActivityAt+id]` 每页 200 条；首次同步回看 30 天，行会先做同步投影。
 - **`connectorHeartbeats`**：按 `at` 每页 500 条；首次同步回看一小时。客户端会清理超过 48 小时的镜像心跳。
+- **`goalEvents`**：按 `ts` 与事件 id 每页 500 条，同步完整历史（Host 每个目标保留最新 5000 条）。它不记录自己的墓碑：被删除目标的 `goals` 墓碑会在客户端一并删除其事件，客户端也把每个目标裁剪到同样的 5000 条。`judge_parse_failed.raw` 会被清空。
 
 `memories` 在冷客户端上同样从最新 500 条开始，并要求 `content_protocol_version: 1`。handler 在 `has_more` 为真时持续拉取，每页之间让出主线程，每次运行最多 100 页；游标不前进的一页属于 `schema` 失败。
 

@@ -221,6 +221,15 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Goal console rows (read-only mirror; goals are authored on the desktop)".to_string(),
             has_tombstones: true,
         },
+        // The goal event log (`chatGoalEvents`) behind a paired phone's goal
+        // detail, judge notes and `/goal status`. No tombstones of its own: a
+        // deleted goal's `goals` tombstone takes its events on the client, and
+        // the per-goal cap is mirrored client-side.
+        SyncTableDescriptor {
+            name: "goalEvents".to_string(),
+            description: "Goal lifecycle events (paged on ts + id; a goal tombstone removes its events, the per-goal cap is mirrored client-side; judge_parse_failed.raw is emptied)".to_string(),
+            has_tombstones: false,
+        },
         // ADR-0045 — AgentPlan rows. The companion mounts the plan approval
         // dock and the step tracker; without this allowlist entry `sync_pull`
         // rejects the table and those surfaces render against an empty local
@@ -426,6 +435,7 @@ mod tests {
         assert!(r.contains("workflowRuns"));
         assert!(r.contains("executionRuns"));
         assert!(r.contains("goals"));
+        assert!(r.contains("goalEvents"));
         assert!(r.contains("memories"));
         assert!(r.contains("mcpServers"));
         assert!(r.contains("terminalHistory"));
@@ -524,6 +534,8 @@ mod tests {
             "connectorHeartbeats",
             "executionRuns",
             "petActivityLog",
+            // A deleted goal's tombstone carries its events; the log has none.
+            "goalEvents",
         ] {
             assert_eq!(by_name.get(name), Some(&false), "{name} has no tombstones");
         }

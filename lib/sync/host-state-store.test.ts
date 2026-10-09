@@ -5,6 +5,7 @@ import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accoun
 
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import {
+  createEmptyHostStateSession,
   hostStateDigest,
   sessionIndexChannel,
   sessionStateChannel,
@@ -24,6 +25,7 @@ import {
   validateHostStateBusinessAction,
 } from "./host-state-store"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
+import { getExecutionBroker } from "@/lib/execution/broker"
 
 const scope = { accountId: "acct-host-state", targetId: "desktop-a", hostId: "host-opaque-a" }
 const channel = sessionStateChannel(scope.targetId, "session-1")
@@ -725,6 +727,159 @@ describe("HostState durable store", () => {
     expect((await getDb().sessions.get("session-1"))?.folderId).toBe("f-new")
   })
 
+  describe("session.workspace", () => {
+    const moveAction = (projectId: string, overrides: Partial<HostStateAction> = {}) =>
+      draftAction({
+        baseRevision: undefined,
+        action: { kind: "session.workspace", projectId },
+        ...overrides,
+      })
+
+    beforeEach(async () => {
+      const db = getDb()
+      await db.projects.bulkPut([
+        {
+          id: "p-a",
+          name: "Alpha",
+          roots: [{ id: "ra", path: "/host/a", isPrimary: true }],
+          sessionIds: ["session-1"],
+        },
+        {
+          id: "p-b",
+          name: "Beta",
+          roots: [{ id: "rb", path: "/host/b", isPrimary: true }],
+          defaultExecutionLocation: "local",
+          sessionIds: [],
+        },
+        { id: "p-gone", name: "Gone", roots: [], sessionIds: [], isArchived: true },
+      ] as never)
+      await db.sessionFolders.bulkPut([
+        { id: "f-a", projectId: "p-a", name: "A", order: 0, createdAt: 1, updatedAt: 1 },
+        { id: "f-any", name: "Any", order: 1, createdAt: 1, updatedAt: 1 },
+      ] as never)
+      await db.sessions.update("session-1", { projectId: "p-a", folderId: "f-a" })
+    })
+
+    afterEach(() => jest.restoreAllMocks())
+
+    it("re-plans the move against the Host's own rows and writes the row", async () => {
+      await acquireWritableLease()
+      await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toBeUndefined()
+
+      const moved = await commitHostStateAction({ action: moveAction("p-b"), now: 900 })
+
+      // Applied with no channel mutation: the row travels by `sessions` sync.
+      expect(moved.event).toMatchObject({ outcome: "applied", hostSeq: 1 })
+      expect(moved.event.mutation).toBeUndefined()
+      const row = await getDb().sessions.get("session-1")
+      expect(row?.projectId).toBe("p-b")
+      expect(row?.updatedAt).toBe(900)
+      // The context names the HOST's directory for the destination, and the
+      // destination's own execution default.
+      expect(row?.executionContext).toMatchObject({
+        location: "local",
+        workspaceBinding: { kind: "project", projectId: "p-b" },
+        execution: { roots: [{ aliasPath: "/host/b" }] },
+      })
+      // A folder of the old workspace cannot hold it in the new one.
+      expect(row?.folderId).toBeUndefined()
+    })
+
+    it("keeps a folder that belongs to no workspace", async () => {
+      await acquireWritableLease()
+      await getDb().sessions.update("session-1", { folderId: "f-any" })
+      await commitHostStateAction({ action: moveAction("p-b"), now: 900 })
+      expect((await getDb().sessions.get("session-1"))?.folderId).toBe("f-any")
+    })
+
+    it("refuses what a desktop move refuses, with one code per reason", async () => {
+      await expect(validateHostStateBusinessAction(moveAction("p-a"))).resolves.toMatchObject({
+        code: "host_state_move_same_workspace",
+      })
+      await expect(validateHostStateBusinessAction(moveAction("p-missing"))).resolves.toMatchObject(
+        { code: "host_state_move_unknown_workspace" }
+      )
+      // No surface offers an archived workspace, so the Host does not take one.
+      await expect(validateHostStateBusinessAction(moveAction("p-gone"))).resolves.toMatchObject({
+        code: "host_state_move_unknown_workspace",
+      })
+      await getDb().sessions.update("session-1", { archivedAt: 50 })
+      await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toMatchObject({
+        code: "host_state_move_session_archived",
+      })
+      await expect(
+        validateHostStateBusinessAction(moveAction("p-b", { sessionId: "missing" }))
+      ).resolves.toMatchObject({ code: "session_not_found" })
+    })
+
+    it("refuses while a turn is in flight, whoever started it", async () => {
+      // A desktop-started turn holds a broker leg.
+      const broker = jest.spyOn(getExecutionBroker(), "hasActiveSession").mockReturnValue(true)
+      await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toMatchObject({
+        code: "host_state_move_session_running",
+      })
+      broker.mockReturnValue(false)
+
+      // A client-started one is on the channel.
+      for (const turn of ["queued", "running", "awaiting-decision", "stopping"] as const) {
+        const state = { ...createEmptyHostStateSession(channel, "session-1"), turn }
+        await getDb().hostStateChannels.put({
+          channel,
+          hostId: scope.hostId,
+          hostGeneration: 1,
+          hostSeq: 0,
+          revision: 0,
+          digest: hostStateDigest(state),
+          state,
+          updatedAt: 1,
+        })
+        await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toMatchObject({
+          code: "host_state_move_session_running",
+        })
+      }
+      for (const turn of ["idle", "completed", "aborted", "fatal-error"] as const) {
+        const state = { ...createEmptyHostStateSession(channel, "session-1"), turn }
+        await getDb().hostStateChannels.update(channel, { state })
+        await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toBeUndefined()
+      }
+    })
+
+    it("rolls the ledger back when the move turns invalid between validation and commit", async () => {
+      await acquireWritableLease()
+      await expect(validateHostStateBusinessAction(moveAction("p-b"))).resolves.toBeUndefined()
+      // The destination is deleted before the commit runs.
+      await getDb().projects.delete("p-b")
+
+      await expect(
+        commitHostStateAction({ action: moveAction("p-b"), now: 900 })
+      ).rejects.toMatchObject({
+        code: "host_state_session_move_refused",
+        message: "The workspace does not exist on this Host.",
+        // What the service commits in its place.
+        rejection: {
+          code: "host_state_move_unknown_workspace",
+          message: "The workspace does not exist on this Host.",
+        },
+      })
+      await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+      expect(await getDb().sessions.get("session-1")).toMatchObject({
+        projectId: "p-a",
+        folderId: "f-a",
+      })
+    })
+
+    it("rolls back on a lock taken after validation", async () => {
+      await acquireWritableLease()
+      await getDb().sessions.update("session-1", {
+        handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      })
+      await expect(
+        commitHostStateAction({ action: moveAction("p-b"), now: 900 })
+      ).rejects.toBeInstanceOf(SessionHandoffLockedError)
+      expect((await getDb().sessions.get("session-1"))?.projectId).toBe("p-a")
+    })
+  })
+
   it("refuses organize and delete intents on a handoff-locked session", async () => {
     await getDb().sessions.update("session-1", {
       handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
@@ -735,6 +890,7 @@ describe("HostState durable store", () => {
       { kind: "session.pin", pinned: true },
       { kind: "session.folder", folderId: "f1" },
       { kind: "session.order", manualOrder: 0, sectionKey: "recent" },
+      { kind: "session.workspace", projectId: "p-b" },
       { kind: "session.delete" },
     ] as const) {
       await expect(

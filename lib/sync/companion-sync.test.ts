@@ -1874,6 +1874,11 @@ describe("SYNC_TABLE_DEPENDENCIES", () => {
     expect(SYNC_TABLE_DEPENDENCIES.platformIdentities).toContain("adapterInstances")
     expect(SYNC_TABLE_DEPENDENCIES.executionRunBindings).toContain("executionRuns")
     expect(SYNC_TABLE_DEPENDENCIES.botEventDeliveries).toContain("botInstallations")
+    // A goal tombstone applied first takes the goal's mirrored events with it,
+    // and both land in the same stage so the detail never shows one without
+    // the other for a whole stage.
+    expect(SYNC_TABLE_DEPENDENCIES.goalEvents).toEqual(["goals"])
+    expect(SYNC_TABLE_STAGES.goalEvents).toBe(SYNC_TABLE_STAGES.goals)
     // The pet ledger's reset rule reads the profile's birth time, and every
     // other pet row is about the pet the profile names.
     for (const table of [

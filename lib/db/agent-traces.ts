@@ -13,6 +13,7 @@ import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { AgentTraceSessionAnalyticsSummary } from "@/types/agent/agent-trace"
 import Dexie from "dexie"
 import { getDb } from "./schema"
+import { uniqueIndexKeys } from "./unique-keys"
 
 /** Idempotent upsert. The span's `id` is the Dexie primary key. */
 export async function insertSpan(span: AgentTraceSpan): Promise<void> {
@@ -100,7 +101,7 @@ export async function queryRecentTraces(limit = 50, offset = 0): Promise<AgentTr
 
 /** How many distinct traces exist, for the panel's paging controls. */
 export async function countTraces(): Promise<number> {
-  return (await getDb().agentTraces.orderBy("traceId").uniqueKeys()).length
+  return (await uniqueIndexKeys(getDb().agentTraces.orderBy("traceId"))).length
 }
 
 /** Read spans whose `startTime` falls in `[since, until]`, oldest-first. Used

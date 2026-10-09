@@ -645,6 +645,41 @@ describe("project-scope helper", () => {
       expect(await db.connectorInboundJobs.get("inB")).toBeDefined()
     }, 30000)
 
+    it("tombstones the workspace's synced goals, plans and workflow runs for a paired phone", async () => {
+      const db = getDb()
+      await db.chatGoals.bulkPut([
+        { id: "gA", sessionId: "sA", projectId: "A", status: "active", createdAt: 1, updatedAt: 1 },
+        { id: "gB", sessionId: "sB", projectId: "B", status: "active", createdAt: 1, updatedAt: 1 },
+      ] as never)
+      await db.agentPlans.bulkPut([
+        { id: "plA", projectId: "A", createdAt: 1, updatedAt: 1 },
+        { id: "plB", projectId: "B", createdAt: 1, updatedAt: 1 },
+      ] as never)
+      await db.workflowRuns.bulkPut([
+        { id: "runA", projectId: "A", workflowId: "w", status: "completed", startedAt: 1 },
+        { id: "runB", projectId: "B", workflowId: "w", status: "completed", startedAt: 1 },
+      ] as never)
+
+      await deleteProjectCascade("A")
+
+      for (const [table, id] of [
+        ["goals", "gA"],
+        ["plans", "plA"],
+        ["workflowRuns", "runA"],
+      ]) {
+        expect(await db.syncTombstones.get([table, id])).toMatchObject({ table, id })
+      }
+      for (const [table, id] of [
+        ["goals", "gB"],
+        ["plans", "plB"],
+        ["workflowRuns", "runB"],
+      ]) {
+        expect(await db.syncTombstones.get([table, id])).toBeUndefined()
+      }
+      expect(await db.agentPlans.get("plB")).toBeDefined()
+      expect(await db.workflowRuns.get("runB")).toBeDefined()
+    }, 30000)
+
     it("is a no-op for a project with no data", async () => {
       await expect(deleteProjectCascade("empty")).resolves.toBeUndefined()
     }, 30000)

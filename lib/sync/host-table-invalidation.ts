@@ -74,6 +74,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   settings: "settings",
   conversationOverrides: "conversationOverrides",
   goals: "chatGoals",
+  goalEvents: "chatGoalEvents",
   plans: "agentPlans",
   memories: "memories",
   executionRuns: "executionRuns",

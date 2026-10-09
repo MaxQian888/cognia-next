@@ -113,6 +113,9 @@ const SESSION_FIELDS = {
   accountId: "local",
   projectRole: "local",
   projectThread: "local",
+  // An agent draft names this device's MCP servers, knowledge bases and
+  // runtime (ADR-0220); a builder row without it is not listed as a draft.
+  agentBuilder: "local",
   // This device's runtime and machine.
   transcriptRevision: "local",
   executionContext: "local",
@@ -244,6 +247,8 @@ const CHARACTER_FIELDS = {
   computerUseSettings: "local",
   computerUseTarget: "local",
   avatarImage: "local",
+  // An external agent id or host configuration id names this device's own.
+  runtime: "local",
 } as const satisfies Record<keyof Character, FieldPolicy>
 
 const SKILL_FIELDS = {

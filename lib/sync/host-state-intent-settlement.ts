@@ -4,8 +4,8 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 /**
  * What a paired client does when the Host refuses one of its list intents.
  *
- * The conversation-list intents (`session.pin` / `folder` / `order` / `delete`
- * and the four `folder.*` ones) are routed to the Host instead of being written
+ * The conversation-list intents (`session.pin` / `folder` / `order` /
+ * `workspace` / `delete` and the four `folder.*` ones) are routed to the Host instead of being written
  * locally, so a refusal has two very different meanings:
  *
  * - **The Host does not know the intent at all.** A Host from before these
@@ -14,7 +14,9 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
  *   never Host-authoritative — pins, folders and ranks lived on each device —
  *   so the honest fallback is exactly what this client did before routing
  *   existed: apply the write locally. Dropping it would make every
- *   organizational action silently do nothing against an older desktop.
+ *   organizational action silently do nothing against an older desktop. A
+ *   workspace move is re-planned on this device first and is dropped if that
+ *   plan refuses it (the conversation started running, the workspace went).
  * - **The Host understood and refused** (no Remote Control grant, a handoff
  *   lock, a folder that is gone). Nothing is applied locally — the Host's
  *   answer is the answer — and the one optimistic write the client made, the
@@ -104,6 +106,19 @@ async function applyLocally(action: HostStateAction): Promise<void> {
         [{ id: action.sessionId, manualOrder: intent.manualOrder }],
         intent.sectionKey
       )
+      return
+    }
+    case "session.workspace": {
+      if (!action.sessionId) return
+      const { moveSessionWorkspaceLocally } =
+        await import("@/lib/chat/session-workspace-move-writes")
+      const result = await moveSessionWorkspaceLocally(action.sessionId, intent.projectId)
+      if (result.status === "refused") {
+        loggers.sync.warn("[host-state] local fallback move refused", {
+          actionId: action.actionId,
+          reason: result.reason,
+        })
+      }
       return
     }
     case "session.delete": {

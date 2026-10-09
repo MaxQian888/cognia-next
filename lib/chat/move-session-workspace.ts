@@ -20,17 +20,23 @@
  * settle its patches into a directory nobody is watching.
  */
 
-import type { ChatSession } from "@cognia/agent-config-types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import { primaryRootOf } from "@/lib/workspace/roots"
 
 export type MoveSessionRefusal =
-  "same-workspace" | "unknown-workspace" | "session-running" | "session-locked"
+  "same-workspace" | "unknown-workspace" | "session-running" | "session-locked" | "session-archived"
 
 export interface MoveSessionInput {
-  session: Pick<ChatSession, "id" | "projectId" | "executionContext" | "handoffLock">
+  session: Pick<ChatSession, "id" | "projectId" | "executionContext" | "handoffLock" | "archivedAt">
+  /**
+   * The folder the conversation is filed in, if any. Folders belong to a
+   * workspace; one that cannot hold the conversation in its new workspace is
+   * dropped by the move rather than left pointing across workspaces.
+   */
+  folder?: Pick<SessionFolder, "projectId"> | null
   target: Pick<Project, "id" | "roots" | "defaultEnvironmentId" | "defaultExecutionLocation"> | null
   /** True while a turn is in flight for this session. */
   running: boolean
@@ -44,6 +50,8 @@ export type MoveSessionPlan =
       projectId: string
       previousProjectId?: string
       executionContext: SessionExecutionContext
+      /** The conversation's folder belongs to the old workspace; unfile it. */
+      clearFolder: boolean
     }
 
 /**
@@ -57,6 +65,9 @@ export function planSessionMove(input: MoveSessionInput): MoveSessionPlan {
   // A handed-off session is read-only by contract (ADR-0103); moving it would
   // write to a row the owning host believes it controls.
   if (session.handoffLock) return { ok: false, reason: "session-locked" }
+  // An archived conversation is frozen in place (ADR-0213): it keeps its
+  // workspace, pin and folder so a restore puts it back where it was.
+  if (session.archivedAt != null) return { ok: false, reason: "session-archived" }
   if (running) return { ok: false, reason: "session-running" }
 
   const root = primaryRootOf(target)
@@ -80,5 +91,8 @@ export function planSessionMove(input: MoveSessionInput): MoveSessionPlan {
     projectId: target.id,
     ...(session.projectId ? { previousProjectId: session.projectId } : {}),
     executionContext,
+    // `folderAcceptsSession`'s rule: a folder with no workspace takes any
+    // conversation, a scoped folder only its own workspace's.
+    clearFolder: Boolean(input.folder?.projectId && input.folder.projectId !== target.id),
   }
 }

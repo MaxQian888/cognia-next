@@ -768,3 +768,62 @@ describe("startNewSession", () => {
     expect(addSessionToProject).toHaveBeenCalledWith("project-default", session.id)
   })
 })
+
+describe("startNewSession — the agent's default runtime (ADR-0220)", () => {
+  // Required lazily inside each test: the stores persist to localStorage and
+  // the module under test imports them on demand, the same way.
+  function stores() {
+    const { useAgentRuntimeStore } = jest.requireActual("@/stores/agent")
+    const { useExternalAgentStore } = jest.requireActual("@/stores/agent/external-agent-store")
+    return { useAgentRuntimeStore, useExternalAgentStore }
+  }
+
+  it("starts a conversation with the agent on its bound external agent", async () => {
+    const { useAgentRuntimeStore, useExternalAgentStore } = stores()
+    useExternalAgentStore.setState({
+      enabled: true,
+      agents: { codex: { id: "codex", name: "Codex", enabled: true } },
+    })
+    const agent = await createCharacter({
+      name: "Reviewer",
+      systemPrompt: "Review.",
+      runtime: { kind: "external", agentId: "codex", name: "Codex" },
+    })
+
+    const session = await startNewSession({ characterId: agent.id })
+
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs[session.id]).toEqual({
+      kind: "external",
+      agentId: "codex",
+    })
+    expect(mockDispatchDiagnostic).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "agentRuntimeUnavailable" })
+    )
+  })
+
+  it("keeps the app default and says so when the bound agent is gone", async () => {
+    const { useAgentRuntimeStore, useExternalAgentStore } = stores()
+    useExternalAgentStore.setState({ enabled: true, agents: {} })
+    const agent = await createCharacter({
+      name: "Reviewer",
+      systemPrompt: "Review.",
+      runtime: { kind: "external", agentId: "deleted" },
+    })
+
+    const session = await startNewSession({ characterId: agent.id })
+
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs[session.id]).toBeUndefined()
+    expect(mockDispatchDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "agentRuntimeUnavailable" })
+    )
+  })
+
+  it("does not touch the lane of a conversation whose agent names no runtime", async () => {
+    const { useAgentRuntimeStore } = stores()
+    const agent = await createCharacter({ name: "Plain", systemPrompt: "Hi." })
+
+    const session = await startNewSession({ characterId: agent.id })
+
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs[session.id]).toBeUndefined()
+  })
+})

@@ -104,7 +104,12 @@ jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
   loadOrCreateAccountArtifactKey: jest.fn(async () => new Uint8Array(32).fill(29)),
 }))
 
-import { dispatchCommand, installDesktopWriteSource } from "./desktop-write-source"
+import {
+  dispatchCommand,
+  GOAL_SUBGOALS_GENERATE_ANSWER_WINDOW_MS,
+  GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS,
+  installDesktopWriteSource,
+} from "./desktop-write-source"
 import { waitFor } from "@testing-library/react"
 import { isRetryable } from "@/lib/queue/retry-policy"
 
@@ -153,6 +158,18 @@ jest.mock("@/lib/goal/runtime", () => {
     .fn()
     .mockResolvedValue({ goal: { id: "g1", status: "active" }, updatePrompt: "re-aimed" })
   const updateConfig = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
+  const deleteGoal = jest.fn().mockResolvedValue(undefined)
+  const requestManualContinue = jest.fn().mockReturnValue(true)
+  const setSubgoalDone = jest.fn(async (goalId: string, subgoalId: string, done: boolean) => ({
+    id: goalId,
+    status: "active",
+    subgoals: [{ id: subgoalId, text: "Plan", done, order: 0 }],
+  }))
+  const clearSubgoals = jest.fn(async (goalId: string) => ({
+    id: goalId,
+    status: "active",
+    subgoals: [],
+  }))
   return {
     getGoalRuntime: () => ({
       pauseGoal,
@@ -161,9 +178,58 @@ jest.mock("@/lib/goal/runtime", () => {
       createGoal,
       updateObjective,
       updateConfig,
+      deleteGoal,
+      requestManualContinue,
+      setSubgoalDone,
+      clearSubgoals,
     }),
   }
 })
+
+// The subgoal generator owns the model call and the PII gate (its own tests
+// cover both); the arm is checked for the settings it hands over and the
+// answer window around it.
+jest.mock("@/lib/goal/subgoal-generation", () => ({
+  generateGoalSubgoals: jest.fn(async (goalId: string) => ({
+    outcome: "generated",
+    goal: { id: goalId, subgoals: [{ id: "s1", text: "Plan", done: false, order: 0 }] },
+  })),
+}))
+const mockStoreSettings: { settings: unknown } = { settings: { id: "store-settings" } }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => mockStoreSettings },
+}))
+
+jest.mock("@/lib/goal/acceptance", () => ({
+  resolveGoalAcceptance: jest.fn(async (goalId: string, accepted: boolean) => ({
+    id: goalId,
+    status: accepted ? "completed" : "active",
+  })),
+}))
+
+const VERIFIER_BINDING = {
+  workflowId: "wf-verify",
+  versionId: "v-verify",
+  deploymentId: "d-verify",
+  deploymentRevision: 3,
+  dependencyLock: { lock: "host" },
+}
+jest.mock("@/lib/goal/verification", () => ({
+  retryPausedGoalVerification: jest.fn(),
+  disableGoalVerification: jest.fn(async (goalId: string) => ({ id: goalId, status: "active" })),
+  listGoalVerifierWorkflowOptions: jest.fn(async () => [
+    {
+      name: "Release checks",
+      binding: {
+        workflowId: "wf-verify",
+        versionId: "v-verify",
+        deploymentId: "d-verify",
+        deploymentRevision: 3,
+        dependencyLock: { lock: "host" },
+      },
+    },
+  ]),
+}))
 
 const mockGetGoal = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
 const mockGetActiveGoalForSession = jest.fn().mockResolvedValue({ id: "g1" })
@@ -1285,6 +1351,7 @@ describe("dispatchCommand: session_attach / session_detach", () => {
       "session.pin",
       "session.folder",
       "session.order",
+      "session.workspace",
       "folder.create",
       "folder.rename",
       "folder.reorder",
@@ -1592,6 +1659,330 @@ describe("dispatchCommand: goal_create / goal_update / goal_status", () => {
   it("goal_status requires goalId or sessionId", async () => {
     await expect(dispatchCommand("goal_status", {})).rejects.toThrow(
       /goal_status requires goalId or sessionId/
+    )
+  })
+})
+
+describe("dispatchCommand: goal lifecycle from a paired device", () => {
+  const acceptance = jest.requireMock("@/lib/goal/acceptance") as {
+    resolveGoalAcceptance: jest.Mock
+  }
+  const verification = jest.requireMock("@/lib/goal/verification") as {
+    retryPausedGoalVerification: jest.Mock
+    disableGoalVerification: jest.Mock
+    listGoalVerifierWorkflowOptions: jest.Mock
+  }
+
+  it("goal_accept records the verdict through resolveGoalAcceptance", async () => {
+    await expect(dispatchCommand("goal_accept", { goalId: "g1", accepted: true })).resolves.toEqual(
+      {
+        goal: { id: "g1", status: "completed" },
+      }
+    )
+    expect(acceptance.resolveGoalAcceptance).toHaveBeenCalledWith("g1", true)
+    await dispatchCommand("goal_accept", { goalId: "g1", accepted: false })
+    expect(acceptance.resolveGoalAcceptance).toHaveBeenLastCalledWith("g1", false)
+  })
+
+  it("goal_accept answers null when the goal is gone", async () => {
+    acceptance.resolveGoalAcceptance.mockResolvedValueOnce(null)
+    await expect(dispatchCommand("goal_accept", { goalId: "g1", accepted: true })).resolves.toEqual(
+      {
+        goal: null,
+      }
+    )
+  })
+
+  it("goal_accept rejects a missing goalId or a non-boolean verdict", async () => {
+    await expect(dispatchCommand("goal_accept", { accepted: true })).rejects.toThrow(
+      /goal_accept.goalId is required/
+    )
+    await expect(dispatchCommand("goal_accept", { goalId: "g1", accepted: "yes" })).rejects.toThrow(
+      /goal_accept.accepted must be a boolean/
+    )
+    await expect(dispatchCommand("goal_accept", { goalId: "g1" })).rejects.toThrow(
+      /goal_accept.accepted must be a boolean/
+    )
+    expect(acceptance.resolveGoalAcceptance).not.toHaveBeenCalled()
+  })
+
+  it("goal_delete deletes through the runtime and says so", async () => {
+    await expect(dispatchCommand("goal_delete", { goalId: "g1" })).resolves.toEqual({
+      goalId: "g1",
+      deleted: true,
+    })
+    expect(getGoalRuntime().deleteGoal).toHaveBeenCalledWith("g1")
+  })
+
+  it("goal_delete of a missing goal is a no-op answering deleted: false", async () => {
+    mockGetGoal.mockResolvedValueOnce(undefined)
+    await expect(dispatchCommand("goal_delete", { goalId: "gone" })).resolves.toEqual({
+      goalId: "gone",
+      deleted: false,
+    })
+    expect(getGoalRuntime().deleteGoal).not.toHaveBeenCalled()
+  })
+
+  it("goal_delete and goal_continue reject a missing or blank goalId", async () => {
+    await expect(dispatchCommand("goal_delete", {})).rejects.toThrow(
+      /goal_delete.goalId is required/
+    )
+    await expect(dispatchCommand("goal_delete", { goalId: "  " })).rejects.toThrow(
+      /goal_delete.goalId is required/
+    )
+    await expect(dispatchCommand("goal_continue", { goalId: 7 })).rejects.toThrow(
+      /goal_continue.goalId is required/
+    )
+    expect(getGoalRuntime().deleteGoal).not.toHaveBeenCalled()
+    expect(getGoalRuntime().requestManualContinue).not.toHaveBeenCalled()
+  })
+
+  it("goal_continue releases the held turn and reports whether one was waiting", async () => {
+    await expect(dispatchCommand("goal_continue", { goalId: "g1" })).resolves.toEqual({
+      continued: true,
+    })
+    expect(getGoalRuntime().requestManualContinue).toHaveBeenCalledWith("g1")
+    ;(getGoalRuntime().requestManualContinue as jest.Mock).mockReturnValueOnce(false)
+    await expect(dispatchCommand("goal_continue", { goalId: "g1" })).resolves.toEqual({
+      continued: false,
+    })
+  })
+
+  it("goal_verify_retry answers the settled outcome", async () => {
+    const outcome = { kind: "passed", result: { passed: true, summary: "ok" } }
+    verification.retryPausedGoalVerification.mockResolvedValueOnce(outcome)
+    await expect(dispatchCommand("goal_verify_retry", { goalId: "g1" })).resolves.toEqual({
+      state: "settled",
+      outcome,
+    })
+    expect(verification.retryPausedGoalVerification).toHaveBeenCalledWith("g1")
+  })
+
+  it("goal_verify_retry answers running when the verifier outlasts the answer window", async () => {
+    jest.useFakeTimers()
+    try {
+      let finish: (value: unknown) => void = () => undefined
+      verification.retryPausedGoalVerification.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve
+        })
+      )
+      const answer = dispatchCommand("goal_verify_retry", { goalId: "g1" })
+      // The window opens in the same tick the retry starts.
+      await waitFor(() => expect(verification.retryPausedGoalVerification).toHaveBeenCalled())
+      await jest.advanceTimersByTimeAsync(GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS)
+      await expect(answer).resolves.toEqual({ state: "running" })
+      finish({ kind: "stale" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("goal_verify_retry surfaces a retry the host refused", async () => {
+    verification.retryPausedGoalVerification.mockRejectedValueOnce(
+      new Error("Goal has no verification candidate to retry")
+    )
+    await expect(dispatchCommand("goal_verify_retry", { goalId: "g1" })).rejects.toThrow(
+      /no verification candidate/
+    )
+    await expect(dispatchCommand("goal_verify_retry", {})).rejects.toThrow(
+      /goal_verify_retry.goalId is required/
+    )
+  })
+
+  it("goal_verification_options lists the host's verifier catalog", async () => {
+    await expect(dispatchCommand("goal_verification_options", {})).resolves.toEqual({
+      options: [{ name: "Release checks", binding: VERIFIER_BINDING }],
+    })
+  })
+
+  it("goal_update with verificationWorkflow: null removes the verifier like the desktop does", async () => {
+    await dispatchCommand("goal_update", { goalId: "g1", config: { verificationWorkflow: null } })
+    expect(verification.disableGoalVerification).toHaveBeenCalledWith("g1")
+    // Nothing else was patched, so no separate config write.
+    expect(getGoalRuntime().updateConfig).not.toHaveBeenCalled()
+
+    await dispatchCommand("goal_update", {
+      goalId: "g1",
+      config: { verificationWorkflow: null, maxTurns: 4 },
+    })
+    expect(getGoalRuntime().updateConfig).toHaveBeenCalledWith("g1", { maxTurns: 4 })
+  })
+
+  it("goal_update leaves a finished goal's verifier alone", async () => {
+    mockGetGoal.mockResolvedValueOnce({ id: "g1", status: "completed" })
+    await dispatchCommand("goal_update", { goalId: "g1", config: { verificationWorkflow: null } })
+    expect(verification.disableGoalVerification).not.toHaveBeenCalled()
+  })
+
+  it("goal_update re-resolves a device-sent verifier against the host's catalog", async () => {
+    await dispatchCommand("goal_update", {
+      goalId: "g1",
+      config: {
+        verificationWorkflow: { versionId: "v-verify", dependencyLock: { lock: "forged" } },
+      },
+    })
+    expect(getGoalRuntime().updateConfig).toHaveBeenCalledWith("g1", {
+      verificationWorkflow: VERIFIER_BINDING,
+    })
+  })
+
+  it("goal_update refuses a verifier the host does not offer", async () => {
+    await expect(
+      dispatchCommand("goal_update", {
+        goalId: "g1",
+        config: { verificationWorkflow: { versionId: "v-other" } },
+      })
+    ).rejects.toThrow(/not a verifier this host offers/)
+    await expect(
+      dispatchCommand("goal_update", { goalId: "g1", config: { verificationWorkflow: "v-verify" } })
+    ).rejects.toThrow(/must name a verifier versionId/)
+    await expect(dispatchCommand("goal_update", { goalId: "g1", config: [1] })).rejects.toThrow(
+      /goal_update.config must be an object/
+    )
+    expect(getGoalRuntime().updateConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe("dispatchCommand: goal subgoals from a paired device", () => {
+  const generation = jest.requireMock("@/lib/goal/subgoal-generation") as {
+    generateGoalSubgoals: jest.Mock
+  }
+
+  afterEach(() => {
+    mockStoreSettings.settings = { id: "store-settings" }
+  })
+
+  it("goal_subgoals_generate runs the shared generator with this host's settings", async () => {
+    await expect(dispatchCommand("goal_subgoals_generate", { goalId: "g1" })).resolves.toEqual({
+      outcome: "generated",
+      goal: { id: "g1", subgoals: [{ id: "s1", text: "Plan", done: false, order: 0 }] },
+    })
+    expect(generation.generateGoalSubgoals).toHaveBeenCalledWith("g1", { id: "store-settings" })
+  })
+
+  it("goal_subgoals_generate falls back to the persisted settings before the store hydrates", async () => {
+    mockStoreSettings.settings = null
+    await dispatchCommand("goal_subgoals_generate", { goalId: "g1" })
+    const settings = generation.generateGoalSubgoals.mock.calls[0]![1] as { id?: string } | null
+    // The persisted row (or its defaults) — never the empty store.
+    expect(settings).not.toBeNull()
+    expect(settings).toEqual(expect.objectContaining({ id: expect.any(String) }))
+  })
+
+  it("goal_subgoals_generate passes unavailable / empty / missing through", async () => {
+    for (const answer of [
+      { outcome: "unavailable", goal: { id: "g1" } },
+      { outcome: "empty", goal: { id: "g1" } },
+      { outcome: "missing", goal: null },
+    ]) {
+      generation.generateGoalSubgoals.mockResolvedValueOnce(answer)
+      await expect(dispatchCommand("goal_subgoals_generate", { goalId: "g1" })).resolves.toEqual(
+        answer
+      )
+    }
+  })
+
+  it("goal_subgoals_generate answers running when the model outlasts the answer window", async () => {
+    jest.useFakeTimers()
+    try {
+      let finish: (value: unknown) => void = () => undefined
+      generation.generateGoalSubgoals.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve
+        })
+      )
+      const answer = dispatchCommand("goal_subgoals_generate", { goalId: "g1" })
+      await waitFor(() => expect(generation.generateGoalSubgoals).toHaveBeenCalled())
+      await jest.advanceTimersByTimeAsync(GOAL_SUBGOALS_GENERATE_ANSWER_WINDOW_MS)
+      await expect(answer).resolves.toEqual({ outcome: "running" })
+      finish({ outcome: "generated", goal: { id: "g1" } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("goal_subgoals_generate rejects a missing goalId and surfaces a failed run", async () => {
+    await expect(dispatchCommand("goal_subgoals_generate", {})).rejects.toThrow(
+      /goal_subgoals_generate.goalId is required/
+    )
+    expect(generation.generateGoalSubgoals).not.toHaveBeenCalled()
+    generation.generateGoalSubgoals.mockRejectedValueOnce(new Error("db closed"))
+    await expect(dispatchCommand("goal_subgoals_generate", { goalId: "g1" })).rejects.toThrow(
+      /db closed/
+    )
+  })
+
+  it("goal_subgoal_mark sets the wanted state and says whether it changed", async () => {
+    mockGetGoal.mockResolvedValueOnce({
+      id: "g1",
+      status: "active",
+      subgoals: [{ id: "s1", text: "Plan", done: false, order: 0 }],
+    })
+    await expect(
+      dispatchCommand("goal_subgoal_mark", { goalId: "g1", subgoalId: "s1", done: true })
+    ).resolves.toEqual({
+      goal: {
+        id: "g1",
+        status: "active",
+        subgoals: [{ id: "s1", text: "Plan", done: true, order: 0 }],
+      },
+      changed: true,
+    })
+    expect(getGoalRuntime().setSubgoalDone).toHaveBeenCalledWith("g1", "s1", true)
+  })
+
+  it("goal_subgoal_mark of an already-set or unknown step answers changed: false", async () => {
+    mockGetGoal.mockResolvedValueOnce({
+      id: "g1",
+      status: "active",
+      subgoals: [{ id: "s1", text: "Plan", done: true, order: 0 }],
+    })
+    const replay = await dispatchCommand("goal_subgoal_mark", {
+      goalId: "g1",
+      subgoalId: "s1",
+      done: true,
+    })
+    expect(replay).toEqual(expect.objectContaining({ changed: false }))
+    mockGetGoal.mockResolvedValueOnce({ id: "g1", status: "active", subgoals: [] })
+    const unknown = await dispatchCommand("goal_subgoal_mark", {
+      goalId: "g1",
+      subgoalId: "s9",
+      done: true,
+    })
+    expect(unknown).toEqual(expect.objectContaining({ changed: false }))
+  })
+
+  it("goal_subgoal_mark rejects a missing goalId, subgoalId or a non-boolean done", async () => {
+    await expect(
+      dispatchCommand("goal_subgoal_mark", { subgoalId: "s1", done: true })
+    ).rejects.toThrow(/goal_subgoal_mark.goalId is required/)
+    await expect(
+      dispatchCommand("goal_subgoal_mark", { goalId: "g1", subgoalId: " ", done: true })
+    ).rejects.toThrow(/goal_subgoal_mark.subgoalId is required/)
+    await expect(
+      dispatchCommand("goal_subgoal_mark", { goalId: "g1", subgoalId: "s1", done: "yes" })
+    ).rejects.toThrow(/goal_subgoal_mark.done must be a boolean/)
+    await expect(
+      dispatchCommand("goal_subgoal_mark", { goalId: "g1", subgoalId: "s1" })
+    ).rejects.toThrow(/goal_subgoal_mark.done must be a boolean/)
+    expect(getGoalRuntime().setSubgoalDone).not.toHaveBeenCalled()
+  })
+
+  it("goal_subgoals_clear removes the checklist through the runtime", async () => {
+    await expect(dispatchCommand("goal_subgoals_clear", { goalId: "g1" })).resolves.toEqual({
+      goal: { id: "g1", status: "active", subgoals: [] },
+    })
+    expect(getGoalRuntime().clearSubgoals).toHaveBeenCalledWith("g1")
+  })
+
+  it("goal_subgoals_clear answers null for a goal that is gone, and needs a goalId", async () => {
+    ;(getGoalRuntime().clearSubgoals as jest.Mock).mockResolvedValueOnce(null)
+    await expect(dispatchCommand("goal_subgoals_clear", { goalId: "gone" })).resolves.toEqual({
+      goal: null,
+    })
+    await expect(dispatchCommand("goal_subgoals_clear", { goalId: 3 })).rejects.toThrow(
+      /goal_subgoals_clear.goalId is required/
     )
   })
 })

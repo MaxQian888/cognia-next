@@ -34,6 +34,7 @@ jest.mock("@/stores/project/project-store", () => ({
 import {
   __resetInstalledForTests,
   excludeLiveKeys,
+  GOAL_EVENTS_PAGE_SIZE,
   HEARTBEAT_FIRST_SYNC_WINDOW_MS,
   HEARTBEAT_PAGE_SIZE,
   installDesktopSyncSource,
@@ -1702,5 +1703,135 @@ describe("the desktop pet readers (ADR-0219)", () => {
     const delta = await readDexieDelta("petActivityLog", first)
     expect(delta.rows).toEqual([expect.objectContaining({ id: String(second), kind: "played" })])
     expect(delta.next_since).toBe(second)
+  })
+})
+
+describe("the goal event log reader (goalEvents)", () => {
+  const { recordTombstones } = jest.requireActual("./tombstones") as typeof import("./tombstones")
+
+  const ev = (id: string, ts: number, goalId = "g1") => ({
+    id,
+    goalId,
+    kind: "turn_started" as const,
+    ts,
+    payload: { kind: "turn_started" as const, turnNumber: ts },
+  })
+  const ids = (rows: unknown[]) => rows.map((row) => (row as { id: string }).id)
+
+  beforeEach(async () => {
+    await Promise.all([getDb().chatGoalEvents.clear(), getDb().syncTombstones.clear()])
+  })
+
+  it("pages on ts with the event id as tie-breaker, never repeating or skipping one", async () => {
+    // Two full pages plus a few, every event of the last page boundary sharing one ts.
+    const total = GOAL_EVENTS_PAGE_SIZE * 2 + 3
+    await getDb().chatGoalEvents.bulkPut(
+      Array.from({ length: total }, (_, i) =>
+        ev(`e${String(i).padStart(5, "0")}`, Math.min(i + 1, GOAL_EVENTS_PAGE_SIZE + 10))
+      )
+    )
+    const seen: string[] = []
+    let since = 0
+    let cursor = ""
+    for (let page = 0; page < 5; page++) {
+      const delta = await readDexieDelta("goalEvents", since, undefined, undefined, cursor)
+      expect(delta.rows.length).toBeLessThanOrEqual(GOAL_EVENTS_PAGE_SIZE)
+      seen.push(...ids(delta.rows))
+      since = delta.next_since
+      cursor = delta.next_cursor!
+      if (!delta.has_more) break
+    }
+    expect(seen).toHaveLength(total)
+    expect(new Set(seen).size).toBe(total)
+    // A pull at the settled cursor carries nothing.
+    const settled = await readDexieDelta("goalEvents", since, undefined, undefined, cursor)
+    expect(settled.rows).toEqual([])
+    expect(settled.has_more).toBe(false)
+  })
+
+  it("carries only events appended after the saved cursor", async () => {
+    await getDb().chatGoalEvents.bulkPut([ev("a", 10), ev("b", 20)])
+    const first = await readDexieDelta("goalEvents", 0, undefined, undefined, "")
+    expect(ids(first.rows)).toEqual(["a", "b"])
+    expect(first.next_since).toBe(20)
+    await getDb().chatGoalEvents.bulkPut([ev("c", 20, "g2"), ev("d", 30)])
+    const next = await readDexieDelta(
+      "goalEvents",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    // `c` shares b's millisecond but sorts after it, so it is not lost.
+    expect(ids(next.rows)).toEqual(["c", "d"])
+  })
+
+  it("empties judge_parse_failed.raw on the wire and nothing else", async () => {
+    await getDb().chatGoalEvents.bulkPut([
+      {
+        id: "pf",
+        goalId: "g1",
+        kind: "judge_parse_failed",
+        ts: 5,
+        payload: { kind: "judge_parse_failed", raw: "secret judge output", failureCount: 1 },
+      },
+      {
+        id: "je",
+        goalId: "g1",
+        kind: "judge_evaluated",
+        ts: 6,
+        payload: { kind: "judge_evaluated", done: false, reason: "keep going", judgeTokens: 2 },
+      },
+    ])
+    for (const delta of [
+      await readDexieDelta("goalEvents", 0, undefined, undefined, ""),
+      await readDexieDelta("goalEvents", 0),
+    ]) {
+      expect(JSON.stringify(delta.rows)).not.toContain("secret judge output")
+      expect(delta.rows).toEqual([
+        expect.objectContaining({
+          id: "pf",
+          payload: expect.objectContaining({ raw: "", failureCount: 1 }),
+        }),
+        expect.objectContaining({
+          id: "je",
+          payload: expect.objectContaining({ reason: "keep going" }),
+        }),
+      ])
+    }
+    // The host's own row keeps it.
+    expect((await getDb().chatGoalEvents.get("pf"))?.payload).toMatchObject({
+      raw: "secret judge output",
+    })
+  })
+
+  it("serves a client without the paged cursor in bounded pages that keep a millisecond whole", async () => {
+    const boundaryTs = GOAL_EVENTS_PAGE_SIZE
+    await getDb().chatGoalEvents.bulkPut([
+      ...Array.from({ length: GOAL_EVENTS_PAGE_SIZE - 1 }, (_, i) =>
+        ev(`a${String(i).padStart(4, "0")}`, i + 1)
+      ),
+      // Three events in the boundary millisecond, then one more page's worth.
+      ev("tie-1", boundaryTs),
+      ev("tie-2", boundaryTs),
+      ev("tie-3", boundaryTs),
+      ev("after", boundaryTs + 1),
+    ])
+    const first = await readDexieDelta("goalEvents", 0)
+    expect(first.rows).toHaveLength(GOAL_EVENTS_PAGE_SIZE + 2)
+    expect(ids(first.rows)).toEqual(expect.arrayContaining(["tie-1", "tie-2", "tie-3"]))
+    expect(first.next_since).toBe(boundaryTs)
+    expect(first.has_more).toBe(true)
+    const second = await readDexieDelta("goalEvents", first.next_since)
+    expect(ids(second.rows)).toEqual(["after"])
+    expect(second.has_more).toBe(false)
+  })
+
+  it("records no tombstones of its own: a goal's deletion travels on the goals table", async () => {
+    await recordTombstones("goals", ["g1"], 50)
+    const delta = await readDexieDelta("goalEvents", 0, undefined, undefined, "")
+    expect(delta.deleted_ids).toEqual([])
+    const goals = await readDexieDelta("goals", 0)
+    expect(goals.deleted_ids).toEqual(["g1"])
   })
 })

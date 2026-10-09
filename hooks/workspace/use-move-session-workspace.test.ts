@@ -15,6 +15,25 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// null = no Host takes the session, so the move is written on this device.
+const enqueue = jest.fn(async (..._a: unknown[]): Promise<unknown> => null)
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueHostStateIntentIfAvailable: (...a: unknown[]) => enqueue(...a),
+}))
+
+// Folders the hook reads through `getDb().sessionFolders.get`; the rest of the
+// schema module stays real.
+const folderRows = new Map<string, { id: string; projectId?: string }>()
+jest.mock("@/lib/db/schema", () => {
+  const actual = jest.requireActual("@/lib/db/schema")
+  return {
+    ...actual,
+    getDb: () => ({
+      sessionFolders: { get: async (id: string) => folderRows.get(id) },
+    }),
+  }
+})
+
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { useProjectStore } from "@/stores/project/project-store"
 import {
@@ -49,7 +68,9 @@ function seed(running = false) {
 }
 
 beforeEach(() => {
+  folderRows.clear()
   updateSession.mockReset().mockResolvedValue(undefined)
+  enqueue.mockReset().mockResolvedValue(null)
   toastError.mockClear()
   toastSuccess.mockClear()
 })
@@ -80,6 +101,29 @@ describe("useMoveSessionWorkspace", () => {
     expect(toastSuccess).toHaveBeenCalledWith("Conversation moved")
   })
 
+  it("hands the move to the Host on a paired client and writes nothing here", async () => {
+    seed()
+    enqueue.mockResolvedValueOnce({ id: "job-1" })
+    const { result } = renderHook(() => useMoveSessionWorkspace())
+
+    let moved = false
+    await act(async () => {
+      moved = await result.current.move(session, "project-b")
+    })
+
+    expect(moved).toBe(true)
+    expect(enqueue).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.workspace", projectId: "project-b" },
+    })
+    expect(updateSession).not.toHaveBeenCalled()
+    expect(
+      useProjectStore.getState().projects.find((project) => project.id === "project-a")?.sessionIds
+    ).toEqual(["s1"])
+    expect(toastSuccess).toHaveBeenCalledWith("Sent to your Host, which will move the conversation")
+    expect(result.current.busy).toBe(false)
+  })
+
   it("hydrates the workspace store before it writes the rosters", async () => {
     seed()
     const order: string[] = []
@@ -101,6 +145,56 @@ describe("useMoveSessionWorkspace", () => {
     })
 
     expect(order).toEqual(["load", "write"])
+  })
+
+  it("unfiles the conversation when its folder belongs to the old workspace", async () => {
+    seed()
+    folderRows.set("f-a", { id: "f-a", projectId: "project-a" })
+    const { result } = renderHook(() => useMoveSessionWorkspace())
+
+    await act(async () => {
+      await result.current.move({ ...session, folderId: "f-a" }, "project-b")
+    })
+
+    const [, patch] = updateSession.mock.calls[0] as [string, Record<string, unknown>]
+    expect(patch).toHaveProperty("folderId", undefined)
+    expect("folderId" in patch).toBe(true)
+  })
+
+  it("keeps the folder when it can hold the conversation in its new workspace", async () => {
+    seed()
+    folderRows.set("f-any", { id: "f-any" })
+    folderRows.set("f-b", { id: "f-b", projectId: "project-b" })
+    const { result } = renderHook(() => useMoveSessionWorkspace())
+
+    await act(async () => {
+      await result.current.move({ ...session, folderId: "f-any" }, "project-b")
+    })
+    await act(async () => {
+      await result.current.move({ ...session, folderId: "f-b" }, "project-b")
+    })
+    await act(async () => {
+      await result.current.move({ ...session, folderId: "f-missing" }, "project-b")
+    })
+
+    expect(updateSession).toHaveBeenCalledTimes(3)
+    for (const call of updateSession.mock.calls) {
+      expect("folderId" in (call[1] as Record<string, unknown>)).toBe(false)
+    }
+  })
+
+  it("refuses an archived conversation and writes nothing", async () => {
+    seed()
+    const { result } = renderHook(() => useMoveSessionWorkspace())
+
+    let moved = true
+    await act(async () => {
+      moved = await result.current.move({ ...session, archivedAt: 123 }, "project-b")
+    })
+
+    expect(moved).toBe(false)
+    expect(updateSession).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledTimes(1)
   })
 
   it("refuses a running conversation and writes nothing", async () => {
@@ -168,6 +262,13 @@ describe("useSessionWorkspaceMoveMenu", () => {
     seed()
     useProjectStore.setState((state) => ({ projects: state.projects.slice(0, 1) }))
     const { result } = renderHook(() => useSessionWorkspaceMoveMenu(session))
+    expect(result.current.canMoveWorkspace).toBe(false)
+  })
+
+  it("cannot move an archived conversation, which stays frozen in place", () => {
+    seed()
+    const { result } = renderHook(() => useSessionWorkspaceMoveMenu({ ...session, archivedAt: 1 }))
+    expect(result.current.workspaceTargets).toHaveLength(2)
     expect(result.current.canMoveWorkspace).toBe(false)
   })
 })

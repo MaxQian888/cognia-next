@@ -347,6 +347,11 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     throw error
   }
 
+  // The agent's default runtime (ADR-0220), set before anything can send on
+  // the conversation. A default whose target is gone keeps the app default and
+  // says so; it never picks a different agent for the user.
+  if (session.characterId) await applyCharacterDefaultRuntime(session.id, session.characterId)
+
   if (partial?.activate ?? true) {
     useChatStore.getState().setActiveSession(session.id)
     // Fourth side effect: the conversation list has to *show* it. Activation
@@ -362,4 +367,38 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: session.id })
 
   return session
+}
+
+/**
+ * Pin a new conversation to its agent's default runtime. Lazy imports: the
+ * runtime stores and the host client are only needed when an agent names a
+ * runtime, which most conversations never do.
+ */
+async function applyCharacterDefaultRuntime(sessionId: string, characterId: string): Promise<void> {
+  const agent = await resolveCharacterById(characterId)
+  if (!agent?.runtime) return
+  const [{ applyAgentRuntimeToSession }, { useAgentRuntimeStore }, { useExternalAgentStore }] =
+    await Promise.all([
+      import("@/lib/agents/runtime-binding"),
+      import("@/stores/agent"),
+      import("@/stores/agent/external-agent-store"),
+    ])
+  const { selectExternalAgent } = await import("@/lib/agent/external-agent-selection")
+  const { getRemoteHostConfig } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-host-configs")
+  const resolution = await applyAgentRuntimeToSession(sessionId, agent, {
+    hasLocalExternalAgent: (agentId) => {
+      const external = useExternalAgentStore.getState()
+      return external.enabled && external.agents[agentId]?.enabled === true
+    },
+    getHostConfig: getRemoteHostConfig,
+    setSessionRuntimeRef: (id, ref) =>
+      useAgentRuntimeStore.getState().setSessionRuntimeRef(id, ref),
+    selectExternalAgent,
+  })
+  if (resolution && !resolution.ok) {
+    dispatchDiagnostic(
+      createDiagnostic("agentRuntimeUnavailable", { source: "chat", message: resolution.reason })
+    )
+  }
 }

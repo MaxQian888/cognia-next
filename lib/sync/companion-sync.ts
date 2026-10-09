@@ -45,7 +45,7 @@ import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncSessionState } from "./handlers/session-state"
 import { syncSessionFolders } from "./handlers/session-folders"
 import { syncExecutionRuns } from "./handlers/execution-runs"
-import { syncGoals } from "./handlers/goals"
+import { syncGoalEvents, syncGoals } from "./handlers/goals"
 import { syncPlans } from "./handlers/plans"
 import { syncMcpServers } from "./handlers/mcp-servers"
 import { syncMemories } from "./handlers/memory"
@@ -198,6 +198,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // Companion read-mostly views (Goals console). Mobile mirrors these so the
   // phone can show goal progress from Dexie offline; authored on the desktop.
   { table: "goals", stage: "interactive", run: syncGoals },
+  // The goal event log behind the detail's Activity and Overview, the judge
+  // notes and `/goal status`. After `goals`: an event names its goal, and a
+  // goal tombstone applied first takes that goal's mirrored events with it.
+  { table: "goalEvents", stage: "interactive", run: syncGoalEvents, after: ["goals"] },
   // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
   // the desktop task board (tasks + team-meta rows) so the mobile workspace
   // can render the kanban offline; controls travel back as Companion RPC.
@@ -445,6 +449,11 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   settings: syncDomain("tombstone", "internal"),
   conversationOverrides: syncDomain("tombstone"),
   goals: syncDomain("tombstone"),
+  // Appended, never edited; paged on `ts` + id. No tombstones of its own: a
+  // deleted goal's tombstone takes its events, and the per-goal cap is
+  // mirrored client-side. `confidential`: judge verdicts and verifier
+  // summaries about the objective.
+  goalEvents: syncDomain("ttl", "confidential", "opaque"),
   plans: syncDomain("tombstone"),
   memories: syncDomain("tombstone"),
   executionRuns: syncDomain("append-only", "confidential", "opaque"),

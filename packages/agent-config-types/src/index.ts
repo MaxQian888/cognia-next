@@ -2255,7 +2255,19 @@ export type SdkResultSubtype = (typeof SDK_RESULT_SUBTYPES)[number]
  *     reachable only by drilling in from the parent turn's `SubagentPart`.
  *     Carries no `branchSeed`, so it has no continuation path.
  */
-export type SessionKind = "direct" | "team" | "workflow-editor" | "resource-workbench" | "subagent"
+export type SessionKind =
+  | "direct"
+  | "team"
+  | "workflow-editor"
+  | "resource-workbench"
+  | "subagent"
+  /**
+   * The conversation behind "Build with AI" on `/agents` (ADR-0220). Always
+   * `visibility: "embedded"`: it is reached from the agent draft it builds,
+   * never from a list. Runs on the runtime and model the user picked, with
+   * the `agent_builder_*` tools and the builder protocol added to its sends.
+   */
+  | "agent-builder"
 
 export type SessionVisibility = "standard" | "embedded"
 
@@ -2672,6 +2684,11 @@ export interface ChatSession {
   projectRole?: ProjectSessionRole
   /** Coordinator-owned bookkeeping; present only when `projectRole === "thread"`. */
   projectThread?: ProjectThreadState
+  /**
+   * The agent draft an `"agent-builder"` session is building (ADR-0220).
+   * Present only on that kind. Non-indexed: drafts are found through `kind`.
+   */
+  agentBuilder?: AgentBuilderSessionState
   /** The source message id (in the parent session) this branch was taken at. */
   branchedFromMessageId?: string
   /** How the branch was created: a verbatim copy or an LLM summary seed. */
@@ -3106,10 +3123,16 @@ export type ConversationGroupBy = "workspace" | "team" | "date" | "agent" | "non
  * - `"oldest"` — last activity, oldest first.
  * - `"created"` — creation time, newest first. Diverges from `"recent"` for
  *   long-running conversations that were revived.
+ * - `"createdAsc"` — creation time, oldest first.
  * - `"title"` — title A→Z, locale-aware.
+ * - `"titleDesc"` — title Z→A, locale-aware.
  * - `"unread"` — unread conversations first, then by last activity.
+ *
+ * The two reverse orders exist so a sortable column header can flip on a
+ * second click, as last activity always could (`recent` ⇄ `oldest`).
  */
-export type ConversationSortBy = "recent" | "oldest" | "created" | "title" | "unread"
+export type ConversationSortBy =
+  "recent" | "oldest" | "created" | "createdAsc" | "title" | "titleDesc" | "unread"
 
 /** Which conversation kinds a filter admits. `"all"` = no kind restriction. */
 export type ConversationKindFilter = "all" | "dm" | "team"
@@ -6646,6 +6669,15 @@ export interface Character {
    */
   providerId?: string
   /**
+   * The runtime a new conversation with this agent starts on (ADR-0220):
+   * Cognia's built-in lane, a locally configured external agent, or a
+   * configuration the paired host owns. Absent means the app default. Applied
+   * once, by `startNewSession`; the composer can still switch a conversation.
+   * Machine-local (an external agent id names this device's configuration),
+   * so account sync keeps it on the device and packs never export it.
+   */
+  runtime?: CharacterRuntimeBinding
+  /**
    * Per-character account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies credentials for every session bound to this character — unless
    * the session itself sets `ChatSession.accountId`, which wins. Undefined here
@@ -6945,6 +6977,56 @@ export interface Character {
 
 /** Product-facing name for Character. Kept structurally compatible on purpose. */
 export type AgentProfile = Character
+
+/**
+ * Where an agent's new conversations run (ADR-0220). Mirrors the three lanes
+ * of `AgentRuntimeRef` (`lib/ai/agent/runtime-catalog/types.ts`) without the
+ * host admission stamp: a stored default outlives any one revision of a host
+ * configuration, so the stamp is re-read when the binding is applied.
+ * `name` is a cached label for when the target is not resolvable here.
+ */
+export type CharacterRuntimeBinding =
+  | { kind: "builtin" }
+  | { kind: "external"; agentId: string; name?: string }
+  | { kind: "host"; configId: string; name?: string }
+
+/**
+ * Everything an agent draft may hold: the profile a `createCharacter` call
+ * accepts, minus identity, timestamps and pack/variant lineage, which only the
+ * store assigns.
+ */
+export type AgentBuilderDraft = Partial<
+  Omit<
+    Character,
+    | "id"
+    | "createdAt"
+    | "updatedAt"
+    | "isBuiltIn"
+    | "variant"
+    | "sourcePluginId"
+    | "sourcePackId"
+    | "clonedFromPackCharacterId"
+    | "packVersionAtClone"
+    | "pristineSnapshot"
+  >
+>
+
+/** The state an `"agent-builder"` session carries (ADR-0220). */
+export interface AgentBuilderSessionState {
+  draft: AgentBuilderDraft
+  /** Bumped on every draft write, by either side. */
+  revision: number
+  /**
+   * Who wrote the current revision. The draft panel adopts `"agent"` writes
+   * and ignores the echo of its own `"user"` writes, so an edit in progress is
+   * never replaced by a stale copy of itself.
+   */
+  editedBy: "agent" | "user"
+  status: "drafting" | "created"
+  /** Set once `status === "created"`. */
+  createdCharacterId?: string
+  updatedAt: number
+}
 
 /**
  * Frozen snapshot of every pack-managed field on a character row at the

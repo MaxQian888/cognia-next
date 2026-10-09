@@ -42,6 +42,7 @@ import {
   SessionHandoffLockedError,
   type SessionWriteOperation,
 } from "@/lib/chat/session-write-guard"
+import { hostSessionMoveRejection, planHostSessionMove } from "./host-state-session-move"
 
 export const HOST_STATE_META_ID = "singleton" as const
 export const HOST_STATE_LEASE_TTL_MS = 30_000
@@ -99,15 +100,29 @@ export type HostStateStoreErrorCode =
   | "host_state_session_not_found"
   | "host_state_message_not_found"
   | "host_state_folder_not_found"
+  | "host_state_session_move_refused"
   | "stale_host_generation"
 
 export class HostStateStoreError extends Error {
   constructor(
     readonly code: HostStateStoreErrorCode,
-    message = code
+    message: string = code
   ) {
     super(message)
     this.name = "HostStateStoreError"
+  }
+}
+
+/**
+ * A workspace move that was valid at validation and is not at commit: a turn
+ * started, the destination was deleted or the folder moved in between. The
+ * transaction rolls back; `rejection` is the receipt the service commits in
+ * its place, the same one validation would have produced.
+ */
+export class HostSessionMoveRefusedError extends HostStateStoreError {
+  constructor(readonly rejection: { code: string; message: string }) {
+    super("host_state_session_move_refused", rejection.message)
+    this.name = "HostSessionMoveRefusedError"
   }
 }
 
@@ -400,6 +415,9 @@ export async function commitHostStateAction(
       db.messageMediaRefs,
       db.agentCanonicalSessions,
       db.threadHandoffTickets,
+      // A `session.workspace` move re-plans against the destination workspace
+      // inside this transaction (and the session's folder, already below).
+      db.projects,
       // The folder intents write `sessionFolders`, unfile member sessions and
       // tombstone a deleted folder, all inside this ledger transaction.
       ...folderWriteTables(db),
@@ -677,6 +695,20 @@ export async function validateHostStateBusinessAction(
       throw error
     }
   }
+  if (action.action.kind === "session.workspace") {
+    // The Host's own rows decide, not the client's view of them: the same
+    // planner a desktop move runs, against this session, this workspace and
+    // this folder, with the channel's turn standing in for "running" when the
+    // turn was started by a client rather than on this desktop.
+    const channel = await db.hostStateChannels.get(action.channel)
+    const plan = await planHostSessionMove(db, {
+      session,
+      projectId: action.action.projectId,
+      ...(channel?.state.kind === "session" ? { turn: channel.state.turn } : {}),
+      now: Date.now(),
+    })
+    return plan.ok ? undefined : hostSessionMoveRejection(plan.reason)
+  }
   if (action.action.kind === "message.enqueue") {
     const existing = await db.messages.get(action.action.messageId)
     const existingActionId = (existing?.metadata?.hostState as { actionId?: unknown } | undefined)
@@ -774,6 +806,7 @@ function sessionWriteOperationFor(
     case "session.pin":
     case "session.folder":
     case "session.order":
+    case "session.workspace":
       return "metadata"
     case "session.delete":
       return "delete"
@@ -1086,6 +1119,33 @@ async function persistBusinessProjection(
           row.manualOrderSection = sectionKey
           stampOrganizationalWrite(row, now)
         })
+      return
+    }
+    // A workspace move, re-planned here against the rows this transaction
+    // holds: a turn that started, a workspace that was deleted or a lock that
+    // was taken since validation refuses the write and rolls the ledger back.
+    // Field for field the write a desktop move makes through `updateSession`
+    // (`hooks/workspace/use-move-session-workspace.ts`). The rosters are
+    // relinked by the service once this commits (`relinkMovedSessionRoster`).
+    case "session.workspace": {
+      assertSessionWritable(session, "metadata")
+      const channel = await db.hostStateChannels.get(action.channel)
+      const plan = await planHostSessionMove(db, {
+        session: session!,
+        projectId: action.action.projectId,
+        ...(channel?.state.kind === "session" ? { turn: channel.state.turn } : {}),
+        now,
+      })
+      if (!plan.ok) {
+        throw new HostSessionMoveRefusedError(hostSessionMoveRejection(plan.reason))
+      }
+      await db.sessions.update(action.sessionId, {
+        projectId: plan.projectId,
+        executionContext: plan.executionContext,
+        // A folder of the old workspace cannot hold it any more.
+        ...(plan.clearFolder ? { folderId: undefined } : {}),
+        updatedAt: now,
+      })
       return
     }
     case "draft.replace": {

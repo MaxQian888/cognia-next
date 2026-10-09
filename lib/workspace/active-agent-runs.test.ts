@@ -35,6 +35,7 @@ function deps(runs: IssueRun[], over: Partial<ActiveAgentRunDeps> = {}): ActiveA
     getIssue: async (id) =>
       ({ id, identifier: `MERC-${id.slice(-1)}`, title: `Issue ${id}` }) as Issue,
     latestTaskSessionId: async () => undefined,
+    taskAgentId: async () => "char 1",
     ...over,
   }
 }
@@ -92,9 +93,17 @@ describe("listActiveAgentRuns (unit)", () => {
     ])
   })
 
-  it("falls back to the Character task board before an attempt has a session", async () => {
+  it("falls back to the agent's task board before an attempt has a session", async () => {
     const [entry] = await listActiveAgentRuns("w1", deps([run({})]))
-    expect(entry).toMatchObject({ href: "/settings?section=characters", linkKind: "agent-board" })
+    expect(entry).toMatchObject({ href: "/agents?id=char+1&mode=tasks", linkKind: "agent-board" })
+  })
+
+  it("falls back to the agents console when the task row is gone", async () => {
+    const [entry] = await listActiveAgentRuns(
+      "w1",
+      deps([run({})], { taskAgentId: async () => undefined })
+    )
+    expect(entry).toMatchObject({ href: "/agents", linkKind: "agent-board" })
   })
 
   it("counts one entry per issue (the newest active run) and skips terminal rows", async () => {

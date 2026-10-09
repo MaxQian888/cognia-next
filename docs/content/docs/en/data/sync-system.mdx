@@ -36,7 +36,7 @@ That stage determines how soon the client receives a table after pairing or resu
 | Scenario | Tables | Stage |
 | --- | --- | --- |
 | Open the app and see the session list | `settings`, `characters`, `sessions`, `sessionState`, `sessionFolders`, `conversationOverrides` | `critical` |
-| Read a conversation and its runs | `messages` (paged), `executionRuns`, `executionRunBindings`, `workflowRuns`, `plans`, `goals`, `agentTasks`, `agentTaskAttempts`, `agentTeamBoard` | `interactive` |
+| Read a conversation and its runs | `messages` (paged), `executionRuns`, `executionRunBindings`, `workflowRuns`, `plans`, `goals`, `goalEvents` (paged), `agentTasks`, `agentTaskAttempts`, `agentTeamBoard` | `interactive` |
 | Triage the inbox | `connectorDrafts`, `outboundQueue`, `connectorHeartbeats`, `projects`, `botInstallations`, `botEventDeliveries` | `interactive` |
 | Browse issues | `labels`, `issueProjects`, `issues`, `issueEvents`, `issueRuns`, `issueCycles` | `background` |
 | Twins, characters and templates | `twinProfile`, `twins`, `twinDrafts`, `chatTemplates`, `templateDefinitions`, `templatePackages`, `templateInstances` | `background` |
@@ -216,15 +216,15 @@ Workflow run events publish directly and skip the coalescer.
 ## Tables & Cursor Strategy
 
 The 48 tables are `COMPANION_SYNC_PROTOCOL_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`,
-and the same set is `default_tables()` in `sync_registry.rs`. Two wire names differ from their Dexie
-table: `goals` is `chatGoals`, `plans` is `agentPlans`.
+and the same set is `default_tables()` in `sync_registry.rs`. Three wire names differ from their Dexie
+table: `goals` is `chatGoals`, `goalEvents` is `chatGoalEvents`, `plans` is `agentPlans`.
 
 ### Stages and dependencies
 
 | Stage | Tables | `after` edges |
 | --- | --- | --- |
 | `critical` (6) | settings, characters, sessions, conversationOverrides, sessionState, sessionFolders | sessions → characters |
-| `interactive` (15) | messages, agentTasks, agentTaskAttempts, plans, goals, agentTeamBoard, executionRuns, workflowRuns, connectorDrafts, outboundQueue, projects, botInstallations, botEventDeliveries, executionRunBindings, connectorHeartbeats | agentTaskAttempts → agentTasks; botEventDeliveries → botInstallations; executionRunBindings → executionRuns |
+| `interactive` (16) | messages, agentTasks, agentTaskAttempts, plans, goals, goalEvents, agentTeamBoard, executionRuns, workflowRuns, connectorDrafts, outboundQueue, projects, botInstallations, botEventDeliveries, executionRunBindings, connectorHeartbeats | agentTaskAttempts → agentTasks; goalEvents → goals; botEventDeliveries → botInstallations; executionRunBindings → executionRuns |
 | `background` (27) | skills, workflows, twinProfile, twins, twinDrafts, labels, issueProjects, issues, issueEvents, issueRuns, issueCycles, plugins, adapterInstances, platformIdentities, connectorCallbackBindings, workflowDeployments, memories, mcpServers, terminalHistory, chatTemplates, templateDefinitions, templatePackages, templateInstances, agentTeams, agentTeammates, agentTeamTasks, botDefinitions | twins → twinProfile; twinDrafts → twins; issueProjects → labels; issues → issueProjects; issueEvents, issueRuns, issueCycles → issues; platformIdentities, connectorCallbackBindings, workflowDeployments → adapterInstances; templateInstances → templateDefinitions + templatePackages; agentTeammates, agentTeamTasks → agentTeams |
 
 `runHandlerGraph` starts a table once the tables it names in `after` have finished, with at most
@@ -237,7 +237,7 @@ handler. Results come back in registry order.
 | Kind | Tables | How it advances |
 | --- | --- | --- |
 | Watermark | 44 tables | `since` is the highest `updatedAt` (else `createdAt`) seen, or the newest tombstone's `deletedAt`, whichever is later. The Host returns rows above it |
-| Opaque, paged | `messages`, `executionRuns`, `workflowRuns`, `connectorHeartbeats` (`PAGED_SYNC_TABLES`) | The client sends `cursor` (empty string to start); the Host returns `next_cursor` and `has_more`. The cursor is JSON of version, table, position, id and tombstone watermark, capped at 4096 bytes |
+| Opaque, paged | `messages`, `executionRuns`, `workflowRuns`, `connectorHeartbeats`, `goalEvents` (`PAGED_SYNC_TABLES`) | The client sends `cursor` (empty string to start); the Host returns `next_cursor` and `has_more`. The cursor is JSON of version, table, position, id and tombstone watermark, capped at 4096 bytes |
 
 Paged tables, as read by `readCursorDelta`:
 
@@ -250,6 +250,9 @@ Paged tables, as read by `readCursorDelta`:
   rows are projected for sync.
 - **`connectorHeartbeats`**: pages of 500 by `at`; the first sync looks back one hour. The client
   sweeps mirrored heartbeats older than 48 hours.
+- **`goalEvents`**: pages of 500 by `ts` and event id, full history (the Host keeps the newest 5000
+  events per goal). It records no tombstones: a deleted goal's `goals` tombstone removes its events
+  on the client, which also trims each goal to the same 5000. `judge_parse_failed.raw` is emptied.
 
 `memories` also starts with the newest 500 on a cold client, and requires
 `content_protocol_version: 1`. The handler keeps pulling while `has_more` is set, yielding to the main

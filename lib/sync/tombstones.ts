@@ -22,6 +22,7 @@ import Dexie from "dexie"
 
 import { preserveGeneratedVideoRecords } from "@/lib/db/files-library-items"
 import { getDb } from "@/lib/db/schema"
+import { uniqueIndexKeys } from "@/lib/db/unique-keys"
 
 import type { SyncTombstoneRow, SyncableTable } from "./types"
 
@@ -143,7 +144,7 @@ export async function pruneTombstones(
           ).filter((row): row is SyncTombstoneRow => row !== undefined)
           const ids = markers.map((row) => row.id)
           const live = new Set(await db.sessions.where("id").anyOf(ids).primaryKeys())
-          const history = new Set(await db.messages.where("sessionId").anyOf(ids).uniqueKeys())
+          const history = new Set(await uniqueIndexKeys(db.messages.where("sessionId").anyOf(ids)))
           const deleted = ids.filter((id) => !live.has(id) && !history.has(id))
           let count = 0
           const pendingMediaSessions = new Set<string>()
@@ -165,7 +166,7 @@ export async function pruneTombstones(
               // Use this captured database throughout the transaction, including
               // the same indexed reference re-check and media grace window as GC.
               const referenced = new Set(
-                await db.messageMediaRefs.where("hash").anyOf(hashes).uniqueKeys()
+                await uniqueIndexKeys(db.messageMediaRefs.where("hash").anyOf(hashes))
               )
               const expired: string[] = []
               const recent = new Set<string>()

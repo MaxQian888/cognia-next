@@ -148,7 +148,8 @@ import {
   updateStyleSample,
 } from "@/lib/db/twin-profile"
 import { getActiveGoalForSession, getGoal, listGoalsBySession } from "@/lib/db/goals"
-import type { GoalConfig } from "@/types/goal"
+import { isTerminalGoalStatus, type GoalConfig } from "@/types/goal"
+import type { GoalSubgoalsGenerateWireResult } from "@/lib/goal/subgoal-generation"
 import type { Playbook, ProfileEntity, StyleSample, TwinSource } from "@/types/twin"
 import {
   cancelJob,
@@ -614,6 +615,27 @@ export async function dispatchCommand(
       return goalTransition(payload, "resume")
     case "goal_stop":
       return goalTransition(payload, "stop")
+    // The rest of a goal's lifecycle from a paired device, each through the
+    // same function the desktop's own button calls: the acceptance verdict,
+    // delete, releasing a held manual-continue turn, and re-running a failed
+    // completion verifier. Control-gated on the Rust side like the three above.
+    case "goal_accept":
+      return goalAccept(payload)
+    case "goal_delete":
+      return goalDelete(payload)
+    case "goal_continue":
+      return goalContinue(payload)
+    case "goal_verify_retry":
+      return goalVerifyRetry(payload)
+    // The subgoal checklist (Subgoals tab) from a paired device. Generation
+    // calls the model HERE, with this host's settings, through the same
+    // `generateGoalSubgoals` (and so the same PII gate) the tab runs.
+    case "goal_subgoals_generate":
+      return goalSubgoalsGenerate(payload)
+    case "goal_subgoal_mark":
+      return goalSubgoalMark(payload)
+    case "goal_subgoals_clear":
+      return goalSubgoalsClear(payload)
     // Agent-Team board control (team-board CQRS). Handlers revalidate every
     // move through the shared canMoveTask guard and answer { ok, reason? } —
     // see lib/companion/agent-team-write-handlers.ts.
@@ -712,6 +734,8 @@ export async function dispatchCommand(
       return goalUpdate(payload)
     case "goal_status":
       return goalStatus(payload)
+    case "goal_verification_options":
+      return goalVerificationOptions()
     // Long-term memory (ADR-0069). All five delegate to the shared
     // `lib/memory/api/*` helpers with `sourceChannel: "rpc"` — PII gate,
     // `external` provenance, never procedural. Writes are CONTROL-gated on
@@ -1205,8 +1229,7 @@ async function goalTransition(
   payload: Record<string, unknown>,
   action: "pause" | "resume" | "stop"
 ): Promise<{ goal: unknown }> {
-  const goalId = payload.goalId as string | undefined
-  if (!goalId) throw new Error(`goal_${action}.goalId is required`)
+  const goalId = requireGoalId(payload, `goal_${action}`)
   const runtime = getGoalRuntime()
   const goal =
     action === "pause"
@@ -1215,6 +1238,211 @@ async function goalTransition(
         ? await runtime.resumeGoal(goalId)
         : await runtime.stopGoal(goalId)
   return { goal }
+}
+
+/** The payload's `goalId`, which every goal arm but `goal_status` requires. */
+function requireGoalId(payload: Record<string, unknown>, command: string): string {
+  const goalId = payload.goalId
+  if (typeof goalId !== "string" || goalId.trim().length === 0) {
+    throw new Error(`${command}.goalId is required`)
+  }
+  return goalId
+}
+
+/**
+ * Record the acceptance verdict on a goal the gate parked
+ * (`paused` + `awaitingAcceptance`). `accepted: true` completes it,
+ * `false` requests changes and resumes it. Delegates to
+ * `resolveGoalAcceptance`, which is a no-op answering the current row when
+ * the goal is not waiting on a verdict.
+ */
+async function goalAccept(payload: Record<string, unknown>): Promise<{ goal: unknown }> {
+  const goalId = requireGoalId(payload, "goal_accept")
+  if (typeof payload.accepted !== "boolean") {
+    throw new Error("goal_accept.accepted must be a boolean")
+  }
+  const { resolveGoalAcceptance } = await import("@/lib/goal/acceptance")
+  const goal = await resolveGoalAcceptance(goalId, payload.accepted)
+  return { goal: goal ?? null }
+}
+
+/**
+ * Delete a goal and its event log through the runtime (which aborts an
+ * in-flight turn, drops a held continuation and records the sync tombstone the
+ * phone learns of the delete through). Deleting a missing goal is a no-op that
+ * answers `deleted: false`.
+ */
+async function goalDelete(
+  payload: Record<string, unknown>
+): Promise<{ goalId: string; deleted: boolean }> {
+  const goalId = requireGoalId(payload, "goal_delete")
+  if (!(await getGoal(goalId))) return { goalId, deleted: false }
+  await getGoalRuntime().deleteGoal(goalId)
+  return { goalId, deleted: true }
+}
+
+/**
+ * Release the turn a `manualContinue` goal is holding. The hold lives in this
+ * renderer's chat turn driver, so the answer says whether one was there:
+ * `continued: false` means nothing was waiting.
+ */
+async function goalContinue(payload: Record<string, unknown>): Promise<{ continued: boolean }> {
+  const goalId = requireGoalId(payload, "goal_continue")
+  return { continued: getGoalRuntime().requestManualContinue(goalId) }
+}
+
+/**
+ * How long `goal_verify_retry` waits for the verifier before answering
+ * `running`. The desktop-writes bridge gives this renderer 30 s to answer
+ * (`desktop_writes_bridge::DEFAULT_TIMEOUT`), and a verifier is a published
+ * workflow that may run longer, so the arm answers inside that deadline with
+ * room for the reply instead of letting the bridge time the call out while the
+ * retry keeps running. A `running` retry still finishes here, and its result
+ * lands on the goal's `verification` state, which syncs to the phone.
+ */
+export const GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS = 20_000
+
+/**
+ * Settle `run` within `windowMs`, or answer `running` and let it finish in
+ * the background. The bridge deadline is the reason (see
+ * {@link GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS}); a run past the window lands its
+ * result on the goal row, which reaches the device on the `goals` sync.
+ */
+async function settleWithinAnswerWindow<T>(
+  run: Promise<T>,
+  windowMs: number
+): Promise<{ settled: true; value: T } | { settled: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const windowClosed = new Promise<"running">((resolve) => {
+    timer = setTimeout(() => resolve("running"), windowMs)
+  })
+  try {
+    const raced = await Promise.race([run.then((value) => ({ value })), windowClosed])
+    if (raced === "running") {
+      // Answered already; a late failure is the run's own to record.
+      run.catch(() => undefined)
+      return { settled: false }
+    }
+    return { settled: true, value: raced.value }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Re-run a goal's failed or errored completion verifier, as the desktop's Retry does. */
+async function goalVerifyRetry(
+  payload: Record<string, unknown>
+): Promise<{ state: "settled"; outcome: unknown } | { state: "running" }> {
+  const goalId = requireGoalId(payload, "goal_verify_retry")
+  const { retryPausedGoalVerification } = await import("@/lib/goal/verification")
+  // A late failure is recorded on the goal's verification state by the
+  // verifier itself.
+  const answer = await settleWithinAnswerWindow(
+    retryPausedGoalVerification(goalId),
+    GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS
+  )
+  return answer.settled ? { state: "settled", outcome: answer.value } : { state: "running" }
+}
+
+/**
+ * How long `goal_subgoals_generate` waits for the model before answering
+ * `running`. Same reason and same budget as
+ * {@link GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS}: one decomposition call is
+ * usually seconds, but a slow provider must not let the bridge time the call
+ * out while the checklist is still being written.
+ */
+export const GOAL_SUBGOALS_GENERATE_ANSWER_WINDOW_MS = 20_000
+
+/**
+ * Generate (or regenerate) a goal's subgoal checklist on this host, exactly as
+ * its Subgoals tab does: the goal's conversation picks the model, this host's
+ * settings supply the key, and the redacted objective passes the PII gate in
+ * `decomposeObjective` before any call. Answers the outcome the tab renders
+ * (`generated` / `empty` / `unavailable` / `missing`), or `running` past the
+ * answer window.
+ */
+async function goalSubgoalsGenerate(
+  payload: Record<string, unknown>
+): Promise<GoalSubgoalsGenerateWireResult> {
+  const goalId = requireGoalId(payload, "goal_subgoals_generate")
+  const { generateGoalSubgoals } = await import("@/lib/goal/subgoal-generation")
+  const { useSettingsStore } = await import("@/stores/settings")
+  // The store is what the tab reads; a renderer that has not hydrated it yet
+  // (the headless brain at boot) falls back to the persisted row.
+  const appSettings =
+    useSettingsStore.getState().settings ?? (await getSettings().catch(() => null))
+  const answer = await settleWithinAnswerWindow(
+    generateGoalSubgoals(goalId, appSettings),
+    GOAL_SUBGOALS_GENERATE_ANSWER_WINDOW_MS
+  )
+  return answer.settled ? answer.value : { outcome: "running" }
+}
+
+/**
+ * Check or uncheck one subgoal. Carries the wanted state rather than "flip",
+ * so a retried call (or two devices checking the same step) cannot undo
+ * itself. Answers the goal row (`null` once it is gone) and whether the flag
+ * changed; an unknown `subgoalId` changes nothing.
+ */
+async function goalSubgoalMark(
+  payload: Record<string, unknown>
+): Promise<{ goal: unknown; changed: boolean }> {
+  const goalId = requireGoalId(payload, "goal_subgoal_mark")
+  const subgoalId = payload.subgoalId
+  if (typeof subgoalId !== "string" || subgoalId.trim().length === 0) {
+    throw new Error("goal_subgoal_mark.subgoalId is required")
+  }
+  if (typeof payload.done !== "boolean") {
+    throw new Error("goal_subgoal_mark.done must be a boolean")
+  }
+  const done = payload.done
+  const before = (await getGoal(goalId))?.subgoals?.find((s) => s.id === subgoalId)?.done
+  const goal = await getGoalRuntime().setSubgoalDone(goalId, subgoalId, done)
+  const after = goal?.subgoals?.find((s) => s.id === subgoalId)?.done
+  return { goal: goal ?? null, changed: before !== undefined && before !== after }
+}
+
+/** Remove a goal's checklist, as the Subgoals tab's Clear does. */
+async function goalSubgoalsClear(payload: Record<string, unknown>): Promise<{ goal: unknown }> {
+  const goalId = requireGoalId(payload, "goal_subgoals_clear")
+  const goal = await getGoalRuntime().clearSubgoals(goalId)
+  return { goal: goal ?? null }
+}
+
+/**
+ * The published verifier workflows this host can bind to a goal. A binding
+ * pins a deployment and a dependency lock built from workflow versions only
+ * the host holds, so a paired device picks from this list rather than
+ * assembling one.
+ */
+async function goalVerificationOptions(): Promise<{ options: unknown[] }> {
+  const { listGoalVerifierWorkflowOptions } = await import("@/lib/goal/verification")
+  return { options: await listGoalVerifierWorkflowOptions() }
+}
+
+/**
+ * Re-resolve a verifier binding a paired device sent against the host's own
+ * catalog, and answer the host's binding (fresh deployment revision and
+ * dependency lock). A device can only choose among verifiers this host offers.
+ */
+async function resolveHostVerifierBinding(
+  value: unknown
+): Promise<GoalConfig["verificationWorkflow"]> {
+  const versionId =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { versionId?: unknown }).versionId
+      : undefined
+  if (typeof versionId !== "string" || versionId.length === 0) {
+    throw new Error("goal_update.config.verificationWorkflow must name a verifier versionId")
+  }
+  const { listGoalVerifierWorkflowOptions } = await import("@/lib/goal/verification")
+  const option = (await listGoalVerifierWorkflowOptions()).find(
+    (candidate) => candidate.binding.versionId === versionId
+  )
+  if (!option) {
+    throw new Error("goal_update.config.verificationWorkflow is not a verifier this host offers")
+  }
+  return option.binding
 }
 
 /** Read string[] nameHints from the payload, tolerating an absent field. */
@@ -1292,10 +1520,36 @@ async function goalUpdate(
     }
   }
   if (config !== undefined) {
-    if (!config || typeof config !== "object") {
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
       throw new Error("goal_update.config must be an object")
     }
-    goal = await getGoalRuntime().updateConfig(goalId, config)
+    let patch: Partial<GoalConfig> = config
+    let removedVerifier = false
+    if (Object.prototype.hasOwnProperty.call(config, "verificationWorkflow")) {
+      const { verificationWorkflow, ...rest } = config as Partial<GoalConfig> & {
+        verificationWorkflow?: unknown
+      }
+      if (verificationWorkflow === null) {
+        // An explicit null removes the verifier the way the desktop's own
+        // "Remove verifier" does: the goal resumes and the pending completion
+        // candidate is dropped. A finished goal's config is history.
+        const current = await getGoal(goalId)
+        if (current && !isTerminalGoalStatus(current.status)) {
+          const { disableGoalVerification } = await import("@/lib/goal/verification")
+          goal = await disableGoalVerification(goalId)
+        }
+        removedVerifier = true
+        patch = rest
+      } else if (verificationWorkflow !== undefined) {
+        patch = {
+          ...rest,
+          verificationWorkflow: await resolveHostVerifierBinding(verificationWorkflow),
+        }
+      }
+    }
+    if (!removedVerifier || Object.keys(patch).length > 0) {
+      goal = await getGoalRuntime().updateConfig(goalId, patch)
+    }
   }
   // Fall back to the current persisted state when nothing changed, so the
   // caller always gets the goal it referenced rather than a bare null.
