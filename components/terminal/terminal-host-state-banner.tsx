@@ -1,9 +1,13 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { authorizeTerminalHostCredentials } from "@/lib/terminal/host-settings"
+import { classifyTerminalHostError } from "@/lib/terminal/host-state"
+import { selectTerminalTransportChain } from "@/lib/terminal/pick-transport"
 
 export function TerminalHostStateBanner({
   onRetry,
@@ -14,7 +18,14 @@ export function TerminalHostStateBanner({
 }) {
   const t = useTranslations("terminal.hostState")
   const state = useTerminalStore((value) => value.hostState)
-  if (state === "online") return null
+  const [authorizing, setAuthorizing] = useState(false)
+  const [authorizationFailed, setAuthorizationFailed] = useState(false)
+  if (state === "online") {
+    if (authorizationFailed) setAuthorizationFailed(false)
+    return null
+  }
+  const credentialFailure = state === "credential_unavailable"
+  const canAuthorize = credentialFailure && selectTerminalTransportChain()[0] === "tauri-channel"
   // Which button helps. Everything here is fixed in settings, not by retrying;
   // `offline` and `reconnecting` are the two a retry can actually resolve.
   const settingsAction =
@@ -22,7 +33,24 @@ export function TerminalHostStateBanner({
     state === "unauthorized" ||
     state === "remote_access_disabled" ||
     state === "resource_limited" ||
-    state === "incompatible"
+    state === "incompatible" ||
+    (credentialFailure && !canAuthorize)
+
+  const authorize = async () => {
+    if (authorizing) return
+    setAuthorizing(true)
+    setAuthorizationFailed(false)
+    try {
+      await authorizeTerminalHostCredentials()
+      onRetry()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      useTerminalStore.getState().setHostState(classifyTerminalHostError(error), message)
+      setAuthorizationFailed(true)
+    } finally {
+      setAuthorizing(false)
+    }
+  }
 
   return (
     <div
@@ -31,15 +59,27 @@ export function TerminalHostStateBanner({
       data-testid="terminal-host-state-banner"
       data-state={state}
     >
-      <span className="min-w-0 flex-1 truncate">{t(`state.${state}`)}</span>
+      <div className="min-w-0 flex-1">
+        <p>{t(`state.${state}`)}</p>
+        {authorizationFailed && <p role="alert">{t("authorizationFailed")}</p>}
+      </div>
       <Button
         type="button"
         size="sm"
         variant="outline"
         className="h-6 px-2 text-[11px]"
-        onClick={settingsAction ? onOpenSettings : onRetry}
+        disabled={authorizing}
+        onClick={canAuthorize ? () => void authorize() : settingsAction ? onOpenSettings : onRetry}
       >
-        {t(settingsAction ? "openSettings" : "retry")}
+        {t(
+          authorizing
+            ? "authorizing"
+            : canAuthorize
+              ? "authorize"
+              : settingsAction
+                ? "openSettings"
+                : "retry"
+        )}
       </Button>
     </div>
   )

@@ -33,8 +33,8 @@ use uuid::Uuid;
 
 use crate::host::ClientIdentity;
 use crate::terminal_host_service::{
-    default_terminal_host_endpoint, load_terminal_host_settings,
-    provision_terminal_host_descriptor, save_terminal_host_settings,
+    authorize_terminal_host_credentials, default_terminal_host_endpoint,
+    load_terminal_host_settings, provision_terminal_host_descriptor, save_terminal_host_settings,
     set_terminal_host_login_service, ssh_known_hosts_path, try_connect_terminal_host_as,
     TerminalHostConnectError, TerminalHostSettings,
 };
@@ -369,16 +369,29 @@ impl TerminalHostBridgeState {
     }
 
     async fn client<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Arc<BridgeClient>, String> {
+        self.client_with_start_mode(app, TerminalHostStartMode::Background)
+            .await
+    }
+
+    async fn client_with_start_mode<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        mode: TerminalHostStartMode,
+    ) -> Result<Arc<BridgeClient>, String> {
         let mut slot = self.client.lock().await;
+        if mode == TerminalHostStartMode::AuthorizeCredentials {
+            terminal_host_blocking(authorize_terminal_host_credentials).await?;
+        }
         if let Some(client) = slot.as_ref().filter(|client| client.is_open()) {
             return Ok(Arc::clone(client));
         }
         let endpoint = default_terminal_host_endpoint();
         let resource_dir = terminal_resources(app.path().resource_dir().ok().as_deref());
-        let client = connect_or_spawn_terminal_host(&endpoint, resource_dir, || {
-            BridgeClient::connect(&endpoint)
-        })
-        .await?;
+        let client =
+            connect_or_spawn_terminal_host_with_mode(&endpoint, resource_dir, mode, || {
+                BridgeClient::connect(&endpoint)
+            })
+            .await?;
         send_hello(&client, app).await;
         *slot = Some(Arc::clone(&client));
         Ok(client)
@@ -860,6 +873,7 @@ pub async fn terminal_list_for_project<R: Runtime>(
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TerminalHostServiceAction {
     Status,
+    AuthorizeCredentials,
     Provision {
         #[serde(rename = "deviceId")]
         device_id: String,
@@ -920,10 +934,32 @@ where
     F: FnOnce() -> Option<String> + Send,
 {
     let endpoint = terminal_host_blocking(|| Ok(default_terminal_host_endpoint())).await?;
-    let client = state.client(app).await?;
+    let client = if matches!(action, TerminalHostServiceAction::AuthorizeCredentials) {
+        async {
+            let client = state
+                .client_with_start_mode(app, TerminalHostStartMode::AuthorizeCredentials)
+                .await?;
+            // Opening a socket does not prove the daemon accepted its credential.
+            // Await a real response before the renderer clears the recovery state.
+            client
+                .request(FrameKind::List, Uuid::nil(), Vec::new())
+                .await?;
+            Ok::<_, String>(client)
+        }
+        .await
+        .map_err(|error| {
+            if error.starts_with("terminal_credential_unavailable:") {
+                error
+            } else {
+                format!("terminal_credential_unavailable: {error}")
+            }
+        })?
+    } else {
+        state.client(app).await?
+    };
     let mut settings = terminal_host_blocking(load_terminal_host_settings).await?;
     let descriptor = match action {
-        TerminalHostServiceAction::Status => None,
+        TerminalHostServiceAction::Status | TerminalHostServiceAction::AuthorizeCredentials => None,
         TerminalHostServiceAction::Provision {
             device_id,
             device_public_key,
@@ -1165,6 +1201,12 @@ mod tests {
         let action: TerminalHostServiceAction =
             serde_json::from_value(serde_json::json!({ "kind": "status" })).unwrap();
         assert!(matches!(action, TerminalHostServiceAction::Status));
+        let authorize: TerminalHostServiceAction =
+            serde_json::from_value(serde_json::json!({ "kind": "authorizeCredentials" })).unwrap();
+        assert!(matches!(
+            authorize,
+            TerminalHostServiceAction::AuthorizeCredentials
+        ));
         let provision: TerminalHostServiceAction = serde_json::from_value(serde_json::json!({
             "kind": "provision",
             "deviceId": "device-a",

@@ -3,6 +3,7 @@ export type TerminalHostState =
   | "offline"
   | "unpaired"
   | "unauthorized"
+  | "credential_unavailable"
   | "reconnecting"
   | "resource_limited"
   | "incompatible"
@@ -20,6 +21,14 @@ export type TerminalHostState =
 
 export function classifyTerminalHostError(error: unknown): Exclude<TerminalHostState, "online"> {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  // Native credential-store refusals need an explicit local authorization,
+  // not a remote device grant or another background connection attempt.
+  if (
+    message.includes("terminal_credential_unavailable") ||
+    /terminal credential (read|write) failed/.test(message)
+  ) {
+    return "credential_unavailable"
+  }
   if (message.includes("unpaired")) return "unpaired"
   // Checked before the generic permission match below: the ticket refusal is
   // also a 403, and reporting it as "not allowed to use remote terminals"

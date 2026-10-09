@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, act, cleanup, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -345,6 +346,28 @@ describe("TerminalDock", () => {
     fireEvent.click(await screen.findByTestId("tab-color-red"))
 
     expect(useTerminalStore.getState().sessions["s-1"].tabColor).toBe("red")
+  })
+
+  // Regression: Rename opened the field while the context menu was still
+  // closing; the menu handed focus back as it went, and the field's blur
+  // committed the untouched title before anything could be typed.
+  it("renames a tab from its context menu", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    const user = userEvent.setup()
+    render(<TerminalDock />)
+
+    await user.pointer({ keys: "[MouseRight]", target: screen.getAllByTestId("terminal-tab")[0] })
+    await user.click(await screen.findByTestId("terminal-tab-menu-rename"))
+    const input = await screen.findByTestId("terminal-dock-rename-input", undefined, {
+      timeout: 500,
+    })
+    await waitFor(() => expect(screen.queryByTestId("terminal-tab-menu")).toBeNull())
+    expect(input).toHaveFocus()
+    await user.clear(input)
+    await user.type(input, "build{Enter}")
+
+    expect(useTerminalStore.getState().sessions["s-1"].customTitle).toBe("build")
+    expect(screen.queryByTestId("terminal-dock-rename-input")).toBeNull()
   })
 
   it("reports a failed restart instead of swallowing it", async () => {

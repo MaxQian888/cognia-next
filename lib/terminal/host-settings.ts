@@ -53,6 +53,14 @@ function isLocalHost(): boolean {
   return selectTerminalTransportChain()[0] === "tauri-channel"
 }
 
+/** User-initiated recovery only. Never call from boot, polling or remote clients. */
+export async function authorizeTerminalHostCredentials(
+  call: typeof transport.call = transport.call.bind(transport)
+): Promise<void> {
+  if (!isLocalHost()) throw new Error("credential authorization requires the local terminal host")
+  await call("terminal_host_service", { action: { kind: "authorizeCredentials" } })
+}
+
 /**
  * The host's settings as it actually has them.
  *

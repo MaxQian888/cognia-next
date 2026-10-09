@@ -12,6 +12,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import {
+  authorizeTerminalHostCredentials,
   readTerminalHostSettings,
   terminalHostReachable,
   writeTerminalHostSettings,
@@ -30,6 +31,37 @@ const SETTINGS: TerminalHostSettingsWire = {
 
 beforeEach(() => {
   mockChain = []
+})
+
+describe("authorizeTerminalHostCredentials", () => {
+  it("requests authorization only through the local terminal service", async () => {
+    mockChain = ["tauri-channel"]
+    const call = jest.fn(async () => undefined)
+    await authorizeTerminalHostCredentials(call as never)
+    expect(call).toHaveBeenCalledWith("terminal_host_service", {
+      action: { kind: "authorizeCredentials" },
+    })
+  })
+
+  it.each([{ chain: [] }, { chain: ["ws", "webrtc"] }])(
+    "never requests native authorization from $chain",
+    async ({ chain }) => {
+      mockChain = chain
+      const call = jest.fn()
+      await expect(authorizeTerminalHostCredentials(call as never)).rejects.toThrow(
+        /local terminal host/
+      )
+      expect(call).not.toHaveBeenCalled()
+    }
+  )
+
+  it("preserves a cancelled or refused authorization for the caller", async () => {
+    mockChain = ["tauri-channel"]
+    const call = jest.fn().mockRejectedValue("terminal_credential_unavailable: user cancelled")
+    await expect(authorizeTerminalHostCredentials(call as never)).rejects.toBe(
+      "terminal_credential_unavailable: user cancelled"
+    )
+  })
 })
 
 describe("terminalHostReachable", () => {

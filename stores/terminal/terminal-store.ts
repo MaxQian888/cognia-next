@@ -30,6 +30,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 import type { SessionInfo } from "@/lib/terminal/types"
+import { runTerminalDockGesture } from "@/lib/terminal/dock-gesture"
 import type { TerminalHostState } from "@/lib/terminal/host-state"
 import type { TabColorPreset, TabIconPreset } from "@/lib/terminal/tab-appearance"
 
@@ -543,16 +544,28 @@ export const useTerminalStore = create<TerminalStoreState>()(
       tabActivity: {},
       pendingReloadLayout: null,
 
-      setPanelOpen: (open) => set({ panelOpen: open }),
+      // The dock gestures (open/close, move, maximize) run through
+      // `runTerminalDockGesture`, which commits them under one View Transition
+      // so the page beside the dock is laid out once instead of on every frame
+      // of the slide. The write lands in the transition's update callback — a
+      // frame later in an engine that has them — so each reads the store then,
+      // never up front: two quick toggles still land open → closed.
+      setPanelOpen: (open) => {
+        if (get().panelOpen === open) return
+        runTerminalDockGesture(() => set({ panelOpen: open }))
+      },
 
-      togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+      togglePanel: () => runTerminalDockGesture(() => set((s) => ({ panelOpen: !s.panelOpen }))),
 
       setHostState: (hostState, hostStateMessage = null) => set({ hostState, hostStateMessage }),
 
       setPanelPosition: (panelPosition) => {
+        if (get().panelPosition === panelPosition) return
         // Leaving `maximized` set across a move would apply the *other* axis's
         // max, so the dock would jump to a size the user never chose.
-        set((s) => (s.panelPosition === panelPosition ? s : { panelPosition, maximized: false }))
+        runTerminalDockGesture(() =>
+          set((s) => (s.panelPosition === panelPosition ? s : { panelPosition, maximized: false }))
+        )
       },
 
       panelSizePct: () => {
@@ -587,31 +600,32 @@ export const useTerminalStore = create<TerminalStoreState>()(
         set({ panelHeightPct: clamp(snapPanelPct(pct), panelMinPct, panelMaxPct) })
       },
 
-      toggleMaximized: () => {
-        const s = get()
-        const bounds = axisBounds(s.panelPosition)
-        const right = s.panelPosition === "right"
-        if (s.maximized) {
-          // Restore the size the user last dragged to (clamped defensively).
-          const previous = right ? s.preMaxWidthPct : s.preMaxHeightPct
-          const restore = clamp(previous, bounds.min, bounds.max)
-          set(
-            (right
-              ? { panelWidthPct: restore, maximized: false }
-              : { panelHeightPct: restore, maximized: false }) as Partial<TerminalStoreState>
-          )
-        } else {
-          set(
-            (right
-              ? { preMaxWidthPct: s.panelWidthPct, panelWidthPct: bounds.max, maximized: true }
-              : {
-                  preMaxHeightPct: s.panelHeightPct,
-                  panelHeightPct: bounds.max,
-                  maximized: true,
-                }) as Partial<TerminalStoreState>
-          )
-        }
-      },
+      toggleMaximized: () =>
+        runTerminalDockGesture(() => {
+          const s = get()
+          const bounds = axisBounds(s.panelPosition)
+          const right = s.panelPosition === "right"
+          if (s.maximized) {
+            // Restore the size the user last dragged to (clamped defensively).
+            const previous = right ? s.preMaxWidthPct : s.preMaxHeightPct
+            const restore = clamp(previous, bounds.min, bounds.max)
+            set(
+              (right
+                ? { panelWidthPct: restore, maximized: false }
+                : { panelHeightPct: restore, maximized: false }) as Partial<TerminalStoreState>
+            )
+          } else {
+            set(
+              (right
+                ? { preMaxWidthPct: s.panelWidthPct, panelWidthPct: bounds.max, maximized: true }
+                : {
+                    preMaxHeightPct: s.panelHeightPct,
+                    panelHeightPct: bounds.max,
+                    maximized: true,
+                  }) as Partial<TerminalStoreState>
+            )
+          }
+        }),
 
       setTabOrder: (projectId, orderedIds) => {
         set((s) => {

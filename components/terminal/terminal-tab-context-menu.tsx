@@ -10,7 +10,13 @@
  * row this menu pertains to.
  *
  * Actions:
- *   * Rename       — enters rename mode in the parent (caller decides).
+ *   * Rename       — enters rename mode in the parent (caller decides),
+ *                    once the menu has closed: `onRename` fires from
+ *                    `onCloseAutoFocus`, not from the item. Fired from the
+ *                    item, the caller's field took focus while the menu was
+ *                    still up, the menu handed focus back as it unmounted,
+ *                    and the field's blur ended the rename before a key
+ *                    was pressed.
  *   * Restart      — kills + respawns with the same shell + cwd + agent.
  *   * Close        — calls onClose (same as ×).
  *   * Close Others — closes every other tab in the same project.
@@ -29,7 +35,7 @@
  * the label `/dev/ttyUSB0 (115200 8N1)`.
  */
 
-import type { ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 
 import { useTranslations } from "next-intl"
 
@@ -108,10 +114,21 @@ export function TerminalTabContextMenu({
   const hasEditGroup = !!(onCopy || onPaste || onSelectAll || onClear || onFind)
   const sshProfileId = row.kind === "ssh" && row.profileId ? row.profileId : null
   const canRestart = row.kind !== "serial"
+  // Set by the Rename item, acted on once the menu has closed (see above).
+  const renamePickedRef = useRef(false)
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent data-testid="terminal-tab-menu" className="w-44">
+      <ContextMenuContent
+        data-testid="terminal-tab-menu"
+        className="w-44"
+        onCloseAutoFocus={(event) => {
+          if (!renamePickedRef.current) return
+          renamePickedRef.current = false
+          event.preventDefault()
+          onRename(row.id)
+        }}
+      >
         {hasEditGroup ? (
           <>
             {onCopy ? (
@@ -145,7 +162,12 @@ export function TerminalTabContextMenu({
             <ContextMenuSeparator />
           </>
         ) : null}
-        <ContextMenuItem onSelect={() => onRename(row.id)} data-testid="terminal-tab-menu-rename">
+        <ContextMenuItem
+          onSelect={() => {
+            renamePickedRef.current = true
+          }}
+          data-testid="terminal-tab-menu-rename"
+        >
           {t("rename")}
         </ContextMenuItem>
         {onChangeAppearance ? (

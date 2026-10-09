@@ -9,6 +9,10 @@ describe("terminal host state classification", () => {
     ["reconnecting transport", "reconnecting"],
     ["socket refused", "offline"],
     [
+      "terminal credential read failed for com.cognia.terminal-host (account desktop-bootstrap): Platform failure: The user name or passphrase you entered is not correct.",
+      "credential_unavailable",
+    ],
+    [
       "terminal_remote_access_disabled: remote terminal access is disabled on this host",
       "remote_access_disabled",
     ],
@@ -35,5 +39,12 @@ describe("terminal host state classification", () => {
   // response instead.
   it("still reports a bare socket failure as offline", () => {
     expect(classifyTerminalHostError(new Error("terminal LAN connection failed"))).toBe("offline")
+  })
+
+  it("classifies native credential error strings without confusing remote grants", () => {
+    expect(classifyTerminalHostError("terminal_credential_unavailable: access denied")).toBe(
+      "credential_unavailable"
+    )
+    expect(classifyTerminalHostError("unauthorized remote device")).toBe("unauthorized")
   })
 })

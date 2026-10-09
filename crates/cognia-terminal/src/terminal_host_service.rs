@@ -20,7 +20,7 @@ use crate::host_wire::serve_host_stream;
 use crate::session::{PathInjection, SessionOrigin, SpawnRequest};
 use base64::Engine;
 use cognia_secrets::keychain_access::{
-    read_password_without_prompt, write_password_without_prompt,
+    read_password, read_password_without_prompt, write_password_without_prompt,
 };
 use ed25519_dalek::{Signer, SigningKey};
 use once_cell::sync::Lazy;
@@ -33,6 +33,16 @@ const KEYRING_ACCOUNT: &str = "desktop-bootstrap";
 const SIGNING_KEY_ACCOUNT: &str = "descriptor-signing-key";
 const AUTH_MAX_BYTES: usize = 256;
 const SETTINGS_FILE: &str = "settings.json";
+
+/// Dedicated desktop-host startup status, so the desktop can offer credential
+/// recovery even when only the daemon identity was denied by the OS store.
+pub const CREDENTIAL_UNAVAILABLE_EXIT_CODE: i32 = 77;
+
+pub fn terminal_host_startup_exit_code(error: &str) -> Option<i32> {
+    error
+        .starts_with("terminal_credential_unavailable:")
+        .then_some(CREDENTIAL_UNAVAILABLE_EXIT_CODE)
+}
 
 struct RemoteAccessCache {
     checked_at: Option<Instant>,
@@ -47,6 +57,7 @@ static REMOTE_ACCESS_CACHE: Lazy<tokio::sync::Mutex<RemoteAccessCache>> = Lazy::
 });
 static REMOTE_ACCESS_CACHE_DIRTY: AtomicBool = AtomicBool::new(true);
 static BOOTSTRAP_SECRET: OnceLock<String> = OnceLock::new();
+static BOOTSTRAP_ACCESS: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -446,10 +457,9 @@ fn load_or_create_credential(account: &str) -> Result<String, String> {
 /// this the only trace is the store's own error text, which on macOS reads like
 /// a wrong password.
 #[cfg(target_os = "macos")]
-const CREDENTIAL_ACCESS_HINT: &str = "the login Keychain refused access without a prompt; this \
-     usually means the item was created by a different build of cognia-server (a rebuilt or \
-     re-signed binary has a new code identity). Allow this binary on the item in Keychain \
-     Access, or delete the item and restart the terminal host so it is recreated";
+const CREDENTIAL_ACCESS_HINT: &str = "the login Keychain refused access; use the terminal's \
+     Authorize access action and approve Cognia and cognia-server in the system dialog. A \
+     rebuilt or re-signed binary may need a new grant for the existing item";
 #[cfg(target_os = "linux")]
 const CREDENTIAL_ACCESS_HINT: &str = "the Secret Service refused access; check that a keyring \
      daemon (gnome-keyring, KWallet) is running and its login collection is unlocked";
@@ -461,7 +471,7 @@ const CREDENTIAL_ACCESS_HINT: &str = "the OS credential store refused access; ch
 /// secret: neither argument carries it.
 fn credential_failure(operation: &str, account: &str, error: &keyring::Error) -> String {
     format!(
-        "terminal credential {operation} failed for {KEYRING_SERVICE} (account {account}): \
+        "terminal_credential_unavailable: terminal credential {operation} failed for {KEYRING_SERVICE} (account {account}): \
          {error}. Hint: {CREDENTIAL_ACCESS_HINT}"
     )
 }
@@ -484,21 +494,43 @@ fn load_or_create_credential_with(
     }
 }
 
-fn load_or_create_bootstrap_secret() -> Result<String, String> {
-    let secret = load_or_create_credential(KEYRING_ACCOUNT)?;
-    if !valid_bootstrap_secret(&secret) {
-        return Err("terminal host bootstrap secret is invalid".into());
+fn cached_bootstrap_secret(
+    cache: &OnceLock<String>,
+    load: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    if let Some(secret) = cache.get() {
+        return Ok(secret.clone());
     }
-    Ok(secret)
+    let secret = load()?;
+    if !valid_bootstrap_secret(&secret) {
+        return Err(
+            "terminal_credential_unavailable: terminal host bootstrap secret is invalid".into(),
+        );
+    }
+    Ok(cache.get_or_init(|| secret).clone())
 }
 
 fn bootstrap_secret() -> Result<String, String> {
-    if let Some(secret) = BOOTSTRAP_SECRET.get() {
-        return Ok(secret.clone());
-    }
-    let secret = load_or_create_bootstrap_secret()?;
-    let _ = BOOTSTRAP_SECRET.set(secret.clone());
-    Ok(secret)
+    let _access = BOOTSTRAP_ACCESS.lock();
+    cached_bootstrap_secret(&BOOTSTRAP_SECRET, || {
+        load_or_create_credential(KEYRING_ACCOUNT)
+    })
+}
+
+/// Recover this process's access only after an explicit user action. Retaining
+/// the validated secret in this process makes a one-time Keychain Allow useful:
+/// the next background request does not immediately lose that grant. No secret
+/// is returned to the renderer, and denied/invalid entries are never replaced.
+pub fn authorize_terminal_host_credentials() -> Result<(), String> {
+    let _access = BOOTSTRAP_ACCESS.lock();
+    cached_bootstrap_secret(&BOOTSTRAP_SECRET, || {
+        load_or_create_credential_with(
+            KEYRING_ACCOUNT,
+            || read_password(KEYRING_SERVICE, KEYRING_ACCOUNT),
+            |secret| write_password_without_prompt(KEYRING_SERVICE, KEYRING_ACCOUNT, secret),
+        )
+    })
+    .map(|_| ())
 }
 
 fn descriptor_signing_key() -> Result<SigningKey, String> {
@@ -764,6 +796,10 @@ pub fn ssh_known_hosts_path() -> PathBuf {
 
 pub async fn run_terminal_host(endpoint: String) -> Result<(), String> {
     let (host, script_dir, known_hosts_path, diagnostics) = tokio::task::spawn_blocking(|| {
+        // Fail before opening a listener if this daemon cannot authenticate any
+        // client. Explicit startup has already cached its interactive grant;
+        // ordinary startup continues to use the no-prompt credential path.
+        bootstrap_secret()?;
         let data_dir = terminal_host_data_dir();
         let known_hosts_path = ssh_known_hosts_path();
         if let Some(parent) = known_hosts_path.parent() {
@@ -1292,6 +1328,42 @@ fn set_owner_only_dir(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_credential_failures_get_the_dedicated_daemon_exit_status() {
+        assert_eq!(
+            terminal_host_startup_exit_code(
+                "terminal_credential_unavailable: terminal credential read failed"
+            ),
+            Some(CREDENTIAL_UNAVAILABLE_EXIT_CODE)
+        );
+        assert_eq!(
+            terminal_host_startup_exit_code("terminal host socket bind failed"),
+            None
+        );
+        assert_eq!(
+            terminal_host_startup_exit_code("terminal host is already running"),
+            None
+        );
+    }
+
+    #[test]
+    fn credential_authorization_caches_only_valid_successful_reads() {
+        let cache = OnceLock::new();
+        assert!(cached_bootstrap_secret(&cache, || Err("denied".into())).is_err());
+        assert!(cache.get().is_none());
+        assert!(cached_bootstrap_secret(&cache, || Ok("invalid".into())).is_err());
+        assert!(cache.get().is_none());
+        let secret = "a".repeat(43);
+        assert_eq!(
+            cached_bootstrap_secret(&cache, || Ok(secret.clone())).unwrap(),
+            secret
+        );
+        assert_eq!(
+            cached_bootstrap_secret(&cache, || panic!("one-time grant stays cached")).unwrap(),
+            secret
+        );
+    }
 
     #[test]
     fn credential_reads_never_rotate_existing_or_inaccessible_keys() {

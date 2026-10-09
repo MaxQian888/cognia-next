@@ -22,11 +22,36 @@ use crate::terminal_host_service::{
     default_terminal_host_endpoint, load_terminal_host_settings, open_terminal_host_log,
     save_terminal_host_settings, try_connect_terminal_host_as, BoxedTerminalHostIo,
     TerminalHostConnectError, TerminalHostDescriptor, TerminalHostSettings,
+    CREDENTIAL_UNAVAILABLE_EXIT_CODE,
 };
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 pub const START_RETRY_COUNT: usize = 40;
 pub const START_RETRY_DELAY: Duration = Duration::from_millis(100);
+const AUTHORIZATION_RETRY_COUNT: usize = 1200;
+
+/// Interactive startup is reachable only from the user's credential recovery action.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalHostStartMode {
+    #[default]
+    Background,
+    AuthorizeCredentials,
+}
+
+impl TerminalHostStartMode {
+    fn retries(self) -> usize {
+        match self {
+            Self::Background => START_RETRY_COUNT,
+            Self::AuthorizeCredentials => AUTHORIZATION_RETRY_COUNT,
+        }
+    }
+
+    fn configure_command(self, command: &mut Command) {
+        if self == Self::AuthorizeCredentials {
+            command.arg("--authorize-credentials");
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +95,21 @@ pub fn error_code_name(code: TerminalErrorCode) -> &'static str {
 pub struct SpawnedTerminalHost {
     child: Option<Child>,
     log_path: Option<PathBuf>,
+    stop_on_drop: bool,
+}
+
+impl Drop for SpawnedTerminalHost {
+    fn drop(&mut self) {
+        // Only our pending interactive launch is owned by this request. A
+        // successful connection releases it; an existing host is never owned.
+        if self.stop_on_drop {
+            if let Some(child) = self.child.as_mut() {
+                if child.try_wait().ok().flatten().is_none() && child.kill().is_ok() {
+                    let _ = child.wait();
+                }
+            }
+        }
+    }
 }
 
 impl SpawnedTerminalHost {
@@ -89,6 +129,7 @@ impl SpawnedTerminalHost {
 fn spawn_terminal_host(
     endpoint: &str,
     terminal_resource_dir: Option<PathBuf>,
+    mode: TerminalHostStartMode,
 ) -> Result<SpawnedTerminalHost, String> {
     let binary = resolve_server_binary()?;
     // The host's stderr carries its log and the reason it exits. A log that
@@ -108,6 +149,7 @@ fn spawn_terminal_host(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(stderr);
+    mode.configure_command(&mut command);
     if let Some(resource_dir) = terminal_resource_dir {
         command.env("COGNIA_TERMINAL_RESOURCES", resource_dir);
     }
@@ -117,6 +159,7 @@ fn spawn_terminal_host(
     Ok(SpawnedTerminalHost {
         child: Some(child),
         log_path,
+        stop_on_drop: mode == TerminalHostStartMode::AuthorizeCredentials,
     })
 }
 
@@ -124,7 +167,20 @@ pub async fn spawn_terminal_host_async(
     endpoint: String,
     terminal_resource_dir: Option<PathBuf>,
 ) -> Result<SpawnedTerminalHost, String> {
-    tokio::task::spawn_blocking(move || spawn_terminal_host(&endpoint, terminal_resource_dir))
+    spawn_terminal_host_with_mode(
+        endpoint,
+        terminal_resource_dir,
+        TerminalHostStartMode::Background,
+    )
+    .await
+}
+
+async fn spawn_terminal_host_with_mode(
+    endpoint: String,
+    terminal_resource_dir: Option<PathBuf>,
+    mode: TerminalHostStartMode,
+) -> Result<SpawnedTerminalHost, String> {
+    tokio::task::spawn_blocking(move || spawn_terminal_host(&endpoint, terminal_resource_dir, mode))
         .await
         .map_err(|error| format!("terminal host spawn task failed: {error}"))?
 }
@@ -142,11 +198,30 @@ where
     C: FnMut() -> F,
     F: Future<Output = Result<T, TerminalHostConnectError>>,
 {
+    connect_or_spawn_terminal_host_with_mode(
+        endpoint,
+        terminal_resource_dir,
+        TerminalHostStartMode::Background,
+        connect,
+    )
+    .await
+}
+
+pub async fn connect_or_spawn_terminal_host_with_mode<T, C, F>(
+    endpoint: &str,
+    terminal_resource_dir: Option<PathBuf>,
+    mode: TerminalHostStartMode,
+    connect: C,
+) -> Result<T, String>
+where
+    C: FnMut() -> F,
+    F: Future<Output = Result<T, TerminalHostConnectError>>,
+{
     let endpoint = endpoint.to_string();
     connect_with_start_policy(
         connect,
-        move || spawn_terminal_host_async(endpoint, terminal_resource_dir),
-        START_RETRY_COUNT,
+        move || spawn_terminal_host_with_mode(endpoint, terminal_resource_dir, mode),
+        mode.retries(),
         START_RETRY_DELAY,
     )
     .await
@@ -188,7 +263,10 @@ where
         // one that is now listening, so it still gets one more attempt.
         let exited = spawned.exit_status();
         match connect().await {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                spawned.stop_on_drop = false;
+                return Ok(stream);
+            }
             Err(error @ TerminalHostConnectError::CredentialUnavailable(_)) => {
                 return Err(error.into());
             }
@@ -202,6 +280,12 @@ where
             }
         }
         if let Some(status) = exited {
+            if status.code() == Some(CREDENTIAL_UNAVAILABLE_EXIT_CODE) {
+                return Err(format!(
+                    "terminal_credential_unavailable: the terminal host could not access its OS credential; use Authorize access{}",
+                    spawned.log_hint(),
+                ));
+            }
             return Err(format!(
                 "terminal host exited during startup with {status}{}: {}",
                 spawned.log_hint(),
@@ -571,6 +655,48 @@ fn dev_workspace_root() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_explicit_authorization_enables_daemon_prompts_and_the_long_start_budget() {
+        for mode in [
+            TerminalHostStartMode::Background,
+            TerminalHostStartMode::AuthorizeCredentials,
+        ] {
+            let mut command = Command::new("cognia-server");
+            command.arg("desktop-host");
+            mode.configure_command(&mut command);
+            let args: Vec<_> = command.get_args().collect();
+            assert_eq!(
+                args.contains(&std::ffi::OsStr::new("--authorize-credentials")),
+                mode == TerminalHostStartMode::AuthorizeCredentials
+            );
+        }
+        assert_eq!(
+            TerminalHostStartMode::default(),
+            TerminalHostStartMode::Background
+        );
+        assert_eq!(TerminalHostStartMode::Background.retries(), 40);
+        assert_eq!(TerminalHostStartMode::AuthorizeCredentials.retries(), 1200);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_authorization_startup_terminates_only_its_pending_child() {
+        let child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = child.id() as i32;
+        let (result, _, _) = run_policy(
+            vec![unreachable()],
+            SpawnedTerminalHost {
+                child: Some(child),
+                log_path: None,
+                stop_on_drop: true,
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        // SAFETY: signal zero only checks whether this test-owned pid remains alive.
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    }
+
     #[tokio::test]
     async fn remote_stream_requests_time_out_when_the_host_never_responds() {
         let (client, _server) = tokio::io::duplex(4096);
@@ -740,6 +866,7 @@ mod tests {
             SpawnedTerminalHost {
                 child: None,
                 log_path: Some(PathBuf::from("/tmp/terminal-host.log")),
+                stop_on_drop: false,
             },
         )
         .await;
@@ -749,6 +876,31 @@ mod tests {
         assert!(error.contains("Broken pipe"), "{error}");
         assert!(!error.contains("Connection refused"), "{error}");
         assert_eq!((attempts, spawns), (6, 1));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_daemon_credential_refusal_keeps_authorization_available_to_its_client() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 77"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let (result, attempts, spawns) = run_policy(
+            vec![unreachable()],
+            SpawnedTerminalHost {
+                child: Some(child),
+                log_path: None,
+                stop_on_drop: false,
+            },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert!(
+            error.starts_with("terminal_credential_unavailable:"),
+            "{error}"
+        );
+        assert_eq!((attempts, spawns), (2, 1));
     }
 
     #[cfg(unix)]
@@ -766,6 +918,7 @@ mod tests {
             SpawnedTerminalHost {
                 child: Some(child),
                 log_path: None,
+                stop_on_drop: false,
             },
         )
         .await;

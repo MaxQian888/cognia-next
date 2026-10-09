@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -67,10 +67,23 @@ describe("TerminalTabContextMenu", () => {
     expect(screen.getByTestId("terminal-tab-menu-trust")).toBeInTheDocument()
   })
 
-  it("Rename fires onRename with the row id", () => {
+  it("Rename fires onRename with the row id once the menu has closed", async () => {
     const { onRename } = renderMenu()
     fireEvent.click(screen.getByTestId("terminal-tab-menu-rename"))
-    expect(onRename).toHaveBeenCalledWith("s-1")
+    // Not while the menu is still up: a rename field focused then would be
+    // blurred by the menu handing focus back as it unmounts.
+    expect(onRename).not.toHaveBeenCalled()
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith("s-1"))
+    expect(screen.queryByTestId("terminal-tab-menu")).toBeNull()
+    expect(onRename).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not fire onRename when the menu closes without Rename", async () => {
+    const { onRename, onRestart } = renderMenu()
+    fireEvent.click(screen.getByTestId("terminal-tab-menu-restart"))
+    await waitFor(() => expect(screen.queryByTestId("terminal-tab-menu")).toBeNull())
+    expect(onRestart).toHaveBeenCalledWith("s-1")
+    expect(onRename).not.toHaveBeenCalled()
   })
 
   it("Restart fires onRestart with the row id", () => {
