@@ -15,6 +15,7 @@ import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
 import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
 import { runMetadataOf, type MessageRunMetadata } from "@/lib/chat/message-run-metadata"
+import { formatWorkedDuration } from "@/lib/chat/turn-fold"
 import { RouterFusionRunCard } from "@/components/router-fusion/router-fusion-run-card"
 import { RoutingIndicator } from "@/components/chat/routing-indicator"
 import { useSettingsStore } from "@/stores/settings"
@@ -148,8 +149,8 @@ function useMessageMetadata(
       timestamp: createdAt === undefined ? undefined : formatTimestamp(createdAt),
       model: run?.modelId,
       provider: run?.providerId,
-      duration:
-        run?.durationMs === undefined ? undefined : t("durationValue", { value: run.durationMs }),
+      // The same compact form as the turn's "Worked for" row, so the two agree.
+      duration: run?.durationMs === undefined ? undefined : formatWorkedDuration(run.durationMs),
       usage: usage
         ? t("usageValue", { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0 })
         : undefined,

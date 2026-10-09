@@ -573,7 +573,7 @@ describe("MessageMetaLine", () => {
     fireEvent.click(chip)
     const popover = screen.getByTestId("message-meta-popover")
     expect(popover).toHaveTextContent("↑10 ↓20")
-    expect(popover).toHaveTextContent("1200 ms")
+    expect(popover).toHaveTextContent("1s")
   })
 
   it("renders nothing when no field is placed under details", () => {

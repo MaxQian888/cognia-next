@@ -2058,7 +2058,6 @@
   "messageDisplay": {
     "assistant": "助手",
     "details": "消息详情",
-    "durationValue": "{value} 毫秒",
     "metadata": {
       "cost": "费用",
       "duration": "耗时",

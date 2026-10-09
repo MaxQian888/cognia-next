@@ -8880,7 +8880,6 @@
     "messageDisplay": {
       "assistant": "Assistant",
       "details": "Message details",
-      "durationValue": "{value} ms",
       "metadata": {
         "cost": "Cost",
         "duration": "Duration",
