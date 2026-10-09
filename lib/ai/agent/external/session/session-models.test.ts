@@ -690,13 +690,17 @@ describe("resolveActiveAgentModel", () => {
     ).toEqual({ modelId: "deepseek/pro", model: pro })
   })
 
-  it("names nothing on a Cognia model, which the agent's catalog does not describe", () => {
+  it("names no agent model on a Cognia model, and hands back its binding instead", () => {
     expect(
       resolveActiveAgentModel({
         choice: { kind: "cognia", binding: { providerId: "openai", modelId: "gpt-5" } },
         surface: live,
       })
-    ).toEqual({ modelId: undefined, model: undefined })
+    ).toEqual({
+      modelId: undefined,
+      model: undefined,
+      cognia: { providerId: "openai", modelId: "gpt-5" },
+    })
   })
 
   it("keeps an id the catalog does not list, without a row", () => {

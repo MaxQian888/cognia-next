@@ -3370,6 +3370,9 @@ describe("CodexAppServerAdapter", () => {
       expect(params.cwd).toBe("/repo")
       const inputTypes = params.input.map((i) => i.type)
       expect(inputTypes).toContain("image") // url image
+      // Inline bytes are the same `image` input as a data URL, never a note.
+      expect(params.input).toContainEqual({ type: "image", url: "data:image/png;base64,abc" })
+      expect(JSON.stringify(params.input)).not.toContain("omitted")
       expect(inputTypes).toContain("localImage") // image file path
       expect(params.input).toContainEqual({
         type: "audio",

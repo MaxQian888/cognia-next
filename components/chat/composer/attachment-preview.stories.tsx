@@ -90,3 +90,33 @@ export const WithOcrHandlers: Story = {
   args: { onRunOcr: fn(), onExtractOcrToInput: fn(), onViewOcrDetail: fn() },
   decorators: [withFiles([pngFile("receipt.png"), textFile("data.csv", "a,b\n1,2")])],
 }
+
+// An external agent that takes no images: the pill beside the tiles names it,
+// and opening it explains why and offers to send the images' text instead.
+export const ImagesTheAgentCannotSee: Story = {
+  args: {
+    imageInput: { accepted: false, reason: "agent-no-images", agentName: "Cline" },
+    onExtractImageText: fn(async () => {}),
+  },
+  decorators: [
+    withFiles([
+      pngFile("screenshot.png"),
+      pngFile("diagram.png"),
+      textFile("notes.md", "# Notes\nhello"),
+    ]),
+  ],
+}
+
+// The agent reads images, but the model it runs reports no vision.
+export const ImagesTheAgentModelCannotSee: Story = {
+  args: {
+    imageInput: {
+      accepted: false,
+      reason: "model-no-vision",
+      modelName: "DeepSeek V4 Pro",
+      agentName: "Pi",
+    },
+    onExtractImageText: fn(async () => {}),
+  },
+  decorators: [withFiles([pngFile("whiteboard.png")])],
+}

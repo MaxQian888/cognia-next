@@ -56,6 +56,8 @@
       "negotiatedLoadSession": "the agent advertised session loading",
       "negotiatedNoLoadSession": "the agent advertised no session loading",
       "negotiatedNoMcpTools": "the agent refused MCP tools",
+      "negotiatedImageInput": "the agent advertised image input",
+      "negotiatedNoImageInput": "the agent advertised text-only prompts",
       "negotiatedThinking": "the agent advertised a thinking control",
       "negotiatedNoThinking": "the agent advertised no thinking control",
       "negotiatedNoToolExecution": "the agent advertised no tool execution",

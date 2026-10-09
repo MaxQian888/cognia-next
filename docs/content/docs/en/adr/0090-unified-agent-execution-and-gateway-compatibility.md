@@ -1011,3 +1011,85 @@ Implementation: `lib/ai/agent/external/config/cognia-model-options.ts`,
 `lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`,
 `lib/companion/desktop-write-source.ts`, `lib/platform/host-feature-manifest.ts`,
 `protocol/companion-request-schemas.json` and `protocol/companion-response-schemas.json`.
+
+## 2026-10-09 amendment — a turn's images reach external agents
+
+### The problem
+
+The external lane flattened every turn to one prompt string. The adapters
+already carried image content (ACP image blocks, Pi and OMP `images`, OpenCode
+file parts, Codex image input, DSH content blocks, A2A file parts, Aider image
+files), but `ExternalAgentManager.execute` built a single text block, so no
+attached image and no frame sampled from an attached video ever reached an
+agent. The user learned this from a toast after the send.
+
+### The decision
+
+- **The turn carries its images.** `externalTurnPrompt` returns the turn's image
+  blocks, attached or sampled from a video, with the attachment each came from.
+  `ExternalAgentExecutionOptions.attachments` puts them ahead of the prompt text
+  in the user message on both execute paths. The prompt text now also keeps the
+  fetched link context after the question.
+- **One verdict, decided before the send.**
+  `ExternalAgentManager.resolvePromptAttachments` answers which images the agent
+  can see, through the pure `decidePromptImages`:
+  - The agent's side is the merged profile's `images` cell. ACP's
+    `promptCapabilities.image` defaults to false and varies by agent build, so the
+    ACP row is now `unknown` and the handshake fills it in as the live
+    `imageInput` flag. Vendor overrides such as Cline's `image: false` are applied
+    first. The manager connects first when the agent is not connected yet.
+  - The model's side is the agent's own catalog (`capabilities.vision`) or, for a
+    Cognia model, the app's model metadata.
+  - Only an explicit "no" withholds.
+- **Portable formats only.** `toPortableImage` re-encodes BMP, TIFF or HEIC
+  images to PNG. An image that cannot be decoded is reported as `format`, never
+  sent to be refused.
+- **Codex** sends inline bytes as a `data:` URL in its `image` input, which is
+  what Codex itself produces from a `localImage`.
+- **The Host lane** stages each image through `session.attachment-upload` under
+  the scope `external-run:<runId>:<index>`, then names the refs in
+  `external_agent_run_turn.attachments` (at most 96 items of exactly
+  `{ ref, name, mediaType }`; `additionalProperties: false`).
+  - One scope per image keeps the six-staged-uploads ceiling from capping a
+    sampled video.
+  - The Host resolves each ref only against this run's own scopes and the
+    calling device, and checks the media type it sniffed at commit. It decides
+    the verdict inside the run, so a cold agent start never holds the start RPC
+    open.
+  - What the Host withheld is reported on the run's stream as a frame carrying
+    `attachmentsWithheld` (`agent`, `model` or `upload`). The refs are spent when
+    the run ends.
+  - The Host advertises the capability marker
+    `external_agent_run_turn_attachments`. A client that does not see it reports
+    `host` and sends the text alone.
+- **Guidance, not silence.**
+  - Before the send, `useComposerImageInput` predicts the same verdict
+    (`agent-no-images`, `model-no-vision` or `host-outdated`). The attachment row
+    then shows a notice that explains the reason and offers to send the images'
+    text instead (OCR on the device, included with the message).
+  - After the send, each withheld group is named with its remedy: extract the
+    text, switch the agent to a vision model, update the Host, re-save the image,
+    or check the connection.
+- **The PII gate reads base64 for what it encodes.** Scanned as text, a photo's
+  base64 tripped the detectors by chance (about one 300 KB image in twenty),
+  refusing image turns at random. `hasNoLeakingPiiDeep` now treats a base64
+  `data:` URL, or a bare base64 run of at least 1 KiB, as a payload:
+  - a text-like one is decoded and scanned;
+  - binary bytes, which carry no text, are not scanned;
+  - shorter base64-alphabet strings are still scanned as text, which covers keys
+    and tokens.
+
+  `promptInputPassesGate` sets binary payloads aside the same way.
+
+A Squad's goal stays text only. Its warning now names the images it did not
+take.
+
+Implementation: `lib/ai/agent/external/session/{prompt-attachments,turn-images}.ts`,
+`lib/ai/agent/external/manager.ts` (`resolvePromptAttachments`),
+`lib/ai/agent/external/capability/capability-live-facts.ts`,
+`lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`,
+`hooks/chat/use-claude-chat-controller.ts`,
+`components/chat/composer/{image-input-notice.tsx,hooks/use-composer-image-input.ts}`,
+`packages/agent-runtime-kit/src/prompt-gate.ts`, `packages/redact/src/index.ts`,
+`packages/ocr/src/image-prep.ts` (`toPortableImage`) and
+`protocol/companion-request-schemas.json`.

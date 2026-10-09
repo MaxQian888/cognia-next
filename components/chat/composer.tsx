@@ -662,7 +662,11 @@ function ComposerInner(props: InnerProps) {
   // stored ON the staged attachment with an explicit opt-in, so the token badge
   // reflects the real cost before the user commits to it.
   const runComposerOcr = useCallback(
-    async (attachmentId: string, action: "extract-to-input" | "view-result") => {
+    async (
+      attachmentId: string,
+      action: "extract-to-input" | "view-result",
+      options?: { quiet?: boolean }
+    ) => {
       const file = attachments.files.find((f) => f.id === attachmentId)
       if (!file?.url) return
       let blob: Blob
@@ -683,6 +687,9 @@ function ComposerInner(props: InnerProps) {
           // result stays available behind the panel's "details" action so the
           // richer Live-Text sheet doesn't become unreachable.
           staged.setOcrText(attachmentId, result.combinedText)
+          // A batch run for a recipient that cannot see the images only
+          // needs the text included; a bubble per image would be noise.
+          if (options?.quiet) return
           setOcrBubbleResult(result)
           setOcrBubbleImageSrc(
             (file.mediaType ?? "").startsWith("image/") ? (file.url ?? null) : null
@@ -694,6 +701,19 @@ function ComposerInner(props: InnerProps) {
   )
   const handleRunOcrForPanel = useCallback(
     (attachmentId: string) => runComposerOcr(attachmentId, "view-result"),
+    [runComposerOcr]
+  )
+  /**
+   * Include the text of these images with the message, for a recipient that
+   * cannot see them (the attachment row's image notice). One at a time: OCR
+   * runs on this device, and a burst would contend for the same engine.
+   */
+  const handleExtractImageText = useCallback(
+    async (attachmentIds: readonly string[]) => {
+      for (const attachmentId of attachmentIds) {
+        await runComposerOcr(attachmentId, "view-result", { quiet: true })
+      }
+    },
     [runComposerOcr]
   )
   /** Second OCR route, kept from the old chip menu: text straight into the draft. */
@@ -3395,6 +3415,7 @@ function ComposerInner(props: InnerProps) {
             <MemoContextChipBar
               videoRoute={props.videoRoute}
               imageInput={props.imageInput}
+              onExtractImageText={handleExtractImageText}
               onRunOcr={handleRunOcrForPanel}
               ocrBusy={ocr.status === "running"}
               onExtractOcrToInput={handleExtractOcrToInput}

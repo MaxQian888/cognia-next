@@ -617,6 +617,72 @@ function scanIsClean(text: string): boolean {
   return true
 }
 
+/** `data:<mime>[;params];base64,<payload>`, the whole string. */
+const BASE64_DATA_URL_RE =
+  /^data:([\w.+-]+\/[\w.+-]+)((?:;[\w.+-]+=[^;,]*)*);base64,([A-Za-z0-9+/]*={0,2})$/i
+/** A bare base64 run with no separators, padded to a whole quantum. */
+const BARE_BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+/**
+ * Shorter than this, a base64-alphabet string is scanned like any text: API
+ * keys, AWS ids and tokens are that alphabet and well under it.
+ */
+const OPAQUE_BASE64_MIN_CHARS = 1024
+
+function isTextLikeMediaType(mediaType: string): boolean {
+  const mime = mediaType.toLowerCase()
+  return (
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    mime === "application/xml" ||
+    mime === "application/javascript" ||
+    mime === "application/yaml" ||
+    mime === "image/svg+xml" ||
+    mime.endsWith("+json") ||
+    mime.endsWith("+xml")
+  )
+}
+
+function decodeBase64Text(payload: string): string | undefined {
+  try {
+    if (typeof Buffer !== "undefined") return Buffer.from(payload, "base64").toString("utf-8")
+    const binary = atob(payload)
+    return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One string leaf of a structured payload.
+ *
+ * A base64 transport field (an image's bytes, a `data:` URL, a resource blob)
+ * is not text, and scanning its characters as text finds PII-shaped runs by
+ * chance: about one 300 KB photo in twenty tripped the gate, refusing image
+ * turns at random. Nothing real is lost by not scanning it raw, because base64
+ * hides whatever it encodes from a text detector anyway. So such a field is
+ * read for what it encodes instead: a text-like `data:` URL is decoded and
+ * scanned, binary bytes carry no text, and a bare run counts as base64 only
+ * from {@link OPAQUE_BASE64_MIN_CHARS} on, above any key or token.
+ */
+function payloadStringIsClean(value: string): boolean {
+  const dataUrl = value.startsWith("data:") ? BASE64_DATA_URL_RE.exec(value) : null
+  if (dataUrl) {
+    const [, mediaType = "", params = "", payload = ""] = dataUrl
+    if (!hasNoLeakingPii(params)) return false
+    if (!isTextLikeMediaType(mediaType)) return true
+    const decoded = decodeBase64Text(payload)
+    return decoded === undefined || hasNoLeakingPii(decoded)
+  }
+  if (
+    value.length >= OPAQUE_BASE64_MIN_CHARS &&
+    value.length % 4 === 0 &&
+    BARE_BASE64_RE.test(value)
+  ) {
+    return true
+  }
+  return hasNoLeakingPii(value)
+}
+
 /**
  * Deep variant of {@link hasNoLeakingPii}: recursively scans every string
  * leaf of a value so object- and array-shaped payloads can't smuggle PII
@@ -632,7 +698,7 @@ export function hasNoLeakingPiiDeep(
   seen: WeakSet<object> = new WeakSet()
 ): boolean {
   if (value === null || value === undefined) return true
-  if (typeof value === "string") return hasNoLeakingPii(value)
+  if (typeof value === "string") return payloadStringIsClean(value)
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
     return true
   }

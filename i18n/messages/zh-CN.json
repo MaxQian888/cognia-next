@@ -7077,8 +7077,7 @@
         "analyzing": "正在解析图片…",
         "countLimit": "最多只能附加 {max} 个附件。",
         "externalOmitted": {
-          "files": "外部智能体只接收文本，{names} 中的图片或视频未发送；其中提取出的文字已发送。",
-          "links": "有 {count} 个已抓取的网页未发送：外部智能体只接收你的消息和附件中的文字。"
+          "files": "{names} 无法作为文件发送给外部 Agent：它的提示只能携带文本和图片。其中提取出的文字已发送。"
         },
         "extracting": "读取中…",
         "fallbackFile": "文件",
@@ -7086,6 +7085,13 @@
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
         "folderEmpty": "该文件夹中没有可添加的文件。",
         "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
+        "imagesWithheld": {
+          "agent": "{agent} 只读取文本，{names} 中的图片未发送；其中提取出的文字已发送。如需让它了解图片内容，请先提取文字，或改用能读取图片的 Agent。",
+          "format": "{names} 中的图片格式无法为 {agent} 转换，因此未发送。请将其另存为 PNG 或 JPEG 后重新添加。",
+          "host": "配对的主机版本过旧，无法接收图片，{names} 中的图片未发送给 {agent}。请在主机上更新 Cognia 后再向其 Agent 发送图片。",
+          "model": "{model} 无法查看图片，{names} 中的图片未发送给 {agent}；其中提取出的文字已发送。将 {agent} 切换到支持视觉的模型即可发送图片。",
+          "upload": "{names} 中的图片未能上传到配对的主机，因此未发送给 {agent}。请检查连接后重新发送。"
+        },
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
         "notResent": "{names} 无法再次发送，已略去。如需包含，请重新附加。",
         "openPreviewAria": "预览 {filename}",
@@ -7139,8 +7145,7 @@
         "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
         "squadOmitted": {
-          "files": "Squad 的目标只能是文本，{names} 中的图片或视频未交给它；其中提取出的文字已交给它。",
-          "links": "有 {count} 个已抓取的网页未交给 Squad：它的目标只包含你的消息和附件中的文字。"
+          "files": "Squad 的目标只能是文本，{names} 中的图片或视频未交给它；其中提取出的文字已交给它。"
         },
         "tokenBadge": "{tokens} tok",
         "unsupported": "有 {count} 个文件不受支持。",
@@ -7226,10 +7231,16 @@
         "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。",
         "visualNotice": {
           "agentFallback": "该 Agent",
-          "noVision": "{model} 不支持图片输入，看不到{count, plural, =1 {这张图片} other {这 # 张图片}}。请切换到支持视觉的模型，或移除{count, plural, =1 {它} other {它们}}。",
+          "agentNoImages": "{agent} 只读取文本，{media, select, images {{count, plural, =1 {这张图片} other {这 {count} 张图片}}} other {{count, plural, =1 {这个视频} other {这 {count} 个图片和视频}}}}不会发送给它。可以改为发送图片中的文字，或换用能读取图片的 Agent。",
+          "agentNoImagesShort": "{agent} 无法查看图片",
+          "agentNoVision": "{agent} 当前使用的 {model} 无法查看图片，{media, select, images {{count, plural, =1 {这张图片} other {这 {count} 张图片}}} other {{count, plural, =1 {这个视频} other {这 {count} 个图片和视频}}}}不会发送。请在模型菜单中为 {agent} 切换到支持视觉的模型，或改为发送图片中的文字。",
+          "extractText": "改为发送{count, plural, =1 {这张图片} other {这 # 张图片}}中的文字",
+          "extracting": "正在提取文字…",
+          "hostOutdated": "配对的主机版本过旧，无法接收图片，{media, select, images {{count, plural, =1 {这张图片} other {这 {count} 张图片}}} other {{count, plural, =1 {这个视频} other {这 {count} 个图片和视频}}}}不会送达 {agent}。请在主机上更新 Cognia，或改为发送图片中的文字。",
+          "hostOutdatedShort": "主机无法接收图片",
+          "noVision": "{model} 不支持图片输入，看不到{count, plural, =1 {这张图片} other {这 # 张图片}}。请切换到支持视觉的模型，或改为发送其中的文字。",
           "noVisionShort": "{model} 无法查看图片",
-          "textOnly": "{agent} 只接收文本，{count, plural, =1 {这张图片或视频} other {这 # 张图片和视频}}不会被发送；从中提取的文字会发送。",
-          "textOnlyShort": "{agent} 只接收文本"
+          "textIncluded": "{count, plural, =1 {这张图片} other {这 # 张图片}}中的文字将随消息发送。"
         }
       },
       "camera": {
@@ -16066,7 +16077,9 @@
         "launchTimeAuthorityOnly": "权限只在启动时授予，运行中无法更改",
         "modelVariantOverlay": "以模型变体（variant）的形式下发",
         "nativeSummarizeRoute": "由服务方自带的 summarize 路径提供",
+        "negotiatedImageInput": "Agent 声明可接收图片输入",
         "negotiatedLoadSession": "Agent 声明支持加载会话",
+        "negotiatedNoImageInput": "Agent 声明只接收文本提示",
         "negotiatedNoLoadSession": "Agent 声明不支持加载会话",
         "negotiatedNoMcpTools": "Agent 拒绝 MCP 工具",
         "negotiatedNoStreaming": "Agent 声明不支持流式输出",

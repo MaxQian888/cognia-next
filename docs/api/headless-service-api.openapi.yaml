@@ -50338,6 +50338,28 @@ paths:
                   items:
                     type: string
                   description: Per-turn native tool allowlist. The host retains its own workspace and policy boundaries.
+                attachments:
+                  type: array
+                  maxItems: 96
+                  description: The turn's images, in order, each staged first through the session.attachment-upload plane under the scope
+                    `external-run:<runId>:<index>`. The host resolves them for this run and caller only, hands the agent
+                    the ones it and its model can read, and reports the rest on the run's event stream. Send only to a
+                    host advertising `external_agent_run_turn_attachments`.
+                  items:
+                    type: object
+                    required:
+                      - ref
+                      - name
+                      - mediaType
+                    properties:
+                      ref:
+                        type: string
+                        minLength: 1
+                      name:
+                        type: string
+                      mediaType:
+                        type: string
+                    additionalProperties: false
               additionalProperties: false
       responses:
         "200":

@@ -534,6 +534,29 @@ export function catalogModelCapabilities(record: {
 }
 
 /**
+ * Why a turn's images were not handed to an external agent.
+ *
+ * - `agent`: the agent takes no image input: its protocol has no image slot,
+ *   or it negotiated none (ACP `promptCapabilities.image`).
+ * - `model`: the agent would carry them, but the model it runs reports no
+ *   vision (its own catalog, or the Cognia model it is bound to).
+ */
+export type ExternalAgentImageWithheldReason = "agent" | "model"
+
+/** What `resolvePromptAttachments` decided for one turn's images. */
+export interface ExternalAgentPromptAttachmentResolution {
+  /** The images the agent can read, in their original order. */
+  delivered: ExternalAgentImageContent[]
+  /** The images it cannot, and why; `null` when every image goes through. */
+  withheld: {
+    reason: ExternalAgentImageWithheldReason
+    count: number
+    /** The model that has no vision, by its catalog name, for `model`. */
+    model?: string
+  } | null
+}
+
+/**
  * ACP Session modes state
  */
 export interface AcpSessionModesState {
@@ -722,6 +745,13 @@ export interface AcpCapabilities {
   maxContextTokens?: number
   /** Supported file types */
   supportedFileTypes?: string[]
+  /**
+   * Whether a prompt may carry image content, as the agent itself negotiated
+   * it (ACP `promptCapabilities.image`, after any vendor override). Absent
+   * when the protocol has no such handshake; the protocol's capability row
+   * answers then.
+   */
+  imageInput?: boolean
   /** Custom capabilities */
   custom?: Record<string, unknown>
 }
@@ -2681,6 +2711,16 @@ export interface ExternalAgentExecutionOptions {
   }
   /** Files to include */
   files?: Array<{ path: string; content?: string }>
+  /**
+   * Images sent with this turn's prompt, ahead of its text: the turn's attached
+   * images and the frames sampled from an attached video, as inline base64.
+   *
+   * Only what the agent can read belongs here. A caller decides that first
+   * with `ExternalAgentManager.resolvePromptAttachments`, which knows the
+   * agent's negotiated input capability and its model's vision; an adapter
+   * handed an image it cannot carry refuses the turn rather than dropping it.
+   */
+  attachments?: ExternalAgentImageContent[]
   /** Callback for events */
   onEvent?: (event: ExternalAgentEvent) => void
   /** Callback for permission requests */

@@ -37,6 +37,8 @@ import type {
   ExternalAgentCogniaModelBinding,
   ExternalAgentConfig,
   ExternalAgentEvent,
+  ExternalAgentImageContent,
+  ExternalAgentImageWithheldReason,
 } from "@/types/agent/external-agent"
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 import type { ApprovalDecision } from "@cognia/agent-config-types"
@@ -99,6 +101,80 @@ export interface RemoteRunRequest {
    * a decision can only be answered by the device that was shown the question.
    */
   callerDeviceId?: string
+  /**
+   * The turn's images, staged on this Host through the chunked upload plane,
+   * in turn order. Item `i` was staged under {@link remoteRunAttachmentScope}
+   * `(runId, i)`, so a ref staged for any other run or position resolves to
+   * nothing. What the agent cannot see is reported on the run's stream.
+   */
+  attachments?: RemoteRunAttachment[]
+}
+
+/**
+ * Most images one run takes. Above any turn the composer can build (six
+ * attachments, at most twelve sampled frames each), and small enough that the
+ * refs fit the run-turn request with room to spare.
+ */
+export const REMOTE_RUN_MAX_ATTACHMENTS = 96
+
+/**
+ * `attachments` off the wire, or a refusal naming the field. Every item names
+ * a ref, a file name and a media type, and nothing else rides along.
+ */
+export function parseRemoteRunAttachments(value: unknown): RemoteRunAttachment[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > REMOTE_RUN_MAX_ATTACHMENTS) {
+    throw new Error(
+      `external_agent_run_turn.attachments must be an array of at most ${REMOTE_RUN_MAX_ATTACHMENTS} items`
+    )
+  }
+  return value.map((item, index) => {
+    const entry = item as Partial<Record<keyof RemoteRunAttachment, unknown>> | null
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      Object.keys(entry).some((key) => key !== "ref" && key !== "name" && key !== "mediaType") ||
+      typeof entry.ref !== "string" ||
+      !entry.ref ||
+      typeof entry.name !== "string" ||
+      typeof entry.mediaType !== "string"
+    ) {
+      throw new Error(
+        `external_agent_run_turn.attachments[${index}] must be { ref, name, mediaType }`
+      )
+    }
+    return { ref: entry.ref, name: entry.name, mediaType: entry.mediaType }
+  })
+}
+
+/** One staged image of a run, as the client names it. */
+export interface RemoteRunAttachment {
+  ref: string
+  name: string
+  mediaType: string
+}
+
+/**
+ * Why a run's images did not reach the Host's agent: the agent's own verdict
+ * (`agent`, `model`), or `upload` when a staged ref no longer resolves (the
+ * staging expired, or it was not staged for this run).
+ */
+export interface RemoteAttachmentsWithheldFrame {
+  reason: ExternalAgentImageWithheldReason | "upload"
+  count: number
+  model?: string
+}
+
+/**
+ * The upload scope image `index` of run `runId` is staged under.
+ *
+ * One scope per image rather than the chat session: the Host stages at most
+ * six unconsumed uploads per scope and device, and a turn can carry more
+ * frames than that from one sampled video. Derived from the run, so the Host
+ * accepts only refs staged for exactly this turn.
+ */
+export function remoteRunAttachmentScope(runId: string, index: number): string {
+  return `external-run:${runId}:${index}`
 }
 
 /** One frame on the wire. */
@@ -118,6 +194,11 @@ export interface RemoteRunFrame {
   terminal?: "completed" | "failed" | "cancelled"
   /** Present on `failed`. Never carries a stack or a host path. */
   error?: string
+  /**
+   * Set on the one frame that reports which of the run's images the agent was
+   * not handed. Like `operationResult`, its `event` is only a carrier.
+   */
+  attachmentsWithheld?: RemoteAttachmentsWithheldFrame
 }
 
 export type RemoteRunStart =
@@ -174,6 +255,17 @@ export interface RemoteRunDeps {
   publish: (topic: string, payload: unknown) => Promise<void>
   getManager: () => Promise<ExternalRunManager>
   now: () => number
+  /**
+   * The run's staged images as prompt content, or `null` when any of them no
+   * longer resolves for this run and caller (or is not a portable image).
+   */
+  loadAttachments: (
+    runId: string,
+    attachments: readonly RemoteRunAttachment[],
+    callerDeviceId: string | undefined
+  ) => Promise<ExternalAgentImageContent[] | null>
+  /** Spend the run's refs once the turn is over, freeing their bytes. */
+  consumeAttachments: (refs: readonly string[]) => Promise<void>
 }
 
 /** The slice of `ExternalAgentManager` this module uses. */
@@ -208,12 +300,15 @@ export interface ExternalRunManager extends Partial<
   getAgent(agentId: string): unknown | undefined
   addAgent(config: ExternalAgentConfig, options?: { connect?: boolean }): Promise<unknown>
   removeAgent(agentId: string): Promise<void>
+  /** {@link ExternalAgentManager.resolvePromptAttachments}; absent on a stub that takes no images. */
+  resolvePromptAttachments?: ExternalAgentManager["resolvePromptAttachments"]
   execute(
     agentId: string,
     prompt: string,
     options?: {
       sessionId?: string
       model?: string
+      attachments?: ExternalAgentImageContent[]
       reasoningEffort?: string
       systemPrompt?: string
       allowedTools?: string[]
@@ -264,6 +359,31 @@ const defaultDeps: RemoteRunDeps = {
     return getExternalAgentManager() as unknown as ExternalRunManager
   },
   now: () => Date.now(),
+  loadAttachments: async (runId, attachments, callerDeviceId) => {
+    const [{ resolveAttachmentRef }, { bytesToBase64, isPortableImageType }] = await Promise.all([
+      import("@/lib/db/session-attachment-uploads"),
+      import("@/lib/ocr/image-prep"),
+    ])
+    const images: ExternalAgentImageContent[] = []
+    for (const [index, attachment] of attachments.entries()) {
+      const row = await resolveAttachmentRef(attachment.ref, {
+        sessionId: remoteRunAttachmentScope(runId, index),
+        ...(callerDeviceId ? { deviceId: callerDeviceId } : {}),
+      })
+      // The media type the Host sniffed at commit, not the one the client
+      // declared: only bytes that really are a portable image go to an agent.
+      if (!row?.bytes || !isPortableImageType(row.mediaType)) return null
+      images.push({
+        type: "image",
+        source: { type: "base64", data: bytesToBase64(row.bytes), mediaType: row.mediaType },
+      })
+    }
+    return images
+  },
+  consumeAttachments: async (refs) => {
+    const { consumeAttachmentRefs } = await import("@/lib/db/session-attachment-uploads")
+    await consumeAttachmentRefs(refs)
+  },
 }
 
 let deps: RemoteRunDeps = defaultDeps
@@ -318,7 +438,8 @@ function emit(
   event: ExternalAgentEvent,
   terminal?: RemoteRunFrame["terminal"],
   error?: string,
-  operationResult?: RemoteRunFrame["operationResult"]
+  operationResult?: RemoteRunFrame["operationResult"],
+  attachmentsWithheld?: RemoteRunFrame["attachmentsWithheld"]
 ): Promise<void> {
   run.seq += 1
   const frame: RemoteRunFrame = {
@@ -329,6 +450,7 @@ function emit(
     ...(terminal ? { terminal } : {}),
     ...(error ? { error } : {}),
     ...(operationResult ? { operationResult } : {}),
+    ...(attachmentsWithheld ? { attachmentsWithheld } : {}),
   }
   const published = run.publishing.then(() => deps.publish(EXTERNAL_RUN_EVENT_TOPIC, frame))
   run.publishing = published.catch(() => undefined)
@@ -597,6 +719,46 @@ export async function resolveRemoteDecision(input: {
  * is still executing under, after which its cancel answers "nothing to stop"
  * and its revision is collectable out from under it.
  */
+/**
+ * The run's staged images this Host's agent can see, after telling the client
+ * about the rest.
+ *
+ * Decided here, inside the run, rather than before `started` is answered: the
+ * verdict can need the agent's handshake (ACP negotiates image input), and
+ * spawning an agent inside the start RPC would hold the client's request open
+ * for as long as a cold start takes.
+ */
+async function deliverableRunImages(
+  run: ActiveRun,
+  manager: ExternalRunManager,
+  request: RemoteRunRequest,
+  staged: readonly RemoteRunAttachment[]
+): Promise<ExternalAgentImageContent[]> {
+  if (staged.length === 0) return []
+  const withheld = (frame: RemoteAttachmentsWithheldFrame) =>
+    emit(
+      run,
+      { type: "progress", timestamp: new Date(deps.now()), message: "", progress: 0 },
+      undefined,
+      undefined,
+      undefined,
+      frame
+    ).catch(() => undefined)
+  const images = await deps.loadAttachments(request.runId, staged, request.callerDeviceId)
+  if (!images) {
+    await withheld({ reason: "upload", count: staged.length })
+    return []
+  }
+  if (!manager.resolvePromptAttachments) return images
+  const verdict = await manager.resolvePromptAttachments(run.agentId, images, {
+    ...(request.externalSessionId ? { sessionId: request.externalSessionId } : {}),
+    ...(request.model ? { model: request.model } : {}),
+    ...(request.cogniaModel !== undefined ? { cogniaModel: request.cogniaModel } : {}),
+  })
+  if (verdict.withheld) await withheld(verdict.withheld)
+  return verdict.delivered
+}
+
 export async function startRemoteExternalRun(request: RemoteRunRequest): Promise<RemoteRunStart> {
   if (runs.has(request.runId)) {
     throw new Error(`external agent run ${request.runId} is already active`)
@@ -651,6 +813,7 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
   // where an unhandled rejection is fatal (Node's default is to throw), so a
   // bus that rejects one frame mid-turn would take the whole brain down
   // instead of costing that frame.
+  const staged = request.attachments ?? []
   void (async () => {
     try {
       if (request.externalSessionId && !isGatewayTaskSessionId(request.externalSessionId))
@@ -660,8 +823,10 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
           request.chatSessionId,
           request.callerDeviceId
         )
+      const images = await deliverableRunImages(run, manager, request, staged)
       const result = await manager.execute(agentId, request.prompt, {
         sessionId: request.externalSessionId,
+        ...(images.length > 0 ? { attachments: images } : {}),
         // Omitted rather than passed as undefined so the manager's own
         // `if (options?.model)` gate reads the same on both lanes: an absent
         // model means "inherit the agent's own selection", and writing an
@@ -718,6 +883,12 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
       // moment the client most needs the list the agent actually has.
       if (!controller.signal.aborted) await reportSessionModels(run, manager)
       await settle(run, controller.signal.aborted ? "cancelled" : "failed", message)
+    } finally {
+      // Spent whether the turn ran, failed or was refused: the bytes were
+      // staged for this run alone, and a resend stages its own.
+      if (staged.length > 0) {
+        await deps.consumeAttachments(staged.map((attachment) => attachment.ref)).catch(() => {})
+      }
     }
   })().catch(() => {
     // `settle` itself can reject through the terminal publish. It has already

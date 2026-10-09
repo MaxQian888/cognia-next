@@ -121,8 +121,9 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "native",
-          "evidence": "protocol-spec"
+          "level": "unknown",
+          "evidence": "protocol-spec",
+          "reasonKey": "notNegotiated"
         },
         "beta-features": {
           "level": "unsupported",
@@ -533,8 +534,8 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",
@@ -1165,8 +1166,8 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",
@@ -1386,9 +1387,8 @@
           "reasonKey": "noProtocolSlot"
         },
         "images": {
-          "level": "unsupported",
-          "evidence": "adapter-code",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",

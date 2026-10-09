@@ -465,12 +465,42 @@ describe("external-agent.host-configs", () => {
       "external_agent_admit_run",
       "external_agent_release_run",
       "external_agent_run_turn",
+      "external_agent_session_query",
+      "external_agent_session_mutate",
       "external_agent_cancel_run",
       "external_agent_resolve_decision",
       "external_agent_cognia_models",
       "external_agent_run_turn_cognia_model",
+      "external_agent_run_turn_attachments",
     ])
   })
+
+  // Run-turn images: a marker that `external_agent_run_turn` takes staged
+  // image refs, and the upload plane that stages them, always together.
+  it.each(["tauri", "headless"] as const)(
+    "advertises run-turn images with the upload plane on the %s Host",
+    (platform) => {
+      const parsed = parseHostFeatureManifest(
+        JSON.parse(JSON.stringify(buildLocalHostFeatureManifest({ platform })))
+      )
+      expect(
+        supportsHostFeatureOperation(
+          parsed,
+          "external-agent.host-configs",
+          "external_agent_run_turn_attachments"
+        )
+      ).toBe(true)
+      for (const operation of [
+        "session_attachment_upload_init",
+        "session_attachment_upload_chunk",
+        "session_attachment_upload_commit",
+      ]) {
+        expect(supportsHostFeatureOperation(parsed, "session.attachment-upload", operation)).toBe(
+          true
+        )
+      }
+    }
+  )
 
   // Host-lane Cognia models: the catalog read and the marker that
   // `external_agent_run_turn` accepts `cogniaModel`. An older Host lacks the

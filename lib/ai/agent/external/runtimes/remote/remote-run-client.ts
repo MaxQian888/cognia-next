@@ -23,12 +23,20 @@ import type {
   AcpElicitationResponse,
   ExternalAgentCogniaModelBinding,
   ExternalAgentEvent,
+  ExternalAgentImageContent,
 } from "@/types/agent/external-agent"
 import type { ApprovalDecision } from "@cognia/agent-config-types"
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 
 import type { RunAdmissionRefusal } from "../../policy/run-admission"
-import { EXTERNAL_RUN_EVENT_TOPIC, type RemoteRunFrame } from "./remote-run-service"
+import {
+  EXTERNAL_RUN_EVENT_TOPIC,
+  REMOTE_RUN_MAX_ATTACHMENTS,
+  remoteRunAttachmentScope,
+  type RemoteAttachmentsWithheldFrame,
+  type RemoteRunAttachment,
+  type RemoteRunFrame,
+} from "./remote-run-service"
 import {
   HOST_CONFIG_COMMANDS,
   callApprovedHostConfigCommand,
@@ -36,7 +44,7 @@ import {
 } from "./remote-host-configs"
 
 export { EXTERNAL_RUN_EVENT_TOPIC }
-export type { RemoteRunFrame }
+export type { RemoteAttachmentsWithheldFrame, RemoteRunAttachment, RemoteRunFrame }
 
 /**
  * Named from the shared table rather than re-spelled, so the run plane and the
@@ -60,6 +68,8 @@ export type RemoteTurnStart =
 export interface RemoteRunSubscription {
   onEvent: (event: ExternalAgentEvent, frame: RemoteRunFrame) => void
   onOperationResult?: (result: NonNullable<RemoteRunFrame["operationResult"]>) => void
+  /** Which of the run's images the Host's agent was not handed, and why. */
+  onAttachmentsWithheld?: (withheld: RemoteAttachmentsWithheldFrame) => void
   /** Called once, with how the run ended. */
   onTerminal: (terminal: NonNullable<RemoteRunFrame["terminal"]>, error: string | undefined) => void
   /**
@@ -96,6 +106,7 @@ export function subscribeRemoteExternalRun(
     lastSeq = frame.seq
 
     if (frame.operationResult) handlers.onOperationResult?.(frame.operationResult)
+    else if (frame.attachmentsWithheld) handlers.onAttachmentsWithheld?.(frame.attachmentsWithheld)
     else handlers.onEvent(frame.event, frame)
     if (frame.terminal) {
       settled = true
@@ -134,6 +145,41 @@ function copyBinding(
   }
 }
 
+/**
+ * Stage a turn's images on the Host before the turn starts, in order.
+ *
+ * Each goes through the chunked upload plane (the run-turn request itself is
+ * capped well under one image) under its own run-scoped upload scope, which
+ * is how the Host knows a ref was staged for this run and position. Throws on
+ * the first failure: a partly staged turn is not one the user sent.
+ */
+export async function stageRemoteRunAttachments(
+  runId: string,
+  images: readonly ExternalAgentImageContent[]
+): Promise<RemoteRunAttachment[]> {
+  const [{ uploadSessionAttachment }, { decodeDataUrl }] = await Promise.all([
+    import("@/lib/companion/attachment-upload-client"),
+    import("@/lib/ocr/image-prep"),
+  ])
+  if (images.length > REMOTE_RUN_MAX_ATTACHMENTS) {
+    throw new Error(`A remote turn takes at most ${REMOTE_RUN_MAX_ATTACHMENTS} images`)
+  }
+  const staged: RemoteRunAttachment[] = []
+  for (const [index, image] of images.entries()) {
+    const { data, mediaType } = image.source
+    const decoded = data ? decodeDataUrl(`data:${mediaType};base64,${data}`) : null
+    if (!decoded) throw new Error("A remote turn can only stage inline image bytes")
+    const extension = mediaType.split("/")[1]?.replace("jpeg", "jpg") ?? "img"
+    const uploaded = await uploadSessionAttachment(remoteRunAttachmentScope(runId, index), {
+      name: `image-${index + 1}.${extension}`,
+      mediaType,
+      bytes: decoded.bytes,
+    })
+    staged.push({ ref: uploaded.ref, name: uploaded.name, mediaType: uploaded.mediaType })
+  }
+  return staged
+}
+
 export async function startRemoteExternalTurn(input: {
   runId: string
   chatSessionId: string
@@ -161,6 +207,12 @@ export async function startRemoteExternalTurn(input: {
    * models. Identifiers only — the Host resolves the credential.
    */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /**
+   * The turn's images, already staged on the Host
+   * (`stageRemoteRunAttachments`). Only sent to a Host that advertises
+   * `runTurnAttachments`; the request schema is closed against the field.
+   */
+  attachments?: readonly RemoteRunAttachment[]
 }): Promise<RemoteTurnStart> {
   // Starting a turn is an interactive approval, like the configuration writes
   // beside it. `callHostConfigCommand` checks the handshake but attaches no
@@ -187,6 +239,15 @@ export async function startRemoteExternalTurn(input: {
     // The one axis where `null` is sent: it is the explicit "native models"
     // instruction, which the Host must not confuse with "inherit".
     ...(input.cogniaModel !== undefined ? { cogniaModel: copyBinding(input.cogniaModel) } : {}),
+    ...(input.attachments?.length
+      ? {
+          attachments: input.attachments.map(({ ref, name, mediaType }) => ({
+            ref,
+            name,
+            mediaType,
+          })),
+        }
+      : {}),
   })
 
   if (result.started && result.runId) {

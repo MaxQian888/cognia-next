@@ -149,9 +149,10 @@ export const DSH_CAPABILITIES: AgentCapabilityContribution = {
           evidence: "protocol-spec",
           reasonKey: "agentOwned",
         },
+        // `session/prompt` content blocks carry raster images inline.
         images: {
-          level: "unknown",
-          evidence: "none",
+          level: "native",
+          evidence: "adapter-code",
         },
         "beta-features": {
           level: "unsupported",

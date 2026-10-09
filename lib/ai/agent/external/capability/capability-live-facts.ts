@@ -69,6 +69,13 @@ export function liveCapabilityFacts(
 
     if (negotiated.mcpTools === false) cells.mcp = no("negotiatedNoMcpTools")
 
+    // Image input is per agent build on ACP (`promptCapabilities.image`, which
+    // defaults to false), so the protocol row cannot answer it and the
+    // handshake must. An adapter whose protocol has no such negotiation leaves
+    // the flag out and its row stands.
+    if (negotiated.imageInput === true) cells.images = yes("negotiatedImageInput")
+    if (negotiated.imageInput === false) cells.images = no("negotiatedNoImageInput")
+
     // `thinking` is deliberately NOT mapped, for the same name-vs-meaning reason
     // as `multiTurn` above. `AcpCapabilities.thinking` means "the agent streams
     // chain-of-thought"; the `thinking` CAPABILITY asks whether the HOST can set

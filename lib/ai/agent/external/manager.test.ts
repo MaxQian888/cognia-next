@@ -112,6 +112,7 @@ import { AcpClientAdapter } from "@cognia/agent-acp/client"
 import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
 import {
   __setModelSurfaceDepsForTests,
+  AGENT_MODEL_CATALOG,
   cachedAgentModelSurface,
   forgetAgentModelSurface,
   loadAgentModelSurface,
@@ -244,20 +245,24 @@ class MockAdapter {
   forgetSessions() {
     this.sessions.clear()
   }
+  /** The user message of the most recent prompt or execute call. */
+  lastMessage?: ExternalAgentMessage
   async *prompt(
     _sessionId: string,
-    _message: ExternalAgentMessage,
+    message: ExternalAgentMessage,
     _options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
+    this.lastMessage = message
     for (const event of this.events) {
       yield event
     }
   }
   async execute(
     sessionId: string,
-    _message: ExternalAgentMessage,
+    message: ExternalAgentMessage,
     _options?: ExternalAgentExecutionOptions
   ): Promise<ExternalAgentResult> {
+    this.lastMessage = message
     if (this.executeImpl) return this.executeImpl()
     return {
       success: true,
@@ -1584,6 +1589,120 @@ describe("capability profile (ADR-0090 external SSOT)", () => {
     // steer" about an agent with no adapter at all.
     expect(m.getAgentCapabilityProfile("p-agent")).toBeUndefined()
     protocolAdapterRegistry.unregister("wire:demo")
+  })
+})
+
+describe("turn images (resolvePromptAttachments + the prompt message)", () => {
+  const image = (data: string) =>
+    ({ type: "image", source: { type: "base64", data, mediaType: "image/png" } }) as const
+
+  afterEach(() => forgetAgentModelSurface())
+
+  it("puts the images ahead of the prompt text, on both execute paths", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.execute("agent-1", "describe it", { attachments: [image("a"), image("b")] })
+    expect(currentMock.lastMessage?.content).toEqual([
+      image("a"),
+      image("b"),
+      { type: "text", text: "describe it" },
+    ])
+    for await (const _event of m.executeStreaming("agent-1", "again", {
+      attachments: [image("c")],
+    })) {
+      // drain
+    }
+    expect(currentMock.lastMessage?.content).toEqual([image("c"), { type: "text", text: "again" }])
+    await m.execute("agent-1", "text only")
+    expect(currentMock.lastMessage?.content).toEqual([{ type: "text", text: "text only" }])
+  })
+
+  it("decides nothing for a turn without images", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ enabled: false }))
+    expect(await m.resolvePromptAttachments("agent-1", [])).toEqual({
+      delivered: [],
+      withheld: null,
+    })
+  })
+
+  it("connects to learn the agent's negotiated image input, then withholds on a no", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig(), { connect: false })
+    expect(currentMock.isConnected()).toBe(false)
+    currentMock.capabilities = { imageInput: false } as never
+    const result = await m.resolvePromptAttachments("agent-1", [image("a")])
+    expect(currentMock.isConnected()).toBe(true)
+    expect(result).toEqual({ delivered: [], withheld: { reason: "agent", count: 1 } })
+  })
+
+  it("delivers to an agent that negotiated images and a model that sees", async () => {
+    const m = freshManager()
+    currentMock.capabilities = { imageInput: true } as never
+    await m.addAgent(buildBaseConfig())
+    expect(await m.resolvePromptAttachments("agent-1", [image("a")])).toEqual({
+      delivered: [image("a")],
+      withheld: null,
+    })
+  })
+
+  it("withholds from a model the agent's own catalog reports without vision, naming it", async () => {
+    const m = freshManager()
+    currentMock.capabilities = { imageInput: true } as never
+    await m.addAgent(buildBaseConfig())
+    const restore = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => ({
+        status: "ok",
+        data: {
+          models: {
+            choices: [
+              { modelId: "flash", name: "Flash", capabilities: { vision: true } },
+              { modelId: "pro", name: "DeepSeek V4 Pro", capabilities: { vision: false } },
+            ],
+            currentModelId: "pro",
+            write: { kind: "session-seed" },
+          },
+          thinking: EMPTY_THINKING_SURFACE,
+        },
+      }),
+    })
+    try {
+      await loadAgentModelSurface("agent-1", AGENT_MODEL_CATALOG)
+      // The catalog's current model, when the turn names none.
+      expect(await m.resolvePromptAttachments("agent-1", [image("a")])).toEqual({
+        delivered: [],
+        withheld: { reason: "model", count: 1, model: "DeepSeek V4 Pro" },
+      })
+      // The turn's own pick wins.
+      expect(
+        (await m.resolvePromptAttachments("agent-1", [image("a")], { model: "flash" })).withheld
+      ).toBeNull()
+    } finally {
+      restore()
+    }
+  })
+
+  it("reads a Cognia model's vision from the app's model metadata, without starting the agent", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig(), { connect: false })
+    const result = await m.resolvePromptAttachments("agent-1", [image("a")], {
+      cogniaModel: { providerId: "deepseek", modelId: "deepseek-v4-pro" },
+    })
+    expect(result).toEqual({
+      delivered: [],
+      withheld: { reason: "model", count: 1, model: "deepseek-v4-pro" },
+    })
+    expect(currentMock.isConnected()).toBe(false)
+  })
+
+  it("offers every image when the agent cannot be reached, leaving the error to execute", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.failConnect = true
+    expect(await m.resolvePromptAttachments("agent-1", [image("a")])).toEqual({
+      delivered: [image("a")],
+      withheld: null,
+    })
   })
 })
 

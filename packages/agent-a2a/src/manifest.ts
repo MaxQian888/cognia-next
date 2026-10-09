@@ -101,9 +101,10 @@ export const A2A_CAPABILITIES: AgentCapabilityContribution = {
           evidence: "protocol-spec",
           reasonKey: "agentOwned",
         },
+        // Image parts ride as file parts (raw bytes or a URL), both A2A versions.
         images: {
-          level: "unknown",
-          evidence: "none",
+          level: "native",
+          evidence: "adapter-code",
         },
         "beta-features": {
           level: "unsupported",

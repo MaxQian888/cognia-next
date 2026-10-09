@@ -8,8 +8,11 @@ let handlers:
       onEvent: (e: ExternalAgentEvent, f: unknown) => void
       onTerminal: (t: string, e?: string) => void
       onGap?: (expected: number, received: number) => void
+      onAttachmentsWithheld?: (withheld: { reason: string; count: number; model?: string }) => void
     }
   | undefined
+const stagedFor: Array<{ runId: string; count: number }> = []
+let stageFails = false
 let startReply: unknown = { started: true, runId: "run-1" }
 let subscribedRunId: string | undefined
 
@@ -31,6 +34,15 @@ jest.mock("./remote-run-client", () => ({
     cancelled.push(runId)
     return true
   },
+  stageRemoteRunAttachments: async (runId: string, images: unknown[]) => {
+    stagedFor.push({ runId, count: images.length })
+    if (stageFails) throw new Error("attachment_too_many")
+    return images.map((_, index) => ({
+      ref: `cognia-upload:u${index}`,
+      name: `image-${index + 1}.png`,
+      mediaType: "image/png",
+    }))
+  },
 }))
 
 const recordReportedAgentModelSurface = jest.fn()
@@ -50,8 +62,10 @@ jest.mock("./remote-host-configs", () => {
   return {
     HostCogniaModelUpdateRequiredError,
     hostSupportsCogniaModelTurns: () => hostTakesCogniaModel,
+    hostSupportsAttachmentTurns: () => hostTakesImages,
   }
 })
+let hostTakesImages = true
 
 import { executeOnRemoteHostAgent, interruptRemoteHostAgent } from "./remote-execute"
 
@@ -71,6 +85,9 @@ beforeEach(() => {
   recordReportedAgentModelSurface.mockClear()
   mountIsLocal = false
   hostTakesCogniaModel = true
+  hostTakesImages = true
+  stagedFor.length = 0
+  stageFails = false
 })
 
 // The Host reports the session's options at the end of each turn. This client
@@ -443,4 +460,69 @@ it("waits for the run topic to be acknowledged before starting the turn", async 
   expect(started).toHaveLength(1)
   handlers?.onTerminal("completed")
   await run
+})
+
+describe("the turn's images", () => {
+  const image = {
+    type: "image" as const,
+    source: { type: "base64" as const, data: "UElD", mediaType: "image/png" },
+  }
+
+  async function run(options: Record<string, unknown>) {
+    const onAttachmentsWithheld = jest.fn()
+    const pending = executeOnRemoteHostAgent("what is this?", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "rer_1",
+      onAttachmentsWithheld,
+      ...options,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    return { pending, onAttachmentsWithheld }
+  }
+
+  it("stages them on the Host under this run, then names their refs on the start", async () => {
+    const { pending, onAttachmentsWithheld } = await run({ attachments: [image, image] })
+    expect(stagedFor).toEqual([{ runId: "rer_1", count: 2 }])
+    expect(started[0]).toMatchObject({
+      runId: "rer_1",
+      attachments: [
+        { ref: "cognia-upload:u0", name: "image-1.png", mediaType: "image/png" },
+        { ref: "cognia-upload:u1", name: "image-2.png", mediaType: "image/png" },
+      ],
+    })
+    // The Host's verdict arrives on the run's stream.
+    handlers?.onAttachmentsWithheld?.({ reason: "model", count: 2, model: "Pro" })
+    expect(onAttachmentsWithheld).toHaveBeenCalledWith({ reason: "model", model: "Pro" })
+    handlers?.onTerminal("completed")
+    await pending
+  })
+
+  it("asks for an update instead of sending images a Host too old would refuse", async () => {
+    hostTakesImages = false
+    const { pending, onAttachmentsWithheld } = await run({ attachments: [image] })
+    expect(stagedFor).toEqual([])
+    expect(started[0]).not.toHaveProperty("attachments")
+    expect(onAttachmentsWithheld).toHaveBeenCalledWith({ reason: "host" })
+    handlers?.onTerminal("completed")
+    await pending
+  })
+
+  it("runs on the text when staging fails, and says the images did not go", async () => {
+    stageFails = true
+    const { pending, onAttachmentsWithheld } = await run({ attachments: [image] })
+    expect(started[0]).not.toHaveProperty("attachments")
+    expect(onAttachmentsWithheld).toHaveBeenCalledWith({ reason: "upload" })
+    handlers?.onTerminal("completed")
+    await pending
+  })
+
+  it("stages nothing for a turn without images", async () => {
+    const { pending, onAttachmentsWithheld } = await run({})
+    expect(stagedFor).toEqual([])
+    expect(started[0]).not.toHaveProperty("attachments")
+    expect(onAttachmentsWithheld).not.toHaveBeenCalled()
+    handlers?.onTerminal("completed")
+    await pending
+  })
 })

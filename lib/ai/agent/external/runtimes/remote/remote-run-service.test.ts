@@ -5,6 +5,9 @@ import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-con
 import {
   executeRemoteSessionOperation,
   DECISION_TIMEOUT_MS,
+  parseRemoteRunAttachments,
+  remoteRunAttachmentScope,
+  REMOTE_RUN_MAX_ATTACHMENTS,
   EXTERNAL_RUN_EVENT_TOPIC,
   MODEL_REPORT_TIMEOUT_MS,
   activeRemoteExternalRuns,
@@ -18,6 +21,13 @@ import {
   type RemoteRunFrame,
 } from "./remote-run-service"
 import { resolveExternalAgentModels } from "../../session/session-models"
+
+const mockResolveAttachmentRef = jest.fn()
+const mockConsumeAttachmentRefs = jest.fn(async (_refs: readonly string[]) => {})
+jest.mock("@/lib/db/session-attachment-uploads", () => ({
+  resolveAttachmentRef: (...args: unknown[]) => mockResolveAttachmentRef(...args),
+  consumeAttachmentRefs: (refs: readonly string[]) => mockConsumeAttachmentRefs(refs),
+}))
 
 function record(over: Partial<ExternalAgentConfigRecord> = {}): ExternalAgentConfigRecord {
   return {
@@ -318,6 +328,181 @@ describe("starting a run", () => {
     })
     expect(h.manager.removed).toEqual(["eac_1"])
     expect(h.manager.added).toHaveLength(2)
+  })
+})
+
+describe("the run's images", () => {
+  const png = (data: string) =>
+    ({ type: "image", source: { type: "base64", data, mediaType: "image/png" } }) as const
+  const staged = [
+    { ref: "cognia-upload:u1", name: "image-1.png", mediaType: "image/png" },
+    { ref: "cognia-upload:u2", name: "image-2.png", mediaType: "image/png" },
+  ]
+  let restoreImages: (() => void) | undefined
+  let loaded: Array<{ runId: string; refs: string[]; deviceId: string | undefined }>
+  let consumed: string[][]
+
+  function images(
+    load: (() => ReturnType<typeof png>[] | null) | null,
+    verdict?: Awaited<ReturnType<NonNullable<ExternalRunManager["resolvePromptAttachments"]>>>
+  ) {
+    loaded = []
+    consumed = []
+    restoreImages = __setRemoteRunDepsForTests({
+      loadAttachments: async (runId, attachments, deviceId) => {
+        loaded.push({ runId, refs: attachments.map((a) => a.ref), deviceId })
+        return load ? load() : null
+      },
+      consumeAttachments: async (refs) => {
+        consumed.push([...refs])
+      },
+    })
+    if (verdict) {
+      ;(h.manager as ExternalRunManager).resolvePromptAttachments = jest.fn(
+        async () => verdict
+      ) as never
+    }
+  }
+
+  afterEach(() => {
+    restoreImages?.()
+    restoreImages = undefined
+  })
+
+  const start = () =>
+    startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "what is this?",
+      model: "flash",
+      callerDeviceId: "phone-1",
+      attachments: staged,
+    })
+
+  it("hands the agent the images it can see, then spends their refs", async () => {
+    images(() => [png("a"), png("b")], { delivered: [png("a"), png("b")], withheld: null })
+    await start()
+    await flush()
+    expect(loaded).toEqual([
+      { runId: "run-1", refs: ["cognia-upload:u1", "cognia-upload:u2"], deviceId: "phone-1" },
+    ])
+    expect(h.manager.resolvePromptAttachments).toHaveBeenCalledWith("eac_1", [png("a"), png("b")], {
+      model: "flash",
+    })
+    expect(h.manager.executed[0]).toMatchObject({ attachments: [png("a"), png("b")] })
+    expect(h.frames.some((frame) => frame.attachmentsWithheld)).toBe(false)
+    h.finish()
+    await flush()
+    expect(consumed).toEqual([["cognia-upload:u1", "cognia-upload:u2"]])
+  })
+
+  it("reports what the agent's verdict held back, and runs the turn on its text", async () => {
+    images(() => [png("a"), png("b")], {
+      delivered: [],
+      withheld: { reason: "model", count: 2, model: "DeepSeek V4 Pro" },
+    })
+    await start()
+    await flush()
+    const report = h.frames.find((frame) => frame.attachmentsWithheld)
+    expect(report?.attachmentsWithheld).toEqual({
+      reason: "model",
+      count: 2,
+      model: "DeepSeek V4 Pro",
+    })
+    expect(report?.seq).toBe(1)
+    expect(h.manager.executed[0]).not.toHaveProperty("attachments")
+  })
+
+  it("reports an upload that no longer resolves, and still spends the refs on failure", async () => {
+    images(null)
+    await start()
+    await flush()
+    expect(h.frames.find((frame) => frame.attachmentsWithheld)?.attachmentsWithheld).toEqual({
+      reason: "upload",
+      count: 2,
+    })
+    expect(h.manager.executed[0]).not.toHaveProperty("attachments")
+    h.fail("agent crashed")
+    await flush()
+    expect(consumed).toEqual([["cognia-upload:u1", "cognia-upload:u2"]])
+  })
+
+  it("loads nothing for a turn without images", async () => {
+    images(() => [])
+    await startRemoteExternalRun({
+      runId: "run-2",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+    })
+    await flush()
+    h.finish()
+    await flush()
+    expect(loaded).toEqual([])
+    expect(consumed).toEqual([])
+  })
+
+  it("resolves refs against this run's scopes and the caller, using the sniffed type", async () => {
+    mockResolveAttachmentRef.mockReset()
+    mockConsumeAttachmentRefs.mockClear()
+    mockResolveAttachmentRef.mockImplementation(async (ref: string) =>
+      ref === "cognia-upload:u1"
+        ? { mediaType: "image/png", bytes: new Uint8Array([1, 2, 3]) }
+        : { mediaType: "image/jpeg", bytes: new Uint8Array([4, 5, 6]) }
+    )
+    ;(h.manager as ExternalRunManager).resolvePromptAttachments = jest.fn(
+      async (_id: string, images: unknown[]) => ({ delivered: images, withheld: null })
+    ) as never
+    await start()
+    await flush()
+    expect(mockResolveAttachmentRef.mock.calls).toEqual([
+      ["cognia-upload:u1", { sessionId: "external-run:run-1:0", deviceId: "phone-1" }],
+      ["cognia-upload:u2", { sessionId: "external-run:run-1:1", deviceId: "phone-1" }],
+    ])
+    expect(h.manager.executed[0]).toMatchObject({
+      attachments: [
+        { type: "image", source: { type: "base64", data: "AQID", mediaType: "image/png" } },
+        { type: "image", source: { type: "base64", data: "BAUG", mediaType: "image/jpeg" } },
+      ],
+    })
+    h.finish()
+    await flush()
+    expect(mockConsumeAttachmentRefs).toHaveBeenCalledWith(["cognia-upload:u1", "cognia-upload:u2"])
+  })
+
+  it("treats a ref that resolves to something other than a portable image as not staged", async () => {
+    mockResolveAttachmentRef.mockReset()
+    mockResolveAttachmentRef.mockResolvedValue({
+      mediaType: "application/pdf",
+      bytes: new Uint8Array([1]),
+    })
+    await start()
+    await flush()
+    expect(h.frames.find((frame) => frame.attachmentsWithheld)?.attachmentsWithheld).toEqual({
+      reason: "upload",
+      count: 2,
+    })
+  })
+
+  it("scopes each staged image to its run and position", () => {
+    expect(remoteRunAttachmentScope("rer_1", 0)).toBe("external-run:rer_1:0")
+    expect(remoteRunAttachmentScope("rer_1", 11)).toBe("external-run:rer_1:11")
+  })
+
+  it("parses refs off the wire and refuses anything else riding along", () => {
+    expect(parseRemoteRunAttachments(undefined)).toBeUndefined()
+    expect(parseRemoteRunAttachments(staged)).toEqual(staged)
+    expect(() => parseRemoteRunAttachments("x")).toThrow(/must be an array/)
+    expect(() =>
+      parseRemoteRunAttachments(
+        Array.from({ length: REMOTE_RUN_MAX_ATTACHMENTS + 1 }, () => staged[0])
+      )
+    ).toThrow(/at most 96/)
+    expect(() => parseRemoteRunAttachments([{ ...staged[0], bytes: "AAAA" }])).toThrow(
+      /attachments\[0\] must be \{ ref, name, mediaType \}/
+    )
+    expect(() => parseRemoteRunAttachments([{ ref: "", name: "a", mediaType: "x" }])).toThrow()
   })
 })
 

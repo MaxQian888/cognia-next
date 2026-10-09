@@ -40,7 +40,6 @@ import {
   Loader2Icon,
   Music2Icon,
   PaperclipIcon,
-  EyeOffIcon,
   PlayIcon,
   ScanTextIcon,
 } from "lucide-react"
@@ -79,11 +78,13 @@ import type { RejectReason } from "@/lib/chat/attachments/dispatch"
 import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
 import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useStagedAttachments, type StagedAttachmentState } from "./staged-attachment-store"
 import { AttachmentPreviewDialog, type PreviewTarget } from "./attachment-preview-dialog"
 import type { ComposerImageInput } from "./hooks/use-composer-image-input"
+import { ImageInputNotice } from "./image-input-notice"
 
 export interface AttachmentPreviewProps {
   /** Runs OCR for an image attachment (invoked from the preview panel). */
@@ -111,6 +112,11 @@ export interface AttachmentPreviewProps {
    * tiles, before the send. Absent means "they will", as before.
    */
   imageInput?: ComposerImageInput
+  /**
+   * Includes the text of these image attachments with the message: the
+   * notice's remedy when the recipient cannot see them.
+   */
+  onExtractImageText?: (attachmentIds: readonly string[]) => Promise<void>
 }
 
 /** i18n key suffix for a machine-readable rejection reason. */
@@ -253,50 +259,42 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
 
   const activeImage = lightboxIndex !== null ? imageItems[lightboxIndex] : undefined
 
-  // Images and video are what a text-only recipient or a model without vision
-  // cannot take; documents still reach it as text.
+  // Images and video are what a recipient that cannot see images misses;
+  // documents still reach it as text. On an external agent's lane a video
+  // travels as sampled frames, which are images, so it counts there; on the
+  // built-in lane a model without vision still takes a video through its own
+  // route (see `videoRoute`), so only images count.
   const imageInput = props.imageInput
-  // A model without vision still takes a video through its own route (see
-  // `videoRoute`), so only images count there.
-  const visualCount = ordered.filter((f) => {
+  const agentLane =
+    imageInput?.accepted === false &&
+    (imageInput.reason !== "model-no-vision" || imageInput.agentName !== null)
+  const visualItems = ordered.filter((f) => {
     const mediaType = f.mediaType ?? ""
     const video =
       mediaType.startsWith("video/") ||
       isVideoDescriptor({ name: ("filename" in f ? f.filename : undefined) ?? "", mediaType })
-    if (video) return imageInput?.accepted === false && imageInput.reason === "text-only-agent"
+    if (video) return agentLane
     return mediaType.startsWith("image/")
-  }).length
-  const visualNotice =
-    imageInput && !imageInput.accepted && visualCount > 0
-      ? imageInput.reason === "text-only-agent"
-        ? {
-            short: t("visualNotice.textOnlyShort", {
-              agent: imageInput.agentName ?? t("visualNotice.agentFallback"),
-            }),
-            full: t("visualNotice.textOnly", {
-              agent: imageInput.agentName ?? t("visualNotice.agentFallback"),
-              count: visualCount,
-            }),
-          }
-        : {
-            short: t("visualNotice.noVisionShort", { model: imageInput.modelName }),
-            full: t("visualNotice.noVision", { model: imageInput.modelName, count: visualCount }),
-          }
-      : null
+  })
+  const imageIds = visualItems
+    .filter((f) => (f.mediaType ?? "").startsWith("image/"))
+    .map((f) => f.id)
+  const imagesWithoutText = imageIds.filter((id) => {
+    const state = staged.byId.get(id)
+    return !(state?.includeOcr && state.ocrText)
+  })
   // A pill in the same flow as the tiles: it describes them, so it sits with
   // them, and it leaves with the last image.
-  const notice = visualNotice ? (
-    <span
-      role="note"
-      title={visualNotice.full}
-      aria-label={visualNotice.full}
-      data-testid="attachment-visual-notice"
-      className="inline-flex h-7 max-w-[18rem] items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 text-[11px] text-amber-700 dark:text-amber-300"
-    >
-      <EyeOffIcon aria-hidden className="size-3.5 shrink-0" />
-      <span className="truncate">{visualNotice.short}</span>
-    </span>
-  ) : null
+  const notice =
+    imageInput && !imageInput.accepted && visualItems.length > 0 ? (
+      <ImageInputNotice
+        verdict={imageInput}
+        count={visualItems.length}
+        imageCount={imageIds.length}
+        imagesWithoutText={imagesWithoutText}
+        onExtractImageText={props.onExtractImageText}
+      />
+    ) : null
 
   const overlays = (
     <>
@@ -409,6 +407,9 @@ function SortableChip({
     mediaType: file.mediaType ?? "",
   })
   const isImage = (file.mediaType ?? "").startsWith("image/") && !isVideo
+  // Documents read as a file card (type badge, name, size and cost on one
+  // line); images and videos keep their thumbnail with an overlaid badge.
+  const isDocument = !isImage && !isVideo
   // A tile is "in flight" before its staged entry exists and while it is being
   // extracted — the visuals dim and the type-specific progress cue rides on top.
   const extracting = !state || state.status === "extracting"
@@ -433,14 +434,18 @@ function SortableChip({
           data={file}
           onRemove={onRemove}
           className={cn(
-            "border bg-muted/40 transition-colors",
+            "rounded-xl border transition-colors",
+            isDocument ? "bg-card shadow-xs hover:border-foreground/20" : "bg-muted/40",
             state?.status === "rejected" && "border-destructive/60 bg-destructive/5"
           )}
-          // Horizontal rectangles, slightly smaller than the grid's square
-          // (112×80 vs 96×96): media crops to a landscape thumb and file tiles
-          // get real width for their name — the shape photos and documents
-          // actually are. Inline style wins over the variant's `size-24`.
-          style={{ width: "7rem", height: "5rem" }}
+          // One row height for every tile. Media is a landscape thumb (112×80,
+          // smaller than the grid's square); a document is a wider card so its
+          // name, size and cost read on their own lines instead of being
+          // stacked into a thumbnail's footprint. Inline style wins over the
+          // variant's `size-24`.
+          style={
+            isDocument ? { width: "13.5rem", height: "5rem" } : { width: "7rem", height: "5rem" }
+          }
           data-testid="composer-attachment-chip"
         >
           <button
@@ -463,21 +468,26 @@ function SortableChip({
               <FileTileContent
                 name={displayName}
                 category={getMediaCategory(file)}
-                sizeLabel={state ? formatBytesCompact(state.sizeBytes) : undefined}
+                sizeLabel={
+                  state && state.sizeBytes > 0 ? formatBytesCompact(state.sizeBytes) : undefined
+                }
+                status={<StatusBadge state={state} isImage={false} t={t} />}
               />
             )}
           </button>
           {/* In-flight cues ride above the dimmed content, below the badges. */}
           {extracting && isImage ? <ScanSweep /> : null}
           {extracting && isVideo ? <VideoProgressBar fraction={state?.video?.progress} /> : null}
-          <div className="absolute bottom-1 left-1 flex max-w-[calc(100%-8px)] items-center rounded-md bg-background/85 px-1 py-0.5 backdrop-blur-sm empty:hidden">
-            <StatusBadge state={state} isImage={isImage} t={t} />
-          </div>
+          {isDocument ? null : (
+            <div className="absolute bottom-1.5 left-1.5 flex max-w-[calc(100%-12px)] items-center rounded-full bg-background/90 px-1.5 py-0.5 shadow-xs ring-1 ring-border/60 backdrop-blur-sm empty:hidden">
+              <StatusBadge state={state} isImage={isImage} t={t} />
+            </div>
+          )}
           <AttachmentRemove
             label={t("removeAria", { filename: displayName })}
             // Visible without hover, like the old chips: touch devices have no
             // hover to reveal an opacity-0 button with.
-            className="opacity-60 transition-opacity hover:opacity-100"
+            className="top-1.5 right-1.5 size-5 bg-background/90 opacity-80 shadow-xs ring-1 ring-border/60 transition-opacity hover:opacity-100 [&>svg]:size-2.5"
           />
         </Attachment>
       </div>
@@ -561,35 +571,64 @@ function VideoProgressBar({ fraction }: { fraction?: number }) {
 }
 
 /**
- * Document tile — same footprint as the media tiles so the strip stays one
- * uniform row. The filename middle-truncates: the stem ellipsis-collapses but
- * the extension always survives (the ".pd / f" mid-word break is what this
- * replaces).
+ * Document card — the media tiles' height, wider, laid out like a file: a type
+ * badge (the app's own file-type glyph and colour, with the extension spelled
+ * out under it), the name on one line, and a meta line with its size and what
+ * it costs the model (or that it is still being read). The name
+ * middle-truncates: the stem ellipsis-collapses but the extension always
+ * survives (the ".pd / f" mid-word break is what this replaces).
  */
 function FileTileContent({
   name,
   category,
   sizeLabel,
+  status,
 }: {
   name: string
   category: AttachmentMediaCategory
   sizeLabel?: string
+  /** The extraction state: a spinner, the token cost, or a rejection. */
+  status?: React.ReactNode
 }) {
-  const Icon = FILE_TILE_ICONS[category] ?? PaperclipIcon
   const dot = name.lastIndexOf(".")
   // Only a short tail counts as an extension — "archive.2026.notes" has a dot
   // but ".notes" is not the interesting part to pin.
   const hasExt = dot > 0 && name.length - dot <= 6
+  const Fallback = FILE_TILE_ICONS[category] ?? PaperclipIcon
   return (
-    <span className="flex size-full flex-col items-center justify-center gap-1 px-1.5 pb-1">
-      <Icon className="size-6 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="flex w-full min-w-0 items-baseline justify-center text-center text-[10px] leading-tight">
-        <span className="truncate">{hasExt ? name.slice(0, dot) : name}</span>
-        {hasExt ? <span className="shrink-0 text-muted-foreground">{name.slice(dot)}</span> : null}
+    <span className="flex size-full items-center gap-2.5 pr-8 pl-2.5">
+      <span
+        className="flex size-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border bg-background"
+        aria-hidden
+      >
+        {category === "source" ? (
+          <Fallback className="size-[18px] text-muted-foreground" />
+        ) : (
+          <FileTypeIcon path={name} className="size-[18px]" />
+        )}
+        {hasExt ? (
+          <span className="max-w-full truncate px-0.5 text-[8.5px] leading-none font-semibold tracking-wide text-muted-foreground uppercase">
+            {name.slice(dot + 1)}
+          </span>
+        ) : null}
       </span>
-      {sizeLabel ? (
-        <span className="text-[9px] leading-none text-muted-foreground">{sizeLabel}</span>
-      ) : null}
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 items-baseline text-xs leading-snug font-medium">
+          <span className="truncate">{hasExt ? name.slice(0, dot) : name}</span>
+          {hasExt ? (
+            <span className="shrink-0 font-normal text-muted-foreground">{name.slice(dot)}</span>
+          ) : null}
+        </span>
+        <span className="flex min-w-0 items-center gap-1 text-[10.5px] leading-none text-muted-foreground tabular-nums">
+          {sizeLabel ? <span className="shrink-0">{sizeLabel}</span> : null}
+          {sizeLabel && status ? (
+            <span aria-hidden className="text-muted-foreground/60 [&:last-child]:hidden">
+              ·
+            </span>
+          ) : null}
+          {status}
+        </span>
+      </span>
     </span>
   )
 }

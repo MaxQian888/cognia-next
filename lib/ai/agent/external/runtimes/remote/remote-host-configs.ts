@@ -85,6 +85,9 @@ export type HostConfigCommand = (typeof HOST_CONFIG_COMMANDS)[keyof typeof HOST_
  */
 export const HOST_CONFIG_CAPABILITIES = Object.freeze({
   runTurnCogniaModel: "external_agent_run_turn_cognia_model",
+  // `external_agent_run_turn` takes `attachments`: images staged through the
+  // chunked upload plane, resolved and judged against the Host's own agent.
+  runTurnAttachments: "external_agent_run_turn_attachments",
 } as const)
 
 export type HostConfigCapability =
@@ -276,6 +279,15 @@ export class HostCogniaModelUpdateRequiredError extends HostConfigsUnsupportedEr
  */
 export function hostSupportsCogniaModelTurns(): boolean {
   return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.runTurnCogniaModel).ok
+}
+
+/**
+ * Can the active Host hand a turn's images to its agent? An older Host closes
+ * its request schema against `attachments`, so the client asks first and says
+ * "update the Host" instead of sending text and pretending nothing was lost.
+ */
+export function hostSupportsAttachmentTurns(): boolean {
+  return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.runTurnAttachments).ok
 }
 
 /**

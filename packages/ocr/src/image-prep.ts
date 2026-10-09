@@ -259,6 +259,45 @@ export async function downscaleImage(
 }
 
 /**
+ * The raster formats every image-reading model API and agent accepts. Anything
+ * else (BMP, TIFF, HEIC) is refused by most of them, or by the adapter in
+ * front of them, so it travels re-encoded.
+ */
+const PORTABLE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
+export function isPortableImageType(mimeType: string): boolean {
+  const mime = mimeType.toLowerCase()
+  return PORTABLE_IMAGE_TYPES.has(mime === "image/jpg" ? "image/jpeg" : mime)
+}
+
+/**
+ * `bytes` in a portable raster format: unchanged when it already is one
+ * (`image/jpg` named `image/jpeg`), otherwise decoded and re-encoded as PNG at
+ * its own size. `null` when it is not portable and this runtime cannot decode
+ * it, so a caller can say the image did not go rather than send what the
+ * receiver will refuse.
+ */
+export async function toPortableImage(
+  bytes: Uint8Array,
+  mimeType: string
+): Promise<NormalizedImageInput | null> {
+  if (isPortableImageType(mimeType)) {
+    return { bytes, mimeType: mimeType.toLowerCase() === "image/jpg" ? "image/jpeg" : mimeType }
+  }
+  const bitmap = await decodeBitmap(bytes, mimeType)
+  if (!bitmap) return null
+  try {
+    const blob = await rasterToBlob(bitmap, bitmap.width, bitmap.height, "image/png")
+    if (!blob || (blob.type && blob.type !== "image/png")) return null
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mimeType: "image/png" }
+  } catch {
+    return null
+  } finally {
+    closeBitmap(bitmap)
+  }
+}
+
+/**
  * Intrinsic pixel size of an encoded image, or null when the runtime cannot
  * decode it (jsdom / node, or an unsupported format).
  *

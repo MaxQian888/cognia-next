@@ -161,10 +161,11 @@ export const AIDER_CAPABILITIES: AgentCapabilityContribution = {
           evidence: "adapter-code",
           reasonKey: "noProtocolSlot",
         },
+        // The adapter writes each inline image beside the repo and adds it to
+        // the turn's files, which Aider hands a vision model as an image.
         images: {
-          level: "unsupported",
+          level: "native",
           evidence: "adapter-code",
-          reasonKey: "noProtocolSlot",
         },
         "beta-features": {
           level: "unsupported",

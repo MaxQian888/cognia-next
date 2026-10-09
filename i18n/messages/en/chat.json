@@ -388,12 +388,17 @@
       "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here.",
       "notResent": "{names} couldn't be sent again and {count, plural, =1 {was} other {were}} left out. Attach {count, plural, =1 {it} other {them}} again to include {count, plural, =1 {it} other {them}}.",
       "externalOmitted": {
-        "files": "External agents receive text only, so the images or video in {names} weren't sent. Any text extracted from {count, plural, =1 {it} other {them}} was.",
-        "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} sent: external agents receive only your message and the text of attached files."
+        "files": "{names} can't go to an external agent as {count, plural, =1 {a file} other {files}}: its prompt carries only text and images. Any text extracted from {count, plural, =1 {it} other {them}} was sent."
+      },
+      "imagesWithheld": {
+        "agent": "{agent} reads text only, so the images in {names} weren't sent. Text extracted from {count, plural, =1 {it} other {them}} was. To share what they show, extract their text first, or use an agent that reads images.",
+        "model": "{model} can't see images, so the images in {names} weren't sent to {agent}. Text extracted from {count, plural, =1 {it} other {them}} was. Switch {agent} to a model with vision to send them.",
+        "format": "The images in {names} are in a format that couldn't be converted for {agent}, so they weren't sent. Save {count, plural, =1 {it} other {them}} as PNG or JPEG and attach again.",
+        "host": "The paired Host is too old to receive images, so the images in {names} weren't sent to {agent}. Update Cognia on the Host to send images to its agents.",
+        "upload": "The images in {names} couldn't be uploaded to the paired Host, so they weren't sent to {agent}. Check the connection and send again."
       },
       "squadOmitted": {
-        "files": "A Squad's goal is text only, so the images or video in {names} weren't handed to it. Any text extracted from {count, plural, =1 {it} other {them}} was.",
-        "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} handed to the Squad: its goal holds only your message and the text of attached files."
+        "files": "A Squad's goal is text only, so the images or video in {names} weren't handed to it. Any text extracted from {count, plural, =1 {it} other {them}} was."
       },
       "processing": {
         "audioPlayer": "Play {filename}",
@@ -411,10 +416,16 @@
       },
       "visualNotice": {
         "agentFallback": "This agent",
-        "textOnlyShort": "{agent} gets text only",
-        "textOnly": "{agent} receives text only, so {count, plural, =1 {this image or video isn't} other {these # images and videos aren't}} sent. Text extracted from {count, plural, =1 {it} other {them}} is.",
+        "agentNoImagesShort": "{agent} can't see images",
+        "agentNoImages": "{agent} reads text only, so {media, select, images {{count, plural, =1 {this image} other {these {count} images}}} other {{count, plural, =1 {this video} other {these {count} images and videos}}}} won't be sent to it. Send the text in the images instead, or pick an agent that reads images.",
         "noVisionShort": "{model} can't see images",
-        "noVision": "{model} doesn't accept images, so it won't see {count, plural, =1 {this one} other {these #}}. Switch to a model with vision, or remove {count, plural, =1 {it} other {them}}."
+        "noVision": "{model} doesn't accept images, so it won't see {count, plural, =1 {this one} other {these #}}. Switch to a model with vision, or send the text in {count, plural, =1 {it} other {them}} instead.",
+        "agentNoVision": "{agent} runs {model}, which can't see images, so {media, select, images {{count, plural, =1 {this image} other {these {count} images}}} other {{count, plural, =1 {this video} other {these {count} images and videos}}}} won't be sent. Switch {agent} to a model with vision in the model menu, or send the text in the images instead.",
+        "hostOutdatedShort": "Host can't take images",
+        "hostOutdated": "The paired Host is too old to receive images, so {media, select, images {{count, plural, =1 {this image} other {these {count} images}}} other {{count, plural, =1 {this video} other {these {count} images and videos}}}} won't reach {agent}. Update Cognia on the Host, or send the text in the images instead.",
+        "extractText": "Send the text in {count, plural, =1 {this image} other {these # images}} instead",
+        "extracting": "Extracting text…",
+        "textIncluded": "The text in {count, plural, =1 {this image} other {these # images}} will be sent."
       }
     },
     "camera": {

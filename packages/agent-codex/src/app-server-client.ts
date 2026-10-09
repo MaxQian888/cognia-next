@@ -2091,11 +2091,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         if (content.source.type === "url" && content.source.url) {
           return { type: "image", url: content.source.url }
         }
-        // Codex input has no inline-base64 form; surface a note rather than drop silently.
-        return {
-          type: "text",
-          text: "[image attachment omitted: base64 not supported by Codex input]",
+        // Inline bytes ride the same `image` input as a `data:` URL: Codex
+        // itself turns a `localImage` into exactly that before the model
+        // request, so this is what the model would have seen from a file.
+        if (content.source.type === "base64" && content.source.data) {
+          return {
+            type: "image",
+            url: content.source.data.startsWith("data:")
+              ? content.source.data
+              : `data:${content.source.mediaType};base64,${content.source.data}`,
+          }
         }
+        throw new Error("Codex image input needs a URL or inline base64 data")
       case "audio":
         // `ExternalAgentMessage` audio is an explicit user attachment. The
         // outbound gate validates its data-URL metadata, but encoded speech is

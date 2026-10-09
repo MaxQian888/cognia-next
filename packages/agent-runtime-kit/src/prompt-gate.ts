@@ -43,10 +43,59 @@ function isTextLike(path: string, mimeType?: string): boolean {
   )
 }
 
+/** What a base64 transport field reads as once its bytes are set aside. */
+function payloadMarker(encoded: string, mimeType: string | undefined): string {
+  const body = encoded.startsWith("data:") ? encoded.slice(encoded.indexOf(",") + 1) : encoded
+  return `[base64 ${mimeType ?? "data"}, ~${Math.floor((body.length * 3) / 4)} bytes]`
+}
+
+/**
+ * The message as the gate's text detectors should read it: every base64
+ * transport field replaced by a marker naming its type and size.
+ *
+ * Base64 is not text. Scanned raw, a photo's encoding trips the detectors by
+ * chance (an e-mail-, key- or ID-shaped run of characters turns up in roughly
+ * one 300 KB image in twenty), which refused real image turns at random. The
+ * text a base64 field can hide is not lost: the text-like ones are decoded and
+ * handed over as `decodedTextContent`, and binary bytes carry no text to scan.
+ */
+function withPayloadsSetAside(message: ExternalAgentMessage): ExternalAgentMessage {
+  let changed = false
+  const content = message.content.map((block) => {
+    if (block.type === "file" && block.encoding === "base64" && block.content) {
+      changed = true
+      return { ...block, content: payloadMarker(block.content, block.mimeType) }
+    }
+    if (block.type === "resource" && block.resource.blob) {
+      changed = true
+      return {
+        ...block,
+        resource: {
+          ...block.resource,
+          blob: payloadMarker(block.resource.blob, block.resource.mimeType ?? undefined),
+        },
+      }
+    }
+    if (block.type === "image" && block.source.type === "base64" && block.source.data) {
+      changed = true
+      return {
+        ...block,
+        source: { ...block.source, data: payloadMarker(block.source.data, block.source.mediaType) },
+      }
+    }
+    if (block.type === "audio" && block.data) {
+      changed = true
+      return { ...block, data: payloadMarker(block.data, block.mimeType) }
+    }
+    return block
+  })
+  return changed ? { ...message, content } : message
+}
+
 /**
  * True when `gate` lets this prompt leave the machine, including the text
- * hidden in its text-like base64 blocks. Binary payloads (PNG bytes) are not
- * decoded as text.
+ * hidden in its text-like base64 blocks. Binary payloads (PNG bytes) are
+ * neither decoded nor scanned as text (`withPayloadsSetAside`).
  */
 export function promptInputPassesGate(
   message: ExternalAgentMessage,
@@ -76,5 +125,5 @@ export function promptInputPassesGate(
     return decoded === undefined ? [] : [decoded]
   })
 
-  return gate({ message, metadata, decodedTextContent })
+  return gate({ message: withPayloadsSetAside(message), metadata, decodedTextContent })
 }

@@ -9,6 +9,8 @@ import type {
   ExternalAgentConfig,
   ExternalAgentSession,
   ExternalAgentMessage,
+  ExternalAgentImageContent,
+  ExternalAgentPromptAttachmentResolution,
   ExternalAgentEvent,
   ExternalAgentHookFireEvent,
   ExternalAgentResult,
@@ -102,11 +104,14 @@ import {
   type ExternalAgentModelSurface,
 } from "./session/session-models"
 import {
+  AGENT_MODEL_CATALOG,
   cachedAgentModelSurface,
   forgetAgentModelSurface,
+  lastKnownNativeSurface,
   loadAgentModelSurface,
   type ExternalAgentSessionSurface,
 } from "./capability/model-surface-cache"
+import { agentModelVision, decidePromptImages } from "./session/prompt-attachments"
 import {
   assertRunEnvironmentPlaced,
   RunEnvironmentRefusedError,
@@ -311,6 +316,18 @@ function inferBranchOutcomeFromReason(
  * are the diagnosis (`Model not found` reads very differently from a transport
  * timeout), and the raw error is chained so nothing above loses the cause.
  */
+/**
+ * A turn's user message: its images ahead of its text, the order the built-in
+ * lane sends attachments in. `attachments` already holds only what the agent
+ * can read (`resolvePromptAttachments`).
+ */
+function promptMessageContent(
+  prompt: string,
+  options?: Pick<ExternalAgentExecutionOptions, "attachments">
+): ExternalAgentMessage["content"] {
+  return [...(options?.attachments ?? []), { type: "text", text: prompt }]
+}
+
 function modelRefusedError(model: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause)
   return new Error(
@@ -4013,7 +4030,7 @@ export class ExternalAgentManager {
     const message: ExternalAgentMessage = {
       id: `msg_${Date.now()}`,
       role: "user",
-      content: [{ type: "text", text: prompt }],
+      content: promptMessageContent(prompt, options),
       timestamp: new Date(),
     }
 
@@ -4387,7 +4404,7 @@ export class ExternalAgentManager {
     const message: ExternalAgentMessage = {
       id: `msg_${Date.now()}`,
       role: "user",
-      content: [{ type: "text", text: prompt }],
+      content: promptMessageContent(prompt, options),
       timestamp: new Date(),
     }
 
@@ -5059,6 +5076,80 @@ export class ExternalAgentManager {
       this.refreshCapabilityProfile(agentId, instance, adapter)
     }
     return instance.capabilityProfile
+  }
+
+  /**
+   * Which of a turn's images this agent can read, decided before the turn is
+   * sent so the caller can say what it holds back instead of an adapter
+   * refusing the whole turn (`decidePromptImages`).
+   *
+   * Native models: connects first when the agent's image input is negotiated
+   * (an ACP agent says it in `initialize`), then reads the model the turn runs
+   * from the agent's own catalog. A Cognia model: the app's model metadata
+   * answers, and the source agent is not started for it (the task runs in a
+   * child). A connect that fails decides nothing: every image is offered and
+   * the execute that follows reports the real error.
+   */
+  async resolvePromptAttachments(
+    agentId: string,
+    images: readonly ExternalAgentImageContent[],
+    options?: Pick<ExternalAgentExecutionOptions, "model" | "cogniaModel" | "sessionId">
+  ): Promise<ExternalAgentPromptAttachmentResolution> {
+    if (images.length === 0) return { delivered: [], withheld: null }
+    const instance = this.instances.get(agentId)
+    if (!instance) throw new Error(`Agent not found: ${agentId}`)
+    const binding = normalizeCogniaModelBinding(
+      options?.cogniaModel === undefined
+        ? (instance.config.cogniaModel ?? parseGatewaySessionId(options?.sessionId)?.binding)
+        : options.cogniaModel
+    )
+    if (binding) {
+      const { useSettingsStore } = await import("@/stores/settings")
+      const { resolveModelMeta } = await import("@/lib/ai/model-options")
+      const settings = useSettingsStore.getState().settings
+      const meta = resolveModelMeta(
+        binding.providerId,
+        binding.modelId,
+        settings?.providerSettings,
+        settings?.customProviders
+      )
+      return decidePromptImages({
+        images,
+        agentImages: instance.capabilityProfile?.effective.images?.level,
+        modelVision: meta.supportsVision,
+        modelName: binding.modelId,
+      })
+    }
+    const adapter = this.adapters.get(agentId)
+    if (adapter && !adapter.isConnected()) {
+      try {
+        await this.connect(agentId)
+      } catch (error) {
+        externalAgentManagerLogger.warn("image input check could not connect the agent", {
+          agentId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return { delivered: [...images], withheld: null }
+      }
+    }
+    const surfaceFor = (sessionId: string) => {
+      const cached = cachedAgentModelSurface(agentId, sessionId)
+      return cached?.status === "ready" ? cached.surface : null
+    }
+    const model = agentModelVision({
+      modelId: options?.model,
+      surfaces: [
+        options?.sessionId ? surfaceFor(options.sessionId) : null,
+        surfaceFor(AGENT_MODEL_CATALOG),
+        lastKnownNativeSurface(agentId)?.surface,
+      ],
+    })
+    return decidePromptImages({
+      images,
+      agentImages: this.getAgentCapabilityProfile(agentId)?.effective.images?.level,
+      modelVision: model.vision,
+      ...(model.name || model.modelId ? { modelName: model.name ?? model.modelId } : {}),
+    })
   }
 
   /**

@@ -100,17 +100,30 @@ describe("AttachmentPreview — tile rendering", () => {
     expect(screen.getAllByTestId("composer-attachment-chip")).toHaveLength(2)
   })
 
-  it("lays every attachment out as a compact landscape tile", () => {
+  it("keeps one row height: media as a landscape thumb, a document as a wider card", () => {
     stage([
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "b", mediaType: "application/pdf", filename: "doc.pdf" },
     ])
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
-    // 112×80: wider than tall, smaller than the grid variant's square —
-    // media crops to a landscape thumb, files get width for their name.
-    for (const chip of screen.getAllByTestId("composer-attachment-chip")) {
-      expect(chip).toHaveStyle({ width: "7rem", height: "5rem" })
-    }
+    const [image, document] = screen.getAllByTestId("composer-attachment-chip")
+    // 112×80: wider than tall, smaller than the grid variant's square.
+    expect(image).toHaveStyle({ width: "7rem", height: "5rem" })
+    // The card has room for its name, size and cost on their own lines.
+    expect(document).toHaveStyle({ width: "13.5rem", height: "5rem" })
+  })
+
+  it("puts a document's size and cost on its meta line, not on an overlay", () => {
+    stage([{ id: "b", mediaType: "text/markdown", filename: "notes.md" }], {
+      b: { ...ready({ tokens: 14 }), sizeBytes: 13 },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    const tokens = screen.getByTestId("attachment-tokens")
+    expect(tokens).toHaveTextContent("14")
+    const meta = tokens.parentElement!
+    expect(meta).toHaveTextContent(/13\s?B/)
+    // The extension is spelled out on the type badge too.
+    expect(screen.getByText("md")).toBeInTheDocument()
   })
 
   it("keeps the extension pinned while the stem truncates", () => {
@@ -677,26 +690,28 @@ describe("AttachmentPreview — videos", () => {
 })
 
 describe("AttachmentPreview — images the model will not see", () => {
-  const TEXT_ONLY = { accepted: false, reason: "text-only-agent", agentName: "Pi" } as const
+  const NO_IMAGES = { accepted: false, reason: "agent-no-images", agentName: "Pi" } as const
   const NO_VISION = {
     accepted: false,
     reason: "model-no-vision",
     modelName: "DeepSeek V4 Pro",
+    agentName: null,
   } as const
+  const AGENT_NO_VISION = { ...NO_VISION, agentName: "Pi" } as const
 
-  it("says before the send that a text-only agent gets no images or video", () => {
+  it("says before the send that an agent with no image input gets no images or video", () => {
     stage([
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
       { id: "d", mediaType: "application/pdf", filename: "doc.pdf" },
     ])
-    renderPreview(<AttachmentPreview bare videoRoute={ROUTE} imageInput={TEXT_ONLY} />)
+    renderPreview(<AttachmentPreview bare videoRoute={ROUTE} imageInput={NO_IMAGES} />)
     const notice = screen.getByTestId("attachment-visual-notice")
-    expect(notice).toHaveTextContent("Pi gets text only")
+    expect(notice).toHaveTextContent("Pi can't see images")
     expect(notice).toHaveAttribute("title", expect.stringContaining("these 2 images and videos"))
   })
 
-  it("names the model that cannot see images, counting images only", () => {
+  it("names the built-in model that cannot see images, counting images only", () => {
     stage([
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
@@ -707,10 +722,68 @@ describe("AttachmentPreview — images the model will not see", () => {
     expect(notice).toHaveAttribute("title", expect.stringContaining("this one"))
   })
 
+  it("counts a video on an agent's lane, whose sampled frames are images", () => {
+    stage([
+      { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
+      { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
+    ])
+    renderPreview(<AttachmentPreview bare videoRoute={ROUTE} imageInput={AGENT_NO_VISION} />)
+    expect(screen.getByTestId("attachment-visual-notice")).toHaveAttribute(
+      "title",
+      expect.stringMatching(/^Pi runs DeepSeek V4 Pro.*these 2 images and videos/)
+    )
+  })
+
+  it("offers to send the images' text instead, for the images that have none yet", async () => {
+    const onExtractImageText = jest.fn(async () => {})
+    stage(
+      [
+        { id: "a", mediaType: "image/png", filename: "a.png", url: "blob:a" },
+        { id: "b", mediaType: "image/png", filename: "b.png", url: "blob:b" },
+        { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
+      ],
+      { b: { ...ready(), ocrText: "already read", includeOcr: true } }
+    )
+    renderPreview(
+      <AttachmentPreview
+        bare
+        videoRoute={ROUTE}
+        imageInput={NO_IMAGES}
+        onExtractImageText={onExtractImageText}
+      />
+    )
+    await user().click(screen.getByTestId("attachment-visual-notice"))
+    const action = await screen.findByTestId("attachment-visual-notice-extract")
+    expect(action).toHaveTextContent("Send the text in this image instead")
+    await user().click(action)
+    expect(onExtractImageText).toHaveBeenCalledWith(["a"])
+  })
+
+  it("says the text goes once every image's text is included", async () => {
+    stage([{ id: "a", mediaType: "image/png", filename: "a.png", url: "blob:a" }], {
+      a: { ...ready(), ocrText: "read", includeOcr: true },
+    })
+    renderPreview(
+      <AttachmentPreview
+        bare
+        videoRoute={ROUTE}
+        imageInput={NO_IMAGES}
+        onExtractImageText={jest.fn()}
+      />
+    )
+    const notice = screen.getByTestId("attachment-visual-notice")
+    expect(notice).toHaveAttribute("data-text-included", "true")
+    await user().click(notice)
+    expect(await screen.findByTestId("attachment-visual-notice-text-included")).toHaveTextContent(
+      "The text in this image will be sent."
+    )
+    expect(screen.queryByTestId("attachment-visual-notice-extract")).toBeNull()
+  })
+
   it("stays quiet when there is nothing visual, or the model takes images", () => {
     stage([{ id: "d", mediaType: "application/pdf", filename: "doc.pdf" }])
     const { rerender } = renderPreview(
-      <AttachmentPreview bare videoRoute={ROUTE} imageInput={TEXT_ONLY} />
+      <AttachmentPreview bare videoRoute={ROUTE} imageInput={NO_IMAGES} />
     )
     expect(screen.queryByTestId("attachment-visual-notice")).toBeNull()
     stage([{ id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" }])

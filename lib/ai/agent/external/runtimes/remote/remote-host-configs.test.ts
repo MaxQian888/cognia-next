@@ -5,6 +5,7 @@ import {
   HostConfigsUnsupportedError,
   fetchHostCogniaModels,
   hostSupportsCogniaModelTurns,
+  hostSupportsAttachmentTurns,
   admitRemoteExternalRun,
   createRemoteHostConfig,
   deleteRemoteHostConfig,
@@ -403,6 +404,24 @@ describe("fetchHostCogniaModels", () => {
   it("rejects a malformed answer rather than rendering it", async () => {
     setup({}, { supported: true, providers: [{ providerId: "p" }] })
     await expect(fetchHostCogniaModels("eac_1")).rejects.toThrow("malformed Cognia model catalog")
+  })
+})
+
+describe("run-turn images", () => {
+  it("are supported by local authority", () => {
+    setup({ hasLocalAuthority: () => true })
+    expect(hostSupportsAttachmentTurns()).toBe(true)
+  })
+
+  it("follow the capability marker on a paired Host", () => {
+    setup({
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () =>
+        manifest([...ALL_OPS, HOST_CONFIG_CAPABILITIES.runTurnAttachments]),
+    })
+    expect(hostSupportsAttachmentTurns()).toBe(true)
+    setup({ isRemoteHostActive: () => true, activeHostFeatureManifest: () => manifest() })
+    expect(hostSupportsAttachmentTurns()).toBe(false)
   })
 })
 

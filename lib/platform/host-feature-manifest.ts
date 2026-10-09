@@ -469,6 +469,11 @@ export function buildLocalHostFeatureManifest({
         // own providers without the credential ever leaving Rust.
         "external_agent_cognia_models",
         "external_agent_run_turn_cognia_model",
+        // A capability marker: `external_agent_run_turn` accepts
+        // `attachments`, refs to images staged through
+        // `session.attachment-upload` (advertised beside it by both Hosts),
+        // which the Host judges against its own agent and model.
+        "external_agent_run_turn_attachments",
       ],
     }
     // Starting the process. Named per operation like its neighbours: a host

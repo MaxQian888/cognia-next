@@ -5,6 +5,8 @@ import {
   combinePageText,
   decodeDataUrl,
   downscaleImage,
+  isPortableImageType,
+  toPortableImage,
   effectiveFormat,
   isImageMimeType,
   isPdfMimeType,
@@ -621,5 +623,89 @@ describe("combinePageMarkdown / combinePageText", () => {
         { pageNumber: 2, text: "B" },
       ])
     ).toBe("A\n\nB")
+  })
+})
+
+describe("toPortableImage", () => {
+  const swap = (bitmap: unknown, canvas: unknown) => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    Object.defineProperty(globalThis, "createImageBitmap", { configurable: true, value: bitmap })
+    Object.defineProperty(globalThis, "OffscreenCanvas", { configurable: true, value: canvas })
+    return () => {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  }
+
+  it.each(["image/png", "image/jpeg", "image/gif", "image/webp", "IMAGE/PNG"])(
+    "passes %s through untouched",
+    async (mime) => {
+      const bytes = new Uint8Array([1, 2])
+      const out = await toPortableImage(bytes, mime)
+      expect(out?.bytes).toBe(bytes)
+      expect(isPortableImageType(mime)).toBe(true)
+    }
+  )
+
+  it("names image/jpg as image/jpeg", async () => {
+    expect((await toPortableImage(new Uint8Array([1]), "image/jpg"))?.mimeType).toBe("image/jpeg")
+  })
+
+  it("re-encodes a format agents refuse as PNG at its own size", async () => {
+    const close = jest.fn()
+    let size: [number, number] | null = null
+    const convertToBlob = jest.fn(
+      async () => new Blob([new Uint8Array([7, 7])], { type: "image/png" })
+    )
+    const restore = swap(
+      jest.fn(async () => ({ width: 640, height: 480, close })),
+      class {
+        constructor(width: number, height: number) {
+          size = [width, height]
+        }
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        convertToBlob = convertToBlob
+      }
+    )
+    try {
+      const out = await toPortableImage(new Uint8Array([1, 2, 3]), "image/bmp")
+      expect(out?.mimeType).toBe("image/png")
+      expect(Array.from(out?.bytes ?? [])).toEqual([7, 7])
+      expect(size).toEqual([640, 480])
+      expect(convertToBlob).toHaveBeenCalledWith({ type: "image/png" })
+      expect(close).toHaveBeenCalled()
+      expect(isPortableImageType("image/bmp")).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  it("is null when the runtime cannot decode it, or the codec answers another type", async () => {
+    expect(await toPortableImage(new Uint8Array([1]), "image/heic")).toBeNull()
+    const restore = swap(
+      jest.fn(async () => ({ width: 2, height: 2, close: jest.fn() })),
+      class {
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array([1])], { type: "image/jpeg" })
+        }
+      }
+    )
+    try {
+      expect(await toPortableImage(new Uint8Array([1]), "image/tiff")).toBeNull()
+    } finally {
+      restore()
+    }
   })
 })

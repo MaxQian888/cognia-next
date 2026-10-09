@@ -508,3 +508,51 @@ Team 调度将映射后的公开外部会话 ID 保存到已有的 durable child
 不同的供应商、模型或账号意味着新的网关任务。切换时创建新任务并把会话交接给它；原任务的原生历史保留，供其自身恢复。只有在所属 Cognia 账号、设备和运行时都相同时，才允许在已有任务内重新绑定，并且总是申请新的租约。任务如何延续取决于运行时的连续性特征：`native-resume` 运行时从保留的任务目录恢复自身会话；`transcript` 运行时（DSH SDK 配置、Aider）则依靠 Cognia 回放的会话记录继续。
 
 实现入口：`lib/ai/agent/external/config/cognia-model-options.ts`、`lib/ai/agent/external/config/host-config-service.ts`（`getHostCogniaModelCatalog`）、`lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`、`lib/companion/desktop-write-source.ts`、`lib/platform/host-feature-manifest.ts`、`protocol/companion-request-schemas.json` 和 `protocol/companion-response-schemas.json`。
+
+## 2026-10-09 修订 — 回合中的图片送达外部 Agent
+
+### 问题
+
+外部通道把每个回合压平成一条提示字符串。各适配器其实早已能携带图片内容：
+- ACP 的图片块；
+- Pi 和 OMP 的 `images`；
+- OpenCode 的文件部件；
+- Codex 的图片输入；
+- DSH 的内容块；
+- A2A 的文件部件；
+- Aider 的图片文件。
+
+但 `ExternalAgentManager.execute` 只构造一个文本块，因此附加的图片和从视频采样的帧从未送达任何 Agent，用户只能在发送后从提示中得知。
+
+### 决定
+
+- **回合携带自己的图片。**
+  - `externalTurnPrompt` 返回回合中的图片块，包括直接附加的和从视频采样的，并标明各自来自哪个附件。
+  - `ExternalAgentExecutionOptions.attachments` 在两条执行路径上都把它们放在用户消息的提示文本之前。
+  - 提示文本现在也保留问题之后抓取的链接内容。
+- **发送前给出唯一判定。** `ExternalAgentManager.resolvePromptAttachments` 通过纯函数 `decidePromptImages` 判断 Agent 能看到哪些图片。
+  - Agent 侧的依据是合并后能力档案中的 `images` 单元格。ACP 的 `promptCapabilities.image` 默认为 false，且随 Agent 构建而不同，所以 ACP 行改为 `unknown`，由握手以 live 层的 `imageInput` 填写。厂商覆盖（例如 Cline 的 `image: false`）先于这一步生效。Agent 尚未连接时，管理器会先连接它。
+  - 模型侧的依据是 Agent 自己的目录（`capabilities.vision`），或者对 Cognia 模型使用应用的模型元数据。
+  - 只有明确的“否”才会扣留。
+- **只发送通用格式。**
+  - `toPortableImage` 把 BMP、TIFF、HEIC 重新编码为 PNG。
+  - 无法解码的图片报告为 `format`，绝不发出去等着被拒绝。
+- **Codex** 用 `image` 输入中的 `data:` URL 发送内联字节，这与 Codex 自己处理 `localImage` 的结果相同。
+- **主机通道**先通过 `session.attachment-upload` 把每张图片暂存到作用域 `external-run:<runId>:<index>` 下，再在 `external_agent_run_turn.attachments` 中列出这些 ref（最多 96 项，每项恰好是 `{ ref, name, mediaType }`；`additionalProperties: false`）。
+  - 每张图片一个作用域，因此“最多暂存六个上传”的上限不会卡住采样视频。
+  - 主机只在本次运行自己的作用域和调用设备下解析 ref，并使用提交时嗅探出的媒体类型。
+  - 判定在运行内部完成，冷启动 Agent 不会拖住启动 RPC。
+  - 被扣留的部分通过运行流上带 `attachmentsWithheld` 的帧报告（`agent`、`model` 或 `upload`），ref 在运行结束时消费。
+  - 主机声明能力标记 `external_agent_run_turn_attachments`。看不到该标记的客户端报告 `host`，只发送文本。
+- **给出引导，不再沉默。**
+  - 发送前，`useComposerImageInput` 预测同样的判定（`agent-no-images`、`model-no-vision`、`host-outdated`），附件行显示提示说明原因，并提供“改为发送图片中的文字”（在本机 OCR 后随消息发送）。
+  - 发送后，每组被扣留的图片都会附上对应的补救方式：提取文字、为该 Agent 切换视觉模型、更新主机、重新保存图片或检查连接。
+- **PII 闸门按 base64 实际编码的内容来读取。**
+  - 照片的 base64 被当成文本扫描时会偶然触发检测（约每二十张 300 KB 图片一张），导致图片回合被随机拒绝。
+  - 现在 `hasNoLeakingPiiDeep` 把 base64 `data:` URL 和不少于 1 KiB 的纯 base64 串视为载荷：文本类会被解码后扫描；二进制字节不含文本，因此不扫描。
+  - 更短的 base64 字母表字符串仍按文本扫描，以覆盖密钥和令牌。
+  - `promptInputPassesGate` 同样把二进制载荷单独处理。
+
+Squad 的目标仍只接受文本，其提示现在会说明它没有接收哪些图片。
+
+实现入口：`lib/ai/agent/external/session/{prompt-attachments,turn-images}.ts`、`lib/ai/agent/external/manager.ts`（`resolvePromptAttachments`）、`lib/ai/agent/external/capability/capability-live-facts.ts`、`lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`、`hooks/chat/use-claude-chat-controller.ts`、`components/chat/composer/{image-input-notice.tsx,hooks/use-composer-image-input.ts}`、`packages/agent-runtime-kit/src/prompt-gate.ts`、`packages/redact/src/index.ts`、`packages/ocr/src/image-prep.ts`（`toPortableImage`）和 `protocol/companion-request-schemas.json`。

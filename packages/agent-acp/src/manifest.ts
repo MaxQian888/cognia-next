@@ -124,9 +124,12 @@ export const ACP_CAPABILITIES: AgentCapabilityContribution = {
           evidence: "protocol-spec",
           reasonKey: "agentOwned",
         },
+        // Per agent build: `promptCapabilities.image` defaults to false, so the
+        // handshake answers it (`capability-live-facts.ts`), not the protocol.
         images: {
-          level: "native",
+          level: "unknown",
           evidence: "protocol-spec",
+          reasonKey: "notNegotiated",
         },
         "beta-features": {
           level: "unsupported",

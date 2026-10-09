@@ -420,6 +420,11 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 // External-agent branch (D1): dynamically imported by `send` when the agent
 // runtime is "external". Mock both so the branch is drivable from a test.
 const executeOnExternalAgentMock = jest.fn()
+/** Every image goes, unless a test says the agent or its model cannot see it. */
+const resolvePromptAttachmentsMock = jest.fn(async (_agentId: string, images: unknown[]) => ({
+  delivered: images,
+  withheld: null,
+}))
 const executeOnRemoteHostAgentMock = jest.fn()
 jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-execute", () => ({
   ...jest.requireActual("@/lib/ai/agent/external/runtimes/remote/remote-execute"),
@@ -498,6 +503,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     supportsSteering: () => true,
     steerSession: (...args: unknown[]) => steerExternalSessionMock(...args),
     getConnectedAgents: () => getConnectedAgentsMock(),
+    resolvePromptAttachments: (...args: unknown[]) => resolvePromptAttachmentsMock(...args),
     getAgentCapabilityProfile: () => ({
       effective: {
         mcp: { level: externalMcpLevelMock.value },
@@ -1438,6 +1444,100 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({ chatSessionId: "sess-1" })
     )
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  describe("images on an external agent's lane", () => {
+    const pic = {
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: "image/png", data: "UElD" },
+    }
+    const manifest = [{ filename: "pic.png", mediaType: "image/png", kind: "image" as const }]
+    const agentImage = {
+      type: "image",
+      source: { type: "base64", data: "UElD", mediaType: "image/png" },
+    }
+
+    beforeEach(() => {
+      resolvePromptAttachmentsMock.mockClear()
+      toastWarning.mockClear()
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "seen" })
+    })
+
+    it("hands the agent the turn's image beside its prompt, once it says it can see it", async () => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send([pic, { type: "text", text: "what is this?" }], undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      expect(resolvePromptAttachmentsMock).toHaveBeenCalledWith(
+        "ext-1",
+        [agentImage],
+        expect.any(Object)
+      )
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "what is this?",
+        expect.objectContaining({ agentId: "ext-1", attachments: [agentImage] })
+      )
+      expect(toastWarning).not.toHaveBeenCalled()
+    })
+
+    it("sends the text alone and says why when the agent's model cannot see images", async () => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      resolvePromptAttachmentsMock.mockResolvedValueOnce({
+        delivered: [],
+        withheld: { reason: "model", count: 1, model: "DeepSeek V4 Pro" },
+      } as never)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send([pic, { type: "text", text: "what is this?" }], undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      const options = executeOnExternalAgentMock.mock.calls.at(-1)?.[1] as {
+        attachments?: unknown
+      }
+      expect(options.attachments).toBeUndefined()
+      expect(toastWarning).toHaveBeenCalledWith(
+        expect.stringMatching(/DeepSeek V4 Pro can't see images, so the images in pic\.png/)
+      )
+    })
+
+    it("hands a paired Host the image and says what the Host held back", async () => {
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Pi",
+        },
+      })
+      executeOnRemoteHostAgentMock.mockImplementationOnce(
+        async (_prompt: string, options: { onAttachmentsWithheld?: (w: unknown) => void }) => {
+          options.onAttachmentsWithheld?.({ reason: "host" })
+          return { success: true, finalResponse: "ok", runId: "r" }
+        }
+      )
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send([pic, { type: "text", text: "what is this?" }], undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      expect(resolvePromptAttachmentsMock).not.toHaveBeenCalled()
+      expect(executeOnRemoteHostAgentMock).toHaveBeenCalledWith(
+        "what is this?",
+        expect.objectContaining({ attachments: [agentImage] })
+      )
+      expect(toastWarning).toHaveBeenCalledWith(
+        expect.stringMatching(/paired Host is too old to receive images.*pic\.png.*Pi/)
+      )
+    })
   })
 
   it("keeps the legacy send path available when durable acceptance fails", async () => {
@@ -8468,7 +8568,7 @@ describe("useClaudeChat — @agent turn routing", () => {
       expect(executeOnExternalAgentMock.mock.calls[1]![0]).toBe(`${REPORT}\n\n${QUESTION}`)
     })
 
-    it("tells the user what an external agent's text-only prompt left out", async () => {
+    it("hands an external agent the image, its OCR text, the question and the fetched page", async () => {
       executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
       const shot = { filename: "shot.png", mediaType: "image/png", kind: "image" as const }
       const { result } = await mount()
@@ -8488,13 +8588,50 @@ describe("useClaudeChat — @agent turn routing", () => {
         )
       })
       expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
-        `OCR words\n\n${QUESTION}`,
-        expect.objectContaining({ agentId: "codex-1" })
+        `OCR words\n\n${QUESTION}\n\n[Link] https://example.com: page text`,
+        expect.objectContaining({
+          agentId: "codex-1",
+          attachments: [
+            {
+              type: "image",
+              source: { type: "base64", data: "iVBORw0KGgo=", mediaType: "image/png" },
+            },
+          ],
+        })
       )
+      expect(toastWarning).not.toHaveBeenCalled()
+    })
+
+    it("tells the user which images an agent with no image input did not get, and what to do", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      resolvePromptAttachmentsMock.mockResolvedValueOnce({
+        delivered: [],
+        withheld: { reason: "agent", count: 1 },
+      } as never)
+      const shot = { filename: "shot.png", mediaType: "image/png", kind: "image" as const }
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(
+          [
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+            },
+            { type: "text", text: "OCR words" },
+            { type: "text", text: `@codex ${QUESTION}` },
+          ],
+          undefined,
+          { turnRoute: CODEX, attachmentManifest: [shot, shot] }
+        )
+      })
+      const options = executeOnExternalAgentMock.mock.calls.at(-1)?.[1] as {
+        attachments?: unknown
+      }
+      expect(options.attachments).toBeUndefined()
       expect(toastWarning).toHaveBeenCalledWith(
-        "External agents receive text only, so the images or video in shot.png weren't sent. " +
-          "Any text extracted from it was. A fetched page wasn't sent: external agents " +
-          "receive only your message and the text of attached files."
+        expect.stringMatching(
+          /reads text only, so the images in shot\.png weren't sent\. Text extracted from it was\./
+        )
       )
     })
 
@@ -8523,13 +8660,15 @@ describe("useClaudeChat — @agent turn routing", () => {
         await act(async () => {
           await result.current.send(turn, undefined, { attachmentManifest: [shot, shot] })
         })
+        // The fetched page now rides the goal; only the image stays behind.
         expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
-          expect.objectContaining({ goal: `OCR words\n\n${QUESTION}` })
+          expect.objectContaining({
+            goal: `OCR words\n\n${QUESTION}\n\n[Link] https://example.com: page text`,
+          })
         )
         expect(toastWarning).toHaveBeenCalledWith(
           "A Squad's goal is text only, so the images or video in shot.png weren't handed to it. " +
-            "Any text extracted from it was. A fetched page wasn't handed to the Squad: its goal " +
-            "holds only your message and the text of attached files."
+            "Any text extracted from it was."
         )
       })
 

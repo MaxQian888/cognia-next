@@ -301,6 +301,12 @@ import {
   withTranscriptRuntimeLock,
 } from "@/lib/chat/transcript/revision-events"
 import { hostStateSendEligible } from "./host-state-send-eligibility"
+import type {
+  ExternalTurnImage,
+  TurnImagesWithheld,
+} from "@/lib/ai/agent/external/session/turn-images"
+import type { ExternalAgentImageContent } from "@/types/agent/external-agent"
+import type { RemoteAttachmentsWithheld } from "@/lib/ai/agent/external/runtimes/remote/remote-execute"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 import { drainSteerVia, handleEvent, tryAutoModeDecision } from "./claude-chat-events"
 import {
@@ -342,25 +348,24 @@ export function rewriteUserPromptText(
 /**
  * What an external agent (Codex, ACP, a paired host's agent) is sent for a turn.
  *
- * Both external executors take one prompt string, so that string is the only
- * way a turn's attachments reach the agent. This lane used to send the payload's
- * FIRST text block, which is the extracted document or OCR text whenever one is
- * attached (`buildSendContent` puts attachment blocks first), so the agent got
- * the file and never the question.
+ * External executors take one prompt string plus the turn's images. This lane
+ * used to send the payload's FIRST text block, which is the extracted document
+ * or OCR text whenever one is attached (`buildSendContent` puts attachment
+ * blocks first), so the agent got the file and never the question.
  *
  * - `request` is what the user typed: the first text block past the
  *   attachments, read at the offset `userPromptText` uses. Delegation rules
  *   match on it, not on a file's contents.
  * - `prompt` is what the agent reads: the text blocks in front of the request
- *   (the provider lines put ahead of the turn, then the attachments' text),
- *   then the request, in the order the builtin lane sends them. Non-text blocks
- *   (images, native video) cannot ride a string. Blocks after the request
- *   (fetched link context) were never part of this lane's prompt and still
- *   are not.
- * - `omitted` is what `prompt` leaves out, so the lane can say so instead of
+ *   (the provider lines put ahead of the turn, then the attachments' text), the
+ *   request, then the text after it (fetched link context), in the order the
+ *   builtin lane sends them.
+ * - `images` are the turn's image blocks, attached or sampled from a video,
+ *   each with the manifest index of its attachment. Whether the agent and its
+ *   model can see them is decided later (`resolvePromptAttachments`).
+ * - `omitted` is what neither carries, so the lane can say so instead of
  *   dropping it silently: the manifest indexes of attachment blocks that are
- *   not text, any other non-text block (no manifest names it), and the
- *   non-empty text blocks after the request.
+ *   neither text nor an image (a native video), and any other such block.
  *
  * `leadingCount` is how many blocks the provider pipeline put in front of the
  * turn's own blocks (the reply line, the resource context); the attachments
@@ -370,43 +375,53 @@ export function externalTurnPrompt(
   content: SendContent,
   attachmentCount = 0,
   leadingCount = 0
-): { request: string; prompt: string; omitted: ExternalTurnOmissions } {
-  const omitted: ExternalTurnOmissions = { attachments: [], unnamed: 0, trailingText: 0 }
-  if (typeof content === "string") return { request: content, prompt: content, omitted }
+): {
+  request: string
+  prompt: string
+  images: ExternalTurnImage[]
+  omitted: ExternalTurnOmissions
+} {
+  const omitted: ExternalTurnOmissions = { attachments: [], unnamed: 0 }
+  const images: ExternalTurnImage[] = []
+  if (typeof content === "string") {
+    return { request: content, prompt: content, images, omitted }
+  }
   const request = userPromptText(content.slice(leadingCount), attachmentCount)
   const attachmentsEnd = leadingCount + attachmentCount
-  const ahead = content
-    .slice(0, attachmentsEnd)
-    .flatMap((block) => (block.type === "text" && block.text.trim() ? [block.text] : []))
   const requestIndex = content.findIndex(
     (block, index) => index >= attachmentsEnd && block.type === "text"
   )
+  const texts = (from: number, to: number) =>
+    content
+      .slice(from, to)
+      .flatMap((block) => (block.type === "text" && block.text.trim() ? [block.text] : []))
+  const ahead = texts(0, attachmentsEnd)
+  const after = requestIndex >= 0 ? texts(requestIndex + 1, content.length) : []
   content.forEach((block, index) => {
-    if (block.type !== "text") {
-      if (index >= leadingCount && index < attachmentsEnd) {
-        omitted.attachments.push(index - leadingCount)
-      } else {
-        omitted.unnamed += 1
-      }
-    } else if (requestIndex >= 0 && index > requestIndex && block.text.trim()) {
-      omitted.trailingText += 1
+    if (block.type === "text") return
+    const attachment = index >= leadingCount && index < attachmentsEnd ? index - leadingCount : null
+    if (block.type === "image") {
+      images.push({ block, attachment })
+    } else if (attachment !== null) {
+      omitted.attachments.push(attachment)
+    } else {
+      omitted.unnamed += 1
     }
   })
   return {
     request,
-    prompt: [...ahead, ...(request.trim() ? [request] : [])].join("\n\n"),
+    prompt: [...ahead, ...(request.trim() ? [request] : []), ...after].join("\n\n"),
+    images,
     omitted,
   }
 }
 
-/** What an external agent's one-string prompt could not carry of a turn. */
+/** What an external agent's prompt (text plus images) could not carry of a turn. */
 export interface ExternalTurnOmissions {
-  /** Manifest indexes of attachment blocks that are not text (an image, a native video). */
+  /** Manifest indexes of attachment blocks that are neither text nor an image (a native video). */
   attachments: number[]
-  /** Non-text blocks outside the attachments, which no manifest names. */
+  /** Such blocks outside the attachments, which no manifest names. */
   unnamed: number
-  /** Non-empty text blocks after the typed request: fetched link context. */
-  trailingText: number
 }
 
 export function resolveChatTurnAttemptIdentity(input: {
@@ -732,43 +747,57 @@ export function useClaudeChat() {
   const tAttachments = useTranslations("chat.composer.attachments")
   const tCollab = useTranslations("chatCollaboration")
   /**
-   * Name what a text-only recipient could not be handed of a turn: the
-   * attached files whose images or native video were left out (any text
-   * extracted from them was sent), and the fetched pages after the question.
-   * An external agent takes one prompt string; a Squad takes one goal string.
+   * Name what a turn's recipient was not handed, and why, so nothing attached
+   * goes missing in silence. A Squad's goal is one string, so it gets the
+   * text alone. An external agent gets text and the images it can see; each
+   * group it did not get says what to do about it (extract the text, switch to
+   * a vision model, update the Host). Text extracted from an attachment is
+   * always sent, and every message says so.
    */
-  const warnTextOnlyOmissions = useCallback(
+  const warnUndeliveredAttachments = useCallback(
     (
       recipient: "external" | "squad",
-      omitted: ExternalTurnOmissions,
+      report: {
+        omitted: ExternalTurnOmissions
+        withheld: readonly TurnImagesWithheld[]
+        agent?: string | null
+      },
       manifest: readonly AttachmentManifestEntry[] | undefined
     ) => {
-      const names = [
-        ...new Set([
-          ...omitted.attachments.map(
-            (index) => manifest?.[index]?.filename || tAttachments("fallbackName")
+      const named = (attachments: ReadonlyArray<number | null>) => {
+        const names = [
+          ...new Set(
+            attachments.map(
+              (index) =>
+                (index !== null ? manifest?.[index]?.filename : undefined) ||
+                tAttachments("fallbackName")
+            )
           ),
-          ...(omitted.unnamed > 0 ? [tAttachments("fallbackName")] : []),
-        ]),
+        ]
+        return { count: names.length, names: names.join(", ") }
+      }
+      const others: Array<number | null> = [
+        ...report.omitted.attachments,
+        ...(report.omitted.unnamed > 0 ? [null] : []),
       ]
-      const files = { count: names.length, names: names.join(", ") }
-      const links = { count: omitted.trailingText }
-      const lines = [
-        ...(names.length > 0
-          ? [
-              recipient === "squad"
-                ? tAttachments("squadOmitted.files", files)
-                : tAttachments("externalOmitted.files", files),
-            ]
-          : []),
-        ...(omitted.trailingText > 0
-          ? [
-              recipient === "squad"
-                ? tAttachments("squadOmitted.links", links)
-                : tAttachments("externalOmitted.links", links),
-            ]
-          : []),
-      ]
+      const lines: string[] = []
+      if (recipient === "squad") {
+        const all = [...others, ...report.withheld.flatMap((group) => group.attachments)]
+        if (all.length > 0) lines.push(tAttachments("squadOmitted.files", named(all)))
+      } else {
+        if (others.length > 0) lines.push(tAttachments("externalOmitted.files", named(others)))
+        const agent = report.agent || tAttachments("visualNotice.agentFallback")
+        for (const group of report.withheld) {
+          if (group.attachments.length === 0) continue
+          lines.push(
+            tAttachments(`imagesWithheld.${group.reason}`, {
+              ...named(group.attachments),
+              agent,
+              model: group.model ?? agent,
+            })
+          )
+        }
+      }
       if (lines.length > 0) toast.warning(lines.join(" "))
     },
     [tAttachments]
@@ -3014,7 +3043,22 @@ export function useClaudeChat() {
           // did not reach the Squad. Said once the run takes it, and not for a
           // run that already existed, whose goal this turn did not set.
           if (!result.duplicate) {
-            warnTextOnlyOmissions("squad", externalTurn.omitted, turnManifest)
+            // A Squad's goal is text only: the turn's images stay behind too.
+            warnUndeliveredAttachments(
+              "squad",
+              {
+                omitted: externalTurn.omitted,
+                withheld: externalTurn.images.length
+                  ? [
+                      {
+                        reason: "agent",
+                        attachments: externalTurn.images.map((image) => image.attachment),
+                      },
+                    ]
+                  : [],
+              },
+              turnManifest
+            )
           }
           // Leave the conversation's own record of the handoff, now rather
           // than when the run finishes. A Squad run takes minutes, and a
@@ -4760,9 +4804,56 @@ export function useClaudeChat() {
           const externalExecutionPrompt = externalContinuationContext
             ? `${externalContinuationContext}\n\nCurrent user request:\n${externalSendText}`
             : externalSendText
-          // The prompt is one string: images, a native video and fetched pages
-          // cannot ride it. Say so instead of dropping them silently.
-          warnTextOnlyOmissions("external", externalTurn.omitted, turnManifest)
+          // The turn's images (attached, or sampled from a video), in a format
+          // agents read. The local lane asks this agent and its model what they
+          // can see before sending; a Host lane hands them to the Host, which
+          // answers the same question against its own agent when the turn
+          // starts. Whatever stays behind is named, with what to do about it.
+          const { prepareExternalTurnImages, withheldTurnImages } =
+            await import("@/lib/ai/agent/external/session/turn-images")
+          const turnImages = await prepareExternalTurnImages(externalTurn.images)
+          const turnAgentName =
+            useExternalAgentStore.getState().agents[extAgentId]?.name ??
+            (turnRuntimeRef?.kind === "host" ? turnRuntimeRef.name : undefined)
+          const warnExternalUndelivered = (
+            omitted: ExternalTurnOmissions,
+            withheld: TurnImagesWithheld[]
+          ) =>
+            warnUndeliveredAttachments(
+              "external",
+              { omitted, withheld, agent: turnAgentName },
+              turnManifest
+            )
+          let deliveredImages: ExternalAgentImageContent[] = []
+          if (hostSelection) {
+            deliveredImages = turnImages.ready.map((image) => image.content)
+            warnExternalUndelivered(externalTurn.omitted, withheldTurnImages(turnImages, null))
+          } else {
+            const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+            const imageVerdict =
+              turnImages.ready.length > 0
+                ? await getExternalAgentManager().resolvePromptAttachments(
+                    extAgentId,
+                    turnImages.ready.map((image) => image.content),
+                    {
+                      ...(externalModel ? { model: externalModel } : {}),
+                      ...(cogniaModel !== undefined ? { cogniaModel } : {}),
+                      // The session the turn continues, whose model list names
+                      // the model it runs on.
+                      ...(!resetExternalSession && modelSelection.gatewayLink
+                        ? { sessionId: modelSelection.gatewayLink }
+                        : nativeConversationSessionId
+                          ? { sessionId: nativeConversationSessionId }
+                          : {}),
+                    }
+                  )
+                : null
+            deliveredImages = imageVerdict?.delivered ?? []
+            warnExternalUndelivered(
+              externalTurn.omitted,
+              withheldTurnImages(turnImages, imageVerdict?.withheld ?? null)
+            )
+          }
           // Reuse the completed instruction pipeline, including selected skills,
           // project context and per-turn additions, on the external lane too.
           const externalSystemPrompt = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
@@ -4795,6 +4886,18 @@ export function useClaudeChat() {
                   systemPrompt: externalSystemPrompt || undefined,
                   allowedTools: sendOptions.allowedTools,
                   mcpServers: externalMcpServers,
+                  ...(deliveredImages.length > 0
+                    ? {
+                        attachments: deliveredImages,
+                        // The Host's verdict, or the route's (an older Host, a
+                        // failed upload), for the images it did not pass on.
+                        onAttachmentsWithheld: (verdict: RemoteAttachmentsWithheld) =>
+                          warnExternalUndelivered(
+                            { attachments: [], unnamed: 0 },
+                            withheldTurnImages({ ready: turnImages.ready, unreadable: [] }, verdict)
+                          ),
+                      }
+                    : {}),
                   onEvent: handleExternalEvent,
                 })
               : await executeOnExternalAgent(externalExecutionPrompt, {
@@ -4825,6 +4928,7 @@ export function useClaudeChat() {
                   workingDirectory: sendOptions.cwd,
                   systemPrompt: externalSystemPrompt || undefined,
                   allowedTools: sendOptions.allowedTools,
+                  ...(deliveredImages.length > 0 ? { attachments: deliveredImages } : {}),
                   ...externalModelAxes,
                   context: {
                     custom: {
@@ -5388,7 +5492,7 @@ export function useClaudeChat() {
       tPiPackages,
       tVideo,
       tCollab,
-      warnTextOnlyOmissions,
+      warnUndeliveredAttachments,
       registry,
       releaseExternalToolHost,
       enqueueClaudeEvent,

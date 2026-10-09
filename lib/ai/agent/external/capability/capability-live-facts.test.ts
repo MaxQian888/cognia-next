@@ -46,6 +46,21 @@ describe("liveCapabilityFacts", () => {
     expect(liveCapabilityFacts({ negotiated: { mcpTools: false } })?.mcp?.level).toBe("unsupported")
   })
 
+  it("answers images from the negotiated image input, either way", () => {
+    expect(liveCapabilityFacts({ negotiated: { imageInput: true } }).images).toEqual({
+      level: "native",
+      evidence: "handshake",
+      reasonKey: "negotiatedImageInput",
+    })
+    expect(liveCapabilityFacts({ negotiated: { imageInput: false } }).images).toEqual({
+      level: "unsupported",
+      evidence: "handshake",
+      reasonKey: "negotiatedNoImageInput",
+    })
+    // A protocol with no image negotiation leaves its manifest row standing.
+    expect(liveCapabilityFacts({ negotiated: { streaming: true } }).images).toBeUndefined()
+  })
+
   it("propagates a tool-execution refusal to results and errors", () => {
     const cells = liveCapabilityFacts({ negotiated: { toolExecution: false } })
     expect(cells["tools.ordinary"]?.level).toBe("unsupported")

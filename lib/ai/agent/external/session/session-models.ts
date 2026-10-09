@@ -572,6 +572,11 @@ export interface ActiveAgentModel {
   modelId: string | undefined
   /** The catalog row for {@link modelId}, when the agent listed it. */
   model: ExternalAgentModelChoice | undefined
+  /**
+   * The Cognia model the conversation runs instead, through the gateway. The
+   * app's own model metadata describes it; the agent's catalog does not.
+   */
+  cognia?: ExternalAgentCogniaModelBinding
 }
 
 export function resolveActiveAgentModel(input: {
@@ -581,7 +586,9 @@ export function resolveActiveAgentModel(input: {
   surface: ExternalAgentModelSurface | null | undefined
 }): ActiveAgentModel {
   const { choice, surface } = input
-  if (choice?.kind === "cognia") return { modelId: undefined, model: undefined }
+  if (choice?.kind === "cognia") {
+    return { modelId: undefined, model: undefined, cognia: choice.binding }
+  }
   const pick = choice?.kind === "native" ? choice.modelId : undefined
   const current = surface?.currentModelId ?? undefined
   // A live surface is the agent's own word on what runs, and a pick writes

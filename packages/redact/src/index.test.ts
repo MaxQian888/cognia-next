@@ -584,6 +584,36 @@ describe("hasNoLeakingPiiDeep", () => {
     expect(hasNoLeakingPiiDeep([{ path: schema }, { file: schema }])).toBe(false)
   })
 
+  it("reads base64 transport fields for what they encode, not as text", () => {
+    const { randomBytes } = jest.requireActual<typeof import("crypto")>("crypto")
+    // Raw photo bytes tripped the text detectors by chance (~1 in 20 at 300 KB).
+    const photos = Array.from({ length: 40 }, () => randomBytes(300_000).toString("base64"))
+    expect(hasNoLeakingPiiDeep(photos.map((data) => ({ type: "image", data })))).toBe(true)
+    expect(
+      hasNoLeakingPiiDeep(photos.map((data) => ({ url: `data:image/png;base64,${data}` })))
+    ).toBe(true)
+  })
+
+  it("decodes and scans a text-like data URL", () => {
+    const encoded = Buffer.from("<text>alice@example.com</text>").toString("base64")
+    expect(hasNoLeakingPiiDeep({ url: `data:image/svg+xml;base64,${encoded}` })).toBe(false)
+    expect(hasNoLeakingPiiDeep({ url: `data:text/plain;charset=utf-8;base64,${encoded}` })).toBe(
+      false
+    )
+    const clean = Buffer.from("<text>hello</text>").toString("base64")
+    expect(hasNoLeakingPiiDeep({ url: `data:image/svg+xml;base64,${clean}` })).toBe(true)
+  })
+
+  it("still scans short base64-alphabet strings and non-base64 data URLs as text", () => {
+    // A key-shaped value is the base64 alphabet and far under the opaque floor.
+    expect(hasNoLeakingPiiDeep({ key: "AKIAIOSFODNN7EXAMPLE" })).toBe(
+      hasNoLeakingPii("AKIAIOSFODNN7EXAMPLE")
+    )
+    expect(hasNoLeakingPiiDeep({ url: "data:text/plain,alice@example.com" })).toBe(false)
+    // A long run that is not one base64 quantum stays text.
+    expect(hasNoLeakingPiiDeep({ note: `${"a".repeat(1023)}@example.com` })).toBe(false)
+  })
+
   it("rejects cycles through arrays, maps, and sets without recursion overflow", () => {
     const array: unknown[] = []
     array.push(array)

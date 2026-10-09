@@ -1065,6 +1065,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         streaming: true,
         toolExecution: true,
         fileOperations: initResult.agentCapabilities?.promptCapabilities?.embeddedContext,
+        // ACP's prompt capabilities default to false: an agent that leaves
+        // `image` out has said it takes text only. Read after the vendor
+        // override, so a build that advertises images it cannot use says no.
+        imageInput: initResult.agentCapabilities?.promptCapabilities?.image === true,
         // Stdio MCP servers are baseline ACP support. The negotiated flags
         // only describe additional HTTP/SSE server transports.
         mcpTools: !this.vendor?.sessionMcpServersUnsupported,

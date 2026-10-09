@@ -3506,8 +3506,11 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
   if (externalSessionId !== undefined && typeof externalSessionId !== "string") {
     throw new Error("external_agent_run_turn.externalSessionId must be a string")
   }
-  const { startRemoteExternalRun } =
+  const { parseRemoteRunAttachments, startRemoteExternalRun } =
     await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
+  // Refs to images staged through the upload plane; the bytes are resolved
+  // inside the run, against this run's own upload scopes and the caller.
+  const attachments = parseRemoteRunAttachments(payload.attachments)
   const result = await startRemoteExternalRun({
     runId,
     chatSessionId,
@@ -3522,6 +3525,7 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
     allowedTools: payload.allowedTools as string[] | undefined,
     externalSessionId,
     ...(cogniaModel !== undefined ? { cogniaModel } : {}),
+    ...(attachments?.length ? { attachments } : {}),
     callerDeviceId: payload.callerDeviceId as string | undefined,
     stamp: {
       configId: stamp.configId,

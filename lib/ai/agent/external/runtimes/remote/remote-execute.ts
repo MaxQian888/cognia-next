@@ -26,19 +26,23 @@ import type {
   AcpMcpServerConfig,
   ExternalAgentCogniaModelBinding,
   ExternalAgentEvent,
+  ExternalAgentImageContent,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 
 import {
   cancelRemoteExternalTurn,
+  stageRemoteRunAttachments,
   startRemoteExternalTurn,
   subscribeRemoteExternalRun,
   whenRemoteRunChannelSubscribed,
+  type RemoteRunAttachment,
 } from "./remote-run-client"
 import { remoteDecisionId } from "./remote-run-service"
 import {
   HostCogniaModelUpdateRequiredError,
+  hostSupportsAttachmentTurns,
   hostSupportsCogniaModelTurns,
 } from "./remote-host-configs"
 import { recordReportedAgentModelSurface } from "../../capability/model-surface-cache"
@@ -76,8 +80,27 @@ export interface RemoteExecuteOptions {
    * is incomplete rather than render a hole as if nothing were missing.
    */
   onGap?: (expected: number, received: number) => void
+  /**
+   * The turn's images (`ExternalAgentManager.resolvePromptAttachments` runs on
+   * the Host, against its own agent). Staged on the Host before the turn
+   * starts.
+   */
+  attachments?: ExternalAgentImageContent[]
+  /**
+   * Some or all of `attachments` did not reach the agent: the Host's verdict
+   * (`agent`, `model`), a ref that no longer resolved there or could not be
+   * staged (`upload`), or a Host too old to take images (`host`). The turn
+   * still runs, on its text.
+   */
+  onAttachmentsWithheld?: (withheld: RemoteAttachmentsWithheld) => void
   /** Injected in tests. */
   newRunId?: () => string
+}
+
+export interface RemoteAttachmentsWithheld {
+  reason: "agent" | "model" | "upload" | "host"
+  /** The model with no vision, for `model`. */
+  model?: string
 }
 
 /** The chat-side id for a question this run is blocked on. */
@@ -166,6 +189,20 @@ export async function executeOnRemoteHostAgent(
   )
     throw new Error("Remote external agent input blocked by the outbound PII gate")
   const runId = options.newRunId?.() ?? `rer_${crypto.randomUUID()}`
+  // Staged before the subscription opens: a slow upload must not leave a
+  // subscribed run waiting on a turn that has not been asked for yet.
+  let attachments: RemoteRunAttachment[] = []
+  if (options.attachments?.length) {
+    if (!hostSupportsAttachmentTurns()) {
+      options.onAttachmentsWithheld?.({ reason: "host" })
+    } else {
+      try {
+        attachments = await stageRemoteRunAttachments(runId, options.attachments)
+      } catch {
+        options.onAttachmentsWithheld?.({ reason: "upload" })
+      }
+    }
+  }
   let text = ""
   let externalSessionId = options.externalSessionId ?? ""
 
@@ -185,6 +222,11 @@ export async function executeOnRemoteHostAgent(
       options.onEvent?.(event)
     },
     onGap: options.onGap,
+    onAttachmentsWithheld: (withheld) =>
+      options.onAttachmentsWithheld?.({
+        reason: withheld.reason,
+        ...(withheld.model ? { model: withheld.model } : {}),
+      }),
     onTerminal: (terminal, error) => {
       settle({
         runId,
@@ -224,6 +266,7 @@ export async function executeOnRemoteHostAgent(
       ...(options.cogniaModel !== undefined && hostTakesCogniaModel
         ? { cogniaModel: options.cogniaModel }
         : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     })
     if (!started.started) {
       stop()

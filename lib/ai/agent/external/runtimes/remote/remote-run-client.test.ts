@@ -21,6 +21,25 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+const uploads: Array<{ scope: string; name: string; mediaType: string; bytes: number[] }> = []
+let uploadFails = false
+jest.mock("@/lib/companion/attachment-upload-client", () => ({
+  uploadSessionAttachment: async (
+    scope: string,
+    file: { name: string; mediaType: string; bytes: Uint8Array }
+  ) => {
+    if (uploadFails) throw new Error("attachment_too_many")
+    uploads.push({ scope, name: file.name, mediaType: file.mediaType, bytes: [...file.bytes] })
+    return {
+      ref: `cognia-upload:${uploads.length}`,
+      name: file.name,
+      mediaType: file.mediaType,
+      size: file.bytes.length,
+      hash: "h",
+    }
+  },
+}))
+
 import {
   HostConfigsUnsupportedError,
   __setRemoteHostConfigDepsForTests,
@@ -33,6 +52,7 @@ import {
   cancelRemoteExternalTurn,
   resolveRemoteElicitation,
   resolveRemotePermission,
+  stageRemoteRunAttachments,
   startRemoteExternalTurn,
   subscribeRemoteExternalRun,
   type RemoteRunFrame,
@@ -354,6 +374,94 @@ describe("starting a turn", () => {
       prompt: "hi",
     })
     expect(result.started).toBe(false)
+  })
+})
+
+describe("the turn's images", () => {
+  const stamp = { configId: "eac_1", revision: "eacr_1", lifecycleGeneration: 2 }
+  const image = (data: string, mediaType = "image/png") =>
+    ({ type: "image", source: { type: "base64", data, mediaType } }) as const
+
+  beforeEach(() => {
+    uploads.length = 0
+    uploadFails = false
+  })
+
+  it("stages each image under its own run-scoped upload, in order", async () => {
+    await expect(
+      stageRemoteRunAttachments("rer_1", [image("AQID"), image("BAUG", "image/jpeg")])
+    ).resolves.toEqual([
+      { ref: "cognia-upload:1", name: "image-1.png", mediaType: "image/png" },
+      { ref: "cognia-upload:2", name: "image-2.jpg", mediaType: "image/jpeg" },
+    ])
+    expect(uploads).toEqual([
+      {
+        scope: "external-run:rer_1:0",
+        name: "image-1.png",
+        mediaType: "image/png",
+        bytes: [1, 2, 3],
+      },
+      {
+        scope: "external-run:rer_1:1",
+        name: "image-2.jpg",
+        mediaType: "image/jpeg",
+        bytes: [4, 5, 6],
+      },
+    ])
+  })
+
+  it("fails the whole staging on the first upload that fails", async () => {
+    uploadFails = true
+    await expect(stageRemoteRunAttachments("rer_1", [image("AQID")])).rejects.toThrow(
+      "attachment_too_many"
+    )
+  })
+
+  it("refuses more images than a run takes, and an image with no inline bytes", async () => {
+    await expect(
+      stageRemoteRunAttachments(
+        "rer_1",
+        Array.from({ length: 97 }, () => image("AQID"))
+      )
+    ).rejects.toThrow(/at most 96/)
+    await expect(
+      stageRemoteRunAttachments("rer_1", [
+        { type: "image", source: { type: "url", url: "https://x/y.png", mediaType: "image/png" } },
+      ])
+    ).rejects.toThrow(/inline image bytes/)
+    expect(uploads).toEqual([])
+  })
+
+  it("names the staged refs on the start, three fields each", async () => {
+    reply = { started: true, runId: "run-1" }
+    await startRemoteExternalTurn({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp,
+      prompt: "hi",
+      attachments: [
+        { ref: "cognia-upload:1", name: "image-1.png", mediaType: "image/png", extra: 1 } as never,
+      ],
+    })
+    expect((calls[0].payload as { attachments: unknown }).attachments).toEqual([
+      { ref: "cognia-upload:1", name: "image-1.png", mediaType: "image/png" },
+    ])
+    calls.length = 0
+    await startRemoteExternalTurn({ runId: "run-2", chatSessionId: "c", stamp, prompt: "hi" })
+    expect(calls[0].payload).not.toHaveProperty("attachments")
+  })
+
+  it("hands the Host's withheld report to its own handler, not to onEvent", () => {
+    const events: unknown[] = []
+    const withheld: unknown[] = []
+    subscribeRemoteExternalRun("run-1", {
+      onEvent: (event) => events.push(event),
+      onAttachmentsWithheld: (report) => withheld.push(report),
+      onTerminal: () => {},
+    })
+    subscriber?.(frame({ attachmentsWithheld: { reason: "agent", count: 2 } }))
+    expect(withheld).toEqual([{ reason: "agent", count: 2 }])
+    expect(events).toEqual([])
   })
 })
 

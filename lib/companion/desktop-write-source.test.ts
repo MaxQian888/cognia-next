@@ -36,6 +36,10 @@ const remoteSessionOperationMock = jest.fn(async (..._args: unknown[]) => ({ val
 jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-service", () => ({
   executeRemoteSessionOperation: (...args: unknown[]) => remoteSessionOperationMock(...args),
   startRemoteExternalRun: (...args: unknown[]) => remoteRunStartMock(args[0]),
+  // The real wire parser: what the handler refuses is part of its contract.
+  parseRemoteRunAttachments: jest.requireActual(
+    "@/lib/ai/agent/external/runtimes/remote/remote-run-service"
+  ).parseRemoteRunAttachments,
 }))
 const cogniaCatalogMock = jest.fn()
 const cogniaCatalogDeps = { marker: "host-deps" }
@@ -2627,6 +2631,43 @@ describe("external_agent_run_turn: the Cognia model binding", () => {
     await expect(
       dispatchCommand("external_agent_run_turn", { ...base, externalSessionId: 42 })
     ).rejects.toThrow("externalSessionId must be a string")
+  })
+})
+
+describe("external_agent_run_turn: the turn's images", () => {
+  const base = {
+    runId: "run",
+    chatSessionId: "chat",
+    prompt: "what is this?",
+    stamp: { configId: "cfg", revision: "rev", lifecycleGeneration: 1 },
+    callerDeviceId: "device-phone",
+  }
+  const staged = { ref: "cognia-upload:u1", name: "image-1.png", mediaType: "image/png" }
+  beforeEach(() => remoteRunStartMock.mockClear())
+
+  it("passes staged image refs through to the run", async () => {
+    await dispatchCommand("external_agent_run_turn", { ...base, attachments: [staged] })
+    expect(remoteRunStartMock).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments: [staged], callerDeviceId: "device-phone" })
+    )
+  })
+
+  it("omits an empty or absent list", async () => {
+    await dispatchCommand("external_agent_run_turn", { ...base, attachments: [] })
+    await dispatchCommand("external_agent_run_turn", base)
+    for (const [input] of remoteRunStartMock.mock.calls) {
+      expect(input).not.toHaveProperty("attachments")
+    }
+  })
+
+  it("refuses an item carrying anything beyond ref, name and media type", async () => {
+    await expect(
+      dispatchCommand("external_agent_run_turn", {
+        ...base,
+        attachments: [{ ...staged, dataBase64: "AAAA" }],
+      })
+    ).rejects.toThrow("external_agent_run_turn.attachments[0] must be { ref, name, mediaType }")
+    expect(remoteRunStartMock).not.toHaveBeenCalled()
   })
 })
 

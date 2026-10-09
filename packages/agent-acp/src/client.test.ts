@@ -1547,6 +1547,30 @@ describe("AcpClientAdapter — Kimi fork MCP restoration", () => {
   })
 })
 
+describe("AcpClientAdapter — negotiated image input", () => {
+  it.each([
+    ["advertises image", { promptCapabilities: { image: true } }, true],
+    [
+      "advertises text only",
+      { promptCapabilities: { image: false, embeddedContext: true } },
+      false,
+    ],
+    ["omits prompt capabilities (ACP default: text only)", {}, false],
+  ])("reports imageInput when the agent %s", async (_label, agentCapabilities, expected) => {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter(acpDeps())
+    const internal = adapter as unknown as { sendRequest: jest.Mock }
+    internal.sendRequest = jest.fn().mockResolvedValue({ protocolVersion: 1, agentCapabilities })
+    try {
+      await adapter.connect(stdioConfig())
+      expect(adapter.capabilities?.imageInput).toBe(expected)
+    } finally {
+      await adapter.disconnect()
+      mockIsTauri.mockReturnValue(false)
+    }
+  })
+})
+
 describe("AcpClientAdapter — Cline Plan/Act", () => {
   it("reports unsupported images and refuses ignored MCP declarations before RPC", async () => {
     mockIsTauri.mockReturnValue(true)
@@ -1566,6 +1590,8 @@ describe("AcpClientAdapter — Cline Plan/Act", () => {
       expect(
         adapter.getAcpInitializationMetadata().agentCapabilities?.promptCapabilities?.image
       ).toBe(false)
+      // The override reaches the negotiated capability the manager reads too.
+      expect(adapter.capabilities?.imageInput).toBe(false)
       internal.sendRequest.mockClear()
       await expect(
         adapter.createSession({
