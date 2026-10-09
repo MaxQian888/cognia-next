@@ -82,10 +82,14 @@ jest.mock("@/components/ui/tooltip")
 
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-function makeAdapter(id: string, displayName: string): AdapterInstanceRow {
+function makeAdapter(
+  id: string,
+  displayName: string,
+  type: AdapterInstanceRow["type"] = "telegram"
+): AdapterInstanceRow {
   return {
     id,
-    type: "telegram",
+    type,
     displayName,
     enabled: true,
     transportMode: "stub",
@@ -103,11 +107,25 @@ function makeAdapter(id: string, displayName: string): AdapterInstanceRow {
 // Subject
 // ---------------------------------------------------------------------------
 
-import { InboxSidebar } from "./inbox-sidebar"
+import { InboxSidebar, platformsOfAdapters, type InboxSidebarProps } from "./inbox-sidebar"
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+const mockGroupingChange = jest.fn()
+
+function renderSidebar(props: Partial<InboxSidebarProps> = {}) {
+  return render(
+    <InboxSidebar
+      view="all"
+      grouping="status"
+      onGroupingChange={mockGroupingChange}
+      adapters={mockQueryResult as AdapterInstanceRow[]}
+      {...props}
+    />
+  )
+}
 
 describe("InboxSidebar", () => {
   beforeEach(() => {
@@ -115,142 +133,210 @@ describe("InboxSidebar", () => {
     mockRecentByAdapter.clear()
     mockReplace.mockReset()
     mockPush.mockReset()
+    mockGroupingChange.mockReset()
     mockUseLiveQuery.mockClear()
   })
 
-  it("renders three view-mode chips", () => {
-    render(<InboxSidebar view="by-adapter" />)
+  describe("grouping toggle", () => {
+    it("renders one chip per grouping", () => {
+      renderSidebar()
+      expect(screen.getByTestId("group-chip-status")).toBeInTheDocument()
+      expect(screen.getByTestId("group-chip-adapter")).toBeInTheDocument()
+      expect(screen.getByTestId("group-chip-platform")).toBeInTheDocument()
+    })
 
-    expect(screen.getByTestId("view-chip-by-adapter")).toBeInTheDocument()
-    expect(screen.getByTestId("view-chip-by-platform")).toBeInTheDocument()
-    expect(screen.getByTestId("view-chip-unified")).toBeInTheDocument()
+    it("marks the grouping in force", () => {
+      renderSidebar({ grouping: "platform" })
+      expect(screen.getByTestId("group-chip-platform")).toHaveAttribute("data-state", "on")
+      expect(screen.getByTestId("group-chip-status")).toHaveAttribute("data-state", "off")
+    })
+
+    it("reports a new grouping instead of writing a param nobody reads", () => {
+      renderSidebar()
+      fireEvent.click(screen.getByTestId("group-chip-platform"))
+      expect(mockGroupingChange).toHaveBeenCalledWith("platform")
+      expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    it("ignores a click on the active chip (Radix reports an empty value)", () => {
+      renderSidebar({ grouping: "adapter" })
+      fireEvent.click(screen.getByTestId("group-chip-adapter"))
+      expect(mockGroupingChange).not.toHaveBeenCalled()
+    })
   })
 
-  it("clicking a chip sets the view query param", () => {
-    render(<InboxSidebar view="by-adapter" />)
+  describe("destinations", () => {
+    it("marks All conversations active on /inbox/all", () => {
+      renderSidebar({ view: "all" })
+      expect(screen.getByRole("link", { name: "All conversations" })).toHaveAttribute(
+        "aria-current",
+        "page"
+      )
+      expect(screen.getByRole("link", { name: "Drafts" })).not.toHaveAttribute("aria-current")
+    })
 
-    fireEvent.click(screen.getByTestId("view-chip-by-platform"))
-
-    expect(mockReplace).toHaveBeenCalledWith(
-      expect.stringContaining("view=by-platform"),
-      expect.anything()
-    )
+    it("marks Drafts active on /inbox/drafts", () => {
+      renderSidebar({ view: "drafts" })
+      expect(screen.getByRole("link", { name: "Drafts" })).toHaveAttribute("aria-current", "page")
+      expect(screen.getByRole("link", { name: "All conversations" })).not.toHaveAttribute(
+        "aria-current"
+      )
+    })
   })
 
-  it("shows a section for each enabled adapter", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha"), makeAdapter("a2", "Bot Beta")]
+  describe("adapters", () => {
+    it("shows a skeleton while the adapters load, not the empty state", () => {
+      renderSidebar({ adapters: undefined })
+      expect(screen.getByTestId("inbox-adapters-loading")).toHaveAttribute("aria-busy", "true")
+      expect(screen.queryByText("No adapters configured")).not.toBeInTheDocument()
+    })
 
-    render(<InboxSidebar view="by-adapter" />)
+    it("shows a failed adapters read with a retry", () => {
+      const onRetryAdapters = jest.fn()
+      renderSidebar({ adapters: undefined, adaptersError: new Error("db closed"), onRetryAdapters })
+      expect(screen.getByTestId("inbox-adapters-error")).toHaveTextContent("db closed")
+      fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+      expect(onRetryAdapters).toHaveBeenCalled()
+    })
 
-    expect(screen.getByTestId("adapter-section-a1")).toBeInTheDocument()
-    expect(screen.getByTestId("adapter-section-a2")).toBeInTheDocument()
-    expect(screen.getByText("Bot Alpha")).toBeInTheDocument()
-    expect(screen.getByText("Bot Beta")).toBeInTheDocument()
+    it("shows the empty state once loaded with none", () => {
+      renderSidebar({ adapters: [] })
+      expect(screen.getByText("No adapters configured")).toBeInTheDocument()
+    })
+
+    it("shows a section for each enabled adapter", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha"), makeAdapter("a2", "Bot Beta")]
+      renderSidebar()
+      expect(screen.getByTestId("adapter-section-a1")).toBeInTheDocument()
+      expect(screen.getByTestId("adapter-section-a2")).toBeInTheDocument()
+      expect(screen.getByText("Bot Alpha")).toBeInTheDocument()
+      expect(screen.getByText("Bot Beta")).toBeInTheDocument()
+    })
+
+    it("marks the scoped adapter as the current page", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha"), makeAdapter("a2", "Bot Beta")]
+      renderSidebar({ view: "by-adapter", activeAdapterId: "a2" })
+      expect(screen.getByTestId("adapter-section-a2")).toHaveAttribute("aria-current", "page")
+      expect(screen.getByTestId("adapter-section-a1")).not.toHaveAttribute("aria-current")
+    })
+
+    it("toggling the chevron expands the recent-sessions list", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      mockRecentByAdapter.set("a1", [
+        {
+          id: "s1",
+          title: "Hello world",
+          platformBinding: { adapterId: "a1", conversationKey: "ck1" },
+          updatedAt: 2000,
+        },
+        {
+          id: "s2",
+          title: "Catch-up",
+          platformBinding: { adapterId: "a1", conversationKey: "ck2" },
+          updatedAt: 1000,
+        },
+      ])
+      renderSidebar()
+      expect(screen.queryByTestId("adapter-section-recent-a1")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
+      expect(screen.getByTestId("adapter-section-recent-a1")).toBeInTheDocument()
+      expect(screen.getByText("Hello world")).toBeInTheDocument()
+      // Recent links name the exact session: several can share one key.
+      expect(screen.getByTestId("adapter-recent-a1-s1")).toHaveAttribute(
+        "href",
+        "/inbox/c?key=ck1&sessionId=s1"
+      )
+    })
+
+    it("expanded section shows empty placeholder when no sessions", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      mockRecentByAdapter.set("a1", [])
+      renderSidebar()
+      fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
+      expect(screen.getByText("No conversations yet")).toBeInTheDocument()
+    })
+
+    it("chevron toggle does NOT trigger navigation", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      renderSidebar()
+      fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
+      expect(mockPush).not.toHaveBeenCalled()
+    })
+
+    it("clicking the row body navigates to the adapter scope", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      renderSidebar()
+      fireEvent.click(screen.getByTestId("adapter-section-a1"))
+      expect(mockPush).toHaveBeenCalledWith("/inbox/adapter?adapterId=a1")
+    })
+
+    it("expand toggle is a labelled disclosure control", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      renderSidebar()
+      const toggle = screen.getByTestId("adapter-section-toggle-a1")
+      expect(toggle.tagName).toBe("BUTTON")
+      expect(toggle).toHaveAttribute("aria-expanded", "false")
+      expect(toggle).toHaveAccessibleName(/Bot Alpha/i)
+      fireEvent.click(toggle)
+      expect(screen.getByTestId("adapter-section-toggle-a1")).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    })
+
+    it("nested recent-conversation links use responsive touch-target sizing", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+      mockRecentByAdapter.set("a1", [
+        {
+          id: "s1",
+          title: "Hello world",
+          platformBinding: { adapterId: "a1", conversationKey: "ck1" },
+          updatedAt: 2000,
+        },
+      ])
+      renderSidebar()
+      fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
+      const sizedNode = screen.getByTestId("adapter-recent-a1-s1").closest(".min-h-11")
+      expect(sizedNode).not.toBeNull()
+      expect(sizedNode).toHaveClass("md:h-7")
+      expect(sizedNode).toHaveClass("md:min-h-0")
+    })
   })
 
-  it("shows empty state when no adapters configured", () => {
-    mockQueryResult = []
+  describe("platform grouping", () => {
+    it("lists each platform once, linking to its scoped route", () => {
+      mockQueryResult = [
+        makeAdapter("a1", "Bot Alpha", "lark"),
+        makeAdapter("a2", "Bot Beta", "telegram"),
+        makeAdapter("a3", "Bot Gamma", "lark"),
+      ]
+      renderSidebar({ grouping: "platform" })
+      expect(screen.getByText("Platforms")).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: "Lark" })).toHaveAttribute(
+        "href",
+        "/inbox/platform?kind=lark"
+      )
+      expect(screen.getByRole("link", { name: "Telegram" })).toHaveAttribute(
+        "href",
+        "/inbox/platform?kind=telegram"
+      )
+      expect(screen.queryByTestId("adapter-section-a1")).not.toBeInTheDocument()
+    })
 
-    render(<InboxSidebar view="by-adapter" />)
+    it("marks the scoped platform as the current page", () => {
+      mockQueryResult = [makeAdapter("a1", "Bot Alpha", "lark")]
+      renderSidebar({ grouping: "platform", view: "by-platform", activePlatformKind: "lark" })
+      expect(screen.getByRole("link", { name: "Lark" })).toHaveAttribute("aria-current", "page")
+    })
 
-    expect(screen.getByText("No adapters configured")).toBeInTheDocument()
-  })
-
-  it("toggling the chevron expands the recent-sessions list", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-    mockRecentByAdapter.set("a1", [
-      {
-        id: "s1",
-        title: "Hello world",
-        platformBinding: { adapterId: "a1", conversationKey: "ck1" },
-        updatedAt: 2000,
-      },
-      {
-        id: "s2",
-        title: "Catch-up",
-        platformBinding: { adapterId: "a1", conversationKey: "ck2" },
-        updatedAt: 1000,
-      },
-    ])
-
-    render(<InboxSidebar view="by-adapter" />)
-    expect(screen.queryByTestId("adapter-section-recent-a1")).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
-
-    expect(screen.getByTestId("adapter-section-recent-a1")).toBeInTheDocument()
-    expect(screen.getByText("Hello world")).toBeInTheDocument()
-    expect(screen.getByText("Catch-up")).toBeInTheDocument()
-  })
-
-  it("expanded section shows empty placeholder when no sessions", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-    mockRecentByAdapter.set("a1", [])
-
-    render(<InboxSidebar view="by-adapter" />)
-    fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
-
-    expect(screen.getByText("No conversations yet")).toBeInTheDocument()
-  })
-
-  it("chevron toggle does NOT trigger navigation", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-
-    render(<InboxSidebar view="by-adapter" />)
-    fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
-
-    // The chevron's onClick has stopPropagation; the row navigate should not fire.
-    expect(mockPush).not.toHaveBeenCalled()
-  })
-
-  it("clicking the row body navigates to the adapter scope", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-
-    render(<InboxSidebar view="by-adapter" />)
-    fireEvent.click(screen.getByTestId("adapter-section-a1"))
-
-    expect(mockPush).toHaveBeenCalledWith("/inbox/adapter?adapterId=a1")
-  })
-
-  // The toggle is `SidebarMenuAction` now rather than a hand-rolled 36px ghost
-  // Button — the rail can be as narrow as ~123px at
-  // `INBOX_LAYOUT_BOUNDS.sidebarMin`. (The shared sidebar mock strips
-  // `data-slot`/variant props, so this pins the contract that survives it:
-  // an accessible, labelled disclosure button.)
-  it("expand toggle is a labelled disclosure control", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-
-    render(<InboxSidebar view="by-adapter" />)
-    const toggle = screen.getByTestId("adapter-section-toggle-a1")
-    expect(toggle.tagName).toBe("BUTTON")
-    expect(toggle).toHaveAttribute("aria-expanded", "false")
-    // Translated aria-label is interpolated with the adapter name (en.json mock).
-    expect(toggle).toHaveAccessibleName(/Bot Alpha/i)
-
-    fireEvent.click(toggle)
-    expect(screen.getByTestId("adapter-section-toggle-a1")).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("nested recent-conversation links use responsive touch-target sizing", () => {
-    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
-    mockRecentByAdapter.set("a1", [
-      {
-        id: "s1",
-        title: "Hello world",
-        platformBinding: { adapterId: "a1", conversationKey: "ck1" },
-        updatedAt: 2000,
-      },
-    ])
-
-    render(<InboxSidebar view="by-adapter" />)
-    fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
-
-    // The link is the `asChild` target of `SidebarMenuSubButton`, so the
-    // sizing classes land on its parent button.
-    const sizedNode = screen.getByTestId("adapter-recent-a1-s1").closest(".min-h-11")
-    // 44px on mobile; md+ takes the primitive's own compact 28px.
-    expect(sizedNode).not.toBeNull()
-    expect(sizedNode).toHaveClass("md:h-7")
-    expect(sizedNode).toHaveClass("md:min-h-0")
+    it("derives platforms in first-seen order without duplicates", () => {
+      expect(
+        platformsOfAdapters([
+          makeAdapter("a", "x", "slack"),
+          makeAdapter("b", "y", "lark"),
+          makeAdapter("c", "z", "slack"),
+        ])
+      ).toEqual(["slack", "lark"])
+    })
   })
 })

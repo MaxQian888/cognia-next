@@ -1,8 +1,21 @@
 // Active connector conversation (ADR-0042). A tiny module-level store so the
 // (non-React) ConnectorBus inbound observer can know which conversation the
 // user is currently viewing — the focus-aware predicate that suppresses an OS
-// notification for the conversation already on screen. The inbox conversation
-// page sets/clears it on mount/unmount.
+// notification (and, via `lib/connectors/inbox-relay/host-events.ts`, the
+// phone push relay) for the conversation already on screen, and that stops the
+// runtime from counting its inbound messages as unread.
+//
+// Who writes it: `PlatformConversationContext`, which every shared ChatPane
+// showing an IM session mounts, registers one `visiblePanes` entry per visible
+// pane and marks the session read while it is visible. The old `/inbox/c`
+// conversation page that used `setActiveConversation` on mount is gone (it
+// redirects into the chat workspace now); the setter stays for callers that
+// own a single active conversation outright.
+//
+// What must NOT write it: the Inbox triage preview pane. A preview is a glance,
+// not a read — registering it here would silence notifications and the phone
+// relay for a conversation the user has not opened, and quietly zero its
+// unread count. Marking read from the preview is an explicit action only.
 
 import { create } from "zustand"
 

@@ -136,6 +136,45 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
     expect(updated?.metadata?.editCount).toBe(1)
   })
 
+  it("restamps the session preview when the edited row is the newest message", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "msg-stamp",
+      platformMessageId: "tg:61",
+      platform: "telegram",
+    })
+    await db.messages.put(row)
+
+    await getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:61", "fixed typo"))
+
+    // The Inbox list reads the denormalized pair, not the message table, so an
+    // edit that skipped the stamp would keep showing the pre-edit text.
+    const session = await db.sessions.get("s-test")
+    expect(session?.lastMessagePreview).toBe("fixed typo")
+    expect(session?.lastMessageAt).toBe(row.createdAt)
+  })
+
+  it("leaves a newer preview alone when an older message is edited", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "msg-old",
+      platformMessageId: "tg:62",
+      platform: "telegram",
+    })
+    await db.messages.put(row)
+    await db.sessions.update("s-test", {
+      lastMessagePreview: "newest message",
+      lastMessageAt: row.createdAt + 1_000,
+    })
+
+    await getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:62", "old edit"))
+
+    expect((await db.messages.get("msg-old"))?.parts).toEqual([{ type: "text", text: "old edit" }])
+    const session = await db.sessions.get("s-test")
+    expect(session?.lastMessagePreview).toBe("newest message")
+    expect(session?.lastMessageAt).toBe(row.createdAt + 1_000)
+  })
+
   it("drops inbound labels that judged the pre-edit text", async () => {
     const db = getDb()
     const row = makeStoredMessage({
@@ -359,6 +398,26 @@ describe("ConnectorBus.applyMessageDelete (v49 indexed lookup)", () => {
     const updated = await db.messages.get("msg-del")
     expect(updated?.parts).toEqual([{ type: "text", text: "[deleted]" }])
     expect(updated?.metadata?.deletedAt).toBeDefined()
+  })
+
+  it("replaces the session preview with the tombstone so the deleted text is gone", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "msg-del-stamp",
+      platformMessageId: "tg:63",
+      platform: "telegram",
+    })
+    await db.messages.put(row)
+    await db.sessions.update("s-test", {
+      lastMessagePreview: "original",
+      lastMessageAt: row.createdAt,
+    })
+
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:63"))
+
+    const session = await db.sessions.get("s-test")
+    expect(session?.lastMessagePreview).toBe("[deleted]")
+    expect(session?.lastMessageAt).toBe(row.createdAt)
   })
 
   it("does not cross platforms", async () => {

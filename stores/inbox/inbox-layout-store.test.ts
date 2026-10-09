@@ -5,9 +5,11 @@
 
 import { act, renderHook } from "@testing-library/react"
 import {
+  INBOX_COLLAPSED_SECTIONS_MAX,
   INBOX_LAYOUT_BOUNDS,
   INBOX_LAYOUT_DEFAULTS,
   INBOX_LAYOUT_PERSIST_DEBOUNCE_MS,
+  migrateInboxLayoutState,
   useInboxLayoutStore,
 } from "./inbox-layout-store"
 
@@ -125,6 +127,18 @@ describe("useInboxLayoutStore", () => {
   })
 
   describe("persistence", () => {
+    it("persists the grouping and collapse choices, never the actions", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      act(() => {
+        result.current.setGrouping("platform")
+        result.current.setSectionCollapsed("resolved", false)
+      })
+      const persisted = readPersisted()
+      expect(persisted?.state.grouping).toBe("platform")
+      expect(persisted?.state.collapsedSections).toEqual({ resolved: false })
+      expect(persisted?.state).not.toHaveProperty("setGrouping")
+    })
+
     it("partializes only sidebar/list/detail sizes", () => {
       jest.useFakeTimers()
       const { result } = renderHook(() => useInboxLayoutStore())
@@ -156,6 +170,105 @@ describe("useInboxLayoutStore", () => {
       expect(result.current.sidebarSize).toBe(INBOX_LAYOUT_DEFAULTS.sidebarSize)
       expect(result.current.listSize).toBe(INBOX_LAYOUT_DEFAULTS.listSize)
       expect(result.current.detailSize).toBe(INBOX_LAYOUT_DEFAULTS.detailSize)
+    })
+  })
+
+  describe("migration v2 → v3", () => {
+    it("keeps v2 sizes and starts the new preferences empty", async () => {
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({ state: { sidebarSize: 20, listSize: 30, detailSize: 50 }, version: 2 })
+      )
+      await act(async () => {
+        await useInboxLayoutStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useInboxLayoutStore())
+      expect(result.current.sidebarSize).toBe(20)
+      expect(result.current.listSize).toBe(30)
+      expect(result.current.detailSize).toBe(50)
+      expect(result.current.grouping).toBeNull()
+      expect(result.current.collapsedSections).toEqual({})
+    })
+
+    it("drops malformed values instead of trusting them", () => {
+      expect(
+        migrateInboxLayoutState(
+          {
+            sidebarSize: "x",
+            listSize: Number.NaN,
+            detailSize: 50,
+            grouping: "by-adapter",
+            collapsedSections: { ok: true, bad: "yes" },
+          },
+          2
+        )
+      ).toEqual({
+        sidebarSize: INBOX_LAYOUT_DEFAULTS.sidebarSize,
+        listSize: INBOX_LAYOUT_DEFAULTS.listSize,
+        detailSize: 50,
+        grouping: null,
+        collapsedSections: { ok: true },
+      })
+      expect(migrateInboxLayoutState(null, 2).grouping).toBeNull()
+      expect(migrateInboxLayoutState({ collapsedSections: [true] }, 2).collapsedSections).toEqual(
+        {}
+      )
+    })
+  })
+
+  describe("preferences", () => {
+    it("starts with no grouping choice and no collapse choices", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      expect(result.current.grouping).toBeNull()
+      expect(result.current.collapsedSections).toEqual({})
+    })
+
+    it("stores a valid grouping and ignores an invalid one", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      act(() => {
+        result.current.setGrouping("adapter")
+      })
+      expect(result.current.grouping).toBe("adapter")
+      act(() => {
+        result.current.setGrouping("by-adapter" as never)
+      })
+      expect(result.current.grouping).toBe("adapter")
+    })
+
+    it("records explicit collapse choices and ignores an empty id", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      act(() => {
+        result.current.setSectionCollapsed("status:read", true)
+        result.current.setSectionCollapsed("archived", false)
+        result.current.setSectionCollapsed("", true)
+      })
+      expect(result.current.collapsedSections).toEqual({ "status:read": true, archived: false })
+    })
+
+    it("bounds the stored choices, dropping the oldest first", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      act(() => {
+        for (let i = 0; i <= INBOX_COLLAPSED_SECTIONS_MAX; i += 1) {
+          result.current.setSectionCollapsed(`adapter:${i}`, true)
+        }
+      })
+      const keys = Object.keys(result.current.collapsedSections)
+      expect(keys).toHaveLength(INBOX_COLLAPSED_SECTIONS_MAX)
+      expect(keys).not.toContain("adapter:0")
+      expect(keys).toContain(`adapter:${INBOX_COLLAPSED_SECTIONS_MAX}`)
+    })
+
+    it("reset clears the preferences too", () => {
+      const { result } = renderHook(() => useInboxLayoutStore())
+      act(() => {
+        result.current.setGrouping("platform")
+        result.current.setSectionCollapsed("resolved", false)
+      })
+      act(() => {
+        result.current.reset()
+      })
+      expect(result.current.grouping).toBeNull()
+      expect(result.current.collapsedSections).toEqual({})
     })
   })
 

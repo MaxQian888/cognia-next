@@ -15,7 +15,9 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="mx-auto w-[390px]">
+      // The body fills the compact shell's definite-height column (`/inbox`
+      // owns the viewport), so the story supplies one.
+      <div className="mx-auto flex h-[780px] w-[390px] flex-col">
         <Story />
       </div>
     ),
@@ -33,4 +35,9 @@ export const Drafts: Story = {
 /** Messages tab (responsive InboxShell list). */
 export const Messages: Story = {
   args: { initialTab: "messages" },
+}
+
+/** A scoped route (`/inbox/platform?kind=slack`): the list is filtered and says so. */
+export const ScopedToPlatform: Story = {
+  args: { initialTab: "messages", platformKind: "slack" },
 }

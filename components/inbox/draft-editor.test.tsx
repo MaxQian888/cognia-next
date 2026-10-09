@@ -190,6 +190,33 @@ describe("DraftEditor", () => {
     expect(mockApprove).not.toHaveBeenCalled()
   })
 
+  it("cancel inline (no onClose) discards edits and is disabled until something changes", () => {
+    // The Draft Center and the triage pane host editors inline; Cancel used to
+    // call a no-op there and leave the operator's edits in the textarea.
+    const draft = makeDraft([{ type: "text", text: "original" }])
+    render(<DraftEditor draft={draft} />)
+    const cancel = screen.getByTestId("draft-cancel-btn")
+    expect(cancel).toBeDisabled()
+    fireEvent.change(screen.getByTestId("draft-segment-text-0"), { target: { value: "edited" } })
+    expect(cancel).toBeEnabled()
+    fireEvent.click(cancel)
+    expect(screen.getByTestId("draft-segment-text-0")).toHaveValue("original")
+    expect(cancel).toBeDisabled()
+  })
+
+  it("keeps the editor and its edits when the approve fails", async () => {
+    mockApprove.mockRejectedValueOnce(new Error("relay down"))
+    const draft = makeDraft([{ type: "text", text: "old" }])
+    const onClose = jest.fn()
+    render(<DraftEditor draft={draft} onClose={onClose} />)
+    fireEvent.change(screen.getByTestId("draft-segment-text-0"), { target: { value: "mine" } })
+    fireEvent.click(screen.getByTestId("draft-approve-btn"))
+    await waitFor(() => expect(mockApprove).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId("draft-approve-btn")).toBeEnabled())
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId("draft-segment-text-0")).toHaveValue("mine")
+  })
+
   it("cancel button invokes onClose without dispatching any side-effect", () => {
     const draft = makeDraft([{ type: "text", text: "hi" }])
     const onClose = jest.fn()

@@ -7,7 +7,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-import { SHEET_MENU_KIT, SessionRowSheetMenu } from "./session-row-sheet-kit"
+import { SHEET_MENU_KIT, SessionRowSheetMenu, SheetHeading } from "./session-row-sheet-kit"
 
 const { Item, Label, Separator, Sub, SubTrigger, SubContent, Shortcut } = SHEET_MENU_KIT
 
@@ -81,4 +81,24 @@ test("refuses to render outside the sheet menu", () => {
   const spy = jest.spyOn(console, "error").mockImplementation(() => {})
   expect(() => render(<Item>Loose</Item>)).toThrow(/SessionRowSheetMenu/)
   spy.mockRestore()
+})
+
+test("draws a plain heading only on the page it belongs to", () => {
+  render(
+    <SessionRowSheetMenu label="Standup" onPicked={jest.fn()}>
+      <SheetHeading>Main heading</SheetHeading>
+      <Sub>
+        <SubTrigger data-testid="to-teams">Assign</SubTrigger>
+        <SubContent>
+          <SheetHeading>Teams</SheetHeading>
+        </SubContent>
+      </Sub>
+    </SessionRowSheetMenu>
+  )
+  // A heading, not the warning note `Label` draws.
+  expect(screen.getByText("Main heading")).not.toHaveAttribute("role", "note")
+  expect(screen.queryByText("Teams")).toBeNull()
+  fireEvent.click(screen.getByTestId("to-teams"))
+  expect(screen.getByText("Teams")).toBeInTheDocument()
+  expect(screen.queryByText("Main heading")).toBeNull()
 })

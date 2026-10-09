@@ -101,7 +101,7 @@ import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
-import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
@@ -896,6 +896,9 @@ export async function insertInboundMessage(
   await getDb()
     .sessions.update(sessionId, { updatedAt: now })
     .catch(() => undefined)
+  // The Inbox list reads the session's denormalized preview rather than one
+  // message query per row, and this write never passes `persistMessages`.
+  await stampSessionLastMessage(sessionId, row)
   // ADR-0131 cross-shell relay. Both calls are reached ONLY for a genuinely
   // new row — the `existing` early-return above means a redelivered platform
   // message never re-invalidates or re-notifies.

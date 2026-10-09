@@ -12,7 +12,7 @@
  * The mobile counterpart is `components/mobile/connector/draft-approval-panel`.
  */
 
-import { Fragment, useMemo } from "react"
+import { Fragment, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -25,7 +25,7 @@ import { Item, ItemContent, ItemGroup, ItemSeparator } from "@/components/ui/ite
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDb } from "@/lib/db/schema"
 import { STAGGER_CONTAINER, STAGGER_CHILD } from "@/lib/ui/motion"
-import { usePendingDrafts } from "@/hooks/connectors/use-pending-drafts"
+import { usePendingDraftsQuery } from "@/hooks/connectors/use-pending-drafts"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
@@ -33,12 +33,46 @@ import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { DraftEditor } from "./draft-editor"
 import { Surface } from "@/components/surface/surface"
 import { PlatformBadge } from "./platform-badge"
+import { StateCard } from "./state/state-card"
 
 export function DraftCenter() {
   const t = useTranslations("inbox.draftCenter")
   const router = useRouter()
   const reduce = useReducedMotion()
-  const drafts = usePendingDrafts()
+  // `undefined` while the first read is in flight. Collapsing it to `[]` made
+  // the Center announce "No drafts waiting" on every open before the queue
+  // arrived.
+  const draftsQuery = usePendingDraftsQuery()
+  const drafts = useMemo(() => draftsQuery ?? [], [draftsQuery])
+
+  const listRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * After a draft is approved, rejected or cancelled, focus the next draft in
+   * the queue (or the previous one at the end) so the operator works down the
+   * list without reaching for the mouse. Runs a frame later: an approved draft
+   * leaves the queue on the next live-query emission, and the focus target
+   * must be a row that is still there.
+   */
+  const focusAfter = useCallback((draftId: string) => {
+    const draftItems = () =>
+      Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-draft-id]") ?? [])
+    // Reading order as drawn (grouped by conversation), taken now while the
+    // closing draft is still in the DOM.
+    const order = draftItems().map((element) => element.dataset.draftId ?? "")
+    const index = order.indexOf(draftId)
+    const candidates = [...order.slice(index + 1), ...order.slice(0, Math.max(0, index)).reverse()]
+    requestAnimationFrame(() => {
+      const items = draftItems()
+      for (const id of candidates) {
+        const item = items.find((element) => element.dataset.draftId === id)
+        if (item) {
+          item.focus()
+          return
+        }
+      }
+    })
+  }, [])
 
   const sessionsResult = useLiveQuery<ChatSession[]>(
     () =>
@@ -70,6 +104,20 @@ export function DraftCenter() {
     return Array.from(map.entries())
   }, [drafts])
 
+  if (draftsQuery === undefined) {
+    return (
+      <div
+        className="flex-1"
+        role="status"
+        aria-busy="true"
+        aria-label={t("loading")}
+        data-testid="draft-center-loading"
+      >
+        <StateCard.Loading rows={3} className="gap-3 p-4" />
+      </div>
+    )
+  }
+
   if (drafts.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center p-6" data-testid="draft-center-empty">
@@ -94,6 +142,7 @@ export function DraftCenter() {
         animate="animate"
         variants={STAGGER_CONTAINER}
         data-testid="draft-center"
+        ref={listRef}
       >
         {groups.map(([ck, rows]) => {
           let platform: PlatformKind | null = null
@@ -139,11 +188,17 @@ export function DraftCenter() {
                   <Fragment key={row.id}>
                     <Item
                       role="listitem"
-                      className="rounded-none px-3 py-4"
+                      // Focus target for "next draft"; not a tab stop.
+                      tabIndex={-1}
+                      className="rounded-none px-3 py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      data-draft-id={row.id}
                       data-testid={`draft-card-${row.id}`}
                     >
                       <ItemContent>
-                        <DraftEditor draft={row} onClose={() => {}} />
+                        {/* Closing a draft here means moving on: Cancel
+                            discards the edits, and approve / reject / Cancel
+                            all hand focus to the next draft. */}
+                        <DraftEditor draft={row} onClose={() => focusAfter(row.id)} />
                       </ItemContent>
                     </Item>
                     {index < rows.length - 1 && <ItemSeparator role="presentation" />}

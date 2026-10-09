@@ -3,5 +3,14 @@
   "empty": "没有待审批的草稿。",
   "queueLabelApprove": "通过连接器草稿",
   "queueLabelReject": "拒绝连接器草稿",
-  "reject": "拒绝"
+  "reject": "拒绝",
+  "loading": "正在加载草稿",
+  "edit": "编辑",
+  "editTitle": "编辑发给 {name} 的回复",
+  "editDescription": "修改文本后发送，或拒绝该草稿。",
+  "confirmTitle": "发送这条回复？",
+  "confirmDescription": "它将通过已连接的平台发送给 {name}。发送后无法在此撤回。",
+  "confirmCancel": "取消",
+  "confirmSend": "发送",
+  "listAria": "{count, plural, other {# 条草稿等待审批}}"
 }

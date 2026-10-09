@@ -29,7 +29,7 @@ import { parseConversationKey } from "@/types/connectors/event"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
-import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 import { readChatTemplateRun, type ChatTemplateRun } from "@/lib/chat/template/run"
 import { parseReplyToPayload } from "@/lib/chat/reply-to"
 import { enforceTwinDisclosureFromProvenance } from "@/lib/twin/outbound-disclosure"
@@ -186,6 +186,10 @@ async function persistManualReplyLocally(input: ManualReplyInput): Promise<Manua
       },
       source: "manual",
     })
+    // The gateway writes the transcript row inside its job transaction, not
+    // through `persistMessages`, so the Inbox preview has to be stamped here
+    // or the list keeps showing the message before this reply.
+    await stampSessionLastMessage(input.sessionId, message)
     notifyReplyMessage(input)
     return { jobId: job.id, messageId: message.id, reused: false }
   } catch (error) {
@@ -195,6 +199,7 @@ async function persistManualReplyLocally(input: ManualReplyInput): Promise<Manua
     const acceptedMessage =
       acceptedJob && (await findMessageForJob(input.sessionId, acceptedJob.id))
     if (!acceptedJob || !acceptedMessage) throw error
+    await stampSessionLastMessage(input.sessionId, acceptedMessage)
     notifyReplyMessage(input)
     return { jobId: acceptedJob.id, messageId: acceptedMessage.id, reused: true }
   }
@@ -220,6 +225,7 @@ async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promi
   // `put`, not `add`: a thin client may already hold the optimistic row under
   // the same client-minted id (host and client converge on one row).
   await getDb().messages.put(row)
+  await stampSessionLastMessage(input.sessionId, row)
   notifyReplyMessage(input)
   return row.id
 }

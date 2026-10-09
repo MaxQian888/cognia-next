@@ -9,22 +9,22 @@
  */
 
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { TagIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { LabelChip } from "@/components/labels/label-chip"
 import { useConversationLabels } from "@/hooks/connectors/use-conversation-labels"
 import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
+import { LabelMenuItems, TRIAGE_DROPDOWN_KIT } from "./triage-menu-items"
+
+/** The label manager, where the conversation label catalog is edited. */
+export const LABEL_MANAGER_HREF = "/settings?section=connections&connectionsTab=assets"
 
 export interface LabelPickerProps {
   conversationKey: string
@@ -34,6 +34,7 @@ export interface LabelPickerProps {
 
 export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPickerProps) {
   const t = useTranslations("inbox.labels")
+  const router = useRouter()
   const catalog = useConversationLabels()
   const selected = new Set(selectedIds)
 
@@ -76,41 +77,14 @@ export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPi
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("pickerTitle")}
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            {catalog.length === 0 ? (
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                {t("empty")}
-              </DropdownMenuLabel>
-            ) : (
-              catalog.map((l) => (
-                <DropdownMenuCheckboxItem
-                  key={l.id}
-                  checked={selected.has(l.id)}
-                  onCheckedChange={(next) => void toggle(l.id, next === true)}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="size-2 shrink-0 rounded-full border"
-                      style={l.color ? { backgroundColor: l.color } : undefined}
-                    />
-                    {l.name}
-                  </span>
-                </DropdownMenuCheckboxItem>
-              ))
-            )}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <a href="/settings?section=connections&connectionsTab=assets">{t("manage")}</a>
-          </DropdownMenuItem>
+          {/* Shared with the row menu, the keyboard's `l` menu, the bulk bar
+              and the phone sheet (`triage-menu-items.tsx`). */}
+          <LabelMenuItems
+            kit={TRIAGE_DROPDOWN_KIT}
+            stateOf={(labelId) => (selected.has(labelId) ? "checked" : "unchecked")}
+            onToggle={(labelId, state) => void toggle(labelId, state !== "checked")}
+            onManage={() => router.push(LABEL_MANAGER_HREF)}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

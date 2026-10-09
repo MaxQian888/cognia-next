@@ -256,17 +256,16 @@
       "unread": "Unread"
     },
     "header": "Conversations",
-    "hideArchived": "Hide archived",
-    "hideResolved": "Hide resolved",
     "openSidebar": "Open conversations list",
     "search": {
       "aria": "Search conversations",
       "clear": "Clear search",
       "placeholder": "Search conversations…"
     },
-    "showArchived": "Show {count} archived",
-    "showResolved": "Show {count} resolved",
-    "operationFailed": "Could not update the conversation. Please try again."
+    "operationFailed": "Could not update the conversation. Please try again.",
+    "shortcuts": "Keyboard shortcuts",
+    "checkRow": "Select {name}",
+    "loadFailed": "Couldn't load conversations. Try again."
   },
   "conversationOverride": {
     "deleteOverride": "Remove override",
@@ -487,7 +486,15 @@
     "draftCountAria": "{count, plural, =1 {1 pending draft} other {# pending drafts}}",
     "noPreview": "No messages yet",
     "openConversation": "Open conversation: {name}",
-    "statusAria": "Status: {status}"
+    "statusAria": "Status: {status}",
+    "previewConversation": "Preview conversation: {name}",
+    "selectConversation": "Select conversation: {name}",
+    "labelsAria": "Labels: {names}",
+    "labelsMore": "+{count}",
+    "slaOverdue": "Overdue",
+    "slaOverdueAria": "Reply overdue",
+    "slaDue": "{minutes}m",
+    "slaDueAria": "{minutes, plural, =1 {Reply due in 1 minute} other {Reply due in # minutes}}"
   },
   "draftBanner": {
     "pending": "A draft reply is waiting for your review.",
@@ -503,7 +510,8 @@
     "open": "Open conversation",
     "pendingCount": "{count, plural, =0 {No drafts} =1 {1 draft} other {# drafts}}",
     "sidebarLabel": "Drafts",
-    "title": "Draft approvals"
+    "title": "Draft approvals",
+    "loading": "Loading drafts"
   },
   "draftEditor": {
     "a2uiBadge": "A2UI",
@@ -644,7 +652,11 @@
       "wechat-oa": "WeChat Official Account",
       "wechat-personal": "WeChat",
       "qq-official": "QQ",
-      "matrix": "Matrix"
+      "matrix": "Matrix",
+      "email": "Email",
+      "kook": "KOOK",
+      "line": "LINE",
+      "mattermost": "Mattermost"
     }
   },
   "policyInfo": {
@@ -700,8 +712,7 @@
     "resize": {
       "detailHandle": "Resize conversation list",
       "sidebarHandle": "Resize sidebar"
-    },
-    "selectPrompt": "Select a conversation to start"
+    }
   },
   "sidebar": {
     "adapters": "Adapters",
@@ -711,12 +722,15 @@
     "recentEmpty": "No conversations yet",
     "title": "Inbox",
     "toggleAdapter": "Toggle recent conversations for {name}",
-    "viewModeAria": "View mode",
-    "viewModes": {
-      "by-adapter": "By adapter",
-      "by-platform": "By platform",
-      "unified": "Unified"
-    }
+    "groupModeAria": "Group conversations",
+    "groupModes": {
+      "status": "Group by status",
+      "adapter": "Group by adapter",
+      "platform": "Group by platform"
+    },
+    "platforms": "Platforms",
+    "allConversations": "All conversations",
+    "loadingAdapters": "Loading adapters"
   },
   "sla": {
     "dueAria": "SLA: reply due in {time}",
@@ -772,5 +786,195 @@
   },
   "unreadPill": {
     "aria": "{count} unread"
+  },
+  "draftApproval": {
+    "approved": "Draft sent",
+    "approveQueued": "Draft approved — your host will send it",
+    "rejected": "Draft rejected",
+    "rejectQueued": "Rejection sent to your host",
+    "approveFailed": "Couldn't send the draft",
+    "rejectFailed": "Couldn't reject the draft",
+    "failedFallback": "Please try again."
+  },
+  "controls": {
+    "status": "Status",
+    "assignee": "Assignee",
+    "labels": "Labels",
+    "sla": "Reply due",
+    "approvals": "Approvals",
+    "lastInbound": "Last message",
+    "delegations": "Running",
+    "model": "Model",
+    "quietHours": "Quiet hours",
+    "atStrategy": "Mentions",
+    "topicRuntime": "Topic",
+    "policy": "Trigger policy",
+    "health": "Adapter",
+    "delivery": "Last reply",
+    "computerUse": "Computer Use"
+  },
+  "sections": {
+    "pinned": "Pinned",
+    "unread": "Unread",
+    "read": "Read",
+    "resolved": "Resolved",
+    "archived": "Archived",
+    "unknownAdapter": "Removed adapter ({id})",
+    "openScope": "Open {name} on its own",
+    "expand": "Expand {name} ({count})",
+    "collapse": "Collapse {name} ({count})",
+    "unreadCount": "{count} unread",
+    "unread_count_unused": null
+  },
+  "triage": {
+    "loading": "Loading conversation",
+    "header": {
+      "contact": "Contact profile",
+      "replyInChat": "Reply in chat",
+      "close": "Close preview"
+    },
+    "controls": {
+      "aria": "Triage",
+      "snoozedUntil": "Snoozed until",
+      "replyMode": "Reply mode",
+      "readState": "Read state",
+      "unreadCount": "{count, plural, =1 {1 unread message} other {# unread messages}}",
+      "allRead": "All read",
+      "markRead": "Mark read",
+      "markUnread": "Mark unread",
+      "markReadFailed": "Couldn't mark the conversation as read",
+      "markUnreadFailed": "Couldn't mark the conversation as unread"
+    },
+    "drafts": {
+      "title": "{count, plural, =1 {1 draft to review} other {# drafts to review}}"
+    },
+    "transcript": {
+      "title": "Recent messages",
+      "loading": "Loading messages",
+      "empty": "No messages yet",
+      "tailNote": "Last {count}",
+      "openFull": "Open full conversation"
+    },
+    "details": {
+      "title": "Routing & health",
+      "attention": "Needs attention",
+      "settings": "Conversation settings",
+      "bindings": "Callback bindings"
+    },
+    "empty": {
+      "title": "Triage without leaving the inbox",
+      "description": "Pick a conversation to see its latest messages, pending drafts, status and owner. Replies happen in the full chat.",
+      "countsAria": "{total, plural, =1 {1 open conversation} other {# open conversations}}",
+      "counts": {
+        "unread": "Unread",
+        "pending": "Pending",
+        "snoozed": "Snoozed",
+        "drafts": "Drafts"
+      },
+      "hintsAria": "How to use the list",
+      "hints": {
+        "preview": "Preview a conversation",
+        "open": "Open it in chat"
+      },
+      "keys": {
+        "click": "Click",
+        "enter": "Enter",
+        "doubleClick": "Double-click"
+      }
+    },
+    "missing": {
+      "title": "Conversation not found",
+      "description": "It may have been deleted, or it is no longer bound to a platform.",
+      "clear": "Close preview"
+    },
+    "drawer": {
+      "title": "Preview: {name}",
+      "titleFallback": "Conversation preview",
+      "description": "Latest messages, drafts, status and owner. Replies happen in the chat.",
+      "reply": "Reply in chat"
+    }
+  },
+  "triageMenu": {
+    "status": "Status",
+    "snooze": "Snooze",
+    "assign": "Assign",
+    "labels": "Labels",
+    "wakeNow": "Wake now",
+    "labelState": {
+      "checked": "On",
+      "unchecked": "Off",
+      "mixed": "Some"
+    }
+  },
+  "bulk": {
+    "toolbarAria": "{count, plural, =1 {Actions for 1 selected conversation} other {Actions for # selected conversations}}",
+    "count": "{count, plural, =1 {1 selected} other {# selected}}",
+    "selectAll": "{count, plural, =1 {Select the visible conversation} other {Select all # visible conversations}}",
+    "selectAllShort": "Select all",
+    "clear": "Clear selection",
+    "resolve": "Resolve",
+    "more": "More actions",
+    "readShort": "Read",
+    "unreadShort": "Unread",
+    "undo": "Undo",
+    "undone": "{count, plural, =1 {Change undone} other {# changes undone}}",
+    "undoFailed": "{count, plural, =1 {Couldn't undo 1 change} other {Couldn't undo # changes}}",
+    "partialFailed": "{count, plural, =1 {1 conversation couldn't be updated} other {# conversations couldn't be updated}}",
+    "failed": "{count, plural, =1 {Couldn't update the conversation} other {Couldn't update # conversations}}",
+    "done": {
+      "markRead": "{count, plural, =1 {Marked as read} other {Marked # conversations as read}}",
+      "markUnread": "{count, plural, =1 {Marked as unread} other {Marked # conversations as unread}}",
+      "pin": "{count, plural, =1 {Pinned} other {Pinned # conversations}}",
+      "unpin": "{count, plural, =1 {Unpinned} other {Unpinned # conversations}}",
+      "archive": "{count, plural, =1 {Conversation archived} other {Archived # conversations}}",
+      "unarchive": "{count, plural, =1 {Conversation unarchived} other {Unarchived # conversations}}",
+      "open": "{count, plural, =1 {Conversation reopened} other {Reopened # conversations}}",
+      "pending": "{count, plural, =1 {Marked as pending} other {Marked # conversations as pending}}",
+      "snooze": "{count, plural, =1 {Conversation snoozed} other {Snoozed # conversations}}",
+      "resolve": "{count, plural, =1 {Conversation resolved} other {Resolved # conversations}}",
+      "assign": "{count, plural, =1 {Assignee updated} other {Assigned # conversations}}",
+      "unassign": "{count, plural, =1 {Conversation unassigned} other {Unassigned # conversations}}",
+      "labelAdd": "{count, plural, =1 {Label added} other {Label added to # conversations}}",
+      "labelRemove": "{count, plural, =1 {Label removed} other {Label removed from # conversations}}"
+    },
+    "failedDetail": "Nothing was changed for those conversations. Try again."
+  },
+  "shortcuts": {
+    "title": "Inbox keyboard shortcuts",
+    "description": "These work while the conversation list has focus. Triage keys act on the checked conversations, or on the focused one when none are checked.",
+    "groups": {
+      "navigate": "Move and open",
+      "select": "Select",
+      "triage": "Triage"
+    },
+    "actions": {
+      "next": "Next conversation",
+      "prev": "Previous conversation",
+      "edges": "First / last conversation",
+      "extend": "Extend the selection",
+      "open": "Open in chat",
+      "focusSearch": "Search conversations",
+      "help": "Show these shortcuts",
+      "toggleCheck": "Check or uncheck",
+      "selectAll": "Select all visible",
+      "escape": "Clear the selection, then the preview",
+      "toggleRead": "Mark read / unread",
+      "togglePin": "Pin / unpin",
+      "toggleArchive": "Archive / unarchive",
+      "resolve": "Resolve (with undo)",
+      "snooze": "Snooze…",
+      "assign": "Assign…",
+      "label": "Labels…"
+    },
+    "keys": {
+      "ctrl": "Ctrl",
+      "shift": "Shift",
+      "enter": "Enter",
+      "escape": "Esc",
+      "up": "↑",
+      "down": "↓",
+      "home": "Home",
+      "end": "End"
+    }
   }
 }

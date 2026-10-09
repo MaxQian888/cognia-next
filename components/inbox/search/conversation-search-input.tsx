@@ -9,7 +9,7 @@
  * input; the explicit clear button is keyboard-accessible.
  */
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useState, type Ref } from "react"
 // React 19: mirror an external prop into local state via the documented
 // "store prev value, compare during render" pattern so we don't trip
 // `react-hooks/set-state-in-effect`.
@@ -28,6 +28,8 @@ export interface ConversationSearchInputProps {
   className?: string
   /** Override debounce window for tests. */
   debounceMs?: number
+  /** The input element, for a host that focuses it (the list's `/` key). */
+  inputRef?: Ref<HTMLInputElement>
 }
 
 export function ConversationSearchInput({
@@ -35,6 +37,7 @@ export function ConversationSearchInput({
   onDebouncedChange,
   className,
   debounceMs = 200,
+  inputRef,
 }: ConversationSearchInputProps) {
   const t = useTranslations("inbox.conversationList.search")
   const [text, setText] = useState(value)
@@ -75,6 +78,7 @@ export function ConversationSearchInput({
           provider rail's search box are the same control and were shipping two
           different focus rings (`focus:ring-1` here vs `focus-visible:ring-[3px]`). */}
       <Input
+        ref={inputRef}
         id={inputId}
         type="search"
         value={text}

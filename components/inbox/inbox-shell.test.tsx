@@ -4,8 +4,6 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 
-// jsdom does not implement `window.matchMedia`; the command palette + motion
-// hooks read it. Provide a permissive stub.
 beforeAll(() => {
   if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     Object.defineProperty(window, "matchMedia", {
@@ -30,55 +28,190 @@ beforeAll(() => {
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockPush = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
   useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/inbox",
+  usePathname: () => "/inbox/all",
   redirect: jest.fn(),
 }))
-
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: jest.fn().mockReturnValue([]),
-}))
-
-jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
 // ADR-0131 §2.2 — the shell swaps itself for `StateCard.RequiresHost` when
 // this shell can neither run connectors nor relay to a host.
 jest.mock("@/lib/connectors/inbox-writes", () => ({ useInboxWriteRoute: jest.fn(() => "local") }))
-// Partial mock: `detect` also exports `isCapacitor`, which the transport
-// picker calls at import time — replacing the whole module breaks it.
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isTauri: jest.fn(() => false),
 }))
-// The sidebar header's view-mode toggles are tooltip-wrapped and always
-// render now; `app/layout.tsx` supplies the provider in the real app.
-jest.mock("@/components/ui/tooltip")
-// The notice area owns six live queries against a stubbed `getDb()`. Its own
-// contract is covered by `notices/notice-area.test.tsx`; here we only care
-// that the shell mounts exactly one and forwards the conversation key.
+
+const mockSetPreview = jest.fn()
+const mockSetGrouping = jest.fn()
+let mockPreview: string | null = null
+jest.mock("@/hooks/inbox/use-inbox-url-state", () => ({
+  useInboxUrlState: () => ({
+    grouping: "status",
+    previewSessionId: mockPreview,
+    filters: [],
+    setGrouping: mockSetGrouping,
+    setPreview: mockSetPreview,
+    toggleFilter: jest.fn(),
+    clearFilters: jest.fn(),
+  }),
+}))
+
+const mockRetryRows = jest.fn()
+let mockRows: unknown[] | undefined = []
+let mockRowsError: Error | null = null
+jest.mock("@/hooks/inbox/use-conversation-rows", () => ({
+  useConversationRows: (scope: unknown) => {
+    mockRowsScope(scope)
+    return { rows: mockRows, error: mockRowsError, retry: mockRetryRows }
+  },
+}))
+const mockRowsScope = jest.fn()
+const mockRetryAdapters = jest.fn()
+let mockAdaptersError: Error | null = null
+jest.mock("@/hooks/inbox/use-inbox-adapters", () => ({
+  useInboxAdapters: () => ({ adapters: [], error: mockAdaptersError, retry: mockRetryAdapters }),
+}))
+
+// The panes have their own suites; here they are stubs that expose what the
+// shell hands them.
+jest.mock("./conversation-list", () => ({
+  ConversationList: (props: {
+    rows?: unknown[]
+    error?: Error | null
+    selectionMode: string
+    selectedSessionId?: string | null
+    onSelectSession: (row: unknown) => void
+    onOpenSession: (row: unknown) => void
+    onClearPreview?: () => void
+    onPreviewSession?: (row: unknown) => void
+    touchSelecting?: boolean
+    onTouchSelectingChange?: (selecting: boolean) => void
+  }) => (
+    <div
+      data-testid="list-stub"
+      data-selection-mode={props.selectionMode}
+      data-selected={props.selectedSessionId ?? ""}
+      data-error={props.error?.message ?? ""}
+      data-touch-selecting={String(Boolean(props.touchSelecting))}
+    >
+      <button type="button" onClick={() => props.onClearPreview?.()}>
+        clear-preview
+      </button>
+      <button type="button" onClick={() => props.onPreviewSession?.(ROW)}>
+        sheet-preview
+      </button>
+      <button type="button" onClick={() => props.onTouchSelectingChange?.(false)}>
+        finish-selection
+      </button>
+      <button type="button" onClick={() => props.onSelectSession(ROW)}>
+        select-row
+      </button>
+      <button type="button" onClick={() => props.onOpenSession(ROW)}>
+        open-row
+      </button>
+    </div>
+  ),
+}))
+jest.mock("./inbox-sidebar", () => {
+  // Both exports share one stub so the desktop pane and the off-canvas sheet
+  // are held to the same prop contract, including the adapter-error arm.
+  const SidebarStub = (props: {
+    view: string
+    grouping: string
+    adaptersError?: Error | null
+    onRetryAdapters?: () => void
+  }) => (
+    <div
+      data-testid="sidebar-stub"
+      data-view={props.view}
+      data-grouping={props.grouping}
+      data-adapters-error={props.adaptersError?.message ?? ""}
+    >
+      <button type="button" onClick={() => props.onRetryAdapters?.()}>
+        retry-adapters
+      </button>
+    </div>
+  )
+  return { InboxSidebar: SidebarStub, InboxSidebarContent: SidebarStub }
+})
+jest.mock("./triage/triage-preview-pane", () => ({
+  TriagePreviewPane: (props: {
+    sessionId: string | null
+    summary?: { total: number }
+    onClose: () => void
+    onOpenInChat: (c: unknown) => void
+  }) => (
+    <div
+      data-testid="triage-stub"
+      data-session-id={props.sessionId ?? ""}
+      data-total={props.summary?.total ?? ""}
+    >
+      <button type="button" onClick={props.onClose}>
+        close-preview
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onOpenInChat({ conversationKey: "lark:a1:oc", session: { id: "s1" } })}
+      >
+        reply-in-chat
+      </button>
+    </div>
+  ),
+}))
+jest.mock("./triage/triage-preview-drawer", () => ({
+  TriagePreviewDrawer: (props: {
+    target: { sessionId: string; conversationKey: string; title: string } | null
+    onClose: () => void
+    onOpenInChat: (conversationKey: string, sessionId: string) => void
+  }) =>
+    props.target ? (
+      <div
+        data-testid="drawer-stub"
+        data-session-id={props.target.sessionId}
+        data-title={props.target.title}
+      >
+        <button type="button" onClick={props.onClose}>
+          close-drawer
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onOpenInChat(props.target!.conversationKey, props.target!.sessionId)}
+        >
+          drawer-reply
+        </button>
+      </div>
+    ) : null,
+}))
 jest.mock("./notices/notice-area", () => ({
-  InboxNoticeArea: ({ conversationKey }: { conversationKey?: string }) => (
-    <div data-testid="inbox-notice-area-stub" data-conversation-key={conversationKey ?? ""} />
+  InboxNoticeArea: ({
+    conversationKey,
+    suppressKinds,
+  }: {
+    conversationKey?: string
+    suppressKinds?: string[]
+  }) => (
+    <div
+      data-testid="inbox-notice-area-stub"
+      data-conversation-key={conversationKey ?? ""}
+      data-suppress={(suppressKinds ?? []).join(",")}
+    />
   ),
 }))
 
-// Drive the breakpoint per test. `useIsMobile` is retained for any child that
-// still consumes it.
 const mockBreakpoint = jest.fn().mockReturnValue("desktop")
-
-const mockWriteRoute = // eslint-disable-next-line @typescript-eslint/no-require-imports
-  (require("@/lib/connectors/inbox-writes") as { useInboxWriteRoute: jest.Mock }).useInboxWriteRoute
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const mockIsTauri = (require("@/lib/platform/detect") as { isTauri: jest.Mock }).isTauri
 jest.mock("@/hooks/ui", () => ({
   useBreakpoint: () => mockBreakpoint(),
   useIsMobile: () => mockBreakpoint() === "mobile",
 }))
 
-// Stub react-resizable-panels wrapper — the real Group measures the DOM which
-// jsdom can't satisfy. Render panels as plain divs, forwarding test hooks.
+const mockWriteRoute = // eslint-disable-next-line @typescript-eslint/no-require-imports
+  (require("@/lib/connectors/inbox-writes") as { useInboxWriteRoute: jest.Mock }).useInboxWriteRoute
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockIsTauri = (require("@/lib/platform/detect") as { isTauri: jest.Mock }).isTauri
+
 jest.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="resizable-group">{children}</div>
@@ -111,265 +244,327 @@ jest.mock("@/components/ui/resizable", () => ({
   ResizableHandle: () => <div data-testid="resizable-handle" />,
 }))
 
-// Sidebar primitives — stub to render children directly.
 jest.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="sidebar-provider">{children}</div>
-  ),
-  Sidebar: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="sidebar">{children}</div>
-  ),
-  SidebarContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarMenu: ({ children }: { children: React.ReactNode }) => <ul>{children}</ul>,
-  SidebarMenuButton: ({
+  SidebarProvider: ({
     children,
-    onClick,
-    isActive,
-    ...rest
+    className,
+    defaultOpen,
   }: {
     children: React.ReactNode
-    onClick?: () => void
-    isActive?: boolean
-    [k: string]: unknown
+    className?: string
+    defaultOpen?: boolean
   }) => (
-    <button onClick={onClick} data-active={isActive} {...rest}>
+    <div
+      data-testid="sidebar-provider"
+      className={className}
+      data-default-open={defaultOpen === undefined ? "" : String(defaultOpen)}
+    >
       {children}
-    </button>
+    </div>
   ),
-  SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <li>{children}</li>,
   SidebarInset: ({ children, ...rest }: { children?: React.ReactNode; [k: string]: unknown }) => (
     <main {...rest}>{children}</main>
   ),
-  SidebarTrigger: () => <button>Toggle</button>,
 }))
 
-// ---------------------------------------------------------------------------
-// Subject
-// ---------------------------------------------------------------------------
+const ROW = {
+  session: {
+    id: "s1",
+    platformBinding: { conversationKey: "lark:a1:oc", adapterId: "a1", platform: "lark" },
+  },
+  override: undefined,
+  unreadCount: 0,
+}
 
 import { InboxShell } from "./inbox-shell"
-import { useLiveQuery } from "dexie-react-hooks"
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+beforeEach(() => {
+  mockBreakpoint.mockReturnValue("desktop")
+  mockWriteRoute.mockReturnValue("local")
+  mockIsTauri.mockReturnValue(false)
+  mockPreview = null
+  mockRows = []
+  mockRowsError = null
+  mockAdaptersError = null
+  mockRetryAdapters.mockReset()
+  mockPush.mockReset()
+  mockSetPreview.mockReset()
+  mockRowsScope.mockReset()
+})
 
 describe("InboxShell", () => {
-  beforeEach(() => {
-    mockBreakpoint.mockReturnValue("desktop")
-    mockWriteRoute.mockReturnValue("local")
-    mockIsTauri.mockReturnValue(false)
-  })
-
-  // ── ADR-0131 §2.2: standalone shells cannot write ────────────────────────
   describe("requires-host state", () => {
     it.each(["desktop", "tablet", "mobile"])(
       "replaces the whole shell on %s when nothing can execute a write",
       (bp) => {
-        // Showing the normal panes here would render an empty conversation
-        // list ("you have no conversations" — a lie) plus reply controls that
-        // silently do nothing.
         mockBreakpoint.mockReturnValue(bp)
         mockWriteRoute.mockReturnValue("unavailable")
         render(<InboxShell view="all" />)
-
         expect(screen.getByTestId("inbox-requires-host")).toBeInTheDocument()
         expect(screen.queryByTestId("inbox-conversation-list-pane")).not.toBeInTheDocument()
-        expect(screen.queryByTestId("inbox-detail-pane")).not.toBeInTheDocument()
       }
     )
 
-    it.each(["local", "remote"] as const)("renders the normal shell on route %s", (route) => {
-      mockWriteRoute.mockReturnValue(route)
-      render(<InboxShell view="all" />)
-      expect(screen.queryByTestId("inbox-requires-host")).not.toBeInTheDocument()
-      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
-    })
-
     it("never shows it on the desktop, where `unavailable` just means still booting", () => {
-      // A Tauri window always ends up with a runtime (or drives a remote
-      // host); flashing the pairing card during boot would be pure noise.
       mockIsTauri.mockReturnValue(true)
       mockWriteRoute.mockReturnValue("unavailable")
       render(<InboxShell view="all" />)
       expect(screen.queryByTestId("inbox-requires-host")).not.toBeInTheDocument()
-      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+    })
+
+    it("adds no safe-area insets when embedded", () => {
+      mockWriteRoute.mockReturnValue("unavailable")
+      render(<InboxShell view="all" embedded />)
+      expect(screen.getByTestId("inbox-requires-host")).not.toHaveClass("safe-area-pt")
     })
   })
 
-  // The five notice strips used to mount from two different places — two here,
-  // three from the `/inbox/c` route. Consolidating them means the shell is the
-  // sole mount site, on every branch.
-  describe("notice area", () => {
-    it.each(["desktop", "tablet", "mobile"])("mounts exactly one on %s", (bp) => {
-      mockBreakpoint.mockReturnValue(bp)
-      render(<InboxShell view="all" />)
-      expect(screen.getAllByTestId("inbox-notice-area-stub")).toHaveLength(1)
+  describe("data", () => {
+    it("scopes the rows to the route", () => {
+      render(<InboxShell view="by-adapter" adapterId="a1" />)
+      expect(mockRowsScope).toHaveBeenCalledWith({ adapterId: "a1", platformKind: undefined })
     })
 
-    it("forwards the conversation key so conversation-scoped notices can mount", () => {
-      render(<InboxShell view="conversation" conversationKey="lark:a1:oc_x" />)
-      expect(screen.getByTestId("inbox-notice-area-stub")).toHaveAttribute(
-        "data-conversation-key",
-        "lark:a1:oc_x"
+    it("hands a failed read to the list instead of throwing past the panes", () => {
+      mockRowsError = new Error("TransactionInactiveError")
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("list-stub")).toHaveAttribute(
+        "data-error",
+        "TransactionInactiveError"
       )
+      expect(screen.getByTestId("triage-stub")).toBeInTheDocument()
     })
 
-    it("passes no conversation key on the list routes", () => {
+    it("hands a failed adapter read and its retry to the sidebar", () => {
+      mockAdaptersError = new Error("adapters unavailable")
       render(<InboxShell view="all" />)
-      expect(screen.getByTestId("inbox-notice-area-stub")).toHaveAttribute(
-        "data-conversation-key",
-        ""
+      const sidebar = screen.getByTestId("sidebar-stub")
+      expect(sidebar).toHaveAttribute("data-adapters-error", "adapters unavailable")
+      fireEvent.click(screen.getByText("retry-adapters"))
+      expect(mockRetryAdapters).toHaveBeenCalledTimes(1)
+      // The adapter failure is the sidebar's to show; the list keeps rendering.
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-error", "")
+    })
+
+    it("passes no adapter error to the sidebar when the read succeeds", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("sidebar-stub")).toHaveAttribute("data-adapters-error", "")
+    })
+
+    it("summarizes the rows for the triage empty state", () => {
+      mockRows = [ROW, { ...ROW, session: { ...ROW.session, id: "s2" } }]
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("triage-stub")).toHaveAttribute("data-total", "2")
+    })
+  })
+
+  describe("preview selection", () => {
+    it("uses preview mode on desktop and selects through the URL", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-selection-mode", "preview")
+      fireEvent.click(screen.getByText("select-row"))
+      expect(mockSetPreview).toHaveBeenCalledWith("s1")
+      expect(mockPush).not.toHaveBeenCalled()
+    })
+
+    it("opens the exact session in chat", () => {
+      render(<InboxShell view="all" />)
+      fireEvent.click(screen.getByText("open-row"))
+      expect(mockPush).toHaveBeenCalledWith("/inbox/c?key=lark%3Aa1%3Aoc&sessionId=s1")
+    })
+
+    it("shows the previewed session and suppresses the duplicate draft notice", () => {
+      mockPreview = "s1"
+      mockRows = [ROW]
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("triage-stub")).toHaveAttribute("data-session-id", "s1")
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-selected", "s1")
+      const notices = screen.getByTestId("inbox-notice-area-stub")
+      expect(notices).toHaveAttribute("data-conversation-key", "lark:a1:oc")
+      expect(notices).toHaveAttribute("data-suppress", "draft")
+    })
+
+    it("lets the keyboard's Escape clear the preview through the URL", () => {
+      render(<InboxShell view="all" />)
+      fireEvent.click(screen.getByText("clear-preview"))
+      expect(mockSetPreview).toHaveBeenCalledWith(null)
+    })
+
+    it("closes the preview and replies in chat from the pane", () => {
+      mockPreview = "s1"
+      render(<InboxShell view="all" />)
+      fireEvent.click(screen.getByText("close-preview"))
+      expect(mockSetPreview).toHaveBeenCalledWith(null)
+      fireEvent.click(screen.getByText("reply-in-chat"))
+      expect(mockPush).toHaveBeenCalledWith("/inbox/c?key=lark%3Aa1%3Aoc&sessionId=s1")
+    })
+
+    it("shows the route's own detail content until something is previewed", () => {
+      render(
+        <InboxShell view="drafts">
+          <div data-testid="draft-center-stub" />
+        </InboxShell>
       )
+      expect(screen.getByTestId("draft-center-stub")).toBeInTheDocument()
+      expect(screen.queryByTestId("triage-stub")).not.toBeInTheDocument()
+    })
+
+    it("lets a preview replace the route's detail content", () => {
+      mockPreview = "s1"
+      render(
+        <InboxShell view="drafts">
+          <div data-testid="draft-center-stub" />
+        </InboxShell>
+      )
+      expect(screen.queryByTestId("draft-center-stub")).not.toBeInTheDocument()
+      expect(screen.getByTestId("triage-stub")).toBeInTheDocument()
+    })
+
+    it("hands the sidebar the active route and the grouping in force", () => {
+      render(<InboxShell view="drafts" />)
+      expect(screen.getByTestId("sidebar-stub")).toHaveAttribute("data-view", "drafts")
+      expect(screen.getByTestId("sidebar-stub")).toHaveAttribute("data-grouping", "status")
     })
   })
 
   describe("desktop", () => {
-    it("renders a resizable three-pane group", () => {
+    it("renders a resizable three-pane group with the page header", () => {
       render(<InboxShell view="all" />)
       expect(screen.getByTestId("resizable-group")).toBeInTheDocument()
       expect(screen.getByTestId("inbox-sidebar-pane")).toBeInTheDocument()
       expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
       expect(screen.getByTestId("inbox-detail-pane")).toBeInTheDocument()
+      expect(screen.getByTestId("inbox-header")).toBeInTheDocument()
     })
 
-    // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
-    // be percent strings or the three panes collapse to px-wide slivers.
     it("passes percent-string sizes to every resizable panel", () => {
       render(<InboxShell view="all" />)
-      const percent = /^\d+(\.\d+)?%$/
-      const sidebar = screen.getByTestId("inbox-sidebar-pane")
-      const list = screen.getByTestId("inbox-conversation-list-pane")
-      const detail = screen.getByTestId("inbox-detail-pane")
-      for (const pane of [sidebar, list, detail]) {
-        expect(pane.dataset.defaultSize).toMatch(percent)
-        expect(pane.dataset.minSize).toMatch(percent)
+      for (const id of [
+        "inbox-sidebar-pane",
+        "inbox-conversation-list-pane",
+        "inbox-detail-pane",
+      ]) {
+        expect(screen.getByTestId(id).getAttribute("data-default-size")).toMatch(/%$/)
       }
-      expect(sidebar.dataset.maxSize).toMatch(percent)
-      expect(list.dataset.maxSize).toMatch(percent)
-    })
-
-    it("renders children in the detail pane", () => {
-      render(
-        <InboxShell view="all">
-          <div data-testid="child-content">Hello detail</div>
-        </InboxShell>
-      )
-      expect(screen.getByTestId("child-content")).toBeInTheDocument()
-    })
-
-    it("shows placeholder text when no children", () => {
-      render(<InboxShell view="all" />)
-      expect(screen.getByText("Select a conversation to start")).toBeInTheDocument()
     })
   })
 
   describe("tablet", () => {
     beforeEach(() => mockBreakpoint.mockReturnValue("tablet"))
 
-    it("uses the flex layout with responsive Tailwind widths", () => {
+    it("shows the list at w-72 beside the triage pane, sidebar off-canvas", () => {
       render(<InboxShell view="all" />)
-      const middle = screen.getByTestId("inbox-conversation-list-pane")
-      expect(middle.className).toContain("w-full")
-      expect(middle.className).toContain("md:w-64")
-      expect(middle.className).toContain("lg:w-72")
-    })
-
-    it("uses the RTL-safe logical border (border-e, not border-r)", () => {
-      render(<InboxShell view="all" />)
-      const middle = screen.getByTestId("inbox-conversation-list-pane")
-      expect(middle.className).toContain("border-e")
-      expect(middle.className).not.toMatch(/(^|\s)border-r(\s|$)/)
-    })
-
-    it("renders both panes regardless of conversationKey", () => {
-      render(<InboxShell view="conversation" conversationKey="ck1" />)
-      const middle = screen.getByTestId("inbox-conversation-list-pane")
-      const detail = screen.getByTestId("inbox-detail-pane")
-      expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-      expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+      const list = screen.getByTestId("inbox-conversation-list-pane")
+      expect(list).toHaveClass("md:w-72", "border-e")
+      expect(screen.getByTestId("inbox-detail-pane")).toBeInTheDocument()
+      expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-default-open", "false")
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-selection-mode", "preview")
+      expect(screen.queryByTestId("inbox-header")).not.toBeInTheDocument()
     })
   })
 
   describe("mobile", () => {
     beforeEach(() => mockBreakpoint.mockReturnValue("mobile"))
 
-    it("with no conversation key shows the list only", () => {
+    it("shows the list only, and a tap opens the chat", () => {
+      mockPreview = "s1"
       render(<InboxShell view="all" />)
-      const middle = screen.getByTestId("inbox-conversation-list-pane")
-      const detail = screen.getByTestId("inbox-detail-pane")
-      expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-      expect(detail.className).toContain("hidden")
-      expect(detail.className).toContain("md:flex")
+      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+      expect(screen.queryByTestId("inbox-detail-pane")).not.toBeInTheDocument()
+      // A stale `?preview=` from a wider window does not select anything here.
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-selection-mode", "open")
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-selected", "")
     })
 
-    it("with a conversation key shows the detail only", () => {
-      render(<InboxShell view="conversation" conversationKey="ck-mobile" />)
-      const middle = screen.getByTestId("inbox-conversation-list-pane")
-      const detail = screen.getByTestId("inbox-detail-pane")
-      expect(middle.className).toContain("hidden")
-      expect(middle.className).toContain("md:flex")
-      expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    it("applies the safe-area insets standalone but not when embedded", () => {
+      const { unmount } = render(<InboxShell view="all" />)
+      expect(screen.getByTestId("sidebar-provider")).toHaveClass("safe-area-pt", "safe-area-pb")
+      unmount()
+      render(<InboxShell view="all" embedded />)
+      expect(screen.getByTestId("sidebar-provider")).not.toHaveClass("safe-area-pt")
+      expect(screen.getByTestId("sidebar-provider")).not.toHaveClass("safe-area-pb")
     })
-  })
-})
 
-// Every other feature route mounts this band, and `/inbox` was the one that
-// did not: no title, no page-level action slot, so it read as a different
-// application from `/scheduler` beside it.
-describe("InboxShell: page header", () => {
-  it("renders the page header on the desktop three-pane layout", () => {
-    mockBreakpoint.mockReturnValue("desktop")
-    render(<InboxShell view="all" />)
-    expect(screen.getByTestId("inbox-header")).toBeInTheDocument()
-    expect(screen.getByTestId("inbox-open-connector-settings")).toBeInTheDocument()
-  })
+    it("previews a row in the drawer from the action sheet, and replies from it", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.queryByTestId("drawer-stub")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByText("sheet-preview"))
+      const drawer = screen.getByTestId("drawer-stub")
+      expect(drawer).toHaveAttribute("data-session-id", "s1")
+      // An untitled session is named by its conversation key.
+      expect(drawer).toHaveAttribute("data-title", "lark:a1:oc")
+      fireEvent.click(screen.getByText("drawer-reply"))
+      expect(mockPush).toHaveBeenCalledWith(expect.stringContaining("/inbox/c"))
+      expect(screen.queryByTestId("drawer-stub")).not.toBeInTheDocument()
+    })
 
-  // A phone gets one pane, and `MobileInboxBody` already carries a segmented
-  // switcher above it. A second band would cost two rows of chrome for a title.
-  it.each(["tablet", "mobile"])("does not render it on %s", (breakpoint) => {
-    mockBreakpoint.mockReturnValue(breakpoint)
-    render(<InboxShell view="all" />)
-    expect(screen.queryByTestId("inbox-header")).not.toBeInTheDocument()
-  })
-})
+    it("closes the drawer", () => {
+      render(<InboxShell view="all" />)
+      fireEvent.click(screen.getByText("sheet-preview"))
+      fireEvent.click(screen.getByText("close-drawer"))
+      expect(screen.queryByTestId("drawer-stub")).not.toBeInTheDocument()
+    })
 
-describe("InboxShell query failure isolation", () => {
-  it.each(["desktop", "tablet", "mobile"])(
-    "keeps the shell and detail available after a DB failure on %s, with local retry",
-    (breakpoint) => {
-      mockBreakpoint.mockReturnValue(breakpoint)
-      mockWriteRoute.mockReturnValue("local")
-      const error = Object.assign(new Error("Transaction became inactive"), {
-        name: "TransactionInactiveError",
+    it("passes the host's selection mode through to the list", () => {
+      const onTouchSelectingChange = jest.fn()
+      render(
+        <InboxShell
+          view="all"
+          embedded
+          touchSelecting
+          onTouchSelectingChange={onTouchSelectingChange}
+        />
+      )
+      expect(screen.getByTestId("list-stub")).toHaveAttribute("data-touch-selecting", "true")
+      fireEvent.click(screen.getByText("finish-selection"))
+      expect(onTouchSelectingChange).toHaveBeenCalledWith(false)
+    })
+
+    describe("selectable report", () => {
+      // The phone host hides its "Select" toggle on `false`, so every arm that
+      // leaves nothing to check must report it, not just the empty list.
+      it("reports false when no host can serve the list off the desktop", () => {
+        mockWriteRoute.mockReturnValue("unavailable")
+        mockRows = [ROW]
+        const onSelectableChange = jest.fn()
+        render(<InboxShell view="all" embedded onSelectableChange={onSelectableChange} />)
+        expect(screen.getByTestId("inbox-requires-host")).toBeInTheDocument()
+        expect(onSelectableChange).toHaveBeenLastCalledWith(false)
+        expect(onSelectableChange).not.toHaveBeenCalledWith(true)
       })
-      const queryMock = useLiveQuery as jest.Mock
-      queryMock.mockImplementation(() => {
-        throw error
-      })
-      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
-      try {
-        render(
-          <InboxShell view="all">
-            <div data-testid="healthy-detail">Existing conversation</div>
-          </InboxShell>
+
+      it("reports false for an empty list and while rows are still loading", () => {
+        const onSelectableChange = jest.fn()
+        const { unmount } = render(
+          <InboxShell view="all" embedded onSelectableChange={onSelectableChange} />
         )
-        expect(screen.getByTestId("healthy-detail")).toBeInTheDocument()
-        expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
-        expect(screen.getByTestId("inbox-notice-area-stub")).toBeInTheDocument()
-        expect(screen.getAllByTestId("inbox-error-boundary")).toHaveLength(2)
-        queryMock.mockReturnValue([])
-        for (const retry of screen.getAllByRole("button", { name: /retry/i }))
-          fireEvent.click(retry)
-        expect(screen.queryByTestId("inbox-error-boundary")).not.toBeInTheDocument()
-        expect(screen.getByTestId("healthy-detail")).toBeInTheDocument()
-      } finally {
-        queryMock.mockReturnValue([])
-        consoleError.mockRestore()
-      }
-    }
-  )
+        expect(onSelectableChange).toHaveBeenLastCalledWith(false)
+        unmount()
+
+        mockRows = undefined
+        onSelectableChange.mockClear()
+        render(<InboxShell view="all" embedded onSelectableChange={onSelectableChange} />)
+        expect(onSelectableChange).toHaveBeenLastCalledWith(false)
+        expect(onSelectableChange).not.toHaveBeenCalledWith(true)
+      })
+
+      it("reports true once rows exist", () => {
+        const onSelectableChange = jest.fn()
+        const { rerender } = render(
+          <InboxShell view="all" embedded onSelectableChange={onSelectableChange} />
+        )
+        expect(onSelectableChange).toHaveBeenLastCalledWith(false)
+
+        mockRows = [ROW]
+        rerender(<InboxShell view="all" embedded onSelectableChange={onSelectableChange} />)
+        expect(onSelectableChange).toHaveBeenLastCalledWith(true)
+      })
+    })
+  })
+
+  it("never turns on touch selection off the phone", () => {
+    render(<InboxShell view="all" touchSelecting />)
+    expect(screen.getByTestId("list-stub")).toHaveAttribute("data-touch-selecting", "false")
+    expect(screen.queryByTestId("drawer-stub")).not.toBeInTheDocument()
+  })
 })

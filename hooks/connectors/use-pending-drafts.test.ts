@@ -13,7 +13,11 @@ jest.mock("@/lib/db/connector-drafts", () => ({
   listAllPendingDrafts: jest.fn(),
 }))
 
-import { usePendingDrafts, usePendingDraftCounts } from "./use-pending-drafts"
+import {
+  usePendingDrafts,
+  usePendingDraftCounts,
+  usePendingDraftsQuery,
+} from "./use-pending-drafts"
 
 const DRAFTS = [
   { id: "d1", conversationKey: "slack:a1:C1", status: "pending", createdAt: 3, segments: [] },
@@ -31,6 +35,20 @@ describe("usePendingDrafts", () => {
   it("falls back to an empty array before the query resolves", () => {
     mockUseLiveQuery.mockReturnValue(undefined)
     const { result } = renderHook(() => usePendingDrafts())
+    expect(result.current).toEqual([])
+  })
+})
+
+describe("usePendingDraftsQuery", () => {
+  it("keeps the loading state as undefined so callers can show a skeleton", () => {
+    mockUseLiveQuery.mockReturnValue(undefined)
+    const { result } = renderHook(() => usePendingDraftsQuery())
+    expect(result.current).toBeUndefined()
+  })
+
+  it("returns an empty queue as [] once resolved", () => {
+    mockUseLiveQuery.mockReturnValue([])
+    const { result } = renderHook(() => usePendingDraftsQuery())
     expect(result.current).toEqual([])
   })
 })

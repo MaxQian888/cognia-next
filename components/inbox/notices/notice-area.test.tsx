@@ -53,12 +53,12 @@ jest.mock("@/hooks/connectors/use-conversation-assignment-events", () => ({
 let isMobile = false
 jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => isMobile }))
 
-import { InboxNoticeArea } from "./notice-area"
+import { InboxNoticeArea, type InboxNoticeKind } from "./notice-area"
 
-function renderArea(conversationKey?: string) {
+function renderArea(conversationKey?: string, suppressKinds?: InboxNoticeKind[]) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <InboxNoticeArea conversationKey={conversationKey} />
+      <InboxNoticeArea conversationKey={conversationKey} suppressKinds={suppressKinds} />
     </NextIntlClientProvider>
   )
 }
@@ -120,6 +120,23 @@ describe("InboxNoticeArea", () => {
     auditEntries = [{ id: "e" }]
     renderArea("ck")
     expect(screen.getByTestId("inbox-notice-area")).toHaveAttribute("data-notice-count", "5")
+  })
+
+  // The triage preview renders every draft inline with its editor; a draft
+  // notice above it would be the same draft twice.
+  it("leaves suppressed kinds out of the rows and the count", () => {
+    degradedAdapters = [{ adapterId: "a" }]
+    pendingDrafts = [{ id: "d1" }]
+    renderArea("ck", ["draft"])
+    expect(screen.queryByTestId("src-draft")).not.toBeInTheDocument()
+    expect(screen.getByTestId("inbox-notice-area")).toHaveAttribute("data-notice-count", "1")
+    expect(screen.queryByTestId("inbox-notice-toggle")).not.toBeInTheDocument()
+  })
+
+  it("renders nothing when the only live notice is suppressed", () => {
+    pendingDrafts = [{ id: "d1" }]
+    renderArea("ck", ["draft"])
+    expect(screen.queryByTestId("inbox-notice-area")).not.toBeInTheDocument()
   })
 
   it("counts activity when only the assignment trail has rows", () => {

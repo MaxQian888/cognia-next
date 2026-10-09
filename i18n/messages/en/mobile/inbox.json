@@ -5,5 +5,20 @@
     "messages": "Messages"
   },
   "tabsAria": "Inbox sections",
-  "title": "Inbox"
+  "title": "Inbox",
+  "scope": {
+    "adapter": "Adapter",
+    "platform": "Platform",
+    "clear": "Show all conversations (clear {name})"
+  },
+  "rowActions": {
+    "description": "Actions for this conversation",
+    "preview": "Preview"
+  },
+  "selection": {
+    "select": "Select",
+    "done": "Done",
+    "hint": "Tap conversations to select them",
+    "sheetDescription": "Apply an action to the selected conversations"
+  }
 }

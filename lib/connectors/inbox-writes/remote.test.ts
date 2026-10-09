@@ -86,6 +86,19 @@ describe("sendManualReplyRemotely", () => {
     expect(mirror?.metadata?.outboundJobId).toBeUndefined()
   })
 
+  it("stamps the optimistic mirror as the session's last-message preview", async () => {
+    await getDb().sessions.add({ id: SESSION, title: "t", createdAt: 1, updatedAt: 1 } as never)
+    const { messageId } = await sendManualReplyRemotely(manualInput)
+
+    // The stamp runs after the queue transaction (it does not cover
+    // `sessions`), so the Inbox row on this device reflects the reply before
+    // the host's authoritative copy syncs down.
+    const mirror = await getDb().messages.get(messageId)
+    const session = await getDb().sessions.get(SESSION)
+    expect(session?.lastMessagePreview).toBe("on it")
+    expect(session?.lastMessageAt).toBe(mirror?.createdAt)
+  })
+
   it("carries replyTo / threadId through to the host", async () => {
     const { queueRow } = await sendManualReplyRemotely({
       ...manualInput,

@@ -14,30 +14,17 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import type { ConversationStatus } from "@/lib/db/conversation-overrides"
+import { STATUS_DOT, StatusMenuItems, TRIAGE_DROPDOWN_KIT } from "./triage-menu-items"
 
-const STATUS_DOT: Record<ConversationStatus, string> = {
-  open: "bg-emerald-500",
-  pending: "bg-amber-500",
-  snoozed: "bg-sky-500",
-  resolved: "bg-muted-foreground",
-}
-
-const SNOOZE_OPTIONS: ReadonlyArray<{ key: "1h" | "8h" | "24h"; ms: number }> = [
-  { key: "1h", ms: 60 * 60 * 1000 },
-  { key: "8h", ms: 8 * 60 * 60 * 1000 },
-  { key: "24h", ms: 24 * 60 * 60 * 1000 },
-]
+// The presets moved to `lib/inbox/snooze-presets.ts` so the shared option
+// lists can use them without importing this component; re-exported here for
+// the callers that already import them from the chip.
+export { SNOOZE_PRESETS, snoozeUntilFor, type SnoozePresetKey } from "@/lib/inbox/snooze-presets"
 
 export interface LifecycleStatusChipProps {
   conversationKey: string
@@ -82,33 +69,13 @@ export function LifecycleStatusChip({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => void apply("open")}>{t("status.open")}</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void apply("pending")}>
-            {t("status.pending")}
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>{t("status.snoozed")}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuGroup>
-                {SNOOZE_OPTIONS.map((o) => (
-                  <DropdownMenuItem
-                    key={o.key}
-                    onClick={() => void apply("snoozed", Date.now() + o.ms)}
-                  >
-                    {t(`snooze.${o.key}`)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => void apply("resolved")}>
-            {t("status.resolved")}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
+        {/* The same option list as the row menu, the keyboard's quick menu,
+            the bulk bar and the phone sheet (`triage-menu-items.tsx`). */}
+        <StatusMenuItems
+          kit={TRIAGE_DROPDOWN_KIT}
+          current={status}
+          onSetStatus={(next, snoozeUntil) => void apply(next, snoozeUntil)}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   )

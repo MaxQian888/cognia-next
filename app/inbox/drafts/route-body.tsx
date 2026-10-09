@@ -3,9 +3,11 @@
 /**
  * /inbox/drafts — cross-conversation Draft Approval Center.
  *
- * Renders the InboxShell in "all" mode with the DraftCenter as the detail-pane
- * content so the operator keeps the sidebar + conversation list while reviewing
- * every pending draft in one queue.
+ * Renders the InboxShell (sidebar highlights Drafts) with the DraftCenter as
+ * the detail pane's resting content, so the operator keeps the sidebar +
+ * conversation list while reviewing every pending draft in one queue. A row
+ * click previews that conversation in place of the queue; closing the preview
+ * brings the queue back.
  */
 
 import { Suspense } from "react"
@@ -22,7 +24,7 @@ export default function InboxDraftsPage() {
       {compact ? (
         <MobileInboxBody initialTab="drafts" />
       ) : (
-        <InboxShell view="all">
+        <InboxShell view="drafts">
           <DraftCenter />
         </InboxShell>
       )}

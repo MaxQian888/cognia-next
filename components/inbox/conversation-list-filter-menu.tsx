@@ -26,15 +26,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { INBOX_LIST_FILTERS, type InboxListFilter } from "@/lib/inbox/inbox-url-state"
 
-export type ConversationFilterChip = "unread" | "pinned" | "pending" | "snoozed"
+/** The filters live in the URL (`?f=`), so their vocabulary is the URL state's. */
+export type ConversationFilterChip = InboxListFilter
 
-export const CONVERSATION_FILTER_CHIPS = [
-  "unread",
-  "pinned",
-  "pending",
-  "snoozed",
-] as const satisfies readonly ConversationFilterChip[]
+export const CONVERSATION_FILTER_CHIPS: readonly ConversationFilterChip[] = INBOX_LIST_FILTERS
 
 export interface ConversationListFilterMenuProps {
   active: ReadonlySet<ConversationFilterChip>

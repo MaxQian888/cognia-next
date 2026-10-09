@@ -119,6 +119,13 @@ describe("importLarkMessages", () => {
     const importMeta = (messages[0].metadata as { larkImport: { triggerId?: string } }).larkImport
     expect(importMeta.triggerId).toBe("trig_9")
 
+    // The import is a direct `messages.add`, outside `persistMessages`, so it
+    // stamps the Inbox preview itself: the block's text, whitespace-collapsed
+    // and capped at the preview length, dated at the import.
+    expect(session?.lastMessageAt).toBe(1_700_000_000_000)
+    expect(session?.lastMessagePreview).toBe(text.replace(/\s+/g, " ").trim().slice(0, 120))
+    expect(session?.lastMessagePreview).toContain("Imported from Feishu")
+
     expect(deps.metric).toHaveBeenCalledWith("lark_message_imports_total")
     const kinds = deps.audit.mock.calls.map((c) => (c[0] as { kind: string }).kind)
     expect(kinds).toContain("shortcut.import")

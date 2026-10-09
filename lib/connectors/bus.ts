@@ -114,7 +114,7 @@ import {
   notifyCallbackDenied,
   resolveLarkCallbackConversation,
 } from "./callback-authorization"
-import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 import { assertLocalMutationAllowed } from "@/lib/collab/shared-session-access"
 
 export interface BusInboundHandler {
@@ -1679,6 +1679,12 @@ export class ConnectorBus {
         parts: finalParts,
         metadata: editedMetadata,
       })
+      // Rewrites the session preview only when this was the newest message;
+      // the helper refuses to move the preview backwards.
+      await stampSessionLastMessage(target.sessionId, {
+        parts: finalParts,
+        createdAt: target.createdAt,
+      })
       // See `invalidatePersistSnapshot`: an in-place edit does not change the
       // session's id set, so the persist snapshot cannot detect it on its own
       // and would keep reporting this row as unchanged.
@@ -1728,6 +1734,12 @@ export class ConnectorBus {
       await db.messages.update(target.id, {
         parts: [{ type: "text" as const, text: "[deleted]" }],
         metadata: deletedMetadata,
+      })
+      // A deleted newest message must not keep its text alive in the Inbox
+      // preview line.
+      await stampSessionLastMessage(target.sessionId, {
+        parts: [{ type: "text" as const, text: "[deleted]" }],
+        createdAt: target.createdAt,
       })
       invalidatePersistSnapshot(target.sessionId)
     }

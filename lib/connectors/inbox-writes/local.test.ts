@@ -173,6 +173,34 @@ describe("sendManualReplyLocally", () => {
     expect(invalidateMock).toHaveBeenCalledWith("messages", KEY)
   })
 
+  it("stamps the reply as the session's last-message preview", async () => {
+    await getDb().sessions.add({ id: SESSION, title: "t", createdAt: 1, updatedAt: 1 } as never)
+    const result = await sendManualReplyLocally(input)
+
+    // The gateway writes the row in its job transaction, outside
+    // `persistMessages`; without the stamp the Inbox row keeps the old preview.
+    const message = await getDb().messages.get(result.messageId)
+    const session = await getDb().sessions.get(SESSION)
+    expect(session?.lastMessagePreview).toBe("on it")
+    expect(session?.lastMessageAt).toBe(message?.createdAt)
+  })
+
+  it("stamps the preview when finishing an interrupted message write", async () => {
+    await getDb().sessions.add({ id: SESSION, title: "t", createdAt: 1, updatedAt: 1 } as never)
+    const first = await sendManualReplyLocally(input)
+    await getDb().messages.delete(first.messageId)
+    await getDb().sessions.update(SESSION, { lastMessagePreview: "stale", lastMessageAt: 0 })
+
+    const second = await sendManualReplyLocally({
+      ...input,
+      segments: [{ type: "text", text: "retry" }],
+    })
+    const message = await getDb().messages.get(second.messageId)
+    const session = await getDb().sessions.get(SESSION)
+    expect(session?.lastMessagePreview).toBe("retry")
+    expect(session?.lastMessageAt).toBe(message?.createdAt)
+  })
+
   it("keeps committed acceptance when the sync notification throws", async () => {
     invalidateMock.mockImplementationOnce(() => {
       throw new Error("notification unavailable")

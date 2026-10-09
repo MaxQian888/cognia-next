@@ -97,7 +97,11 @@ jest.mock("@/hooks/global-search/use-global-search-actions", () => ({
 const mockGetSession = jest.fn(async (_id: string) => undefined as unknown)
 jest.mock("@/lib/db/sessions", () => ({ getSession: (id: string) => mockGetSession(id) }))
 
-import { ConversationHeaderOverflow, hasOverflowAttention } from "./conversation-header-overflow"
+import {
+  ConversationHeaderOverflow,
+  hasHealthAttention,
+  hasOverflowAttention,
+} from "./conversation-header-overflow"
 
 const EMPTY_POLICY: TriggerPolicy = {
   rules: [],
@@ -130,6 +134,18 @@ beforeEach(() => {
   mockDecideBadge.mockReturnValue(null)
   mockUseLastInbound.mockReturnValue(null)
   mockUseLatestOutboundJob.mockReturnValue(null)
+})
+
+describe("hasHealthAttention", () => {
+  it("flags a degraded adapter or an undelivered newest reply only", () => {
+    expect(hasHealthAttention(false)).toBe(false)
+    expect(hasHealthAttention(true)).toBe(true)
+    expect(hasHealthAttention(false, "failed")).toBe(true)
+    expect(hasHealthAttention(false, "deadlettered")).toBe(true)
+    expect(hasHealthAttention(false, "delivery_unknown")).toBe(true)
+    expect(hasHealthAttention(false, "sent" as never)).toBe(false)
+    expect(hasHealthAttention(false, null)).toBe(false)
+  })
 })
 
 describe("hasOverflowAttention", () => {

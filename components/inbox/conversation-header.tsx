@@ -13,15 +13,22 @@
  * the pane, which `ResizablePanel` clips, so the trailing controls became
  * unclickable. `lib/ui/chrome-budget.ts` pins the new count.
  *
- * Height matches `chat-header.tsx` (`h-9`) so the Inbox detail pane and the
- * main chat page present the same seam.
+ * Height matches `chat-header.tsx` (`h-9`) so every platform conversation
+ * header presents the same seam as the main chat page.
+ *
+ * Where it renders: IM sessions open in the shared chat workspace (the old
+ * `/inbox/c` conversation pane redirects there), and that workspace mounts
+ * this header in `controlsOnly` mode through `PlatformConversationHeader`.
+ * The full strip (identity + back + sidebar trigger) is the standalone form.
+ * The Inbox's own detail pane is the triage preview now, which draws the same
+ * controls from `conversation-control-groups.tsx` and
+ * `conversation-mode-control.tsx` rather than mounting this header.
  */
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ChevronLeftIcon, Settings2Icon } from "lucide-react"
-import { ModeSwitcher } from "./mode-switcher"
 import { ContactProfileDrawer } from "./contact-profile-drawer"
 import { PlatformBadge } from "./platform-badge"
 import { ThreadMembershipChip } from "./thread-membership-chip"
@@ -29,8 +36,6 @@ import { ConversationOverrideDialog } from "./overrides/conversation-override-di
 import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
 import { ConversationHeaderOverflow } from "./conversation-header-overflow"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
-import { useImEffectiveConfig } from "@/hooks/connectors/use-im-effective-config"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -38,12 +43,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { isTauri } from "@/lib/tauri"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import {
-  imModePresetFor,
-  IM_MODE_CUSTOM,
-  type ImModePresetId,
-} from "@/lib/connectors/composition/im-mode-presets"
-import { useInboxWriteRoute } from "@/lib/connectors/inbox-writes"
+import type { ImModePresetId } from "@/lib/connectors/composition/im-mode-presets"
+import { ConversationModeControl } from "./conversation-mode-control"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -79,7 +80,6 @@ export function ConversationHeader({
   controlsOnly = false,
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
-  const tPresets = useTranslations("inbox.modeSwitcher.presets")
   const desktop = isTauri()
   const character = useCharacter(characterId)
   const router = useRouter()
@@ -95,28 +95,6 @@ export function ConversationHeader({
   } catch {
     parsedAdapterId = ""
   }
-
-  // The chip speaks the four behaviour presets, so it needs the resolved axes
-  // and the execution target, not the legacy mirror. Live row on purpose: an
-  // SLA escalation or another shell rewriting the mode has to show up here.
-  const effectiveConfig = useImEffectiveConfig({
-    adapterId: parsedAdapterId,
-    override: overrideRow ?? null,
-  })
-  const selection = effectiveConfig
-    ? imModePresetFor({
-        autonomy: effectiveConfig.autonomy.effective,
-        engagement: effectiveConfig.engagement.effective,
-      })
-    : IM_MODE_CUSTOM
-  const targetKind = effectiveConfig?.target.effective.kind ?? "direct"
-
-  // ADR-0131: the override write is routed, not desktop-only. A paired phone
-  // mirrors locally and relays the authoritative write to its host, so gating
-  // this on `isTauri()` disabled a control that works. Only `"unavailable"`
-  // (a standalone tab, an unpaired phone) has nowhere to send the write.
-  const writeRoute = useInboxWriteRoute()
-  const canSwitchMode = writeRoute !== "unavailable"
 
   // Mobile back: prefer router.back() so we restore the previous Inbox list /
   // scope; fall back to /inbox when this is a fresh deep-link load with no
@@ -193,30 +171,14 @@ export function ConversationHeader({
           its place in the strip; every other setting lives behind `⋯`.
           Live ModeSwitcher wherever the write can be routed, static disabled
           badge where it cannot. */}
-      {canSwitchMode ? (
-        <ModeSwitcher
-          conversationKey={conversationKey}
-          sessionId={sessionId}
-          selection={selection}
-          targetKind={targetKind}
-          onOpenAdvanced={() => setOverrideDialogOpen(true)}
-          onSelectionChange={onModeChange}
-        />
-      ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge
-              variant="secondary"
-              className="opacity-60"
-              data-testid="mode-switcher-disabled"
-              aria-disabled="true"
-            >
-              {tPresets(selection)}
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent>{t("modeSwitchRequiresHost")}</TooltipContent>
-        </Tooltip>
-      )}
+      <ConversationModeControl
+        conversationKey={conversationKey}
+        sessionId={sessionId}
+        adapterId={parsedAdapterId}
+        overrideRow={overrideRow}
+        onOpenAdvanced={() => setOverrideDialogOpen(true)}
+        onModeChange={onModeChange}
+      />
 
       {/* Status, routing, health and tooling — one popover, opened on demand. */}
       <ConversationHeaderOverflow
@@ -225,8 +187,11 @@ export function ConversationHeader({
         adapterId={parsedAdapterId}
         policy={policy}
         overrideRow={overrideRow}
-        providerOverride={providerOverride}
-        modelOverride={modelOverride}
+        // The shared chat header passes neither prop (it never had the row),
+        // which showed the switcher as "default" on a conversation pinned to a
+        // model. The live row is the fallback, and the source of truth.
+        providerOverride={providerOverride ?? overrideRow?.providerOverride}
+        modelOverride={modelOverride ?? overrideRow?.modelOverride}
         desktop={desktop}
         hideOpenInChat={controlsOnly}
         onOpenContact={() => setContactOpen(true)}

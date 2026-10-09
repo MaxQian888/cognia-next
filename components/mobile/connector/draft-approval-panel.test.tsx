@@ -17,18 +17,8 @@ import {
 import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { INBOX_RELAY_HOST_OPERATIONS } from "@/lib/platform/host-feature-manifest"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
-    const map: Record<string, string> = {
-      empty: "No drafts pending approval.",
-      approve: "Approve",
-      reject: "Reject",
-      queueLabelApprove: "Approve connector draft",
-      queueLabelReject: "Reject connector draft",
-    }
-    return map[key] ?? key
-  },
-}))
+// The global next-intl mock resolves keys against the English bundle; its
+// formatter prints ISO strings, which is what the relative-time check reads.
 
 beforeEach(async () => {
   setActiveRuntimeTargetContext("acct_draft", "mobile-draft-test")
@@ -64,6 +54,12 @@ afterEach(() => {
 })
 
 describe("<DraftApprovalPanel />", () => {
+  it("shows a loading skeleton, not the empty state, before the first read lands", () => {
+    render(<DraftApprovalPanel />)
+    expect(screen.getByTestId("draft-approval-loading")).toHaveAttribute("aria-busy", "true")
+    expect(screen.queryByTestId("draft-approval-empty")).not.toBeInTheDocument()
+  })
+
   it("renders the empty state when no drafts pending", async () => {
     render(<DraftApprovalPanel />)
     expect(await screen.findByTestId("draft-approval-empty")).toBeInTheDocument()
@@ -80,7 +76,62 @@ describe("<DraftApprovalPanel />", () => {
     expect(screen.getByText("Hello there")).toBeInTheDocument()
   })
 
-  it("approves a draft when its approve button is tapped", async () => {
+  it("names the conversation, its platform and when the draft was written", async () => {
+    await getDb().sessions.put({
+      id: "session-t",
+      title: "Acme support",
+      createdAt: 1,
+      updatedAt: 1,
+      platformBinding: {
+        adapterId: "a1",
+        conversationKey: "telegram:a1:chat-9",
+        platform: "telegram",
+      },
+    } as never)
+    const draft = await createDraft({
+      conversationKey: "telegram:a1:chat-9",
+      sessionId: "session-t",
+      segments: [{ type: "text", text: "Hi" }],
+    })
+    render(<DraftApprovalPanel />)
+    expect(await screen.findByTestId(`draft-title-${draft.id}`)).toHaveTextContent("Acme support")
+    expect(screen.getByTestId(`draft-time-${draft.id}`)).toHaveAttribute(
+      "dateTime",
+      new Date(draft.createdAt).toISOString()
+    )
+    // Flat divided rows, not cards.
+    expect(screen.getByTestId(`draft-row-${draft.id}`).closest('[data-slot="card"]')).toBeNull()
+    await getDb().sessions.delete("session-t")
+  })
+
+  it("falls back to the conversation key when no session names it", async () => {
+    const draft = await createDraft({
+      conversationKey: "lark:a2:room",
+      sessionId: "s",
+      segments: [{ type: "text", text: "Hi" }],
+    })
+    render(<DraftApprovalPanel />)
+    expect(await screen.findByTestId(`draft-title-${draft.id}`)).toHaveTextContent("lark:a2:room")
+  })
+
+  it("does not send on a single tap: Approve asks first, and Cancel keeps the draft", async () => {
+    const draft = await createDraft({
+      conversationKey: "x",
+      sessionId: "s",
+      segments: [{ type: "text", text: "Hold on" }],
+    })
+    const user = userEvent.setup()
+    render(<DraftApprovalPanel />)
+    await user.click(await screen.findByTestId(`draft-approve-${draft.id}`))
+    expect(await screen.findByTestId(`draft-approve-confirm-${draft.id}`)).toHaveTextContent(
+      "Hold on"
+    )
+    await user.click(screen.getByTestId("draft-approve-cancel"))
+    expect(await listAllPendingDrafts()).toHaveLength(1)
+    expect(await listByStatus("pending")).toHaveLength(0)
+  })
+
+  it("approves a draft once the send is confirmed", async () => {
     const draft = await createDraft({
       conversationKey: "x",
       sessionId: "s",
@@ -89,6 +140,7 @@ describe("<DraftApprovalPanel />", () => {
     const user = userEvent.setup()
     render(<DraftApprovalPanel />)
     await user.click(await screen.findByTestId(`draft-approve-${draft.id}`))
+    await user.click(await screen.findByTestId("draft-approve-confirm"))
     await waitFor(async () => {
       const pending = await listAllPendingDrafts()
       expect(pending).toHaveLength(0)
@@ -111,6 +163,26 @@ describe("<DraftApprovalPanel />", () => {
     })
     const queued = await listByStatus("pending")
     expect(queued.find((q) => q.command === "connector_reject_draft")).toBeDefined()
+  })
+
+  it("opens the shared draft editor in a drawer from Edit", async () => {
+    const draft = await createDraft({
+      conversationKey: "x",
+      sessionId: "s",
+      segments: [{ type: "text", text: "Edit me" }],
+    })
+    const user = userEvent.setup()
+    render(<DraftApprovalPanel />)
+    await user.click(await screen.findByTestId(`draft-edit-${draft.id}`))
+    const drawer = await screen.findByTestId("draft-edit-drawer")
+    expect(drawer).toHaveTextContent("Edit reply to x")
+    expect(screen.getByTestId("draft-segment-text-0")).toHaveValue("Edit me")
+    // vaul's pointer handlers need a real layout engine; a click is enough here.
+    fireEvent.click(screen.getByTestId("draft-cancel-btn"))
+    await waitFor(() =>
+      expect(screen.queryByTestId("draft-edit-drawer")).not.toBeInTheDocument()
+    )
+    expect(await listAllPendingDrafts()).toHaveLength(1)
   })
 
   it("falls back to a kind label when there is no text segment", async () => {

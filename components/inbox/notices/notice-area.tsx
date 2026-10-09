@@ -54,13 +54,28 @@ import { InboundRecoveryNotice } from "../inbound-recovery-panel"
 import { DraftNotice } from "../draft-banner"
 import { ConversationActivityNotice } from "../conversation-activity-log"
 
+/** Every notice this area can show. */
+export type InboxNoticeKind =
+  "connection-loss" | "outbound-saturation" | "inbound-recovery" | "draft" | "activity"
+
 export interface InboxNoticeAreaProps {
   /** Conversation-scoped sources stay empty when this is absent. */
   conversationKey?: string
+  /**
+   * Notices a host already renders in its own body. The triage preview lists
+   * every pending draft inline with its editor, so a draft notice above it
+   * would be the same draft twice with two different "edit" entry points.
+   * Suppressed kinds are left out of the count and the collapse summary too.
+   */
+  suppressKinds?: readonly InboxNoticeKind[]
   className?: string
 }
 
-export function InboxNoticeArea({ conversationKey, className }: InboxNoticeAreaProps) {
+export function InboxNoticeArea({
+  conversationKey,
+  suppressKinds,
+  className,
+}: InboxNoticeAreaProps) {
   const t = useTranslations("inbox.notices")
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
@@ -76,7 +91,7 @@ export function InboxNoticeArea({ conversationKey, className }: InboxNoticeAreaP
   const activityCount = auditEntries.length + assignmentEvents.length
   const firstDraft = drafts[0]
 
-  const notices: Array<{ id: string; mobileHidden: boolean; node: ReactNode }> = []
+  const notices: Array<{ id: InboxNoticeKind; mobileHidden: boolean; node: ReactNode }> = []
   if (degraded.adapters.length > 0) {
     notices.push({
       id: "connection-loss",
@@ -127,7 +142,9 @@ export function InboxNoticeArea({ conversationKey, className }: InboxNoticeAreaP
 
   // Everything downstream — the empty check, the count, the disclosure — reads
   // the set this viewport can actually show.
-  const visible = isMobile ? notices.filter((notice) => !notice.mobileHidden) : notices
+  const visible = notices.filter(
+    (notice) => !(isMobile && notice.mobileHidden) && !(suppressKinds?.includes(notice.id) ?? false)
+  )
   if (visible.length === 0) return null
 
   // One notice needs no disclosure — "1 notice ▸" over a single row is pure

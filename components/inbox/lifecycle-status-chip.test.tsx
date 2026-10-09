@@ -15,7 +15,7 @@ jest.mock("@/lib/connectors/inbox-writes", () => ({
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 import { toast } from "sonner"
-import { LifecycleStatusChip } from "./lifecycle-status-chip"
+import { LifecycleStatusChip, SNOOZE_PRESETS, snoozeUntilFor } from "./lifecycle-status-chip"
 
 const mockToastError = toast.error as jest.Mock
 
@@ -50,5 +50,19 @@ describe("LifecycleStatusChip", () => {
     await user.click(screen.getByTestId("lifecycle-status-chip"))
     await user.click(await screen.findByText("Pending"))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("boom"))
+  })
+})
+
+describe("snooze presets", () => {
+  it("offers 1h, 8h and 24h", () => {
+    expect(SNOOZE_PRESETS.map((preset) => preset.key)).toEqual(["1h", "8h", "24h"])
+  })
+
+  it("computes the end of a snooze from an injected clock", () => {
+    expect(snoozeUntilFor("8h", 1_000)).toBe(1_000 + 8 * 60 * 60 * 1000)
+  })
+
+  it("refuses an unknown preset", () => {
+    expect(() => snoozeUntilFor("2d" as never, 0)).toThrow("Unknown snooze preset")
   })
 })

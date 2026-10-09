@@ -5,5 +5,20 @@
     "messages": "消息"
   },
   "tabsAria": "收件箱分区",
-  "title": "收件箱"
+  "title": "收件箱",
+  "scope": {
+    "adapter": "适配器",
+    "platform": "平台",
+    "clear": "查看全部会话（清除“{name}”）"
+  },
+  "rowActions": {
+    "description": "此会话的操作",
+    "preview": "预览"
+  },
+  "selection": {
+    "select": "选择",
+    "done": "完成",
+    "hint": "轻点会话以选择",
+    "sheetDescription": "对所选会话执行操作"
+  }
 }

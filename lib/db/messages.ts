@@ -66,6 +66,45 @@ function previewOf(parts: StoredMessage["parts"]): string {
     .slice(0, PREVIEW_MAX)
 }
 
+/**
+ * Refresh the session's denormalized last-message preview for a message
+ * written OUTSIDE {@link persistMessages}.
+ *
+ * `persistMessages` is the only writer that kept `lastMessagePreview` /
+ * `lastMessageAt` current, but connector traffic never goes through it: an
+ * inbound platform message, a manual reply and a Lark history import are each
+ * a direct `messages.add`/`put`, and a platform edit or delete rewrites a row in
+ * place. The Inbox list reads the denormalized pair instead of opening one
+ * message query per conversation, so every one of those writers has to keep it
+ * true or the list shows yesterday's preview for today's message.
+ *
+ * Only moves the preview forward (or rewrites it for the same message): a
+ * late-arriving older message must not replace a newer preview. Best-effort —
+ * the message itself has already committed, and a missing session row is a
+ * no-op.
+ */
+export async function stampSessionLastMessage(
+  sessionId: string,
+  message: Pick<StoredMessage, "parts" | "createdAt">
+): Promise<void> {
+  try {
+    const db = getDb()
+    await db.transaction("rw", db.sessions, async () => {
+      const session = await db.sessions.get(sessionId)
+      if (!session) return
+      if (typeof session.lastMessageAt === "number" && session.lastMessageAt > message.createdAt) {
+        return
+      }
+      await db.sessions.update(sessionId, {
+        lastMessagePreview: previewOf(message.parts),
+        lastMessageAt: message.createdAt,
+      })
+    })
+  } catch {
+    // Decoration on the session row; the transcript write already landed.
+  }
+}
+
 async function bumpTranscriptRevision(
   db: ReturnType<typeof getDb>,
   sessionId: string

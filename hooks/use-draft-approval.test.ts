@@ -17,6 +17,11 @@ jest.mock("@/lib/connectors/inbox-writes", () => ({
   rejectInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "cdr_1" }),
 }))
 
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+import { toast } from "sonner"
+const mockToastSuccess = toast.success as jest.Mock
+const mockToastError = toast.error as jest.Mock
+
 const mockApprove = approveInboxDraft as jest.Mock
 const mockReject = rejectInboxDraft as jest.Mock
 
@@ -33,6 +38,8 @@ function makeDraft(overrides: Partial<ConnectorDraftRow> = {}): ConnectorDraftRo
 }
 
 beforeEach(() => {
+  mockToastSuccess.mockReset()
+  mockToastError.mockReset()
   mockApprove.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
   mockReject.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
 })
@@ -150,7 +157,7 @@ describe("useDraftApproval", () => {
     )
     const { result } = renderHook(() => useDraftApproval(draft))
 
-    let pending: Promise<void> | undefined
+    let pending: Promise<unknown> | undefined
     act(() => {
       pending = result.current.approve()
     })
@@ -162,31 +169,81 @@ describe("useDraftApproval", () => {
     expect(result.current.busy).toBe(false)
   })
 
-  it("approve propagates errors and resets busy", async () => {
+  it("approve never throws: it toasts the failure and returns it", async () => {
+    // Both callers fire approve from a button or a swipe (`void approve()`); a
+    // rejected promise there was an unhandled rejection and a silent no-op.
     const draft = makeDraft()
-    mockApprove.mockRejectedValueOnce(new Error("kaboom"))
+    const error = new Error("kaboom")
+    mockApprove.mockRejectedValueOnce(error)
     const onComplete = jest.fn()
     const { result } = renderHook(() => useDraftApproval(draft, { onComplete }))
-    await expect(
-      act(async () => {
-        await result.current.approve()
-      })
-    ).rejects.toThrow("kaboom")
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.approve()
+    })
+    expect(outcome).toEqual({ ok: false, action: "approve", error })
+    expect(mockToastError).toHaveBeenCalledWith("Couldn't send the draft", {
+      description: "Please try again.",
+    })
     expect(result.current.busy).toBe(false)
     expect(onComplete).not.toHaveBeenCalled()
   })
 
-  it("approve propagates errors thrown from beforeApprove without writing", async () => {
+  it("approve reports a failure from beforeApprove without writing", async () => {
     const draft = makeDraft()
     const beforeApprove = jest.fn().mockRejectedValue(new Error("preflight"))
     const { result } = renderHook(() => useDraftApproval(draft, { beforeApprove }))
-    await expect(
-      act(async () => {
-        await result.current.approve()
-      })
-    ).rejects.toThrow("preflight")
+    let outcome: { ok: boolean } | undefined
+    await act(async () => {
+      outcome = await result.current.approve()
+    })
+    expect(outcome?.ok).toBe(false)
     expect(mockApprove).not.toHaveBeenCalled()
     expect(result.current.busy).toBe(false)
+  })
+
+  it("approve toasts success, distinguishing a relayed (queued) approval", async () => {
+    const draft = makeDraft()
+    const { result } = renderHook(() => useDraftApproval(draft))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.approve()
+    })
+    expect(outcome).toEqual({ ok: true, action: "approve", route: "local" })
+    expect(mockToastSuccess).toHaveBeenLastCalledWith("Draft sent")
+
+    mockApprove.mockResolvedValueOnce({ route: "remote", draftId: "cdr_1" })
+    await act(async () => {
+      await result.current.approve()
+    })
+    expect(mockToastSuccess).toHaveBeenLastCalledWith("Draft approved — your host will send it")
+  })
+
+  it("stays quiet when notify is off but still returns the outcome", async () => {
+    const draft = makeDraft()
+    mockReject.mockRejectedValueOnce("offline")
+    const { result } = renderHook(() => useDraftApproval(draft, { notify: false }))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.reject()
+    })
+    expect(outcome).toEqual({ ok: false, action: "reject", error: "offline" })
+    expect(mockToastError).not.toHaveBeenCalled()
+  })
+
+  it("tracks dirtiness by content and resets edits", () => {
+    const draft = makeDraft({ segments: [{ type: "text", text: "original" }] })
+    const { result } = renderHook(() => useDraftApproval(draft))
+    expect(result.current.dirty).toBe(false)
+    act(() => result.current.setSegment(0, "edited"))
+    expect(result.current.dirty).toBe(true)
+    act(() => result.current.setSegment(0, "original"))
+    // Typing the original text back is not an edit.
+    expect(result.current.dirty).toBe(false)
+    act(() => result.current.setSegment(0, "edited again"))
+    act(() => result.current.resetSegments())
+    expect(result.current.segments).toEqual(draft.segments)
+    expect(result.current.dirty).toBe(false)
   })
 
   it("reject runs beforeReject, delegates to the facade, then onComplete", async () => {
@@ -236,7 +293,7 @@ describe("useDraftApproval", () => {
     )
     const { result } = renderHook(() => useDraftApproval(draft))
 
-    let pending: Promise<void> | undefined
+    let pending: Promise<unknown> | undefined
     act(() => {
       pending = result.current.reject()
     })
@@ -248,15 +305,32 @@ describe("useDraftApproval", () => {
     expect(result.current.busy).toBe(false)
   })
 
-  it("reject propagates errors and resets busy", async () => {
+  it("reject toasts a failure with a fallback description and resets busy", async () => {
     const draft = makeDraft()
-    mockReject.mockRejectedValueOnce(new Error("nope"))
+    mockReject.mockRejectedValueOnce({})
     const { result } = renderHook(() => useDraftApproval(draft))
-    await expect(
-      act(async () => {
-        await result.current.reject()
-      })
-    ).rejects.toThrow("nope")
+    let outcome: { ok: boolean } | undefined
+    await act(async () => {
+      outcome = await result.current.reject()
+    })
+    expect(outcome?.ok).toBe(false)
+    expect(mockToastError).toHaveBeenCalledWith("Couldn't reject the draft", {
+      description: "Please try again.",
+    })
     expect(result.current.busy).toBe(false)
+  })
+
+  it("reject toasts success per route", async () => {
+    const draft = makeDraft()
+    const { result } = renderHook(() => useDraftApproval(draft))
+    await act(async () => {
+      await result.current.reject()
+    })
+    expect(mockToastSuccess).toHaveBeenLastCalledWith("Draft rejected")
+    mockReject.mockResolvedValueOnce({ route: "remote", draftId: "cdr_1" })
+    await act(async () => {
+      await result.current.reject()
+    })
+    expect(mockToastSuccess).toHaveBeenLastCalledWith("Rejection sent to your host")
   })
 })

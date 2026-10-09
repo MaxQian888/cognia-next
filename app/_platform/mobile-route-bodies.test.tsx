@@ -13,6 +13,13 @@ function body(name: string) {
   }
 }
 
+// The scoped inbox bodies read their scope from the query string.
+let mockSearchParams = new URLSearchParams()
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearchParams,
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/",
+}))
 jest.mock("@/hooks/ui/use-compact-layout", () => ({
   useCompactLayout: () => {
     throw new Error("Mobile build must not select a desktop body by viewport")
@@ -64,6 +71,8 @@ import Runs from "@/app/workflows/runs/route-body.mobile"
 import Server from "@/app/servers/detail/route-body.mobile"
 import AllInbox from "@/app/inbox/all/route-body.mobile"
 import DraftsInbox from "@/app/inbox/drafts/route-body.mobile"
+import AdapterInbox from "@/app/inbox/adapter/route-body.mobile"
+import PlatformInbox from "@/app/inbox/platform/route-body.mobile"
 import type { RouteBodyProps as SquadProps } from "@/app/squads/route-body"
 import type { RouteBodyProps as EditorProps } from "@/app/workflows/editor/route-body"
 import type { RouteBodyProps as ServerProps } from "@/app/servers/detail/route-body"
@@ -76,6 +85,14 @@ it.each([
 ] as const)("opens the %s inbox tab", (initialTab, Inbox) => {
   render(<Inbox />)
   expect(record).toHaveBeenCalledWith("inbox", { initialTab })
+})
+
+it("scopes the native adapter and platform inbox bodies from the query", () => {
+  mockSearchParams = new URLSearchParams("adapterId=a1&kind=lark")
+  render(<AdapterInbox />)
+  expect(record).toHaveBeenCalledWith("inbox", { initialTab: "messages", adapterId: "a1" })
+  render(<PlatformInbox />)
+  expect(record).toHaveBeenCalledWith("inbox", { initialTab: "messages", platformKind: "lark" })
 })
 
 it("preserves bot selection callbacks and the installation deep link", () => {

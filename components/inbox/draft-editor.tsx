@@ -10,7 +10,15 @@
  *                      outbound job on a connector host, relays it to the
  *                      paired host on a thin client, then marks "approved"
  *  - Reject          → `rejectInboxDraft`, marks "rejected"
- *  - Cancel          → onClose()
+ *  - Cancel          → discards local edits, then onClose() when the host has
+ *                      somewhere to close to (a sheet, a collapsible row).
+ *                      Inline hosts (the Draft Center, the triage pane) pass
+ *                      none, and Cancel then only resets the text — it used to
+ *                      call a no-op there and leave the edits in place.
+ *
+ * Approve / reject never throw: the hook toasts the outcome (ADR-0131 writes
+ * can fail on a dropped relay), and the editor stays mounted on failure so
+ * the operator's edits survive a retry.
  */
 
 import { useTranslations } from "next-intl"
@@ -23,7 +31,8 @@ import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 
 interface DraftEditorProps {
   draft: ConnectorDraftRow
-  onClose: () => void
+  /** Close the host surface. Runs after a successful approve / reject and on Cancel. */
+  onClose?: () => void
 }
 
 export function DraftEditor({ draft, onClose }: DraftEditorProps) {
@@ -31,10 +40,17 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
   // ADR-0131: the hook owns delivery for every shell now — this editor no
   // longer enqueues the outbound job itself, and the edited segments reach
   // the platform whether the runtime is here or on a paired host.
-  const { segments, setSegment, busy, approve, reject } = useDraftApproval(draft, {
-    onComplete: onClose,
-    label: draft.conversationKey,
-  })
+  const { segments, setSegment, dirty, resetSegments, busy, approve, reject } = useDraftApproval(
+    draft,
+    {
+      onComplete: onClose,
+      label: draft.conversationKey,
+    }
+  )
+  const cancel = () => {
+    resetSegments()
+    onClose?.()
+  }
 
   return (
     <div className="flex flex-col gap-3" data-testid="draft-editor">
@@ -136,8 +152,9 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
         <Button
           size="sm"
           variant="ghost"
-          onClick={onClose}
-          disabled={busy}
+          onClick={cancel}
+          // Inline, with nothing edited, there is nothing for Cancel to undo.
+          disabled={busy || (!dirty && !onClose)}
           data-testid="draft-cancel-btn"
         >
           {t("cancel")}

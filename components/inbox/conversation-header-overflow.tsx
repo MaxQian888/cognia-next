@@ -40,22 +40,12 @@ import { decideBadge } from "./adapter-health-decision"
 import { effectiveStatus } from "@/lib/db/conversation-overrides"
 import type { ConversationOverrideRow, OutboundJobStatus } from "@/lib/db/connector-types"
 import type { TriggerPolicy } from "@/types/connectors/policy"
-import { LifecycleStatusChip } from "./lifecycle-status-chip"
-import { AssigneeChip } from "./assignee-chip"
-import { SlaBadge } from "./sla-badge"
-import { PendingApprovalChip } from "./pending-approval-chip"
-import { LabelPicker } from "./label-picker"
-import { LastInboundChip } from "./last-inbound-chip"
-import { ActiveDelegationsChip } from "./active-delegations-chip"
-import { ProviderModelSwitcher } from "./provider-model-switcher"
-import { QuietHoursChip } from "./quiet-hours-chip"
-import { AtStrategyChip } from "./at-strategy-chip"
-import { TopicRuntimeChip } from "./topic-runtime-chip"
-import { PolicyInfo } from "./policy-info"
-import { AdapterHealthBadge } from "./adapter-health-badge"
-import { OutboundStatusPill } from "./outbound-status-pill"
-import { ComputerUseToggle } from "./overrides/computer-use-toggle"
-import { ComputerUseChip } from "./computer-use-chip"
+import {
+  ConversationComputerUseControl,
+  ConversationHealthControls,
+  ConversationRoutingControls,
+  ConversationStatusControls,
+} from "./conversation-control-groups"
 
 /** Outbound statuses that mean "the last reply did NOT (verifiably) go out". */
 const OUTBOUND_ATTENTION_STATUSES: ReadonlySet<OutboundJobStatus> = new Set([
@@ -63,6 +53,19 @@ const OUTBOUND_ATTENTION_STATUSES: ReadonlySet<OutboundJobStatus> = new Set([
   "deadlettered",
   "delivery_unknown",
 ])
+
+/**
+ * The health half of the attention rule: a degraded adapter, or a newest reply
+ * that did not (verifiably) go out. Shared with the triage pane's details
+ * disclosure, which holds the same health controls.
+ */
+export function hasHealthAttention(
+  healthDegraded: boolean,
+  latestOutboundStatus?: OutboundJobStatus | null
+): boolean {
+  if (healthDegraded) return true
+  return Boolean(latestOutboundStatus && OUTBOUND_ATTENTION_STATUSES.has(latestOutboundStatus))
+}
 
 /**
  * Whether the `⋯` should carry an attention dot — i.e. whether anything behind
@@ -77,8 +80,7 @@ export function hasOverflowAttention(
   healthDegraded: boolean,
   latestOutboundStatus?: OutboundJobStatus | null
 ): boolean {
-  if (healthDegraded) return true
-  if (latestOutboundStatus && OUTBOUND_ATTENTION_STATUSES.has(latestOutboundStatus)) return true
+  if (hasHealthAttention(healthDegraded, latestOutboundStatus)) return true
   if (effectiveStatus(row) !== "open") return true
   if (row?.assignee) return true
   if ((row?.labelIds?.length ?? 0) > 0) return true
@@ -186,80 +188,51 @@ export function ConversationHeaderOverflow({
         className="w-72 space-y-3 p-3"
         data-testid="conversation-header-overflow"
       >
+        {/* The groups are shared with the Inbox triage pane
+            (`conversation-control-groups.tsx`), so a control added to one
+            surface reaches the other. */}
         <OverflowGroup label={t("groupStatus")}>
-          <LifecycleStatusChip
+          <ConversationStatusControls
+            layout="inline"
             conversationKey={conversationKey}
             sessionId={sessionId}
-            status={effectiveStatus(overrideRow)}
+            adapterId={adapterId}
+            overrideRow={overrideRow}
           />
-          <AssigneeChip
-            conversationKey={conversationKey}
-            sessionId={sessionId}
-            adapterId={adapterId || undefined}
-            assignee={overrideRow?.assignee}
-          />
-          <SlaBadge
-            nextResponseDueAt={overrideRow?.nextResponseDueAt}
-            status={effectiveStatus(overrideRow)}
-            escalatedStep={overrideRow?.escalatedStep}
-          />
-          <PendingApprovalChip sessionId={sessionId} />
-          <LabelPicker
-            conversationKey={conversationKey}
-            sessionId={sessionId}
-            selectedIds={overrideRow?.labelIds ?? []}
-          />
-          <LastInboundChip conversationKey={conversationKey} />
-          {/* Renders only while a delegated run is in flight, which is the one
-              piece of this conversation's state that lives outside the thread. */}
-          <ActiveDelegationsChip conversationKey={conversationKey} />
         </OverflowGroup>
 
         <OverflowGroup label={t("groupRouting")}>
-          {/* A6 — per-channel provider/model override (ADR-0009 v41). */}
-          {desktop && (
-            <ProviderModelSwitcher
-              conversationKey={conversationKey}
-              sessionId={sessionId}
-              providerOverride={providerOverride}
-              modelOverride={modelOverride}
-            />
-          )}
-          {adapterId && <QuietHoursChip adapterId={adapterId} conversationKey={conversationKey} />}
-          {adapterId && <AtStrategyChip adapterId={adapterId} conversationKey={conversationKey} />}
-          {adapterId && (
-            <TopicRuntimeChip adapterId={adapterId} conversationKey={conversationKey} />
-          )}
-          <PolicyInfo policy={policy} />
+          <ConversationRoutingControls
+            layout="inline"
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            adapterId={adapterId}
+            policy={policy}
+            providerOverride={providerOverride}
+            modelOverride={modelOverride}
+            desktop={desktop}
+          />
         </OverflowGroup>
 
         {adapterId && (
           <OverflowGroup label={t("groupHealth")}>
-            {/* v49 — the wider health surface that picks up breaker /
-                rate-bucket signals from the heartbeat snapshots, not just
-                `current.state`. */}
-            <AdapterHealthBadge adapterId={adapterId} />
-            {/* Delivery state of the newest outbound job (ADR-0009 §3A.2).
-                Mounted once here — never per conversation row — so it costs
-                one liveQuery, not one per row, and its retry button is not
-                nested inside another interactive element. */}
-            <OutboundStatusPill conversationKey={conversationKey} />
+            <ConversationHealthControls
+              layout="inline"
+              conversationKey={conversationKey}
+              adapterId={adapterId}
+            />
           </OverflowGroup>
         )}
 
         <OverflowGroup label={t("groupTools")}>
-          {adapterId && desktop && (
-            <ComputerUseToggle
-              conversationKey={conversationKey}
-              sessionId={sessionId}
-              adapterId={adapterId}
-              currentValue={overrideRow?.allowComputerUse === true}
-            />
-          )}
-          {/* Web-mode mirror of the computer-use opt-in — read-only chip so the
-              operator still sees the elevated-permission state even when the
-              biometric toggle isn't available (web build / mobile shell). */}
-          {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
+          <ConversationComputerUseControl
+            layout="inline"
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            adapterId={adapterId}
+            overrideRow={overrideRow}
+            desktop={desktop}
+          />
           {!hideOpenInChat && (
             <Button
               type="button"

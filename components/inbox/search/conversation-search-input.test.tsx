@@ -83,4 +83,10 @@ describe("ConversationSearchInput", () => {
     )
     expect(screen.getByTestId<HTMLInputElement>("conversation-search-input").value).toBe("")
   })
+
+  it("hands its input element to a host that focuses it", () => {
+    const ref = { current: null as HTMLInputElement | null }
+    wrap(<ConversationSearchInput value="" onDebouncedChange={jest.fn()} inputRef={ref} />)
+    expect(ref.current).toBe(screen.getByTestId("conversation-search-input"))
+  })
 })

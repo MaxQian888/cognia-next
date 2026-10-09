@@ -27,6 +27,16 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   ),
 }))
 
+jest.mock("@/components/ui/dropdown-menu")
+jest.mock("@/components/ui/tooltip")
+jest.mock("@/lib/data-hooks/context", () => ({ useCharacters: () => [] }))
+jest.mock("@/hooks/connectors/use-conversation-labels", () => ({ useConversationLabels: () => [] }))
+
+const mockApprovalCount = jest.fn((_sessionId: string) => 0)
+jest.mock("@/hooks/connectors/use-pending-approval-count", () => ({
+  usePendingApprovalCount: (sessionId: string) => mockApprovalCount(sessionId),
+}))
+
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -223,5 +233,239 @@ describe("ConversationRow", () => {
     expect(action).toHaveFocus()
     fireEvent.click(action)
     expect(mockSlotAction).toHaveBeenCalledTimes(1)
+  })
+
+  describe("preview mode (onOpen given)", () => {
+    it("selects on click and opens on double-click", () => {
+      const onSelect = jest.fn()
+      const onOpen = jest.fn()
+      render(
+        <ConversationRow item={makeItem()} isActive={false} onSelect={onSelect} onOpen={onOpen} />
+      )
+      const button = screen.getByRole("button", { name: "Preview conversation: Product team" })
+      fireEvent.click(button)
+      expect(onSelect).toHaveBeenCalledWith("slack:a1:C1", "s1")
+      expect(onOpen).not.toHaveBeenCalled()
+      fireEvent.doubleClick(button)
+      expect(onOpen).toHaveBeenCalledWith("slack:a1:C1", "s1")
+    })
+
+    it("opens on Enter and leaves Space to the native select", () => {
+      const onSelect = jest.fn()
+      const onOpen = jest.fn()
+      render(
+        <ConversationRow item={makeItem()} isActive={false} onSelect={onSelect} onOpen={onOpen} />
+      )
+      const button = screen.getByTestId("conversation-row-button-slack:a1:C1")
+      expect(button).toHaveAttribute("aria-keyshortcuts", "Enter")
+      fireEvent.keyDown(button, { key: "Enter" })
+      expect(onOpen).toHaveBeenCalledTimes(1)
+      fireEvent.keyDown(button, { key: " " })
+      expect(onOpen).toHaveBeenCalledTimes(1)
+    })
+
+    it("ignores Enter while an IME composition is in progress", () => {
+      const onOpen = jest.fn()
+      render(
+        <ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} onOpen={onOpen} />
+      )
+      fireEvent.keyDown(screen.getByTestId("conversation-row-button-slack:a1:C1"), {
+        key: "Enter",
+        isComposing: true,
+      })
+      expect(onOpen).not.toHaveBeenCalled()
+    })
+
+    it("marks the previewed row as current and selected", () => {
+      render(<ConversationRow item={makeItem()} isActive onSelect={() => {}} onOpen={() => {}} />)
+      const button = screen.getByTestId("conversation-row-button-slack:a1:C1")
+      expect(button).toHaveAttribute("aria-current", "true")
+      expect(button).toHaveAttribute("data-selected", "true")
+    })
+  })
+
+  it("keeps the open-mode name and no Enter shortcut without onOpen", () => {
+    render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+    const button = screen.getByRole("button", { name: "Open conversation: Product team" })
+    expect(button).not.toHaveAttribute("aria-keyshortcuts")
+  })
+
+  it("renders the leading slot outside the click target", () => {
+    render(
+      <ConversationRow
+        item={makeItem()}
+        isActive={false}
+        onSelect={() => {}}
+        leading={<input type="checkbox" aria-label="select" />}
+      />
+    )
+    const checkbox = screen.getByRole("checkbox", { name: "select" })
+    expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).not.toContainElement(checkbox)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).toContainElement(checkbox)
+  })
+
+  describe("triage at a glance", () => {
+    const NOW = new Date(1_700_000_000_000)
+    const labelsById = new Map([
+      ["l1", { id: "l1", name: "VIP", color: "#f00", scope: "conversation", sortOrder: 0 }],
+      ["l2", { id: "l2", name: "Bug", scope: "conversation", sortOrder: 1 }],
+      ["l3", { id: "l3", name: "Lead", scope: "conversation", sortOrder: 2 }],
+    ] as const)
+
+    function withOverride(over: Partial<ConversationOverrideRow>) {
+      return makeItem({
+        override: { id: "o", conversationKey: "slack:a1:C1", ...over } as ConversationOverrideRow,
+      })
+    }
+
+    it("draws up to two label dots and a +n, naming them all", () => {
+      render(
+        <ConversationRow
+          item={withOverride({ labelIds: ["l1", "l2", "l3", "gone"] })}
+          isActive={false}
+          onSelect={() => {}}
+          labelsById={labelsById as never}
+          now={NOW}
+        />
+      )
+      const dots = screen.getByTestId("conversation-row-labels-slack:a1:C1")
+      expect(dots).toHaveAccessibleName("Labels: VIP, Bug, Lead")
+      expect(dots.querySelectorAll("span.rounded-full")).toHaveLength(2)
+      expect(dots).toHaveTextContent("+1")
+    })
+
+    it("shows the assignee as initials, a person glyph for me", () => {
+      const { rerender } = render(
+        <ConversationRow
+          item={withOverride({ assignee: { kind: "character", id: "c", label: "Ava Bot" } })}
+          isActive={false}
+          onSelect={() => {}}
+          now={NOW}
+        />
+      )
+      const token = screen.getByTestId("conversation-row-assignee-slack:a1:C1")
+      expect(token).toHaveTextContent("AB")
+      expect(token).toHaveAccessibleName("Assignee: Ava Bot")
+      rerender(
+        <ConversationRow
+          item={withOverride({ assignee: { kind: "human" } })}
+          isActive={false}
+          onSelect={() => {}}
+          now={NOW}
+        />
+      )
+      expect(screen.getByTestId("conversation-row-assignee-slack:a1:C1")).toHaveAttribute(
+        "data-assignee-kind",
+        "human"
+      )
+    })
+
+    it("flags an SLA only when overdue or nearly due", () => {
+      const { rerender } = render(
+        <ConversationRow
+          item={withOverride({ nextResponseDueAt: NOW.getTime() - 1 })}
+          isActive={false}
+          onSelect={() => {}}
+          now={NOW}
+        />
+      )
+      expect(screen.getByTestId("conversation-row-sla-slack:a1:C1")).toHaveTextContent("Overdue")
+      rerender(
+        <ConversationRow
+          item={withOverride({ nextResponseDueAt: NOW.getTime() + 10 * 60_000 })}
+          isActive={false}
+          onSelect={() => {}}
+          now={NOW}
+        />
+      )
+      expect(screen.getByTestId("conversation-row-sla-slack:a1:C1")).toHaveAccessibleName(
+        "Reply due in 10 minutes"
+      )
+      rerender(
+        <ConversationRow
+          item={withOverride({ nextResponseDueAt: NOW.getTime() + 5 * 3_600_000 })}
+          isActive={false}
+          onSelect={() => {}}
+          now={NOW}
+        />
+      )
+      expect(screen.queryByTestId("conversation-row-sla-slack:a1:C1")).not.toBeInTheDocument()
+    })
+
+    it("marks pending approvals from the approval registry", () => {
+      mockApprovalCount.mockImplementation((id) => (id === "s1" ? 2 : 0))
+      render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+      expect(screen.getByTestId("conversation-row-approvals-slack:a1:C1")).toHaveAccessibleName(
+        "2 pending approvals"
+      )
+      mockApprovalCount.mockReturnValue(0)
+    })
+  })
+
+  describe("menus and selection", () => {
+    it("offers the triage menu and reports its choices", () => {
+      const onTriage = jest.fn()
+      render(
+        <ConversationRow
+          item={makeItem({ unreadCount: 1 })}
+          isActive={false}
+          onSelect={() => {}}
+          onTriage={onTriage}
+          menuMode="full"
+          onMenuModeChange={() => {}}
+        />
+      )
+      fireEvent.click(screen.getByTestId("row-menu-toggle-read"))
+      expect(onTriage).toHaveBeenCalledWith({ kind: "markRead" })
+    })
+
+    it("opens the phone's action sheet from ⋯ when it has no menu", () => {
+      const onOpenActions = jest.fn()
+      render(
+        <ConversationRow
+          item={makeItem()}
+          isActive={false}
+          onSelect={() => {}}
+          onOpenActions={onOpenActions}
+        />
+      )
+      fireEvent.click(screen.getByTestId("conversation-row-actions-slack:a1:C1"))
+      expect(onOpenActions).toHaveBeenCalled()
+      expect(screen.queryByTestId("conversation-row-menu-slack:a1:C1")).not.toBeInTheDocument()
+    })
+
+    it("reports a pressed state and a select name in touch selection mode", () => {
+      render(
+        <ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} pressed checked />
+      )
+      const button = screen.getByRole("button", { name: "Select conversation: Product team" })
+      expect(button).toHaveAttribute("aria-pressed", "true")
+      expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveAttribute(
+        "data-checked",
+        "true"
+      )
+    })
+
+    it("tags the row button for the keyboard model", () => {
+      render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+      expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).toHaveAttribute(
+        "data-inbox-row-select",
+        "s1"
+      )
+    })
+
+    it("forwards the context menu", () => {
+      const onContextMenu = jest.fn()
+      render(
+        <ConversationRow
+          item={makeItem()}
+          isActive={false}
+          onSelect={() => {}}
+          onContextMenu={onContextMenu}
+        />
+      )
+      fireEvent.contextMenu(screen.getByTestId("conversation-row-button-slack:a1:C1"))
+      expect(onContextMenu).toHaveBeenCalled()
+    })
   })
 })

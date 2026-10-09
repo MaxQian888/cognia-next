@@ -3295,6 +3295,45 @@ describe("insertInboundMessage — session recency bump", () => {
   })
 })
 
+describe("insertInboundMessage — session preview stamp", () => {
+  it("stamps the inserted message as the session's last-message preview", async () => {
+    const conversationKey = "telegram:adapter_1:chat_preview"
+    await callHandler(makeEvent({ conversationKey }), "manual-store")
+    const session = (await getDb().sessions.toArray())[0]
+    expect(session).toBeDefined()
+
+    // The Inbox row reads this denormalized pair; inbound writes bypass
+    // `persistMessages`, so the runtime has to stamp it itself.
+    await insertInboundMessage(
+      makeEvent({
+        conversationKey,
+        segments: [{ type: "text", text: "  fresh   platform\ntext " }],
+        plainText: "fresh platform text",
+      }),
+      session.id,
+      8_000_000_000_000
+    )
+    const stamped = await getDb().sessions.get(session.id)
+    expect(stamped?.lastMessagePreview).toBe("fresh platform text")
+    expect(stamped?.lastMessageAt).toBe(8_000_000_000_000)
+
+    // A late-arriving older message lands in the transcript but must not
+    // pull the preview backwards.
+    await insertInboundMessage(
+      makeEvent({
+        conversationKey,
+        segments: [{ type: "text", text: "late straggler" }],
+        plainText: "late straggler",
+      }),
+      session.id,
+      7_000_000_000_000
+    )
+    const after = await getDb().sessions.get(session.id)
+    expect(after?.lastMessagePreview).toBe("fresh platform text")
+    expect(after?.lastMessageAt).toBe(8_000_000_000_000)
+  })
+})
+
 describe("inbound shared unread state", () => {
   it("increments the canonical session unread counter once across concurrent redelivery", async () => {
     const event = makeEvent({

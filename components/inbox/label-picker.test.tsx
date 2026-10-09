@@ -31,8 +31,17 @@ jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
+// The global next/navigation mock hands out a fresh `push` per render, so the
+// Manage item's navigation can only be asserted through a stable spy.
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/inbox/all",
+}))
+
 import { toast } from "sonner"
-import { LabelPicker } from "./label-picker"
+import { LABEL_MANAGER_HREF, LabelPicker } from "./label-picker"
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -85,6 +94,16 @@ describe("LabelPicker", () => {
         sessionId: "s",
       })
     )
+  })
+
+  it("opens the label manager from the Manage item", async () => {
+    const user = userEvent.setup()
+    render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
+    await user.click(screen.getByTestId("label-picker-trigger"))
+    await user.click(await screen.findByRole("menuitem", { name: "Manage labels" }))
+    expect(mockPush).toHaveBeenCalledTimes(1)
+    expect(mockPush).toHaveBeenCalledWith(LABEL_MANAGER_HREF)
+    expect(mockMutate).not.toHaveBeenCalled()
   })
 
   it("surfaces a toast when a toggle rejects", async () => {

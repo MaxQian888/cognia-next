@@ -31,7 +31,7 @@ import {
 import { markPendingOverrideMutation } from "./pending-overrides"
 import { INBOX_WRITE_COMMANDS } from "./route"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
-import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 
 export interface RemoteWriteOptions {
   /** Human label rendered in the offline-queue UI. */
@@ -54,6 +54,7 @@ export async function sendManualReplyRemotely(
   options: RemoteWriteOptions = {}
 ): Promise<RemoteManualReplyResult> {
   const db = getDb()
+  let mirrored: StoredMessage | null = null
   const queueRow = await db.transaction("rw", db.mobileOutboundQueue, db.messages, async () => {
     const queued = await enqueue({
       command: INBOX_WRITE_COMMANDS.send,
@@ -86,8 +87,16 @@ export async function sendManualReplyRemotely(
       createdAt: Date.now(),
     }
     await db.messages.put(row)
+    mirrored = row
     return queued
   })
+  // Outside the queue transaction (it does not cover `sessions`): the optimistic
+  // row is the conversation's newest message on this device until the host's
+  // copy syncs down, so the Inbox preview should say so.
+  // Re-widen: `mirrored` is only assigned inside the transaction closure, so
+  // the compiler's outer-flow type stays at its `null` initializer.
+  const mirroredRow = mirrored as StoredMessage | null
+  if (mirroredRow) await stampSessionLastMessage(input.sessionId, mirroredRow)
   markSessionDirty(input.sessionId)
   invalidatePersistSnapshot(input.sessionId)
   return { queueRow, messageId: input.clientMessageId }

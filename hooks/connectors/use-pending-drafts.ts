@@ -4,8 +4,9 @@
  * Live-query the cross-conversation pending-draft queue.
  *
  * `usePendingDrafts()` returns every `ConnectorDraftRow` in status "pending"
- * (newest-first, as `listAllPendingDrafts` orders them) — the data source for
- * the desktop Draft Approval Center.
+ * (newest-first, as `listAllPendingDrafts` orders them); `usePendingDraftsQuery()`
+ * is the same read with `undefined` while it loads — the data source for the
+ * desktop Draft Approval Center.
  *
  * `usePendingDraftCounts()` derives a `conversationKey → count` map so list
  * rows and the sidebar entry can show a pending-draft badge without each row
@@ -22,13 +23,24 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { listAllPendingDrafts } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 
-export function usePendingDrafts(): ConnectorDraftRow[] {
-  return (
-    useLiveQuery<ConnectorDraftRow[]>(
-      () => (typeof window === "undefined" ? Promise.resolve([]) : listAllPendingDrafts()),
-      []
-    ) ?? []
+const NO_DRAFTS: ConnectorDraftRow[] = []
+
+/**
+ * The queue with its loading state intact: `undefined` until the first read
+ * resolves. Surfaces that show an empty state (the Draft Center, the triage
+ * pane's drafts section) need it, or they announce "no drafts" for the beat
+ * before the real queue arrives.
+ */
+export function usePendingDraftsQuery(): ConnectorDraftRow[] | undefined {
+  return useLiveQuery<ConnectorDraftRow[]>(
+    () => (typeof window === "undefined" ? Promise.resolve([]) : listAllPendingDrafts()),
+    []
   )
+}
+
+/** The queue, `[]` while loading — for badges and counts, where loading reads as zero. */
+export function usePendingDrafts(): ConnectorDraftRow[] {
+  return usePendingDraftsQuery() ?? NO_DRAFTS
 }
 
 export function usePendingDraftCounts(): Map<string, number> {

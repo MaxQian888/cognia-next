@@ -3,5 +3,14 @@
   "empty": "No drafts pending approval.",
   "queueLabelApprove": "Approve connector draft",
   "queueLabelReject": "Reject connector draft",
-  "reject": "Reject"
+  "reject": "Reject",
+  "loading": "Loading drafts",
+  "edit": "Edit",
+  "editTitle": "Edit reply to {name}",
+  "editDescription": "Change the text, then send it or reject the draft.",
+  "confirmTitle": "Send this reply?",
+  "confirmDescription": "It will be sent to {name} on the connected platform. Sent messages can't be recalled from here.",
+  "confirmCancel": "Cancel",
+  "confirmSend": "Send",
+  "listAria": "{count, plural, =1 {1 draft waiting for approval} other {# drafts waiting for approval}}"
 }

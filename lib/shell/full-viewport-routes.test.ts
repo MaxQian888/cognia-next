@@ -104,6 +104,30 @@ describe("needsFullViewport", () => {
     }
   })
 
+  // `MobileInboxBody` is `h-full`: every compact inbox list route needs the
+  // definite height, and so does the redirect root that lands on one.
+  it("gives every inbox route a definite height", () => {
+    for (const route of [
+      "/inbox",
+      "/inbox/all",
+      "/inbox/drafts",
+      "/inbox/adapter",
+      "/inbox/platform",
+    ]) {
+      expect(needsFullViewport(route)).toBe(true)
+    }
+    expect(needsFullViewport("/inboxes")).toBe(false)
+  })
+
+  // `PetConsole` is an `h-full` column with its own scrolling tab pane, and a
+  // paired phone now reaches it (ADR-0219). `/pet-overlay` and `/pet-popup` are
+  // desktop windows, not routes the compact shell ever wraps.
+  it("gives the pet console a definite height without catching its sibling windows", () => {
+    expect(needsFullViewport("/pet")).toBe(true)
+    expect(needsFullViewport("/pet-overlay")).toBe(false)
+    expect(needsFullViewport("/pet-popup")).toBe(false)
+  })
+
   it("leaves an ordinary scrolling route alone", () => {
     expect(needsFullViewport("/settings")).toBe(false)
   })
@@ -114,7 +138,7 @@ describe("needsFullViewport", () => {
   // viewport-height box they cannot scroll out of.
   it("treats the root route as exact, never as a prefix for the whole app", () => {
     expect(needsFullViewport("/")).toBe(true)
-    for (const route of ["/settings", "/inbox/all", "/memory", "/goals", "/notifications"]) {
+    for (const route of ["/settings", "/memory", "/goals", "/notifications"]) {
       expect(needsFullViewport(route)).toBe(false)
     }
   })

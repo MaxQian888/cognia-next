@@ -15,8 +15,10 @@ jest.mock("@/components/mobile/inbox/mobile-inbox-body", () => ({
   ),
 }))
 jest.mock("@/components/inbox/inbox-shell", () => ({
-  InboxShell: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="stub-inbox-shell">{children}</div>
+  InboxShell: ({ children, view }: { children?: React.ReactNode; view: string }) => (
+    <div data-testid="stub-inbox-shell" data-view={view}>
+      {children}
+    </div>
   ),
 }))
 jest.mock("@/components/inbox/draft-center", () => ({
@@ -35,7 +37,8 @@ describe("/inbox/drafts dispatch", () => {
   it("renders the desktop InboxShell + DraftCenter on a wide viewport", () => {
     compact = false
     render(<InboxDraftsPage />)
-    expect(screen.getByTestId("stub-inbox-shell")).toBeInTheDocument()
+    // `drafts`, so the sidebar's Drafts destination reads as the current page.
+    expect(screen.getByTestId("stub-inbox-shell")).toHaveAttribute("data-view", "drafts")
     expect(screen.getByTestId("stub-draft-center")).toBeInTheDocument()
     expect(screen.queryByTestId("stub-mobile-inbox")).not.toBeInTheDocument()
   })

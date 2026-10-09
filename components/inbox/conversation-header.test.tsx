@@ -137,6 +137,26 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 // Stub the inspector so the header test doesn't pull in Dexie / the bus — the
 // inspector's own behaviour is covered by its co-located test. We only verify
 // the header mounts it and the trigger toggles `open`.
+let mockOverrideRow: Record<string, unknown> | undefined
+jest.mock("@/hooks/connectors/use-conversation-overrides", () => ({
+  useConversationOverride: () => mockOverrideRow,
+}))
+jest.mock("./provider-model-switcher", () => ({
+  ProviderModelSwitcher: ({
+    providerOverride,
+    modelOverride,
+  }: {
+    providerOverride?: string
+    modelOverride?: string
+  }) => (
+    <span
+      data-testid="provider-model-switcher-stub"
+      data-provider={providerOverride ?? ""}
+      data-model={modelOverride ?? ""}
+    />
+  ),
+}))
+
 jest.mock("./debug/callback-bindings-inspector", () => ({
   CallbackBindingsInspector: ({ open }: { open: boolean }) =>
     open ? <div data-testid="bindings-inspector-open" /> : null,
@@ -157,6 +177,7 @@ const EMPTY_POLICY: TriggerPolicy = {
 }
 
 beforeEach(() => {
+  mockOverrideRow = undefined
   ;(isTauri as jest.Mock).mockReturnValue(false)
   mockUseCharacter.mockReturnValue(undefined)
   mockBack.mockReset()
@@ -533,6 +554,53 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
     fireEvent.click(reconnect)
     await new Promise((r) => setTimeout(r, 0))
     expect(mockRequeueAdapter).toHaveBeenCalledWith("adp-1")
+  })
+})
+
+describe("ConversationHeader — per-conversation model", () => {
+  // The shared chat header mounts this in `controlsOnly` mode without the two
+  // props; the switcher then read "default" on a conversation pinned to a model.
+  it("falls back to the live override row when the props are absent", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    mockOverrideRow = {
+      conversationKey: "ck-m",
+      providerOverride: "anthropic",
+      modelOverride: "m-1",
+    }
+    render(
+      <ConversationHeader
+        controlsOnly
+        conversationKey="ck-m"
+        sessionId="s-m"
+        title="Model"
+        platform="telegram"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const switcher = screen.getByTestId("provider-model-switcher-stub")
+    expect(switcher).toHaveAttribute("data-provider", "anthropic")
+    expect(switcher).toHaveAttribute("data-model", "m-1")
+  })
+
+  it("lets explicit props win", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    mockOverrideRow = {
+      conversationKey: "ck-m",
+      providerOverride: "anthropic",
+      modelOverride: "m-1",
+    }
+    render(
+      <ConversationHeader
+        conversationKey="ck-m"
+        sessionId="s-m"
+        title="Model"
+        platform="telegram"
+        policy={EMPTY_POLICY}
+        providerOverride="openai"
+        modelOverride="m-2"
+      />
+    )
+    expect(screen.getByTestId("provider-model-switcher-stub")).toHaveAttribute("data-model", "m-2")
   })
 })
 

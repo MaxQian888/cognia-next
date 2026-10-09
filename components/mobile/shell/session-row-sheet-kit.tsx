@@ -128,6 +128,18 @@ function SheetLabel({ children }: { children?: ReactNode; className?: string }) 
   )
 }
 
+/**
+ * A plain group heading on the page it belongs to ("Characters", "Teams").
+ * Not part of `MenuKit` — `Label` above is the sheet's warning note — but
+ * exported for item lists that head their groups (the Inbox triage lists).
+ */
+export function SheetHeading({ children }: { children?: ReactNode; className?: string }) {
+  if (!useOnPage()) return null
+  return (
+    <p className="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">{children}</p>
+  )
+}
+
 function SheetSeparator() {
   if (!useOnPage()) return null
   return <div role="separator" className="mx-3 my-1 h-px bg-border" />

@@ -18,6 +18,7 @@ import {
   persistStreamingMessages,
   replaceSessionTranscript,
   setMessageReaction,
+  stampSessionLastMessage,
   truncateAfter,
   updateMessageMetadata,
   ImageEditAppendError,
@@ -1495,4 +1496,103 @@ function enableOperationRecording() {
 afterEach(() => {
   operationRecordingSpy?.mockRestore()
   operationRecordingSpy = undefined
+})
+
+describe("stampSessionLastMessage", () => {
+  // Connector writes (inbound, manual replies, imports, platform edits) bypass
+  // `persistMessages`; the Inbox list reads this denormalized pair instead of
+  // one message query per conversation, so they stamp it explicitly.
+  it("writes the preview for a newer message", async () => {
+    await putSession("s-stamp")
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "  inbound   hello " }],
+      createdAt: 50,
+    })
+    const row = await getDb().sessions.get("s-stamp")
+    expect(row?.lastMessagePreview).toBe("inbound hello")
+    expect(row?.lastMessageAt).toBe(50)
+  })
+
+  it("rewrites the preview for the same message (an edit of the newest)", async () => {
+    await putSession("s-stamp")
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "a" }],
+      createdAt: 50,
+    })
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "b" }],
+      createdAt: 50,
+    })
+    expect((await getDb().sessions.get("s-stamp"))?.lastMessagePreview).toBe("b")
+  })
+
+  it("never moves the preview backwards", async () => {
+    await putSession("s-stamp")
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "new" }],
+      createdAt: 90,
+    })
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "late old" }],
+      createdAt: 10,
+    })
+    const row = await getDb().sessions.get("s-stamp")
+    expect(row?.lastMessagePreview).toBe("new")
+    expect(row?.lastMessageAt).toBe(90)
+  })
+
+  it("is a no-op without a session row", async () => {
+    // A bystander row proves the stamp is keyed to the named session, not a
+    // write that happens to land somewhere else when its target is missing.
+    await putSession("s-other")
+    const before = await getDb().sessions.get("s-other")
+    const update = jest.spyOn(getDb().sessions, "update")
+    try {
+      await expect(
+        stampSessionLastMessage("s-missing", { parts: [{ type: "text", text: "x" }], createdAt: 1 })
+      ).resolves.toBeUndefined()
+      expect(update).not.toHaveBeenCalled()
+    } finally {
+      update.mockRestore()
+    }
+    expect(await getDb().sessions.get("s-missing")).toBeUndefined()
+    expect(await getDb().sessions.get("s-other")).toEqual(before)
+  })
+
+  it("swallows a failed session write: the message already committed", async () => {
+    await putSession("s-stamp")
+    await stampSessionLastMessage("s-stamp", {
+      parts: [{ type: "text", text: "kept" }],
+      createdAt: 5,
+    })
+    const update = jest
+      .spyOn(getDb().sessions, "update")
+      .mockRejectedValueOnce(new Error("QuotaExceededError"))
+    try {
+      // Best-effort decoration: callers await it right after their own write
+      // and must never see that write reported as failed.
+      await expect(
+        stampSessionLastMessage("s-stamp", {
+          parts: [{ type: "text", text: "lost" }],
+          createdAt: 9,
+        })
+      ).resolves.toBeUndefined()
+      expect(update).toHaveBeenCalledTimes(1)
+    } finally {
+      update.mockRestore()
+    }
+    const row = await getDb().sessions.get("s-stamp")
+    expect(row?.lastMessagePreview).toBe("kept")
+    expect(row?.lastMessageAt).toBe(5)
+  })
+
+  it("swallows an unavailable database", async () => {
+    const mockDb = jest.mocked(getDb)
+    mockDb.mockImplementationOnce(() => {
+      throw new Error("DatabaseClosedError")
+    })
+    await expect(
+      stampSessionLastMessage("s-stamp", { parts: [{ type: "text", text: "x" }], createdAt: 1 })
+    ).resolves.toBeUndefined()
+  })
 })
