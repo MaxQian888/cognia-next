@@ -8119,6 +8119,41 @@
       },
       "additionalProperties": false
     },
+    "goal_accept": {
+      "type": "object",
+      "required": [
+        "goalId",
+        "accepted"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal parked by the acceptance gate (paused + awaitingAcceptance)."
+        },
+        "accepted": {
+          "type": "boolean",
+          "description": "true completes the goal; false requests changes and resumes it."
+        }
+      },
+      "additionalProperties": false
+    },
+    "goal_continue": {
+      "type": "object",
+      "required": [
+        "goalId"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal whose held manual-continue turn (config.manualContinue) the host releases."
+        }
+      },
+      "additionalProperties": false
+    },
     "goal_create": {
       "type": "object",
       "required": [
@@ -8141,6 +8176,21 @@
         },
         "startPaused": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "goal_delete": {
+      "type": "object",
+      "required": [
+        "goalId"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal to delete with its event log. Deleting a missing goal is a no-op."
         }
       },
       "additionalProperties": false
@@ -8193,6 +8243,63 @@
       },
       "additionalProperties": false
     },
+    "goal_subgoal_mark": {
+      "type": "object",
+      "required": [
+        "goalId",
+        "subgoalId",
+        "done"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal whose subgoal checklist holds the step."
+        },
+        "subgoalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The checklist step to set. An unknown id changes nothing."
+        },
+        "done": {
+          "type": "boolean",
+          "description": "The wanted state, not a flip: a retried call cannot undo itself."
+        }
+      },
+      "additionalProperties": false
+    },
+    "goal_subgoals_clear": {
+      "type": "object",
+      "required": [
+        "goalId"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal whose subgoal checklist the host removes."
+        }
+      },
+      "additionalProperties": false
+    },
+    "goal_subgoals_generate": {
+      "type": "object",
+      "required": [
+        "goalId"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal whose objective the host decomposes into a checklist, replacing any prior one."
+        }
+      },
+      "additionalProperties": false
+    },
     "goal_update": {
       "type": "object",
       "required": [
@@ -8208,6 +8315,26 @@
         "config": {
           "type": "object",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "goal_verification_options": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "goal_verify_retry": {
+      "type": "object",
+      "required": [
+        "goalId"
+      ],
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "The goal whose failed or errored completion verification the host re-runs."
         }
       },
       "additionalProperties": false
@@ -12798,6 +12925,7 @@
             "settings",
             "conversationOverrides",
             "goals",
+            "goalEvents",
             "memories",
             "executionRuns",
             "mcpServers",
@@ -12856,7 +12984,7 @@
         "cursor": {
           "type": "string",
           "maxLength": 4096,
-          "description": "Optional opaque paging cursor for messages, executionRuns, workflowRuns and connectorHeartbeats. An empty string negotiates cursor-aware pagination. Persist next_cursor and return it together with next_since."
+          "description": "Optional opaque paging cursor for messages, executionRuns, workflowRuns, connectorHeartbeats and goalEvents. An empty string negotiates cursor-aware pagination. Persist next_cursor and return it together with next_since."
         }
       },
       "additionalProperties": false

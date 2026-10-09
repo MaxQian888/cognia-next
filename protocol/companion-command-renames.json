@@ -1903,8 +1903,17 @@
     "github_workspace_stat": {
       "to": "github.workspace.stat"
     },
+    "goal_accept": {
+      "to": "goal.acceptance.decide"
+    },
     "goal_create": {
       "to": "goal.create"
+    },
+    "goal_continue": {
+      "to": "goal.continue"
+    },
+    "goal_delete": {
+      "to": "goal.delete"
     },
     "goal_pause": {
       "to": "goal.pause"
@@ -1918,8 +1927,23 @@
     "goal_stop": {
       "to": "goal.stop"
     },
+    "goal_subgoal_mark": {
+      "to": "goal.subgoals.mark"
+    },
+    "goal_subgoals_clear": {
+      "to": "goal.subgoals.clear"
+    },
+    "goal_subgoals_generate": {
+      "to": "goal.subgoals.generate"
+    },
     "goal_update": {
       "to": "goal.update"
+    },
+    "goal_verification_options": {
+      "to": "goal.verification.get_options"
+    },
+    "goal_verify_retry": {
+      "to": "goal.verification.retry"
     },
     "greet": {
       "to": "host.greet"

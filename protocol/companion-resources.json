@@ -672,7 +672,13 @@
         "workspace": {}
       }
     },
-    "goal": {},
+    "goal": {
+      "children": {
+        "acceptance": {},
+        "subgoals": {},
+        "verification": {}
+      }
+    },
     "host": {
       "children": {
         "admin_lease": {},
