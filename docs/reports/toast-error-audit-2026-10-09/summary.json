@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-09",
+  "head": "514a46bf76cb8e7764b4576cee1f998874648327",
+  "scannedFiles": 10965,
+  "toastCalls": 2418,
+  "methods": {
+    "success": 811,
+    "info": 76,
+    "error": 1364,
+    "warning": 79,
+    "loading": 13,
+    "plain": 7,
+    "dismiss": 12,
+    "message": 45,
+    "dynamic": 3,
+    "error|warning": 1,
+    "custom": 4,
+    "success|warning": 1,
+    "show": 1,
+    "error|info|success|warning": 1
+  },
+  "errorFiles": 510,
+  "errorBuckets": {
+    "short-or-unresolved": 436,
+    "runtime-detail": 712,
+    "guidance-text": 205,
+    "button": 11
+  },
+  "warningBuckets": {
+    "runtime-detail": 18,
+    "guidance-text": 11,
+    "short-or-unresolved": 47,
+    "button": 2,
+    "long-static": 1
+  },
+  "promiseErrors": 0,
+  "errorsWithDescription": 115,
+  "errorsWithUnknownOptions": 5,
+  "errorsWithRuntimeDetail": 716,
+  "errorsWithResolvedTitle": 1009,
+  "notificationCalls": 337,
+  "otherToastCalls": 124
+}

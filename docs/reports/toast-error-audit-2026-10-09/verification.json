@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-09",
+  "sourceFilesHashed": 2309,
+  "drift": [],
+  "referencedToastCallsChecked": 1453,
+  "invalidCallLocations": [],
+  "errorBucketSum": 1364,
+  "directErrors": 1364,
+  "pluginHostErrorCandidates": [
+    "plugins/cognia-anime-effort/src/index.tsx:258",
+    "plugins/e2b-sandbox/src/sandboxes-panel.tsx:87",
+    "plugins/pet-daily-quests/src/index.ts:91",
+    "plugins/prompt-templates/src/templates-panel.tsx:74",
+    "plugins/prompt-templates/src/templates-panel.tsx:87",
+    "plugins/screenshot/src/index.ts:527",
+    "plugins/skill-recorder/src/index.ts:102",
+    "plugins/strix-security/src/StrixPanel.tsx:117",
+    "plugins/strix-security/src/StrixPanel.tsx:293",
+    "plugins/web-clone/src/index.ts:552",
+    "plugins/web-clone/src/index.ts:577"
+  ],
+  "i18nFreshness": "scripts/i18n/build-messages.mjs --check: en and zh-CN passed",
+  "uiVerification": "not performed; static source audit only"
+}
