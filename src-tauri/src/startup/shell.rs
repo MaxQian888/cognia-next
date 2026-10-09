@@ -91,6 +91,17 @@ pub(crate) fn main_window(app: &App) {
     // FULLSCREEN restore is already disabled at the plugin level in `lib.rs`.
     crate::window_recovery::recenter_if_offscreen(&window);
 
+    // Paint the still-hidden window in the theme it will open in. The boot
+    // reveal safety net can show it before the renderer's first frame, and the
+    // static `backgroundColor` in `tauri.conf.json` is dark, which flashed dark
+    // ahead of every light-themed launch.
+    let os_dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
+    let saved = crate::commands::read_shell_background(app.handle());
+    let color = crate::commands::boot_shell_background(saved.as_ref(), os_dark);
+    if let Err(error) = window.set_background_color(Some(color)) {
+        log::warn!("main window: failed to apply boot background: {error}");
+    }
+
     // Runtime white-screen watchdog. The renderer beats a realm-lifetime
     // heartbeat; if it goes silent while the window is visible (renderer
     // process crash, hung main thread, a page navigated to a blank/broken

@@ -36,7 +36,7 @@
 //! the window is hidden, because a terminated process is certainly dead,
 //! unlike a hidden window's throttled heartbeat.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -429,6 +429,7 @@ impl RendererLifecycle {
     }
 
     /// Current state for `label` (default for a webview never seen).
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
     pub fn state(&self, label: &str) -> RendererState {
         self.inner
             .records
@@ -440,7 +441,8 @@ impl RendererLifecycle {
     }
 
     /// Every webview that has a lifecycle record, ordered by label.
-    pub fn snapshot(&self) -> BTreeMap<String, RendererState> {
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+    pub fn snapshot(&self) -> std::collections::BTreeMap<String, RendererState> {
         self.inner
             .records
             .lock()
@@ -493,6 +495,7 @@ impl RendererLifecycle {
     }
 
     /// Resolve once `label`'s renderer has terminated past `generation`.
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
     /// Never resolves while the renderer stays alive; callers race it.
     pub async fn wait_for_termination(&self, label: &str, generation: u64) {
         let mut epoch = self.inner.epoch.subscribe();
@@ -508,6 +511,7 @@ impl RendererLifecycle {
     }
 
     /// Wait up to `timeout` for a replacement renderer after a termination.
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
     /// Returns the state observed last; `awaiting_load` is still true on timeout.
     pub async fn wait_until_loaded(&self, label: &str, timeout: Duration) -> RendererState {
         let mut epoch = self.inner.epoch.subscribe();

@@ -86,7 +86,7 @@ export function MobileCredentialWarning({
             className={cn(
               "shrink-0 text-destructive hover:text-destructive",
               showLabel
-                ? "touch-hit h-8 gap-1.5 rounded-full border border-destructive/25 bg-destructive/10 px-2.5 text-xs font-medium hover:bg-destructive/15"
+                ? "touch-hit h-8 gap-1.5 rounded-pill border border-destructive/25 bg-destructive/10 px-2.5 text-xs font-medium hover:bg-destructive/15"
                 : "touch-target size-11 hover:bg-destructive/10"
             )}
           >

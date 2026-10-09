@@ -54,7 +54,7 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   useSyncTrayToRust()
   useSyncShortcutsToRust()
 
-  const { resolvedTheme } = useTheme()
+  const { theme, resolvedTheme } = useTheme()
   const locale = useLocale()
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
@@ -94,8 +94,12 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
       },
       resolvedTheme
     )
-    void setWindowBackgroundColor(shellColors.backgroundHex)
+    void setWindowBackgroundColor(shellColors.backgroundHex, {
+      scheme: resolvedTheme === "dark" ? "dark" : "light",
+      followsSystem: theme === "system",
+    })
   }, [
+    theme,
     resolvedTheme,
     appearanceColorTheme,
     appearanceActiveCustomThemeId,

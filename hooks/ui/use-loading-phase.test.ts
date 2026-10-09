@@ -138,5 +138,25 @@ describe("useLoadingPhase", () => {
       expect(result.current.elapsedMs).toBeGreaterThanOrEqual(7000)
       expect(result.current.phase).toBe("prolonged")
     })
+
+    it("re-bases at once when an anchor arrives after mount, without waiting for a tick", () => {
+      let startedAt: number | null = null
+      const { result, rerender } = renderHook(() => useLoadingPhase({ startedAt }))
+      startedAt = Date.now() - 3000
+      rerender()
+      expect(result.current.elapsedMs).toBeGreaterThanOrEqual(3000)
+    })
+
+    it("reports the clock its elapsed count was read at", () => {
+      const before = Date.now()
+      const { result } = renderHook(() => useLoadingPhase())
+      expect(result.current.now).toBeGreaterThanOrEqual(before)
+      const first = result.current.now
+      act(() => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(result.current.now - first).toBeGreaterThanOrEqual(2000)
+      expect(result.current.elapsedMs).toBe(result.current.now - first)
+    })
   })
 })

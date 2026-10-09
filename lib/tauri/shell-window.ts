@@ -17,20 +17,34 @@ import { isTauri } from "@/lib/tauri"
 const HEX_PATTERN = /^#?[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
 
 /**
+ * The theme that produced a pushed colour. Rust persists it with the colour so
+ * the next launch paints the hidden window in the right mode before the
+ * renderer runs; a colour from a system-following theme is only reused while
+ * the OS is still in the same mode.
+ */
+export interface WindowBackgroundTheme {
+  scheme: "light" | "dark"
+  followsSystem: boolean
+}
+
+/**
  * Push a `#RRGGBB` or `#RRGGBBAA` colour to the desktop window. Returns a
  * boolean describing the outcome rather than throwing, because callers wire
  * this into theme-change effects where a failed paint should never break
  * rendering. The Rust side validates again; this client-side check trims
  * obvious typos before the IPC round-trip.
  */
-export async function setWindowBackgroundColor(hex: string): Promise<boolean> {
+export async function setWindowBackgroundColor(
+  hex: string,
+  theme?: WindowBackgroundTheme
+): Promise<boolean> {
   if (!isTauri()) return false
   if (!HEX_PATTERN.test(hex)) {
     console.warn("setWindowBackgroundColor: rejected invalid hex", hex)
     return false
   }
   try {
-    await invoke("set_window_background_color", { hex })
+    await invoke("set_window_background_color", theme ? { hex, ...theme } : { hex })
     return true
   } catch (err) {
     console.warn("setWindowBackgroundColor failed", err)

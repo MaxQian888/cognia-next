@@ -1,3 +1,4 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   getMobileQuickActionCatalog,
   resolveMobileHomeLayout,
@@ -87,4 +88,8 @@ describe("the retired agent-teams tile", () => {
     expect(active.filter((item) => item.id === "squads")).toHaveLength(1)
     expect(available.some((item) => item.id === "squads")).toBe(false)
   })
+})
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(MOBILE_QUICK_ACTION_ICONS.squads).toBe(AgentTeamIcon)
 })

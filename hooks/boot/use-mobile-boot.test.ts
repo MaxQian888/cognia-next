@@ -5,6 +5,7 @@ import { act, renderHook } from "@testing-library/react"
 
 import {
   __resetBootProgressForTesting,
+  BOOT_SEQUENCE_GAP_MS,
   beginBootMilestone,
   endBootMilestone,
   getBootProgressSnapshot,
@@ -75,6 +76,7 @@ describe("deriveMobileBootView", () => {
       status: "done",
       detail: null,
       durationMs: null,
+      startedAt: null,
     })
     expect(view.rows[1].status).toBe("active")
     expect(view.activeId).toBe("preferences")
@@ -113,6 +115,12 @@ describe("deriveMobileBootView", () => {
     expect(view.completed).toBe(4)
     expect(view.fraction).toBeCloseTo((4 + MOBILE_BOOT_ACTIVE_SHARE) / 6)
     expect(view.sequenceStartedAt).toBe(1000)
+    // The bar's two beats: the ended share, then the running row's lean-in.
+    expect(view.boundary).toBeCloseTo(4 / 6)
+    expect(view.sequence).toBe(1)
+    // Only the running row carries a start time, for its live timer.
+    expect(view.rows[4].startedAt).toBe(2100)
+    expect(view.rows[3].startedAt).toBeNull()
   })
 
   it("counts failed and skipped stages as completed and reports settled", () => {
@@ -205,6 +213,23 @@ describe("useMobileBoot", () => {
 
   afterEach(() => {
     jest.useRealTimers()
+  })
+
+  it("opens a route load after the cold boot in the route layout from its first render", () => {
+    jest.setSystemTime(10_000)
+    const gate = renderHook(() => useMobileBoot("accounts"))
+    gate.unmount()
+    // Long after the boot settled, a routed page streams in.
+    jest.setSystemTime(10_000 + BOOT_SEQUENCE_GAP_MS + 5_000)
+    const layouts: string[] = []
+    const route = renderHook(() => {
+      const view = useMobileBoot("workspace")
+      layouts.push(`${view.layout}:${view.sequence}:${view.boundary}`)
+      return view
+    })
+    // Never a frame of the finished boot's rows, sequence or bar.
+    expect(layouts.every((entry) => entry === "route:2:0")).toBe(true)
+    route.unmount()
   })
 
   it("registers ownership of the milestone for the life of the mount", () => {

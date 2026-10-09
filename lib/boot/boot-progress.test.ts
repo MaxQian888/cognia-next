@@ -4,10 +4,12 @@ import {
   __resetBootProgressForTesting,
   beginBootMilestone,
   bootMilestoneIndex,
+  continuesBootSequence,
   endBootMilestone,
   getBootProgressSnapshot,
   getServerBootProgressSnapshot,
   markBootIntroPlayed,
+  projectNewBootSequence,
   subscribeBootProgress,
   visibleBootMilestones,
 } from "./boot-progress"
@@ -184,6 +186,71 @@ describe("boot progress timeline", () => {
     const v2 = getBootProgressSnapshot().version
     expect(v1).toBeGreaterThan(v0)
     expect(v2).toBeGreaterThan(v1)
+  })
+
+  describe("sequence identity", () => {
+    it("numbers each sequence and records when the last owner left", () => {
+      expect(getBootProgressSnapshot().sequence).toBe(0)
+      beginBootMilestone("accounts", 1000)
+      expect(getBootProgressSnapshot().sequence).toBe(1)
+      endBootMilestone("accounts", 1200)
+      expect(getBootProgressSnapshot().endedAt).toBe(1200)
+      // A hand-over inside the gap keeps the id.
+      beginBootMilestone("preferences", 1300)
+      expect(getBootProgressSnapshot().sequence).toBe(1)
+      endBootMilestone("preferences", 1400)
+      // A route load long after opens the next one.
+      beginBootMilestone("workspace", 1400 + BOOT_SEQUENCE_GAP_MS + 1)
+      expect(getBootProgressSnapshot().sequence).toBe(2)
+    })
+  })
+
+  describe("continuesBootSequence", () => {
+    it("is false before any owner has mounted", () => {
+      expect(continuesBootSequence(getBootProgressSnapshot(), 0)).toBe(false)
+    })
+
+    it("is true while an owner is still on screen, however long it has been", () => {
+      beginBootMilestone("accounts", 1000)
+      expect(continuesBootSequence(getBootProgressSnapshot(), 1000 + 60_000)).toBe(true)
+    })
+
+    it("follows the gap once the last owner has left", () => {
+      beginBootMilestone("accounts", 1000)
+      endBootMilestone("accounts", 2000)
+      const snapshot = getBootProgressSnapshot()
+      expect(continuesBootSequence(snapshot, 2000 + BOOT_SEQUENCE_GAP_MS)).toBe(true)
+      expect(continuesBootSequence(snapshot, 2000 + BOOT_SEQUENCE_GAP_MS + 1)).toBe(false)
+    })
+  })
+
+  describe("projectNewBootSequence", () => {
+    it("describes the wait a mount is about to open, not the one that ended", () => {
+      beginBootMilestone("accounts", 1000)
+      endBootMilestone("accounts", 1500)
+      markBootIntroPlayed()
+      const before = getBootProgressSnapshot()
+      const projected = projectNewBootSequence(before, "workspace")
+
+      expect(projected.active).toBe("workspace")
+      expect(projected.first).toBe("workspace")
+      expect(projected.sequence).toBe(before.sequence + 1)
+      expect(projected.sequenceStartedAt).toBeNull()
+      expect(projected.introPlayed).toBe(true)
+      expect(projected.milestones.accounts.status).toBe("pending")
+      expect(projected.milestones.workspace).toEqual({
+        status: "active",
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+      })
+      // The store itself is untouched.
+      expect(getBootProgressSnapshot()).toBe(before)
+
+      // And the id is the one registration then assigns.
+      beginBootMilestone("workspace", 1500 + BOOT_SEQUENCE_GAP_MS + 1)
+      expect(getBootProgressSnapshot().sequence).toBe(projected.sequence)
+    })
   })
 
   describe("visibleBootMilestones", () => {

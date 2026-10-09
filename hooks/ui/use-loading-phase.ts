@@ -56,6 +56,12 @@ export interface LoadingPhaseOptions {
 export interface LoadingPhase {
   phase: LoadingPhaseName
   elapsedMs: number
+  /**
+   * The clock reading `elapsedMs` was taken at — mount time, then each tick.
+   * For callers that time something other than the whole wait (a boot step's
+   * own elapsed time) on the same cadence.
+   */
+  now: number
   /** Prolonged AND the device reports no connection. */
   offline: boolean
 }
@@ -69,25 +75,25 @@ export function useLoadingPhase(options: LoadingPhaseOptions = {}): LoadingPhase
     startedAt = null,
   } = options
 
-  // Seeded from the anchor when there is one, so a re-mount mid-wait reports
-  // the true elapsed time on its very first render rather than flickering
-  // back to zero until the first tick. Without an anchor the wait starts now.
-  const [elapsedMs, setElapsedMs] = useState(() =>
-    startedAt === null ? 0 : Math.max(0, Date.now() - startedAt)
-  )
+  // The clock is the state, the elapsed count is derived from it. Deriving it
+  // per render means a re-mount mid-wait reports the true elapsed time on its
+  // very first render, and an anchor that arrives after mount (a boot mount
+  // whose sequence registers in a layout effect) re-bases the count at once
+  // instead of showing a stale figure until the next tick. Without an anchor
+  // the wait starts at mount.
+  const [mountedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(mountedAt)
   const { status } = useNetworkStatus()
 
   useEffect(() => {
-    const origin = startedAt ?? Date.now()
-    const interval = setInterval(() => {
-      setElapsedMs(Math.max(0, Date.now() - origin))
-    }, tickMs)
+    const interval = setInterval(() => setNow(Date.now()), tickMs)
     return () => clearInterval(interval)
-  }, [tickMs, startedAt])
+  }, [tickMs])
 
+  const elapsedMs = Math.max(0, now - (startedAt ?? mountedAt))
   const prolonged = elapsedMs >= prolongedAtMs
   const phase: LoadingPhaseName =
     canEscalate && elapsedMs >= escalatedAtMs ? "escalated" : prolonged ? "prolonged" : "visible"
 
-  return { phase, elapsedMs, offline: prolonged && !status.connected }
+  return { phase, elapsedMs, now, offline: prolonged && !status.connected }
 }

@@ -4,12 +4,34 @@
 import { render, screen } from "@testing-library/react"
 import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
+import { createRef } from "react"
 
-import { MobileSpotIcon, MOBILE_SPOT_ICON_NAMES } from "./mobile-spot-icon"
+import { AgentTeamIcon, MobileSpotIcon, MOBILE_SPOT_ICON_NAMES } from "./mobile-spot-icon"
 import manifest from "@/public/icons/cognia-mobile-spots/icon-manifest.json"
 import { ME_ENTRIES } from "./me/me-entries"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
+
+describe("AgentTeamIcon", () => {
+  it("keeps an explicitly labelled icon accessible", () => {
+    render(<AgentTeamIcon role="img" aria-label="Squad" />)
+    expect(screen.getByRole("img", { name: "Squad" })).not.toHaveAttribute("aria-hidden")
+  })
+
+  it("uses the same packaged anime illustration in SVG icon slots", () => {
+    const ref = createRef<SVGSVGElement>()
+    const { container } = render(<AgentTeamIcon ref={ref} size={32} className="size-8" />)
+    expect(container.querySelector("image")).toHaveAttribute(
+      "href",
+      "/icons/cognia-mobile-spots/png/agent-teams.png"
+    )
+    expect(ref.current).toHaveAttribute("width", "32")
+    expect(ref.current).toHaveAttribute("height", "32")
+    expect(ref.current).toHaveClass("size-8")
+    expect(ref.current).toHaveAttribute("aria-hidden", "true")
+    expect(ref.current).toHaveAttribute("focusable", "false")
+  })
+})
 
 describe("<MobileSpotIcon />", () => {
   it("keeps the asset manifest and component names in sync without duplicates", () => {

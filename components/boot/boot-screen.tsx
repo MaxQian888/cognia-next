@@ -17,11 +17,16 @@
  *     says which build it is;
  *   - the title / description;
  *   - a progress bar that leans into the current step and snaps forward when
- *     a step completes, captioned "Step n of N" rather than a percentage the
- *     app has no way to know;
- *   - the step list, each row with its measured duration once done, and —
- *     while the workspace step is loading — the runtime capabilities that
- *     have come up so far, straight from `lib/boot/capabilities.ts`;
+ *     a step completes, captioned "Step n of N" plus the total time waited
+ *     rather than a percentage the app has no way to know. Its position is
+ *     owned by `useBootFill` (`lib/boot/boot-fill.ts`) and only ever moves
+ *     forward within one wait, across every owner hand-over; while the
+ *     workspace step runs, its lean-in tracks the runtimes that have reported
+ *     ready, so the bar advances on real progress rather than a timer alone;
+ *   - the step list, each row with its measured duration once done and a live
+ *     timer while running, and — during the workspace step — the runtime
+ *     capabilities that have come up so far, straight from
+ *     `lib/boot/capabilities.ts`;
  *   - reassurance once the wait is prolonged, an offline note when that is
  *     the likely cause, and a reload offer once it has gone on long enough
  *     that a way out is worth more than another second of spinner.
@@ -34,15 +39,17 @@
 
 import { CheckIcon, RefreshCw, Sparkles } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties } from "react"
+import { useId, useRef, useSyncExternalStore, type CSSProperties } from "react"
 
 import { BootPreview, type BootPreviewSettled } from "@/components/boot/boot-preview"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useBootFill } from "@/hooks/boot/use-boot-fill"
 import { useBootProgress, type BootMilestoneView } from "@/hooks/boot/use-boot-progress"
 import { useLoadingPhase } from "@/hooks/ui/use-loading-phase"
 import { usePlatform } from "@/hooks/use-platform"
 import { APP_VERSION } from "@/lib/app-version"
+import { formatBootDuration, liveBootSeconds } from "@/lib/boot/boot-clock"
 import {
   getBootCapabilitySnapshot,
   getBootDiagnosticsSnapshot,
@@ -65,27 +72,10 @@ export interface BootScreenProps {
 }
 
 /**
- * Where the progress fill last stood, remembered across mounts so the next
- * owner's bar picks up from there instead of jumping. Module state on purpose:
- * it is a purely visual continuity detail, not part of the boot model.
- */
-let lastFillFraction = 0
-
-/**
- * How long the completion snap gets before the lean-in creep takes over. The
- * snap itself runs `420ms * --motion-duration-scale` (see `.boot-bar__fill`),
- * so the creep is scheduled just past it — and scaled the same way, read off
- * the element exactly like `artifact-workspace-dock.tsx` does.
+ * Length of the fill's completion snap (`.boot-bar__fill`, 420ms) plus a beat;
+ * the creep is scheduled just past it, scaled like the CSS.
  */
 const BOOT_FILL_SNAP_MS = 480
-
-export function __resetBootScreenForTesting(): void {
-  lastFillFraction = 0
-}
-
-function formatDuration(ms: number): string {
-  return Math.max(0.1, ms / 1000).toFixed(1)
-}
 
 const serverCapabilitySnapshot = () => 0
 
@@ -101,55 +91,35 @@ export function BootScreen({
   const titleId = useId()
   const platform = usePlatform()
 
-  const view = useBootProgress(milestone)
-  const { elapsedMs, offline, phase } = useLoadingPhase({
-    canEscalate: allowReload,
-    startedAt: view.sequenceStartedAt,
-  })
-
   // Runtime capabilities (chat, plugins, workflows…) — meaningful once the
-  // provider stack that boots them is mounted, i.e. during the workspace step.
+  // provider stack that boots them is mounted, i.e. during the workspace step,
+  // where their ready share is that step's measured progress.
   useSyncExternalStore(
     subscribeBootCapabilities,
     getBootCapabilitySnapshot,
     serverCapabilitySnapshot
   )
   const capabilities = getBootDiagnosticsSnapshot()
+  const capabilityProgress =
+    milestone === "workspace" && capabilities.requested.length > 0
+      ? capabilities.ready.length / capabilities.requested.length
+      : null
 
-  // Progress fill. Each mount renders where the previous owner left the bar —
-  // or empty when this mount opens the sequence, so a later route load never
-  // inherits a stale position and animates backwards — and is then moved
-  // imperatively in two beats: a ~400ms snap to this step's boundary (the
-  // previous step's completion tick), then, once the snap has landed, the long
-  // decelerating creep (`data-creep`) toward the lean-in point so the bar
-  // keeps moving while the step runs without ever claiming it done. Forcing a
-  // style resolution first gives the snap a computed start value. The creep
-  // is on a timer rather than `requestAnimationFrame` — rAF is paused in a
-  // hidden document, and a boot that begins backgrounded must still land
-  // right when the tab is shown.
-  const target = view.fraction
-  const boundary = view.index / view.total
-  const [initialFill] = useState(() =>
-    view.milestones[0]?.id === milestone ? 0 : lastFillFraction
-  )
+  const view = useBootProgress(milestone, capabilityProgress)
+  const { elapsedMs, now, offline, phase } = useLoadingPhase({
+    canEscalate: allowReload,
+    startedAt: view.sequenceStartedAt,
+  })
+
   const fillRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = fillRef.current
-    if (!el) return
-    void getComputedStyle(el).transform
-    el.style.setProperty("--boot-fill", String(boundary))
-    lastFillFraction = boundary
-    const scale = Number(getComputedStyle(el).getPropertyValue("--motion-duration-scale")) || 1
-    const creepAt = window.setTimeout(
-      () => {
-        el.dataset.creep = "true"
-        el.style.setProperty("--boot-fill", String(target))
-        lastFillFraction = target
-      },
-      BOOT_FILL_SNAP_MS * Math.max(0, scale)
-    )
-    return () => window.clearTimeout(creepAt)
-  }, [boundary, target])
+  const { initialFill } = useBootFill(fillRef, {
+    sequence: view.sequence,
+    boundary: view.boundary,
+    target: view.fraction,
+    property: "--boot-fill",
+    snapMs: BOOT_FILL_SNAP_MS,
+  })
+  const totalSeconds = liveBootSeconds(now, view.sequenceStartedAt)
 
   const prolonged = phase === "prolonged" || phase === "escalated"
   // `useLoadingPhase` only reaches "escalated" when `canEscalate` — i.e. when
@@ -157,7 +127,9 @@ export function BootScreen({
   const escalated = phase === "escalated"
   const waitDetail = offline
     ? tLoading("offline")
-    : tLoading("stillWorking", { seconds: Math.round(elapsedMs / 1000) })
+    : // Whole seconds elapsed, truncated like every other live counter on the
+      // screen, so the reassurance never reads a second ahead of the timers.
+      tLoading("stillWorking", { seconds: Math.floor(elapsedMs / 1000) })
 
   const heading = title ?? t("title")
   const detail = description === undefined ? t("description") : description
@@ -247,6 +219,14 @@ export function BootScreen({
               <span className="font-medium text-foreground">{t("progressLabel")}</span>
               <span className="font-mono tabular-nums text-muted-foreground">
                 {t("stepOf", { current: view.index + 1, total: view.total })}
+                {totalSeconds !== null ? (
+                  <>
+                    <span aria-hidden="true" className="mx-1.5 text-border">
+                      ·
+                    </span>
+                    <span data-slot="boot-elapsed">{t("elapsed", { seconds: totalSeconds })}</span>
+                  </>
+                ) : null}
               </span>
             </div>
             <div
@@ -275,6 +255,7 @@ export function BootScreen({
                 row={row}
                 order={index}
                 pop={index === justCompletedIndex}
+                now={now}
                 capabilities={
                   row.id === "workspace" && row.status === "active" ? capabilities : null
                 }
@@ -331,15 +312,18 @@ interface MilestoneRowProps {
   order: number
   /** Play the check-mark pop — the row finished just now. */
   pop: boolean
+  /** The wait's clock, for the running row's live timer. */
+  now: number
   /** Runtime capability state to show under this row, or `null` for none. */
   capabilities: ReturnType<typeof getBootDiagnosticsSnapshot> | null
 }
 
-function MilestoneRow({ row, order, pop, capabilities }: MilestoneRowProps) {
+function MilestoneRow({ row, order, pop, now, capabilities }: MilestoneRowProps) {
   const t = useTranslations("loading.page")
   const active = row.status === "active"
   const done = row.status === "done"
   const showCapabilities = capabilities !== null && capabilities.requested.length > 0
+  const runningSeconds = active ? liveBootSeconds(now, row.startedAt) : null
 
   return (
     <li
@@ -384,7 +368,14 @@ function MilestoneRow({ row, order, pop, capabilities }: MilestoneRowProps) {
         </span>
         {done && row.durationMs !== null ? (
           <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-            {t("milestoneDuration", { seconds: formatDuration(row.durationMs) })}
+            {t("milestoneDuration", { seconds: formatBootDuration(row.durationMs) })}
+          </span>
+        ) : runningSeconds !== null ? (
+          <span
+            data-slot="boot-milestone-timer"
+            className="shrink-0 font-mono text-[11px] tabular-nums text-foreground/70"
+          >
+            {t("milestoneDuration", { seconds: runningSeconds })}
           </span>
         ) : null}
       </div>

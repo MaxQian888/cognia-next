@@ -2746,6 +2746,93 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
   }
 }
 
+/* The terminal dock's open / close / move / maximize gesture
+   (`lib/terminal/dock-gesture.ts`) on the same clock and with the same
+   cropped-not-stretched snapshots as the gestures above. The routed page keeps
+   its top-left corner, which no slot ever moves; each dock slot keeps the
+   window edge it grows out of, so it slides in from that edge instead of
+   unfolding from the middle. */
+::view-transition-group(cognia-terminal-content),
+::view-transition-group(cognia-terminal-bottom),
+::view-transition-group(cognia-terminal-right),
+::view-transition-group(cognia-terminal-outlet-center),
+::view-transition-group(cognia-terminal-outlet-end) {
+  animation-duration: calc(280ms * var(--motion-duration-scale, 1));
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-old(cognia-terminal-content),
+::view-transition-new(cognia-terminal-content),
+::view-transition-old(cognia-terminal-bottom),
+::view-transition-new(cognia-terminal-bottom),
+::view-transition-old(cognia-terminal-right),
+::view-transition-new(cognia-terminal-right),
+::view-transition-old(cognia-terminal-outlet-center),
+::view-transition-new(cognia-terminal-outlet-center),
+::view-transition-old(cognia-terminal-outlet-end),
+::view-transition-new(cognia-terminal-outlet-end) {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: none;
+  overflow: clip;
+}
+
+::view-transition-old(cognia-terminal-content),
+::view-transition-new(cognia-terminal-content),
+::view-transition-old(cognia-terminal-outlet-center),
+::view-transition-new(cognia-terminal-outlet-center) {
+  object-position: left top;
+}
+
+::view-transition-old(cognia-terminal-bottom),
+::view-transition-new(cognia-terminal-bottom) {
+  object-position: left bottom;
+}
+
+::view-transition-old(cognia-terminal-right),
+::view-transition-new(cognia-terminal-right),
+::view-transition-old(cognia-terminal-outlet-end),
+::view-transition-new(cognia-terminal-outlet-end) {
+  object-position: right top;
+}
+
+html.reduce-motion::view-transition-group(cognia-terminal-content),
+html.reduce-motion::view-transition-group(cognia-terminal-bottom),
+html.reduce-motion::view-transition-group(cognia-terminal-right),
+html.reduce-motion::view-transition-group(cognia-terminal-outlet-center),
+html.reduce-motion::view-transition-group(cognia-terminal-outlet-end),
+html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-content),
+html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-bottom),
+html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-right),
+html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-outlet-center),
+html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-outlet-end) {
+  animation-duration: 1ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-terminal-content),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-terminal-bottom),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-terminal-right),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-terminal-outlet-center),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-terminal-outlet-end) {
+    animation-duration: 1ms !important;
+  }
+}
+
+/* While a shell gesture runs as a View Transition the snapshots are the motion:
+   every edge panel's own size transition stands down so the commit lands the
+   final layout in one frame. Left armed, the new state was captured on the
+   first frame of a 280ms width tween and `::view-transition-new` (a live
+   image) kept showing a row still reflowing underneath — ghosted content, a
+   bare strip where the panel had been, and the whole row (a docked Monaco
+   included) re-laid out every frame. The attribute is owned by
+   `lib/ui/shell-view-transition.ts`; engines without View Transitions never
+   see it and keep the CSS tween. */
+html[data-shell-view-transition]
+  :is(#conversation-sidebar, [data-shell-edge-panel], [data-title-bar-outlet]) {
+  transition: none !important;
+}
+
 /* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).
    Monaco creates a fixed-size internal div that prevents its flex parent
    from shrinking. Setting min-width: 0 on the wrapper section allows the
@@ -3601,6 +3688,14 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
   will-change: transform;
 }
 
+/* While a row runs the fill leans toward its share over a long decelerating
+   transition, exactly like the desktop bar (`useBootFill` sets `data-creep`
+   after the completion snap has landed). */
+.mboot__bar-fill[data-creep="true"] {
+  transition-duration: calc(6500ms * var(--motion-duration-scale, 1));
+  transition-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
 /* Highlight sweeping along the fill so the bar reads as alive while it holds.
    Rests off-screen: under reduced motion the loop collapses to its base state,
    and a highlight parked on the fill would read as a stuck glitch. */
@@ -3772,6 +3867,12 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   color: var(--mboot-fg-2);
+}
+
+/* The running row's live timer reads a step brighter than finished durations. */
+.mboot__duration--live {
+  color: var(--mboot-fg);
+  opacity: 0.72;
 }
 
 /* Footer: build stamp left, reassurance / reload right, one reserved row. */
@@ -4151,7 +4252,8 @@ html[data-reduce-motion="true"] .boot-preview__block {
    While a step is running the fill "leans in" toward that step's boundary
    over a long decelerating transition — it visibly moves without ever
    claiming the step is done — and snaps to the boundary in ~400ms when the
-   step actually completes. */
+   step actually completes. Both values come from `hooks/boot/use-boot-fill.ts`,
+   which never sets one behind the bar's visible position. */
 .boot-bar {
   position: relative;
   overflow: hidden;

@@ -64,7 +64,7 @@ describe("status labels", () => {
   it("draws a pill label with the status tint and keeps the text", () => {
     render(<StatusLabel status="degraded" pill />)
     const label = screen.getByText("Degraded")
-    expect(label.className).toMatch(/rounded-full/)
+    expect(label.className).toMatch(/rounded-pill/)
     expect(label.className).toContain(STATUS_STYLES.degraded.soft.split(" ")[0])
   })
 

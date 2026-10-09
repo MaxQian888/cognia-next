@@ -5080,6 +5080,13 @@ function FolderSectionHeader({
   })
 
   const hasMenu = Boolean(onRename || onDelete || onMove || onSelectConversations)
+  const renameFromMenuRef = useRef(false)
+  const handleMenuCloseAutoFocus = (event: Event) => {
+    if (!renameFromMenuRef.current) return
+    renameFromMenuRef.current = false
+    event.preventDefault()
+    setEditing(true)
+  }
   // One item list for the ⋯ button and the right-click menu, as the rows and
   // the squad headers have — a folder header was the one section header a
   // right-click did nothing on.
@@ -5090,11 +5097,16 @@ function FolderSectionHeader({
     last,
     onSelectConversations,
     onMove,
-    // Opened once the menu has closed. A context menu traps focus while it is
-    // up and hands it back to its trigger — this header, which stays mounted —
-    // as it goes; a field focused before that was blurred straight away, and a
-    // blur commits, so the rename ended the moment it began.
-    onRename: onRename ? () => setTimeout(() => setEditing(true), 0) : undefined,
+    // Only marks the request; the field opens once the menu has closed
+    // (`onCloseAutoFocus`). A menu traps focus while it is up and hands it
+    // back as it unmounts — after its exit animation, so well after any
+    // zero-delay timer; a field focused before that was blurred, and a blur
+    // commits, so the rename ended the moment it began.
+    onRename: onRename
+      ? () => {
+          renameFromMenuRef.current = true
+        }
+      : undefined,
     onDelete: onDelete ? () => setConfirmOpen(true) : undefined,
   }
 
@@ -5155,7 +5167,7 @@ function FolderSectionHeader({
                   <MoreHorizontalIcon className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" onCloseAutoFocus={handleMenuCloseAutoFocus}>
                 <FolderMenuItems kit={DROPDOWN_MENU_KIT} surface="dropdown" {...menuItemsProps} />
               </DropdownMenuContent>
             </DropdownMenu>
@@ -5188,7 +5200,11 @@ function FolderSectionHeader({
           </AlertDialog>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-52" data-testid={`folder-context-menu-${folder.id}`}>
+      <ContextMenuContent
+        className="w-52"
+        data-testid={`folder-context-menu-${folder.id}`}
+        onCloseAutoFocus={handleMenuCloseAutoFocus}
+      >
         <FolderMenuItems kit={CONTEXT_MENU_KIT} surface="context" {...menuItemsProps} />
       </ContextMenuContent>
     </ContextMenu>

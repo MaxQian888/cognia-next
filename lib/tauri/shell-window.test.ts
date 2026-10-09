@@ -27,6 +27,17 @@ describe("setWindowBackgroundColor", () => {
     expect(mockInvoke).toHaveBeenCalledWith("set_window_background_color", { hex: "#ff8800" })
   })
 
+  it("sends the theme that produced the colour so Rust can persist it", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    const ok = await setWindowBackgroundColor("#ffffff", { scheme: "light", followsSystem: true })
+    expect(ok).toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("set_window_background_color", {
+      hex: "#ffffff",
+      scheme: "light",
+      followsSystem: true,
+    })
+  })
+
   it("returns false without calling invoke when not running under Tauri", async () => {
     mockIsTauri = false
     const ok = await setWindowBackgroundColor("#ff8800")

@@ -680,7 +680,7 @@ describe("useUIStore", () => {
 
     it("clearPendingCreate resets to null", () => {
       const { result } = renderHook(() => useUIStore())
-      act(() => result.current.requestCreate("character"))
+      act(() => result.current.requestCreate("agentTeam"))
       act(() => result.current.clearPendingCreate())
       expect(result.current.pendingCreateRequest).toBeNull()
     })

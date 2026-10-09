@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ScheduledTask } from "@/types/scheduler"
 
 jest.mock("next/link", () => ({
@@ -42,6 +43,8 @@ jest.mock("@/hooks/scheduler/use-scheduler-host-target", () => ({
   useSchedulerHostTarget: () => ({ target: hostTarget }),
 }))
 
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { OverlaySideContext } from "@/components/shell/rail-overlay-side"
 import { StatusBarNextRun } from "./status-bar-next-run"
 import { scheduleHref } from "@/components/workspace/workspace-schedules"
 
@@ -109,5 +112,60 @@ describe("StatusBarNextRun", () => {
     expect(container).toBeEmptyDOMElement()
     await expect(lastQuery?.()).resolves.toEqual([])
     expect(getUpcomingTasks).not.toHaveBeenCalled()
+  })
+
+  describe("rail variant", () => {
+    const label = (ms: number) =>
+      `label:${JSON.stringify({ name: "Daily digest", when: `rel(${ms})` })}`
+
+    function renderRail(side: "left" | "right" = "right") {
+      return render(
+        <TooltipProvider>
+          <OverlaySideContext.Provider value={side}>
+            <StatusBarNextRun variant="rail" />
+          </OverlaySideContext.Provider>
+        </TooltipProvider>
+      )
+    }
+
+    it("renders the glyph alone: no name or relative time printed into the rail", () => {
+      const next = task({})
+      tasksResult = [next]
+      renderRail()
+      const link = screen.getByTestId("status-next-run")
+      expect(link).toHaveAttribute("data-variant", "rail")
+      expect(link.textContent).toBe("")
+      expect(link.querySelector("svg")).not.toBeNull()
+      expect(link).toHaveAttribute("href", scheduleHref(next))
+      // Fixed rail-sized target, and visible at every width (the rail is).
+      expect(link.className).toContain("size-9")
+      expect(link.className).not.toContain("hidden")
+    })
+
+    it("names the schedule and its time in the accessible name and the tooltip", async () => {
+      tasksResult = [task({})]
+      renderRail()
+      const link = screen.getByRole("link", { name: label(2 * 3_600_000) })
+      expect(link).not.toHaveAttribute("title")
+      await userEvent.hover(link)
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(label(2 * 3_600_000))
+    })
+
+    it("marks a schedule due within the hour, and only then", () => {
+      tasksResult = [task({ nextRunAt: new Date(NOW.getTime() + 5 * 60_000) })]
+      const { unmount } = renderRail()
+      expect(screen.getByTestId("status-next-run-imminent")).toHaveAttribute("aria-hidden", "true")
+      unmount()
+      tasksResult = [task({})]
+      renderRail()
+      expect(screen.queryByTestId("status-next-run-imminent")).toBeNull()
+    })
+
+    it("still steps aside for a paired host's scheduler", () => {
+      hostTarget = "paired"
+      tasksResult = [task({})]
+      renderRail()
+      expect(screen.queryByTestId("status-next-run")).toBeNull()
+    })
   })
 })

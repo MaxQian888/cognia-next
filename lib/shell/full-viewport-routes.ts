@@ -53,6 +53,7 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/servers/",
   "/workspace",
   "/squads",
+  "/agents",
   "/projects",
   "/plugins",
   "/twin",

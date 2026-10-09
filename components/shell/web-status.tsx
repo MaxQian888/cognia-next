@@ -110,7 +110,7 @@ export function WebGlobalStatusRail({ collapsed }: { collapsed: boolean }) {
   if (!context || collapsed) return null
   return (
     <div className={RAIL_STACK} data-testid="web-status-rail">
-      <StatusBarZone items={context.scopes.global} />
+      <StatusBarZone items={context.scopes.global} variant="rail" />
     </div>
   )
 }

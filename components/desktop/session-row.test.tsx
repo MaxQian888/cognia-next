@@ -470,6 +470,37 @@ test("commits no rename when title unchanged", async () => {
   expect(onRename).not.toHaveBeenCalled()
 })
 
+// Regression: Rename from a menu used to open the field while the menu was
+// still closing; its focus trap and return-focus blurred the new field, and
+// the blur committed the untouched draft as a cancel.
+test("Rename from the ⋯ menu keeps the field open and commits the typed name", async () => {
+  const user = userEvent.setup()
+  const { onRename } = setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByTestId("session-row-dropdown-rename-s-1"))
+  const input = await screen.findByDisplayValue("Hello", undefined, { timeout: 500 })
+  expect(input).toHaveFocus()
+  await user.clear(input)
+  await user.type(input, "World{Enter}")
+  expect(onRename).toHaveBeenCalledWith("s-1", "World")
+})
+
+test("Rename from the right-click menu keeps the field open and commits the typed name", async () => {
+  const user = userEvent.setup()
+  const { onRename } = setup()
+  await user.pointer({
+    keys: "[MouseRight]",
+    target: screen.getByRole("button", { name: /Hello/ }),
+  })
+  const menu = await screen.findByTestId("session-row-context-menu-s-1")
+  await user.click(within(menu).getByTestId("session-row-context-rename-s-1"))
+  const input = await screen.findByDisplayValue("Hello", undefined, { timeout: 500 })
+  expect(input).toHaveFocus()
+  await user.clear(input)
+  await user.type(input, "World{Enter}")
+  expect(onRename).toHaveBeenCalledWith("s-1", "World")
+})
+
 test("renders an accent dot when accentColor is provided", () => {
   setup({ accentColor: "#ff0000" })
   // Both the icon-less accent dot and the action menu show the title button.

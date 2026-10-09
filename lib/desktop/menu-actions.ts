@@ -1,6 +1,7 @@
 "use client"
 
 import { settingsHref } from "@/lib/settings/deep-link"
+import { newAgentHref } from "@/lib/agents/routes"
 import { invoke } from "@tauri-apps/api/core"
 
 /**
@@ -50,7 +51,7 @@ export const MENU_COMMAND_IDS = [
   "new-chat",
   "new-workflow",
   "new-agent-team",
-  "new-character",
+  "new-agent",
   "open-workspace",
   "open-settings",
   "open-logs",
@@ -241,12 +242,12 @@ export function newAgentTeamAction(router: AppRouterInstance): void {
   router.push(settingsHref("squads"))
 }
 
-export function newCharacterAction(router: AppRouterInstance): void {
-  log.info("menu action new-character")
-  // Open the Characters settings tab and signal "create" — the characters
-  // panel listens for `pendingCreateRequest` and pops its editor.
-  useUIStore.getState().requestCreate("character")
-  router.push("/settings?section=characters")
+export function newAgentAction(router: AppRouterInstance): void {
+  log.info("menu action new-agent")
+  // The agents console owns creation (ADR-0220): its starting-point chooser
+  // offers a blank form or a builder conversation. The route IS the request,
+  // so no pending-create signal is needed.
+  router.push(newAgentHref())
 }
 
 export async function openWorkspaceAction(): Promise<void> {

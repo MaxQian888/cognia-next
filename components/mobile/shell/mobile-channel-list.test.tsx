@@ -947,6 +947,11 @@ describe("<MobileChannelList />", () => {
       // computed transform for vaul to read on pointerup).
       fireEvent.click(await screen.findByTestId("session-row-sheet-rename-s2"))
       const input = await screen.findByTestId("mobile-channel-rename-s2")
+      // The closing sheet must not take focus back: a blur would commit the
+      // untouched field as a cancel before anything could be typed.
+      await waitFor(() => expect(screen.queryByTestId("mobile-channel-actions")).toBeNull())
+      expect(input).toBeInTheDocument()
+      expect(input).toHaveFocus()
       await user.clear(input)
       await user.type(input, "Renamed{Enter}")
       await waitFor(() => expect(onRename).toHaveBeenCalledWith("s2", "Renamed"))

@@ -31,7 +31,7 @@ import {
   MENU_ACTION_IDS,
   newAgentTeamAction,
   newChatAction,
-  newCharacterAction,
+  newAgentAction,
   newWorkflowAction,
   openLogsAction,
   openSettingsAction,
@@ -131,8 +131,8 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
           case "new-agent-team":
             newAgentTeamAction(router)
             break
-          case "new-character":
-            newCharacterAction(router)
+          case "new-agent":
+            newAgentAction(router)
             break
           case "open-workspace":
             await openWorkspaceAction()

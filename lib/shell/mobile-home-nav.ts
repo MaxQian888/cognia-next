@@ -8,6 +8,7 @@
  * the sidebar customizer (`@/lib/shell/sidebar-nav`).
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   BotIcon,
   CompassIcon,
@@ -19,7 +20,6 @@ import {
   SmartphoneIcon,
   ServerCogIcon,
   UserRoundIcon,
-  Users2Icon,
   WorkflowIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -40,7 +40,7 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   discover: CompassIcon,
   inbox: InboxIcon,
   twin: BotIcon,
-  squads: Users2Icon,
+  squads: AgentTeamIcon,
   // The same icon the Studio's own page header carries.
   templates: FileArchiveIcon,
   fleet: LayersIcon,

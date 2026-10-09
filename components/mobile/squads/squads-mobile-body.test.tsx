@@ -265,6 +265,7 @@ describe("SquadsMobileBody, one Squad", () => {
   it("says a Squad is gone and offers the way back to all of them", async () => {
     render(<SquadsMobileBody route={route({ selectedId: "gone" })} />)
     expect(screen.getByTestId("squads-mobile-missing")).toHaveTextContent("Squad unavailable")
+    expect(screen.getByTestId("mobile-spot-icon-agent-teams")).toBeInTheDocument()
     expect(screen.queryByTestId("squad-fleet-row")).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Show all Squads" }))
     expect(setSelectedId).toHaveBeenCalledWith(undefined)

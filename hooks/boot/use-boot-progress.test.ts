@@ -9,10 +9,18 @@ import {
   endBootMilestone,
   getBootProgressSnapshot,
   getServerBootProgressSnapshot,
+  BOOT_SEQUENCE_GAP_MS,
   markBootIntroPlayed,
 } from "@/lib/boot/boot-progress"
 
-import { BOOT_ACTIVE_SHARE, deriveBootProgressView, useBootProgress } from "./use-boot-progress"
+import {
+  BOOT_ACTIVE_FLOOR,
+  BOOT_ACTIVE_SHARE,
+  deriveBootProgressView,
+  useBootProgress,
+  useBootTimeline,
+  type BootProgressView,
+} from "./use-boot-progress"
 
 describe("deriveBootProgressView", () => {
   beforeEach(() => __resetBootProgressForTesting())
@@ -36,8 +44,18 @@ describe("deriveBootProgressView", () => {
     // Owner A is still registered as active; owner B renders before effects run.
     beginBootMilestone("accounts", 1000)
     const view = deriveBootProgressView(getBootProgressSnapshot(), "preferences", false)
-    expect(view.milestones[0]).toEqual({ id: "accounts", status: "done", durationMs: null })
-    expect(view.milestones[1]).toEqual({ id: "preferences", status: "active", durationMs: null })
+    expect(view.milestones[0]).toEqual({
+      id: "accounts",
+      status: "done",
+      durationMs: null,
+      startedAt: null,
+    })
+    expect(view.milestones[1]).toEqual({
+      id: "preferences",
+      status: "active",
+      durationMs: null,
+      startedAt: null,
+    })
     expect(view.milestones[2].status).toBe("pending")
     expect(view.index).toBe(1)
     expect(view.fraction).toBeCloseTo((1 + BOOT_ACTIVE_SHARE) / 4)
@@ -65,8 +83,42 @@ describe("deriveBootProgressView", () => {
     endBootMilestone("workspace", 5100)
     // The account gate re-mounts its loader before the store has been told.
     const view = deriveBootProgressView(getBootProgressSnapshot(), "accounts", false)
-    expect(view.milestones[0]).toEqual({ id: "accounts", status: "active", durationMs: null })
+    expect(view.milestones[0]).toEqual({
+      id: "accounts",
+      status: "active",
+      durationMs: null,
+      startedAt: null,
+    })
     expect(view.total).toBe(4)
+  })
+
+  it("exposes the active step's boundary, start time and sequence", () => {
+    beginBootMilestone("accounts", 1000)
+    endBootMilestone("accounts", 1100)
+    beginBootMilestone("preferences", 1100)
+    const view = deriveBootProgressView(getBootProgressSnapshot(), "preferences", false)
+    expect(view.boundary).toBeCloseTo(1 / 4)
+    expect(view.milestones[1].startedAt).toBe(1100)
+    expect(view.sequence).toBe(1)
+  })
+
+  it("weights the lean-in by measured progress, keeping a floor", () => {
+    beginBootMilestone("workspace", 5000)
+    const snapshot = getBootProgressSnapshot()
+    const unknown = deriveBootProgressView(snapshot, "workspace", false, null)
+    const none = deriveBootProgressView(snapshot, "workspace", false, 0)
+    const half = deriveBootProgressView(snapshot, "workspace", false, 0.5)
+    const all = deriveBootProgressView(snapshot, "workspace", false, 1)
+    expect(unknown.fraction).toBeCloseTo(BOOT_ACTIVE_SHARE)
+    expect(none.fraction).toBeCloseTo(BOOT_ACTIVE_SHARE * BOOT_ACTIVE_FLOOR)
+    expect(half.fraction).toBeGreaterThan(none.fraction)
+    expect(half.fraction).toBeLessThan(all.fraction)
+    // Fully reported still stops short of the step's end: only completion fills it.
+    expect(all.fraction).toBeCloseTo(BOOT_ACTIVE_SHARE)
+    // Out-of-range input is clamped rather than overshooting.
+    expect(deriveBootProgressView(snapshot, "workspace", false, 4).fraction).toBeCloseTo(
+      BOOT_ACTIVE_SHARE
+    )
   })
 })
 
@@ -140,5 +192,56 @@ describe("useBootProgress", () => {
     // the newly-active accounts row reads as done from this mount's view.
     expect(result.current.milestone).toBe("workspace")
     expect(result.current.total).toBe(4)
+  })
+
+  it("opens a route load on its own sequence from the very first render", () => {
+    jest.useFakeTimers({ now: 10_000 })
+    try {
+      const boot = renderHook(() => useBootProgress("accounts"))
+      jest.setSystemTime(12_000)
+      boot.unmount()
+      // The app has been interactive well past the hand-over gap.
+      jest.setSystemTime(12_000 + BOOT_SEQUENCE_GAP_MS + 5_000)
+
+      const renders: BootProgressView[] = []
+      const route = renderHook(() => {
+        const view = useBootProgress("workspace")
+        renders.push(view)
+        return view
+      })
+      // The first render — before registration — already describes the new
+      // wait: one row, an empty bar, no stale anchor, the next sequence id.
+      expect(renders[0].milestones.map((m) => m.id)).toEqual(["workspace"])
+      expect(renders[0].boundary).toBe(0)
+      expect(renders[0].sequenceStartedAt).toBeNull()
+      expect(renders[0].sequence).toBe(2)
+      // Registration then confirms it.
+      expect(route.result.current.sequence).toBe(2)
+      expect(route.result.current.sequenceStartedAt).toBe(12_000 + BOOT_SEQUENCE_GAP_MS + 5_000)
+      route.unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("useBootTimeline", () => {
+  beforeEach(() => __resetBootProgressForTesting())
+
+  it("reads without registering for a null milestone", () => {
+    const { result } = renderHook(() => useBootTimeline(null))
+    expect(result.current).toBe(getBootProgressSnapshot())
+    expect(getBootProgressSnapshot().active).toBeNull()
+  })
+
+  it("renders a hand-over from the live store, not a projection", () => {
+    beginBootMilestone("accounts", Date.now())
+    const renders: number[] = []
+    renderHook(() => {
+      const snapshot = useBootTimeline("preferences")
+      renders.push(snapshot.sequence)
+      return snapshot
+    })
+    expect(renders.every((sequence) => sequence === 1)).toBe(true)
   })
 })

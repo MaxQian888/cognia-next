@@ -36,6 +36,31 @@ describe("StatStrip", () => {
   })
 
   /**
+   * Six divides by two, three and six, so its steps never leave a hole. A
+   * missing entry used to fall back to the four-column steps.
+   */
+  it("gives six stats the six-column steps in every pane", () => {
+    const six = ["a", "b", "c", "d", "e", "f"].map((id) => stat(id))
+    const { rerender } = render(<StatStrip stats={six} />)
+    const strip = () => screen.getByTestId("stat-strip")
+    expect(strip()).toHaveClass(
+      "grid-cols-2",
+      "@lg/console-pane:grid-cols-3",
+      "@4xl/console-pane:grid-cols-6"
+    )
+    expect(strip().className).not.toContain("grid-cols-4")
+    for (const pane of ["device-pane", "workspace-pane", "environment-pane"] as const) {
+      rerender(<StatStrip stats={six} pane={pane} />)
+      expect(strip()).toHaveClass(`@lg/${pane}:grid-cols-3`, `@4xl/${pane}:grid-cols-6`)
+    }
+  })
+
+  it("falls back to the four-column steps for an unlisted count", () => {
+    render(<StatStrip stats={["a", "b", "c", "d", "e"].map((id) => stat(id))} />)
+    expect(screen.getByTestId("stat-strip")).toHaveClass("@xl/console-pane:grid-cols-4")
+  })
+
+  /**
    * The responsive step has to name the pane. An interpolated container name
    * emits no class at all, so the strip would simply stop reflowing.
    */

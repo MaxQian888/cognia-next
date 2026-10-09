@@ -41,13 +41,15 @@
 
 import { AlertCircle, CheckIcon, MinusIcon, RefreshCw } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react"
+import { useId, useLayoutEffect, useRef, type CSSProperties } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useBootFill } from "@/hooks/boot/use-boot-fill"
 import { useMobileBoot, type MobileBootRow } from "@/hooks/boot/use-mobile-boot"
 import { useLoadingPhase } from "@/hooks/ui/use-loading-phase"
 import { APP_VERSION } from "@/lib/app-version"
+import { formatBootDuration, liveBootSeconds } from "@/lib/boot/boot-clock"
 import type { BootMilestone } from "@/lib/boot/boot-progress"
 import type { MobileBootStageDetail } from "@/lib/boot/mobile-boot-stages"
 import { cn } from "@/lib/utils"
@@ -69,19 +71,10 @@ export interface MobileBootScreenProps {
 }
 
 /**
- * Where the progress fill last stood, remembered across mounts so the next
- * owner's bar picks up from there instead of jumping. Purely visual continuity,
- * not part of the boot model — hence module state.
+ * Length of the fill's completion snap (`.mboot__bar-fill`, 520ms) plus a
+ * beat; the creep is scheduled just past it, scaled like the CSS.
  */
-let lastFillFraction = 0
-
-export function __resetMobileBootScreenForTesting(): void {
-  lastFillFraction = 0
-}
-
-function formatDuration(ms: number): string {
-  return Math.max(0.1, ms / 1000).toFixed(1)
-}
+const MOBILE_BOOT_FILL_SNAP_MS = 560
 
 function stagger(index: number): CSSProperties {
   return { "--mboot-i": index } as CSSProperties
@@ -115,27 +108,22 @@ export function MobileBootScreen({
 
   const view = useMobileBoot(milestone)
   const gate = !overlay
-  const { elapsedMs, offline, phase } = useLoadingPhase({
+  const { elapsedMs, now, offline, phase } = useLoadingPhase({
     canEscalate: gate && allowReload,
     startedAt: view.sequenceStartedAt,
   })
 
-  // Progress fill. Mounts at the previous owner's value (so a hand-over never
-  // jumps) and is then moved to this mount's target imperatively, after a
-  // forced style resolution so the transition has a computed start value.
-  // Not `requestAnimationFrame` on purpose: rAF is paused in a hidden
-  // document, and a boot that begins backgrounded must still be right when
-  // the app is brought forward.
-  const target = view.fraction
-  const [initialFill] = useState(() => lastFillFraction)
+  // Progress fill — the same monotonic, hand-over-safe position the desktop
+  // screen uses (`hooks/boot/use-boot-fill.ts`): snap to the ended share, then
+  // creep toward the running row's lean-in, never backwards within one wait.
   const fillRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = fillRef.current
-    if (!el) return
-    void getComputedStyle(el).transform
-    el.style.setProperty("--mboot-fill", String(target))
-    lastFillFraction = target
-  }, [target])
+  const { initialFill } = useBootFill(fillRef, {
+    sequence: view.sequence,
+    boundary: view.boundary,
+    target: view.fraction,
+    property: "--mboot-fill",
+    snapMs: MOBILE_BOOT_FILL_SNAP_MS,
+  })
 
   // Glide. The native splash paints its icon at the exact centre of the
   // screen; the overlay's first frame must too, or the hand-over jumps. The
@@ -158,7 +146,9 @@ export function MobileBootScreen({
   const escalated = phase === "escalated"
   const waitDetail = offline
     ? tLoading("offline")
-    : tLoading("stillWorking", { seconds: Math.round(elapsedMs / 1000) })
+    : // Whole seconds elapsed, truncated like every other live counter on the
+      // screen, so the reassurance never reads a second ahead of the timers.
+      tLoading("stillWorking", { seconds: Math.floor(elapsedMs / 1000) })
 
   const route = view.layout === "route"
   const allEnded = view.completed === view.total
@@ -292,7 +282,13 @@ export function MobileBootScreen({
           {route ? null : (
             <ol aria-label={t("stepsLabel")} className="mboot__rows">
               {view.rows.map((row, index) => (
-                <Row key={row.id} row={row} order={index} pop={index === justCompletedIndex} />
+                <Row
+                  key={row.id}
+                  row={row}
+                  order={index}
+                  pop={index === justCompletedIndex}
+                  now={now}
+                />
               ))}
             </ol>
           )}
@@ -333,12 +329,15 @@ interface RowProps {
   order: number
   /** Play the check-mark pop — the row finished just now. */
   pop: boolean
+  /** The wait's clock, for the running row's live timer. */
+  now: number
 }
 
-function Row({ row, order, pop }: RowProps) {
+function Row({ row, order, pop, now }: RowProps) {
   const t = useTranslations("mobile.splash")
   const { status } = row
   const active = status === "active"
+  const runningSeconds = active ? liveBootSeconds(now, row.startedAt) : null
   const statusKey =
     status === "active"
       ? "statusActive"
@@ -391,12 +390,17 @@ function Row({ row, order, pop }: RowProps) {
           </span>
         ) : status === "done" && row.durationMs !== null ? (
           <span className="mboot__duration">
-            {t("duration", { seconds: formatDuration(row.durationMs) })}
+            {t("duration", { seconds: formatBootDuration(row.durationMs) })}
           </span>
         ) : null}
         {row.detail && row.durationMs !== null ? (
           <span className="mboot__duration">
-            {t("duration", { seconds: formatDuration(row.durationMs) })}
+            {t("duration", { seconds: formatBootDuration(row.durationMs) })}
+          </span>
+        ) : null}
+        {runningSeconds !== null ? (
+          <span data-slot="mobile-boot-timer" className="mboot__duration mboot__duration--live">
+            {t("duration", { seconds: runningSeconds })}
           </span>
         ) : null}
       </div>

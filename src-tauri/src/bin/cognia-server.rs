@@ -106,6 +106,9 @@ enum CliCommand {
         /// Owner-only Unix socket path or Windows named-pipe name.
         #[arg(long)]
         endpoint: Option<String>,
+        /// Allow credential prompts for an explicit desktop recovery request.
+        #[arg(long)]
+        authorize_credentials: bool,
     },
     /// Issue a one-shot Owner invitation and print the cgnp3 payload the mobile
     /// app scans or pastes.
@@ -676,14 +679,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let cli = Cli::parse();
 
-    if let CliCommand::DesktopHost { endpoint } = &cli.command {
-        let endpoint = endpoint
-            .clone()
-            .unwrap_or_else(app_lib::terminal_host_service::default_terminal_host_endpoint);
-        log::info!("terminal host endpoint: {endpoint}");
-        return app_lib::terminal_host_service::run_terminal_host(endpoint)
-            .await
-            .map_err(Into::into);
+    if let CliCommand::DesktopHost {
+        endpoint,
+        authorize_credentials,
+    } = &cli.command
+    {
+        let result = async {
+            if *authorize_credentials {
+                // Keep the granted credential in this very process: a one-shot
+                // helper would lose a one-time Keychain Allow when it exited.
+                tokio::task::spawn_blocking(
+                    app_lib::terminal_host_service::authorize_terminal_host_credentials,
+                )
+                .await
+                .map_err(|error| {
+                    format!("terminal credential authorization task failed: {error}")
+                })??;
+            }
+            let endpoint = endpoint
+                .clone()
+                .unwrap_or_else(app_lib::terminal_host_service::default_terminal_host_endpoint);
+            log::info!("terminal host endpoint: {endpoint}");
+            app_lib::terminal_host_service::run_terminal_host(endpoint).await
+        }
+        .await;
+        if let Err(error) = &result {
+            if let Some(code) =
+                app_lib::terminal_host_service::terminal_host_startup_exit_code(error)
+            {
+                // This failure precedes the listener and all PTY sessions. The
+                // client consumes only the exit status, never log contents.
+                log::error!("{error}");
+                std::process::exit(code);
+            }
+        }
+        return result.map_err(Into::into);
     }
 
     let dir = data_dir();
@@ -2296,9 +2326,25 @@ mod tests {
         .unwrap();
         assert!(matches!(
             cli.command,
-            CliCommand::DesktopHost { endpoint: Some(value) }
+            CliCommand::DesktopHost { endpoint: Some(value), authorize_credentials: false }
                 if value == "/tmp/cognia-terminal.sock"
         ));
+    }
+
+    #[test]
+    fn desktop_host_credential_authorization_requires_an_explicit_flag() {
+        let cli = Cli::try_parse_from(["cognia-server", "desktop-host", "--authorize-credentials"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::DesktopHost {
+                endpoint: None,
+                authorize_credentials: true,
+            }
+        ));
+        assert!(
+            Cli::try_parse_from(["cognia-server", "serve", "--authorize-credentials",]).is_err()
+        );
     }
 
     #[test]

@@ -533,7 +533,7 @@ export function AccountLockScreen({
             )}
           </h1>
         </div>
-        <p className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+        <p className="inline-flex max-w-full items-center gap-1.5 rounded-pill border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
           <ShieldCheckIcon aria-hidden="true" className="size-3.5 shrink-0" />
           <span className="truncate">{t(runtimeBadgeKey)}</span>
         </p>

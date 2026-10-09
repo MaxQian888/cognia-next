@@ -27,10 +27,11 @@
  * one thing here and another on a desktop.
  */
 
+import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { PlusIcon, SettingsIcon, SparklesIcon, UsersIcon } from "lucide-react"
+import { PlusIcon, SettingsIcon, SparklesIcon } from "lucide-react"
 
 import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
@@ -131,8 +132,8 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
       >
         <Empty className="flex-1" data-testid="squads-mobile-missing">
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <UsersIcon />
+            <EmptyMedia>
+              <MobileSpotIcon name="agent-teams" size={96} />
             </EmptyMedia>
             <EmptyTitle className="text-sm">{t("detail.missingTitle")}</EmptyTitle>
             <EmptyDescription className="text-xs">

@@ -39,6 +39,7 @@ const GO_MENU_SECTIONS: &[&[GoMenuItem]] = &[
         ("go-workflows", "Workflows"),
         ("go-sites", "Sites"),
         ("go-twin", "Digital twin"),
+        ("go-agents", "Agents"),
         ("go-skills", "Skills"),
         ("go-plugins", "Plugins"),
         ("go-squads", "Squads"),
@@ -95,8 +96,8 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let new_agent_team = MenuItemBuilder::new("New Agent Team")
         .id("new-agent-team")
         .build(handle)?;
-    let new_character = MenuItemBuilder::new("New Character")
-        .id("new-character")
+    let new_agent = MenuItemBuilder::new("New Agent")
+        .id("new-agent")
         .build(handle)?;
     let open_workspace = MenuItemBuilder::new("Open Workspace…")
         .id("open-workspace")
@@ -114,7 +115,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .item(&new_chat)
         .item(&new_workflow)
         .item(&new_agent_team)
-        .item(&new_character)
+        .item(&new_agent)
         .separator()
         .item(&open_workspace)
         .item(&open_settings)

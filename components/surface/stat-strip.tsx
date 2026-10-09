@@ -72,6 +72,8 @@ const STAT_COLUMNS: Record<ConsolePaneName, Record<number, string>> = {
     2: "grid-cols-2",
     3: "grid-cols-1 @lg/console-pane:grid-cols-3",
     4: "grid-cols-2 @xl/console-pane:grid-cols-4",
+    // Six divides by two, three and six: no step of it leaves a hole.
+    6: "grid-cols-2 @lg/console-pane:grid-cols-3 @4xl/console-pane:grid-cols-6",
   },
   // A device record on a phone is ~340px wide, and stacking three numbers
   // there cost a third of the first screen. Three narrow cells with wrapping
@@ -81,18 +83,24 @@ const STAT_COLUMNS: Record<ConsolePaneName, Record<number, string>> = {
     2: "grid-cols-2",
     3: "grid-cols-1 @2xs/device-pane:grid-cols-3",
     4: "grid-cols-2 @xl/device-pane:grid-cols-4",
+    // Six divides by two, three and six: no step of it leaves a hole.
+    6: "grid-cols-2 @lg/device-pane:grid-cols-3 @4xl/device-pane:grid-cols-6",
   },
   "workspace-pane": {
     1: "grid-cols-1",
     2: "grid-cols-2",
     3: "grid-cols-1 @lg/workspace-pane:grid-cols-3",
     4: "grid-cols-2 @xl/workspace-pane:grid-cols-4",
+    // Six divides by two, three and six: no step of it leaves a hole.
+    6: "grid-cols-2 @lg/workspace-pane:grid-cols-3 @4xl/workspace-pane:grid-cols-6",
   },
   "environment-pane": {
     1: "grid-cols-1",
     2: "grid-cols-2",
     3: "grid-cols-1 @lg/environment-pane:grid-cols-3",
     4: "grid-cols-2 @xl/environment-pane:grid-cols-4",
+    // Six divides by two, three and six: no step of it leaves a hole.
+    6: "grid-cols-2 @lg/environment-pane:grid-cols-3 @4xl/environment-pane:grid-cols-6",
   },
 }
 

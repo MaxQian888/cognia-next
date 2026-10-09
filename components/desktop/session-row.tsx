@@ -390,6 +390,22 @@ function SessionRowImpl({
     if (locked) return
     setEditing(true)
   }
+  // A menu's Rename (⋯ or right-click) only marks the request; the field opens
+  // once that menu has closed (`onCloseAutoFocus`). Opened while the menu was
+  // still up, the menu's focus trap and its return-focus (the ⋯ trigger, or
+  // whatever held focus before the right-click) blurred the new field, and the
+  // blur committed the untouched draft: a cancelled rename before anything
+  // could be typed.
+  const renameFromMenuRef = useRef(false)
+  const requestRenameFromMenu = () => {
+    renameFromMenuRef.current = true
+  }
+  const handleMenuCloseAutoFocus = (event: Event) => {
+    if (!renameFromMenuRef.current) return
+    renameFromMenuRef.current = false
+    event.preventDefault()
+    startRename()
+  }
 
   // Keys that act on the row itself while its button has focus. Everything
   // else (arrows, Enter, Escape) belongs to the list's container handler.
@@ -501,7 +517,7 @@ function SessionRowImpl({
     selected,
     unread: isUnread ?? (unread ?? 0) > 0,
     onToggleSelection: onToggleSelection ? () => onToggleSelection(session.id) : undefined,
-    onRename: startRename,
+    onRename: requestRenameFromMenu,
     onTogglePinned: onTogglePinned ? handleTogglePinned : undefined,
     onMarkRead: extraActions?.onMarkRead ? () => extraActions.onMarkRead!(session.id) : undefined,
     onMarkUnread: extraActions?.onMarkUnread
@@ -859,7 +875,7 @@ function SessionRowImpl({
                       <MoreHorizontalIcon className="size-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="end" onCloseAutoFocus={handleMenuCloseAutoFocus}>
                     <SessionRowMenuItems
                       kit={DROPDOWN_MENU_KIT}
                       surface="dropdown"
@@ -889,7 +905,11 @@ function SessionRowImpl({
           ) : null}
         </li>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-56" data-testid={`session-row-context-menu-${session.id}`}>
+      <ContextMenuContent
+        className="w-56"
+        data-testid={`session-row-context-menu-${session.id}`}
+        onCloseAutoFocus={handleMenuCloseAutoFocus}
+      >
         <SessionRowMenuItems kit={CONTEXT_MENU_KIT} surface="context" {...menuItemsProps} />
       </ContextMenuContent>
     </ContextMenu>

@@ -24,13 +24,14 @@ jest.mock("@cognia/logging", () => ({
 
 const setBadgeCount = jest.fn(async (_count?: number) => {})
 const setOverlayIcon = jest.fn(async (_icon?: unknown) => {})
+const getCurrentWindow = jest.fn(() => ({
+  setBadgeCount: (c?: number) => setBadgeCount(c),
+  setOverlayIcon: (icon?: unknown) => setOverlayIcon(icon),
+}))
 jest.mock(
   "@tauri-apps/api/window",
   () => ({
-    getCurrentWindow: () => ({
-      setBadgeCount: (c?: number) => setBadgeCount(c),
-      setOverlayIcon: (icon?: unknown) => setOverlayIcon(icon),
-    }),
+    getCurrentWindow: () => getCurrentWindow(),
   }),
   { virtual: true }
 )
@@ -100,6 +101,7 @@ beforeEach(() => {
   isMainMock.mockReturnValue(true)
   setBadgeCount.mockReset().mockResolvedValue(undefined)
   setOverlayIcon.mockReset().mockResolvedValue(undefined)
+  getCurrentWindow.mockClear()
   imageNew.mockClear()
   renderTaskbarBadge.mockClear()
   osMock.mockReturnValue("macos")
@@ -165,6 +167,20 @@ describe("useAppBadge", () => {
     await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(3))
     unmount()
     await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(undefined))
+  })
+
+  it("resolves the window once and clears on unmount without importing again", async () => {
+    // The unmount clear also runs when Fast Refresh disposes this module,
+    // where a fresh dynamic import fails; it must reuse the first writer.
+    const { rerender, unmount } = renderHook(({ count }) => useAppBadge(count), {
+      initialProps: { count: 2 },
+    })
+    await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(2))
+    rerender({ count: 4 })
+    await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(4))
+    unmount()
+    await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(undefined))
+    expect(getCurrentWindow).toHaveBeenCalledTimes(1)
   })
 
   it("does nothing outside Tauri or outside the main window", async () => {

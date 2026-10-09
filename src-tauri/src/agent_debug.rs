@@ -530,7 +530,7 @@ fn webview_window_region(
     let position = window.outer_position().map_err(internal_error)?;
     let size = window.outer_size().map_err(internal_error)?;
     let scale = window.scale_factor().map_err(internal_error)?;
-    logical_region(position.x, position.y, size.width, size.height, scale)
+    desktop_region(position.x, position.y, size.width, size.height, scale)
 }
 
 fn screenshot_needs_recenter(error: &crate::automation::types::AutomationError) -> bool {
@@ -905,7 +905,9 @@ fn validate_inspection(operation: &str) -> Result<(), (StatusCode, Json<Value>)>
     }
 }
 
-fn logical_region(
+/// The window's frame in the desktop units `capture_global_region` takes:
+/// points on macOS, physical pixels elsewhere.
+fn desktop_region(
     physical_x: i32,
     physical_y: i32,
     physical_width: u32,
@@ -918,12 +920,14 @@ fn logical_region(
             "window bounds are invalid",
         ));
     }
-    Ok(crate::automation::types::Rect {
-        x: (f64::from(physical_x) / scale).round() as i32,
-        y: (f64::from(physical_y) / scale).round() as i32,
-        width: (f64::from(physical_width) / scale).round() as i32,
-        height: (f64::from(physical_height) / scale).round() as i32,
-    })
+    Ok(
+        crate::automation::platform::shared::desktop_space::window_frame(
+            (physical_x, physical_y),
+            (physical_width, physical_height),
+            scale,
+            crate::automation::platform::shared::desktop_space::DESKTOP_UNITS_ARE_POINTS,
+        ),
+    )
 }
 
 fn read_log_tail(dir: PathBuf, line_limit: usize) -> Result<Vec<Value>, String> {
@@ -1112,18 +1116,27 @@ mod tests {
     }
 
     #[test]
-    fn converts_physical_window_bounds_to_logical_coordinates() {
-        let rect = logical_region(200, 100, 1600, 1200, 2.0).unwrap();
-        assert_eq!(
-            rect,
-            crate::automation::types::Rect {
-                x: 100,
-                y: 50,
-                width: 800,
-                height: 600
-            }
-        );
-        assert!(logical_region(0, 0, 0, 100, 1.0).is_err());
+    fn converts_window_bounds_to_desktop_units() {
+        let rect = desktop_region(200, 100, 1600, 1200, 2.0).unwrap();
+        // macOS captures in points; Windows and Linux in physical pixels.
+        let expected =
+            if crate::automation::platform::shared::desktop_space::DESKTOP_UNITS_ARE_POINTS {
+                crate::automation::types::Rect {
+                    x: 100,
+                    y: 50,
+                    width: 800,
+                    height: 600,
+                }
+            } else {
+                crate::automation::types::Rect {
+                    x: 200,
+                    y: 100,
+                    width: 1600,
+                    height: 1200,
+                }
+            };
+        assert_eq!(rect, expected);
+        assert!(desktop_region(0, 0, 0, 100, 1.0).is_err());
     }
 
     #[test]

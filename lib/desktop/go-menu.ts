@@ -68,7 +68,18 @@ const GO_MENU_EXTRAS: Readonly<Record<string, Omit<GoMenuItem, "id">>> = {
  * unreachable from Go.
  */
 export const GO_MENU_LAYOUT: readonly (readonly string[])[] = [
-  ["inbox", "workflows", "sites", "twin", "skills", "plugins", "squads", "scheduler", "discover"],
+  [
+    "inbox",
+    "workflows",
+    "sites",
+    "twin",
+    "agents",
+    "skills",
+    "plugins",
+    "squads",
+    "scheduler",
+    "discover",
+  ],
   ["issues", "templates", "goals", "pet", "browser"],
   ["a2ui", "dms", "conversations", "canvas", "files"],
   [

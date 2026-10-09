@@ -13,8 +13,8 @@
  * no matter which owner is currently painting it.
  *
  * Owners. A gate that holds the app back passes the `milestone` it stands for
- * and this hook registers that ownership with the shared timeline, exactly as
- * `useBootProgress` does for the desktop screen. The splash overlay passes
+ * and this hook registers that ownership with the shared timeline through the
+ * same `useBootTimeline` the desktop screen uses. The splash overlay passes
  * `null`: it owns no milestone (it mounts *after* the gates resolve, so every
  * milestone is behind it by construction) and only reads.
  *
@@ -34,15 +34,11 @@
  * commit on the phone and would otherwise latch it from under the splash.
  */
 
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 
+import { useBootTimeline } from "@/hooks/boot/use-boot-progress"
 import {
-  beginBootMilestone,
   bootMilestoneIndex,
-  endBootMilestone,
-  getBootProgressSnapshot,
-  getServerBootProgressSnapshot,
-  subscribeBootProgress,
   type BootMilestone,
   type BootProgressSnapshot,
 } from "@/lib/boot/boot-progress"
@@ -83,6 +79,8 @@ export interface MobileBootRow {
   detail: MobileBootStageDetail | null
   /** Measured on-screen time once ended; `null` while running or never run. */
   durationMs: number | null
+  /** When the running row began; `null` for other rows and before it registers. */
+  startedAt: number | null
 }
 
 export type MobileBootLayout = "boot" | "route"
@@ -95,8 +93,12 @@ export interface MobileBootView {
   /** Rows that have ended (done, failed or skipped). */
   completed: number
   total: number
-  /** Overall progress in [0, 1]. */
+  /** Where the active row starts on the bar (the ended share), in [0, 1]. */
+  boundary: number
+  /** Lean-in target for the active row, in [0, 1]. */
   fraction: number
+  /** Identity of the shared boot sequence (`BootProgressSnapshot.sequence`). */
+  sequence: number
   /** The Capacitor boot outcome is known. */
   settled: boolean
   /** Anchor for the elapsed counter; `null` on the very first render of a page load. */
@@ -122,8 +124,16 @@ export function deriveMobileBootView(
   const route = milestone === "workspace" && (boot.first === "workspace" || boot.first === null)
 
   if (route) {
+    const record = boot.milestones.workspace
     const rows: MobileBootRow[] = [
-      { id: "workspace", kind: "milestone", status: "active", detail: null, durationMs: null },
+      {
+        id: "workspace",
+        kind: "milestone",
+        status: "active",
+        detail: null,
+        durationMs: null,
+        startedAt: record.status === "active" ? record.startedAt : null,
+      },
     ]
     return {
       layout: "route",
@@ -131,7 +141,9 @@ export function deriveMobileBootView(
       activeId: "workspace",
       completed: 0,
       total: 1,
+      boundary: 0,
       fraction: MOBILE_BOOT_ACTIVE_SHARE,
+      sequence: boot.sequence,
       settled: false,
       sequenceStartedAt: boot.sequenceStartedAt,
       playIntro,
@@ -152,6 +164,7 @@ export function deriveMobileBootView(
       status,
       detail: null,
       durationMs: status === "done" && record.status === "done" ? record.durationMs : null,
+      startedAt: status === "active" && record.status === "active" ? record.startedAt : null,
     })
   }
 
@@ -164,6 +177,7 @@ export function deriveMobileBootView(
       detail: record.detail,
       durationMs:
         record.status === "pending" || record.status === "active" ? null : record.durationMs,
+      startedAt: record.status === "active" ? record.startedAt : null,
     })
   }
 
@@ -178,7 +192,9 @@ export function deriveMobileBootView(
     activeId: active?.id ?? null,
     completed,
     total,
+    boundary: completed / total,
     fraction,
+    sequence: boot.sequence,
     settled: mobile.settled,
     sequenceStartedAt: boot.sequenceStartedAt,
     playIntro,
@@ -186,11 +202,6 @@ export function deriveMobileBootView(
 }
 
 export function useMobileBoot(milestone: BootMilestone | null): MobileBootView {
-  const boot = useSyncExternalStore(
-    subscribeBootProgress,
-    getBootProgressSnapshot,
-    getServerBootProgressSnapshot
-  )
   const mobile = useSyncExternalStore(
     subscribeMobileBoot,
     getMobileBootSnapshot,
@@ -200,12 +211,7 @@ export function useMobileBoot(milestone: BootMilestone | null): MobileBootView {
   // Decided once per mount, before registration, so a hand-over inside the
   // same page load never replays the entrance once it has been seen.
   const [playIntro] = useState(() => !getMobileBootSnapshot().introPlayed)
-
-  useLayoutEffect(() => {
-    if (milestone === null) return
-    beginBootMilestone(milestone)
-    return () => endBootMilestone(milestone)
-  }, [milestone])
+  const boot = useBootTimeline(milestone)
 
   useEffect(() => {
     if (!playIntro) return

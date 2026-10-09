@@ -62,6 +62,7 @@ function mobileRouteImports(route: string): Set<string> {
 }
 
 const bodyCases = [
+  ["agents", "@/components/agents/agents-console", "@/components/mobile/agents/agents-mobile-body"],
   ["inbox/all", "@/components/inbox/inbox-shell", "@/components/mobile/inbox/mobile-inbox-body"],
   ["", "@/components/desktop/desktop-chat-workspace", "@/components/app-shell-mobile"],
   ["bots", "@/components/bots/bot-console", "@/components/mobile/bots/bots-mobile-body"],

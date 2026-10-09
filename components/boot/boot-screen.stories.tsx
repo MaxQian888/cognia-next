@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { BootScreen, __resetBootScreenForTesting } from "./boot-screen"
+import { __resetBootFillForTesting } from "@/lib/boot/boot-fill"
+import { BootScreen } from "./boot-screen"
 import { __resetBootCapabilitiesForTesting, markBootCapabilityReady } from "@/lib/boot/capabilities"
 import {
   __resetBootProgressForTesting,
@@ -35,7 +36,7 @@ const meta = {
   args: { allowReload: true },
   beforeEach: () => {
     __resetBootProgressForTesting()
-    __resetBootScreenForTesting()
+    __resetBootFillForTesting()
     __resetBootCapabilitiesForTesting("eager")
   },
 } satisfies Meta<typeof BootScreen>

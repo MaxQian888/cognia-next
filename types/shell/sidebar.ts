@@ -112,6 +112,9 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "issues", route: "/issues", i18nKey: "issues", group: "feature", category: "agents" },
   { id: "skills", route: "/skills", i18nKey: "skills", group: "feature", category: "explore" },
   { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature", category: "explore" },
+  // Custom agents (ADR-0220): the list, each agent's detail, and the blank /
+  // conversational create flows.
+  { id: "agents", route: "/agents", i18nKey: "agents", group: "feature", category: "agents" },
   { id: "squads", route: "/squads", i18nKey: "squads", group: "feature", category: "agents" },
   {
     id: "scheduler",

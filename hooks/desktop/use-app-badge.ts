@@ -124,6 +124,11 @@ async function tauriBadgeWriter(): Promise<BadgeWriter> {
 export function useAppBadge(count: number): void {
   const unsupportedRef = useRef(false)
   const lastRef = useRef<number | null>(null)
+  // Resolved once, by the first write, and reused by the unmount clear: that
+  // cleanup also runs when Fast Refresh swaps this module out, and importing
+  // `@tauri-apps/api/window` from a module HMR has already disposed fails
+  // ("Unexpected import of module … deleted by an HMR update").
+  const writerRef = useRef<Promise<BadgeWriter> | null>(null)
   const active = isTauri() && isMainAppWindow()
 
   useEffect(() => {
@@ -133,7 +138,8 @@ export function useAppBadge(count: number): void {
     let cancelled = false
     void (async () => {
       try {
-        const write = await tauriBadgeWriter()
+        writerRef.current ??= tauriBadgeWriter()
+        const write = await writerRef.current
         if (cancelled) return
         await write(count > 0 ? count : undefined)
       } catch (err) {
@@ -154,10 +160,10 @@ export function useAppBadge(count: number): void {
   useEffect(() => {
     if (!active) return
     return () => {
-      if (unsupportedRef.current || !lastRef.current) return
-      void tauriBadgeWriter()
-        .then((write) => write(undefined))
-        .catch(() => undefined)
+      // Nothing to clear until a write has resolved the writer.
+      const writer = writerRef.current
+      if (unsupportedRef.current || !lastRef.current || !writer) return
+      void writer.then((write) => write(undefined)).catch(() => undefined)
     }
   }, [active])
 }

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react"
 
 import {
   __resetBootProgressForTesting,
+  BOOT_SEQUENCE_GAP_MS,
   beginBootMilestone,
   endBootMilestone,
   getBootProgressSnapshot,
@@ -18,7 +19,8 @@ import {
 import { ESCALATED_AT_MS, PROLONGED_AT_MS } from "@/hooks/ui/use-loading-phase"
 import { APP_VERSION } from "@/lib/app-version"
 
-import { __resetMobileBootScreenForTesting, MobileBootScreen } from "./mobile-boot-screen"
+import { __resetBootFillForTesting } from "@/lib/boot/boot-fill"
+import { MobileBootScreen } from "./mobile-boot-screen"
 
 jest.mock("@/hooks/use-network-status", () => ({
   useNetworkStatus: () => ({ loading: false, status: mockNetwork }),
@@ -35,7 +37,7 @@ describe("<MobileBootScreen />", () => {
   beforeEach(() => {
     __resetBootProgressForTesting()
     __resetMobileBootForTesting()
-    __resetMobileBootScreenForTesting()
+    __resetBootFillForTesting()
     mockNetwork = { connected: true, connectionType: "wifi" }
     jest.useFakeTimers()
   })
@@ -192,6 +194,48 @@ describe("<MobileBootScreen />", () => {
     // The next owner's bar picks up where this one left off.
     render(<MobileBootScreen milestone={null} />)
     expect(fill().style.getPropertyValue("--mboot-fill")).toBe(String(3 / 6))
+  })
+
+  it("opens a later route load from empty instead of pulling back from the finished boot", () => {
+    jest.setSystemTime(10_000)
+    const gate = render(<MobileBootScreen milestone="accounts" />)
+    gate.unmount()
+    jest.setSystemTime(10_000 + BOOT_SEQUENCE_GAP_MS + 5_000)
+
+    const seen: number[] = []
+    const original = CSSStyleDeclaration.prototype.setProperty
+    const spy = jest
+      .spyOn(CSSStyleDeclaration.prototype, "setProperty")
+      .mockImplementation(function (this: CSSStyleDeclaration, name, value, priority) {
+        if (name === "--mboot-fill") seen.push(Number(value))
+        return original.call(this, name, value, priority)
+      })
+    try {
+      render(<MobileBootScreen milestone="workspace" />)
+    } finally {
+      spy.mockRestore()
+    }
+    const fill = document.querySelector('[data-slot="mobile-boot-fill"]') as HTMLElement
+    expect(document.querySelector('[data-slot="mobile-boot"]')).toHaveAttribute(
+      "data-layout",
+      "route"
+    )
+    expect(seen[0]).toBe(0)
+    expect(seen.every((value, index) => index === 0 || value >= seen[index - 1])).toBe(true)
+    // Nothing to tick on the route's only row: it creeps straight to its share.
+    expect(fill).toHaveAttribute("data-creep", "true")
+    expect(Number(fill.style.getPropertyValue("--mboot-fill"))).toBeCloseTo(0.6)
+  })
+
+  it("times the running row live once a second has passed", () => {
+    render(<MobileBootScreen milestone="accounts" />)
+    expect(document.querySelector('[data-slot="mobile-boot-timer"]')).toBeNull()
+    act(() => {
+      jest.advanceTimersByTime(2000)
+    })
+    const timer = document.querySelector('[data-slot="mobile-boot-timer"]')
+    expect(timer).toHaveTextContent("2s")
+    expect(timer?.closest('[data-slot="mobile-boot-row"]')).toHaveAttribute("data-row", "accounts")
   })
 
   it("does not replay the entrance once the intro has been seen", () => {

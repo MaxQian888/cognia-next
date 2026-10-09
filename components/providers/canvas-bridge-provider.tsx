@@ -16,8 +16,15 @@
  * database must not keep mirroring into another's, and only a restart re-runs
  * hydration against the database that is actually selected now.
  *
- * Monaco is configured once and never again: it is a global loader path, not
- * per-account state.
+ * Monaco is configured once and never again: it is a global loader path (and
+ * the standalone service overrides, see `monaco-loader.ts`), not per-account
+ * state. It runs at module evaluation rather than in an effect: a restored
+ * `<Editor>` calls `loader.init()` from its own mount effect, and a child's
+ * effects run before this provider's. This module sits in the root layout's
+ * static client graph (`AppRuntime`), so it evaluates before hydration starts.
+ * (`instrumentation-client.ts` is earlier still, but Turbopack cannot build a
+ * dynamic `import()` reached from outside the client-reference graph — and the
+ * clipboard override loads its platform helpers lazily.)
  */
 
 import { useEffect } from "react"
@@ -26,12 +33,10 @@ import { startArtifactDexieBridge } from "@/lib/artifacts/dexie-bridge"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
 import { useAccountStore } from "@/stores/account/account-store"
 
+configureMonacoLoader()
+
 export function CanvasBridgeProvider({ children }: { children: React.ReactNode }) {
   const accountRevision = useAccountStore((state) => state.accountRevision)
-
-  useEffect(() => {
-    configureMonacoLoader()
-  }, [])
 
   useEffect(() => {
     const disposeCanvas = startCanvasDexieBridge()

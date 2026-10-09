@@ -49,6 +49,9 @@ jest.mock("@/components/mobile/source-control/source-control-mobile-body", () =>
 jest.mock("@/components/mobile/squads/squads-mobile-body", () => ({
   SquadsMobileBody: body("squads"),
 }))
+jest.mock("@/components/mobile/agents/agents-mobile-body", () => ({
+  AgentsMobileBody: body("agents"),
+}))
 jest.mock("@/components/mobile/workflow/editor/mobile-workflow-editor", () => ({
   MobileWorkflowEditor: body("editor"),
 }))
@@ -66,6 +69,7 @@ import Projects from "@/app/projects/route-body.mobile"
 import Memory from "@/app/memory/route-body.mobile"
 import Git from "@/app/source-control/route-body.mobile"
 import Squads from "@/app/squads/route-body.mobile"
+import Agents from "@/app/agents/route-body.mobile"
 import Editor from "@/app/workflows/editor/route-body.mobile"
 import Runs from "@/app/workflows/runs/route-body.mobile"
 import Server from "@/app/servers/detail/route-body.mobile"
@@ -74,6 +78,7 @@ import DraftsInbox from "@/app/inbox/drafts/route-body.mobile"
 import AdapterInbox from "@/app/inbox/adapter/route-body.mobile"
 import PlatformInbox from "@/app/inbox/platform/route-body.mobile"
 import type { RouteBodyProps as SquadProps } from "@/app/squads/route-body"
+import type { RouteBodyProps as AgentsProps } from "@/app/agents/route-body"
 import type { RouteBodyProps as EditorProps } from "@/app/workflows/editor/route-body"
 import type { RouteBodyProps as ServerProps } from "@/app/servers/detail/route-body"
 
@@ -136,6 +141,12 @@ it("forwards the same squad route and workflow instances without copying control
   expect(record).toHaveBeenCalledWith("squads", { route })
   expect(record.mock.calls.find(([name]) => name === "editor")?.[1].workflow).toBe(workflow)
   expect(record).toHaveBeenCalledWith("runs", { workflowId: "workflow-1" })
+})
+
+it("forwards the agents console's route state to the phone body", () => {
+  const route = { view: { kind: "list" } } as AgentsProps["route"]
+  render(<Agents route={route} />)
+  expect(record).toHaveBeenCalledWith("agents", { route })
 })
 
 it("preserves every server action supplied by the shared route controller", () => {

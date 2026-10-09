@@ -24,6 +24,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { cn } from "@/lib/utils"
 
 interface Props {
   open: boolean
@@ -33,6 +34,19 @@ interface Props {
   description?: string
   /** Extra header row — plugin slots, quick actions. */
   headerExtra?: React.ReactNode
+  /**
+   * Keep the title and description for assistive tech only. For a body that
+   * draws its own header (the goal detail panel), where the visible sheet
+   * header would print the same facts twice.
+   */
+  headerVisuallyHidden?: boolean
+  /** Extra classes for the sheet / drawer content (width, padding). */
+  contentClassName?: string
+  /**
+   * The sheet's own corner close button. Off for a body with a close button
+   * of its own in its header row, which the corner one would sit on top of.
+   */
+  showCloseButton?: boolean
   children: React.ReactNode
 }
 
@@ -42,15 +56,22 @@ export function ResponsiveDetailSheet({
   title,
   description,
   headerExtra,
+  headerVisuallyHidden = false,
+  contentClassName,
+  showCloseButton = true,
   children,
 }: Props) {
   const isMobile = useIsMobile()
+  const headerClassName = headerVisuallyHidden ? "sr-only" : undefined
 
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[85vh]" data-testid="responsive-detail-drawer">
-          <DrawerHeader>
+        <DrawerContent
+          className={cn("max-h-[85vh]", contentClassName)}
+          data-testid="responsive-detail-drawer"
+        >
+          <DrawerHeader className={headerClassName}>
             <DrawerTitle>{title}</DrawerTitle>
             {description ? (
               <DrawerDescription className="line-clamp-3 text-xs">{description}</DrawerDescription>
@@ -67,10 +88,11 @@ export function ResponsiveDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full max-w-md sm:max-w-lg"
+        showCloseButton={showCloseButton}
+        className={cn("w-full max-w-md sm:max-w-lg", contentClassName)}
         data-testid="responsive-detail-sheet"
       >
-        <SheetHeader>
+        <SheetHeader className={headerClassName}>
           <SheetTitle>{title}</SheetTitle>
           {description ? (
             <SheetDescription className="line-clamp-3 text-xs">{description}</SheetDescription>

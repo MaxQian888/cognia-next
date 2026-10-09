@@ -1532,15 +1532,15 @@ test("File > New Squad signals create + routes to the Squads library", async () 
   await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=squads"))
 })
 
-test("File > New Character signals create + routes to settings characters tab", async () => {
+test("File > New Agent opens the agents console's create chooser", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
   render(<TitleBar />)
   await user.click(await screen.findByText("desktop.menu.file.label"))
-  await user.click(await screen.findByText("desktop.menu.file.newCharacter"))
-  expect(requestCreate).toHaveBeenCalledWith("character")
-  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=characters"))
+  await user.click(await screen.findByText("desktop.menu.file.newAgent"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/agents?new=1"))
+  expect(requestCreate).not.toHaveBeenCalled()
 })
 
 test("File > Recent Sessions submenu lists loaded sessions and routes on click", async () => {

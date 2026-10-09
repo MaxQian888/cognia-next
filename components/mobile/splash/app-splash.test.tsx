@@ -11,7 +11,8 @@ import {
 } from "@/lib/boot/mobile-boot-stages"
 
 import { AppSplash, FADE_MS, MAX_HOLD_MS } from "./app-splash"
-import { __resetMobileBootScreenForTesting, MOBILE_SPLASH_BACKDROP } from "./mobile-boot-screen"
+import { __resetBootFillForTesting } from "@/lib/boot/boot-fill"
+import { MOBILE_SPLASH_BACKDROP } from "./mobile-boot-screen"
 
 // `usePlatform` drives the mobile gate; flip it per test. (Jest allows factory
 // references to variables prefixed with `mock`.)
@@ -41,7 +42,7 @@ describe("AppSplash", () => {
     mockPlatform = "mobile"
     __resetBootProgressForTesting()
     __resetMobileBootForTesting()
-    __resetMobileBootScreenForTesting()
+    __resetBootFillForTesting()
     syncStatusBarMock.mockClear()
     syncNavBarMock.mockClear()
     jest.useFakeTimers()

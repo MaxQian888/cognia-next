@@ -8,6 +8,11 @@
  * (`AppSettings.statusBarLayout`, see `@/types/shell/bars`), so the bar hands
  * this component the items for a zone and the switch below maps each id to its
  * component. Adding a segment means one catalog entry plus one case here.
+ *
+ * `variant` names the host's geometry. Most segments are buttons that the rail
+ * host already squeezes into icon targets through descendant selectors; a
+ * segment whose wide form is not a button (the next-run link) needs to be told
+ * it sits in the rail and render its own compact form.
  */
 
 import type { BarCatalogItem } from "@/lib/shell/bar-items"
@@ -17,7 +22,10 @@ import { AttentionPanel } from "@/components/attention/attention-panel"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectivity"
 import { StatusBarNetwork } from "@/components/desktop/status-bar-network"
-import { StatusBarNextRun } from "@/components/desktop/status-bar-next-run"
+import {
+  StatusBarNextRun,
+  type StatusBarNextRunVariant,
+} from "@/components/desktop/status-bar-next-run"
 import { StatusBarExecutionHost } from "@/components/devices/execution-host-switcher"
 import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
 import { StatusBarRunState } from "@/components/desktop/status-bar-run-state"
@@ -28,11 +36,19 @@ import { StatusBarUsage } from "@/components/desktop/status-bar-usage"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 
-export function StatusBarZone({ items }: { items: BarCatalogItem[] }) {
+export type StatusBarZoneVariant = StatusBarNextRunVariant
+
+export function StatusBarZone({
+  items,
+  variant = "bar",
+}: {
+  items: BarCatalogItem[]
+  variant?: StatusBarZoneVariant
+}) {
   return (
     <>
       {items.map((item) => (
-        <StatusBarSegment key={item.id} id={item.id} />
+        <StatusBarSegment key={item.id} id={item.id} variant={variant} />
       ))}
     </>
   )
@@ -43,7 +59,7 @@ export function StatusBarZone({ items }: { items: BarCatalogItem[] }) {
  * invisible. That matters for `perf`, whose mount starts native CPU/memory
  * sampling, and for the panels that open Dexie live queries.
  */
-function StatusBarSegment({ id }: { id: string }) {
+function StatusBarSegment({ id, variant }: { id: string; variant: StatusBarZoneVariant }) {
   switch (id) {
     case "connectivity":
       return <StatusBarConnectivity />
@@ -58,7 +74,7 @@ function StatusBarSegment({ id }: { id: string }) {
     case "terminal":
       return <StatusBarTerminal />
     case "nextRun":
-      return <StatusBarNextRun />
+      return <StatusBarNextRun variant={variant} />
     case "notifications":
       return <NotificationBell />
     case "attention":

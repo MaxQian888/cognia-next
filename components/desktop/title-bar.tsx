@@ -64,7 +64,7 @@ import {
   manageMcpServerAction,
   newAgentTeamAction,
   newChatAction,
-  newCharacterAction,
+  newAgentAction,
   newWorkflowAction,
   pluginDevtoolsAction,
   restartSidecarAction,
@@ -506,7 +506,7 @@ export function TitleBar() {
   }
   const handleNewWorkflow = () => newWorkflowAction(router)
   const handleNewAgentTeam = () => newAgentTeamAction(router)
-  const handleNewCharacter = () => newCharacterAction(router)
+  const handleNewAgent = () => newAgentAction(router)
   const handleOpenRecentSession = (sessionId: string) => () => {
     log.info("title-bar menu open-recent-session", { sessionId })
     useChatStore.getState().setActiveSession(sessionId)
@@ -791,8 +791,8 @@ export function TitleBar() {
                   <DropdownMenuItem onSelect={handleNewAgentTeam}>
                     {tMenu("file.newAgentTeam")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleNewCharacter}>
-                    {tMenu("file.newCharacter")}
+                  <DropdownMenuItem onSelect={handleNewAgent}>
+                    {tMenu("file.newAgent")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleOpenWorkspace}>
                     {tMenu("file.openWorkspace")}
@@ -1055,9 +1055,7 @@ export function TitleBar() {
                     <MenubarItem onSelect={handleNewAgentTeam}>
                       {tMenu("file.newAgentTeam")}
                     </MenubarItem>
-                    <MenubarItem onSelect={handleNewCharacter}>
-                      {tMenu("file.newCharacter")}
-                    </MenubarItem>
+                    <MenubarItem onSelect={handleNewAgent}>{tMenu("file.newAgent")}</MenubarItem>
                     <MenubarSeparator />
                     <MenubarItem onSelect={handleOpenWorkspace}>
                       {tMenu("file.openWorkspace")}

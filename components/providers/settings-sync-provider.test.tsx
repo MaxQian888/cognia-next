@@ -94,15 +94,28 @@ describe("SettingsSyncProvider", () => {
     )
   })
 
-  it.each(["overlay", "popup"] as const)(
-    "skips the webview zoom sync in the %s pet window (least-privilege, no capability)",
+  it.each([
+    "overlay",
+    "popup",
+    "island",
+    "selection-toolbar",
+    "tray-panel",
+    "usage-dock",
+    "chat-copilot",
+  ] as const)(
+    "leaves the shared mode and the zoom to the main window in the %s window",
     async (role) => {
       getPetWindowRoleMock.mockReturnValue(role)
-      setLoadedSettings()
+      setLoadedSettings({ theme: "system" })
       render(<SettingsSyncProvider>child</SettingsSyncProvider>)
-      // Theme + font still sync (cheap DOM writes), but setZoom must not fire —
-      // the pet windows lack core:webview:allow-set-webview-zoom.
-      await waitFor(() => expect(mockSetTheme).toHaveBeenCalled())
+      // Font still syncs (a cheap per-document DOM write).
+      await waitFor(() => expect(document.documentElement.style.fontSize).toBe("16px"))
+      // These windows never opened the account, so their `theme` is a default:
+      // writing it to next-themes' shared key flipped the main window (dark →
+      // light) through the storage event. They follow that key instead.
+      expect(mockSetTheme).not.toHaveBeenCalled()
+      expect(readAccountTheme("acct_alpha")).toBeNull()
+      // And setZoom must not fire — they lack core:webview:allow-set-webview-zoom.
       expect(applyZoomMock).not.toHaveBeenCalled()
     }
   )

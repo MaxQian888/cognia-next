@@ -409,8 +409,11 @@ export function ChannelListBulkToolbar({
             {countLabel}
             {selectionControl}
           </div>
+          {/* One line at any width: the verbs scroll sideways rather than
+              wrap. Wrapped, five labelled verbs turned the bar into a
+              three-row box on a phone, pushing the list half a screen down. */}
           <div
-            className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5"
+            className="flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0"
             data-testid="channel-list-bulk-actions"
           >
             {verbs}

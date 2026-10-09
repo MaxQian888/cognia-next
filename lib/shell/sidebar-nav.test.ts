@@ -1,3 +1,4 @@
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   CANVAS_MODE_ID,
   SIDEBAR_NAV_META,
@@ -388,4 +389,8 @@ describe("navItemForPath", () => {
     expect(navItemForPath("/inboxes", catalog)).toBeNull()
     expect(navItemForPath("/", catalog)).toBeNull()
   })
+})
+
+it("uses the shared anime artwork for Squads", () => {
+  expect(SIDEBAR_NAV_ICONS.squads).toBe(AgentTeamIcon)
 })

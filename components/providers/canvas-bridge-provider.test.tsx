@@ -8,7 +8,6 @@ const disposeCanvas = jest.fn()
 const disposeArtifact = jest.fn()
 const startCanvas = jest.fn(() => disposeCanvas)
 const startArtifact = jest.fn(() => disposeArtifact)
-const configureMonacoLoader = jest.fn()
 
 jest.mock("@/lib/canvas/dexie-bridge", () => ({
   __esModule: true,
@@ -18,10 +17,15 @@ jest.mock("@/lib/artifacts/dexie-bridge", () => ({
   __esModule: true,
   startArtifactDexieBridge: () => startArtifact(),
 }))
+// The provider calls this at module evaluation — the factory owns the fn, since
+// a test-scope const would still be in its TDZ when the import runs.
 jest.mock("@/lib/canvas/monaco-loader", () => ({
   __esModule: true,
-  configureMonacoLoader: () => configureMonacoLoader(),
+  configureMonacoLoader: jest.fn(),
 }))
+const configureMonacoLoaderMock = () =>
+  jest.requireMock<{ configureMonacoLoader: jest.Mock }>("@/lib/canvas/monaco-loader")
+    .configureMonacoLoader
 
 let accountRevision = 0
 jest.mock("@/stores/account/account-store", () => ({
@@ -38,14 +42,24 @@ beforeEach(() => {
 })
 
 describe("CanvasBridgeProvider", () => {
-  it("starts both bridges and configures Monaco on mount", () => {
+  it("configures Monaco when the module evaluates, before anything renders", () => {
+    // A restored <Editor> calls loader.init() from its own mount effect, which
+    // runs before any provider effect — configuring on mount would be too late.
+    jest.isolateModules(() => {
+      jest.requireActual("./canvas-bridge-provider")
+      // The isolated registry has its own mock instance.
+      expect(configureMonacoLoaderMock()).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("starts both bridges on mount without reconfiguring Monaco", () => {
     render(
       <CanvasBridgeProvider>
         <span>child</span>
       </CanvasBridgeProvider>
     )
 
-    expect(configureMonacoLoader).toHaveBeenCalledTimes(1)
+    expect(configureMonacoLoaderMock()).not.toHaveBeenCalled()
     expect(startCanvas).toHaveBeenCalledTimes(1)
     expect(startArtifact).toHaveBeenCalledTimes(1)
   })
@@ -84,8 +98,9 @@ describe("CanvasBridgeProvider", () => {
     expect(startCanvas).toHaveBeenCalledTimes(2)
   })
 
-  it("configures Monaco once and not again per account", () => {
-    // A global loader path, not per-account state.
+  it("does not reconfigure Monaco per account", () => {
+    // A global loader path, not per-account state: configured at module
+    // evaluation and never by a render or an account switch.
     const { rerender } = render(
       <CanvasBridgeProvider>
         <span>child</span>
@@ -99,7 +114,7 @@ describe("CanvasBridgeProvider", () => {
       </CanvasBridgeProvider>
     )
 
-    expect(configureMonacoLoader).toHaveBeenCalledTimes(1)
+    expect(configureMonacoLoaderMock()).not.toHaveBeenCalled()
   })
 
   it("disposes both bridges on unmount", () => {

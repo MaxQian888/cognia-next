@@ -127,7 +127,7 @@ export function StatusLabel({
     <span
       className={cn(
         "inline-flex items-center gap-1.5 text-xs font-medium",
-        pill && "rounded-full px-2.5 py-1 ring-1 ring-inset",
+        pill && "rounded-pill px-2.5 py-1 ring-1 ring-inset",
         pill && style.soft,
         style.text,
         className

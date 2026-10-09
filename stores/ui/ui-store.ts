@@ -384,19 +384,20 @@ interface UIState {
 
   /**
    * One-shot "open the create-X dialog" signal. Same nonce-bump pattern as
-   * `pendingSettingsRequest` — consumers (workflow library, agent-teams
-   * page, settings characters tab) observe `kind` matching their domain and
-   * call `clearPendingCreate()` after opening their dialog.
+   * `pendingSettingsRequest` — consumers (workflow library, squads settings)
+   * observe `kind` matching their domain and call `clearPendingCreate()`
+   * after opening their dialog.
    *
-   * Drives the File menu's "New Workflow / Agent Team / Character" items.
-   * Without this, those items only navigate — the destination page can't
-   * tell the navigation was initiated to create something.
+   * Drives the File menu's "New Workflow / Agent Team" items. Without this,
+   * those items only navigate — the destination page can't tell the
+   * navigation was initiated to create something. "New Agent" needs no signal:
+   * `/agents?new=1` is itself the create view (ADR-0220).
    */
   pendingCreateRequest: {
-    kind: "workflow" | "agentTeam" | "character"
+    kind: "workflow" | "agentTeam"
     nonce: number
   } | null
-  requestCreate: (kind: "workflow" | "agentTeam" | "character") => void
+  requestCreate: (kind: "workflow" | "agentTeam") => void
   clearPendingCreate: () => void
 
   /**

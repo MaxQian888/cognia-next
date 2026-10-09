@@ -11,6 +11,7 @@ import {
 } from "@/lib/boot/capabilities"
 import {
   __resetBootProgressForTesting,
+  BOOT_SEQUENCE_GAP_MS,
   beginBootMilestone,
   endBootMilestone,
   markBootIntroPlayed,
@@ -33,7 +34,9 @@ jest.mock("next-intl", () => ({
     values ? `${namespace}.${key}:${JSON.stringify(values)}` : `${namespace}.${key}`,
 }))
 
-import { BootScreen, __resetBootScreenForTesting } from "./boot-screen"
+import { BOOT_ACTIVE_FLOOR } from "@/hooks/boot/use-boot-progress"
+import { __resetBootFillForTesting } from "@/lib/boot/boot-fill"
+import { BootScreen } from "./boot-screen"
 
 const T = "loading.page."
 
@@ -45,13 +48,38 @@ function fill(): HTMLElement {
   return document.querySelector<HTMLElement>('[data-slot="boot-bar-fill"]')!
 }
 
+/** Every `--boot-fill` value written while `run` executes, as numbers. */
+function recordFillWrites(run: () => void): number[] {
+  const seen: number[] = []
+  const original = CSSStyleDeclaration.prototype.setProperty
+  const spy = jest.spyOn(CSSStyleDeclaration.prototype, "setProperty").mockImplementation(function (
+    this: CSSStyleDeclaration,
+    name,
+    value,
+    priority
+  ) {
+    if (name === "--boot-fill") seen.push(Number(value))
+    return original.call(this, name, value, priority)
+  })
+  try {
+    run()
+  } finally {
+    spy.mockRestore()
+  }
+  return seen
+}
+
+function isNonDecreasing(values: readonly number[]): boolean {
+  return values.every((value, index) => index === 0 || value >= values[index - 1] - 1e-9)
+}
+
 describe("BootScreen", () => {
   beforeEach(() => {
     jest.useFakeTimers()
     mockNetwork.connected = true
     mockPlatform = "web"
     __resetBootProgressForTesting()
-    __resetBootScreenForTesting()
+    __resetBootFillForTesting()
     __resetBootCapabilitiesForTesting("main")
   })
 
@@ -198,93 +226,128 @@ describe("BootScreen", () => {
   })
 
   describe("progress fill", () => {
-    it("snaps to the step boundary first, then creeps toward the lean-in point", () => {
+    it("creeps straight toward the lean-in point on the opening step", () => {
       render(<BootScreen milestone="accounts" />)
-      // First beat: the completion snap to this step's boundary — still empty
-      // for the opening step — before the long lean-in transition starts.
-      expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBe(0)
-      expect(fill()).not.toHaveAttribute("data-creep")
-
-      act(() => {
-        jest.advanceTimersByTime(600)
-      })
+      // Nothing has completed yet, so there is no tick to snap to.
       expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo(0.85 / 4)
       expect(fill()).toHaveAttribute("data-creep", "true")
     })
 
     it("ticks the completed step's boundary forward before leaning into the next", () => {
       const first = render(<BootScreen milestone="accounts" />)
-      act(() => {
-        jest.advanceTimersByTime(600)
-      })
       first.unmount()
 
       render(<BootScreen milestone="preferences" />)
       // The snap covers the last slice the creep deliberately left short —
-      // the visible "step done" tick.
+      // the visible "step done" tick — on the short transition.
       expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo(0.25)
+      expect(fill()).not.toHaveAttribute("data-creep")
       act(() => {
         jest.advanceTimersByTime(600)
       })
       expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo((1 + 0.85) / 4)
+      expect(fill()).toHaveAttribute("data-creep", "true")
     })
 
     it("picks up from where the previous owner left it", () => {
       const first = render(<BootScreen milestone="accounts" />)
-      act(() => {
-        jest.advanceTimersByTime(600)
-      })
       first.unmount()
 
-      const seen: string[] = []
-      const original = CSSStyleDeclaration.prototype.setProperty
-      const spy = jest
-        .spyOn(CSSStyleDeclaration.prototype, "setProperty")
-        .mockImplementation(function (this: CSSStyleDeclaration, name, value, priority) {
-          if (name === "--boot-fill") seen.push(String(value))
-          return original.call(this, name, value, priority)
+      const seen = recordFillWrites(() => {
+        render(<BootScreen milestone="preferences" />)
+        act(() => {
+          jest.advanceTimersByTime(600)
         })
-      render(<BootScreen milestone="preferences" />)
-      act(() => {
-        jest.advanceTimersByTime(600)
       })
-      spy.mockRestore()
 
-      // Mounted at the previous lean-in (React's inline style), snapped to
-      // this step's boundary, then crept to its own share.
-      expect(seen.some((v) => Math.abs(Number(v) - 0.85 / 4) < 1e-6)).toBe(true)
-      expect(seen).toContain("0.25")
+      // Placed at the previous owner's position, snapped to this step's
+      // boundary, then crept to its own share — never anything lower.
+      expect(seen[0]).toBeCloseTo(0.85 / 4)
+      expect(seen).toContain(0.25)
+      expect(isNonDecreasing(seen)).toBe(true)
       expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo((1 + 0.85) / 4)
     })
 
-    it("starts a new sequence from empty rather than a stale position", () => {
-      const first = render(<BootScreen milestone="accounts" />)
+    it("opens a later route load at zero instead of animating back from the boot", () => {
+      jest.setSystemTime(10_000)
+      const boot = render(<BootScreen milestone="workspace" />)
       act(() => {
         jest.advanceTimersByTime(600)
       })
-      first.unmount()
+      boot.unmount()
+      // Long after the boot, a routed page streams in: a new wait.
+      jest.setSystemTime(Date.now() + BOOT_SEQUENCE_GAP_MS + 5_000)
 
-      // A route load later is a fresh sequence — the bar must open at zero
-      // rather than inheriting where the boot left it.
-      __resetBootProgressForTesting()
-      markBootIntroPlayed()
+      const seen = recordFillWrites(() => {
+        render(<BootScreen milestone="workspace" />)
+      })
+      // React's inline style and the placement both start from empty; the
+      // bar only ever moves forward from there.
+      expect(fill().getAttribute("style")).toContain("--boot-fill: 0")
+      expect(seen[0]).toBe(0)
+      expect(isNonDecreasing(seen)).toBe(true)
+      expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo(
+        0.85 * BOOT_ACTIVE_FLOOR
+      )
+      // Only the route's own step is listed, from the first paint on.
+      expect(rows().map((row) => row.dataset.milestone)).toEqual(["workspace"])
+    })
 
-      const seen: string[] = []
-      const original = CSSStyleDeclaration.prototype.setProperty
-      const spy = jest
-        .spyOn(CSSStyleDeclaration.prototype, "setProperty")
-        .mockImplementation(function (this: CSSStyleDeclaration, name, value, priority) {
-          if (name === "--boot-fill") seen.push(String(value))
-          return original.call(this, name, value, priority)
-        })
+    it("advances the workspace lean-in as runtimes report ready, never backwards", () => {
+      __resetBootCapabilitiesForTesting("main")
       render(<BootScreen milestone="workspace" />)
-      spy.mockRestore()
+      const opening = Number(fill().style.getPropertyValue("--boot-fill"))
 
-      expect(seen[0]).toBe("0")
       act(() => {
-        jest.advanceTimersByTime(600)
+        // Requesting another runtime lowers the ready share — the bar holds.
+        void ensureBootCapability("plugin-runtime")
+      })
+      expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeGreaterThanOrEqual(opening)
+
+      act(() => {
+        markBootCapabilityReady("core-chat")
+        markBootCapabilityReady("plugin-runtime")
       })
       expect(Number(fill().style.getPropertyValue("--boot-fill"))).toBeCloseTo(0.85)
+      expect(fill()).toHaveAttribute("data-creep", "true")
+    })
+  })
+
+  describe("timing detail", () => {
+    it("shows the wait's total and the running step's own time once a second has passed", () => {
+      render(<BootScreen milestone="accounts" />)
+      expect(document.querySelector('[data-slot="boot-elapsed"]')).not.toBeInTheDocument()
+      expect(document.querySelector('[data-slot="boot-milestone-timer"]')).not.toBeInTheDocument()
+
+      act(() => {
+        jest.advanceTimersByTime(3000)
+      })
+      expect(document.querySelector('[data-slot="boot-elapsed"]')).toHaveTextContent(
+        `${T}elapsed:{"seconds":3}`
+      )
+      expect(document.querySelector('[data-slot="boot-milestone-timer"]')).toHaveTextContent(
+        `${T}milestoneDuration:{"seconds":3}`
+      )
+    })
+
+    it("times the running step from its own start, not the wait's", () => {
+      const first = render(<BootScreen milestone="accounts" />)
+      act(() => {
+        jest.advanceTimersByTime(4000)
+      })
+      first.unmount()
+      render(<BootScreen milestone="preferences" />)
+      act(() => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(document.querySelector('[data-slot="boot-elapsed"]')).toHaveTextContent(
+        `${T}elapsed:{"seconds":6}`
+      )
+      expect(document.querySelector('[data-slot="boot-milestone-timer"]')).toHaveTextContent(
+        `${T}milestoneDuration:{"seconds":2}`
+      )
+      // The finished step keeps its measured duration instead.
+      expect(rows()[0]).toHaveTextContent(`${T}milestoneDuration:{"seconds":"4.0"}`)
     })
   })
 

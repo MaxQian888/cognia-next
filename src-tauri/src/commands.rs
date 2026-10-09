@@ -1,6 +1,6 @@
 use serde::Serialize;
 use tauri::window::Color;
-use tauri::Webview;
+use tauri::{Manager, Webview};
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
@@ -76,8 +76,17 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
 /// webviews, at which point Tauri intentionally stops classifying it as a
 /// `WebviewWindow` even though the invoking app webview and parent window are
 /// both valid targets.
+///
+/// `scheme` / `follows_system` describe the theme that produced `hex`; the
+/// pair is persisted with it so the next launch can paint the hidden window in
+/// the right colour before the renderer runs (see [`boot_shell_background`]).
 #[tauri::command]
-pub fn set_window_background_color(webview: Webview, hex: String) -> Result<(), String> {
+pub fn set_window_background_color(
+    webview: Webview,
+    hex: String,
+    scheme: Option<String>,
+    follows_system: Option<bool>,
+) -> Result<(), String> {
     let color = parse_hex_color(&hex).map_err(|e| e.to_string())?;
     webview
         .window()
@@ -86,7 +95,104 @@ pub fn set_window_background_color(webview: Webview, hex: String) -> Result<(), 
     webview
         .set_background_color(Some(color))
         .map_err(|e| e.to_string())?;
+    if let Some(dark) = scheme.as_deref().and_then(scheme_is_dark) {
+        persist_shell_background(
+            webview.app_handle(),
+            &SavedShellBackground {
+                hex,
+                dark,
+                follows_system: follows_system.unwrap_or(false),
+            },
+        );
+    }
     Ok(())
+}
+
+/// Native background of the main window before the renderer's first paint.
+/// `tauri.conf.json` can only hold one static colour, and the boot safety net
+/// (`lib.rs`, `BOOT_REVEAL_GRACE`) may show the window before the page paints
+/// — always the case on a cold dev start while Next.js compiles `/` — so a
+/// fixed dark colour flashed dark before every light-themed launch.
+const SHELL_BACKGROUND_FILE: &str = "shell-background.json";
+/// Mirrors `lib/appearance/shell-sync.ts` light fallback and the dark
+/// `backgroundColor` in `tauri.conf.json`.
+pub(crate) const DEFAULT_LIGHT_SHELL_BACKGROUND: &str = "#ffffff";
+pub(crate) const DEFAULT_DARK_SHELL_BACKGROUND: &str = "#0a0a0a";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedShellBackground {
+    pub hex: String,
+    pub dark: bool,
+    pub follows_system: bool,
+}
+
+fn scheme_is_dark(scheme: &str) -> Option<bool> {
+    match scheme {
+        "dark" => Some(true),
+        "light" => Some(false),
+        _ => None,
+    }
+}
+
+/// The colour to paint the hidden main window with at launch. A saved colour
+/// from a theme that follows the system is only reused while the OS is still
+/// in the same mode; otherwise (or with nothing saved) the default for the
+/// current OS mode applies. An explicit light/dark choice is reused as-is.
+pub(crate) fn boot_shell_background(saved: Option<&SavedShellBackground>, os_dark: bool) -> Color {
+    let reusable = saved
+        .filter(|saved| !saved.follows_system || saved.dark == os_dark)
+        .and_then(|saved| parse_hex_color(&saved.hex).ok());
+    reusable.unwrap_or_else(|| {
+        let fallback = if os_dark {
+            DEFAULT_DARK_SHELL_BACKGROUND
+        } else {
+            DEFAULT_LIGHT_SHELL_BACKGROUND
+        };
+        parse_hex_color(fallback).expect("default shell backgrounds are valid hex")
+    })
+}
+
+fn shell_background_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join(SHELL_BACKGROUND_FILE))
+}
+
+pub(crate) fn read_shell_background<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<SavedShellBackground> {
+    let raw = std::fs::read(shell_background_path(app)?).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+/// Best effort: a failed write only costs the next launch its first-frame
+/// colour, never the theme change that triggered it.
+fn persist_shell_background<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    value: &SavedShellBackground,
+) {
+    if read_shell_background(app).as_ref() == Some(value) {
+        return;
+    }
+    let Some(path) = shell_background_path(app) else {
+        return;
+    };
+    let Ok(json) = serde_json::to_vec(value) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = std::fs::write(&path, json) {
+        log::warn!(
+            "shell background: failed to persist {}: {error}",
+            path.display()
+        );
+    }
 }
 
 /// Authoritative list of every custom menu id the desktop chrome dispatches.
@@ -104,7 +210,7 @@ pub const MENU_IDS: &[&str] = &[
     "new-chat",
     "new-workflow",
     "new-agent-team",
-    "new-character",
+    "new-agent",
     "open-workspace",
     "open-settings",
     "open-logs",
@@ -131,6 +237,7 @@ pub const MENU_IDS: &[&str] = &[
     "go-workflows",
     "go-sites",
     "go-twin",
+    "go-agents",
     "go-skills",
     "go-plugins",
     "go-squads",
@@ -242,6 +349,59 @@ mod tests {
         assert_eq!(color.1, 0x0a);
         assert_eq!(color.2, 0x0a);
         assert_eq!(color.3, 0xff);
+    }
+
+    fn saved(hex: &str, dark: bool, follows_system: bool) -> SavedShellBackground {
+        SavedShellBackground {
+            hex: hex.into(),
+            dark,
+            follows_system,
+        }
+    }
+
+    #[test]
+    fn boot_shell_background_defaults_to_the_os_mode() {
+        let light = boot_shell_background(None, false);
+        assert_eq!((light.0, light.1, light.2), (0xff, 0xff, 0xff));
+        let dark = boot_shell_background(None, true);
+        assert_eq!((dark.0, dark.1, dark.2), (0x0a, 0x0a, 0x0a));
+    }
+
+    #[test]
+    fn boot_shell_background_reuses_an_explicit_theme_on_any_os_mode() {
+        let color = boot_shell_background(Some(&saved("#112233", true, false)), false);
+        assert_eq!((color.0, color.1, color.2), (0x11, 0x22, 0x33));
+    }
+
+    #[test]
+    fn boot_shell_background_drops_a_system_theme_saved_under_the_other_os_mode() {
+        let same = boot_shell_background(Some(&saved("#f5f5f4", false, true)), false);
+        assert_eq!((same.0, same.1, same.2), (0xf5, 0xf5, 0xf4));
+        let flipped = boot_shell_background(Some(&saved("#111111", true, true)), false);
+        assert_eq!((flipped.0, flipped.1, flipped.2), (0xff, 0xff, 0xff));
+    }
+
+    #[test]
+    fn boot_shell_background_ignores_a_corrupt_saved_colour() {
+        let color = boot_shell_background(Some(&saved("nope", false, false)), true);
+        assert_eq!((color.0, color.1, color.2), (0x0a, 0x0a, 0x0a));
+    }
+
+    #[test]
+    fn saved_shell_background_round_trips_as_camel_case_json() {
+        let value = saved("#ffffff", false, true);
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            json,
+            r##"{"hex":"#ffffff","dark":false,"followsSystem":true}"##
+        );
+        assert_eq!(
+            serde_json::from_str::<SavedShellBackground>(&json).unwrap(),
+            value
+        );
+        assert_eq!(scheme_is_dark("dark"), Some(true));
+        assert_eq!(scheme_is_dark("light"), Some(false));
+        assert_eq!(scheme_is_dark("system"), None);
     }
 
     #[test]

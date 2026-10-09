@@ -28,7 +28,9 @@ jest.mock("@/components/desktop/status-bar-today", () => ({
   StatusBarToday: () => <div data-testid="seg-todayUsage" />,
 }))
 jest.mock("@/components/desktop/status-bar-next-run", () => ({
-  StatusBarNextRun: () => <div data-testid="seg-nextRun" />,
+  StatusBarNextRun: ({ variant }: { variant?: string }) => (
+    <div data-testid="seg-nextRun" data-variant={variant} />
+  ),
 }))
 jest.mock("@/components/desktop/status-bar-run-state", () => ({
   StatusBarRunState: () => <div data-testid="seg-runStatus" />,
@@ -82,6 +84,13 @@ describe("StatusBarZone", () => {
     // Matters for `perf`: mounting it starts native CPU/memory sampling.
     render(<StatusBarZone items={pick("connectivity")} />)
     expect(screen.queryByTestId("seg-perf")).toBeNull()
+  })
+
+  it("renders the bar form by default and forwards the rail variant", () => {
+    const { rerender } = render(<StatusBarZone items={pick("nextRun")} />)
+    expect(screen.getByTestId("seg-nextRun")).toHaveAttribute("data-variant", "bar")
+    rerender(<StatusBarZone items={pick("nextRun")} variant="rail" />)
+    expect(screen.getByTestId("seg-nextRun")).toHaveAttribute("data-variant", "rail")
   })
 
   it("renders nothing for an empty zone", () => {

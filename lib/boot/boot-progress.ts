@@ -70,6 +70,14 @@ export interface BootProgressSnapshot {
    */
   introPlayed: boolean
   milestones: Readonly<Record<BootMilestone, BootMilestoneRecord>>
+  /**
+   * Identity of the current sequence: 0 before any loader mounts, then bumped
+   * every time a mount starts a new one. Lets per-sequence visual state (the
+   * progress fill, `lib/boot/boot-fill.ts`) tell a hand-over from a new wait.
+   */
+  sequence: number
+  /** When the last loader unmounted; `null` until one has. */
+  endedAt: number | null
   /** Monotonic change counter. */
   version: number
 }
@@ -103,11 +111,12 @@ const INITIAL_SNAPSHOT: BootProgressSnapshot = Object.freeze({
   sequenceStartedAt: null,
   introPlayed: false,
   milestones: Object.freeze(pendingMilestones()),
+  sequence: 0,
+  endedAt: null,
   version: 0,
 })
 
 let snapshot: BootProgressSnapshot = INITIAL_SNAPSHOT
-let lastEndedAt: number | null = null
 const listeners = new Set<() => void>()
 
 export function bootMilestoneIndex(milestone: BootMilestone): number {
@@ -128,6 +137,50 @@ export function visibleBootMilestones(
   return BOOT_MILESTONES.slice(start)
 }
 
+/**
+ * Whether a loader mounting at `now` continues the current sequence rather
+ * than starting a new one: another owner is still on screen (a hand-over
+ * renders before the outgoing owner's cleanup runs), or the last one left
+ * within `BOOT_SEQUENCE_GAP_MS`. The single rule behind `beginBootMilestone`,
+ * exported so a mount can know on its very first render — before it has
+ * registered — which sequence it is about to belong to.
+ */
+export function continuesBootSequence(
+  current: Pick<BootProgressSnapshot, "active" | "first" | "endedAt">,
+  now: number
+): boolean {
+  if (current.active !== null) return true
+  if (current.first === null || current.endedAt === null) return false
+  return now - current.endedAt <= BOOT_SEQUENCE_GAP_MS
+}
+
+/**
+ * The snapshot a mount that is about to start a new sequence should render
+ * from until its registration lands: its own milestone active and first,
+ * nothing measured, no anchor yet, and the sequence id `beginBootMilestone`
+ * will assign. Rendering the store's previous sequence instead is what made
+ * a route load open on the cold boot's full step list, its ~96% fill and its
+ * minutes-old elapsed count for a frame before snapping back.
+ */
+export function projectNewBootSequence(
+  current: BootProgressSnapshot,
+  milestone: BootMilestone
+): BootProgressSnapshot {
+  return {
+    active: milestone,
+    first: milestone,
+    sequenceStartedAt: null,
+    introPlayed: current.introPlayed,
+    milestones: {
+      ...pendingMilestones(),
+      [milestone]: { status: "active", startedAt: null, completedAt: null, durationMs: null },
+    },
+    sequence: current.sequence + 1,
+    endedAt: current.endedAt,
+    version: current.version,
+  }
+}
+
 function publish(next: Omit<BootProgressSnapshot, "version">): void {
   snapshot = { ...next, version: snapshot.version + 1 }
   for (const listener of listeners) listener()
@@ -141,8 +194,7 @@ function publish(next: Omit<BootProgressSnapshot, "version">): void {
 export function beginBootMilestone(milestone: BootMilestone, now: number = Date.now()): void {
   if (snapshot.active === milestone) return
 
-  const gapExceeded = lastEndedAt === null || now - lastEndedAt > BOOT_SEQUENCE_GAP_MS
-  const startsSequence = snapshot.active === null && (snapshot.first === null || gapExceeded)
+  const startsSequence = !continuesBootSequence(snapshot, now)
 
   const base = startsSequence ? pendingMilestones() : { ...snapshot.milestones }
   const index = bootMilestoneIndex(milestone)
@@ -182,6 +234,8 @@ export function beginBootMilestone(milestone: BootMilestone, now: number = Date.
     sequenceStartedAt: startsSequence ? now : (snapshot.sequenceStartedAt ?? now),
     introPlayed: snapshot.introPlayed,
     milestones: base,
+    sequence: startsSequence ? snapshot.sequence + 1 : snapshot.sequence,
+    endedAt: snapshot.endedAt,
   })
 }
 
@@ -192,10 +246,10 @@ export function beginBootMilestone(milestone: BootMilestone, now: number = Date.
 export function endBootMilestone(milestone: BootMilestone, now: number = Date.now()): void {
   if (snapshot.active !== milestone) return
   const record = snapshot.milestones[milestone]
-  lastEndedAt = now
   publish({
     ...snapshot,
     active: null,
+    endedAt: now,
     milestones: {
       ...snapshot.milestones,
       [milestone]: {
@@ -233,6 +287,5 @@ export function getServerBootProgressSnapshot(): BootProgressSnapshot {
 
 export function __resetBootProgressForTesting(): void {
   snapshot = INITIAL_SNAPSHOT
-  lastEndedAt = null
   for (const listener of listeners) listener()
 }

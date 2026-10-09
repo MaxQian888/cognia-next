@@ -22,8 +22,14 @@ jest.mock("@/components/shell/use-bar-layout", () => ({
   }),
 }))
 jest.mock("@/components/desktop/status-bar-zone", () => ({
-  StatusBarZone: ({ items }: { items: { id: string }[] }) =>
-    selfHide ? null : items.map(({ id }) => <button key={id}>{id}</button>),
+  StatusBarZone: ({ items, variant }: { items: { id: string }[]; variant?: string }) =>
+    selfHide
+      ? null
+      : items.map(({ id }) => (
+          <button key={id} data-variant={variant ?? "bar"}>
+            {id}
+          </button>
+        )),
 }))
 
 beforeEach(() => {
@@ -60,6 +66,20 @@ function Hosts({ context = true, composer = true, header = true, enabled = true 
     </WebStatusProvider>
   )
 }
+
+it("asks the rail for its compact segment forms and every other host for the bar forms", () => {
+  // The rail is a ~56px icon column: a segment that prints text there (the
+  // next-run label) overflows it across the page, so the rail names its
+  // geometry and the segments render icon-only.
+  render(<Hosts />)
+  const rail = screen.getByTestId("web-status-rail")
+  const railSegments = within(rail).getAllByRole("button")
+  expect(railSegments.length).toBeGreaterThan(0)
+  for (const segment of railSegments) expect(segment).toHaveAttribute("data-variant", "rail")
+  for (const segment of within(screen.getByTestId("context-bar")).getAllByRole("button")) {
+    expect(segment).toHaveAttribute("data-variant", "bar")
+  }
+})
 
 it("moves session items context → composer → header → nowhere without duplicating global runs", () => {
   const { rerender } = render(

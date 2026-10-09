@@ -68,7 +68,9 @@ jest.mock("@/lib/native/crash-context", () => ({
   pushCrashContext: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/notifications/install", () => ({ installNotificationBridges: jest.fn() }))
-jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }))
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: "system", resolvedTheme: "dark" }),
+}))
 const routerPushMock = jest.fn()
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPushMock }) }))
 const handlePromotedTaskWakeMock = jest.fn(async (..._args: unknown[]) => ({ ran: true }))
@@ -105,6 +107,26 @@ beforeEach(() => {
   getLaunchCliMock.mockResolvedValue({ workspacePath: undefined, newChat: false })
   getLaunchDeepLinkMock.mockResolvedValue([])
   startNewSessionMock.mockResolvedValue({ id: "s-new" })
+})
+
+describe("<TauriProvider /> native window background", () => {
+  it("pushes the shell background with the theme that produced it", async () => {
+    const { setWindowBackgroundColor } = jest.requireMock("@/lib/tauri/shell-window") as {
+      setWindowBackgroundColor: jest.Mock
+    }
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+
+    await waitFor(() =>
+      expect(setWindowBackgroundColor).toHaveBeenCalledWith("#000000", {
+        scheme: "dark",
+        followsSystem: true,
+      })
+    )
+  })
 })
 
 describe("<TauriProvider /> launch CLI args", () => {

@@ -5706,6 +5706,39 @@ describe("managing conversations", () => {
       expect(await screen.findByLabelText("renameFolder")).toHaveFocus()
     })
 
+    // Regression: the field used to open on a zero-delay timer after Rename.
+    // A real menu fades out first and only hands focus back when it unmounts,
+    // after that timer: the field lost focus, and its blur cancelled the
+    // rename. jsdom computes no CSS, so the exit animation is emulated here.
+    it("keeps the rename field open through the right-click menu's exit animation", async () => {
+      const onRenameFolder = jest.fn()
+      const user = userEvent.setup()
+      const exit = holdMenuExitAnimation('[data-slot="context-menu-content"]')
+      try {
+        renderList({ sessions: filed, folders: [work], onRenameFolder })
+        await user.pointer({
+          keys: "[MouseRight]",
+          target: screen.getByTestId("folder-header-f-work"),
+        })
+        const menu = await screen.findByTestId("folder-context-menu-f-work")
+        await user.click(within(menu).getByTestId("folder-context-rename-f-work"))
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        })
+        exit.finish()
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        })
+        const input = screen.getByLabelText("renameFolder")
+        expect(input).toHaveFocus()
+        fireEvent.change(input, { target: { value: "Projects" } })
+        fireEvent.keyDown(input, { key: "Enter" })
+        expect(onRenameFolder).toHaveBeenCalledWith("f-work", "Projects")
+      } finally {
+        exit.restore()
+      }
+    })
+
     it("selects every conversation in a folder, unfolding it first", async () => {
       collapsedFolderIds = ["f-work"]
       const { onSelect } = renderList({ sessions: filed, folders: [work] })
@@ -6026,3 +6059,47 @@ describe("archive view entry points and archived rows (ADR-0213)", () => {
     expect(screen.getByRole("dialog", { name: "conversationsTitle" })).toBeInTheDocument()
   })
 })
+
+/**
+ * Emulates a Radix menu's exit animation. jsdom computes no CSS, so Radix
+ * Presence unmounts a closed menu at once; a real one fades out first and
+ * only returns focus when it unmounts. While held, the matched content reports
+ * an enter animation when open and an exit animation when closed, and stays
+ * mounted until `finish()` ends the exit animation.
+ */
+function holdMenuExitAnimation(selector: string) {
+  const realGetComputedStyle = window.getComputedStyle.bind(window)
+  const cssGlobal = globalThis as { CSS?: { escape?: (value: string) => string } }
+  const hadCss = cssGlobal.CSS
+  if (!cssGlobal.CSS?.escape) cssGlobal.CSS = { ...cssGlobal.CSS, escape: (value) => value }
+  const spy = jest
+    .spyOn(window, "getComputedStyle")
+    .mockImplementation((element: Element, pseudo?: string | null) => {
+      const styles = realGetComputedStyle(element, pseudo)
+      if (!element.matches(selector)) return styles
+      return new Proxy(styles, {
+        get(target, prop) {
+          if (prop === "animationName") {
+            return element.getAttribute("data-state") === "closed" ? "menu-exit" : "menu-enter"
+          }
+          const value = Reflect.get(target, prop)
+          return typeof value === "function" ? value.bind(target) : value
+        },
+      })
+    })
+  return {
+    finish() {
+      const node = document.querySelector(selector)
+      if (!node) throw new Error(`no menu content matches ${selector}`)
+      const event = new Event("animationend")
+      Object.defineProperty(event, "animationName", { value: "menu-exit" })
+      act(() => {
+        node.dispatchEvent(event)
+      })
+    },
+    restore() {
+      spy.mockRestore()
+      cssGlobal.CSS = hadCss
+    },
+  }
+}

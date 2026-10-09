@@ -13,8 +13,11 @@
  * one set of strings (`subscription.usage.costOverTime.heatmap.*`). Two copies
  * is exactly how two views of one table start disagreeing.
  *
- * Callers vary only the test-id prefix, so each surface stays independently
- * addressable in tests.
+ * Callers vary the test-id prefix, so each surface stays independently
+ * addressable in tests, and the layout: the settings page keeps the
+ * GitHub-style week-column `calendar`, while the welcome dashboard draws a
+ * `strip` of one cell per day that spans its full width. A 7–90 day window is
+ * only 1–13 weeks, so the calendar filled a corner of a full-width panel.
  */
 
 import type * as React from "react"
@@ -64,6 +67,31 @@ export function levelStyle(level: number, accent: string): React.CSSProperties |
   return { fill: accent, fillOpacity: 0.25 + level * 0.1875 }
 }
 
+/**
+ * Strip cell tint: the same accent and the same per-level opacity as
+ * `levelStyle`, as a background (the strip cells are boxes, not SVG rects).
+ */
+export function stripLevelStyle(level: number, accent: string): React.CSSProperties | undefined {
+  if (level <= 0) return undefined
+  const percent = Math.round((0.25 + level * 0.1875) * 100)
+  return { backgroundColor: `color-mix(in oklab, ${accent} ${percent}%, transparent)` }
+}
+
+/** Longest single strip row; longer windows wrap into rows of equal length. */
+export const STRIP_MAX_COLUMNS = 31
+
+/**
+ * Columns per strip row: one row up to a month, then the fewest equal rows
+ * that keep each under `STRIP_MAX_COLUMNS` (90 days → 3 rows of 30), so a
+ * cell never thins to a sliver on a long window.
+ */
+export function stripColumns(days: number): number {
+  if (days <= STRIP_MAX_COLUMNS) return Math.max(1, days)
+  return Math.ceil(days / Math.ceil(days / STRIP_MAX_COLUMNS))
+}
+
+export type UsageHeatmapLayout = "calendar" | "strip"
+
 export interface UsageHeatmapProps {
   /** Sparse daily aggregates — `fillDailyRange` pads them to the full window. */
   daily: DailyUsage[]
@@ -73,6 +101,8 @@ export interface UsageHeatmapProps {
   now: number
   /** Test-id prefix for the root, each cell, and the total. */
   testIdPrefix?: string
+  /** `calendar` (default): week columns × weekday rows. `strip`: full-width day row(s). */
+  layout?: UsageHeatmapLayout
   className?: string
 }
 
@@ -81,6 +111,7 @@ export function UsageHeatmap({
   rangeDays,
   now,
   testIdPrefix = "usage-cost-heatmap",
+  layout = "calendar",
   className,
 }: UsageHeatmapProps) {
   const t = useTranslations("subscription.usage.costOverTime")
@@ -134,6 +165,73 @@ export function UsageHeatmap({
     })
   }
 
+  const totalLabel = t("heatmap.total", {
+    cost: formatCostInCurrency(totals.cost, "USD"),
+    days: cells.length,
+    requests: totals.requests,
+  })
+
+  if (layout === "strip") {
+    const edgeFormat = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" })
+    const first = cells[0]
+    const last = cells[cells.length - 1]
+    return (
+      <TooltipProvider delayDuration={100}>
+        <div
+          className={cn("flex w-full flex-col gap-2 text-muted-foreground", className)}
+          data-testid={testIdPrefix}
+          data-layout="strip"
+        >
+          <div
+            className="grid gap-[3px]"
+            style={{ gridTemplateColumns: `repeat(${stripColumns(cells.length)}, minmax(0, 1fr))` }}
+          >
+            {activities.map((activity) => (
+              <UiTooltip key={activity.date}>
+                <TooltipTrigger asChild>
+                  <div
+                    className="h-6 rounded-[4px] bg-muted outline-none ring-inset ring-border/70 focus-visible:ring-2 focus-visible:ring-ring data-[level='0']:ring-1"
+                    style={stripLevelStyle(activity.level, accent)}
+                    data-level={activity.level}
+                    role="img"
+                    tabIndex={0}
+                    aria-label={cellLabel(activity.date)}
+                    data-testid={`${testIdPrefix}-cell-${activity.date}`}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>{cellLabel(activity.date)}</TooltipContent>
+              </UiTooltip>
+            ))}
+          </div>
+          {first && last ? (
+            <div className="flex justify-between text-[11px] tabular-nums" aria-hidden>
+              <span>{edgeFormat.format(parseLocalDay(first.date))}</span>
+              <span>{edgeFormat.format(parseLocalDay(last.date))}</span>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
+            <span data-testid={`${testIdPrefix}-total`}>{totalLabel}</span>
+            <span className="flex items-center gap-1">
+              <span className="mr-1">{t("heatmap.less")}</span>
+              {[0, 1, 2, 3, 4].map((level) => (
+                <span
+                  key={level}
+                  aria-hidden
+                  className={cn(
+                    "size-3 rounded-[3px]",
+                    level === 0 && "bg-muted ring-1 ring-inset ring-border/70"
+                  )}
+                  style={stripLevelStyle(level, accent)}
+                />
+              ))}
+              <span className="ml-1">{t("heatmap.more")}</span>
+            </span>
+          </div>
+        </div>
+      </TooltipProvider>
+    )
+  }
+
   return (
     <TooltipProvider delayDuration={100}>
       <ContributionGraph
@@ -173,15 +271,7 @@ export function UsageHeatmap({
         </ContributionGraphCalendar>
         <ContributionGraphFooter className="items-center text-xs">
           <ContributionGraphTotalCount>
-            {({ totalCount }) => (
-              <span data-testid={`${testIdPrefix}-total`}>
-                {t("heatmap.total", {
-                  cost: formatCostInCurrency(totals.cost, "USD"),
-                  days: cells.length,
-                  requests: totalCount,
-                })}
-              </span>
-            )}
+            {() => <span data-testid={`${testIdPrefix}-total`}>{totalLabel}</span>}
           </ContributionGraphTotalCount>
           <ContributionGraphLegend>
             {({ level }) => (

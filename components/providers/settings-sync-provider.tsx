@@ -63,11 +63,22 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
     if (!ready) return
     if (typeof document === "undefined") return
 
+    // Only the window that runs the account gate owns the mode. The secondary
+    // windows (island, selection toolbar, tray panel, usage dock, pet…) load
+    // this provider over a settings store that never opened the account, so
+    // their `theme` is the default `system`. next-themes' key is shared by
+    // every same-origin webview and next-themes follows its `storage` event,
+    // so their `setTheme("system")` flipped the main window from the
+    // account's dark mode to light a few seconds after every launch. Those
+    // windows already track the main window's mode through that same key.
+    const role = getPetWindowRole()
+    const ownsWindowTheme = role === "main" || role === "web"
+
     // next-themes' shared key may describe a different account. Keep this
     // account's canonical choice readable before the next unlock.
-    if (accountId) writeAccountTheme(accountId, theme)
+    if (ownsWindowTheme && accountId) writeAccountTheme(accountId, theme)
 
-    if (theme !== lastTheme.current) {
+    if (ownsWindowTheme && theme !== lastTheme.current) {
       lastTheme.current = theme
       setThemeRef.current(theme)
     }
@@ -88,8 +99,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
     // `core:webview:allow-set-webview-zoom` (see capabilities/pet.json). Calling
     // `setZoom` there both mis-scales the sprite and logs a denied-capability
     // error, so restrict the zoom sync to the main/web context.
-    const role = getPetWindowRole()
-    if ((role === "main" || role === "web") && lastZoom.current !== webviewZoom) {
+    if (ownsWindowTheme && lastZoom.current !== webviewZoom) {
       lastZoom.current = webviewZoom
       void applyZoom(webviewZoom)
     }

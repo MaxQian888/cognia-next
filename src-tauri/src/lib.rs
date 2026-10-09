@@ -77,8 +77,8 @@ pub use cognia_gateway as gateway;
 // ADR-0067 Phase 2 — extracted to `crates/cognia-git`; re-aliased so every
 // `crate::git::…` reference (incl. `generate_handler!` + `.manage()`) resolves.
 pub use cognia_git as git;
-mod gateway_brain_bridge;
 mod gateway_agent;
+mod gateway_brain_bridge;
 mod github;
 pub mod headless;
 mod hooks;

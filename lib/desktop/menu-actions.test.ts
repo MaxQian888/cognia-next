@@ -118,7 +118,7 @@ import {
   newChatAction,
   newWorkflowAction,
   newAgentTeamAction,
-  newCharacterAction,
+  newAgentAction,
   openWorkspaceAction,
   openSettingsAction,
   openLogsAction,
@@ -275,10 +275,10 @@ test("newAgentTeamAction requests Squad creation and routes to /squads", () => {
   expect(router.push).toHaveBeenCalledWith("/settings?section=squads")
 })
 
-test("newCharacterAction requests character creation and routes to characters tab", () => {
-  newCharacterAction(router)
-  expect(requestCreate).toHaveBeenCalledWith("character")
-  expect(router.push).toHaveBeenCalledWith("/settings?section=characters")
+test("newAgentAction opens the agents console's create chooser", () => {
+  newAgentAction(router)
+  expect(router.push).toHaveBeenCalledWith("/agents?new=1")
+  expect(requestCreate).not.toHaveBeenCalled()
 })
 
 test("openWorkspaceAction creates/activates a workspace via the unified flow", async () => {

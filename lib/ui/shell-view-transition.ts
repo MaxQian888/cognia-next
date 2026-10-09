@@ -47,6 +47,41 @@ export interface ShellViewTransitionOptions {
 }
 
 /**
+ * The root attribute `app/globals.css` keys on to stand every shell edge
+ * panel's own CSS size transition down while a View Transition runs.
+ *
+ * The edge panels arm a 280ms `width`/`height` transition in the very commit
+ * the gesture's `apply` produces (`useEdgePanelTransition`). Under a View
+ * Transition that is the wrong half to keep: the new state is captured on the
+ * first frame after the update, so it captured the panel at the *start* of its
+ * tween — and `::view-transition-new` is a live image, so the snapshots then
+ * animated toward a geometry the page was still sliding away from. The result
+ * was ghosted double content, a strip of bare background where the panel had
+ * been (black under a dark theme), and the whole row — a docked Monaco, the
+ * file tree, the chat — reflowing on every frame of the gesture. With the size
+ * transitions held, the commit lands the final layout in one frame and only
+ * the compositor snapshots move.
+ */
+export const SHELL_VIEW_TRANSITION_ATTRIBUTE = "data-shell-view-transition"
+
+/**
+ * Gestures in flight. A second gesture started mid-flight makes the browser
+ * skip the first, whose cleanup then lands while the second is still running —
+ * a plain set/remove would drop the hold out from under it.
+ */
+let edgeTransitionHolds = 0
+
+function holdEdgeTransitions(root: HTMLElement): void {
+  edgeTransitionHolds += 1
+  root.setAttribute(SHELL_VIEW_TRANSITION_ATTRIBUTE, "")
+}
+
+function releaseEdgeTransitions(root: HTMLElement): void {
+  edgeTransitionHolds = Math.max(0, edgeTransitionHolds - 1)
+  if (edgeTransitionHolds === 0) root.removeAttribute(SHELL_VIEW_TRANSITION_ATTRIBUTE)
+}
+
+/**
  * Returns the cancellation — calling it skips the in-flight transition (and
  * still runs `onDone`). Bail-outs return a no-op after applying directly.
  */
@@ -65,7 +100,15 @@ export function runShellViewTransition({
     return () => {}
   }
 
-  if (!startViewTransition || (scope && isProIdePanePinnedWithin(scope))) return bail()
+  // A hidden document has nothing to animate, and WebKit skips the transition
+  // there by rejecting `ready` with InvalidStateError.
+  if (
+    !startViewTransition ||
+    document.visibilityState === "hidden" ||
+    (scope && isProIdePanePinnedWithin(scope))
+  ) {
+    return bail()
+  }
 
   const root = document.documentElement
   const previousRootName = root.style.viewTransitionName
@@ -76,7 +119,9 @@ export function runShellViewTransition({
   captures.forEach((capture) => {
     if (capture.element) capture.element.style.viewTransitionName = capture.name
   })
+  holdEdgeTransitions(root)
   const reset = () => {
+    releaseEdgeTransitions(root)
     root.style.viewTransitionName = previousRootName
     captures.forEach((capture, index) => {
       if (capture.element) capture.element.style.viewTransitionName = previousNames[index]
@@ -107,6 +152,10 @@ export function runShellViewTransition({
     reset()
     onDone?.()
   }
+  // `ready` rejects whenever the animation never starts: skipped by the
+  // browser (the page went hidden mid-call) or by `skipTransition` below.
+  // `finished` still settles in both cases and owns the cleanup.
+  void transition.ready.catch(() => undefined)
   void transition.finished.catch(() => undefined).finally(() => finish())
   return () => {
     if (!active) return

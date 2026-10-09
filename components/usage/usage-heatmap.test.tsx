@@ -4,7 +4,14 @@
 import { render, screen } from "@testing-library/react"
 
 import type { DailyUsage } from "@/types/system/usage"
-import { costLevel, levelStyle, UsageHeatmap } from "./usage-heatmap"
+import {
+  costLevel,
+  levelStyle,
+  stripColumns,
+  stripLevelStyle,
+  STRIP_MAX_COLUMNS,
+  UsageHeatmap,
+} from "./usage-heatmap"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
@@ -126,5 +133,53 @@ describe("<UsageHeatmap />", () => {
     expect(screen.getByTestId("welcome-heat")).toBeInTheDocument()
     expect(screen.getAllByTestId(/^welcome-heat-cell-/)).toHaveLength(7)
     expect(screen.queryByTestId("usage-cost-heatmap")).not.toBeInTheDocument()
+  })
+})
+
+describe("strip layout", () => {
+  it("keeps up to a month on one row and wraps longer windows into equal rows", () => {
+    expect(stripColumns(7)).toBe(7)
+    expect(stripColumns(30)).toBe(30)
+    expect(stripColumns(STRIP_MAX_COLUMNS)).toBe(STRIP_MAX_COLUMNS)
+    expect(stripColumns(90)).toBe(30)
+    expect(stripColumns(45)).toBe(23)
+    expect(stripColumns(0)).toBe(1)
+  })
+
+  it("tints spend days with the same per-level opacity as the calendar", () => {
+    expect(stripLevelStyle(0, "red")).toBeUndefined()
+    expect(stripLevelStyle(4, "red")).toEqual({
+      backgroundColor: "color-mix(in oklab, red 100%, transparent)",
+    })
+    expect(stripLevelStyle(1, "red")).toEqual({
+      backgroundColor: "color-mix(in oklab, red 44%, transparent)",
+    })
+  })
+
+  it("draws one cell per day across the full width, with the shared total", () => {
+    render(
+      <UsageHeatmap
+        daily={daily([{ date: dayKey(NOW), cost: 2, requests: 3 }])}
+        rangeDays={30}
+        now={NOW}
+        layout="strip"
+        testIdPrefix="strip"
+      />
+    )
+
+    const root = screen.getByTestId("strip")
+    expect(root).toHaveAttribute("data-layout", "strip")
+    const cells = root.querySelectorAll('[data-testid^="strip-cell-"]')
+    expect(cells).toHaveLength(30)
+    const today = screen.getByTestId(`strip-cell-${dayKey(NOW)}`)
+    expect(today).toHaveAttribute("data-level", "4")
+    expect(today).toHaveAttribute("aria-label", expect.stringContaining("3 requests"))
+    expect(screen.getByTestId(`strip-cell-${dayKey(NOW - DAY_MS)}`)).toHaveAttribute(
+      "data-level",
+      "0"
+    )
+    expect(screen.getByTestId("strip-total")).toHaveTextContent("30 days")
+    expect(screen.getByText("Less")).toBeInTheDocument()
+    expect(screen.getByText("More")).toBeInTheDocument()
   })
 })

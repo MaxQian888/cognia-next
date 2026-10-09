@@ -23,6 +23,22 @@ jest.mock("@/hooks/workspace/use-move-session-workspace", () => ({
   }),
 }))
 
+// Pass-through: the real sheet renders, and the test can call the focus
+// handler the sheet runs as it closes. jsdom gives vaul no close animation, so
+// the focus return it guards against never happens there on its own.
+let mockCloseAutoFocus: ((event: Event) => void) | undefined
+jest.mock("@/components/ui/drawer", () => {
+  const actual = jest.requireActual("@/components/ui/drawer")
+  const React = jest.requireActual("react")
+  return {
+    ...actual,
+    DrawerContent: (props: { onCloseAutoFocus?: (event: Event) => void }) => {
+      mockCloseAutoFocus = props.onCloseAutoFocus
+      return React.createElement(actual.DrawerContent, props)
+    },
+  }
+})
+
 import {
   MobileChannelRowActions,
   type MobileChannelRowActionsProps,
@@ -251,6 +267,31 @@ describe("<MobileChannelRowActions />", () => {
       expect(screen.getByTestId(item(action))).toBeEnabled()
     }
     expect(screen.getByTestId(item("handoff"))).toHaveTextContent("handoffStatus")
+  })
+
+  it("keeps focus off the row button when the sheet closes for a rename, and only then", async () => {
+    const closeEvent = () => ({ preventDefault: jest.fn() }) as unknown as Event & {
+      preventDefault: jest.Mock
+    }
+    renderActions()
+    await screen.findByTestId(item("rename"))
+
+    // Any other close hands focus back to the row as usual.
+    const plain = closeEvent()
+    mockCloseAutoFocus?.(plain)
+    expect(plain.preventDefault).not.toHaveBeenCalled()
+
+    // Rename: the inline field takes focus, and a focus return would blur it,
+    // which commits the untouched field as a cancel.
+    fireEvent.click(screen.getByTestId(item("rename")))
+    const forRename = closeEvent()
+    mockCloseAutoFocus?.(forRename)
+    expect(forRename.preventDefault).toHaveBeenCalledTimes(1)
+
+    // One close only: the next one returns focus again.
+    const after = closeEvent()
+    mockCloseAutoFocus?.(after)
+    expect(after.preventDefault).not.toHaveBeenCalled()
   })
 
   it("is closed without a conversation", async () => {

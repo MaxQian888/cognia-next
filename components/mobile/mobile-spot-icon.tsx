@@ -1,4 +1,6 @@
 import Image from "next/image"
+import { forwardRef } from "react"
+import type { LucideProps } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import iconManifest from "@/public/icons/cognia-mobile-spots/icon-manifest.json"
@@ -91,6 +93,27 @@ export const MOBILE_SPOT_ICON_NAMES = [
 ] as const
 
 export type MobileSpotIconName = (typeof MOBILE_SPOT_ICON_NAMES)[number]
+
+/** Raster artwork in an SVG slot so navigation and picker icon sizing still works. */
+export const AgentTeamIcon = forwardRef<SVGSVGElement, LucideProps>(function AgentTeamIcon(
+  { size = 24, className, ...props },
+  ref
+) {
+  return (
+    <svg
+      ref={ref}
+      width={size}
+      height={size}
+      viewBox="0 0 512 512"
+      className={cn("shrink-0", className)}
+      aria-hidden={props["aria-label"] || props["aria-labelledby"] ? undefined : true}
+      focusable="false"
+      {...props}
+    >
+      <image href="/icons/cognia-mobile-spots/png/agent-teams.png" width="512" height="512" />
+    </svg>
+  )
+})
 
 export interface MobileSpotIconProps {
   name: MobileSpotIconName

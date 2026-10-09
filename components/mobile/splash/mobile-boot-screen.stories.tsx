@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { MobileBootScreen, __resetMobileBootScreenForTesting } from "./mobile-boot-screen"
+import { __resetBootFillForTesting } from "@/lib/boot/boot-fill"
+import { MobileBootScreen } from "./mobile-boot-screen"
 import {
   __resetBootProgressForTesting,
   beginBootMilestone,
@@ -34,7 +35,7 @@ const meta = {
   beforeEach: () => {
     __resetBootProgressForTesting()
     __resetMobileBootForTesting()
-    __resetMobileBootScreenForTesting()
+    __resetBootFillForTesting()
   },
 } satisfies Meta<typeof MobileBootScreen>
 

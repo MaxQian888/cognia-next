@@ -10,6 +10,7 @@ jest.mock("@/lib/codeserver/pane-manager", () => ({
 const pinned = jest.mocked(isProIdePanePinnedWithin)
 
 interface TransitionStub {
+  ready: Promise<void>
   finished: Promise<void>
   skipTransition: jest.Mock
   resolve: () => void
@@ -24,7 +25,12 @@ function installViewTransition(): jest.Mock {
     const finished = new Promise<void>((r) => {
       resolve = r
     })
-    const stub: TransitionStub = { finished, skipTransition: jest.fn(), resolve }
+    const stub: TransitionStub = {
+      ready: Promise.resolve(),
+      finished,
+      skipTransition: jest.fn(),
+      resolve,
+    }
     stubs.push(stub)
     update()
     return stub
@@ -44,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   removeViewTransition()
+  Reflect.deleteProperty(document, "visibilityState")
   document.documentElement.style.viewTransitionName = ""
 })
 
@@ -112,6 +119,7 @@ describe("runShellViewTransition", () => {
       value: jest.fn((cb: () => void) => {
         update = cb
         return {
+          ready: new Promise<void>(() => {}),
           finished: new Promise<void>(() => {}),
           skipTransition: jest.fn(),
         }
@@ -148,6 +156,46 @@ describe("runShellViewTransition", () => {
     expect(onDone).toHaveBeenCalledTimes(1)
   })
 
+  it("bails out while the document is hidden", () => {
+    installViewTransition()
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    const el = document.createElement("div")
+    const apply = jest.fn()
+    const onDone = jest.fn()
+
+    runShellViewTransition({ captures: [{ element: el, name: "one" }], apply, onDone })
+
+    expect(document.startViewTransition).not.toHaveBeenCalled()
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(el.style.viewTransitionName).toBe("")
+  })
+
+  it("absorbs a rejected ready when the browser skips the transition", async () => {
+    // WebKit's shape when the page goes hidden: the update still runs,
+    // `ready` rejects with InvalidStateError and `finished` resolves.
+    const ready = Promise.reject(new DOMException("skipped", "InvalidStateError"))
+    const readyCatch = jest.spyOn(ready, "catch")
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: jest.fn((update: () => void) => {
+        update()
+        return { ready, finished: Promise.resolve(), skipTransition: jest.fn() }
+      }),
+    })
+    const el = document.createElement("div")
+    const apply = jest.fn()
+    const onDone = jest.fn()
+
+    runShellViewTransition({ captures: [{ element: el, name: "one" }], apply, onDone })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(readyCatch).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(el.style.viewTransitionName).toBe("")
+  })
+
   it("still lands the layout and resets names when startViewTransition throws", () => {
     Object.defineProperty(document, "startViewTransition", {
       configurable: true,
@@ -169,5 +217,67 @@ describe("runShellViewTransition", () => {
     expect(onDone).toHaveBeenCalledTimes(1)
     expect(el.style.viewTransitionName).toBe("")
     expect(document.documentElement.style.viewTransitionName).toBe("")
+  })
+})
+
+describe("edge-panel transition hold", () => {
+  // A fresh module per test: the hold is a module-level count, and the suites
+  // above deliberately leave transitions that never settle.
+  let runShellViewTransition: typeof import("./shell-view-transition").runShellViewTransition
+  let attribute = ""
+  beforeEach(() => {
+    document.documentElement.removeAttribute("data-shell-view-transition")
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fresh = require("./shell-view-transition") as typeof import("./shell-view-transition")
+      runShellViewTransition = fresh.runShellViewTransition
+      attribute = fresh.SHELL_VIEW_TRANSITION_ATTRIBUTE
+    })
+  })
+  const held = () => document.documentElement.hasAttribute(attribute)
+
+  it("holds the edge panels' own size transitions for the length of the gesture", async () => {
+    installViewTransition()
+    // Observed inside the update: the commit that arms the edge panels' CSS
+    // transitions must already see the hold, or they tween under the snapshot.
+    let heldDuringApply = false
+    runShellViewTransition({ captures: [], apply: () => (heldDuringApply = held()) })
+
+    expect(heldDuringApply).toBe(true)
+    expect(held()).toBe(true)
+    stubs[0].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(held()).toBe(false)
+  })
+
+  it("keeps the hold while a second gesture is still running", async () => {
+    installViewTransition()
+    runShellViewTransition({ captures: [], apply: jest.fn() })
+    runShellViewTransition({ captures: [], apply: jest.fn() })
+
+    stubs[0].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(held()).toBe(true)
+
+    stubs[1].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(held()).toBe(false)
+  })
+
+  it("never holds on the instant path, where the CSS tween is the only motion", () => {
+    let heldDuringApply = true
+    runShellViewTransition({ captures: [], apply: () => (heldDuringApply = held()) })
+    expect(heldDuringApply).toBe(false)
+    expect(held()).toBe(false)
+  })
+
+  it("releases the hold when the transition is cancelled", () => {
+    installViewTransition()
+    const cancel = runShellViewTransition({ captures: [], apply: jest.fn() })
+    cancel()
+    expect(held()).toBe(false)
   })
 })

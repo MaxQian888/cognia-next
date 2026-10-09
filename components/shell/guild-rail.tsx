@@ -318,6 +318,10 @@ export function GuildRail({
         style={variant === "rail" ? { width: railCollapsed ? 0 : GUILD_RAIL_WIDTH_PX } : undefined}
         aria-label={t("navigation")}
         data-testid="guild-rail"
+        // An edge panel for `app/globals.css`: its width tween stands down while
+        // a shell View Transition (the sidebar gesture it folds with) owns the
+        // motion, and while the user drags a shell edge.
+        data-shell-edge-panel={variant === "rail" ? "" : undefined}
         data-variant={variant}
         data-side={effectiveSide}
         data-collapsed={railCollapsed || undefined}
