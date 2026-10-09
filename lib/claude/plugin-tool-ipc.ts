@@ -98,6 +98,11 @@ import {
   type ProjectCoordinatorToolDeps,
 } from "./project-coordinator-builtin-tools"
 import {
+  isAgentBuilderBuiltinTool,
+  runAgentBuilderBuiltinTool,
+  type AgentBuilderToolDeps,
+} from "./agent-builder-builtin-tools"
+import {
   isAttachmentBuiltinTool,
   resolveAttachmentToolDeps,
   runAttachmentBuiltinTool,
@@ -235,6 +240,23 @@ export function __setProjectCoordinatorToolDepsForTesting(
   fn: (() => ProjectCoordinatorToolDeps) | null
 ): void {
   projectCoordinatorDepsOverride = fn
+}
+
+/** Resolver for the Agent Builder tools' host-side deps (ADR-0220). Swappable for tests. */
+let agentBuilderDepsOverride: (() => Promise<AgentBuilderToolDeps> | AgentBuilderToolDeps) | null =
+  null
+
+/** Inject Agent Builder deps (tests). Pass `null` to restore the default. */
+export function __setAgentBuilderToolDepsForTesting(
+  fn: (() => Promise<AgentBuilderToolDeps> | AgentBuilderToolDeps) | null
+): void {
+  agentBuilderDepsOverride = fn
+}
+
+async function resolveAgentBuilderDeps(): Promise<AgentBuilderToolDeps> {
+  if (agentBuilderDepsOverride) return agentBuilderDepsOverride()
+  const { resolveAgentBuilderToolDeps } = await import("@/lib/agents/builder/tool-deps")
+  return resolveAgentBuilderToolDeps()
 }
 
 async function resolveProjectCoordinatorDeps(): Promise<ProjectCoordinatorToolDeps> {
@@ -710,6 +732,15 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolveProjectCoordinatorDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    if (isAgentBuilderBuiltinTool(request.name)) {
+      const result = await runAgentBuilderBuiltinTool(
+        request.name,
+        request.args,
+        await resolveAgentBuilderDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

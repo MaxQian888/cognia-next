@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { ComponentType } from "react"
 import {
@@ -700,6 +701,7 @@ describe("the selection composer inside the resource chat", () => {
 describe("useSessionSurfacePanels", () => {
   it("offers exactly the seventeen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
+    expect(panels.find((panel) => panel.id === "squad-context")?.icon).toBe(AgentTeamIcon)
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["new-tab", "preview-run", 0],
       ["artifacts", "review", 10],

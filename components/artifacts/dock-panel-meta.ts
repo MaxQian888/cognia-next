@@ -19,6 +19,7 @@
  * page can import it without pulling in the panels it describes.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
   BrainIcon,
@@ -62,7 +63,7 @@ export const DOCK_SESSION_PANEL_META: Readonly<Record<string, DockPanelMeta>> = 
   artifacts: { labelKey: "artifacts.dock.browseArtifacts", icon: LibraryIcon },
   plan: { labelKey: "contextWorkbench.planPanel.title", icon: ListTodoIcon },
   "session-sidechat": { labelKey: "contextWorkbench.sessionSidechat", icon: MessagesSquareIcon },
-  "squad-context": { labelKey: "contextWorkbench.squadPanel.title", icon: UsersIcon },
+  "squad-context": { labelKey: "contextWorkbench.squadPanel.title", icon: AgentTeamIcon },
   "team-members": { labelKey: "contextWorkbench.teamMembersPanel.title", icon: UsersIcon },
   browser: { labelKey: "browser.title", icon: GlobeIcon, preferredMode: "wide" },
   "project-overview": {

@@ -7,6 +7,7 @@ import type {
 import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
+import { uniqueIndexKeys } from "@/lib/db/unique-keys"
 
 export interface ProviderDiagnosticHistoryQuery {
   providerId?: string
@@ -72,7 +73,7 @@ export async function queryLatestProviderDiagnosticSamples(): Promise<
   Map<string, ProviderDiagnosticSample>
 > {
   const table = getDb().providerDiagnosticSamples
-  const providerIds = (await table.orderBy("providerId").uniqueKeys()) as string[]
+  const providerIds = (await uniqueIndexKeys(table.orderBy("providerId"))) as string[]
   const latest = new Map<string, ProviderDiagnosticSample>()
   await Promise.all(
     providerIds.map(async (providerId) => {

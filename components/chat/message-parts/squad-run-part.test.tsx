@@ -50,6 +50,9 @@ beforeEach(async () => {
 describe("SquadRunPart", () => {
   it("names the Squad and what it was asked to do", () => {
     render(<SquadRunPart part={PART} />)
+    expect(
+      document.querySelector('image[href="/icons/cognia-mobile-spots/png/agent-teams.png"]')
+    ).toBeInTheDocument()
     const node = screen.getByTestId("squad-run-part")
     expect(node).toHaveTextContent("Research Squad")
     expect(node).toHaveTextContent("Audit the auth flow")

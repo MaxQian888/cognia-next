@@ -22,11 +22,12 @@
  * chat message. The full detail is one click away.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import Link from "next/link"
-import { ExternalLinkIcon, UsersIcon } from "lucide-react"
+import { ExternalLinkIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -101,7 +102,7 @@ export const SquadRunPart = memo(function SquadRunPart({ part }: Props) {
           {part.squadName}
         </span>
       }
-      icon={<UsersIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+      icon={<AgentTeamIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
       target={
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {steps.length > 0 ? t("memberActivity", { count: steps.length }) : part.objective}

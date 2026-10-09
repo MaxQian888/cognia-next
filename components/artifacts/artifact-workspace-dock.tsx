@@ -18,6 +18,7 @@
  */
 
 import {
+  Activity,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -265,51 +266,83 @@ function useDockAttentionSignal({
 }
 
 /**
- * Keep the dock's contents mounted while it is open, and for exactly one
- * collapse animation after it closes.
+ * How long a collapsed dock's body stays parked behind `<Activity>` before it
+ * is unmounted for real. Re-opening within it is a reveal, not a rebuild: the
+ * project editor keeps its tabs, tree and documents, the side chat its
+ * transcript, and nothing re-reads the disk. Long enough to cover the
+ * ⌘J-to-peek-and-back rhythm; short enough that an abandoned dock does not hold
+ * its DOM for the rest of the session.
+ */
+export const DOCK_BODY_PARK_MS = 5 * 60_000
+
+/**
+ * Where a collapsed dock's body is in its retreat:
+ *
+ * - `shown` — on screen, and for exactly one collapse animation after it closes;
+ * - `parked` — behind `<Activity mode="hidden">`: DOM and React state kept,
+ *   every effect torn down;
+ * - `gone` — unmounted.
  *
  * A collapsed dock used to stay fully mounted at zero width — Monaco, the
  * resource chat pane and the embedded browser all still running behind a panel
  * nobody could see. The browser pane is the sharpest case: it holds a
- * *process-wide* embedded-webview lease that is only released on unmount, so an
- * invisible zero-width dock could lock every other surface out of the webview
- * and leave them retrying on a backoff.
+ * *process-wide* embedded-webview lease, so an invisible dock could lock every
+ * other surface out of the webview. The fix was to unmount the body once the
+ * collapse finished — which made every re-open a cold mount: the project
+ * editor re-listed its tree, re-read its open files and rebuilt its editors
+ * while the dock was trying to animate open.
  *
- * The delay is not cosmetic. `animateDockResize` captures the open and collapsed
- * layouts as compositor snapshots; unmounting on the same frame would capture
- * an empty panel instead of letting the old body move cleanly into the rail.
+ * Parking keeps the first fix without the second cost. `<Activity>` hidden runs
+ * every effect's cleanup — the browser releases its lease, the project editor
+ * unregisters its opener (so a reveal still routes through the dock and opens
+ * it), the title-bar projection stands down — while the state and DOM survive
+ * for a cheap reveal. It is the state the workbench already parks inactive
+ * panels in. Only after {@link DOCK_BODY_PARK_MS} does the body go.
  *
- * **With a persistent rail this never retracts** — callers pass `false`. The
- * workbench stays mounted so its activity rail can keep drawing, and it drops
- * the panel *body* itself via `railOnly`. The lease invariant above is
- * untouched: rail-only unmounts every panel, exactly as a zero-width dock did.
+ * The first delay is not cosmetic. `animateDockResize` captures the open and
+ * collapsed layouts as compositor snapshots; hiding the body on the same frame
+ * would capture an empty panel instead of letting it move cleanly into the
+ * edge.
+ *
+ * A dock that mounts already collapsed starts `gone`: app launch must not build
+ * a body nobody has asked to see.
+ *
+ * **With a persistent rail** the shell never parks or goes — the workbench has
+ * to keep drawing its activity rail — and `shown` alone decides `railOnly`,
+ * which drops the panel body inside the workbench instead. The lease invariant
+ * holds there too: rail-only unmounts every panel.
  */
-function useDockContentMounted(
+type DockBodyPhase = "shown" | "parked" | "gone"
+
+function useDockBodyPhase(
   dockCollapsed: boolean,
   panelElementRef: { current: HTMLElement | null }
-): boolean {
-  // Only the timer writes this. Expanding clears it *during render* — React's
-  // sanctioned "adjust state when a prop changes" pattern, and what
+): DockBodyPhase {
+  // Only the timers move it forward. Expanding resets it *during render* —
+  // React's sanctioned "adjust state when a prop changes" pattern, and what
   // `react-hooks/set-state-in-effect` steers you to: re-opening is immediate
-  // and must not wait a second render pass to put the dock back.
-  const [retracted, setRetracted] = useState(dockCollapsed)
-  if (!dockCollapsed && retracted) setRetracted(false)
+  // and must not wait a second render pass to put the body back.
+  const [phase, setPhase] = useState<DockBodyPhase>(dockCollapsed ? "gone" : "shown")
+  if (!dockCollapsed && phase !== "shown") setPhase("shown")
 
   useEffect(() => {
-    if (!dockCollapsed || retracted) return
+    if (!dockCollapsed || phase === "gone") return
     const element = panelElementRef.current
-    const timer = window.setTimeout(
-      () => setRetracted(true),
-      DOCK_RESIZE_DURATION_MS *
-        (element
-          ? Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
-          : 1) +
-        DOCK_RESIZE_CLEANUP_SLACK_MS
-    )
+    const timer =
+      phase === "shown"
+        ? window.setTimeout(
+            () => setPhase("parked"),
+            DOCK_RESIZE_DURATION_MS *
+              (element
+                ? Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+                : 1) +
+              DOCK_RESIZE_CLEANUP_SLACK_MS
+          )
+        : window.setTimeout(() => setPhase("gone"), DOCK_BODY_PARK_MS)
     return () => window.clearTimeout(timer)
-  }, [dockCollapsed, panelElementRef, retracted])
+  }, [dockCollapsed, panelElementRef, phase])
 
-  return !retracted
+  return phase
 }
 
 /**
@@ -496,17 +529,23 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     dockSizeRef.current = dockSize
   }, [dockSize])
   /**
-   * Whether the panel *body* is still on screen. Retracts one animation after a
-   * collapse, so the old snapshot contains real content instead of an empty box.
+   * Where the panel *body* is in its retreat (see `useDockBodyPhase`). It leaves
+   * the screen one animation after a collapse, so the old snapshot contains real
+   * content instead of an empty box.
    *
-   * Two consumers now read this one delay: whether `<ArtifactDock />` mounts at
-   * all (only when the rail is not persistent — otherwise the rail has to keep
-   * drawing), and `railOnly`, which is what actually drops the body. Deriving
-   * `railOnly` from the raw `dockCollapsed` instead would flip it before the
-   * transition captured the outgoing panel and make the body blink away.
+   * Three consumers read this one clock: whether `<ArtifactDock />` renders at
+   * all, whether it is parked behind `<Activity>` (only when the rail is not
+   * persistent), and — with a persistent rail — `railOnly`, which drops the body
+   * inside the workbench. Deriving any of them from the raw `dockCollapsed`
+   * would flip it before the transition captured the outgoing panel and make the
+   * body blink away.
    */
-  const dockBodyMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
-  const dockContentMounted = railPersistent || dockBodyMounted
+  const dockBodyPhase = useDockBodyPhase(dockCollapsed, dockPanelElementRef)
+  const dockBodyMounted = dockBodyPhase === "shown"
+  /** Rendered at all — on screen, rail-only, or parked behind `<Activity>`. */
+  const dockContentMounted = railPersistent || dockBodyPhase !== "gone"
+  /** Parked: kept for a cheap reveal, every effect torn down. Never with a rail. */
+  const dockBodyParked = !railPersistent && dockBodyPhase === "parked"
   /**
    * What the panel shrinks to. `0%` is the pre-minibar behaviour; with the rail
    * persistent it is the rail's own width, so the collapsed dock still shows a
@@ -864,7 +903,14 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
               style={overlayOpen ? { width: overlayWidthPx } : undefined}
             >
               <TitleBarProjectionScope enabled={projectionScope && !overlayOpen}>
-                {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
+                {dockContentMounted ? (
+                  // One `<Activity>` in every shape, so parking and revealing
+                  // flip its mode rather than changing the tree — a changed
+                  // parent would remount the very body parking exists to keep.
+                  <Activity mode={dockBodyParked ? "hidden" : "visible"}>
+                    <ArtifactDock railOnly={railPersistent && !dockBodyMounted} />
+                  </Activity>
+                ) : null}
               </TitleBarProjectionScope>
             </div>
           </FocusScope.FocusScope>

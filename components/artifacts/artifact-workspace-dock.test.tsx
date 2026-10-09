@@ -177,12 +177,25 @@ jest.mock("@/components/ui/resizable", () => {
 // counts as "pinned" once a surface has actually claimed the native pane.
 // Literal attribute name rather than the imported constant — a jest.mock
 // factory referencing a module-scope import hits the TDZ trap.
+// Mount count (a `useState` initialiser runs once per instance) and live
+// effects (up on mount *and* on an Activity reveal, down on hide).
+const mockDockMounts = jest.fn()
+let mockDockEffects = 0
+const mockDockEffectsLive = () => mockDockEffects
 jest.mock("./artifact-dock", () => ({
   ArtifactDock: ({ railOnly }: { railOnly?: boolean }) => {
     // Whether the dock's header would project into the title bar.
     const { useTitleBarProjectionScope } = jest.requireActual<
       typeof import("@/components/shell/title-bar-outlets")
     >("@/components/shell/title-bar-outlets")
+    const { useEffect, useState } = jest.requireActual<typeof import("react")>("react")
+    useState(() => mockDockMounts())
+    useEffect(() => {
+      mockDockEffects += 1
+      return () => {
+        mockDockEffects -= 1
+      }
+    }, [])
     return (
       <div
         data-testid="dock"
@@ -217,6 +230,7 @@ jest.mock("./workspace-mode/workspace-reveal-opener", () => ({
 
 import {
   ArtifactWorkspaceDock,
+  DOCK_BODY_PARK_MS,
   DOCK_RESIZE_DURATION_MS,
   DOCK_RESIZE_EASE,
   dockCapForChatFloor,
@@ -257,6 +271,7 @@ const RECT = { x: 0, y: 0, width: 400, height: 600 }
 beforeEach(() => {
   localStorage.clear()
   mockRowBudget = null
+  mockDockMounts.mockClear()
   useBreakpointMock.mockReturnValue("desktop")
   __resetCodeServerPaneManagerForTesting()
   // The persistent rail is a settings field defaulting to OFF (see
@@ -352,13 +367,58 @@ describe("ArtifactWorkspaceDock", () => {
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
       act(() => jest.advanceTimersByTime(400))
 
-      // No rail to keep on screen, so the pre-minibar contract holds: nothing
-      // survives behind a dock collapsed to zero width.
-      expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+      // No rail to keep on screen: once retracted the body is parked behind
+      // `<Activity mode="hidden">` — off screen, every effect torn down (the
+      // browser's webview lease, the editor opener), kept for a cheap reveal.
+      expect(screen.getByTestId("dock")).not.toBeVisible()
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
       expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
+
+      // …and after the park window nothing survives behind a zero-width dock.
+      act(() => jest.advanceTimersByTime(DOCK_BODY_PARK_MS))
+      expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("re-opens a parked dock as a reveal, not a remount", async () => {
+    jest.useFakeTimers()
+    try {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      expect(mockDockMounts).toHaveBeenCalledTimes(1)
+      expect(mockDockEffectsLive()).toBe(1)
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      act(() => jest.advanceTimersByTime(400))
+      // Parked: the effects are down even though the body is still in the tree.
+      expect(mockDockEffectsLive()).toBe(0)
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(screen.getByTestId("dock")).toBeVisible()
+      expect(mockDockEffectsLive()).toBe(1)
+      // The same instance came back — tabs, trees and documents with it.
+      expect(mockDockMounts).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not build a body for a dock that starts collapsed", () => {
+    useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
   })
 
   it("collapses to zero width out of the box — the minibar is an opt-in", () => {

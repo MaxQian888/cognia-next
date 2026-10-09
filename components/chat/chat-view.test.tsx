@@ -1586,6 +1586,44 @@ describe("ChatPane", () => {
       expect(stage).toContainElement(screen.getByTestId("composer"))
     })
   })
+
+  // Home, notice and conversation all render through one surface stage at the
+  // same tree position, so switching between them animates instead of cutting
+  // — and switching conversations keeps the conversation subtree mounted.
+  describe("surface transitions", () => {
+    function surface() {
+      return document.querySelector('[data-slot="chat-surface"]')
+    }
+
+    it("renders the home welcome on the home surface", () => {
+      render(<ChatPane {...makeProps()} activeSession={null} />)
+      expect(surface()).toHaveAttribute("data-surface", "home")
+    })
+
+    it("renders a conversation on the conversation surface", () => {
+      render(<ChatPane {...makeProps()} />)
+      expect(surface()).toHaveAttribute("data-surface", "conversation")
+    })
+
+    it("renders the runtime notice on its own surface", () => {
+      render(<ChatPane {...makeProps()} activeSession={null} runtimeNotice={<p>offline</p>} />)
+      expect(surface()).toHaveAttribute("data-surface", "notice")
+    })
+
+    it("keeps one stage across home → conversation → another conversation", () => {
+      const props = makeProps()
+      const view = render(<ChatPane {...props} activeSession={null} />)
+      const stage = surface()
+      view.rerender(<ChatPane {...props} />)
+      expect(surface()).toBe(stage)
+      expect(stage).toHaveAttribute("data-surface", "conversation")
+      view.rerender(
+        <ChatPane {...props} activeSession={{ ...mockSession, id: "s2" } as ChatSession} />
+      )
+      expect(surface()).toBe(stage)
+      expect(stage).toHaveAttribute("data-surface", "conversation")
+    })
+  })
 })
 
 // ── The welcome screen actually reads what settings wrote ──────────────────

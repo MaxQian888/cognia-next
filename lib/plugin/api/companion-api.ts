@@ -13,9 +13,12 @@
  *                               Mirrors the desktop "Mobile companion" settings
  *                               card exactly: the authoritative Rust command +
  *                               the Dexie row mirror the UI reads from.
- *   - `companion:goal-control`— pause / resume / stop a host goal loop, the
- *                               same capability a paired device gets from the
- *                               remote-control grant (`goal_pause/resume/stop`).
+ *   - `companion:goal-control`— pause / resume / stop a host goal loop: the
+ *                               run-control slice of what a paired device's
+ *                               remote-control grant carries
+ *                               (`goal_pause/resume/stop`). The grant also
+ *                               carries accept, delete, continue and the
+ *                               verifier retry; this tier deliberately does not.
  *
  * Why `companion:goal-control` is separate from `goal:write`: it is the narrow
  * "remote controller" slice — pause / resume / stop *existing* goals only. It

@@ -96,6 +96,7 @@ import {
 import { listMessages } from "@/lib/db/messages"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { ChatSurfaceTransition } from "./motion/chat-surface-transition"
 import { useFlowMotion } from "./motion/motion-reveal"
 import { isSupportAgentId } from "@/lib/support-agent/context"
 import { SupportAgentPanel } from "@/components/support/support-agent-panel"
@@ -514,6 +515,22 @@ export function ChatPane({
     [composerRef]
   )
 
+  // After a swap that remounts the composer — the centered→docked swap inside
+  // a conversation, or arriving in a conversation from home — pull focus back
+  // to the new instance. Only when entering the chat layout (messages present),
+  // not when returning to the empty welcome. Skip on mobile viewports:
+  // programmatic focus opens the virtual keyboard, which is disruptive when
+  // switching sessions from the nav sheet (the left drawer on mobile).
+  // History can finish loading after the user has opened a summary or focused
+  // another control. A delayed autofocus must not dismiss that popover or
+  // steal an in-progress interaction.
+  const restoreComposerFocus = () => {
+    const focused = document.activeElement
+    if (hasHistory && !isMobile && (!focused || focused === document.body)) {
+      internalComposerRef.current?.focus()
+    }
+  }
+
   // Stable-identity wrappers (not plain useCallback): these three cross the
   // `MessageRenderer` memo comparator for EVERY mounted row. The upstream
   // `onRegenerate`/`onEditResend` props are rebuilt whenever the workspace
@@ -736,80 +753,92 @@ export function ChatPane({
     <WelcomeStats />
   ) : undefined
 
+  // Every surface this pane can show goes through one `ChatSurfaceTransition`
+  // at the same tree position, so moving between them — home, notice,
+  // conversation, or one conversation to the next — animates instead of
+  // cutting (see `components/chat/motion/chat-surface-transition.tsx`).
+  const surfaceSessionId = activeSession?.id ?? null
+
   if (runtimeNotice && (!activeSession || !hasHistory)) {
     return (
-      <>
+      <ChatSurfaceTransition
+        surface="notice"
+        sessionId={surfaceSessionId}
+        onExitComplete={restoreComposerFocus}
+      >
         {showHeader && activeSession && (
           <ChatHeader session={activeSession} onSplitView={onSplitView} onExitSplit={onExitSplit} />
         )}
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
           <div className="w-full max-w-md">{runtimeNotice}</div>
         </div>
-      </>
+      </ChatSurfaceTransition>
     )
   }
 
   if (!activeSession) {
     return (
-      <EmptyChatState
-        onCreate={onCreate}
-        onUseSample={(text) => onUseSample(text)}
-        recentSessions={recentSessions}
-        onResumeSession={onResumeSession}
-        override={emptyState}
-        hideSamples={welcomeExtras?.hideSamples}
-        workspaceAvailable={workspaceAvailable}
-        hideCreateAction={welcomeExtras?.hideNewChatAction}
-        headerExtraSlot={welcomeExtras?.header}
-        quickActionsSlot={welcomeExtras?.quickActions}
-        executionControlsSlot={newChatExecutionControls}
-        statsSlot={statsSlot}
-        hiddenSections={welcomeHidden}
-        onDismissSection={handleDismissSection}
-        // These three were declared on `EmptyChatState` and rendered a style
-        // toggle, but no production caller ever passed them — so the name typed
-        // into Settings → Personalization was written and never read, and the
-        // page was permanently `rich`. Wiring them is a prerequisite here: the
-        // hero has to know which density it is laying out.
-        welcomeStyle={welcomeStyle}
-        userName={userName}
-        onToggleStyle={isMobileShell ? undefined : handleToggleWelcomeStyle}
-        // The real composer, not a lookalike — so a first message carries
-        // attachments, slash commands and @-mentions like any other turn.
-        // `onHeroSend` creates the session, then sends into it.
-        composerSlot={
-          onHeroSend && !emptyState ? (
-            <div className="flex w-full flex-col" data-ctxbar-scope>
-              {/* Context bar fused onto the hero composer's top edge, wrapped
+      <ChatSurfaceTransition surface="home" sessionId={null} onExitComplete={restoreComposerFocus}>
+        <EmptyChatState
+          onCreate={onCreate}
+          onUseSample={(text) => onUseSample(text)}
+          recentSessions={recentSessions}
+          onResumeSession={onResumeSession}
+          override={emptyState}
+          hideSamples={welcomeExtras?.hideSamples}
+          workspaceAvailable={workspaceAvailable}
+          hideCreateAction={welcomeExtras?.hideNewChatAction}
+          headerExtraSlot={welcomeExtras?.header}
+          quickActionsSlot={welcomeExtras?.quickActions}
+          executionControlsSlot={newChatExecutionControls}
+          statsSlot={statsSlot}
+          hiddenSections={welcomeHidden}
+          onDismissSection={handleDismissSection}
+          // These three were declared on `EmptyChatState` and rendered a style
+          // toggle, but no production caller ever passed them — so the name typed
+          // into Settings → Personalization was written and never read, and the
+          // page was permanently `rich`. Wiring them is a prerequisite here: the
+          // hero has to know which density it is laying out.
+          welcomeStyle={welcomeStyle}
+          userName={userName}
+          onToggleStyle={isMobileShell ? undefined : handleToggleWelcomeStyle}
+          // The real composer, not a lookalike — so a first message carries
+          // attachments, slash commands and @-mentions like any other turn.
+          // `onHeroSend` creates the session, then sends into it.
+          composerSlot={
+            onHeroSend && !emptyState ? (
+              <div className="flex w-full flex-col" data-ctxbar-scope>
+                {/* Context bar fused onto the hero composer's top edge, wrapped
                   in the same reading-column geometry (`max-w-[52rem]` +
                   `px-3 sm:px-5`) the Composer applies inside itself, so the
                   strip shares the card's exact side edges. `data-ctxbar-scope`
                   on the parent is the hook the strip's scoped CSS targets. */}
-              {welcomeContextBarSlot ? (
-                <div className="mx-auto w-full max-w-[52rem] px-3 sm:px-5">
-                  {welcomeContextBarSlot}
-                </div>
-              ) : null}
-              <Composer
-                placement="hero"
-                // The mono `dense` box is the desktop welcome's look. A phone
-                // keeps the one composer it uses in every conversation, so the
-                // box does not change style between the home and the chat.
-                {...(isMobileShell ? {} : { defaultSkin: "dense" as const })}
-                placeholderHints={heroHints}
-                session={null}
-                onStartNewSession={() => onCreate()}
-                onOpenSettings={(tab) => onOpenSettings(tab)}
-                onSend={onHeroSend}
-                onStop={() => void onStop()}
-                disabled={composerDisabled}
-                toolbar={welcomeComposerToolbar}
-                routing={heroRouting}
-              />
-            </div>
-          ) : undefined
-        }
-      />
+                {welcomeContextBarSlot ? (
+                  <div className="mx-auto w-full max-w-[52rem] px-3 sm:px-5">
+                    {welcomeContextBarSlot}
+                  </div>
+                ) : null}
+                <Composer
+                  placement="hero"
+                  // The mono `dense` box is the desktop welcome's look. A phone
+                  // keeps the one composer it uses in every conversation, so the
+                  // box does not change style between the home and the chat.
+                  {...(isMobileShell ? {} : { defaultSkin: "dense" as const })}
+                  placeholderHints={heroHints}
+                  session={null}
+                  onStartNewSession={() => onCreate()}
+                  onOpenSettings={(tab) => onOpenSettings(tab)}
+                  onSend={onHeroSend}
+                  onStop={() => void onStop()}
+                  disabled={composerDisabled}
+                  toolbar={welcomeComposerToolbar}
+                  routing={heroRouting}
+                />
+              </div>
+            ) : undefined
+          }
+        />
+      </ChatSurfaceTransition>
     )
   }
 
@@ -958,7 +987,11 @@ export function ChatPane({
   )
 
   return (
-    <>
+    <ChatSurfaceTransition
+      surface="conversation"
+      sessionId={surfaceSessionId}
+      onExitComplete={restoreComposerFocus}
+    >
       {showHeader && (
         <ChatHeader session={activeSession} onSplitView={onSplitView} onExitSplit={onExitSplit} />
       )}
@@ -1024,25 +1057,7 @@ export function ChatPane({
         {inScope ? (
           <SessionSummaryStageHost key={activeSession.id} session={activeSession} />
         ) : null}
-        <AnimatePresence
-          mode="popLayout"
-          initial={false}
-          onExitComplete={() => {
-            // After the centered→docked swap completes the new composer is
-            // mounted; pull focus back to it. Only when entering the chat layout
-            // (messages present) — not when returning to the empty welcome.
-            // Skip on mobile viewports: programmatic focus opens the virtual
-            // keyboard, which is disruptive when switching sessions from the nav
-            // sheet (the left drawer on mobile).
-            // History can finish loading after the user has opened a summary
-            // or focused another control. A delayed autofocus must not dismiss
-            // that popover or steal an in-progress interaction.
-            const focused = document.activeElement
-            if (hasHistory && !isMobile && (!focused || focused === document.body)) {
-              internalComposerRef.current?.focus()
-            }
-          }}
-        >
+        <AnimatePresence mode="popLayout" initial={false} onExitComplete={restoreComposerFocus}>
           {showHistorySurface || !hasHistory ? (
             <motion.div
               key="empty"
@@ -1177,7 +1192,7 @@ export function ChatPane({
           )}
         </AnimatePresence>
       </div>
-    </>
+    </ChatSurfaceTransition>
   )
 }
 

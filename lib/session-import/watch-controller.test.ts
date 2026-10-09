@@ -1,3 +1,8 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { runInNewContext } from "node:vm"
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
+
 import {
   __resetSessionImportWatchForTesting,
   isSessionImportWatchActive,
@@ -39,6 +44,66 @@ afterEach(() => {
 })
 
 describe("session-import watch controller", () => {
+  it.each(["inactive", "active", "starting"] as const)(
+    "stops after HMR disposal without loading modules (watch: %s)",
+    async (state) => {
+      // Jest caches imports, so run the actual controller in a loader that
+      // rejects late imports just as Turbopack does for a disposed module.
+      const { outputText } = transpileModule(
+        readFileSync(join(__dirname, "watch-controller.ts"), "utf8"),
+        { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }
+      )
+      const { deps, unlisten } = makeDeps()
+      let resolveRoots!: (roots: string[]) => void
+      if (state === "starting") {
+        deps.collectWatchRoots = jest.fn(
+          () =>
+            new Promise<string[]>((resolve) => {
+              resolveRoots = resolve
+            })
+        )
+      }
+      const warn = jest.fn()
+      let disposed = false
+      const modules: Record<string, unknown> = {
+        "@cognia/logging": { createLogger: () => ({ warn, error: jest.fn() }) },
+        "@/lib/tauri": { isTauri: deps.isTauri },
+        "@/lib/tauri/safe-unlisten": jest.requireActual("@/lib/tauri/safe-unlisten"),
+        "./watch-import": deps,
+        "@tauri-apps/api/core": { invoke: deps.invoke },
+        "@tauri-apps/api/event": { listen: deps.listen },
+      }
+      const controller = {} as typeof import("./watch-controller")
+      runInNewContext(outputText, {
+        exports: controller,
+        require: (id: string) => {
+          if (disposed) {
+            throw new Error(
+              `Unexpected import of module ${id} from module watch-controller.ts, which was deleted by an HMR update`
+            )
+          }
+          if (!(id in modules)) throw new Error(`Unexpected test dependency: ${id}`)
+          return modules[id]
+        },
+      })
+      const start = state === "inactive" ? undefined : controller.startSessionImportWatch()
+      if (state === "active") await start
+      if (state === "starting") {
+        await Promise.resolve()
+        expect(deps.collectWatchRoots).toHaveBeenCalledTimes(1)
+      }
+      disposed = true
+      const stop = controller.stopSessionImportWatch()
+      if (state === "starting") resolveRoots(["/home/u/.claude/projects"])
+      await start
+      await stop
+      expect(warn).not.toHaveBeenCalled()
+      expect(deps.invoke).toHaveBeenLastCalledWith("session_import_watch_stop", undefined)
+      expect(controller.isSessionImportWatchActive()).toBe(false)
+      expect(unlisten).toHaveBeenCalledTimes(state === "inactive" ? 0 : 1)
+    }
+  )
+
   it("imports every distinct path in a batch and rescans once after overflow", async () => {
     const { deps, fireBatch } = makeDeps()
     await startSessionImportWatch({ deps })

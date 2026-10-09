@@ -365,7 +365,7 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
               <Button
                 variant="outline"
                 size="sm"
-                className="pointer-events-auto h-7 gap-1 rounded-full bg-background px-3 text-xs shadow-xs"
+                className="pointer-events-auto h-7 gap-1 rounded-pill bg-background px-3 text-xs shadow-xs"
                 onClick={() => setExpanded(true)}
                 data-testid="artifact-part-show-more"
                 type="button"

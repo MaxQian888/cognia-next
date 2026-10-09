@@ -22,6 +22,9 @@ const base: DispatchType = {
 describe("AgentTeamDispatchPart", () => {
   it("renders the from→to header with the target's display name", () => {
     render(<AgentTeamDispatchPart part={base} fromName="Captain" />)
+    expect(
+      document.querySelector('image[href="/icons/cognia-mobile-spots/png/agent-teams.png"]')
+    ).toBeInTheDocument()
     expect(screen.getByText("Captain")).toBeInTheDocument()
     expect(screen.getByTestId("dispatch-to").textContent).toBe("Alice")
   })

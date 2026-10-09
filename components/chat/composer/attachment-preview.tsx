@@ -480,7 +480,7 @@ function SortableChip({
           {extracting && isImage ? <ScanSweep /> : null}
           {extracting && isVideo ? <VideoProgressBar fraction={state?.video?.progress} /> : null}
           {isDocument ? null : (
-            <div className="absolute bottom-1.5 left-1.5 flex max-w-[calc(100%-12px)] items-center rounded-full bg-background/90 px-1.5 py-0.5 shadow-xs ring-1 ring-border/60 backdrop-blur-sm empty:hidden">
+            <div className="absolute bottom-1.5 left-1.5 flex max-w-[calc(100%-12px)] items-center rounded-pill bg-background/90 px-1.5 py-0.5 shadow-xs ring-1 ring-border/60 backdrop-blur-sm empty:hidden">
               <StatusBadge state={state} isImage={isImage} t={t} />
             </div>
           )}

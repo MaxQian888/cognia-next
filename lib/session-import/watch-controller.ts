@@ -21,6 +21,10 @@
 // lifetime it manages is the app's, not any component's.
 
 import { createLogger } from "@cognia/logging"
+// Fast Refresh can dispose this module before queued work or effect cleanup
+// runs. Bind the APIs up front: a dynamic import from that old module fails.
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { isTauri as isTauriDefault } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { collectWatchRoots, runWatchImport } from "./watch-import"
@@ -74,7 +78,6 @@ function enqueue(step: () => Promise<void>): Promise<void> {
 }
 
 async function defaultInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
-  const { invoke } = await import("@tauri-apps/api/core")
   return invoke(cmd, args)
 }
 
@@ -82,7 +85,6 @@ async function defaultListen(
   event: string,
   handler: (e: { payload?: ChangedPayload }) => void
 ): Promise<() => void> {
-  const { listen } = await import("@tauri-apps/api/event")
   return listen<ChangedPayload>(event, handler)
 }
 

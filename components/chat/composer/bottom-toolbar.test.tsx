@@ -403,6 +403,9 @@ describe("BottomToolbar — session-kind branching", () => {
     })
     render(<BottomToolbar session={session} />)
     const chip = screen.getByTestId("composer-executor-summary")
+    expect(
+      document.querySelector('image[href="/icons/cognia-mobile-spots/png/agent-teams.png"]')
+    ).toBeInTheDocument()
     expect(chip.className).toContain("inline-flex")
     expect(chip.className).toContain("max-w-[11rem]")
     const label = chip.querySelector<HTMLElement>(".truncate")

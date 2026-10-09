@@ -60,6 +60,7 @@ describe("SquadContextPanel", () => {
     // decision — one executor entry, not two.
     render(<SquadContextPanel sessionId="s1" />)
     expect(screen.getByTestId("squad-panel-unbound")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-agent-teams")).toBeInTheDocument()
     expect(screen.getByText(/executor control in the composer/i)).toBeInTheDocument()
   })
 
@@ -80,6 +81,8 @@ describe("SquadContextPanel", () => {
     render(<SquadContextPanel sessionId="s1" />)
     const rows = screen.getAllByTestId("squad-panel-member")
     expect(rows).toHaveLength(2)
+    expect(screen.getByTestId("agent-team-avatar-a")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-team-avatar-b")).toBeInTheDocument()
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining("Alpha"),
       expect.stringContaining("Bravo"),

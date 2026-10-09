@@ -351,6 +351,39 @@ export interface ContextWorkbenchProps {
    * without each becoming a tab.
    */
   resourcePanelSwitcher?: boolean
+  /**
+   * Host-local activities pinned ahead of every other one — first in the rail,
+   * first among the open tabs — in the order given. The project editor's Files
+   * and Search are panels of its file workbench, peers of AI and Comments, and
+   * sit where VS Code's explorer sits: at the top. They are host views, not
+   * part of the canonical (plugin-facing) taxonomy, so the user's rail
+   * customization neither reorders nor hides them.
+   */
+  leadingActivities?: readonly string[]
+  /**
+   * Store the layout (active panel, open tabs, history, mode) under this key
+   * instead of one per resource. A host whose sidebar should not follow the
+   * resource — the project editor keeps its view (Files, AI, …) and width as
+   * the user moves between files, like VS Code's sidebar — passes one stable
+   * key for all of its resources. Panels still receive the current resource.
+   */
+  layoutScopeKey?: string
+  /**
+   * Host request to bring a panel to the front — e.g. the project editor's
+   * selection toolbar opening the AI or comments panel for the selection. Acts
+   * once per new `seq`, exactly like clicking that panel's rail button: a
+   * folded host is asked to open (`onEnsureVisible`), and a panel already in
+   * front stays put rather than toggling shut. A panel that does not apply to
+   * the current resource is ignored.
+   */
+  revealRequest?: { panelId: string; seq: number }
+  /**
+   * Extra classes for the workbench's own header row (not a header projected
+   * into `headerOutlet`). A host whose sidebar sits beside its own chrome
+   * sizes the row to match — the project editor lines it up with its tab strip
+   * so the rules under both meet at the divider.
+   */
+  headerClassName?: string
 }
 
 export interface ContextWorkbenchMobileDrawerProps extends Omit<
@@ -365,7 +398,15 @@ export interface ContextWorkbenchMobileDrawerProps extends Omit<
   // away from callers is what makes that unreachable rather than merely fixed.
   //
   // Both are compile errors rather than runtime surprises.
-  "placement" | "className" | "manageOwnWidth" | "railOnly" | "onCollapse"
+  | "placement"
+  | "className"
+  | "manageOwnWidth"
+  | "railOnly"
+  | "onCollapse"
+  | "leadingActivities"
+  | "layoutScopeKey"
+  | "revealRequest"
+  | "headerClassName"
 > {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -631,6 +672,10 @@ export function ContextWorkbench({
   onResetLayout,
   tabStrip = "internal",
   resourcePanelSwitcher = false,
+  leadingActivities,
+  layoutScopeKey,
+  revealRequest,
+  headerClassName,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -668,7 +713,7 @@ export function ContextWorkbench({
   // whether re-tapping the active activity dismisses the surface. Declared up
   // here because handlers defined above the rail markup read it.
   const railIsHorizontal = placement === "mobile-sheet"
-  const scopeKey = `${workbenchInstanceId}::${getContextResourceKey(resource)}`
+  const scopeKey = layoutScopeKey ?? `${workbenchInstanceId}::${getContextResourceKey(resource)}`
   const panelHistory = usePanelHistory(scopeKey)
   const persistedLayout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const layout = persistedLayout ?? FALLBACK_CONTEXT_WORKBENCH_LAYOUT
@@ -870,6 +915,12 @@ export function ContextWorkbench({
       ),
     [panels, registeredPanels, resource]
   )
+  const leadingKey = (leadingActivities ?? []).join("\u0000")
+  /** Position among the host's pinned activities, or -1 for every other one. */
+  const leadingRank = useCallback(
+    (activity: string) => (leadingKey ? leadingKey.split("\u0000").indexOf(activity) : -1),
+    [leadingKey]
+  )
   const activityGroups = useMemo(() => {
     const groups = new Map<string, ContextPanelDefinition[]>()
     for (const panel of resolvedPanels) {
@@ -914,17 +965,33 @@ export function ContextWorkbench({
     // their rail *button* only. Their panels stay in `resolvedPanels`, so the
     // command palette and `ctrl+1..7` still reach them — which is the whole
     // reason hiding is safe to offer.
+    //
+    // Host-pinned `leadingActivities` sit ahead of all of it, in their own order,
+    // and the customization neither moves nor hides them.
     return [...groups.entries()]
-      .filter(([activity]) => !isWorkbenchActivityHidden(activity, railLayout))
-      .sort(
-        ([left], [right]) =>
-          workbenchRailIndex(left, railLayout) - workbenchRailIndex(right, railLayout)
+      .filter(
+        ([activity]) =>
+          leadingRank(activity) !== -1 || !isWorkbenchActivityHidden(activity, railLayout)
       )
-  }, [panelLayout, railLayout, resolvedPanels])
+      .sort(([left], [right]) => {
+        const leftLead = leadingRank(left)
+        const rightLead = leadingRank(right)
+        if (leftLead !== -1 || rightLead !== -1) {
+          if (leftLead === -1) return 1
+          if (rightLead === -1) return -1
+          return leftLead - rightLead
+        }
+        return workbenchRailIndex(left, railLayout) - workbenchRailIndex(right, railLayout)
+      })
+  }, [leadingRank, panelLayout, railLayout, resolvedPanels])
 
   const handleRailDragEnd = useCallback(
     (event: DragEndEvent) => {
-      const currentIds = activityGroups.map(([activity]) => activity)
+      // Pinned host activities are not the user's to reorder: they stay out of
+      // the saved order (the sort keeps them first regardless).
+      const currentIds = activityGroups
+        .map(([activity]) => activity)
+        .filter((activity) => leadingRank(activity) === -1)
       const next = applyDragReorder(
         currentIds,
         String(event.active.id),
@@ -936,7 +1003,7 @@ export function ContextWorkbench({
       const untouched = railLayout.order.filter((id) => !next.includes(id))
       void saveSettings({ workbenchRail: { ...railLayout, order: [...next, ...untouched] } })
     },
-    [activityGroups, railLayout, saveSettings]
+    [activityGroups, leadingRank, railLayout, saveSettings]
   )
 
   const activePanel = resolvedPanels.find((panel) => panel.id === layout.activePanelId)
@@ -1113,6 +1180,22 @@ export function ContextWorkbench({
     // itself would re-run this on every render that re-memoises it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invokePanelLifecycle, persistedLayout?.activatedPanelIds, scopeKey, visiblePanelsKey])
+
+  // Leaving the screen as a whole — an unmount, or a host parking the entire
+  // workbench behind `<Activity mode="hidden">` (the collapsed chat dock,
+  // `artifact-workspace-dock.tsx`) — forgets what was on screen. Effects re-run
+  // when an Activity reveals, so the lifecycle effect above then sees every
+  // visible panel as newly arrived and fires `restore` for it, exactly as the
+  // remount that parking replaced did. Only on that teardown: clearing on every
+  // run of the lifecycle effect would make each pane swap fire again.
+  useEffect(() => {
+    const visibleKeys = lastVisibleKeyRef.current
+    const visiblePanelsByScope = lastVisiblePanelsRef.current
+    return () => {
+      visibleKeys.clear()
+      visiblePanelsByScope.clear()
+    }
+  }, [])
 
   const handleHistoryBack = useCallback(() => {
     const panelId = panelHistory.goBack()
@@ -1368,6 +1451,27 @@ export function ContextWorkbench({
     setSplitRatio(scopeKey, clampSplitRatio(next))
   }
 
+  // Host reveal requests, honoured once per `seq`. The handler is read through a
+  // ref: it is a fresh closure every render, and only a new request may fire it.
+  const handleActivateRef = useRef(handleActivate)
+  // Declared before the reveal effect, so it always sees this render's handler.
+  useEffect(() => {
+    handleActivateRef.current = handleActivate
+  })
+  const lastRevealSeqRef = useRef<number | null>(null)
+  const revealSeq = revealRequest?.seq
+  const revealPanelId = revealRequest?.panelId
+  useEffect(() => {
+    if (revealSeq === undefined || revealPanelId === undefined) return
+    if (lastRevealSeqRef.current === revealSeq) return
+    lastRevealSeqRef.current = revealSeq
+    const panel = resolvedPanels.find((candidate) => candidate.id === revealPanelId)
+    if (!panel) return
+    // "rail" while folded: that is the path that opens the host first. With
+    // the body open, "tab": re-requesting the panel in front must not close it.
+    handleActivateRef.current(panel, bodyHidden ? "rail" : "tab")
+  }, [bodyHidden, resolvedPanels, revealPanelId, revealSeq])
+
   const handleActivityKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     const [nextKey, previousKey] = railIsHorizontal
       ? ["ArrowRight", "ArrowLeft"]
@@ -1448,6 +1552,18 @@ export function ContextWorkbench({
     .filter((panel): panel is ContextPanelDefinition => Boolean(panel))
   if (activePanel && !openPanels.some((panel) => panel.id === activePanel.id)) {
     openPanels.push(activePanel)
+  }
+  // Pinned host activities lead the tab strip too (stable: the rest keep their
+  // opening order).
+  if (leadingKey) {
+    openPanels.sort((left, right) => {
+      const leftLead = leadingRank(left.activity)
+      const rightLead = leadingRank(right.activity)
+      if (leftLead === rightLead) return 0
+      if (leftLead === -1) return 1
+      if (rightLead === -1) return -1
+      return leftLead - rightLead
+    })
   }
   const dismissPanel = (panel: ContextPanelDefinition) => {
     if (openPanels.length <= 1) {
@@ -1905,7 +2021,10 @@ export function ContextWorkbench({
     ) : (
       <header
         data-testid="context-workbench-header"
-        className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2"
+        className={cn(
+          "@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2",
+          headerClassName
+        )}
       >
         {headerContent}
       </header>

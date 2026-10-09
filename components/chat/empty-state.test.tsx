@@ -581,6 +581,45 @@ describe("<EmptyChatState />", () => {
     expect(chips.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it("hangs the rich recents and the stats on one band under the first screen", () => {
+    const recentSessions = Array.from({ length: 2 }, (_, i) => ({
+      id: `s${i}`,
+      title: `Session ${i}`,
+      updatedAt: 1000 + i,
+    }))
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        recentSessions={recentSessions}
+        onResumeSession={jest.fn()}
+        statsSlot={<div data-testid="stats" />}
+      />
+    )
+    const band = screen.getByTestId("welcome-dashboard")
+    const firstScreen = screen.getByTestId("welcome-first-screen")
+    expect(band).toContainElement(screen.getByTestId("welcome-recents"))
+    expect(band).toContainElement(screen.getByTestId("welcome-stats-slot"))
+    expect(firstScreen).not.toContainElement(screen.getByTestId("welcome-recents"))
+    // The band shares the composer column's measure, so every section below
+    // the fold starts on the composer's left edge.
+    expect(band.className).toContain("max-w-[46rem]")
+    // The first screen keeps the composer at the optical centre with the band
+    // peeking in below it.
+    expect(firstScreen.className).toContain("min-h-[calc(100%-3.5rem)]")
+    expect(firstScreen).toContainElement(screen.getByTestId("welcome-bloom"))
+  })
+
+  it("simply centres the first screen when nothing sits below it", () => {
+    render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
+    expect(screen.queryByTestId("welcome-dashboard")).not.toBeInTheDocument()
+    const firstScreen = screen.getByTestId("welcome-first-screen")
+    expect(firstScreen.className).toContain("flex-1")
+    const spacers = Array.from(firstScreen.children).filter(
+      (child) => child.getAttribute("aria-hidden") === "true"
+    )
+    expect(spacers.map((spacer) => spacer.className)).toEqual(["min-h-6 flex-1", "min-h-6 flex-1"])
+  })
+
   it("omits the stats section entirely when no slot is passed", () => {
     render(<EmptyChatState {...baseProps()} />)
     expect(screen.queryByTestId("welcome-stats-slot")).not.toBeInTheDocument()

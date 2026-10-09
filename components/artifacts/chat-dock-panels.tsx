@@ -24,6 +24,7 @@
  * for the loop this used to be.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
   BotIcon,
@@ -1051,7 +1052,7 @@ export function useSessionSurfacePanels({
         id: SQUAD_CONTEXT_PANEL_ID,
         activity: "ai",
         labelKey: "contextWorkbench.squadPanel.title",
-        icon: UsersIcon,
+        icon: AgentTeamIcon,
         order: 16,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",

@@ -6,7 +6,7 @@ import {
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
-import { useEffect, useState } from "react"
+import { Activity, useEffect, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
 import { CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP } from "@/types/context-workbench"
@@ -223,6 +223,43 @@ describe("ContextWorkbench", () => {
     expect(onFirstActivate).toHaveBeenCalledTimes(1)
     expect(onRestore).toHaveBeenCalledTimes(1)
     expect(screen.getByText("comments:true")).toBeInTheDocument()
+  })
+
+  it("reports a restore when a host reveals the whole workbench from <Activity>", () => {
+    // The collapsed chat dock parks its workbench behind `<Activity mode="hidden">`
+    // instead of unmounting it. A reveal must still tell the panel on screen it
+    // is back — the remount it replaced did — and must not repeat its first.
+    const onFirstActivate = jest.fn()
+    const onRestore = jest.fn()
+    const panels: ContextPanelDefinition[] = [
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments</div>,
+        retention: "stateful",
+        onFirstActivate,
+        onRestore,
+      },
+    ]
+    const host = (mode: "visible" | "hidden") => (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <Activity mode={mode}>
+          <ContextWorkbench workbenchInstanceId="window-a" resource={resource} panels={panels} />
+        </Activity>
+      </NextIntlClientProvider>
+    )
+    const { rerender } = render(host("visible"))
+    expect(onFirstActivate).toHaveBeenCalledTimes(1)
+    expect(onRestore).not.toHaveBeenCalled()
+
+    rerender(host("hidden"))
+    expect(onRestore).not.toHaveBeenCalled()
+
+    rerender(host("visible"))
+    expect(onFirstActivate).toHaveBeenCalledTimes(1)
+    expect(onRestore).toHaveBeenCalledTimes(1)
   })
 
   it("names the active panel when the header has no tabs or artifact strip to show", () => {
@@ -2310,6 +2347,22 @@ describe("ContextWorkbench — header projection", () => {
     expect(screen.getByTestId("context-workbench")).toContainElement(header)
   })
 
+  it("sizes its own header row with the host's class, the default height giving way", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={panels}
+          headerClassName="h-9"
+        />
+      </NextIntlClientProvider>
+    )
+    const header = screen.getByTestId("context-workbench-header")
+    expect(header).toHaveClass("h-9")
+    expect(header).not.toHaveClass("h-10")
+  })
+
   it("renders the header row into the host's outlet, past the activity rail", () => {
     const outlet = document.createElement("div")
     outlet.setAttribute("data-testid", "end-outlet")
@@ -2672,5 +2725,222 @@ describe("ContextWorkbench — a host-drawn tab strip (ADR-0214)", () => {
     renderWorkbench(PANELS)
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
     expect(screen.queryByRole("group", { name: "Views of this item" })).toBeNull()
+  })
+})
+
+describe("ContextWorkbench — host leadingActivities and layoutScopeKey", () => {
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+      retention: "stateful",
+    },
+    {
+      id: "host-search",
+      activity: "host-search",
+      labelKey: "contextWorkbench.panels.commentsTwo",
+      appliesTo: () => true,
+      renderer: () => <div>search-panel</div>,
+      retention: "stateful",
+    },
+    {
+      id: "host-files",
+      activity: "host-files",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>files-panel</div>,
+      retention: "stateful",
+    },
+  ]
+
+  function renderLeading(props: Partial<React.ComponentProps<typeof ContextWorkbench>> = {}) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={() => undefined}
+          leadingActivities={["host-files", "host-search"]}
+          {...props}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+  })
+
+  afterEach(clearAllMockExtensions)
+
+  const railActivities = () =>
+    [
+      ...screen
+        .getByTestId("context-workbench-activity-rail")
+        .querySelectorAll("[data-workbench-activity-button]"),
+    ].map((button) => button.getAttribute("data-testid"))
+
+  it("pins the host's activities at the head of the rail, in the given order", () => {
+    renderLeading({ railOnly: true })
+    expect(railActivities()).toEqual([
+      "workbench-activity-host-files",
+      "workbench-activity-host-search",
+      "workbench-activity-review",
+    ])
+  })
+
+  it("keeps pinned activities visible when the user's rail customization hides them", () => {
+    useSettingsStore.setState({
+      settings: {
+        workbenchRail: { order: ["review"], hidden: ["host-files", "review"] },
+      } as never,
+    })
+    renderLeading({ railOnly: true })
+    expect(railActivities()).toEqual([
+      "workbench-activity-host-files",
+      "workbench-activity-host-search",
+    ])
+  })
+
+  it("leads the tab strip with the pinned activities under the tabs style", () => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "tabs" })
+    const scope = "window-a::project:demo"
+    useContextWorkbenchStore.getState().activatePanel(scope, "review")
+    useContextWorkbenchStore.getState().activatePanel(scope, "host-search")
+    useContextWorkbenchStore.getState().activatePanel(scope, "host-files")
+    renderLeading({ layoutScopeKey: scope })
+
+    const tabs = within(screen.getByTestId("context-workbench-panel-tabs"))
+      .getAllByRole("tab")
+      .map((tab) => tab.getAttribute("aria-controls"))
+    expect(tabs).toEqual([
+      "context-workbench-panel-host-files",
+      "context-workbench-panel-host-search",
+      "context-workbench-panel-review",
+    ])
+  })
+
+  it("keeps one layout across resources when the host passes a layoutScopeKey", () => {
+    const scope = "window-a::project:demo"
+    const view = (res: ContextResource) => (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={res}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={() => undefined}
+          layoutScopeKey={scope}
+        />
+      </NextIntlClientProvider>
+    )
+    const { rerender } = render(view(resource))
+    fireEvent.click(screen.getByTestId("workbench-activity-host-search"))
+    expect(useContextWorkbenchStore.getState().layouts[scope]?.activePanelId).toBe("host-search")
+
+    // Another resource: the same view stays in front — nothing is keyed by it.
+    rerender(view({ ...resource, documentId: "doc-2" } as ContextResource))
+    expect(useContextWorkbenchStore.getState().layouts[scope]?.activePanelId).toBe("host-search")
+    expect(screen.getByText("search-panel")).toBeInTheDocument()
+    expect(
+      Object.keys(useContextWorkbenchStore.getState().layouts).some((key) => key.includes("doc-2"))
+    ).toBe(false)
+  })
+})
+
+describe("ContextWorkbench — host revealRequest", () => {
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+      retention: "stateful",
+    },
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>comments-panel</div>,
+      retention: "stateful",
+    },
+  ]
+
+  function Host({
+    railOnly,
+    request,
+    onEnsureVisible = () => undefined,
+  }: {
+    railOnly: boolean
+    request?: { panelId: string; seq: number }
+    onEnsureVisible?: () => void
+  }) {
+    return (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={() => undefined}
+          onEnsureVisible={onEnsureVisible}
+          railOnly={railOnly}
+          revealRequest={request}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+  })
+
+  afterEach(clearAllMockExtensions)
+
+  it("asks a folded host to open and brings the requested panel to the front", () => {
+    const onEnsureVisible = jest.fn()
+    const { rerender } = render(<Host railOnly onEnsureVisible={onEnsureVisible} />)
+    expect(onEnsureVisible).not.toHaveBeenCalled()
+
+    rerender(
+      <Host railOnly onEnsureVisible={onEnsureVisible} request={{ panelId: "comments", seq: 1 }} />
+    )
+    expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+    rerender(
+      <Host
+        railOnly={false}
+        onEnsureVisible={onEnsureVisible}
+        request={{ panelId: "comments", seq: 1 }}
+      />
+    )
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    // The same request never fires twice.
+    expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a panel already in front open when it is requested again", () => {
+    const { rerender } = render(<Host railOnly={false} request={{ panelId: "comments", seq: 1 }} />)
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    rerender(<Host railOnly={false} request={{ panelId: "comments", seq: 2 }} />)
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+  })
+
+  it("ignores a panel that does not apply to the resource", () => {
+    const onEnsureVisible = jest.fn()
+    render(
+      <Host railOnly onEnsureVisible={onEnsureVisible} request={{ panelId: "missing", seq: 1 }} />
+    )
+    expect(onEnsureVisible).not.toHaveBeenCalled()
   })
 })

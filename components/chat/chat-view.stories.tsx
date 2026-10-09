@@ -10,11 +10,15 @@ import { useChatStore } from "@/stores/chat"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 // ── The whole chat page in Storybook ───────────────────────────────────────
-// `ChatPane` (header + message list + composer) is fully props-driven, so it
-// renders in the real Storybook browser without the sidecar — unlike
-// `DesktopChatWorkspace`, which calls `useClaudeChat()` (Tauri listeners) at
-// mount. Storybook runs on the webpack framework (see .storybook/main.ts), so
-// the heavy chat graph resolves exactly like the real app — no per-dep stubbing.
+// `ChatPane` (header + message list + composer) renders from the chat store and
+// its props, plus the app-wide chat controller it reaches through
+// `useChatPaneRuntime()`. That controller needs the bootstrap-only
+// `ClaudeChatRuntimeProvider` (sidecar transport, Tauri listeners), so
+// .storybook/main.ts aliases the hook to `.storybook/mocks/use-chat-pane-runtime.ts`:
+// this pane owns the session's decisions and every runtime action (send,
+// approve, compact, …) is a spy logged to the Actions panel. Storybook runs on
+// the webpack framework (see .storybook/main.ts), so the heavy chat graph
+// resolves exactly like the real app — no per-dep stubbing.
 //
 // Each story SEEDS the real chat-store with a different conversation/state via
 // `seed()` so the variants exercise distinct render paths (streaming, tool

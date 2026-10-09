@@ -179,6 +179,16 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    // ADR-0220. Agents are local Dexie rows that account sync carries, like
+    // skills: every shell lists and edits its own, offline reads stay usable.
+    id: "agents",
+    route: "/agents",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
     id: "squads",
     route: "/squads",
     navigation: true,

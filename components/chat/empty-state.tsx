@@ -631,10 +631,13 @@ export function EmptyChatState({
   // ── Fullscreen: the centered welcome (mainstream AI entry — greeting, one
   // big composer, one wrap of prompt chips). Prototype variant A, promoted.
   // Every section below the composer is compressed so the box is the only
-  // thing competing for the eye; the usage dashboard sits below the fold.
+  // thing competing for the eye; recents (rich) and the usage dashboard sit in
+  // a band below the fold, peeking in at the bottom of the first screen.
   if (variant === "fullscreen") {
     const quietRecents = recents.slice(0, 3)
     const showChips = aiPrompts.length > 0 || charPrompts.length > 0 || showStarters
+    const richRecents = Boolean(showRecents && rich)
+    const dashboard = richRecents || Boolean(statsSlot)
     return (
       <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
         {/* Inline rich/minimal switch (desktop only). */}
@@ -654,228 +657,246 @@ export function EmptyChatState({
           </div>
         ) : null}
 
-        {/* Ambient bloom — texture only, carries no information. Rich style
-            only; minimal keeps the same layout with no decorative media. */}
-        {rich ? (
-          <div
-            aria-hidden
-            data-testid="welcome-bloom"
-            data-ambient-glow
-            className="pointer-events-none absolute left-1/2 top-[22%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.06] blur-3xl"
-          />
-        ) : null}
-
         {headerExtraSlot}
 
-        <motion.div
-          className="relative z-10 m-auto flex w-full max-w-[46rem] flex-col items-center gap-6 px-4 py-10"
-          initial={reduce ? false : "initial"}
-          animate="animate"
-          variants={STAGGER_CONTAINER}
+        {/* First screen: hero, composer and chips. With a dashboard below it
+            fills the viewport less a peek of the band, and the column sits on
+            2:3 spacers, the optical centre. Top-aligned, the composer landed
+            in the top third of a tall window while the ragged dashboard
+            filled the rest, so the whole page read top-heavy. With nothing
+            below, the spacers are equal and the column is simply centred. */}
+        <div
+          className={cn(
+            "relative flex w-full shrink-0 flex-col",
+            dashboard ? "min-h-[calc(100%-3.5rem)]" : "flex-1"
+          )}
+          data-testid="welcome-first-screen"
         >
+          {/* Ambient bloom — texture only, carries no information. Rich style
+              only; minimal keeps the same layout with no decorative media.
+              Centred behind the composer so the glow pulls the eye to the
+              box rather than above it. */}
+          {rich ? (
+            <div
+              aria-hidden
+              data-testid="welcome-bloom"
+              data-ambient-glow
+              className="pointer-events-none absolute left-1/2 top-[48%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.06] blur-3xl"
+            />
+          ) : null}
+          <div aria-hidden className={cn("min-h-6", dashboard ? "flex-[2]" : "flex-1")} />
+
           <motion.div
-            className="flex flex-col items-center gap-6"
-            variants={STAGGER_CHILD}
-            data-testid="welcome-hero"
+            className="relative z-10 mx-auto flex w-full max-w-[46rem] flex-col items-center gap-6 px-4 py-4"
+            initial={reduce ? false : "initial"}
+            animate="animate"
+            variants={STAGGER_CONTAINER}
           >
-            <div className="flex items-center gap-2.5">
-              <Image
-                src="/icons/icon-512.png"
-                alt=""
-                width={28}
-                height={28}
-                className="size-7 rounded-lg"
-              />
-              <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                {t("brandAlt")}
-              </span>
-            </div>
-            {/* One line, one job: the greeting IS the headline. No generic
+            <motion.div
+              className="flex flex-col items-center gap-6"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-hero"
+            >
+              <div className="flex items-center gap-2.5">
+                <Image
+                  src="/icons/icon-512.png"
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="size-7 rounded-lg"
+                />
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  {t("brandAlt")}
+                </span>
+              </div>
+              {/* One line, one job: the greeting IS the headline. No generic
                 subtitle — the composer's typewriter hints do that work. An
                 override subtitle is deliberate per-surface copy, so it still
                 renders. */}
-            <h2
-              className={cn(
-                "text-balance text-center font-semibold leading-[1.08] tracking-tight",
-                rich ? "text-4xl @lg:text-5xl" : "text-2xl @lg:text-3xl"
-              )}
-            >
-              {heading}
-            </h2>
-            {/* Rich only: today's date under the greeting — a fact the page
+              <h2
+                className={cn(
+                  "text-balance text-center font-semibold leading-[1.08] tracking-tight",
+                  rich ? "text-4xl @lg:text-5xl" : "text-2xl @lg:text-3xl"
+                )}
+              >
+                {heading}
+              </h2>
+              {/* Rich only: today's date under the greeting — a fact the page
                 can state that the composer's hints cannot, formatted by the
                 locale rather than spelled out in copy. */}
-            {rich ? (
-              <p
-                className="-mt-3 text-center text-sm text-muted-foreground tabular-nums"
-                data-testid="welcome-date"
-              >
-                {format.dateTime(now, { weekday: "long", month: "long", day: "numeric" })}
-              </p>
-            ) : null}
-            {override?.subtitle ? (
-              <p className="-mt-3 text-center text-sm text-muted-foreground text-pretty">
-                {override.subtitle}
-              </p>
-            ) : null}
-          </motion.div>
-
-          {/* The primary affordance: the live composer (floored at ~4 lines —
-              this surface's only job is that box), or the New chat button on
-              surfaces that render no composer. */}
-          {composerSlot || showHeroAction || executionControlsSlot ? (
-            <motion.div
-              className="w-full [&_textarea]:min-h-24 [&_[data-testid=composer-param-preview]]:min-h-24"
-              variants={STAGGER_CHILD}
-              data-testid={composerSlot ? "welcome-composer" : undefined}
-            >
-              {composerSlot ?? (
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {executionControlsSlot}
-                  {showHeroAction ? (
-                    <Button onClick={onCreate} className="gap-2">
-                      <PlusIcon className="size-4" aria-hidden />
-                      {t("newChat")}
-                    </Button>
-                  ) : null}
-                </div>
-              )}
-            </motion.div>
-          ) : null}
-
-          {/* Every prompt surface compressed into one wrapped chip row: AI
-              starters and character exemplars first, then the generic
-              starters, then the ✕ that dismisses the starter group. */}
-          {showChips ? (
-            <motion.div
-              className="flex flex-wrap items-center justify-center gap-2"
-              variants={STAGGER_CHILD}
-              data-testid="welcome-chips"
-            >
-              {aiPrompts.map((prompt, i) => (
-                <Suggestion
-                  key={`ai-${i}-${prompt.slice(0, 24)}`}
-                  suggestion={prompt}
-                  onClick={onUseSample}
-                  aria-label={prompt}
-                  className="max-w-[20rem] gap-2"
+              {rich ? (
+                <p
+                  className="-mt-3 text-center text-sm text-muted-foreground tabular-nums"
+                  data-testid="welcome-date"
                 >
-                  <SparklesIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
-                  <span className="truncate">{prompt}</span>
-                </Suggestion>
-              ))}
-              {charPrompts.map((prompt, i) => (
-                <Suggestion
-                  key={`char-${i}-${prompt.slice(0, 24)}`}
-                  suggestion={prompt}
-                  onClick={onUseSample}
-                  aria-label={prompt}
-                  className="max-w-[20rem] gap-2"
-                >
-                  <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="truncate">{prompt}</span>
-                </Suggestion>
-              ))}
-              {showStarters
-                ? starters.map(({ key, icon: Icon, title, prompt }) => (
-                    <Suggestion
-                      key={key}
-                      suggestion={prompt}
-                      onClick={onUseSample}
-                      aria-label={title}
-                      className="gap-2 text-muted-foreground hover:text-foreground"
-                    >
-                      <Icon className="size-3.5 shrink-0" aria-hidden />
-                      <span className="truncate">{title}</span>
-                    </Suggestion>
-                  ))
-                : null}
-              {showStarters && onDismissSection ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => onDismissSection("tryPrompt")}
-                  aria-label={t("dismiss")}
-                  className="size-6 shrink-0 text-muted-foreground/70 hover:text-foreground"
-                >
-                  <XIcon className="size-3.5" aria-hidden />
-                </Button>
+                  {format.dateTime(now, { weekday: "long", month: "long", day: "numeric" })}
+                </p>
+              ) : null}
+              {override?.subtitle ? (
+                <p className="-mt-3 text-center text-sm text-muted-foreground text-pretty">
+                  {override.subtitle}
+                </p>
               ) : null}
             </motion.div>
-          ) : null}
 
-          {quickActionsSlot ? (
-            <motion.div className="w-full" variants={STAGGER_CHILD}>
-              {quickActionsSlot}
-            </motion.div>
-          ) : null}
+            {/* The primary affordance: the live composer (floored at ~4 lines —
+              this surface's only job is that box), or the New chat button on
+              surfaces that render no composer. */}
+            {composerSlot || showHeroAction || executionControlsSlot ? (
+              <motion.div
+                className="w-full [&_textarea]:min-h-24 [&_[data-testid=composer-param-preview]]:min-h-24"
+                variants={STAGGER_CHILD}
+                data-testid={composerSlot ? "welcome-composer" : undefined}
+              >
+                {composerSlot ?? (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {executionControlsSlot}
+                    {showHeroAction ? (
+                      <Button onClick={onCreate} className="gap-2">
+                        <PlusIcon className="size-4" aria-hidden />
+                        {t("newChat")}
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </motion.div>
+            ) : null}
 
-          {/* Execution controls park under the composer they configure — no
+            {/* Every prompt surface compressed into one wrapped chip row: AI
+              starters and character exemplars first, then the generic
+              starters, then the ✕ that dismisses the starter group. */}
+            {showChips ? (
+              <motion.div
+                className="flex flex-wrap items-center justify-center gap-2"
+                variants={STAGGER_CHILD}
+                data-testid="welcome-chips"
+              >
+                {aiPrompts.map((prompt, i) => (
+                  <Suggestion
+                    key={`ai-${i}-${prompt.slice(0, 24)}`}
+                    suggestion={prompt}
+                    onClick={onUseSample}
+                    aria-label={prompt}
+                    className="max-w-[20rem] gap-2"
+                  >
+                    <SparklesIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+                    <span className="truncate">{prompt}</span>
+                  </Suggestion>
+                ))}
+                {charPrompts.map((prompt, i) => (
+                  <Suggestion
+                    key={`char-${i}-${prompt.slice(0, 24)}`}
+                    suggestion={prompt}
+                    onClick={onUseSample}
+                    aria-label={prompt}
+                    className="max-w-[20rem] gap-2"
+                  >
+                    <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="truncate">{prompt}</span>
+                  </Suggestion>
+                ))}
+                {showStarters
+                  ? starters.map(({ key, icon: Icon, title, prompt }) => (
+                      <Suggestion
+                        key={key}
+                        suggestion={prompt}
+                        onClick={onUseSample}
+                        aria-label={title}
+                        className="gap-2 text-muted-foreground hover:text-foreground"
+                      >
+                        <Icon className="size-3.5 shrink-0" aria-hidden />
+                        <span className="truncate">{title}</span>
+                      </Suggestion>
+                    ))
+                  : null}
+                {showStarters && onDismissSection ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => onDismissSection("tryPrompt")}
+                    aria-label={t("dismiss")}
+                    className="size-6 shrink-0 text-muted-foreground/70 hover:text-foreground"
+                  >
+                    <XIcon className="size-3.5" aria-hidden />
+                  </Button>
+                ) : null}
+              </motion.div>
+            ) : null}
+
+            {quickActionsSlot ? (
+              <motion.div className="w-full" variants={STAGGER_CHILD}>
+                {quickActionsSlot}
+              </motion.div>
+            ) : null}
+
+            {/* Execution controls park under the composer they configure — no
               "New chat" button here: the first send already creates the
               session, so a second control for the same outcome is redundant
               and discards the draft. */}
-          {composerSlot && executionControlsSlot ? (
-            <motion.div
-              className="flex w-full flex-wrap items-center justify-center gap-2"
-              variants={STAGGER_CHILD}
-              data-testid="welcome-actions"
-            >
-              {executionControlsSlot}
-            </motion.div>
-          ) : null}
+            {composerSlot && executionControlsSlot ? (
+              <motion.div
+                className="flex w-full flex-wrap items-center justify-center gap-2"
+                variants={STAGGER_CHILD}
+                data-testid="welcome-actions"
+              >
+                {executionControlsSlot}
+              </motion.div>
+            ) : null}
 
-          {/* Recents. Minimal demotes them to one quiet line of titles —
+            {/* Recents. Minimal demotes them to one quiet line of titles —
               present but never competing with the composer for the eye. Rich
               gives them a section of their own, with when each conversation
               was last touched, which is what makes the list worth reading
               rather than just a row of links. */}
-          {showRecents && !rich ? (
-            <motion.div
-              className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-              variants={STAGGER_CHILD}
-              data-testid="welcome-recents"
-              data-style="minimal"
-            >
-              <span>{t("sections.continue")}:</span>
-              {quietRecents.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => onResumeSession?.(s.id)}
-                  className="max-w-[14rem] truncate underline-offset-4 transition-colors hover:text-foreground hover:underline"
-                >
-                  {s.title}
-                </button>
-              ))}
-            </motion.div>
-          ) : null}
-          {showRecents && rich ? (
-            <motion.div
-              className="w-full pt-2"
-              variants={STAGGER_CHILD}
-              data-testid="welcome-recents"
-              data-style="rich"
-            >
-              <SectionHeading label={t("sections.continue")} />
-              <RecentSessionList
-                sessions={recents}
-                now={now}
-                onResume={(id) => onResumeSession?.(id)}
-                columns={2}
-              />
-            </motion.div>
-          ) : null}
-        </motion.div>
+            {showRecents && !rich ? (
+              <motion.div
+                className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                variants={STAGGER_CHILD}
+                data-testid="welcome-recents"
+                data-style="minimal"
+              >
+                <span>{t("sections.continue")}:</span>
+                {quietRecents.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onResumeSession?.(s.id)}
+                    className="max-w-[14rem] truncate underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                  >
+                    {s.title}
+                  </button>
+                ))}
+              </motion.div>
+            ) : null}
+          </motion.div>
+          <div aria-hidden className={cn("min-h-6", dashboard ? "flex-[3]" : "flex-1")} />
+        </div>
 
-        {/* Usage dashboard below the fold — the centered column stays the
-            first impression; the panel keeps its wider reading measure. */}
-        {statsSlot ? (
+        {/* The dashboard band: rich recents, then the usage panel. One width
+            and one left edge, the composer's, so the page hangs on a single
+            axis instead of three measures stacked under each other. */}
+        {dashboard ? (
           <div
-            className="mx-auto w-full max-w-[52rem] px-3 pb-8 sm:px-5"
-            data-testid="welcome-stats-slot"
+            className="relative z-10 mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-4 pb-10"
+            data-testid="welcome-dashboard"
           >
-            {statsSlot}
+            {richRecents ? (
+              <section className="w-full" data-testid="welcome-recents" data-style="rich">
+                <SectionHeading label={t("sections.continue")} />
+                <RecentSessionList
+                  sessions={recents}
+                  now={now}
+                  onResume={(id) => onResumeSession?.(id)}
+                  columns={2}
+                />
+              </section>
+            ) : null}
+            {statsSlot ? (
+              <div className="w-full" data-testid="welcome-stats-slot">
+                {statsSlot}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

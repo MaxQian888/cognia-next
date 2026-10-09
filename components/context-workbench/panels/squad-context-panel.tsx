@@ -13,9 +13,11 @@
  * the composer's job, one control, in the place you are already typing.
  */
 
+import { AgentTeamIcon, MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
+import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { UsersIcon, ShieldAlertIcon } from "lucide-react"
+import { ShieldAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -80,8 +82,8 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
   if (!squadId) {
     return (
       <Empty className="h-full rounded-none" data-testid="squad-panel-unbound">
-        <EmptyMedia variant="icon">
-          <UsersIcon />
+        <EmptyMedia>
+          <MobileSpotIcon name="agent-teams" size={96} />
         </EmptyMedia>
         <EmptyTitle className="text-sm">{t("unboundTitle")}</EmptyTitle>
         {/* Names where to change it rather than offering a second control for
@@ -94,8 +96,8 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
   if (!executor.squadName) {
     return (
       <Empty className="h-full rounded-none" data-testid="squad-panel-missing">
-        <EmptyMedia variant="icon">
-          <UsersIcon />
+        <EmptyMedia>
+          <MobileSpotIcon name="agent-teams" size={96} />
         </EmptyMedia>
         <EmptyTitle className="text-sm">{t("missingTitle")}</EmptyTitle>
         <EmptyDescription className="text-xs">{t("missingDescription")}</EmptyDescription>
@@ -106,7 +108,7 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
   return (
     <div className="flex h-full flex-col" data-testid="squad-panel">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <UsersIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <AgentTeamIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{executor.squadName}</span>
         <Badge variant="secondary" className="shrink-0 text-[10px]">
           {t("working", { count: liveCount })}
@@ -139,11 +141,12 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
           <div className="divide-y">
             {members.map((member) => (
               <Item key={member.id} size="sm" data-testid="squad-panel-member">
-                <ItemMedia>
+                <ItemMedia className="relative">
+                  <AgentTeamAvatar subject={member} className="size-8" />
                   <span
                     aria-hidden
                     className={cn(
-                      "size-2 shrink-0 rounded-full",
+                      "absolute bottom-0 right-0 size-2 rounded-full ring-2 ring-background",
                       STATUS_DOT[member.status],
                       LIVE_STATUSES.has(member.status) && "animate-pulse"
                     )}

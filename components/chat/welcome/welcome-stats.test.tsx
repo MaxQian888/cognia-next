@@ -22,8 +22,10 @@ jest.mock("@/hooks/usage/use-activity-stats", () => ({ useActivityStats: jest.fn
 
 // The heatmap has its own suite; a stub keeps this one about the dashboard.
 jest.mock("@/components/usage/usage-heatmap", () => ({
-  UsageHeatmap: ({ rangeDays }: { rangeDays: number }) => (
-    <div data-testid="mock-heatmap">{rangeDays}</div>
+  UsageHeatmap: ({ rangeDays, layout }: { rangeDays: number; layout?: string }) => (
+    <div data-testid="mock-heatmap" data-layout={layout}>
+      {rangeDays}
+    </div>
   ),
 }))
 
@@ -130,6 +132,8 @@ describe("<WelcomeStats />", () => {
     storeState.settings = { welcomeStats: { rangeDays: 7 } }
     render(<WelcomeStats />)
     expect(screen.getByTestId("mock-heatmap")).toHaveTextContent("7")
+    // The welcome panel is full-width; the strip fills it at every range.
+    expect(screen.getByTestId("mock-heatmap")).toHaveAttribute("data-layout", "strip")
   })
 
   it("skips the heatmap when it is turned off", () => {

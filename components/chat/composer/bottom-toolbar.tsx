@@ -43,11 +43,12 @@
 // rule with it (the rule is a `::before`, which `:empty` does not count), so a
 // default install never shows a rule with nothing on one side of it.
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { WebGlobalStatusInline, WebSessionStatus } from "@/components/shell/web-status"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { MoreHorizontalIcon, UsersIcon } from "lucide-react"
+import { MoreHorizontalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -383,7 +384,7 @@ function GenericBottomToolbar({
           )}
           data-testid="composer-executor-summary"
         >
-          <UsersIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
+          <AgentTeamIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
           <span className="min-w-0 truncate">
             {executor.squadName ?? tComposition("squadMissing")}
           </span>

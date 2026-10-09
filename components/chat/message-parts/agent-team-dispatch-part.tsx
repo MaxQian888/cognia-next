@@ -9,10 +9,11 @@
  * Phase 8 of the ClaudeCode 完整化 plan.
  */
 
+import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { ArrowRightIcon, ExternalLinkIcon, UsersIcon } from "lucide-react"
+import { ArrowRightIcon, ExternalLinkIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ToolRowShell } from "@/components/chat/message-parts/tool-row"
 import type { AgentTeamDispatchPart as DispatchPartType } from "@/lib/claude/parts-extensions"
@@ -51,7 +52,7 @@ export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
         testId={`agent-team-dispatch-row-${part.to}`}
         lead={
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <UsersIcon className="size-3 shrink-0" aria-hidden />
+            <AgentTeamIcon className="size-3 shrink-0" aria-hidden />
             <span className="min-w-0 max-w-[40%] truncate font-medium">
               {fromName ?? t("supervisor")}
             </span>

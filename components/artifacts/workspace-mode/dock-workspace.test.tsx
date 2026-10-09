@@ -299,10 +299,43 @@ jest.mock("@/components/editor/project/project-file-fallback", () => ({
   ProjectFileFallback: () => null,
 }))
 
-jest.mock("@/components/editor/project/project-context-workbench", () => ({
-  ProjectContextWorkbench: () => <div data-testid="project-context-workbench" />,
-  ProjectContextWorkbenchMobile: () => <div data-testid="project-context-workbench-mobile" />,
-}))
+jest.mock("@/components/editor/project/project-context-workbench", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  type View = "files" | "search"
+  // The sidebar's explorer and search panels: the rail's two buttons and the
+  // editor's reveal requests pick which parked view is in front.
+  function ProjectContextWorkbench({
+    projectViews,
+    revealRequest,
+    onActivePanelChange,
+  }: {
+    projectViews: Record<View, () => React.ReactNode>
+    revealRequest?: { panelId: string; seq: number }
+    onActivePanelChange?: (panelId: string) => void
+  }) {
+    const [active, setActive] = React.useState<string>("files")
+    React.useEffect(() => {
+      if (revealRequest) setActive(revealRequest.panelId)
+    }, [revealRequest])
+    React.useEffect(() => onActivePanelChange?.(active), [active, onActivePanelChange])
+    return (
+      <div data-testid="project-context-workbench">
+        <button data-testid="workbench-activity-project-files" onClick={() => setActive("files")} />
+        <button
+          data-testid="workbench-activity-project-search"
+          onClick={() => setActive("search")}
+        />
+        {active === "files" || active === "search" ? projectViews[active as View]() : null}
+      </div>
+    )
+  }
+  return {
+    ProjectContextWorkbench,
+    ProjectContextWorkbenchMobile: () => <div data-testid="project-context-workbench-mobile" />,
+    PROJECT_FILES_PANEL_ID: "files",
+    PROJECT_SEARCH_PANEL_ID: "search",
+  }
+})
 
 // Production mounts TooltipProvider in app/layout; the bare DockWorkspace
 // render needs the tooltip primitives to pass through instead of demanding it.
@@ -1099,7 +1132,7 @@ describe("DockWorkspace", () => {
 
     fireEvent.click(screen.getByTestId("file-tree"))
     expect(openFile).toHaveBeenCalledWith("src/tree.ts")
-    fireEvent.click(screen.getByTestId("left-tab-search"))
+    fireEvent.click(screen.getByTestId("workbench-activity-project-search"))
     fireEvent.click(screen.getByTestId("search-panel"))
     expect(openFile).toHaveBeenCalledWith("src/search.ts")
 
@@ -1107,8 +1140,8 @@ describe("DockWorkspace", () => {
     fireEvent.click(screen.getByTestId("action-file.copyPath"))
     fireEvent.click(screen.getByTestId("action-file.copyRelativePath"))
     fireEvent.click(screen.getByTestId("action-file.searchProject"))
-    fireEvent.click(screen.getByTestId("left-tab-files"))
-    fireEvent.click(screen.getByTestId("left-tab-search"))
+    fireEvent.click(screen.getByTestId("workbench-activity-project-files"))
+    fireEvent.click(screen.getByTestId("workbench-activity-project-search"))
 
     fireEvent.click(screen.getByText("change"))
     expect(setDraft).toHaveBeenCalledWith("src/a.ts", "updated")

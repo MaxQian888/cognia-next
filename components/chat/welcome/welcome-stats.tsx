@@ -448,14 +448,13 @@ export function WelcomeStats({ className, compact = false }: WelcomeStatsProps) 
             </div>
           ) : null}
           {prefs.heatmap ? (
-            <div className="overflow-x-auto pb-1">
-              <UsageHeatmap
-                daily={daily}
-                rangeDays={prefs.rangeDays}
-                now={now}
-                testIdPrefix="welcome-stats-heatmap"
-              />
-            </div>
+            <UsageHeatmap
+              daily={daily}
+              rangeDays={prefs.rangeDays}
+              now={now}
+              layout="strip"
+              testIdPrefix="welcome-stats-heatmap"
+            />
           ) : null}
         </div>
       )}

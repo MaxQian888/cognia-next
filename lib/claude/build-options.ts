@@ -2537,6 +2537,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // A coordinated project's coordinator and threads (ADR-0204): gates both the
   // project goal section below and the coordinator tool ruleset.
   const projectRoleToolsSurfaced = projectRoleToolsApply(session, ctx.activeProject)
+  // "Build with AI" on /agents (ADR-0220): the builder tools, their ruleset
+  // and the builder protocol, on the runtime and model the user picked.
+  const agentBuilderToolsSurfaced =
+    session?.kind === "agent-builder" && Boolean(session.agentBuilder)
   const systemPrompt = [
     baseSystem,
     personaSection,
@@ -2687,6 +2691,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const { buildMediaToolRuleset } = await import("@/lib/claude/permissions/media-tool-rules")
   const { buildProjectCoordinatorToolRuleset } =
     await import("@/lib/claude/permissions/project-coordinator-tool-rules")
+  const { buildAgentBuilderToolRuleset } =
+    await import("@/lib/claude/permissions/agent-builder-tool-rules")
   const mergedRuleset = mergeRulesets(
     editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
     sitesToolsSurfaced ? buildSiteToolRuleset() : undefined,
@@ -2695,6 +2701,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     petToolsSurfaced ? buildPetToolRuleset() : undefined,
     videoToolsSurfaced ? buildMediaToolRuleset() : undefined,
     projectRoleToolsSurfaced ? buildProjectCoordinatorToolRuleset() : undefined,
+    agentBuilderToolsSurfaced ? buildAgentBuilderToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
@@ -3791,6 +3798,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append project-coordinator built-in tools", {
         error: String(err),
       })
+    }
+  }
+  // Agent Builder (ADR-0220): same shape as project coordination above — tools,
+  // a session-stable protocol, and the live draft as a per-turn section.
+  if (agentBuilderToolsSurfaced && session) {
+    try {
+      const { resolveAgentBuilderSendExtras } = await import("@/lib/agents/builder/send-extras")
+      const { resolveAgentBuilderToolDeps } = await import("@/lib/agents/builder/tool-deps")
+      const extras = await resolveAgentBuilderSendExtras(
+        session,
+        resolveAgentBuilderToolDeps().catalogs
+      )
+      if (extras) {
+        opts.pluginTools = [...(opts.pluginTools ?? []), ...extras.pluginTools]
+        const existing = opts.appendSystemPrompt?.trim() ?? ""
+        opts.appendSystemPrompt = existing ? `${existing}\n\n${extras.protocol}` : extras.protocol
+        dynamicTailSections.push(extras.dynamicSection)
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append agent-builder built-in tools", { error: String(err) })
     }
   }
   // Team-collaboration tools — only on a team dispatch session, opt-in. Lets a
