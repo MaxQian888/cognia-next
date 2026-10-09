@@ -51,6 +51,7 @@ import {
   type ProjectEditorGotoDetail,
 } from "./editor-events"
 import type { TextSelectionCoordinates } from "@/types/context-workbench"
+import { EditorSelectionToolbar, type SelectionToolbarEditor } from "./editor-selection-toolbar"
 
 interface RevealableEditor {
   revealLineInCenter(line: number): void
@@ -104,6 +105,16 @@ interface Props {
    * `setModelLanguage`, and a fresh mount honors it too.
    */
   language?: string
+  /**
+   * The floating selection toolbar's actions. `onAddToChat` receives this
+   * editor (with two groups mounted it is not necessarily the active one).
+   * Omitted: no toolbar.
+   */
+  selectionActions?: {
+    onAddToChat: (editor: unknown) => void
+    onAskAi?: () => void
+    onComment?: () => void
+  }
 }
 
 export function ProjectMonaco({
@@ -120,6 +131,7 @@ export function ProjectMonaco({
   wordWrap = false,
   fontSize = 13,
   language,
+  selectionActions,
 }: Props) {
   // Shared theme path (DiffViewer, BlameView use the same hook): it keeps
   // re-syncing on palette/light-dark changes *after* mount, which the old
@@ -131,6 +143,7 @@ export function ProjectMonaco({
   const rawEditorRef = useRef<IMonacoEditor | null>(null)
   const monacoRef = useRef<MonacoNamespace | null>(null)
   const [diag, setDiag] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(null)
+  const [toolbarEditor, setToolbarEditor] = useState<SelectionToolbarEditor | null>(null)
   const nesDocumentRef = useRef<{ uri: string; version: number; savedContent: string } | null>(null)
 
   // Latest-value refs for everything read by a listener or an effect that must
@@ -367,6 +380,7 @@ export function ProjectMonaco({
       editor: editor as unknown as EditorLike,
     }
     setDiag(nextDiagnostics)
+    setToolbarEditor(editor as unknown as SelectionToolbarEditor)
     // registerMonaco both applies the theme now (the `theme` prop alone can
     // fire before the theme is defined) and stores the instance so the hook
     // keeps it in sync on palette/light-dark changes.
@@ -380,7 +394,7 @@ export function ProjectMonaco({
   return (
     <div className="flex h-full flex-col">
       <LspServerHint language={file.language} />
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <Editor
           // `path` swaps the model instead of remounting the editor, and
           // `keepCurrentModel` stops the library from disposing it — together
@@ -408,9 +422,25 @@ export function ProjectMonaco({
             padding: { top: 8 },
           }}
           onChange={(v) => onChange(v ?? "")}
+          // Define cognia-active before the editor exists: `theme={themeId}`
+          // applied at creation otherwise names a theme Monaco does not have
+          // yet, and the first frame paints in the stock theme.
+          beforeMount={(monaco) =>
+            registerMonaco(monaco as unknown as Parameters<typeof registerMonaco>[0])
+          }
           onMount={handleMount}
           height="100%"
         />
+        {toolbarEditor && selectionActions ? (
+          <EditorSelectionToolbar
+            editor={toolbarEditor}
+            actions={{
+              onAddToChat: () => selectionActions.onAddToChat(toolbarEditor),
+              onAskAi: selectionActions.onAskAi,
+              onComment: selectionActions.onComment,
+            }}
+          />
+        ) : null}
       </div>
       {!onDiagnosticsReady ? (
         <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />

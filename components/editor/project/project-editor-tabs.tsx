@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import type { OpenFile } from "./use-project-editor"
+import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 interface Props {
   density?: "compact" | "touch"
@@ -240,12 +241,16 @@ export function ProjectEditorTabs({
 
   return (
     <div
-      className="@container/editor-tabs flex min-w-0 shrink-0 items-center border-b"
+      className={cn(
+        "@container/editor-tabs flex min-w-0 shrink-0 items-center border-b",
+        density === "compact" && EDITOR_TITLE_ROW_CLASS
+      )}
       data-testid="project-editor-tabs"
     >
       <div
         ref={stripRef}
-        className="flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        // Stretched so each tab fills the row, its top accent on the row's edge.
+        className="flex min-w-0 flex-1 self-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
         aria-orientation="horizontal"
         onKeyDown={(event) => {

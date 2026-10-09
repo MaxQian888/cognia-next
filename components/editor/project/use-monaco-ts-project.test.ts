@@ -20,9 +20,13 @@ import {
   configureJsonLanguageService,
   configureTsLanguageService,
   isTsProjectFile,
+  MONACO_LANGUAGE_CONFIG_LEAK_THRESHOLD,
   packageNamesFromManifest,
+  pinModelLanguage,
   syncMonacoTsProject,
+  TS_PROJECT_MODEL_CAP,
   useMonacoTsProject,
+  disposeLingeringTsProjectSyncs,
   type MonacoProjectApi,
   type MonacoTsNamespace,
   type MonacoTsProjectDeps,
@@ -412,7 +416,11 @@ interface FakeModel {
   value: string
   language: string
   disposed: boolean
+  /** Mirrors the runtime `TextModel`: a live language selection until pinned to an id. */
+  liveSelection: boolean
   getValue(): string
+  getLanguageId(): string
+  setLanguage(languageId: string): void
   setValue(v: string): void
   isDisposed(): boolean
   dispose(): void
@@ -429,8 +437,16 @@ function makeMonaco() {
             value,
             language,
             disposed: false,
+            liveSelection: true,
             getValue() {
               return this.value
+            },
+            getLanguageId() {
+              return this.language
+            },
+            setLanguage(languageId: string) {
+              this.language = languageId
+              this.liveSelection = false
             },
             setValue(v: string) {
               this.value = v
@@ -452,6 +468,33 @@ function makeMonaco() {
   }
   return { api: api as unknown as MonacoProjectApi, models }
 }
+
+describe("pinModelLanguage", () => {
+  const model = (languageId: string) => ({
+    getValue: () => "",
+    setValue: jest.fn(),
+    isDisposed: () => false,
+    getLanguageId: () => languageId,
+    setLanguage: jest.fn(),
+  })
+
+  it("pins a model whose selection already resolved to the requested id", () => {
+    const m = model("typescript")
+    pinModelLanguage(m, "typescript")
+    expect(m.setLanguage).toHaveBeenCalledWith("typescript")
+  })
+
+  it("keeps the live selection when the language has not registered yet", () => {
+    const m = model("plaintext")
+    pinModelLanguage(m, "typescript")
+    expect(m.setLanguage).not.toHaveBeenCalled()
+  })
+
+  it("is a no-op on a model without the runtime setLanguage", () => {
+    const m = { getValue: () => "", setValue: jest.fn(), isDisposed: () => false }
+    expect(() => pinModelLanguage(m, "typescript")).not.toThrow()
+  })
+})
 
 describe("syncMonacoTsProject — model-backed mirror", () => {
   afterEach(() => resetMonacoModelRegistry())
@@ -485,6 +528,46 @@ describe("syncMonacoTsProject — model-backed mirror", () => {
     expect(jsLibs.has("file:///repo/package.json")).toBe(true)
     // The sync holds one workspace retain per model.
     expect(getModelRetainCount("file:///repo/src/a.ts")).toBe(1)
+  })
+
+  it("pins created mirror models to their language id, leaving editor-owned models live", async () => {
+    const { ts } = makeTs()
+    const { api, models } = makeMonaco()
+    const { deps } = makeDeps()
+    // An editor already holds a.ts — its model keeps whatever selection it was built with.
+    const editorOwned = api.editor.createModel(
+      "export const a = 1",
+      "typescript",
+      api.Uri.parse("file:///repo/src/a.ts")
+    ) as unknown as FakeModel
+    syncMonacoTsProject(ts, "/repo", deps, api)
+    await flush()
+    await flush()
+
+    // A live selection subscribes each model to LanguageService.onDidChange
+    // (leak threshold 200) — mirror models must drop it.
+    expect(models.get("file:///repo/src/b.tsx")?.liveSelection).toBe(false)
+    expect(models.get("file:///repo/package.json")?.liveSelection).toBe(false)
+    expect(models.get("file:///repo/src/b.tsx")?.language).toBe("typescript")
+    expect(editorOwned.liveSelection).toBe(true)
+  })
+
+  it("stops creating models at the cap, well under Monaco's listener-leak threshold", async () => {
+    // One `LanguageConfigurationService.onDidChange` listener per model: the
+    // mirror must leave room for the models editors and diff views add.
+    expect(MONACO_LANGUAGE_CONFIG_LEAK_THRESHOLD - TS_PROJECT_MODEL_CAP).toBeGreaterThanOrEqual(100)
+
+    const { ts, jsLibs } = makeTs()
+    const { api, models } = makeMonaco()
+    const { deps, files } = makeDeps()
+    for (let i = 0; i < TS_PROJECT_MODEL_CAP + 50; i++)
+      files.set(`gen/f${i}.ts`, `export const f${i} = ${i}`)
+    syncMonacoTsProject(ts, "/repo", deps, api)
+    for (let i = 0; i < 60; i++) await flush()
+
+    expect(models.size).toBe(TS_PROJECT_MODEL_CAP)
+    // Files past the cap still resolve, through the extra-lib floor.
+    expect(jsLibs.has("file:///repo/gen/f449.ts")).toBe(true)
   })
 
   it("a .jsx mirror feeds the TS worker as a lib while its model stays javascript", async () => {
@@ -684,6 +767,7 @@ describe("useMonacoTsProject", () => {
   }
 
   afterEach(() => {
+    disposeLingeringTsProjectSyncs()
     mockLoadConfiguredMonaco.mockReset()
   })
 
@@ -773,5 +857,102 @@ describe("useMonacoTsProject", () => {
     expect(deps.watch).not.toHaveBeenCalled()
     expect(tsLibs.size).toBe(0)
     expect(ts.typescriptDefaults.compilerOptions).toBeNull()
+  })
+
+  describe("keepAliveMs", () => {
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    it("a remount on the same root adopts the lingering sync instead of re-walking", async () => {
+      const { tsLibs } = makeLoadedMonaco()
+      const { deps, watchers } = makeDeps()
+      const first = renderHook(() => useMonacoTsProject("/repo", deps, { keepAliveMs: 60_000 }))
+      await settle()
+      expect(deps.walk).toHaveBeenCalledTimes(1)
+
+      first.unmount()
+      // Still mirrored and still watched while it lingers.
+      expect(tsLibs.get("file:///repo/src/a.ts")?.content).toBe("export const a = 1")
+      expect(watchers).toHaveLength(1)
+
+      renderHook(() => useMonacoTsProject("/repo", deps, { keepAliveMs: 60_000 }))
+      await settle()
+      expect(deps.walk).toHaveBeenCalledTimes(1)
+      expect(mockLoadConfiguredMonaco).toHaveBeenCalledTimes(1)
+      expect(watchers).toHaveLength(1)
+    })
+
+    it("disposes a lingering sync once the keep-alive runs out", async () => {
+      const { tsLibs } = makeLoadedMonaco()
+      const { deps, watchers } = makeDeps()
+      const { unmount } = renderHook(() =>
+        useMonacoTsProject("/repo", deps, { keepAliveMs: 1_000 })
+      )
+      await settle()
+      jest.useFakeTimers()
+      unmount()
+      expect(watchers).toHaveLength(1)
+      jest.advanceTimersByTime(1_000)
+      expect(watchers).toHaveLength(0)
+      expect(tsLibs.size).toBe(0)
+    })
+
+    it("still disposes at once when disabled — only an unmount lingers", async () => {
+      const { tsLibs } = makeLoadedMonaco()
+      const { deps, watchers } = makeDeps()
+      const { rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useMonacoTsProject("/repo", deps, { enabled, keepAliveMs: 60_000 }),
+        { initialProps: { enabled: true } }
+      )
+      await settle()
+      rerender({ enabled: false })
+      expect(watchers).toHaveLength(0)
+      expect(tsLibs.size).toBe(0)
+    })
+
+    it("never lets another root's mirror linger beside a live one", async () => {
+      makeLoadedMonaco()
+      const a = makeDeps()
+      const b = makeDeps()
+      const first = renderHook(() => useMonacoTsProject("/a", a.deps, { keepAliveMs: 60_000 }))
+      await settle()
+      first.unmount()
+      expect(a.watchers).toHaveLength(1)
+
+      // A fresh sync for another root drops the lingering one at once.
+      const second = renderHook(() => useMonacoTsProject("/b", b.deps, { keepAliveMs: 60_000 }))
+      await settle()
+      expect(a.watchers).toHaveLength(0)
+      expect(b.watchers).toHaveLength(1)
+
+      // And only one ever lingers: unmounting /b leaves /b, not both.
+      second.unmount()
+      expect(b.watchers).toHaveLength(1)
+      const third = renderHook(() => useMonacoTsProject("/a", a.deps, { keepAliveMs: 60_000 }))
+      await settle()
+      expect(b.watchers).toHaveLength(0)
+      expect(a.deps.walk).toHaveBeenCalledTimes(2)
+      third.unmount()
+    })
+
+    it("does not adopt a sync built from different deps", async () => {
+      makeLoadedMonaco()
+      const first = makeDeps()
+      const second = makeDeps()
+      const { unmount } = renderHook(() =>
+        useMonacoTsProject("/repo", first.deps, { keepAliveMs: 60_000 })
+      )
+      await settle()
+      unmount()
+
+      renderHook(() => useMonacoTsProject("/repo", second.deps, { keepAliveMs: 60_000 }))
+      await settle()
+      // The stale one went away; the new host walked with its own deps.
+      expect(first.watchers).toHaveLength(0)
+      expect(second.deps.walk).toHaveBeenCalledTimes(1)
+      expect(second.watchers).toHaveLength(1)
+    })
   })
 })

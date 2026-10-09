@@ -58,20 +58,29 @@ jest.mock("@tauri-apps/api/core", () => ({
 }))
 
 // Flatten Radix ContextMenu: trigger renders its child; content + items render
-// inline so tests can click them without a real pointer-driven menu.
+// inline so tests can click them without a real pointer-driven menu. A click
+// runs the item's onSelect and then the content's onCloseAutoFocus, the order
+// a real menu closes in (items that open a field defer to the latter).
 jest.mock("@/components/ui/context-menu", () => {
   const React = jest.requireActual<typeof import("react")>("react")
+  const CloseContext = React.createContext<((event: Event) => void) | undefined>(undefined)
   return {
     ContextMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     ContextMenuContent: ({
       children,
+      onCloseAutoFocus,
       ...rest
     }: {
       children: React.ReactNode
+      onCloseAutoFocus?: (event: Event) => void
       [key: string]: unknown
-    }) => <div {...rest}>{children}</div>,
-    ContextMenuItem: ({
+    }) => (
+      <CloseContext.Provider value={onCloseAutoFocus}>
+        <div {...rest}>{children}</div>
+      </CloseContext.Provider>
+    ),
+    ContextMenuItem: function MockContextMenuItem({
       children,
       onSelect,
       ...rest
@@ -79,11 +88,21 @@ jest.mock("@/components/ui/context-menu", () => {
       children: React.ReactNode
       onSelect?: () => void
       [key: string]: unknown
-    }) => (
-      <button type="button" onClick={onSelect} {...rest}>
-        {children}
-      </button>
-    ),
+    }) {
+      const onCloseAutoFocus = React.useContext(CloseContext)
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            onSelect?.()
+            onCloseAutoFocus?.(new Event("focus", { cancelable: true }))
+          }}
+          {...rest}
+        >
+          {children}
+        </button>
+      )
+    },
     ContextMenuSeparator: () => null,
     // Submenus flatten inline so template entries stay clickable in tests.
     ContextMenuSub: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -120,6 +139,7 @@ jest.mock("@/components/ui/alert-dialog", () => {
 
 import { ProjectFileTree, type ProjectFileTreeDeps } from "./project-file-tree"
 import type { WorkspaceEntry } from "@/lib/files/types"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 function entry(relPath: string, isDir: boolean): WorkspaceEntry {
   return { relPath, absolutePath: `/repo/${relPath}`, isDir, size: 0, mtimeMs: null }
@@ -698,6 +718,27 @@ describe("ProjectFileTree", () => {
     expect(row).not.toHaveClass("bg-primary/15")
     fireEvent.drop(root, { dataTransfer })
     fireEvent.drop(row, { dataTransfer })
+  })
+
+  it("sizes its toolbar to the editor's breadcrumb row on desktop", async () => {
+    const deps = makeDeps()
+    const { rerender } = render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toBeInTheDocument())
+    expect(screen.getByTestId("project-file-tree-toolbar")).toHaveClass(EDITOR_SUBTITLE_ROW_CLASS)
+    rerender(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        density="touch"
+      />
+    )
+    expect(screen.getByTestId("project-file-tree-toolbar")).not.toHaveClass(
+      EDITOR_SUBTITLE_ROW_CLASS
+    )
   })
 
   it("uses touch-sized rows and toolbar actions in touch density", async () => {

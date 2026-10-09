@@ -91,6 +91,7 @@ import type {
 } from "@/lib/files/workspace-fs"
 import { FILE_TEMPLATES, templateById, type FileTemplate } from "./file-templates"
 import { isImeComposing } from "@/lib/ui/ime"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 export interface ProjectFileTreeDeps {
   listDir: typeof listWorkspaceDir
@@ -259,6 +260,8 @@ export function ProjectFileTree({
   // Type-ahead buffer: chars within the window accumulate into a prefix
   // search; a stale buffer restarts.
   const typeaheadRef = useRef({ text: "", at: 0 })
+  // The workspace-root menu's field-opening items wait for it to close.
+  const rootMenuClose = useAfterMenuClose()
   const [pendingCreate, setPendingCreate] = useState<{
     parent: string
     kind: "file" | "folder"
@@ -1092,7 +1095,13 @@ export function ProjectFileTree({
 
   return (
     <div className="flex h-full flex-col" data-testid="project-file-tree">
-      <div className="flex items-center gap-0.5 border-b px-2 py-1">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-0.5 border-b px-2",
+          density === "compact" ? EDITOR_SUBTITLE_ROW_CLASS : "py-1"
+        )}
+        data-testid="project-file-tree-toolbar"
+      >
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
           {t("treeAria")}
         </span>
@@ -1238,8 +1247,8 @@ export function ProjectFileTree({
             </FileTree>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onSelect={() => startCreate("", "file")}>
+        <ContextMenuContent onCloseAutoFocus={rootMenuClose.onCloseAutoFocus}>
+          <ContextMenuItem onSelect={() => rootMenuClose.defer(() => startCreate("", "file"))}>
             <FilePlusIcon className="size-3.5" />
             {t("newFile")}
           </ContextMenuItem>
@@ -1249,14 +1258,14 @@ export function ProjectFileTree({
               {FILE_TEMPLATES.map((template) => (
                 <ContextMenuItem
                   key={template.id}
-                  onSelect={() => startCreate("", "file", template.id)}
+                  onSelect={() => rootMenuClose.defer(() => startCreate("", "file", template.id))}
                 >
                   {t(`templates.${template.id}`)}
                 </ContextMenuItem>
               ))}
             </ContextMenuSubContent>
           </ContextMenuSub>
-          <ContextMenuItem onSelect={() => startCreate("", "folder")}>
+          <ContextMenuItem onSelect={() => rootMenuClose.defer(() => startCreate("", "folder"))}>
             <FolderPlusIcon className="size-3.5" />
             {t("newFolder")}
           </ContextMenuItem>
@@ -1388,6 +1397,31 @@ function FailureRow({
   )
 }
 
+/**
+ * Defers a context-menu action until the menu has finished closing. The
+ * items that open an inline field (New File / New Folder / template / Rename)
+ * go through this: run from the item, the field took focus while the menu
+ * was still up, the menu handed focus back to its trigger as it unmounted,
+ * and the field's blur submitted the untouched value (a rename to the same
+ * name, or a dropped create) before a key was pressed. The pending action
+ * runs from the content's `onCloseAutoFocus`, which also stops that focus
+ * return.
+ */
+function useAfterMenuClose() {
+  const pendingRef = useRef<(() => void) | null>(null)
+  const defer = useCallback((action: () => void) => {
+    pendingRef.current = action
+  }, [])
+  const onCloseAutoFocus = useCallback((event: Event) => {
+    const action = pendingRef.current
+    if (!action) return
+    pendingRef.current = null
+    event.preventDefault()
+    action()
+  }, [])
+  return { defer, onCloseAutoFocus }
+}
+
 interface TreeRowProps {
   entry: WorkspaceEntry
   depth: number
@@ -1493,6 +1527,7 @@ function TreeRow({
 }: TreeRowProps) {
   const name = entry.relPath.split("/").pop() ?? entry.relPath
   const badge = entry.isDir ? dirGitStatus : gitStatus
+  const menuClose = useAfterMenuClose()
   return (
     <div>
       <ContextMenu>
@@ -1566,21 +1601,31 @@ function TreeRow({
             ) : null}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent data-testid={`tree-menu-${entry.relPath}`}>
+        <ContextMenuContent
+          data-testid={`tree-menu-${entry.relPath}`}
+          onCloseAutoFocus={menuClose.onCloseAutoFocus}
+        >
           {entry.isDir ? (
             <>
-              <ContextMenuItem onSelect={onNewFile}>{labels.newFile}</ContextMenuItem>
+              <ContextMenuItem onSelect={() => menuClose.defer(onNewFile)}>
+                {labels.newFile}
+              </ContextMenuItem>
               <ContextMenuSub>
                 <ContextMenuSubTrigger>{labels.newFromTemplate}</ContextMenuSubTrigger>
                 <ContextMenuSubContent>
                   {FILE_TEMPLATES.map((template) => (
-                    <ContextMenuItem key={template.id} onSelect={() => onNewFromTemplate(template)}>
+                    <ContextMenuItem
+                      key={template.id}
+                      onSelect={() => menuClose.defer(() => onNewFromTemplate(template))}
+                    >
                       {labels.templateLabel(template.id)}
                     </ContextMenuItem>
                   ))}
                 </ContextMenuSubContent>
               </ContextMenuSub>
-              <ContextMenuItem onSelect={onNewFolder}>{labels.newFolder}</ContextMenuItem>
+              <ContextMenuItem onSelect={() => menuClose.defer(onNewFolder)}>
+                {labels.newFolder}
+              </ContextMenuItem>
               {onFindInFolder || onRevealInSystem || onAddToChat ? <ContextMenuSeparator /> : null}
               {onFindInFolder ? (
                 <ContextMenuItem onSelect={onFindInFolder}>
@@ -1645,7 +1690,9 @@ function TreeRow({
             </>
           ) : null}
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={onRename}>{labels.rename}</ContextMenuItem>
+          <ContextMenuItem onSelect={() => menuClose.defer(onRename)}>
+            {labels.rename}
+          </ContextMenuItem>
           <ContextMenuItem onSelect={onDelete} className="text-destructive">
             {labels.delete}
           </ContextMenuItem>

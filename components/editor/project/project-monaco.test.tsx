@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
@@ -69,18 +69,37 @@ let cursorSelectionListener: ((event: unknown) => void) | null = null
 let capturedOnChange: ((v: string) => void) | null = null
 let editorProps: { path?: string; keepCurrentModel?: boolean } = {}
 let editorMountCount = 0
+// How many theme syncs had happened at the moment the editor was "created" —
+// i.e. after `beforeMount`, before `onMount` (the library's real order).
+let themeSyncsAtCreate: number | null = null
 const registryModels = new Map<
   string,
   { disposeCalls: number; isDisposed(): boolean; dispose(): void }
 >()
+jest.mock("./editor-selection-toolbar", () => ({
+  EditorSelectionToolbar: ({
+    editor,
+    actions,
+  }: {
+    editor: { getId(): string }
+    actions: { onAddToChat(): void; onAskAi?: () => void; onComment?: () => void }
+  }) => (
+    <div data-testid="selection-toolbar" data-editor={editor.getId()}>
+      <button data-testid="toolbar-add" onClick={actions.onAddToChat} />
+      {actions.onAskAi ? <button data-testid="toolbar-ask" onClick={actions.onAskAi} /> : null}
+    </div>
+  ),
+}))
 jest.mock("@monaco-editor/react", () => {
   const React = jest.requireActual<typeof import("react")>("react")
   const MockEditor = ({
+    beforeMount,
     onMount,
     onChange,
     path,
     keepCurrentModel,
   }: {
+    beforeMount?: (m: unknown) => void
     onMount: (e: unknown, m: unknown) => void
     onChange: (v: string) => void
     path?: string
@@ -107,15 +126,20 @@ jest.mock("@monaco-editor/react", () => {
           return { dispose: jest.fn() }
         },
       }
-      onMount(editor, {
+      const monacoNs = {
         editor: {
           setTheme,
           getModel: (uri: string) => registryModels.get(uri) ?? null,
         },
         Uri: { parse: (value: string) => value },
         languages: {},
-      })
-    }, [onMount])
+      }
+      beforeMount?.(monacoNs)
+      themeSyncsAtCreate = jest.requireMock<{ syncCogniaActiveTheme: jest.Mock }>(
+        "@/lib/canvas/themes/cognia-active-theme"
+      ).syncCogniaActiveTheme.mock.calls.length
+      onMount(editor, monacoNs)
+    }, [beforeMount, onMount])
     return React.createElement("div", { "data-testid": "monaco" })
   }
   return { __esModule: true, default: MockEditor }
@@ -377,6 +401,26 @@ describe("ProjectMonaco", () => {
     )
 
     expect(setTheme).toHaveBeenCalledWith("cognia-active")
+  })
+
+  it("defines the theme before the editor is created, so the first frame is not the stock theme", () => {
+    const { syncCogniaActiveTheme } = jest.requireMock<{ syncCogniaActiveTheme: jest.Mock }>(
+      "@/lib/canvas/themes/cognia-active-theme"
+    )
+    syncCogniaActiveTheme.mockClear()
+    themeSyncsAtCreate = null
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+
+    expect(themeSyncsAtCreate).toBe(1)
   })
 
   it("addresses the model by its file:// uri and keeps it on unmount", () => {
@@ -706,5 +750,47 @@ describe("ProjectMonaco", () => {
       />
     )
     expect(setTheme).toHaveBeenCalledWith("cognia-active")
+  })
+})
+
+describe("ProjectMonaco selection toolbar", () => {
+  it("floats the toolbar over the mounted editor and hands it that editor", async () => {
+    const onAddToChat = jest.fn()
+    const onAskAi = jest.fn()
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+        selectionActions={{ onAddToChat, onAskAi }}
+      />
+    )
+    const toolbar = await screen.findByTestId("selection-toolbar")
+    expect(toolbar).toHaveAttribute("data-editor", "ed1")
+
+    fireEvent.click(screen.getByTestId("toolbar-add"))
+    expect(onAddToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ getId: expect.any(Function) })
+    )
+    fireEvent.click(screen.getByTestId("toolbar-ask"))
+    expect(onAskAi).toHaveBeenCalledTimes(1)
+  })
+
+  it("draws no toolbar when the host offers no selection actions", async () => {
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    await waitFor(() => expect(editorMountCount).toBe(1))
+    expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument()
   })
 })

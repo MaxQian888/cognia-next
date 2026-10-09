@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
 
 import { ProjectEditorTabs } from "./project-editor-tabs"
 import type { OpenFile } from "./use-project-editor"
+import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 function file(relPath: string, dirty = false, externallyChanged = false): OpenFile {
   return {
@@ -307,6 +308,22 @@ describe("ProjectEditorTabs", () => {
       />
     )
     expect(screen.getByTitle("externallyChanged")).toBeInTheDocument()
+  })
+
+  it("sizes the strip to the editor's title row on desktop, to its controls on touch", () => {
+    const props = {
+      files: [file("src/a.ts")],
+      activePath: "src/a.ts",
+      dirtyCount: 0,
+      onSelect: jest.fn(),
+      onClose: jest.fn(),
+      onSaveAll: jest.fn(),
+    }
+    const { rerender } = render(<ProjectEditorTabs {...props} />)
+    // The sidebar header uses the same row height, so their rules line up.
+    expect(screen.getByTestId("project-editor-tabs")).toHaveClass(EDITOR_TITLE_ROW_CLASS)
+    rerender(<ProjectEditorTabs {...props} density="touch" />)
+    expect(screen.getByTestId("project-editor-tabs")).not.toHaveClass(EDITOR_TITLE_ROW_CLASS)
   })
 
   it("uses touch-sized tab controls in mobile density", () => {

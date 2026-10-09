@@ -24,6 +24,7 @@ jest.mock("next-intl", () => ({
 
 import { ProjectSearchPanel } from "./project-search-panel"
 import type { WorkspaceContentMatch } from "@/lib/files/types"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 const matches: WorkspaceContentMatch[] = [
   {
@@ -68,6 +69,18 @@ describe("ProjectSearchPanel", () => {
 
     fireEvent.click(screen.getByTestId("search-hit-src/b.ts-4"))
     expect(onOpenMatch).toHaveBeenCalledWith("src/b.ts", 4, 3)
+  })
+
+  it("sizes its search row to the editor's breadcrumb row on desktop", () => {
+    const deps = { search: jest.fn(async () => matches) }
+    const { rerender } = render(
+      <ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={deps} />
+    )
+    expect(screen.getByTestId("project-search-toolbar")).toHaveClass(EDITOR_SUBTITLE_ROW_CLASS)
+    rerender(
+      <ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={deps} density="touch" />
+    )
+    expect(screen.getByTestId("project-search-toolbar")).not.toHaveClass(EDITOR_SUBTITLE_ROW_CLASS)
   })
 
   it("uses touch-sized search controls in touch density", async () => {

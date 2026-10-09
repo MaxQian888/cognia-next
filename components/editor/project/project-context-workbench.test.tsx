@@ -16,13 +16,18 @@ jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
   useResourceWorkbenchSession: () => ({ id: "resource-session" }),
 }))
 
-import { ProjectContextWorkbench } from "./project-context-workbench"
+import {
+  PROJECT_FILES_PANEL_ID,
+  PROJECT_SEARCH_PANEL_ID,
+  ProjectContextWorkbench,
+} from "./project-context-workbench"
 import type { OpenFile } from "./use-project-editor"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import {
   getProjectFileResourceKey,
   proposeProjectFileUpdate,
 } from "@/lib/context-workbench/project-file-proposals"
+import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 function file(overrides: Partial<OpenFile> = {}): OpenFile {
   return {
@@ -47,6 +52,10 @@ function renderWorkbench(overrides: Partial<Parameters<typeof ProjectContextWork
     onCollapse: jest.fn(),
     onEnsureVisible: jest.fn(),
     onModeWidthHint: jest.fn(),
+    projectViews: {
+      files: () => <div data-testid="files-view" />,
+      search: () => <div data-testid="search-view" />,
+    },
     ...overrides,
   }
   return { props, ...render(<ProjectContextWorkbench {...props} />) }
@@ -90,13 +99,86 @@ describe("ProjectContextWorkbench", () => {
     expect(screen.queryByText("projectEditor.workbench.problems")).not.toBeInTheDocument()
   })
 
-  it("activates a default panel on first mount so the content pane is never empty", () => {
-    renderWorkbench({
-      scopeKey: "session:s-default",
-      file: file({ relPath: "src/main.ts", savedContent: "x", draftContent: "x" }),
+  it("opens on the explorer so the content pane is never empty", () => {
+    const onActivePanelChange = jest.fn()
+    renderWorkbench({ scopeKey: "session:s-default", onActivePanelChange })
+    // The explorer renders without any manual activity-rail click.
+    expect(screen.getByTestId("files-view")).toBeInTheDocument()
+    expect(onActivePanelChange).toHaveBeenLastCalledWith(PROJECT_FILES_PANEL_ID)
+  })
+
+  it("leads the rail with the explorer and search, peers of the file's views", () => {
+    renderWorkbench({ scopeKey: "session:s-order" })
+    const rail = screen.getByTestId("context-workbench-activity-rail")
+    const labels = Array.from(rail.querySelectorAll("button[aria-label]")).map((button) =>
+      button.getAttribute("aria-label")
+    )
+    const files = labels.indexOf("projectEditor.filesTab")
+    const search = labels.indexOf("projectEditor.searchTab")
+    const ai = labels.indexOf("projectEditor.workbench.ai")
+    expect(files).toBeGreaterThanOrEqual(0)
+    expect(search).toBe(files + 1)
+    expect(ai).toBeGreaterThan(search)
+
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.searchTab" }))
+    expect(screen.getByTestId("search-view")).toBeInTheDocument()
+  })
+
+  it("keeps one layout per project root: switching files keeps the view in front", () => {
+    const { rerender, props } = renderWorkbench({ scopeKey: "session:s-scope" })
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.workbench.inspect" }))
+    expect(screen.getByText("src/index.ts")).toBeInTheDocument()
+
+    rerender(
+      <ProjectContextWorkbench
+        {...props}
+        file={file({ relPath: "src/other.ts", absolutePath: "/repo/src/other.ts" })}
+      />
+    )
+    // Still on Inspect — now for the other file — not back on a default.
+    expect(screen.getByText("src/other.ts")).toBeVisible()
+    // The explorer stays mounted (stateful) but out of sight.
+    expect(screen.getByTestId("files-view")).not.toBeVisible()
+  })
+
+  it("keeps every view on the rail with no file, the file views asking for one", () => {
+    renderWorkbench({ scopeKey: "session:s-nofile", file: null })
+
+    expect(screen.getByTestId("files-view")).toBeInTheDocument()
+    for (const name of [
+      "projectEditor.searchTab",
+      "projectEditor.workbench.ai",
+      "projectEditor.workbench.comments",
+      "projectEditor.workbench.inspect",
+    ]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.workbench.ai" }))
+    expect(screen.getByTestId("project-context-no-file")).toHaveTextContent("noFile")
+    expect(screen.queryByText(/resource-chat-panel/)).not.toBeInTheDocument()
+  })
+
+  it("brings a view to the front on the host's reveal request", () => {
+    const onActivePanelChange = jest.fn()
+    const { rerender, props } = renderWorkbench({
+      scopeKey: "session:s-reveal",
+      onActivePanelChange,
     })
-    // The AI panel renders without any manual activity-rail click.
-    expect(screen.getByText("resource-chat-panel:x")).toBeInTheDocument()
+    rerender(
+      <ProjectContextWorkbench
+        {...props}
+        revealRequest={{ panelId: PROJECT_SEARCH_PANEL_ID, seq: 1 }}
+      />
+    )
+    expect(screen.getByTestId("search-view")).toBeInTheDocument()
+    expect(onActivePanelChange).toHaveBeenLastCalledWith(PROJECT_SEARCH_PANEL_ID)
+  })
+
+  it("sizes its header to the editor's tab strip", () => {
+    renderWorkbench({ scopeKey: "session:s-header" })
+    expect(screen.getByTestId("context-workbench-header")).toHaveClass(EDITOR_TITLE_ROW_CLASS)
+    // The workbench's own default height gives way rather than stacking.
+    expect(screen.getByTestId("context-workbench-header")).not.toHaveClass("h-10")
   })
 
   it("draws only the rail while the host has it folded", () => {

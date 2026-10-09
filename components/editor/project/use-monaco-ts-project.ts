@@ -28,7 +28,7 @@
 // drops it. Own saves emit the same events — disk truth is exactly what
 // the table should mirror, so no self-write grace applies here.
 
-import { useEffect } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 
 import { monacoLanguageFromPath } from "@/components/editor/editor-language"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
@@ -68,8 +68,19 @@ const TS_PROJECT_LIB_CAP = 1_000
  * one per file is the cost of project-wide diagnostics — so the cap
  * protects pathological checkouts; files beyond it fall back to
  * resolution-only extra libs.
+ *
+ * Also bounded by Monaco's listener-leak monitors: every model holds one
+ * listener on `LanguageConfigurationService.onDidChange`, whose leak threshold
+ * is 500 — at the old cap of 500 the mirror alone tripped it and Monaco threw
+ * "potential listener LEAK detected". 400 leaves room for the models open
+ * editors, diff views and the canvas create on the same Monaco instance.
+ * (`LanguageService.onDidChange`, threshold 200, is not a bound: mirror models
+ * drop that subscription through `pinModelLanguage`.)
  */
-const TS_PROJECT_MODEL_CAP = 500
+export const TS_PROJECT_MODEL_CAP = 400
+
+/** `LanguageConfigurationService.onDidChange`'s leak threshold in monaco-editor 0.57. */
+export const MONACO_LANGUAGE_CONFIG_LEAK_THRESHOLD = 500
 
 /** Files larger than this stay extra libs — a giant generated file is not worth a model. */
 const TS_PROJECT_MODEL_BYTES = 512 * 1024
@@ -491,11 +502,34 @@ interface MonacoModelUri {
   toString(): string
 }
 
-/** The slice of an `ITextModel` the project mirror needs. */
+/**
+ * The slice of an `ITextModel` the project mirror needs. `getLanguageId`
+ * and `setLanguage` are optional: `setLanguage` exists on the runtime
+ * `TextModel` but not in monaco's public typings, so the pin below is
+ * guarded structurally.
+ */
 interface ProjectModel {
   getValue(): string
   setValue(value: string): void
   isDisposed(): boolean
+  getLanguageId?(): string
+  setLanguage?(languageId: string): void
+}
+
+/**
+ * `editor.createModel` builds every model on a live `LanguageSelection`,
+ * which subscribes the model to `LanguageService.onDidChange` — an emitter
+ * with a 200-listener leak threshold. A few hundred mirror models trip it
+ * and monaco reports "[LanguageService._onDidChange] potential listener
+ * LEAK detected" as an unexpected error. Passing `setLanguage` a plain id
+ * drops that subscription. Only an already-resolved id is pinned: a model
+ * created before its language registered resolves to `plaintext` and keeps
+ * the live selection so it can flip once the language arrives.
+ */
+export function pinModelLanguage(model: ProjectModel, languageId: string): void {
+  if (typeof model.setLanguage !== "function" || typeof model.getLanguageId !== "function") return
+  if (model.getLanguageId() !== languageId) return
+  model.setLanguage(languageId)
 }
 
 /** The slice of `monaco.editor` used to build workspace models. */
@@ -657,9 +691,14 @@ export function syncMonacoTsProject(
       const parsed = monaco.Uri.parse(uri)
       retainModel(uri)
       const existing = monaco.editor.getModel(parsed)
+      let model = existing
+      if (!model) {
+        const language = monacoLanguageFromPath(relPath)
+        model = monaco.editor.createModel(content, language, parsed)
+        pinModelLanguage(model, language)
+      }
       models.set(relPath, {
-        model:
-          existing ?? monaco.editor.createModel(content, monacoLanguageFromPath(relPath), parsed),
+        model,
         // An already-open model holds the editor's truth, not ours.
         content: existing ? existing.getValue() : content,
       })
@@ -780,6 +819,97 @@ interface UseMonacoTsProjectOptions {
    * `false` disposes a running sync; flipping back starts a fresh one.
    */
   enabled?: boolean
+  /**
+   * Keep a running sync alive this long after the host *unmounts*, so a host
+   * that comes straight back to the same root adopts it instead of re-walking
+   * the workspace and rebuilding every model. Defaults to `0` (dispose on
+   * unmount).
+   *
+   * The chat dock is the case this exists for: a collapsed dock drops its
+   * body (`useDockContentMounted` in `artifact-workspace-dock.tsx`), so every
+   * collapse → expand remounted the project editor and paid a full walk, up to
+   * `TS_PROJECT_LIB_CAP` file reads and `TS_PROJECT_MODEL_CAP` model builds,
+   * in the very frames the dock was trying to animate open. The watcher stays
+   * attached while the sync lingers, so the adopted mirror is still current.
+   *
+   * Disabling (`enabled: false`) and moving to another root still dispose at
+   * once: only an unmount lingers.
+   */
+  keepAliveMs?: number
+}
+
+/**
+ * How long the project editor keeps its sync after unmounting — long enough
+ * to cover a dock collapse/expand or a quick hop to another panel, short
+ * enough that an abandoned root's models do not outstay their welcome.
+ */
+export const TS_PROJECT_KEEP_ALIVE_MS = 60_000
+
+/** A sync whose host unmounted, waiting `keepAliveMs` for one to come back. */
+interface LingeringTsProjectSync {
+  sync: { dispose(): void }
+  deps: MonacoTsProjectDeps
+  timer: ReturnType<typeof setTimeout>
+}
+
+/**
+ * Keyed by root. Holds at most ONE sync in practice: lingering a second root,
+ * or starting a fresh sync for any root, disposes the rest. Two mirrors side by
+ * side would hold up to twice `TS_PROJECT_MODEL_CAP` models on one Monaco
+ * instance, past `MONACO_LANGUAGE_CONFIG_LEAK_THRESHOLD` — exactly the
+ * listener-leak report the model cap exists to stay under.
+ */
+const lingeringTsProjectSyncs = new Map<string, LingeringTsProjectSync>()
+
+/** Dispose every lingering sync except the one for `keepRoot`, if given. */
+function disposeLingeringTsProjectSyncsExcept(keepRoot: string | null): void {
+  for (const [root, entry] of lingeringTsProjectSyncs) {
+    if (root === keepRoot) continue
+    lingeringTsProjectSyncs.delete(root)
+    clearTimeout(entry.timer)
+    entry.sync.dispose()
+  }
+}
+
+function sameTsProjectDeps(left: MonacoTsProjectDeps, right: MonacoTsProjectDeps): boolean {
+  return left.readFile === right.readFile && left.watch === right.watch && left.walk === right.walk
+}
+
+/** Take the lingering sync for `rootPath` if it was built from the same deps. */
+function adoptLingeringTsProjectSync(
+  rootPath: string,
+  deps: MonacoTsProjectDeps
+): { dispose(): void } | null {
+  // Whatever happens below, this root is about to hold a live mirror; no other
+  // root's may linger beside it.
+  disposeLingeringTsProjectSyncsExcept(rootPath)
+  const entry = lingeringTsProjectSyncs.get(rootPath)
+  if (!entry) return null
+  lingeringTsProjectSyncs.delete(rootPath)
+  clearTimeout(entry.timer)
+  if (sameTsProjectDeps(entry.deps, deps)) return entry.sync
+  entry.sync.dispose()
+  return null
+}
+
+function lingerTsProjectSync(
+  rootPath: string,
+  deps: MonacoTsProjectDeps,
+  sync: { dispose(): void },
+  keepAliveMs: number
+): void {
+  disposeLingeringTsProjectSyncsExcept(null)
+  const timer = setTimeout(() => {
+    if (lingeringTsProjectSyncs.get(rootPath)?.sync !== sync) return
+    lingeringTsProjectSyncs.delete(rootPath)
+    sync.dispose()
+  }, keepAliveMs)
+  lingeringTsProjectSyncs.set(rootPath, { sync, deps, timer })
+}
+
+/** Test seam: dispose every lingering sync now. */
+export function disposeLingeringTsProjectSyncs(): void {
+  disposeLingeringTsProjectSyncsExcept(null)
 }
 
 /**
@@ -795,41 +925,71 @@ export function useMonacoTsProject(
 ): void {
   const { readFile, watch, walk } = deps
   const enabled = options.enabled ?? true
+  const keepAliveMs = options.keepAliveMs ?? 0
+  /**
+   * The latest `enabled`/root/keep-alive, read by the effect's cleanup to tell
+   * an unmount (still enabled, same root — linger) from a disable or a root
+   * change (dispose now). A layout effect, so it is current before the passive
+   * cleanup of the same commit runs.
+   */
+  const latestRef = useRef({ enabled, rootPath, keepAliveMs })
+  const mountedRef = useRef(true)
+  useLayoutEffect(() => {
+    latestRef.current = { enabled, rootPath, keepAliveMs }
+  })
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   useEffect(() => {
     if (!rootPath || !enabled) return
-    let sync: { dispose(): void } | null = null
+    const syncDeps: MonacoTsProjectDeps = { readFile, watch, walk }
+    let sync: { dispose(): void } | null = adoptLingeringTsProjectSync(rootPath, syncDeps)
     let cancelled = false
-    void loadConfiguredMonaco().then((monaco) => {
-      if (cancelled || !monaco) return
-      const languages = (
-        monaco as {
-          languages?: { typescript?: MonacoTsNamespace; json?: MonacoJsonNamespace }
+    if (!sync) {
+      void loadConfiguredMonaco().then((monaco) => {
+        if (cancelled || !monaco) return
+        const languages = (
+          monaco as {
+            languages?: { typescript?: MonacoTsNamespace; json?: MonacoJsonNamespace }
+          }
+        ).languages
+        const ts = languages?.typescript
+        if (ts?.typescriptDefaults) {
+          configureTsLanguageService(ts)
+          // The editor API surface is optional on the loaded namespace —
+          // guard structurally so a monaco build without `editor.createModel`
+          // falls back to the lib-only mirror rather than crashing.
+          const api = monaco as {
+            Uri?: MonacoProjectApi["Uri"]
+            editor?: Partial<MonacoProjectApi["editor"]>
+          }
+          sync = syncMonacoTsProject(
+            ts,
+            rootPath,
+            syncDeps,
+            api?.editor?.createModel && api?.Uri?.parse ? (api as MonacoProjectApi) : undefined
+          )
         }
-      ).languages
-      const ts = languages?.typescript
-      if (ts?.typescriptDefaults) {
-        configureTsLanguageService(ts)
-        // The editor API surface is optional on the loaded namespace —
-        // guard structurally so a monaco build without `editor.createModel`
-        // falls back to the lib-only mirror rather than crashing.
-        const api = monaco as {
-          Uri?: MonacoProjectApi["Uri"]
-          editor?: Partial<MonacoProjectApi["editor"]>
+        if (languages?.json?.jsonDefaults) {
+          configureJsonLanguageService(languages.json)
         }
-        sync = syncMonacoTsProject(
-          ts,
-          rootPath,
-          { readFile, watch, walk },
-          api?.editor?.createModel && api?.Uri?.parse ? (api as MonacoProjectApi) : undefined
-        )
-      }
-      if (languages?.json?.jsonDefaults) {
-        configureJsonLanguageService(languages.json)
-      }
-    })
+      })
+    }
     return () => {
       cancelled = true
-      sync?.dispose()
+      if (!sync) return
+      // `mountedRef` is cleared by a layout cleanup, which React runs before
+      // the passive cleanups of the same unmount.
+      const latest = latestRef.current
+      const unmounting = !mountedRef.current
+      if (unmounting && latest.keepAliveMs > 0 && latest.enabled && latest.rootPath === rootPath) {
+        lingerTsProjectSync(rootPath, syncDeps, sync, latest.keepAliveMs)
+      } else {
+        sync.dispose()
+      }
     }
   }, [rootPath, enabled, readFile, watch, walk])
 }

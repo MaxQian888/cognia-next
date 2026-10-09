@@ -1,10 +1,13 @@
 /**
- * @jest-environment node
+ * @jest-environment jsdom
  */
 import type { ThemeColors as AppearanceColors } from "@/types/plugin/plugin"
 import {
   buildCogniaActiveEditorTheme,
   COGNIA_ACTIVE_THEME_ID,
+  isWallpaperBehindEditors,
+  readLiveSurfaceColors,
+  resetCogniaActiveThemeSyncForTests,
   syncCogniaActiveTheme,
 } from "./cognia-active-theme"
 import { themeRegistry } from "./theme-registry"
@@ -51,8 +54,9 @@ describe("buildCogniaActiveEditorTheme", () => {
     expect(theme.colors.background).toBe("#ffffff")
     expect(theme.colors.foreground).toBe("#0f172a")
     expect(theme.colors.cursor).toBe("#0f172a")
-    // Minimap clears fully transparent so a wallpaper shows through the canvas.
-    expect(theme.colors.minimap).toBe("#ffffff00")
+    // The minimap canvas sits over the view lines — it must stay opaque or
+    // long lines bleed through it.
+    expect(theme.colors.minimap).toBe("#ffffff")
     expect(theme.colors.gutterBackground).toBe("#ffffff")
   })
 
@@ -103,13 +107,115 @@ describe("buildCogniaActiveEditorTheme", () => {
     expect(theme.colors.lineHighlight).toMatch(/^#[0-9a-f]{6}$/i)
   })
 
+  it("turns the minimap 80% opaque only when a wallpaper paints behind editors", () => {
+    const theme = buildCogniaActiveEditorTheme(makeAppearance(), "light", {
+      wallpaperBehind: true,
+    })
+    expect(theme.colors.minimap).toBe("#ffffffcc")
+  })
+
   it("emits empty tokenColors so toMonacoTheme inherits syntax highlighting from base", () => {
     const theme = buildCogniaActiveEditorTheme(makeAppearance(), "dark")
     expect(theme.tokenColors).toEqual([])
   })
 })
 
+function clearLiveDom() {
+  for (const v of ["--background", "--foreground", "--muted-foreground", "--border", "--primary"]) {
+    document.documentElement.style.removeProperty(v)
+  }
+  document.body.removeAttribute("data-bg-enabled")
+  document.body.removeAttribute("data-bg-scope")
+}
+
+describe("readLiveSurfaceColors / isWallpaperBehindEditors", () => {
+  afterEach(clearLiveDom)
+
+  it("reads only the surface tokens the page is painted with", () => {
+    document.documentElement.style.setProperty("--background", "oklch(0.145 0 0)")
+    document.documentElement.style.setProperty("--border", "#222222")
+    document.documentElement.style.setProperty("--primary", "#ffffff")
+    // Accents stay the caller's: the default preset's `--primary` is a button
+    // neutral that would wash out selections.
+    expect(readLiveSurfaceColors()).toEqual({
+      background: "oklch(0.145 0 0)",
+      border: "#222222",
+    })
+  })
+
+  it("is empty when the variables are unset", () => {
+    expect(readLiveSurfaceColors()).toEqual({})
+  })
+
+  it("detects a wallpaper only for the scopes that clear Monaco's background", () => {
+    expect(isWallpaperBehindEditors()).toBe(false)
+    document.body.setAttribute("data-bg-enabled", "true")
+    document.body.setAttribute("data-bg-scope", "chat")
+    expect(isWallpaperBehindEditors()).toBe(false)
+    for (const scope of ["canvas", "all", "global"]) {
+      document.body.setAttribute("data-bg-scope", scope)
+      expect(isWallpaperBehindEditors()).toBe(true)
+    }
+    document.body.setAttribute("data-bg-enabled", "false")
+    expect(isWallpaperBehindEditors()).toBe(false)
+  })
+})
+
 describe("syncCogniaActiveTheme", () => {
+  afterEach(() => {
+    resetCogniaActiveThemeSyncForTests()
+    clearLiveDom()
+    jest.useRealTimers()
+  })
+
+  it("paints the editor in the DOM's live background, not the resolved palette's", () => {
+    // Default preset: the palette resolves navy, the DOM paints globals.css neutral.
+    document.documentElement.style.setProperty("--background", "#0a0a0a")
+    const defineTheme = jest.fn()
+    syncCogniaActiveTheme(
+      { editor: { defineTheme } },
+      makeAppearance({ background: "#0b1220" }),
+      "dark"
+    )
+    const [, data] = defineTheme.mock.calls[0]
+    expect(data.colors["editor.background"]).toBe("#0a0a0a")
+    expect(data.colors["minimap.background"]).toBe("#0a0a0a")
+    // Accents still come from the resolved palette.
+    expect(data.colors["editor.selectionBackground"]).toBe("#3b82f655")
+  })
+
+  it("re-syncs when the painted DOM changes after the caller ran, without looping", async () => {
+    jest.useFakeTimers()
+    const defineTheme = jest.fn()
+    syncCogniaActiveTheme({ editor: { defineTheme } }, makeAppearance(), "dark")
+    expect(defineTheme).toHaveBeenCalledTimes(1)
+
+    // next-themes flips the class / variables after the editor's effect ran.
+    document.documentElement.style.setProperty("--background", "#101010")
+    await Promise.resolve() // deliver the MutationObserver record
+    jest.runOnlyPendingTimers()
+    expect(defineTheme).toHaveBeenCalledTimes(2)
+    expect(defineTheme.mock.calls[1][1].colors["editor.background"]).toBe("#101010")
+
+    // A mutation that changes nothing painted (Monaco rewriting its own
+    // <style>) must not redefine.
+    document.head.appendChild(document.createElement("style"))
+    await Promise.resolve()
+    jest.runOnlyPendingTimers()
+    expect(defineTheme).toHaveBeenCalledTimes(2)
+  })
+
+  it("follows the wallpaper toggle on <body>", async () => {
+    jest.useFakeTimers()
+    const defineTheme = jest.fn()
+    syncCogniaActiveTheme({ editor: { defineTheme } }, makeAppearance(), "light")
+    document.body.setAttribute("data-bg-enabled", "true")
+    document.body.setAttribute("data-bg-scope", "all")
+    await Promise.resolve()
+    jest.runOnlyPendingTimers()
+    expect(defineTheme.mock.calls.at(-1)?.[1].colors["minimap.background"]).toBe("#ffffffcc")
+  })
+
   it("registers the theme on themeRegistry and calls monaco.editor.defineTheme", () => {
     const defineTheme = jest.fn()
     const monaco = { editor: { defineTheme } }

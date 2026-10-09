@@ -59,7 +59,7 @@ export function ProjectEditorBreadcrumbs({
   const prefixes = segments.map((_, i) => segments.slice(0, i).join("/"))
 
   return (
-    <Breadcrumb className="border-b px-3 py-1" data-testid="project-editor-breadcrumbs">
+    <Breadcrumb className="py-1" data-testid="project-editor-breadcrumbs">
       <BreadcrumbList className="flex-nowrap gap-0.5 text-xs sm:gap-0.5">
         <BreadcrumbItem>
           <SegmentDropdown

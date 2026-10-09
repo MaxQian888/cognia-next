@@ -18,9 +18,7 @@ import {
   FileIcon,
   FilesIcon,
   FolderSearchIcon,
-  PanelLeftCloseIcon,
   PanelLeftIcon,
-  PanelLeftOpenIcon,
   RotateCcwIcon,
   SaveIcon,
   SearchIcon,
@@ -53,7 +51,6 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { usePanelRef } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
 import type { EditorTabMode } from "@/lib/editor-workbench/editor-tab-model"
 import {
@@ -103,16 +100,22 @@ import {
   type UseProjectEditorArgs,
 } from "./use-project-editor"
 import { useProjectGitStatus, type ProjectGitStatusDeps } from "./use-project-git-status"
-import { useMonacoTsProject } from "./use-monaco-ts-project"
+import { TS_PROJECT_KEEP_ALIVE_MS, useMonacoTsProject } from "./use-monaco-ts-project"
 import { ProjectProblemsPanel } from "./project-problems-panel"
-import { ProjectContextWorkbench, ProjectContextWorkbenchMobile } from "./project-context-workbench"
+import {
+  ProjectContextWorkbench,
+  ProjectContextWorkbenchMobile,
+  PROJECT_FILES_PANEL_ID,
+  PROJECT_SEARCH_PANEL_ID,
+  type ProjectViews,
+} from "./project-context-workbench"
+import { ParkedView, ParkedViewSlot, useParkedViewTarget } from "./parked-view"
 import type { ContextPanelMode, TextSelectionCoordinates } from "@/types/context-workbench"
 import {
   CONTEXT_WORKBENCH_DEFAULT_WIDTH,
   CONTEXT_WORKBENCH_MIN_WIDTH,
 } from "@/stores/context-workbench/context-workbench-store"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
-import { useElementWidth } from "@/hooks/use-element-width"
 import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 import { useChatStore } from "@/stores/chat"
@@ -122,8 +125,23 @@ import { revealInExplorer } from "@/lib/tauri/opener"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 import { isTauri } from "@/lib/platform/detect"
 import { claimNativeMenuAction } from "@/lib/desktop/menu-focus-claims"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 export type ProjectEditorWorkbenchLayout = "split" | "mobile"
+
+/**
+ * The desktop sidebar as the hook's commands see it. Implemented by the
+ * component over the file context workbench, whose Files and Search panels
+ * are the explorer.
+ */
+export interface ProjectSidebarController {
+  /** Open the sidebar (if folded) on the explorer or project search. */
+  show(view: "files" | "search"): void
+  /** ⌘B: fold the sidebar to its rail, or bring it back. */
+  toggle(): void
+  /** Whether `view` is the panel on screen right now. */
+  isShowing(view: "files" | "search"): boolean
+}
 
 interface UseProjectEditorWorkbenchArgs extends UseProjectEditorArgs {
   beforeOpen?: () => void
@@ -181,21 +199,20 @@ export function useProjectEditorWorkbench({
   const [sideTab, setSideTab] = useState<"files" | "search">("files")
   const [mobilePane, setMobilePane] = useState<"files" | "search" | "editor">("files")
   const [quickOpen, setQuickOpen] = useState(false)
-  // The panel ref lives here (not in the component) so the ⇧⌘F chord can
-  // expand a collapsed sidebar the same way the rail's own buttons do.
-  const sidebarPanelRef = usePanelRef()
+  // The sidebar (the file context workbench, whose Files and Search panels are
+  // the explorer) is the component's to render; this controller is how the
+  // hook's commands — ⌘B, ⇧⌘F, reveal in explorer — reach it. The component
+  // fills it in once mounted.
+  const sidebarRef = useRef<ProjectSidebarController | null>(null)
   // Explorer reveal lives at hook level: the palette's "reveal active file"
   // command and gotoLine's soft reveal need it, not just the component.
   const [revealRequest, setRevealRequest] = useState<{ path: string; nonce: number } | null>(null)
-  const revealInTree = useCallback(
-    (relPath: string) => {
-      setSideTab("files")
-      setMobilePane("files")
-      sidebarPanelRef.current?.expand()
-      setRevealRequest({ path: relPath, nonce: Date.now() })
-    },
-    [sidebarPanelRef]
-  )
+  const revealInTree = useCallback((relPath: string) => {
+    setSideTab("files")
+    setMobilePane("files")
+    sidebarRef.current?.show("files")
+    setRevealRequest({ path: relPath, nonce: Date.now() })
+  }, [])
   /**
    * Reveal only when the explorer is already on screen — the way VS Code
    * scrolls the tree to a navigated-to file without yanking the sidebar out
@@ -203,10 +220,13 @@ export function useProjectEditorWorkbench({
    */
   const softRevealInTree = useCallback(
     (relPath: string) => {
-      if (sideTab !== "files") return
+      const explorerShown = mobile
+        ? sideTab === "files"
+        : (sidebarRef.current?.isShowing("files") ?? false)
+      if (!explorerShown) return
       setRevealRequest({ path: relPath, nonce: Date.now() })
     },
-    [sideTab]
+    [mobile, sideTab]
   )
 
   // Destructive gates (dirty close, overwrite-on-save, revert) surface as an
@@ -782,18 +802,19 @@ export function useProjectEditorWorkbench({
         run: saveActive,
       },
       {
+        // Palette and keybinding only: Monaco's own "Format Document" is in
+        // the right-click menu whenever the language has a formatter.
         id: "file.format",
         label: actionLabels["file.format"],
         monacoCommand: "editor.action.formatDocument",
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 2,
         alwaysAvailable: true,
       },
       {
         id: "file.copyPath",
         label: actionLabels["file.copyPath"],
+        // After Monaco's own Cut (1) / Copy (2) / Paste (4), not between them.
         contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 1,
+        contextMenuOrder: 10,
         alwaysAvailable: true,
         run: () => {
           if (activeFile) void navigator.clipboard?.writeText(activeFile.absolutePath)
@@ -803,7 +824,7 @@ export function useProjectEditorWorkbench({
         id: "file.copyRelativePath",
         label: actionLabels["file.copyRelativePath"],
         contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 2,
+        contextMenuOrder: 11,
         alwaysAvailable: true,
         run: () => {
           if (activeFile) void navigator.clipboard?.writeText(activeFile.relPath)
@@ -817,6 +838,7 @@ export function useProjectEditorWorkbench({
         run: () => {
           setSideTab("search")
           setMobilePane("search")
+          sidebarRef.current?.show("search")
         },
       },
     ],
@@ -874,13 +896,10 @@ export function useProjectEditorWorkbench({
     setQuickOpen(true)
   }, [])
 
-  /** ⌘B — collapse the sidebar to its rail, or bring it back. */
+  /** ⌘B — fold the sidebar to its rail, or bring it back. */
   const toggleSidebar = useCallback(() => {
-    const panel = sidebarPanelRef.current
-    if (!panel) return
-    if (panel.isCollapsed()) panel.expand()
-    else panel.collapse()
-  }, [sidebarPanelRef])
+    sidebarRef.current?.toggle()
+  }, [])
 
   /** ⌘1 / ⌘2 — VS Code focuses the group, and ⌘2 creates it when missing. */
   const focusOrCreateGroup = useCallback(
@@ -1004,7 +1023,7 @@ export function useProjectEditorWorkbench({
         consume()
         setSideTab("search")
         setMobilePane("search")
-        sidebarPanelRef.current?.expand()
+        sidebarRef.current?.show("search")
         return
       }
       // Ctrl(+Shift)+Tab — cycle tabs in MRU order, like VS Code's quick
@@ -1108,7 +1127,6 @@ export function useProjectEditorWorkbench({
       reopenClosedFile,
       saveActive,
       saveEveryFile,
-      sidebarPanelRef,
       splitEditor,
       toggleSidebar,
       togglePreview,
@@ -1126,7 +1144,7 @@ export function useProjectEditorWorkbench({
     setSideTab,
     mobilePane,
     setMobilePane,
-    sidebarPanelRef,
+    sidebarRef,
     quickOpen,
     setQuickOpen,
     quickOpenSeed,
@@ -1196,18 +1214,6 @@ interface ProjectEditorFileWorkbenchProps {
   onSendToChat?: (selection: FileSelectionRef) => void
 }
 
-/** Sidebar collapse threshold — the rail alone is 40px wide. */
-const RAIL_WIDTH_PX = 40
-
-/**
- * Narrowest workbench that seats the explorer, a usable editor and the file
- * context workbench side by side (explorer ~25% + editor ~300px + the context
- * workbench's 360px default). The workbench lives in the chat's right dock —
- * 480px at its floor, roughly 540–900px in practice — so below this only one
- * of the two side panels stays open: opening one folds the other.
- */
-const SIDE_PANELS_MIN_WIDTH_PX = 880
-
 /** The file context workbench's "wide" preset, as a share of the workbench. */
 const CONTEXT_PANEL_WIDE_PERCENT = 60
 
@@ -1239,7 +1245,10 @@ export function ProjectEditorFileWorkbench({
   const t = useTranslations("projectEditor")
   const showKeyboardHints = useShowKeyboardHints()
   const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // The sidebar panel in front (Files, Search, AI, …), mirrored from the file
+  // context workbench, and the reveal requests sent to it.
+  const [activeSidePanel, setActiveSidePanel] = useState<string | null>(null)
+  const [sideReveal, setSideReveal] = useState<{ panelId: string; seq: number } | undefined>()
   const [cursor, setCursor] = useState<{
     relPath: string
     lineNumber: number
@@ -1286,9 +1295,8 @@ export function ProjectEditorFileWorkbench({
     setMonacoReadHandles,
     setQuickOpen,
     openQuickOpen,
-    sideTab,
     setSideTab,
-    sidebarPanelRef,
+    sidebarRef,
     splitEditor,
     splitVisible,
     focusGroup,
@@ -1338,13 +1346,44 @@ export function ProjectEditorFileWorkbench({
   // until the user opens it — a narrow dock should not hand a third of its
   // width to a panel nobody asked for.
   const contextWorkbenchOpen = useProjectEditorSessionStore(
-    (state) => state.sessions[editor.scopeKey]?.contextWorkbenchOpen === true
+    // Open unless the user folded it: the sidebar holds the explorer, which
+    // shows by default (VS Code).
+    (state) => state.sessions[editor.scopeKey]?.contextWorkbenchOpen !== false
   )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
   const setContextWorkbenchOpen = useCallback(
     (open: boolean) => setEditorSession(editor.scopeKey, { contextWorkbenchOpen: open }),
     [editor.scopeKey, setEditorSession]
   )
+
+  const revealSidePanel = useCallback((panelId: string) => {
+    setSideReveal((previous) => ({ panelId, seq: (previous?.seq ?? 0) + 1 }))
+  }, [])
+  // Read by the controller below at call time, never captured stale.
+  const sideStateRef = useRef({ open: contextWorkbenchOpen, active: activeSidePanel })
+  useEffect(() => {
+    sideStateRef.current = { open: contextWorkbenchOpen, active: activeSidePanel }
+  }, [activeSidePanel, contextWorkbenchOpen])
+  useEffect(() => {
+    const panelIdOf = (view: "files" | "search") =>
+      view === "files" ? PROJECT_FILES_PANEL_ID : PROJECT_SEARCH_PANEL_ID
+    sidebarRef.current = {
+      // The workbench opens itself through `onEnsureVisible` when folded.
+      show: (view) => revealSidePanel(panelIdOf(view)),
+      toggle: () => setContextWorkbenchOpen(!sideStateRef.current.open),
+      isShowing: (view) =>
+        sideStateRef.current.open && sideStateRef.current.active === panelIdOf(view),
+    }
+    return () => {
+      sidebarRef.current = null
+    }
+  }, [revealSidePanel, setContextWorkbenchOpen, sidebarRef])
+  // `sideTab` remembers the last project view for the mobile panes and the
+  // command palette; on desktop it follows the sidebar.
+  useEffect(() => {
+    if (activeSidePanel === PROJECT_FILES_PANEL_ID) setSideTab("files")
+    else if (activeSidePanel === PROJECT_SEARCH_PANEL_ID) setSideTab("search")
+  }, [activeSidePanel, setSideTab])
 
   // Project-wide script checking: the TS worker's file table mirrors the
   // workspace (open models still shadow their lib — drafts stay live).
@@ -1354,7 +1393,10 @@ export function ProjectEditorFileWorkbench({
   useMonacoTsProject(
     rootPath,
     { readFile: deps.readFile, watch: deps.watch, walk: quickOpenDeps?.walk },
-    { enabled: layout !== "mobile" }
+    // Lingers past an unmount: the chat dock drops this editor on every
+    // collapse, and re-expanding must not re-walk the repo and rebuild its
+    // models in the frames the dock animates open.
+    { enabled: layout !== "mobile", keepAliveMs: TS_PROJECT_KEEP_ALIVE_MS }
   )
 
   // A cold open moves `activePath` synchronously but the file only exists in
@@ -1670,8 +1712,8 @@ export function ProjectEditorFileWorkbench({
   const openSearchPane = useCallback(() => {
     setSideTab("search")
     setMobilePane("search")
-    sidebarPanelRef.current?.expand()
-  }, [setMobilePane, setSideTab, sidebarPanelRef])
+    sidebarRef.current?.show("search")
+  }, [setMobilePane, setSideTab, sidebarRef])
 
   // ---- context-menu / agent linkage -----------------------------------------
   //
@@ -1692,6 +1734,13 @@ export function ProjectEditorFileWorkbench({
     (name: string) => toast.success(t("agent.addedToChat", { name })),
     [t]
   )
+  // A read that fails (deleted on disk, a lost remote host) must say so —
+  // "Add to chat" used to do nothing at all.
+  const failStaged = useCallback(
+    (relPath: string) =>
+      toast.error(t("agent.addToChatFailed", { name: relPath.split("/").pop() || relPath })),
+    [t]
+  )
 
   const stageFileToChat = useCallback(
     (relPath: string) => {
@@ -1700,12 +1749,14 @@ export function ProjectEditorFileWorkbench({
         relPath,
         draftContent: chatDraftOf(relPath),
         deps: fileChatDeps,
-      }).then((sel) => {
-        sendToChat(sel)
-        confirmStaged(sel.title)
       })
+        .then((sel) => {
+          sendToChat(sel)
+          confirmStaged(sel.title)
+        })
+        .catch(() => failStaged(relPath))
     },
-    [chatDraftOf, confirmStaged, fileChatDeps, rootPath, sendToChat]
+    [chatDraftOf, confirmStaged, failStaged, fileChatDeps, rootPath, sendToChat]
   )
 
   const stageEntryToChat = useCallback(
@@ -1734,12 +1785,14 @@ export function ProjectEditorFileWorkbench({
         marker,
         draftContent: chatDraftOf(relPath),
         deps: fileChatDeps,
-      }).then((sel) => {
-        sendToChat(sel)
-        confirmStaged(sel.title)
       })
+        .then((sel) => {
+          sendToChat(sel)
+          confirmStaged(sel.title)
+        })
+        .catch(() => failStaged(relPath))
     },
-    [chatDraftOf, confirmStaged, fileChatDeps, rootPath, sendToChat]
+    [chatDraftOf, confirmStaged, failStaged, fileChatDeps, rootPath, sendToChat]
   )
 
   const stageMarkersToChat = useCallback(
@@ -1794,12 +1847,14 @@ export function ProjectEditorFileWorkbench({
           : undefined,
         selectedText: range ? model?.getValueInRange?.(range) : undefined,
         deps: fileChatDeps,
-      }).then((sel) => {
-        sendToChat(sel)
-        confirmStaged(sel.title)
       })
+        .then((sel) => {
+          sendToChat(sel)
+          confirmStaged(sel.title)
+        })
+        .catch(() => failStaged(relPath))
     },
-    [chatDraftOf, confirmStaged, fileChatDeps, rootPath, sendToChat]
+    [chatDraftOf, confirmStaged, failStaged, fileChatDeps, rootPath, sendToChat]
   )
 
   /**
@@ -1892,20 +1947,18 @@ export function ProjectEditorFileWorkbench({
   )
 
   /**
-   * The text-area right-click menu — VS Code's group layout:
-   * navigation → modification → clipboard → command palette. The built-in ids
-   * were verified against monaco-editor@0.56 (`editor.action.goToReferences`,
-   * `editor.action.rename`, `editor.action.changeAll`, `editor.action.quickCommand`
-   * for the Command Palette). The custom "Add to Chat" action's `run` receives
-   * the editor instance the user clicked — with two groups mounted that is not
+   * The workbench's additions to the text-area right-click menu, in VS Code's
+   * group layout (navigation → modification → clipboard → commands). Monaco's
+   * own language items — Go to Definition/References/Implementations, Rename
+   * Symbol, Change All Occurrences, Format Document/Selection, Command Palette
+   * — are already in that menu, shown when the language supports them and
+   * labelled with their shortcuts; re-registering them here only listed them
+   * twice. The custom "Add to Chat" action's `run` receives the editor
+   * instance the user clicked — with two groups mounted that is not
    * necessarily the active one, so the model URI names the file.
    */
   const editorActionLabels = useMemo(
     () => ({
-      "workbench.goToReferences": t("action.goToReferences"),
-      "workbench.goToImplementation": t("action.goToImplementation"),
-      "workbench.renameSymbol": t("action.renameSymbol"),
-      "workbench.changeAll": t("action.changeAllOccurrences"),
       "workbench.addSelectionToChat": t("action.addSelectionToChat"),
       "workbench.addFileToChat": t("action.addFileToChat"),
       "workbench.commandPalette": t("command.palette"),
@@ -1918,43 +1971,13 @@ export function ProjectEditorFileWorkbench({
   const editorContextActions = useMemo<EditorActionDef[]>(
     () => [
       {
-        id: "workbench.goToReferences",
-        label: editorActionLabels["workbench.goToReferences"],
-        monacoCommand: "editor.action.goToReferences",
-        contextMenuGroupId: "navigation",
-        contextMenuOrder: 3,
-        alwaysAvailable: true,
-      },
-      {
-        id: "workbench.goToImplementation",
-        label: editorActionLabels["workbench.goToImplementation"],
-        monacoCommand: "editor.action.goToImplementation",
-        contextMenuGroupId: "navigation",
-        contextMenuOrder: 4,
-        alwaysAvailable: true,
-      },
-      {
-        id: "workbench.renameSymbol",
-        label: editorActionLabels["workbench.renameSymbol"],
-        monacoCommand: "editor.action.rename",
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 1,
-        alwaysAvailable: true,
-      },
-      {
-        id: "workbench.changeAll",
-        label: editorActionLabels["workbench.changeAll"],
-        monacoCommand: "editor.action.changeAll",
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 2,
-        alwaysAvailable: true,
-      },
-      {
         id: "workbench.addSelectionToChat",
         label: editorActionLabels["workbench.addSelectionToChat"],
         run: (ed) => stageEditorSelectionToChat(ed),
-        contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 4,
+        // Their own section, between the clipboard and the command palette
+        // (groups sort by id).
+        contextMenuGroupId: "9z_chat",
+        contextMenuOrder: 1,
         alwaysAvailable: true,
       },
       {
@@ -1963,19 +1986,18 @@ export function ProjectEditorFileWorkbench({
         run: () => {
           if (activePath) stageFileToChat(activePath)
         },
-        contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 5,
+        contextMenuGroupId: "9z_chat",
+        contextMenuOrder: 2,
         alwaysAvailable: true,
       },
       {
-        // The workbench palette, not Monaco's own F1 list: this item carries
-        // the workbench palette's label and ⇧⌘P opens the workbench palette,
-        // so the menu must too. Monaco's editor commands stay on F1.
+        // The workbench palette (⇧⌘P) from Monaco's F1 list. Not in the
+        // right-click menu: Monaco's own "Command Palette" (its F1 list of
+        // editor commands, these actions included) already sits there, and a
+        // second palette entry beside it read as a duplicate.
         id: "workbench.commandPalette",
         label: editorActionLabels["workbench.commandPalette"],
         run: () => openQuickOpen(">"),
-        contextMenuGroupId: "z_commands",
-        contextMenuOrder: 1,
         alwaysAvailable: true,
       },
       // Keybinding-only actions (no context-menu group): Monaco owns ⌘K as a
@@ -2294,10 +2316,14 @@ export function ProjectEditorFileWorkbench({
 
   const filesVisible =
     active &&
-    (layout === "mobile" ? mobilePane === "files" : sideTab === "files" && !sidebarCollapsed)
+    (layout === "mobile"
+      ? mobilePane === "files"
+      : contextWorkbenchOpen && activeSidePanel === PROJECT_FILES_PANEL_ID)
   const searchVisible =
     active &&
-    (layout === "mobile" ? mobilePane === "search" : sideTab === "search" && !sidebarCollapsed)
+    (layout === "mobile"
+      ? mobilePane === "search"
+      : contextWorkbenchOpen && activeSidePanel === PROJECT_SEARCH_PANEL_ID)
   // Selection/caret state belongs to the editor. Reuse these elements until
   // their own inputs change so every caret move does not redraw the tree.
   const fileTree = useMemo(
@@ -2365,7 +2391,13 @@ export function ProjectEditorFileWorkbench({
   // the viewer registry can render — a plain .ts editor never shows it.
   const breadcrumbsFor = (file: OpenFile | null) =>
     file ? (
-      <div className="flex items-center border-b border-border/60 pl-3 pr-1">
+      <div
+        className={cn(
+          "flex shrink-0 items-center border-b pl-3 pr-1",
+          layout !== "mobile" && EDITOR_SUBTITLE_ROW_CLASS
+        )}
+        data-testid="project-editor-title-row"
+      >
         <div className="min-w-0 flex-1">
           <ProjectEditorBreadcrumbs
             rootPath={rootPath}
@@ -2744,7 +2776,24 @@ export function ProjectEditorFileWorkbench({
   // of the editor's resizable group it is bounded by the dock, keeps its pixel
   // width while the dock is dragged, and folds to its 48px rail.
   const contextPanelRef = usePanelRef()
-  const hasContextPanel = contextFile !== null && !zen && layout !== "mobile"
+  // Mounted whether or not a file is open: it is also the explorer, and a
+  // panel that came and went with the first/last open file (or a blocked one)
+  // resized the editor every time.
+  const hasContextPanel = !zen && layout !== "mobile"
+  // The explorer and search render once, here, and are adopted into their
+  // sidebar panels — folding the sidebar unmounts its body, and must not cost
+  // the tree its expanded folders or the search its query.
+  const filesViewTarget = useParkedViewTarget()
+  const searchViewTarget = useParkedViewTarget()
+  const projectViews = useMemo<ProjectViews>(
+    () => ({
+      files: () => <ParkedViewSlot target={filesViewTarget} testId="project-editor-files-view" />,
+      search: () => (
+        <ParkedViewSlot target={searchViewTarget} testId="project-editor-search-view" />
+      ),
+    }),
+    [filesViewTarget, searchViewTarget]
+  )
   // The width to unfold back to; read only from effects and callbacks.
   const lastContextWidthRef = useRef(CONTEXT_WORKBENCH_DEFAULT_WIDTH)
   // A width request that arrived while the sidebar was folded, applied on unfold.
@@ -2808,41 +2857,6 @@ export function ProjectEditorFileWorkbench({
     },
     [contextPanelRef]
   )
-
-  // One side panel at a time in a dock too narrow for both: the one opened
-  // last stays, the other folds to its rail. With no transition to go on (both
-  // restored open), the context workbench — an explicit, persisted choice —
-  // keeps its place over the explorer's default.
-  const workbenchRef = useRef<HTMLDivElement | null>(null)
-  const workbenchWidth = useElementWidth(workbenchRef)
-  const tooNarrowForBothSides = workbenchWidth > 0 && workbenchWidth < SIDE_PANELS_MIN_WIDTH_PX
-  const lastOpenedSideRef = useRef<"explorer" | "context">("context")
-  const previousSidesRef = useRef({
-    explorerOpen: !sidebarCollapsed,
-    contextOpen: contextWorkbenchOpen,
-  })
-  useEffect(() => {
-    const explorerOpen = !sidebarCollapsed
-    const previous = previousSidesRef.current
-    if (explorerOpen && !previous.explorerOpen) lastOpenedSideRef.current = "explorer"
-    if (contextWorkbenchOpen && !previous.contextOpen) lastOpenedSideRef.current = "context"
-    previousSidesRef.current = { explorerOpen, contextOpen: contextWorkbenchOpen }
-    if (!tooNarrowForBothSides || !hasContextPanel || !explorerOpen || !contextWorkbenchOpen) return
-    // A frame later: leaving zen remounts both side panels in this very
-    // commit, and neither handle answers until the group has registered it.
-    const frame = requestAnimationFrame(() => {
-      if (lastOpenedSideRef.current === "context") sidebarPanelRef.current?.collapse()
-      else setContextWorkbenchOpen(false)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [
-    contextWorkbenchOpen,
-    hasContextPanel,
-    setContextWorkbenchOpen,
-    sidebarCollapsed,
-    sidebarPanelRef,
-    tooNarrowForBothSides,
-  ])
 
   if (layout === "mobile") {
     // One strip for every open file: the mobile pane flow renders a single
@@ -3083,146 +3097,13 @@ export function ProjectEditorFileWorkbench({
     )
   }
 
-  const railButtonClass = (active: boolean) =>
-    cn(
-      "relative flex size-8 items-center justify-center rounded-md transition-colors",
-      active
-        ? "bg-accent text-foreground"
-        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-      // VS Code's signature: a short accent strip on the rail's outer edge
-      // marks the view that owns the open panel.
-      active &&
-        "before:absolute before:top-1 before:bottom-1 before:-left-1 before:w-0.5 before:rounded-full before:bg-primary"
-    )
-
-  const selectSideTab = (tab: "files" | "search") => {
-    if (sideTab === tab && !sidebarCollapsed) {
-      sidebarPanelRef.current?.collapse()
-      return
-    }
-    setSideTab(tab)
-    sidebarPanelRef.current?.expand()
+  // The floating selection toolbar: the selection to the chat, or to the
+  // sidebar's AI / Comments panels (which already read the live selection).
+  const selectionActions = {
+    onAddToChat: stageEditorSelectionToChat,
+    onAskAi: hasContextPanel ? () => revealSidePanel("ai") : undefined,
+    onComment: hasContextPanel ? () => revealSidePanel("comments") : undefined,
   }
-
-  const rail = (
-    // The app root mounts a provider already; nesting one here keeps the rail
-    // self-sufficient when the workbench renders without it (tests, embeds).
-    <TooltipProvider delayDuration={400}>
-      <div
-        className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/30 py-2"
-        role="toolbar"
-        aria-label={t("sidebar.aria")}
-        aria-orientation="vertical"
-        data-testid="project-editor-activity-rail"
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              data-testid="left-tab-files"
-              aria-label={t("filesTab")}
-              aria-pressed={sideTab === "files" && !sidebarCollapsed}
-              className={railButtonClass(sideTab === "files" && !sidebarCollapsed)}
-              onClick={() => selectSideTab("files")}
-            >
-              <FilesIcon className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("filesTab")}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              data-testid="left-tab-search"
-              aria-label={t("searchTab")}
-              aria-pressed={sideTab === "search" && !sidebarCollapsed}
-              className={railButtonClass(sideTab === "search" && !sidebarCollapsed)}
-              onClick={() => selectSideTab("search")}
-            >
-              <SearchIcon className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("searchTab")}</TooltipContent>
-        </Tooltip>
-        <div className="mt-auto flex flex-col items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className={railButtonClass(false)}
-                onClick={() => setQuickOpen(true)}
-                data-testid="rail-quick-open"
-                aria-label={t("quickOpen.hint")}
-              >
-                <FolderSearchIcon className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">{t("quickOpen.hint")} ⌘P</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className={railButtonClass(false)}
-                onClick={toggleSidebar}
-                data-testid="rail-toggle-sidebar"
-                aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
-                aria-expanded={!sidebarCollapsed}
-              >
-                {sidebarCollapsed ? (
-                  <PanelLeftOpenIcon className="size-4" />
-                ) : (
-                  <PanelLeftCloseIcon className="size-4" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")} ⌘B
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-    </TooltipProvider>
-  )
-
-  const sidebar = (
-    <ResizablePanel
-      id={`${panelIdPrefix}-sidebar`}
-      collapsible
-      collapsedSize={`${RAIL_WIDTH_PX}px`}
-      minSize="160px"
-      defaultSize="25%"
-      maxSize="45%"
-      // Dragging the dock resizes the editor, not the explorer (VS Code).
-      groupResizeBehavior="preserve-pixel-size"
-      panelRef={sidebarPanelRef}
-      onResize={(size) => setSidebarCollapsed(size.inPixels <= RAIL_WIDTH_PX + 8)}
-      className="min-h-0"
-    >
-      <div className="flex h-full min-h-0">
-        {rail}
-        <div
-          className={cn("flex min-w-0 flex-1 flex-col", sidebarCollapsed && "hidden")}
-          data-testid="project-editor-sidebar-content"
-        >
-          <div className="flex h-9 shrink-0 items-center border-b px-3">
-            <span className="truncate text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              {sideTab === "files" ? t("sidebar.explorer") : t("sidebar.search")}
-            </span>
-          </div>
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            <div className="h-full" hidden={!filesVisible}>
-              {fileTree}
-            </div>
-            <div className="h-full" hidden={!searchVisible}>
-              {searchPanel}
-            </div>
-          </div>
-        </div>
-      </div>
-    </ResizablePanel>
-  )
 
   /**
    * One editor group: its own tab strip, breadcrumbs, sync banner, and Monaco
@@ -3308,6 +3189,7 @@ export function ProjectEditorFileWorkbench({
                   minimap={minimapEnabled}
                   wordWrap={isWordWrapped(groupFile.relPath)}
                   fontSize={editorFontSize}
+                  selectionActions={selectionActions}
                   onSelectionChange={
                     focused
                       ? (selection) => {
@@ -3374,41 +3256,45 @@ export function ProjectEditorFileWorkbench({
   // it rather than moving it. Open/closed is one fact per editor scope,
   // persisted with the session: the per-file layout underneath only decides
   // which panel is in front. Its width is the resizable panel's below.
-  const contextPanel =
-    hasContextPanel && contextFile ? (
-      <>
-        <ResizableHandle withHandle />
-        <ContextSidebarPanel
-          id={`${panelIdPrefix}-context`}
-          open={contextWorkbenchOpen}
-          panelRef={contextPanelRef}
-          onResize={(size) => {
-            const open = size.inPixels > WORKBENCH_RAIL_WIDTH_PX + 8
-            if (open) {
-              lastContextWidthRef.current = size.inPixels
-              setContextPanelMode(
-                size.inPixels > CONTEXT_WORKBENCH_DEFAULT_WIDTH + 24 ? "wide" : "narrow"
-              )
-            }
-            // A drag across the collapse threshold is an open/close too.
-            if (open !== contextWorkbenchOpen) setContextWorkbenchOpen(open)
+  const contextPanel = hasContextPanel ? (
+    <>
+      <ResizableHandle withHandle />
+      <ContextSidebarPanel
+        id={`${panelIdPrefix}-context`}
+        open={contextWorkbenchOpen}
+        panelRef={contextPanelRef}
+        onResize={(size) => {
+          const open = size.inPixels > WORKBENCH_RAIL_WIDTH_PX + 8
+          if (open) {
+            lastContextWidthRef.current = size.inPixels
+            setContextPanelMode(
+              size.inPixels > CONTEXT_WORKBENCH_DEFAULT_WIDTH + 24 ? "wide" : "narrow"
+            )
+          }
+          // A drag across the collapse threshold is an open/close too.
+          if (open !== contextWorkbenchOpen) setContextWorkbenchOpen(open)
+        }}
+      >
+        <ProjectContextWorkbench
+          scopeKey={editor.scopeKey}
+          rootPath={rootPath}
+          file={contextFile}
+          onDraftChange={(content) => {
+            if (contextFile) setDraft(contextFile.relPath, content)
           }}
-        >
-          <ProjectContextWorkbench
-            scopeKey={editor.scopeKey}
-            rootPath={rootPath}
-            file={contextFile}
-            onDraftChange={(content) => setDraft(contextFile.relPath, content)}
-            selection={editorSelection}
-            railOnly={!contextWorkbenchOpen}
-            onCollapse={() => setContextWorkbenchOpen(false)}
-            onEnsureVisible={() => setContextWorkbenchOpen(true)}
-            onModeWidthHint={hintContextWidth}
-            resolvedMode={contextPanelMode}
-          />
-        </ContextSidebarPanel>
-      </>
-    ) : null
+          selection={editorSelection}
+          railOnly={!contextWorkbenchOpen}
+          onCollapse={() => setContextWorkbenchOpen(false)}
+          onEnsureVisible={() => setContextWorkbenchOpen(true)}
+          onModeWidthHint={hintContextWidth}
+          resolvedMode={contextPanelMode}
+          projectViews={projectViews}
+          revealRequest={sideReveal}
+          onActivePanelChange={setActiveSidePanel}
+        />
+      </ContextSidebarPanel>
+    </>
+  ) : null
 
   const editorPane = (
     <ResizablePanel
@@ -3460,19 +3346,20 @@ export function ProjectEditorFileWorkbench({
       <ResizablePanelGroup
         orientation="horizontal"
         className="h-full min-h-0 min-w-0 overflow-hidden"
-        elementRef={workbenchRef}
       >
+        {/* The editor sits beside the chat; the one sidebar — project views
+            and file views as peers — sits to its right. */}
         {zen ? (
           editorPane
         ) : (
           <>
-            {sidebar}
-            <ResizableHandle withHandle />
             {editorPane}
             {contextPanel}
           </>
         )}
       </ResizablePanelGroup>
+      <ParkedView target={filesViewTarget}>{fileTree}</ParkedView>
+      <ParkedView target={searchViewTarget}>{searchPanel}</ParkedView>
       <ProjectQuickOpen
         rootPath={rootPath}
         open={quickOpen}

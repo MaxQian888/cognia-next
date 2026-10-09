@@ -211,7 +211,7 @@ jest.mock("./project-monaco", () => ({
     file?: { relPath: string }
     [key: string]: unknown
   }) => {
-    monacoProps(rest)
+    monacoProps({ actions, ...rest })
     return (
       <div data-testid="monaco">
         <button
@@ -253,18 +253,67 @@ jest.mock("./project-file-preview-panel", () => ({
   },
 }))
 const projectContextWorkbenchProps = jest.fn()
+/**
+ * A double of the sidebar's contract as the editor drives it: it opens on the
+ * explorer, honours `revealRequest` (opening itself through `onEnsureVisible`
+ * when folded), reports the panel in front, and shows the project view in front
+ * while open. Its activity buttons carry the real workbench's test ids.
+ */
+function MockProjectContextWorkbench(props: Record<string, unknown>) {
+  const React = jest.requireActual<typeof import("react")>("react")
+  projectContextWorkbenchProps(props)
+  const railOnly = props.railOnly as boolean
+  const onEnsureVisible = props.onEnsureVisible as () => void
+  const onCollapse = props.onCollapse as () => void
+  const onActivePanelChange = props.onActivePanelChange as ((id: string | null) => void) | undefined
+  const reveal = props.revealRequest as { panelId: string; seq: number } | undefined
+  const views = props.projectViews as {
+    files: () => React.ReactNode
+    search: () => React.ReactNode
+  }
+  const [active, setActive] = React.useState("files")
+  const lastSeqRef = React.useRef<number | null>(null)
+  React.useEffect(() => {
+    if (!reveal || reveal.seq === lastSeqRef.current) return
+    lastSeqRef.current = reveal.seq
+    setActive(reveal.panelId)
+    if (railOnly) onEnsureVisible()
+  }, [reveal, railOnly, onEnsureVisible])
+  React.useEffect(() => {
+    onActivePanelChange?.(active)
+  }, [active, onActivePanelChange])
+  const select = (id: string) => {
+    if (active === id && !railOnly) return onCollapse()
+    setActive(id)
+    if (railOnly) onEnsureVisible()
+  }
+  return (
+    <div data-testid="project-context-workbench" data-active-panel={active}>
+      <button
+        data-testid="workbench-activity-project-files"
+        aria-pressed={active === "files" && !railOnly}
+        onClick={() => select("files")}
+      />
+      <button
+        data-testid="workbench-activity-project-search"
+        aria-pressed={active === "search" && !railOnly}
+        onClick={() => select("search")}
+      />
+      {!railOnly && active === "files" ? views.files() : null}
+      {!railOnly && active === "search" ? views.search() : null}
+      <button
+        data-testid="workbench-draft"
+        onClick={() => (props.onDraftChange as (c: string) => void)?.("from workbench")}
+      />
+    </div>
+  )
+}
 jest.mock("./project-context-workbench", () => ({
-  ProjectContextWorkbench: (props: Record<string, unknown>) => {
-    projectContextWorkbenchProps(props)
-    return (
-      <div data-testid="project-context-workbench">
-        <button
-          data-testid="workbench-draft"
-          onClick={() => (props.onDraftChange as (c: string) => void)?.("from workbench")}
-        />
-      </div>
-    )
-  },
+  PROJECT_FILES_PANEL_ID: "files",
+  PROJECT_SEARCH_PANEL_ID: "search",
+  ProjectContextWorkbench: (props: Record<string, unknown>) => (
+    <MockProjectContextWorkbench {...props} />
+  ),
   ProjectContextWorkbenchMobile: ({
     open,
     onDraftChange,
@@ -304,6 +353,7 @@ jest.mock("@/components/source-control/diff-viewer", () => ({
 
 import { ProjectEditorFileWorkbench, useProjectEditorWorkbench } from "./project-editor-workbench"
 import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 function Harness({
   beforeOpen,
@@ -478,15 +528,55 @@ describe("readActive", () => {
   })
 })
 
-it("lays the primary sidebar out on the left, rail first, editor after", () => {
+it("lays the editor out beside the chat, with the one sidebar to its right", () => {
   render(<Harness />)
 
-  const rail = screen.getByTestId("project-editor-activity-rail")
   const editorGroup = screen.getByTestId("editor-group-0")
-  // DOCUMENT_POSITION_FOLLOWING: the editor comes after the rail.
-  expect(rail.compareDocumentPosition(editorGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect(rail).toHaveClass("border-r")
-  expect(screen.getByTestId("tree")).toBeInTheDocument()
+  const sidebar = screen.getByTestId("project-context-workbench")
+  // DOCUMENT_POSITION_FOLLOWING: editor → sidebar, left to right.
+  expect(
+    editorGroup.compareDocumentPosition(sidebar) & Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
+})
+
+it("hosts the explorer and search as panels of the file context workbench, not a second sidebar", () => {
+  render(<Harness />)
+
+  const sidebar = screen.getByTestId("project-context-workbench")
+  expect(projectContextWorkbenchProps).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      projectViews: { files: expect.any(Function), search: expect.any(Function) },
+    })
+  )
+  // The explorer is on screen by default, inside the one sidebar.
+  expect(sidebar).toContainElement(screen.getByTestId("tree"))
+  expect(screen.queryByTestId("project-editor-sidebar-content")).toBeNull()
+  expect(screen.queryByTestId("project-editor-standalone-rail")).toBeNull()
+})
+
+it("sizes the breadcrumb row to the sidebar view's toolbar row", () => {
+  render(<Harness />)
+  // The explorer's and search's toolbars use the same height, so the rules
+  // under both columns meet at the divider.
+  expect(screen.getByTestId("project-editor-title-row")).toHaveClass(EDITOR_SUBTITLE_ROW_CLASS)
+})
+
+it("keeps the sidebar — explorer included — mounted with no file open", () => {
+  editor.activePath = null
+  editor.activeFile = null as unknown as typeof editor.activeFile
+  editor.openFiles = []
+  render(<Harness />)
+
+  expect(projectContextWorkbenchProps).toHaveBeenLastCalledWith(
+    expect.objectContaining({ file: null })
+  )
+  expect(screen.getByTestId("project-context-workbench")).toContainElement(
+    screen.getByTestId("tree")
+  )
+  fireEvent.click(screen.getByTestId("workbench-activity-project-search"))
+  expect(screen.getByTestId("project-context-workbench")).toContainElement(
+    screen.getByTestId("search")
+  )
 })
 
 it("renders one tab strip per editor group, with the tab actions wired", () => {
@@ -515,7 +605,7 @@ it("renders one tab strip per editor group, with the tab actions wired", () => {
 })
 
 describe("file context workbench (secondary sidebar)", () => {
-  it("mounts for the shown file, folded to its rail until opened", () => {
+  it("mounts open on the explorer for the shown file", () => {
     render(<Harness />)
 
     expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
@@ -524,7 +614,7 @@ describe("file context workbench (secondary sidebar)", () => {
         scopeKey: "session:s1",
         rootPath: "/repo",
         file: expect.objectContaining({ relPath: "src/a.ts" }),
-        railOnly: true,
+        railOnly: false,
       })
     )
   })
@@ -538,43 +628,48 @@ describe("file context workbench (secondary sidebar)", () => {
         onEnsureVisible: () => void
         onCollapse: () => void
       }
-    act(() => last().onEnsureVisible())
-    expect(last().railOnly).toBe(false)
-    expect(useProjectEditorSessionStore.getState().sessions["session:s1"]).toEqual(
-      expect.objectContaining({ contextWorkbenchOpen: true })
-    )
-
     act(() => last().onCollapse())
     expect(last().railOnly).toBe(true)
     expect(
       useProjectEditorSessionStore.getState().sessions["session:s1"]?.contextWorkbenchOpen
     ).toBe(false)
+
+    act(() => last().onEnsureVisible())
+    expect(last().railOnly).toBe(false)
+    expect(useProjectEditorSessionStore.getState().sessions["session:s1"]).toEqual(
+      expect.objectContaining({ contextWorkbenchOpen: true })
+    )
   })
 
-  it("restores an opened workbench from the session record", () => {
+  it("restores a folded sidebar from the session record", () => {
     useProjectEditorSessionStore.setState({
       sessions: {
         "session:s1": {
           rootKey: "/repo",
           openPaths: [],
           activePath: null,
-          contextWorkbenchOpen: true,
+          contextWorkbenchOpen: false,
         },
       },
     })
     render(<Harness />)
 
     expect(projectContextWorkbenchProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ railOnly: false })
+      expect.objectContaining({ railOnly: true })
     )
   })
 
-  it("stays away from a blocked file, which has no text to act on", () => {
+  it("keeps the sidebar for a blocked file, with no file to act on", () => {
     editor.activeFile = { ...editor.activeFile, blocked: "binary" }
     render(<Harness />)
 
     expect(screen.getByTestId("file-fallback")).toBeInTheDocument()
-    expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
+    // Still mounted — a sidebar that vanished for a binary file resized the
+    // editor — but without file views.
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
+    expect(projectContextWorkbenchProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ file: null })
+    )
   })
 
   it("feeds draft edits made from a panel back into the editor", () => {
@@ -614,10 +709,13 @@ it("empty-state shortcut rows drive quick open, search, and reopen", () => {
   expect(screen.getByTestId("quick-open")).toBeInTheDocument()
 
   fireEvent.click(screen.getByTestId("editor-empty-search"))
-  expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
-  expect(
-    screen.getByTestId("project-editor-sidebar-content").querySelector('[data-testid="search"]')
-  ).not.toBeNull()
+  expect(screen.getByTestId("workbench-activity-project-search")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
+  expect(screen.getByTestId("project-context-workbench")).toContainElement(
+    screen.getByTestId("search")
+  )
 
   fireEvent.click(screen.getByTestId("editor-empty-reopen"))
   expect(editor.reopenClosedFile).toHaveBeenCalled()
@@ -907,34 +1005,48 @@ describe("tab keyboard chords", () => {
   it("opens project search on mod+shift+F", () => {
     render(<Harness />)
     fireEvent.keyDown(surface(), { key: "F", metaKey: true, shiftKey: true })
-    expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
-    expect(
-      screen.getByTestId("project-editor-sidebar-content").querySelector('[data-testid="search"]')
-    ).not.toBeNull()
+    expect(screen.getByTestId("workbench-activity-project-search")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("project-context-workbench")).toContainElement(
+      screen.getByTestId("search")
+    )
   })
 })
 
-describe("activity rail", () => {
+describe("project views in the sidebar", () => {
   it("switches the sidebar between the file tree and search panel", () => {
     render(<Harness />)
-    const sidebar = screen.getByTestId("project-editor-sidebar-content")
-    expect(sidebar.querySelector('[data-testid="tree"]')).not.toBeNull()
+    const sidebar = screen.getByTestId("project-context-workbench")
+    expect(sidebar).toContainElement(screen.getByTestId("tree"))
 
-    fireEvent.click(screen.getByTestId("left-tab-search"))
-    expect(sidebar.querySelector('[data-testid="search"]')).not.toBeNull()
-    expect(screen.getByTestId("tree")).not.toBeVisible()
-    expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByTestId("workbench-activity-project-search"))
+    expect(sidebar).toContainElement(screen.getByTestId("search"))
+    expect(screen.queryByTestId("tree")).toBeNull()
 
-    fireEvent.click(screen.getByTestId("left-tab-files"))
-    expect(sidebar.querySelector('[data-testid="tree"]')).not.toBeNull()
+    fireEvent.click(screen.getByTestId("workbench-activity-project-files"))
+    expect(sidebar).toContainElement(screen.getByTestId("tree"))
   })
 
-  it("opens quick-open from the rail button", () => {
+  it("brings a folded sidebar back on the explorer when ⌘B is pressed", () => {
+    useProjectEditorSessionStore.setState({
+      sessions: {
+        "session:s1": {
+          rootKey: "/repo",
+          openPaths: [],
+          activePath: null,
+          contextWorkbenchOpen: false,
+        },
+      },
+    })
     render(<Harness />)
-    expect(screen.queryByTestId("quick-open")).toBeNull()
-    fireEvent.click(screen.getByTestId("rail-quick-open"))
-    expect(screen.getByTestId("quick-open")).toBeInTheDocument()
-    expect(quickOpenProps).toHaveBeenLastCalledWith(expect.objectContaining({ open: true }))
+    expect(screen.queryByTestId("tree")).toBeNull()
+
+    fireEvent.keyDown(screen.getByTestId("tabs").parentElement!, { key: "b", metaKey: true })
+    expect(screen.getByTestId("project-context-workbench")).toContainElement(
+      screen.getByTestId("tree")
+    )
   })
 
   it("opens quick-open on the mod+P chord", () => {
@@ -975,17 +1087,27 @@ it("does not rerender the file tree for 20 editor selection changes", () => {
   )
 })
 
-it("retains the same file-tree and search nodes across sidebar switches", () => {
+it("retains the same file-tree and search nodes across sidebar switches and folds", () => {
   render(<Harness />)
   const tree = screen.getByTestId("tree")
-  fireEvent.click(screen.getByTestId("left-tab-search"))
+  fireEvent.click(screen.getByTestId("workbench-activity-project-search"))
   const search = screen.getByTestId("search")
-  expect(tree).toBeInTheDocument()
-  expect(tree).not.toBeVisible()
-  fireEvent.click(screen.getByTestId("left-tab-files"))
+  // Parked, not unmounted: the node leaves the document and comes back as is.
+  expect(tree).not.toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("workbench-activity-project-files"))
   expect(screen.getByTestId("tree")).toBe(tree)
-  expect(search).toBeInTheDocument()
-  expect(search).not.toBeVisible()
+  expect(search).not.toBeInTheDocument()
+
+  // Folding the sidebar unmounts its body; the explorer survives it.
+  const last = () =>
+    projectContextWorkbenchProps.mock.calls.at(-1)?.[0] as {
+      onEnsureVisible: () => void
+      onCollapse: () => void
+    }
+  act(() => last().onCollapse())
+  expect(tree).not.toBeInTheDocument()
+  act(() => last().onEnsureVisible())
+  expect(screen.getByTestId("tree")).toBe(tree)
 })
 
 it("retains the light editor while switching mobile navigation", () => {
@@ -1692,14 +1814,13 @@ describe("zen mode and go to symbol", () => {
     fireEvent.keyDown(monaco, { key: "z" })
   }
 
-  it("⌘K Z hides rail/sidebar/tabs/status-bar but keeps the editors", () => {
+  it("⌘K Z hides sidebar/tabs/status-bar but keeps the editors", () => {
     editor.openFiles = [{ relPath: "src/a.ts" }]
     render(<Harness />)
-    expect(screen.getByTestId("project-editor-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
 
     zenChord()
-    expect(screen.queryByTestId("project-editor-activity-rail")).toBeNull()
-    expect(screen.queryByTestId("project-editor-sidebar-content")).toBeNull()
+    expect(screen.queryByTestId("project-context-workbench")).toBeNull()
     expect(screen.queryByTestId("tabs")).toBeNull()
     expect(screen.queryByTestId("status-bar")).toBeNull()
     expect(screen.queryByTestId("project-context-workbench")).toBeNull()
@@ -1707,7 +1828,7 @@ describe("zen mode and go to symbol", () => {
     expect(screen.getByTestId("editor-group-0")).toBeInTheDocument()
 
     zenChord()
-    expect(screen.getByTestId("project-editor-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
     expect(screen.getByTestId("tabs")).toBeInTheDocument()
     expect(screen.getByTestId("status-bar")).toBeInTheDocument()
   })
@@ -1716,17 +1837,17 @@ describe("zen mode and go to symbol", () => {
     editor.openFiles = [{ relPath: "src/a.ts" }]
     render(<Harness />)
     zenChord()
-    expect(screen.queryByTestId("project-editor-activity-rail")).toBeNull()
+    expect(screen.queryByTestId("project-context-workbench")).toBeNull()
 
     // One Escape belongs to Monaco (find widget, suggestions) — never
     // swallowed, zen stays.
     const monaco = screen.getByTestId("monaco")
     expect(fireEvent.keyDown(monaco, { key: "Escape" })).toBe(true)
-    expect(screen.queryByTestId("project-editor-activity-rail")).toBeNull()
+    expect(screen.queryByTestId("project-context-workbench")).toBeNull()
 
     // The second tap inside 500ms is the exit gesture.
     fireEvent.keyDown(monaco, { key: "Escape" })
-    expect(screen.getByTestId("project-editor-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
   })
 
   it("a non-Z key after ⌘K clears the chord without entering zen", () => {
@@ -1735,7 +1856,7 @@ describe("zen mode and go to symbol", () => {
     const monaco = screen.getByTestId("monaco")
     fireEvent.keyDown(monaco, { key: "k", metaKey: true })
     fireEvent.keyDown(monaco, { key: "x" })
-    expect(screen.getByTestId("project-editor-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
   })
 
   it("⌘⇧O opens quick open seeded with '@' and the live draft document", () => {
@@ -2179,11 +2300,36 @@ describe("chord ownership", () => {
     )
   })
 
-  it("opens the workbench palette from the editor's Command Palette menu item", () => {
+  it("opens the workbench palette from its entry in Monaco's F1 list", () => {
     render(<Harness />)
     fireEvent.click(screen.getByTestId("workbench.commandPalette"))
     expect(quickOpenProps.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ open: true, seedQuery: { text: ">" } })
+    )
+  })
+
+  it("adds only its own items to the right-click menu, never a second copy of Monaco's", () => {
+    render(<Harness />)
+    const { actions } = monacoProps.mock.calls.at(-1)?.[0] as {
+      actions: Array<{ id: string; contextMenuGroupId?: string; monacoCommand?: string }>
+    }
+    const menuItems = actions.filter((action) => action.contextMenuGroupId)
+    // Monaco lists its own commands (references, rename, change all, format,
+    // its command palette) in this menu already.
+    expect(menuItems.filter((action) => action.monacoCommand)).toEqual([])
+    expect(menuItems.map((action) => action.id).sort()).toEqual(
+      [
+        "file.copyPath",
+        "file.copyRelativePath",
+        "file.save",
+        "file.searchProject",
+        "workbench.addFileToChat",
+        "workbench.addSelectionToChat",
+      ].sort()
+    )
+    // The palette stays reachable — keybinding and F1 — just not in the menu.
+    expect(actions.map((action) => action.id)).toEqual(
+      expect.arrayContaining(["file.format", "workbench.commandPalette"])
     )
   })
 })

@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
 
 // How the editor workbench sizes itself inside the chat's right dock: the
-// file context workbench as a panel of the editor's resizable group (bounded
-// by the dock, folding to its rail, answering narrow/wide hints) and the
-// one-side-panel-at-a-time rule for a dock too narrow for both sidebars.
+// one sidebar — the file context workbench, whose rail also carries the
+// explorer and search — as a panel of the editor's resizable group (bounded by
+// the dock, folding to its rail, answering narrow/wide hints), and a width that
+// stays put while files open, switch and close.
 //
 // jsdom has no layout, so the resizable group is replaced by a fake that keeps
 // each panel's size in pixels against a fixed group width, applies the
@@ -87,6 +88,8 @@ jest.mock("@/components/editor/light-code-editor", () => ({ LightCodeEditor: () 
 jest.mock("@/components/source-control/diff-viewer", () => ({ DiffViewer: () => null }))
 
 interface ContextWorkbenchProps {
+  file: { relPath: string } | null
+  projectViews: { files: () => ReactNode; search: () => ReactNode }
   railOnly: boolean
   onCollapse: () => void
   onEnsureVisible: () => void
@@ -97,14 +100,17 @@ const mockContextWorkbenchProps = jest.fn()
 jest.mock("./project-context-workbench", () => ({
   ProjectContextWorkbench: (props: ContextWorkbenchProps) => {
     mockContextWorkbenchProps(props)
-    return <div data-testid="project-context-workbench" />
+    // The explorer is the sidebar's default panel.
+    return (
+      <div data-testid="project-context-workbench">
+        {props.railOnly ? null : props.projectViews.files()}
+      </div>
+    )
   },
   ProjectContextWorkbenchMobile: () => null,
+  PROJECT_FILES_PANEL_ID: "files",
+  PROJECT_SEARCH_PANEL_ID: "search",
 }))
-
-// The workbench's own width, as `useElementWidth` measures it.
-let mockWorkbenchWidth = 0
-jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => mockWorkbenchWidth }))
 
 // --- Fake resizable group -------------------------------------------------
 
@@ -209,7 +215,6 @@ function Harness() {
 }
 
 const contextPanel = () => mockPanels.get("dock-context")
-const explorerPanel = () => mockPanels.get("dock-sidebar")
 const lastContextProps = () =>
   mockContextWorkbenchProps.mock.calls.at(-1)?.[0] as ContextWorkbenchProps
 const contextOpenInStore = () =>
@@ -231,11 +236,24 @@ function openContextSidebar() {
   act(() => lastContextProps().onEnsureVisible())
 }
 
+/** The session remembers the sidebar folded to its rail. */
+function restoreFolded() {
+  useProjectEditorSessionStore.setState({
+    sessions: {
+      "session:dock": {
+        rootKey: "/repo",
+        openPaths: [],
+        activePath: null,
+        contextWorkbenchOpen: false,
+      },
+    },
+  })
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockPanels.clear()
   mockGroupWidth = 600
-  mockWorkbenchWidth = 0
   mockEditor.openFiles = [{ relPath: "src/a.ts" }]
   mockEditor.activePath = "src/a.ts"
   mockEditor.activeFile = {
@@ -269,37 +287,35 @@ describe("the file context workbench as a resizable sidebar", () => {
         collapsedSize: "48px",
         minSize: "240px",
         maxSize: "65%",
-        defaultSize: "48px",
+        // Open by default: the explorer is its first panel.
+        defaultSize: "360px",
         groupResizeBehavior: "preserve-pixel-size",
       })
     )
-    // Sidebars keep their pixel width while the dock is dragged; the editor
+    // The sidebar keeps its pixel width while the dock is dragged; the editor
     // absorbs the change.
-    expect(explorerPanel()!.props.groupResizeBehavior).toBe("preserve-pixel-size")
     expect(mockPanels.get("dock-editor")!.props.groupResizeBehavior).toBeUndefined()
-    expect(lastContextProps().railOnly).toBe(true)
-  })
-
-  it("first appears at its default width when the session restores it open", () => {
-    useProjectEditorSessionStore.setState({
-      sessions: {
-        "session:dock": {
-          rootKey: "/repo",
-          openPaths: [],
-          activePath: null,
-          contextWorkbenchOpen: true,
-        },
-      },
-    })
-    render(<Harness />)
-
-    expect(contextPanel()!.props.defaultSize).toBe("360px")
     expect(lastContextProps().railOnly).toBe(false)
     // Mounting needs no imperative call — the handle is not registered yet.
+    expect(contextPanel()!.calls).toEqual([])
+    // The editor has one sidebar: no separate explorer panel beside it.
+    expect(mockPanels.has("dock-sidebar")).toBe(false)
+    expect(screen.getByTestId("project-context-workbench")).toContainElement(
+      screen.getByTestId("tree")
+    )
+  })
+
+  it("first appears folded to its rail when the session restores it folded", () => {
+    restoreFolded()
+    render(<Harness />)
+
+    expect(contextPanel()!.props.defaultSize).toBe("48px")
+    expect(lastContextProps().railOnly).toBe(true)
     expect(contextPanel()!.calls).toEqual([])
   })
 
   it("unfolds to its last width and folds back to the rail on the rail's requests", () => {
+    restoreFolded()
     render(<Harness />)
 
     openContextSidebar()
@@ -318,6 +334,7 @@ describe("the file context workbench as a resizable sidebar", () => {
   })
 
   it("treats a drag across the collapse threshold as an open or a close", () => {
+    restoreFolded()
     render(<Harness />)
 
     drag(contextPanel(), 280)
@@ -330,6 +347,7 @@ describe("the file context workbench as a resizable sidebar", () => {
   })
 
   it("reports the preset it really sits at for the header's narrow/wide highlight", () => {
+    restoreFolded()
     render(<Harness />)
     expect(lastContextProps().resolvedMode).toBeUndefined()
 
@@ -340,6 +358,7 @@ describe("the file context workbench as a resizable sidebar", () => {
   })
 
   it("applies the header's narrow/wide buttons as asked, within the dock", () => {
+    restoreFolded()
     render(<Harness />)
     openContextSidebar()
 
@@ -358,6 +377,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("lets a panel activation widen the sidebar but never narrow it", () => {
     mockGroupWidth = 1000
+    restoreFolded()
     render(<Harness />)
     openContextSidebar()
     drag(contextPanel(), 450)
@@ -377,6 +397,7 @@ describe("the file context workbench as a resizable sidebar", () => {
   })
 
   it("unfolds straight to the wide preset when a proposal lands on the folded rail", () => {
+    restoreFolded()
     render(<Harness />)
 
     // What the context workbench does when the AI answers with a proposal.
@@ -389,16 +410,18 @@ describe("the file context workbench as a resizable sidebar", () => {
     expect(lastContextProps().railOnly).toBe(false)
   })
 
-  it("is absent with no file to act on", () => {
+  it("stays mounted, at the same width, with no file to act on", () => {
     mockEditor.activeFile = null
     mockEditor.activePath = null
     mockEditor.openFiles = []
     render(<Harness />)
-    expect(contextPanel()).toBeUndefined()
-    expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
+    expect(contextPanel()!.px).toBe(360)
+    expect(lastContextProps().file).toBeNull()
+    expect(screen.getByTestId("tree")).toBeInTheDocument()
   })
 
   it("steps aside for zen and comes back open without driving the fresh panel", () => {
+    restoreFolded()
     render(<Harness />)
     openContextSidebar()
     const zenChord = () => {
@@ -420,63 +443,59 @@ describe("the file context workbench as a resizable sidebar", () => {
   })
 })
 
-describe("a dock too narrow for both sidebars", () => {
-  it("folds the explorer when the context workbench opens", () => {
-    mockWorkbenchWidth = 600
-    render(<Harness />)
-    expect(explorerPanel()!.calls).toEqual([])
-
-    openContextSidebar()
-    expect(explorerPanel()!.calls).toContain("collapse")
-    expect(explorerPanel()!.px).toBe(40)
-    expect(contextOpenInStore()).toBe(true)
+describe("a stable width while files come and go", () => {
+  const fileState = (relPath: string, extra: Record<string, unknown> = {}) => ({
+    relPath,
+    absolutePath: `/repo/${relPath}`,
+    savedContent: "x",
+    draftContent: "x",
+    draftVersion: 1,
+    ...extra,
   })
 
-  it("folds the context workbench when the explorer is opened again", () => {
-    mockWorkbenchWidth = 600
-    render(<Harness />)
-    openContextSidebar()
-    expect(explorerPanel()!.px).toBe(40)
+  it("opening, switching and closing files never resizes or remounts the sidebar", () => {
+    mockEditor.activeFile = null
+    mockEditor.activePath = null
+    mockEditor.openFiles = []
+    const { rerender } = render(<Harness />)
+    drag(contextPanel(), 420)
+    const panelBefore = contextPanel()
+    const callsBefore = contextPanel()!.calls.length
 
-    act(() => screen.getByTestId("rail-toggle-sidebar").click())
-    expect(explorerPanel()!.px).toBeGreaterThan(40)
-    expect(contextOpenInStore()).toBe(false)
-    expect(contextPanel()!.calls.at(-1)).toBe("collapse")
+    // First file opens into an empty editor.
+    mockEditor.openFiles = [{ relPath: "src/a.ts" }]
+    mockEditor.activePath = "src/a.ts"
+    mockEditor.activeFile = fileState("src/a.ts")
+    rerender(<Harness />)
+    // A second tab.
+    mockEditor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }]
+    mockEditor.activePath = "src/b.ts"
+    mockEditor.activeFile = fileState("src/b.ts")
+    rerender(<Harness />)
+    // A file the editor refuses (binary/too large) — nothing to act on.
+    mockEditor.activePath = "img.bin"
+    mockEditor.activeFile = fileState("img.bin", { blocked: "binary" })
+    rerender(<Harness />)
+    // Everything closed again.
+    mockEditor.openFiles = []
+    mockEditor.activePath = null
+    mockEditor.activeFile = null
+    rerender(<Harness />)
+
+    expect(contextPanel()).toBe(panelBefore)
+    expect(contextPanel()!.calls).toHaveLength(callsBefore)
+    expect(contextPanel()!.px).toBe(420)
+    expect(lastContextProps().railOnly).toBe(false)
   })
 
-  it("keeps the restored context workbench over the explorer's default", () => {
-    mockWorkbenchWidth = 600
-    useProjectEditorSessionStore.setState({
-      sessions: {
-        "session:dock": {
-          rootKey: "/repo",
-          openPaths: [],
-          activePath: null,
-          contextWorkbenchOpen: true,
-        },
-      },
-    })
-    render(<Harness />)
-
-    expect(explorerPanel()!.calls).toContain("collapse")
-    expect(contextOpenInStore()).toBe(true)
-  })
-
-  it("leaves both open when the dock is wide enough", () => {
-    mockWorkbenchWidth = 1000
-    mockGroupWidth = 1000
-    render(<Harness />)
-
-    openContextSidebar()
-    expect(explorerPanel()!.calls).toEqual([])
-    expect(contextOpenInStore()).toBe(true)
-  })
-
-  it("does nothing before the workbench has been measured", () => {
-    mockWorkbenchWidth = 0
-    render(<Harness />)
-
-    openContextSidebar()
-    expect(explorerPanel()!.calls).toEqual([])
+  it("keeps one layout for the whole project rather than one per file", () => {
+    const { rerender } = render(<Harness />)
+    const first = lastContextProps()
+    mockEditor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }]
+    mockEditor.activePath = "src/b.ts"
+    mockEditor.activeFile = fileState("src/b.ts")
+    rerender(<Harness />)
+    expect(lastContextProps().file?.relPath).toBe("src/b.ts")
+    expect(lastContextProps().railOnly).toBe(first.railOnly)
   })
 })

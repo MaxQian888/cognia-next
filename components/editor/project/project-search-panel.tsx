@@ -36,6 +36,7 @@ import type { WorkspaceContentMatch } from "@/lib/files/types"
 import { cn } from "@/lib/utils"
 import { onTransportChange } from "@/lib/tauri/transport-instance"
 import { subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
 
 export interface ProjectSearchDeps {
   search: typeof searchWorkspaceContent
@@ -192,7 +193,13 @@ export function ProjectSearchPanel({
 
   return (
     <div className="flex h-full flex-col" data-testid="project-search-panel">
-      <div className="flex items-center gap-1 border-b px-2 py-1.5">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-1 border-b px-2",
+          density === "touch" ? "py-1.5" : EDITOR_SUBTITLE_ROW_CLASS
+        )}
+        data-testid="project-search-toolbar"
+      >
         <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <Input
           ref={inputRef}

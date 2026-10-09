@@ -1,12 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react"
 import {
   BotIcon,
   FileSearchIcon,
+  FilesIcon,
   GitCompareIcon,
   ListTreeIcon,
   MessageSquareIcon,
+  SearchIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
@@ -36,6 +38,7 @@ import {
   resolveContextCapabilities,
 } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
+import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 function contentToken(content: string | undefined | null): string {
   const text = content ?? ""
@@ -52,11 +55,18 @@ function fileBaseToken(file: OpenFile): string {
 }
 
 /**
- * The project editor's secondary sidebar: per-file AI (a resource-scoped chat
- * whose replies land as reviewable proposals), comments, inspect, outline and
- * the proposal review itself. Preview, problems and the Git diff are the
- * editor's own surfaces (the preview overlay, the Problems panel, the dock's
- * Review surface) and deliberately not duplicated here.
+ * The project editor's one sidebar. Its project views — Files and Search, the
+ * explorer VS Code keeps on the left — lead it, and the open file's views
+ * follow as peers: per-file AI (a resource-scoped chat whose replies land as
+ * reviewable proposals), comments, inspect, outline and the proposal review.
+ * Preview, problems and the Git diff are the editor's own surfaces (the preview
+ * overlay, the Problems panel, the dock's Review surface) and deliberately not
+ * duplicated here.
+ *
+ * It is mounted whether or not a file is open (`file: null` keeps every view on
+ * the rail; the file views then ask for a file), and its layout — which view is in front, which tabs are
+ * open — is one per project root, not one per file: opening or switching files
+ * never moves the sidebar off the view the user picked, nor resizes it.
  *
  * The host owns open/closed and width: `railOnly` draws the activity rail
  * alone, `onCollapse` / `onEnsureVisible` are the rail's close and open
@@ -75,10 +85,14 @@ export function ProjectContextWorkbench({
   onEnsureVisible,
   onModeWidthHint,
   resolvedMode,
+  projectViews,
+  revealRequest,
+  onActivePanelChange,
 }: {
   scopeKey: string
   rootPath: string
-  file: OpenFile
+  /** The focused group's file; null while nothing is open. */
+  file: OpenFile | null
   onDraftChange: (content: string) => void
   selection?: TextSelectionCoordinates
   railOnly: boolean
@@ -88,6 +102,12 @@ export function ProjectContextWorkbench({
   onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
   /** The preset the host's panel actually sits at, once measured. */
   resolvedMode?: ContextPanelMode
+  /** The explorer and project search, rendered by the editor (kept alive across folds). */
+  projectViews: ProjectViews
+  /** Bring a panel to the front (⌘B, ⇧⌘F, reveal in explorer, the selection toolbar). */
+  revealRequest?: { panelId: string; seq: number }
+  /** The panel in front changed — the editor mirrors it (explorer visibility, ⌘B). */
+  onActivePanelChange?: (panelId: string | null) => void
 }) {
   return (
     <ProjectContextWorkbenchHost
@@ -96,9 +116,102 @@ export function ProjectContextWorkbench({
       file={file}
       onDraftChange={onDraftChange}
       selection={selection}
-      desktop={{ railOnly, onCollapse, onEnsureVisible, onModeWidthHint, resolvedMode }}
+      desktop={{
+        railOnly,
+        onCollapse,
+        onEnsureVisible,
+        onModeWidthHint,
+        resolvedMode,
+        projectViews,
+        revealRequest,
+        onActivePanelChange,
+      }}
     />
   )
+}
+
+/** Panel ids of the project views — also what the editor's commands reveal. */
+export const PROJECT_FILES_PANEL_ID = "files"
+export const PROJECT_SEARCH_PANEL_ID = "search"
+/**
+ * Their activities. Host-local (not in the canonical, plugin-facing taxonomy)
+ * and pinned ahead of the file views through `leadingActivities`.
+ */
+const PROJECT_FILES_ACTIVITY = "project-files"
+const PROJECT_SEARCH_ACTIVITY = "project-search"
+const PROJECT_LEADING_ACTIVITIES = [PROJECT_FILES_ACTIVITY, PROJECT_SEARCH_ACTIVITY] as const
+
+/**
+ * The open file's views. Their rail buttons stay put with no file to act on
+ * (none open, or a binary/oversized one in front) — the rail never reshuffles
+ * as files come and go — and their bodies say what they need instead.
+ */
+type FilePanelId = "ai" | "comments" | "inspect" | "outline" | "proposal-review"
+const FILE_PANELS: Record<
+  FilePanelId,
+  Pick<ContextPanelDefinition, "id" | "activity" | "labelKey" | "icon" | "order" | "retention">
+> = {
+  ai: {
+    id: "ai",
+    activity: "ai",
+    labelKey: "projectEditor.workbench.ai",
+    icon: BotIcon,
+    order: 10,
+    retention: "stateful",
+  },
+  comments: {
+    id: "comments",
+    activity: "comments",
+    labelKey: "projectEditor.workbench.comments",
+    icon: MessageSquareIcon,
+    order: 20,
+    retention: "stateful",
+  },
+  inspect: {
+    id: "inspect",
+    activity: "inspect",
+    labelKey: "projectEditor.workbench.inspect",
+    icon: FileSearchIcon,
+    order: 30,
+    retention: "stateful",
+  },
+  outline: {
+    id: "outline",
+    activity: "inspect",
+    labelKey: "projectEditor.workbench.outline",
+    icon: ListTreeIcon,
+    order: 31,
+    retention: "stateful",
+  },
+  "proposal-review": {
+    id: "proposal-review",
+    activity: "review",
+    labelKey: "contextWorkbench.proposalReview",
+    icon: GitCompareIcon,
+    order: 40,
+    retention: "stateful",
+  },
+}
+
+const appliesToProjectFile: ContextPanelDefinition["appliesTo"] = (resource) =>
+  resource.kind === "project-file"
+
+function NoFilePanel({ message }: { message: string }) {
+  return (
+    <div
+      className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground"
+      data-testid="project-context-no-file"
+    >
+      {message}
+    </div>
+  )
+}
+
+export interface ProjectViews {
+  /** Renders the explorer in the panel's box (a parked-view slot). */
+  files: () => ReactNode
+  /** Renders project search in the panel's box. */
+  search: () => ReactNode
 }
 
 export function ProjectContextWorkbenchMobile({
@@ -141,7 +254,7 @@ function ProjectContextWorkbenchHost({
 }: {
   scopeKey: string
   rootPath: string
-  file: OpenFile
+  file: OpenFile | null
   mobile?: { open: boolean; onOpenChange: (open: boolean) => void }
   desktop?: {
     railOnly: boolean
@@ -149,14 +262,18 @@ function ProjectContextWorkbenchHost({
     onEnsureVisible: () => void
     onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
     resolvedMode?: ContextPanelMode
+    projectViews: ProjectViews
+    revealRequest?: { panelId: string; seq: number }
+    onActivePanelChange?: (panelId: string | null) => void
   }
   onDraftChange: (content: string) => void
   selection?: TextSelectionCoordinates
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(`project:${scopeKey}`)
   const t = useTranslations("projectEditor.workbench")
-  const dirty = file.draftContent !== file.savedContent
-  const hash = contentToken(file.draftContent)
+  const relPath = file?.relPath ?? ""
+  const dirty = file ? file.draftContent !== file.savedContent : false
+  const hash = contentToken(file?.draftContent)
   const latestFile = useRef(file)
   useEffect(() => {
     latestFile.current = file
@@ -164,7 +281,7 @@ function ProjectContextWorkbenchHost({
   const resourceKey = getProjectFileResourceKey({
     projectId: scopeKey,
     rootId: rootPath,
-    relPath: file.relPath,
+    relPath,
   })
   const unresolvedCommentCount = useContextCommentBadge("project-file", resourceKey)
   const proposal = useSyncExternalStore(
@@ -175,29 +292,35 @@ function ProjectContextWorkbenchHost({
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const hadProposal = useRef(false)
-  const layoutScopeKey = `${workbenchInstanceId}::project:${scopeKey}:${rootPath}:${file.relPath}`
+  // Desktop: one layout per project root, whatever file is open — the sidebar
+  // keeps its view and width across files. The mobile drawer only carries file
+  // views, so it keeps the workbench's own per-file scope.
+  const projectLayoutScopeKey = `${workbenchInstanceId}::project-root:${scopeKey}:${rootPath}`
+  const layoutScopeKey = desktop
+    ? projectLayoutScopeKey
+    : `${workbenchInstanceId}::project:${scopeKey}:${rootPath}:${relPath}`
 
-  useEffect(
-    () =>
-      registerProjectFileProposalAdapter(resourceKey, {
-        capture: () => ({
-          content: latestFile.current.draftContent,
-          baseToken: fileBaseToken(latestFile.current),
-        }),
-        apply: (content, expectedBaseToken) => {
-          if (fileBaseToken(latestFile.current) !== expectedBaseToken) return false
-          const nextDraftVersion = latestFile.current.draftVersion + 1
-          latestFile.current = {
-            ...latestFile.current,
-            draftContent: content,
-            draftVersion: nextDraftVersion,
-          }
-          onDraftChange(content)
-          return `${nextDraftVersion}:0:${contentToken(content)}`
-        },
-      }),
-    [onDraftChange, resourceKey]
-  )
+  const hasFile = file !== null
+  useEffect(() => {
+    // No file, no draft to propose against.
+    if (!hasFile) return
+    return registerProjectFileProposalAdapter(resourceKey, {
+      capture: () => {
+        const current = latestFile.current
+        return current
+          ? { content: current.draftContent, baseToken: fileBaseToken(current) }
+          : { content: "", baseToken: "" }
+      },
+      apply: (content, expectedBaseToken) => {
+        const current = latestFile.current
+        if (!current || fileBaseToken(current) !== expectedBaseToken) return false
+        const nextDraftVersion = current.draftVersion + 1
+        latestFile.current = { ...current, draftContent: content, draftVersion: nextDraftVersion }
+        onDraftChange(content)
+        return `${nextDraftVersion}:0:${contentToken(content)}`
+      },
+    })
+  }, [hasFile, onDraftChange, resourceKey])
 
   // A proposal is the AI panel's answer — surface it even when the host has
   // the workbench folded to its rail, or the reply would land out of sight.
@@ -219,34 +342,68 @@ function ProjectContextWorkbenchHost({
   const activePanelId = useContextWorkbenchStore(
     (state) => state.layouts[layoutScopeKey]?.activePanelId ?? null
   )
+  // The desktop sidebar opens on the explorer (VS Code); the drawer on AI.
+  const defaultPanelId = desktop ? PROJECT_FILES_PANEL_ID : "ai"
   useEffect(() => {
     if (activePanelId) return
-    navigatePanel(layoutScopeKey, "ai", "narrow")
-  }, [activePanelId, layoutScopeKey, navigatePanel])
+    navigatePanel(layoutScopeKey, defaultPanelId, "narrow")
+  }, [activePanelId, defaultPanelId, layoutScopeKey, navigatePanel])
+  const onActivePanelChange = desktop?.onActivePanelChange
+  useEffect(() => {
+    onActivePanelChange?.(activePanelId)
+  }, [activePanelId, onActivePanelChange])
 
-  const panels = useMemo<ContextPanelDefinition[]>(
-    () => [
+  const projectViews = desktop?.projectViews
+  const projectPanels = useMemo<ContextPanelDefinition[]>(
+    () =>
+      projectViews
+        ? [
+            {
+              id: PROJECT_FILES_PANEL_ID,
+              activity: PROJECT_FILES_ACTIVITY,
+              labelKey: "projectEditor.filesTab",
+              icon: FilesIcon,
+              order: 0,
+              appliesTo: (resource) => resource.kind === "project-file",
+              retention: "stateful",
+              renderer: projectViews.files,
+            },
+            {
+              id: PROJECT_SEARCH_PANEL_ID,
+              activity: PROJECT_SEARCH_ACTIVITY,
+              labelKey: "projectEditor.searchTab",
+              icon: SearchIcon,
+              order: 0,
+              appliesTo: (resource) => resource.kind === "project-file",
+              retention: "stateful",
+              renderer: projectViews.search,
+            },
+          ]
+        : [],
+    [projectViews]
+  )
+
+  const filePanels = useMemo<ContextPanelDefinition[]>(() => {
+    if (!file) {
+      const noFile = () => <NoFilePanel message={t("noFile")} />
+      return Object.values(FILE_PANELS).map((panel) => ({
+        ...panel,
+        appliesTo: appliesToProjectFile,
+        renderer: noFile,
+      }))
+    }
+    return [
       {
-        id: "ai",
-        activity: "ai",
-        labelKey: "projectEditor.workbench.ai",
-        icon: BotIcon,
-        order: 10,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
+        ...FILE_PANELS.ai,
+        appliesTo: appliesToProjectFile,
         requiresChatScope: true,
         renderer: () => (
           <ResourceWorkbenchChatPanel getResourceContext={() => file.draftContent ?? ""} />
         ),
       },
       {
-        id: "comments",
-        activity: "comments",
-        labelKey: "projectEditor.workbench.comments",
-        icon: MessageSquareIcon,
-        order: 20,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
+        ...FILE_PANELS.comments,
+        appliesTo: appliesToProjectFile,
         getBadge: () => unresolvedCommentCount,
         renderer: () => (
           <ContextCommentsPanel
@@ -266,13 +423,8 @@ function ProjectContextWorkbenchHost({
         ),
       },
       {
-        id: "inspect",
-        activity: "inspect",
-        labelKey: "projectEditor.workbench.inspect",
-        icon: FileSearchIcon,
-        order: 30,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
+        ...FILE_PANELS.inspect,
+        appliesTo: appliesToProjectFile,
         renderer: () => (
           <div className="workbench-scroll h-full overflow-auto">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 p-4 text-xs">
@@ -295,13 +447,8 @@ function ProjectContextWorkbenchHost({
         ),
       },
       {
-        id: "outline",
-        activity: "inspect",
-        labelKey: "projectEditor.workbench.outline",
-        icon: ListTreeIcon,
-        order: 31,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
+        ...FILE_PANELS.outline,
+        appliesTo: appliesToProjectFile,
         renderer: () => (
           <ProjectFileOutlinePanel
             relPath={file.relPath}
@@ -311,44 +458,41 @@ function ProjectContextWorkbenchHost({
         ),
       },
       {
-        id: "proposal-review",
-        activity: "review",
-        labelKey: "contextWorkbench.proposalReview",
-        icon: GitCompareIcon,
-        order: 40,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
+        ...FILE_PANELS["proposal-review"],
+        appliesTo: appliesToProjectFile,
         preferredMode: "wide",
         getBadge: () => (proposal ? 1 : 0),
         renderer: () => <ProjectFileReviewPanel resourceKey={resourceKey} />,
       },
-    ],
-    [
-      dirty,
-      file,
-      hash,
-      proposal,
-      resourceKey,
-      rootPath,
-      scopeKey,
-      selection,
-      t,
-      unresolvedCommentCount,
     ]
-  )
+  }, [
+    dirty,
+    file,
+    hash,
+    proposal,
+    resourceKey,
+    rootPath,
+    scopeKey,
+    selection,
+    t,
+    unresolvedCommentCount,
+  ])
+  const panels = useMemo(() => [...projectPanels, ...filePanels], [filePanels, projectPanels])
 
+  // With no file open the resource is the project root (`relPath: ""`); the
+  // file views stay on the rail with their no-file bodies.
   const resource: ContextResource = {
     kind: "project-file",
     projectId: scopeKey,
     rootId: rootPath,
-    relPath: file.relPath,
+    relPath,
     contentHash: hash,
-    mtime: file.mtime,
-    draftVersion: file.draftVersion,
+    mtime: file?.mtime,
+    draftVersion: file?.draftVersion ?? 0,
     selection,
     capabilities: resolveContextCapabilities({
       kind: "project-file",
-      previewable: isProjectFilePreviewable(file.relPath),
+      previewable: file ? isProjectFilePreviewable(file.relPath) : false,
     }),
   }
 
@@ -371,6 +515,10 @@ function ProjectContextWorkbenchHost({
       onEnsureVisible={desktop?.onEnsureVisible}
       onModeWidthHint={desktop?.onModeWidthHint}
       resolvedMode={desktop?.resolvedMode}
+      leadingActivities={PROJECT_LEADING_ACTIVITIES}
+      layoutScopeKey={projectLayoutScopeKey}
+      revealRequest={desktop?.revealRequest}
+      headerClassName={EDITOR_TITLE_ROW_CLASS}
       // The host's resizable panel draws the divider; a second border beside
       // it would read as a double rule.
       className="w-full border-l-0"

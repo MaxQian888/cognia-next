@@ -18,7 +18,7 @@ jest.mock("@monaco-editor/react", () => ({
   },
 }))
 
-jest.mock("@/lib/tauri", () => ({
+jest.mock("@/lib/platform/detect", () => ({
   __esModule: true,
   isTauri: () => mockIsTauri(),
 }))
