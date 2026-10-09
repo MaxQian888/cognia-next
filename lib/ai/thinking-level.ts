@@ -207,7 +207,22 @@ function appLadderFromTiers(tiers: readonly ReasoningTier[]): EffortTier[] {
  */
 export function externalAgentThinkingLevels(published?: readonly string[]): EffortTier[] {
   const declared = projectAgentLevels(published)
-  return declared.length > 0 ? declared : appLadderFromTiers(tiersForSurface("generic-effort"))
+  if (declared.length > 0) return declared
+  // An agent whose whole vocabulary is the app's own, and that offers no depth
+  // in it, has answered: this model does not think (Pi publishes just `off`
+  // for a model without reasoning). Inventing `low | medium | high` there put
+  // a dial on the toolbar that the adapter then clamped to nothing.
+  if (published && published.length > 0 && published.every(isKnownAgentLevel)) return []
+  return appLadderFromTiers(tiersForSurface("generic-effort"))
+}
+
+/** A level name the app understands: a tier, `off`, or `minimal` (see below). */
+function isKnownAgentLevel(level: string): boolean {
+  return (
+    level === "off" ||
+    level === "minimal" ||
+    (EFFORT_SLIDER_LEVELS as readonly string[]).includes(level)
+  )
 }
 
 /**

@@ -7223,7 +7223,14 @@
           },
           "strategyLabel": "取帧方式"
         },
-        "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。"
+        "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。",
+        "visualNotice": {
+          "agentFallback": "该 Agent",
+          "noVision": "{model} 不支持图片输入，看不到{count, plural, =1 {这张图片} other {这 # 张图片}}。请切换到支持视觉的模型，或移除{count, plural, =1 {它} other {它们}}。",
+          "noVisionShort": "{model} 无法查看图片",
+          "textOnly": "{agent} 只接收文本，{count, plural, =1 {这张图片或视频} other {这 # 张图片和视频}}不会被发送；从中提取的文字会发送。",
+          "textOnlyShort": "{agent} 只接收文本"
+        }
       },
       "camera": {
         "captureAria": "拍照或添加照片",

@@ -408,6 +408,13 @@
         "audioRequired": "请先转写此音频再发送。",
         "partial": "当前为部分表示，不包含尚未处理的页面、音轨或未采样的视频内容。",
         "rejected": "有 {count} 个附件尚未处理完成，请重试或移除后再发送。"
+      },
+      "visualNotice": {
+        "agentFallback": "该 Agent",
+        "textOnlyShort": "{agent} 只接收文本",
+        "textOnly": "{agent} 只接收文本，{count, plural, =1 {这张图片或视频} other {这 # 张图片和视频}}不会被发送；从中提取的文字会发送。",
+        "noVisionShort": "{model} 无法查看图片",
+        "noVision": "{model} 不支持图片输入，看不到{count, plural, =1 {这张图片} other {这 # 张图片}}。请切换到支持视觉的模型，或移除{count, plural, =1 {它} other {它们}}。"
       }
     },
     "camera": {

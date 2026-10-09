@@ -42,6 +42,34 @@ describe("resolveEffortSurface", () => {
     expect(surface.levels).not.toContain("ultracode")
   })
 
+  it("offers no dial on a model the agent's catalog says does not reason", () => {
+    const surface = resolveEffortSurface({ runtime: "external", externalModelReasoning: false })
+    expect(surface.levels).toEqual([])
+    expect(surface.offered).toEqual([])
+  })
+
+  it("trusts a ladder the agent published over its catalog's reasoning flag", () => {
+    const surface = resolveEffortSurface({
+      runtime: "external",
+      externalLevels: ["off", "low", "high"],
+      externalModelReasoning: false,
+    })
+    expect(surface.levels).toEqual(["low", "high"])
+  })
+
+  it("keeps the generic ladder for a reasoning model, or one the catalog says nothing about", () => {
+    const generic = resolveEffortSurface({ runtime: "external" }).levels
+    expect(
+      resolveEffortSurface({ runtime: "external", externalModelReasoning: true }).levels
+    ).toEqual(generic)
+    expect(generic.length).toBeGreaterThan(0)
+  })
+
+  it("ignores the agent's reasoning flag on the built-in rail", () => {
+    const builtin = resolveEffortSurface({ runtime: "claude-sdk", externalModelReasoning: false })
+    expect(builtin.levels.length).toBeGreaterThan(0)
+  })
+
   it("keeps the generic external ladder until the agent has answered", () => {
     // An empty list is "not asked yet", not "this agent offers nothing".
     const asked = resolveEffortSurface({ runtime: "external", externalLevels: [] })

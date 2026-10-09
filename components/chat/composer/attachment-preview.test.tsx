@@ -675,3 +675,50 @@ describe("AttachmentPreview — videos", () => {
     )
   })
 })
+
+describe("AttachmentPreview — images the model will not see", () => {
+  const TEXT_ONLY = { accepted: false, reason: "text-only-agent", agentName: "Pi" } as const
+  const NO_VISION = {
+    accepted: false,
+    reason: "model-no-vision",
+    modelName: "DeepSeek V4 Pro",
+  } as const
+
+  it("says before the send that a text-only agent gets no images or video", () => {
+    stage([
+      { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
+      { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
+      { id: "d", mediaType: "application/pdf", filename: "doc.pdf" },
+    ])
+    renderPreview(<AttachmentPreview bare videoRoute={ROUTE} imageInput={TEXT_ONLY} />)
+    const notice = screen.getByTestId("attachment-visual-notice")
+    expect(notice).toHaveTextContent("Pi gets text only")
+    expect(notice).toHaveAttribute("title", expect.stringContaining("these 2 images and videos"))
+  })
+
+  it("names the model that cannot see images, counting images only", () => {
+    stage([
+      { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
+      { id: "v", mediaType: "video/mp4", filename: "clip.mp4" },
+    ])
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} imageInput={NO_VISION} />)
+    const notice = screen.getByTestId("attachment-visual-notice")
+    expect(notice).toHaveTextContent("DeepSeek V4 Pro can't see images")
+    expect(notice).toHaveAttribute("title", expect.stringContaining("this one"))
+  })
+
+  it("stays quiet when there is nothing visual, or the model takes images", () => {
+    stage([{ id: "d", mediaType: "application/pdf", filename: "doc.pdf" }])
+    const { rerender } = renderPreview(
+      <AttachmentPreview bare videoRoute={ROUTE} imageInput={TEXT_ONLY} />
+    )
+    expect(screen.queryByTestId("attachment-visual-notice")).toBeNull()
+    stage([{ id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" }])
+    rerender(
+      <TooltipProvider>
+        <AttachmentPreview bare videoRoute={ROUTE} imageInput={{ accepted: true }} />
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("attachment-visual-notice")).toBeNull()
+  })
+})

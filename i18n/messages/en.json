@@ -7223,7 +7223,14 @@
           },
           "strategyLabel": "Pick frames"
         },
-        "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here."
+        "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here.",
+        "visualNotice": {
+          "agentFallback": "This agent",
+          "noVision": "{model} doesn't accept images, so it won't see {count, plural, =1 {this one} other {these #}}. Switch to a model with vision, or remove {count, plural, =1 {it} other {them}}.",
+          "noVisionShort": "{model} can't see images",
+          "textOnly": "{agent} receives text only, so {count, plural, =1 {this image or video isn't} other {these # images and videos aren't}} sent. Text extracted from {count, plural, =1 {it} other {them}} is.",
+          "textOnlyShort": "{agent} gets text only"
+        }
       },
       "camera": {
         "captureAria": "Take or attach a photo",

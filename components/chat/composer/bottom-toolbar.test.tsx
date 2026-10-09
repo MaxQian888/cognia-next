@@ -206,6 +206,8 @@ beforeEach(() => {
   }
   for (const key of Object.keys(lastSelectorProps)) delete lastSelectorProps[key]
   mockToolbarWidth = 0
+  mockAgentContextWindow = undefined
+  mockContextIndicatorProps.length = 0
 })
 
 // Stub the workflow toolbar variant so the branching test doesn't need
@@ -249,6 +251,25 @@ jest.mock("./fusion-mode-chip", () => ({
     return fusionChipVisible ? <div data-testid="fusion-mode-chip" /> : null
   },
 }))
+
+// The agent model's window, as the agent's catalog reports it; its own suite
+// covers how it is resolved. The indicator stays real, its props recorded.
+let mockAgentContextWindow: number | undefined
+jest.mock("./hooks/use-agent-context-window", () => ({
+  useAgentContextWindow: () => mockAgentContextWindow,
+}))
+const mockContextIndicatorProps: Array<{ maxTokens?: number }> = []
+jest.mock("@/components/chat/context-usage-indicator", () => {
+  const actual = jest.requireActual("@/components/chat/context-usage-indicator")
+  const { createElement } = jest.requireActual("react")
+  return {
+    ...actual,
+    ContextUsageIndicator: (props: { maxTokens?: number }) => {
+      mockContextIndicatorProps.push(props)
+      return createElement(actual.ContextUsageIndicator, props)
+    },
+  }
+})
 
 jest.mock("./workflow-bottom-toolbar", () => ({
   WorkflowBottomToolbar: () => <div data-testid="workflow-bottom-toolbar" />,
@@ -1050,4 +1071,19 @@ it("mounts session status in the ambient composer cluster", () => {
     screen.getByTestId("segment-connectivity")
   )
   expect(screen.queryByTestId("segment-runStatus")).toBeNull()
+})
+
+describe("BottomToolbar — context ring on an agent's lane", () => {
+  it("sizes the ring from the window the agent's catalog reports", () => {
+    mockAgentContextWindow = 1_000_000
+    render(<BottomToolbar session={session} />)
+    expect(mockContextIndicatorProps.length).toBeGreaterThan(0)
+    expect(mockContextIndicatorProps.at(-1)?.maxTokens).toBe(1_000_000)
+  })
+
+  it("leaves the ring on the built-in catalog when no agent window is known", () => {
+    render(<BottomToolbar session={session} />)
+    expect(mockContextIndicatorProps.length).toBeGreaterThan(0)
+    expect(mockContextIndicatorProps.at(-1)?.maxTokens).toBeUndefined()
+  })
 })

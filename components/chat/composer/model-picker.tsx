@@ -55,6 +55,7 @@ import {
   cogniaProviderIdFromGroupId,
   externalAgentProviderId,
   isExternalAgentProviderId,
+  resolveActiveAgentModel,
   resolveExternalAgentModelSelection,
 } from "@/lib/ai/agent/external/session/session-models"
 import {
@@ -315,17 +316,10 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // The agent's own model this conversation asked for, from the resolved
   // choice above (the conversation row, or the app default a welcome-screen
   // pick writes).
-  const agentPick = choice?.kind === "native" ? choice.modelId : undefined
-  const agentCurrent = nativeSurface?.currentModelId ?? undefined
-  // A live surface is the agent's own word on what runs, and a pick writes
-  // through to it at once. A seeded one (a catalog before the first turn, or
-  // what a paired Host reported after the last one) can only be changed by the
-  // next turn, so until then the pick is the truer answer.
-  const agentModel =
-    nativeSurface?.write.kind === "session-seed"
-      ? (agentPick ?? agentCurrent)
-      : (agentCurrent ?? agentPick)
-  const agentActiveModel = agentModel || ""
+  // The seeded-vs-live precedence lives in `resolveActiveAgentModel`, shared
+  // with the thinking dial and the context ring so all three name one model.
+  const activeAgentModel = resolveActiveAgentModel({ choice, surface: nativeSurface })
+  const agentActiveModel = activeAgentModel.modelId ?? ""
   // A Cognia model, named compactly on the chip with a Cognia glyph, and in
   // full (agent, provider, model, route) on hover.
   const cogniaProvider = cogniaBinding
@@ -338,8 +332,7 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   const agentTriggerLabel = cogniaBinding
     ? cogniaModelName
     : agentActiveModel
-      ? (nativeSurface?.choices.find((option) => option.modelId === agentActiveModel)?.name ??
-        agentActiveModel)
+      ? (activeAgentModel.model?.name ?? agentActiveModel)
       : t("agentDefaultModel", { agent: agentLabel })
   const agentTriggerTitle = cogniaBinding
     ? t("cogniaChipTitle", {

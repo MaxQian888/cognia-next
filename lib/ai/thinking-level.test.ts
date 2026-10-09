@@ -258,6 +258,12 @@ describe("externalAgentThinkingLevels", () => {
     expect(fallback).not.toContain("max")
   })
 
+  it("offers no ladder for a model the agent says does not think", () => {
+    // Pi publishes `off` alone for a model without reasoning.
+    expect(externalAgentThinkingLevels(["off"])).toEqual([])
+    expect(externalAgentThinkingLevels(["off", "minimal"])).toEqual([])
+  })
+
   it("ignores a vocabulary the app shares no level with", () => {
     // An agent speaking entirely its own words gets the generic ladder rather
     // than an empty control that offers nothing at all.

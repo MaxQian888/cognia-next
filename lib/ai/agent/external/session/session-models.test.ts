@@ -15,6 +15,7 @@ import {
   cogniaProviderIdFromGroupId,
   EXTERNAL_AGENT_GATEWAY_SESSIONS_PER_AGENT,
   resolveExternalAgentModels,
+  resolveActiveAgentModel,
   reportableConfigOptions,
   seededModelSurface,
   EMPTY_THINKING_SURFACE,
@@ -654,5 +655,57 @@ describe("reportableConfigOptions", () => {
         thinking: EMPTY_THINKING_SURFACE,
       })
     ).toEqual([])
+  })
+})
+
+describe("resolveActiveAgentModel", () => {
+  const flash = {
+    modelId: "deepseek/flash",
+    name: "Flash",
+    capabilities: { contextWindow: 1_000_000, reasoning: true, vision: true },
+  }
+  const pro = { modelId: "deepseek/pro", name: "Pro", capabilities: { reasoning: true } }
+  const live = {
+    choices: [flash, pro],
+    currentModelId: "deepseek/flash",
+    write: { kind: "session-model" as const },
+  }
+
+  it("names what a live session runs, over the conversation's pick", () => {
+    expect(
+      resolveActiveAgentModel({
+        choice: { kind: "native", modelId: "deepseek/pro" },
+        surface: live,
+      })
+    ).toEqual({ modelId: "deepseek/flash", model: flash })
+  })
+
+  it("names the pick on a seeded surface, which only the next turn changes", () => {
+    const seeded = { ...live, write: { kind: "session-seed" as const } }
+    expect(
+      resolveActiveAgentModel({
+        choice: { kind: "native", modelId: "deepseek/pro" },
+        surface: seeded,
+      })
+    ).toEqual({ modelId: "deepseek/pro", model: pro })
+  })
+
+  it("names nothing on a Cognia model, which the agent's catalog does not describe", () => {
+    expect(
+      resolveActiveAgentModel({
+        choice: { kind: "cognia", binding: { providerId: "openai", modelId: "gpt-5" } },
+        surface: live,
+      })
+    ).toEqual({ modelId: undefined, model: undefined })
+  })
+
+  it("keeps an id the catalog does not list, without a row", () => {
+    expect(
+      resolveActiveAgentModel({ choice: { kind: "native", modelId: "x/unlisted" }, surface: null })
+    ).toEqual({ modelId: "x/unlisted", model: undefined })
+    expect(resolveActiveAgentModel({ choice: null, surface: null })).toEqual({
+      modelId: undefined,
+      model: undefined,
+    })
   })
 })

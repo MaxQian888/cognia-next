@@ -73,6 +73,14 @@ export interface EffortSurfaceInput {
    * is a round trip to an agent process.
    */
   externalLevels?: readonly string[]
+  /**
+   * Whether the external agent's catalog says the model this conversation
+   * runs reasons (`ExternalAgentModelCapabilities.reasoning`). `false` with no
+   * published ladder means there is no depth to choose, so no dial; a ladder
+   * the agent published wins either way, because it is the more specific
+   * answer. Only consulted on the external rail.
+   */
+  externalModelReasoning?: boolean
 }
 
 export interface EffortSurface {
@@ -107,7 +115,11 @@ export function resolveEffortSurface(input: EffortSurfaceInput): EffortSurface {
   // when it has declared them (Pi reports `max` for the models that honour it),
   // and from the generic surface until then.
   if (input.runtime === "external") {
-    const offered = externalAgentThinkingLevels(input.externalLevels)
+    const agentPublished = (input.externalLevels?.length ?? 0) > 0
+    const offered =
+      !agentPublished && input.externalModelReasoning === false
+        ? []
+        : externalAgentThinkingLevels(input.externalLevels)
     return {
       offered,
       levels: visibleThinkingLevels(offered, input.hiddenTiers),

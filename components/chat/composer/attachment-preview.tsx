@@ -40,6 +40,7 @@ import {
   Loader2Icon,
   Music2Icon,
   PaperclipIcon,
+  EyeOffIcon,
   PlayIcon,
   ScanTextIcon,
 } from "lucide-react"
@@ -82,6 +83,7 @@ import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useStagedAttachments, type StagedAttachmentState } from "./staged-attachment-store"
 import { AttachmentPreviewDialog, type PreviewTarget } from "./attachment-preview-dialog"
+import type { ComposerImageInput } from "./hooks/use-composer-image-input"
 
 export interface AttachmentPreviewProps {
   /** Runs OCR for an image attachment (invoked from the preview panel). */
@@ -103,6 +105,12 @@ export interface AttachmentPreviewProps {
    * delivery options; the send path re-checks the resolved route.
    */
   videoRoute: NativeVideoVerdict
+  /**
+   * Whether staged images and video will reach the model
+   * (`useComposerImageInput`). When they will not, the row says so beside the
+   * tiles, before the send. Absent means "they will", as before.
+   */
+  imageInput?: ComposerImageInput
 }
 
 /** i18n key suffix for a machine-readable rejection reason. */
@@ -245,6 +253,51 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
 
   const activeImage = lightboxIndex !== null ? imageItems[lightboxIndex] : undefined
 
+  // Images and video are what a text-only recipient or a model without vision
+  // cannot take; documents still reach it as text.
+  const imageInput = props.imageInput
+  // A model without vision still takes a video through its own route (see
+  // `videoRoute`), so only images count there.
+  const visualCount = ordered.filter((f) => {
+    const mediaType = f.mediaType ?? ""
+    const video =
+      mediaType.startsWith("video/") ||
+      isVideoDescriptor({ name: ("filename" in f ? f.filename : undefined) ?? "", mediaType })
+    if (video) return imageInput?.accepted === false && imageInput.reason === "text-only-agent"
+    return mediaType.startsWith("image/")
+  }).length
+  const visualNotice =
+    imageInput && !imageInput.accepted && visualCount > 0
+      ? imageInput.reason === "text-only-agent"
+        ? {
+            short: t("visualNotice.textOnlyShort", {
+              agent: imageInput.agentName ?? t("visualNotice.agentFallback"),
+            }),
+            full: t("visualNotice.textOnly", {
+              agent: imageInput.agentName ?? t("visualNotice.agentFallback"),
+              count: visualCount,
+            }),
+          }
+        : {
+            short: t("visualNotice.noVisionShort", { model: imageInput.modelName }),
+            full: t("visualNotice.noVision", { model: imageInput.modelName, count: visualCount }),
+          }
+      : null
+  // A pill in the same flow as the tiles: it describes them, so it sits with
+  // them, and it leaves with the last image.
+  const notice = visualNotice ? (
+    <span
+      role="note"
+      title={visualNotice.full}
+      aria-label={visualNotice.full}
+      data-testid="attachment-visual-notice"
+      className="inline-flex h-7 max-w-[18rem] items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 text-[11px] text-amber-700 dark:text-amber-300"
+    >
+      <EyeOffIcon aria-hidden className="size-3.5 shrink-0" />
+      <span className="truncate">{visualNotice.short}</span>
+    </span>
+  ) : null
+
   const overlays = (
     <>
       <ImageLightbox
@@ -301,10 +354,14 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
   return (
     <>
       {props.bare ? (
-        chips
+        <>
+          {chips}
+          {notice}
+        </>
       ) : (
         <Attachments variant="grid" className="ml-0 w-full px-2 has-[>*]:pt-2">
           {chips}
+          {notice}
         </Attachments>
       )}
       {overlays}

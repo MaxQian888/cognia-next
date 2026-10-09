@@ -13,6 +13,7 @@
 import { useSettingsStore } from "@/stores/settings"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentModels } from "@/hooks/agent/use-external-agent-models"
+import { useExternalAgentActiveModel } from "@/hooks/agent/use-external-agent-active-model"
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
 import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -41,7 +42,15 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
   // cached round trip the model chip already makes for this conversation, so
   // asking costs nothing extra, and it is what lets Pi's `max` appear instead
   // of the generic three tiers every external agent used to be given.
-  const agentThinking = useExternalAgentModels(session?.id).thinking
+  const agentModels = useExternalAgentModels(session?.id)
+  const agentThinking = agentModels.thinking
+  // What the agent's catalog says about the model this conversation runs: a
+  // model it reports as non-reasoning gets no dial, before the first turn too.
+  const activeAgentModel = useExternalAgentActiveModel(
+    agentModels.agentId,
+    session,
+    agentModels.surface
+  )
   // The RESOLVED app default, as `effortSurfaceForSession` reads it. The raw
   // pair can hold an external agent's model plus the reserved marker provider;
   // handed through as-is, a built-in session behind that default derived its
@@ -57,5 +66,6 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
     defaultProvider: appDefault.provider,
     hiddenTiers,
     externalLevels: agentThinking.levels,
+    externalModelReasoning: activeAgentModel.model?.capabilities?.reasoning,
   })
 }

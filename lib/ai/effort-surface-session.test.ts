@@ -31,9 +31,20 @@ jest.mock("@/stores/settings", () => ({
 // can publish an agent's ladder after the lane was chosen, the way a
 // `config_options` reply actually arrives.
 let agentLevels: readonly string[] | null = null
+let agentModels: {
+  choices: Array<{ modelId: string; name: string; capabilities?: { reasoning?: boolean } }>
+  currentModelId: string | null
+  write: { kind: string }
+} | null = null
 const cacheListeners = new Set<() => void>()
 const cachedConversationSurface = jest.fn((_agentId: string, _chatSessionId?: string) =>
-  agentLevels ? { status: "ready", thinking: { levels: agentLevels } } : null
+  agentLevels || agentModels
+    ? {
+        status: "ready",
+        thinking: { levels: agentLevels ?? [] },
+        surface: agentModels ?? { choices: [], currentModelId: null, write: { kind: "none" } },
+      }
+    : null
 )
 jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
   cachedConversationSurface: (agentId: string, chatSessionId?: string) =>
@@ -55,6 +66,8 @@ import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session
 beforeEach(() => {
   settingsState.settings = {}
   runtimeKind = "builtin"
+  agentLevels = null
+  agentModels = null
   settingsListeners.clear()
   runtimeListeners.clear()
   cacheListeners.clear()
@@ -267,6 +280,33 @@ describe("the app default that belongs to an external agent", () => {
     notify(settingsListeners)
 
     expect(listener).not.toHaveBeenCalled()
+    stop()
+  })
+})
+
+describe("the agent model's reasoning flag", () => {
+  const surface = (reasoning: boolean) => ({
+    choices: [{ modelId: "p/m", name: "M", capabilities: { reasoning } }],
+    currentModelId: "p/m",
+    write: { kind: "session-model" },
+  })
+
+  it("hides the dial for a model the agent's catalog says does not reason", () => {
+    runtimeKind = "external"
+    agentModels = surface(false)
+    expect(effortSurfaceForSession({ id: "chat-1" }).levels).toEqual([])
+    agentModels = surface(true)
+    expect(effortSurfaceForSession({ id: "chat-1" }).levels.length).toBeGreaterThan(0)
+  })
+
+  it("wakes a listener when the running model's reasoning flag changes", () => {
+    runtimeKind = "external"
+    agentModels = surface(true)
+    const listener = jest.fn()
+    const stop = subscribeEffortSurface("chat-1", listener)
+    agentModels = surface(false)
+    notify(cacheListeners)
+    expect(listener).toHaveBeenCalledTimes(1)
     stop()
   })
 })

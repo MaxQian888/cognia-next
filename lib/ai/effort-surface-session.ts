@@ -18,6 +18,8 @@ import {
   subscribeAgentModelSurface,
 } from "@/lib/ai/agent/external/capability/model-surface-cache"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
+import { activeAgentModelFor } from "@/lib/ai/agent/external/session/active-agent-model"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 /** The agent a lane dispatches to: its id, or the host configuration's. */
 function laneAgentId(ref: AgentRuntimeRef): string | null {
@@ -42,6 +44,48 @@ function externalLevelsFor(
 }
 
 /**
+ * Whether the catalog says the model the agent runs for this conversation
+ * reasons. Read from the same cache, through the same selection the model
+ * picker shows, so this path hides the dial exactly when the host chip does.
+ */
+function externalModelReasoningFor(
+  session: EffortSessionColumns | null | undefined,
+  ref: AgentRuntimeRef
+): boolean | undefined {
+  const agentId = laneAgentId(ref)
+  if (!agentId) return undefined
+  const cached = cachedConversationSurface(agentId, session?.id)
+  const surface = cached?.status === "ready" ? cached.surface : null
+  return activeAgentModelFor(agentId, session, surface).model?.capabilities?.reasoning
+}
+
+function reasoningSignature(sessionId: string | undefined, ref: AgentRuntimeRef): string {
+  const agentId = laneAgentId(ref)
+  if (!agentId) return ""
+  const cached = cachedConversationSurface(agentId, sessionId)
+  const surface = cached?.status === "ready" ? cached.surface : null
+  const agent = useExternalAgentStore.getState().agents[agentId]
+  return JSON.stringify([
+    agent?.cogniaModel ?? null,
+    surface?.currentModelId ?? null,
+    surface?.choices.map((choice) => [choice.modelId, choice.capabilities?.reasoning ?? null]),
+  ])
+}
+
+/**
+ * The session columns the ladder reads. The external-agent columns are
+ * optional so a caller holding only the core three still gets an answer; it
+ * then describes the agent's default model, as a new conversation would.
+ */
+export type EffortSessionColumns = Pick<ChatSession, "id" | "model" | "providerOverride"> &
+  Partial<
+    Pick<
+      ChatSession,
+      "externalAgentModels" | "externalAgentSession" | "externalAgentGatewaySessions"
+    >
+  >
+
+/**
  * The same answer, for a caller that has a session row but no React.
  *
  * NOT the pure half: it performs the four store reads the composer's
@@ -55,7 +99,7 @@ function externalLevelsFor(
  * actually writes. `Session.provider` is a plugin-compat shim nothing populates.
  */
 export function effortSurfaceForSession(
-  session: Pick<ChatSession, "id" | "model" | "providerOverride"> | null | undefined
+  session: EffortSessionColumns | null | undefined
 ): EffortSurface {
   const settings = useSettingsStore.getState().settings
   const appDefault = resolveAppDefaultModel(settings)
@@ -74,6 +118,7 @@ export function effortSurfaceForSession(
     defaultProvider: appDefault.provider,
     hiddenTiers: settings?.composerBehavior?.hiddenEffortTiers,
     externalLevels: externalLevelsFor(session?.id, runtimeRef),
+    externalModelReasoning: externalModelReasoningFor(session, runtimeRef),
   })
 }
 
@@ -115,6 +160,11 @@ export function subscribeEffortSurface(
       // fourth. Signed on the levels rather than the cache revision, because
       // the cache also moves for the model list, which cannot change a ladder.
       externalLevelsFor(sessionId, runtimeRef),
+      // Whether the model the agent runs reasons. The session row is not in
+      // reach here, so this signs what can move that answer from outside it:
+      // which model the agent reports running, and the reasoning flag the
+      // catalog gives each model.
+      reasoningSignature(sessionId, runtimeRef),
     ])
   }
   let last = signature()
@@ -127,6 +177,8 @@ export function subscribeEffortSurface(
   const stops = [
     useSettingsStore.subscribe(notify),
     useAgentRuntimeStore.subscribe(notify),
+    // The agent's own Cognia binding decides whether its catalog applies.
+    useExternalAgentStore.subscribe(notify),
     subscribeAgentModelSurface(notify),
   ]
   return () => {

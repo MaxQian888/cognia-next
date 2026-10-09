@@ -557,6 +557,46 @@ export function resolveExternalAgentModels(input: {
 }
 
 /**
+ * The agent's own model a conversation runs, and the catalog entry for it.
+ *
+ * One answer for every surface that has to name or describe it: the model
+ * chip, the thinking ladder (a model the catalog says does not reason gets no
+ * dial) and the context ring (the window is the model's, not a guess from the
+ * built-in catalog). They used to be three derivations, and only the chip's
+ * knew that a seeded surface yields to the pick.
+ *
+ * `modelId` is `undefined` when the conversation runs a Cognia model (the
+ * agent's own catalog does not describe it) or the agent's unnamed default.
+ */
+export interface ActiveAgentModel {
+  modelId: string | undefined
+  /** The catalog row for {@link modelId}, when the agent listed it. */
+  model: ExternalAgentModelChoice | undefined
+}
+
+export function resolveActiveAgentModel(input: {
+  /** The conversation's resolved choice (`resolveExternalAgentModelSelection`). */
+  choice: ConversationModelChoice | null | undefined
+  /** What the agent reports, if anything yet. */
+  surface: ExternalAgentModelSurface | null | undefined
+}): ActiveAgentModel {
+  const { choice, surface } = input
+  if (choice?.kind === "cognia") return { modelId: undefined, model: undefined }
+  const pick = choice?.kind === "native" ? choice.modelId : undefined
+  const current = surface?.currentModelId ?? undefined
+  // A live surface is the agent's own word on what runs, and a pick writes
+  // through to it at once. A seeded one (a catalog before the first turn, or
+  // what a paired Host reported after the last one) only changes with the next
+  // turn, so until then the pick is the truer answer.
+  const modelId =
+    (surface?.write.kind === "session-seed" ? (pick ?? current) : (current ?? pick)) || undefined
+  return {
+    modelId,
+    model: modelId ? surface?.choices.find((option) => option.modelId === modelId) : undefined,
+  }
+}
+
+/**
  * A surface whose writes cannot reach the agent's session directly, so a pick
  * is recorded on the conversation and replayed by `applyModelToSession` on the
  * next turn.

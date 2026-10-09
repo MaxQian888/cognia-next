@@ -88,6 +88,10 @@ import { useCameraRecovery } from "@/hooks/use-camera-recovery"
 import { attachmentToFiles } from "@/components/mobile/chat/composer-attachment"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
 import { useComposerVideoRoute } from "./composer/hooks/use-composer-video-route"
+import {
+  useComposerImageInput,
+  type ComposerImageInput,
+} from "./composer/hooks/use-composer-image-input"
 import { ComposerBox, composerCardRadiusPx } from "./composer/composer-box"
 import {
   resolveComposerSkin,
@@ -563,6 +567,8 @@ interface InnerProps {
    * the outer `Composer`, whose `handleSubmit` reads the same verdict.
    */
   videoRoute: NativeVideoVerdict
+  /** Whether staged images reach the model (`useComposerImageInput`). */
+  imageInput: ComposerImageInput
 }
 
 function ComposerInner(props: InnerProps) {
@@ -3388,6 +3394,7 @@ function ComposerInner(props: InnerProps) {
             // card so staged media reads as part of the message being written.
             <MemoContextChipBar
               videoRoute={props.videoRoute}
+              imageInput={props.imageInput}
               onRunOcr={handleRunOcrForPanel}
               ocrBusy={ocr.status === "running"}
               onExtractOcrToInput={handleExtractOcrToInput}
@@ -3717,6 +3724,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // One prediction for the panel and the send: the controller still re-checks
   // the route the turn actually resolves.
   const { verdict: videoRoute } = useComposerVideoRoute(session)
+  const imageInput = useComposerImageInput(session)
   // One per composer, like the attachment provider it follows: ids are minted
   // per provider, and a binding is only ever looked up by one of them.
   const [attachmentCitations] = useState(createAttachmentCitations)
@@ -4478,6 +4486,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   externalSessionLink={externalSessionLink}
                   session={session}
                   videoRoute={videoRoute}
+                  imageInput={imageInput}
                   status={promptStatus}
                   disabled={disabled}
                   onSubmit={handleSubmit}

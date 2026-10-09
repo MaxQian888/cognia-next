@@ -67,6 +67,7 @@ import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import { useAgentContextWindow } from "./hooks/use-agent-context-window"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
@@ -166,6 +167,9 @@ function GenericBottomToolbar({
   // SDK-authoritative context usage for the live session (Anthropic + desktop
   // only; falls back to the message-derived estimate inside the indicator).
   const { snapshot: sdkUsage } = useSdkContextUsage(session?.id ?? null, providerId)
+  // On an external agent's lane the window is the agent model's, as its own
+  // catalog reports it, not the built-in catalog's guess.
+  const agentContextWindow = useAgentContextWindow(session)
 
   // The measured width only decides how the same set of controls is packed,
   // not which of them exist — every branch renders the identical roster, so no
@@ -469,6 +473,9 @@ function GenericBottomToolbar({
     <ContextUsageIndicator
       modelId={modelId}
       providerId={providerId}
+      // A window the agent reports with a turn still wins over this
+      // (`computeContextWindowUsage`); this covers the turns before one.
+      maxTokens={agentContextWindow}
       sdkUsage={sdkUsage}
       ringOnly={ringOnlyForm}
       triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5 has-[>svg]:px-1.5")}
