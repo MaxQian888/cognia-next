@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { FilePartPreview } from "./file-part-preview"
+import { FilePartCard, FilePartPreview, filePreviewKind } from "./file-part-preview"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -162,5 +162,69 @@ describe("FilePartPreview", () => {
     expect(await screen.findByTestId("code-block")).toHaveTextContent("name,value")
     expect(screen.queryByRole("tab")).toBeNull()
     expect(screen.queryByTestId("markdown-preview")).toBeNull()
+  })
+})
+
+describe("filePreviewKind", () => {
+  it.each([
+    ["application/pdf", "a.pdf", "pdf"],
+    ["video/mp4", "clip.mp4", "video"],
+    ["text/html", "page.html", "html"],
+    ["text/markdown", "notes.md", "markdown"],
+    ["text/x-python", "main.py", "text"],
+    ["application/zip", "bundle.zip", "file"],
+  ] as const)("reads %s (%s) as %s", (mediaType, filename, kind) => {
+    expect(filePreviewKind(mediaType, filename)).toBe(kind)
+  })
+})
+
+describe("FilePartCard", () => {
+  it("heads a previewable file with the file card, its kind and a download action", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => "print(1)" })
+    render(<FilePartCard url="blob:py" mediaType="text/x-python" filename="main.py" />)
+    const card = screen.getByTestId("file-part-card")
+    expect(card).toHaveTextContent("main.py")
+    expect(card).toHaveTextContent("kind.text")
+    expect(screen.getByTestId("file-part-card-download")).toHaveAttribute("href", "blob:py")
+    expect(await screen.findByTestId("code-block")).toHaveTextContent("print(1)")
+  })
+
+  it("collapses and reopens the preview from its header", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => "body" })
+    render(<FilePartCard url="blob:md" mediaType="text/plain" filename="a.txt" />)
+    const toggle = screen.getByRole("button", { name: /toggle/ })
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByTestId("file-part-card-body")).toBeNull()
+    await userEvent.click(toggle)
+    expect(screen.getByTestId("file-part-card-body")).toBeInTheDocument()
+  })
+
+  it("starts closed when asked", () => {
+    render(
+      <FilePartCard
+        url="blob:pdf"
+        mediaType="application/pdf"
+        filename="a.pdf"
+        defaultExpanded={false}
+      />
+    )
+    expect(screen.queryByTestId("file-part-card-body")).toBeNull()
+  })
+
+  it("names the file once: no second download card inside a failed preview", async () => {
+    fetchMock.mockRejectedValue(new Error("gone"))
+    render(<FilePartCard url="blob:x" mediaType="text/plain" filename="a.txt" />)
+    expect(await screen.findByTestId("file-preview-unavailable")).toBeInTheDocument()
+    expect(screen.queryByTestId("file-download-link")).toBeNull()
+  })
+
+  it("is the download card alone for a file with no inline preview", () => {
+    render(<FilePartCard url="blob:zip" mediaType="application/zip" filename="bundle.zip" />)
+    const link = screen.getByTestId("file-download-link")
+    expect(link).toHaveAttribute("href", "blob:zip")
+    expect(link).toHaveTextContent("bundle.zip")
+    expect(screen.queryByTestId("file-part-card")).toBeNull()
   })
 })

@@ -341,6 +341,18 @@ export function basenameOf(path: string): string {
 }
 
 /**
+ * The extension a file label pins beside its name (and a file badge spells
+ * out), without the dot, or `null`. Only a short tail counts: "archive.2026.notes"
+ * has a dot, but ".notes" is not the part worth keeping visible when the name
+ * truncates, and a leading dot (".env") names the file rather than its type.
+ */
+export function pinnedExtension(path: string): string | null {
+  const name = basenameOf(path)
+  const dot = name.lastIndexOf(".")
+  return dot > 0 && name.length - dot <= 6 ? name.slice(dot + 1) : null
+}
+
+/**
  * Classify a path (or bare filename) for iconography.
  *
  * `isDir` is an argument rather than something inferred from the string because

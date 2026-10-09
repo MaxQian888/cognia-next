@@ -1,6 +1,7 @@
 import {
   FILE_TYPE_ICON_KINDS,
   basenameOf,
+  pinnedExtension,
   resolveFileTypeIcon,
   type FileTypeIconKind,
 } from "./file-type-icon"
@@ -114,5 +115,20 @@ describe("basenameOf", () => {
     ["/", ""],
   ])("reduces %s to %s", (input, expected) => {
     expect(basenameOf(input)).toBe(expected)
+  })
+})
+
+describe("pinnedExtension", () => {
+  it("returns a short tail without its dot, from the basename", () => {
+    expect(pinnedExtension("report.pdf")).toBe("pdf")
+    expect(pinnedExtension("src/app/page.tsx")).toBe("tsx")
+    expect(pinnedExtension("C:\\docs\\Q3.XLSX")).toBe("XLSX")
+  })
+
+  it("pins nothing for a dotfile, a dotless name or a long tail", () => {
+    expect(pinnedExtension(".env")).toBeNull()
+    expect(pinnedExtension("Makefile")).toBeNull()
+    expect(pinnedExtension("archive.2026.notes-final")).toBeNull()
+    expect(pinnedExtension("dir.v2/README")).toBeNull()
   })
 })

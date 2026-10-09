@@ -8100,10 +8100,19 @@
       "title": "今天想完成点什么？"
     },
     "filePreview": {
+      "download": "下载 {name}",
       "extractedChars": "已提取 {count} 字符",
+      "kind": {
+        "html": "网页",
+        "markdown": "Markdown 文档",
+        "pdf": "PDF 文档",
+        "text": "文本文件",
+        "video": "视频"
+      },
       "loading": "正在加载 {name}…",
       "pdfFallback": "无法预览此 PDF。",
       "preview": "预览",
+      "previewUnavailable": "无法预览，请使用上方的下载按钮。",
       "source": {
         "cancel": "取消",
         "confirm": "移除来源",
@@ -8114,7 +8123,8 @@
         "removeTitle": "移除此附件来源？",
         "removed": "来源已移除",
         "unavailable": "此设备上没有原文件"
-      }
+      },
+      "toggle": "显示或隐藏 {name} 的预览"
     },
     "grounding": {
       "supported": "检索证据支持本次回答中的陈述。",

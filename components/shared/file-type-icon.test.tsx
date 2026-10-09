@@ -18,7 +18,7 @@ jest.mock("@/lib/plugin/bridge/plugin-file-path", () => ({
 let mockResolvedTheme: string | undefined = "dark"
 jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: mockResolvedTheme }) }))
 
-import { FileTypeIcon } from "./file-type-icon"
+import { FileTypeBadge, FileTypeIcon } from "./file-type-icon"
 import {
   __resetIconThemeHighContrastForTesting,
   setIconThemeHighContrast,
@@ -206,5 +206,24 @@ describe("FileTypeIcon colour scheme", () => {
       undefined,
       "highContrast"
     )
+  })
+})
+
+describe("FileTypeBadge", () => {
+  it("draws the file-type glyph with the extension spelled out under it", () => {
+    const { getByTestId } = render(<FileTypeBadge path="docs/report.pdf" />)
+    const badge = getByTestId("file-type-badge")
+    expect(badge).toHaveAttribute("aria-hidden", "true")
+    expect(badge.querySelector("[data-file-type='pdf']")).not.toBeNull()
+    expect(badge).toHaveTextContent("pdf")
+  })
+
+  it("spells nothing out for a name with no extension, and takes a replacement glyph", () => {
+    const { getByTestId } = render(
+      <FileTypeBadge path="Makefile" icon={<svg data-testid="custom-glyph" />} />
+    )
+    const badge = getByTestId("file-type-badge")
+    expect(badge).toHaveTextContent("")
+    expect(badge.querySelector("[data-testid='custom-glyph']")).not.toBeNull()
   })
 })

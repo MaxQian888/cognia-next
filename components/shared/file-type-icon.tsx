@@ -22,7 +22,7 @@
  * accessible name, so it is `aria-hidden` and contributes no translated string.
  */
 
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import {
   BinaryIcon,
@@ -65,7 +65,11 @@ import {
   subscribeIconThemeHighContrast,
 } from "@/lib/plugin/bridge/icon-theme-high-contrast"
 import { joinPluginPath, publicBuiltinAssetUrl } from "@/lib/plugin/bridge/plugin-file-path"
-import { resolveFileTypeIcon, type FileTypeIconKind } from "@/lib/files/file-type-icon"
+import {
+  pinnedExtension,
+  resolveFileTypeIcon,
+  type FileTypeIconKind,
+} from "@/lib/files/file-type-icon"
 import { cn } from "@/lib/utils"
 
 /**
@@ -270,5 +274,42 @@ export function FileTypeIcon({ path, isDir = false, className, muted }: FileType
       data-file-type={kind}
       className={cn("shrink-0 size-3.5", muted ? "text-muted-foreground" : tone, className)}
     />
+  )
+}
+
+/**
+ * The glyph a file card leads with: this module's file-type glyph on a small
+ * tile, with the extension spelled out under it. The composer's staged
+ * document tile and a sent file in the transcript both draw it, so a file
+ * looks the same before and after it is sent. Decorative like the glyph: the
+ * card beside it names the file.
+ */
+export function FileTypeBadge({
+  path,
+  icon,
+  className,
+}: {
+  path: string
+  /** Replaces the glyph (a fetched page has no file name to classify). */
+  icon?: ReactNode
+  className?: string
+}) {
+  const ext = pinnedExtension(path)
+  return (
+    <span
+      aria-hidden
+      data-testid="file-type-badge"
+      className={cn(
+        "flex size-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border bg-background",
+        className
+      )}
+    >
+      {icon ?? <FileTypeIcon path={path} className="size-[18px]" />}
+      {ext ? (
+        <span className="max-w-full truncate px-0.5 text-[8.5px] leading-none font-semibold tracking-wide text-muted-foreground uppercase">
+          {ext}
+        </span>
+      ) : null}
+    </span>
   )
 }

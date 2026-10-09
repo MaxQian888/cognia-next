@@ -1299,7 +1299,17 @@
       "unavailable": "此设备上没有原文件",
       "removed": "来源已移除",
       "failed": "无法访问附件来源，请重试。"
-    }
+    },
+    "download": "下载 {name}",
+    "toggle": "显示或隐藏 {name} 的预览",
+    "kind": {
+      "pdf": "PDF 文档",
+      "video": "视频",
+      "html": "网页",
+      "markdown": "Markdown 文档",
+      "text": "文本文件"
+    },
+    "previewUnavailable": "无法预览，请使用上方的下载按钮。"
   },
   "grounding": {
     "supported": "检索证据支持本次回答中的陈述。",

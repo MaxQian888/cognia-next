@@ -39,7 +39,7 @@ import { FileToolPart, isFileToolPart } from "@/components/chat/message-parts/fi
 import { StructuredToolPart } from "@/components/chat/message-parts/structured-tool-part"
 import { isBashToolPart } from "@/components/chat/message-parts/tool-detail-body"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
-import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
+import { FilePartCard } from "@/components/chat/message-parts/file-part-preview"
 import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
 import { AttachmentSourceActions } from "@/components/chat/message-parts/attachment-source-actions"
 import { readAttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
@@ -2215,8 +2215,9 @@ function renderPart(
 
     if (!url) return null
 
-    // Non-image file: inline preview for text/code/pdf, download link otherwise.
-    return <FilePartPreview key={key} url={url} mediaType={mediaType} filename={filename} />
+    // Non-image file: the same file card the composer showed, with an inline
+    // preview for text/code/pdf/video under it, or a download card otherwise.
+    return <FilePartCard key={key} url={url} mediaType={mediaType} filename={filename} />
   }
 
   // Special-case Claude's TodoWrite tool: render as a structured task list.

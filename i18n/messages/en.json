@@ -8100,10 +8100,19 @@
       "title": "What do you want to get done?"
     },
     "filePreview": {
+      "download": "Download {name}",
       "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",
+      "kind": {
+        "html": "Web page",
+        "markdown": "Markdown document",
+        "pdf": "PDF document",
+        "text": "Text file",
+        "video": "Video"
+      },
       "loading": "Loading {name}…",
       "pdfFallback": "PDF preview is unavailable.",
       "preview": "Preview",
+      "previewUnavailable": "Preview is unavailable. Use the download button above.",
       "source": {
         "cancel": "Cancel",
         "confirm": "Remove source",
@@ -8114,7 +8123,8 @@
         "removeTitle": "Remove this attachment source?",
         "removed": "Source removed",
         "unavailable": "Original unavailable on this device"
-      }
+      },
+      "toggle": "Show or hide the preview of {name}"
     },
     "grounding": {
       "supported": "Retrieved evidence supports the answer's claims.",

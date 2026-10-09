@@ -7,10 +7,18 @@
 // play in the shared VideoBlock player. Binary or unknown files and fetch
 // failures retain the plain download fallback.
 
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
-import { FileTypeIcon } from "@/components/shared/file-type-icon"
+import { ChevronRightIcon, DownloadIcon, Loader2Icon } from "lucide-react"
+import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments"
+import { FileTypeBadge } from "@/components/shared/file-type-icon"
+import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { VideoBlock } from "@/components/chat/renderers/video-block"
@@ -27,6 +35,12 @@ export interface FilePartPreviewProps {
   url: string
   mediaType?: string
   filename?: string
+  /**
+   * Leave out the download card a preview falls back to: set by a host that
+   * already offers the download beside the preview (`FilePartCard`), so the
+   * file is not named twice.
+   */
+  hideDownloadFallback?: boolean
 }
 
 /** A textual media type (covers `text/*` plus the common `application/*` text formats). */
@@ -91,20 +105,75 @@ function HtmlPreviewFrame({ html, title }: { html: string; title: string }) {
   )
 }
 
-/** Plain downloadable link — the universal fallback (unknown/binary types). */
+/** A file part as the AI Elements attachment primitives describe it. */
+function useAttachmentData(
+  url: string,
+  mediaType: string | undefined,
+  displayName: string
+): AttachmentData {
+  return useMemo(
+    () => ({ id: url, type: "file", url, mediaType: mediaType ?? "", filename: displayName }),
+    [url, mediaType, displayName]
+  )
+}
+
+/**
+ * The file card every sent file shares (the composer drew the same one before
+ * the send): the AI Elements `list` attachment with the shared file-type badge
+ * and the name. `children` is what sits at its right.
+ */
+function FileCardRow({
+  url,
+  mediaType,
+  displayName,
+  meta,
+  children,
+}: {
+  url: string
+  mediaType: string | undefined
+  displayName: string
+  meta?: string
+  children?: React.ReactNode
+}) {
+  const data = useAttachmentData(url, mediaType, displayName)
+  return (
+    <Attachments variant="list" className="w-full">
+      <Attachment data={data} className="gap-2.5 rounded-xl border-0 p-2 hover:bg-transparent">
+        <AttachmentPreview
+          className="size-auto rounded-none bg-transparent"
+          fallbackIcon={<FileTypeBadge path={displayName} className="size-10" />}
+        />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <AttachmentInfo className="text-xs font-medium" title={displayName} />
+          {meta ? (
+            <span className="truncate text-[10.5px] leading-none text-muted-foreground">
+              {meta}
+            </span>
+          ) : null}
+        </span>
+        {children}
+      </Attachment>
+    </Attachments>
+  )
+}
+
+/** Plain downloadable file card — the universal fallback (unknown/binary types). */
 function DownloadLink({ url, displayName }: { url: string; displayName: string }) {
+  const t = useTranslations("chat.filePreview")
   return (
     <a
       href={url}
       download={displayName}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      className="my-1 block w-full max-w-md rounded-xl border bg-card shadow-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       target="_blank"
       rel="noopener noreferrer"
       data-testid="file-download-link"
       title={displayName}
+      aria-label={t("download", { name: displayName })}
     >
-      <FileTypeIcon path={displayName} />
-      <span className="truncate">{displayName}</span>
+      <FileCardRow url={url} mediaType={undefined} displayName={displayName}>
+        <DownloadIcon className="me-1 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      </FileCardRow>
     </a>
   )
 }
@@ -136,6 +205,7 @@ export const FilePartPreview = memo(function FilePartPreview({
   url,
   mediaType,
   filename,
+  hideDownloadFallback = false,
 }: FilePartPreviewProps) {
   const t = useTranslations("chat.filePreview")
   const displayName = filename ?? url
@@ -157,7 +227,7 @@ export const FilePartPreview = memo(function FilePartPreview({
         >
           <div className="p-2 text-sm">
             <p className="mb-1 text-muted-foreground">{t("pdfFallback")}</p>
-            <DownloadLink url={url} displayName={displayName} />
+            {hideDownloadFallback ? null : <DownloadLink url={url} displayName={displayName} />}
           </div>
         </object>
       </div>
@@ -173,7 +243,15 @@ export const FilePartPreview = memo(function FilePartPreview({
   }
 
   if (textLike) {
-    if (text === false) return <DownloadLink url={url} displayName={displayName} />
+    if (text === false) {
+      return hideDownloadFallback ? (
+        <p className="text-xs text-muted-foreground" data-testid="file-preview-unavailable">
+          {t("previewUnavailable")}
+        </p>
+      ) : (
+        <DownloadLink url={url} displayName={displayName} />
+      )
+    }
     if (text === null) {
       return (
         <p
@@ -245,4 +323,101 @@ export const FilePartPreview = memo(function FilePartPreview({
   }
 
   return <DownloadLink url={url} displayName={displayName} />
+})
+
+/** What `FilePartPreview` will draw for a file part. */
+export type FilePreviewKind = "pdf" | "video" | "html" | "markdown" | "text" | "file"
+
+export function filePreviewKind(
+  mediaType: string | undefined,
+  filename: string | undefined
+): FilePreviewKind {
+  if (isPdf(mediaType, filename)) return "pdf"
+  if (isVideo(mediaType, filename)) return "video"
+  if (!isTextLike(mediaType, filename)) return "file"
+  if (isHtml(mediaType, filename)) return "html"
+  if (isMarkdown(mediaType, filename)) return "markdown"
+  return "text"
+}
+
+/**
+ * A file part in the transcript: the shared file card, with its inline
+ * preview (PDF, video, page, document or code) under the header, which
+ * collapses it, and a download action beside it. A file with no inline
+ * preview is the download card alone.
+ */
+export const FilePartCard = memo(function FilePartCard({
+  url,
+  mediaType,
+  filename,
+  defaultExpanded = true,
+}: FilePartPreviewProps & {
+  /** Whether the preview starts open. */
+  defaultExpanded?: boolean
+}) {
+  const t = useTranslations("chat.filePreview")
+  const [open, setOpen] = useState(defaultExpanded)
+  const bodyId = useId()
+  const displayName = filename ?? url
+  const kind = filePreviewKind(mediaType, filename)
+  if (kind === "file") return <DownloadLink url={url} displayName={displayName} />
+  return (
+    <div
+      className={cn(
+        "my-1 w-full overflow-hidden rounded-xl border bg-card shadow-xs",
+        // A closed card is as wide as every other file card; an open preview
+        // gets room for a page or a code listing.
+        open ? "max-w-2xl" : "max-w-md"
+      )}
+      data-testid="file-part-card"
+    >
+      <div className="flex items-center pe-1.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          aria-label={t("toggle", { name: displayName })}
+          onClick={() => setOpen((v) => !v)}
+          className="min-w-0 flex-1 rounded-xl text-left transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <FileCardRow
+            url={url}
+            mediaType={mediaType}
+            displayName={displayName}
+            meta={t(`kind.${kind}`)}
+          >
+            <ChevronRightIcon
+              aria-hidden
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform",
+                open && "rotate-90"
+              )}
+            />
+          </FileCardRow>
+        </button>
+        <a
+          href={url}
+          download={displayName}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={t("download", { name: displayName })}
+          title={t("download", { name: displayName })}
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          data-testid="file-part-card-download"
+        >
+          <DownloadIcon className="size-4" aria-hidden />
+        </a>
+      </div>
+      {open ? (
+        <div id={bodyId} className="border-t p-2 [&>*]:my-0" data-testid="file-part-card-body">
+          <FilePartPreview
+            url={url}
+            mediaType={mediaType}
+            filename={filename}
+            hideDownloadFallback
+          />
+        </div>
+      ) : null}
+    </div>
+  )
 })

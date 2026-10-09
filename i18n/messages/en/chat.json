@@ -1299,7 +1299,17 @@
       "unavailable": "Original unavailable on this device",
       "removed": "Source removed",
       "failed": "Unable to access the attachment source. Please try again."
-    }
+    },
+    "download": "Download {name}",
+    "toggle": "Show or hide the preview of {name}",
+    "kind": {
+      "pdf": "PDF document",
+      "video": "Video",
+      "html": "Web page",
+      "markdown": "Markdown document",
+      "text": "Text file"
+    },
+    "previewUnavailable": "Preview is unavailable. Use the download button above."
   },
   "grounding": {
     "supported": "Retrieved evidence supports the answer's claims.",

@@ -78,7 +78,8 @@ import type { RejectReason } from "@/lib/chat/attachments/dispatch"
 import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
 import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
-import { FileTypeIcon } from "@/components/shared/file-type-icon"
+import { FileTypeBadge } from "@/components/shared/file-type-icon"
+import { pinnedExtension } from "@/lib/files/file-type-icon"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useStagedAttachments, type StagedAttachmentState } from "./staged-attachment-store"
@@ -571,9 +572,9 @@ function VideoProgressBar({ fraction }: { fraction?: number }) {
 }
 
 /**
- * Document card — the media tiles' height, wider, laid out like a file: a type
- * badge (the app's own file-type glyph and colour, with the extension spelled
- * out under it), the name on one line, and a meta line with its size and what
+ * Document card — the media tiles' height, wider, laid out like a file: the
+ * shared `FileTypeBadge` (the transcript's file cards lead with it too), the
+ * name on one line, and a meta line with its size and what
  * it costs the model (or that it is still being read). The name
  * middle-truncates: the stem ellipsis-collapses but the extension always
  * survives (the ".pd / f" mid-word break is what this replaces).
@@ -590,34 +591,23 @@ function FileTileContent({
   /** The extraction state: a spinner, the token cost, or a rejection. */
   status?: React.ReactNode
 }) {
-  const dot = name.lastIndexOf(".")
-  // Only a short tail counts as an extension — "archive.2026.notes" has a dot
-  // but ".notes" is not the interesting part to pin.
-  const hasExt = dot > 0 && name.length - dot <= 6
+  const ext = pinnedExtension(name)
+  const stem = ext ? name.slice(0, name.length - ext.length - 1) : name
   const Fallback = FILE_TILE_ICONS[category] ?? PaperclipIcon
   return (
     <span className="flex size-full items-center gap-2.5 pr-8 pl-2.5">
-      <span
-        className="flex size-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border bg-background"
-        aria-hidden
-      >
-        {category === "source" ? (
-          <Fallback className="size-[18px] text-muted-foreground" />
-        ) : (
-          <FileTypeIcon path={name} className="size-[18px]" />
-        )}
-        {hasExt ? (
-          <span className="max-w-full truncate px-0.5 text-[8.5px] leading-none font-semibold tracking-wide text-muted-foreground uppercase">
-            {name.slice(dot + 1)}
-          </span>
-        ) : null}
-      </span>
+      <FileTypeBadge
+        path={name}
+        icon={
+          category === "source" ? (
+            <Fallback className="size-[18px] text-muted-foreground" />
+          ) : undefined
+        }
+      />
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex min-w-0 items-baseline text-xs leading-snug font-medium">
-          <span className="truncate">{hasExt ? name.slice(0, dot) : name}</span>
-          {hasExt ? (
-            <span className="shrink-0 font-normal text-muted-foreground">{name.slice(dot)}</span>
-          ) : null}
+          <span className="truncate">{stem}</span>
+          {ext ? <span className="shrink-0 font-normal text-muted-foreground">.{ext}</span> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1 text-[10.5px] leading-none text-muted-foreground tabular-nums">
           {sizeLabel ? <span className="shrink-0">{sizeLabel}</span> : null}
