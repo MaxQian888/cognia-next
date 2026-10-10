@@ -36,14 +36,14 @@
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use super::{
@@ -53,6 +53,7 @@ use super::{
     rate_limit::RateLimitDecision,
     SharedState,
 };
+use cognia_companion_security::request_origin::request_origin;
 
 const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
 
@@ -146,39 +147,6 @@ pub async fn require_service_jwt(
         next,
     )
     .await
-}
-
-/// Request provenance shared by loopback gates and pre-auth rate limiting.
-struct RequestOrigin {
-    direct_loopback: bool,
-    client_ip: Option<IpAddr>,
-}
-
-fn request_origin(peer: Option<IpAddr>, headers: &HeaderMap) -> RequestOrigin {
-    let peer = peer.map(|ip| ip.to_canonical());
-    let peer_is_loopback = peer.is_some_and(|ip| ip.is_loopback());
-    // cloudflared connects to the same HTTPS listener from loopback. Header
-    // presence removes local privileges even when the value is empty, invalid,
-    // or itself loopback. CF-Ray also covers a removed visitor-IP header.
-    let via_cloudflare = headers.contains_key("cf-connecting-ip") || headers.contains_key("cf-ray");
-    // Only the local proxy may supply the rate-limit identity. A LAN client
-    // must not rotate buckets by spoofing forwarding headers. Missing or
-    // ambiguous IPs fall back to the peer bucket, never to an exemption.
-    let forwarded_ip = if peer_is_loopback {
-        let mut values = headers.get_all("cf-connecting-ip").iter();
-        let ip = values
-            .next()
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<IpAddr>().ok());
-        ip.filter(|_| values.next().is_none())
-            .map(|ip| ip.to_canonical())
-    } else {
-        None
-    };
-    RequestOrigin {
-        direct_loopback: peer_is_loopback && !via_cloudflare,
-        client_ip: forwarded_ip.or(peer),
-    }
 }
 
 /// Operator-only surface for metrics and local diagnostics. Tunnel requests
@@ -614,38 +582,6 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
-
-    #[test]
-    fn cloudflare_origin_rejects_ambiguous_ips_and_canonicalizes_addresses() {
-        let peer = Some("127.0.0.1".parse().unwrap());
-        for values in [
-            vec![axum::http::HeaderValue::from_static(
-                "198.51.100.1, 198.51.100.2",
-            )],
-            vec![axum::http::HeaderValue::from_bytes(&[0xff]).unwrap()],
-            vec![
-                axum::http::HeaderValue::from_static("198.51.100.1"),
-                axum::http::HeaderValue::from_static("198.51.100.2"),
-            ],
-        ] {
-            let mut headers = HeaderMap::new();
-            for value in values {
-                headers.append("cf-connecting-ip", value);
-            }
-            let origin = request_origin(peer, &headers);
-            assert!(!origin.direct_loopback);
-            assert_eq!(origin.client_ip, peer);
-        }
-
-        let mut headers = HeaderMap::new();
-        headers.insert("cf-connecting-ip", "::ffff:198.51.100.1".parse().unwrap());
-        let origin = request_origin(peer, &headers);
-        assert!(!origin.direct_loopback);
-        assert_eq!(origin.client_ip, Some("198.51.100.1".parse().unwrap()));
-        let unknown = request_origin(None, &headers);
-        assert!(!unknown.direct_loopback);
-        assert_eq!(unknown.client_ip, None);
-    }
 
     #[tokio::test]
     async fn cloudflare_tunnel_headers_remove_operator_loopback_privileges() {

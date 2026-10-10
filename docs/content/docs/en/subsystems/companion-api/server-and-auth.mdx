@@ -31,6 +31,20 @@ request bodies are bounded, and middleware classifies the request before it reac
 | Canonical `/ws/*` | Path-bound ticket from `POST /api/auth/socket-ticket` |
 | `/internal/*`, `/ide/content*` | Loopback service token |
 
+"Loopback" in this table and elsewhere on the listener means a **direct** loopback caller. cloudflared
+connects to the same listener from `127.0.0.1`, so a request carrying `CF-Ray` or `CF-Connecting-IP` is
+treated as remote whatever its socket peer: it cannot use the service token or the local-debug token,
+the operator routes, the fleet hook routes (`/api/fleet/*`), single-user Owner invitations, or the
+pre-auth rate-limit exemption. One function decides this for every route
+(`crates/cognia-companion-security/src/request_origin.rs`).
+
+A paired device reads workspace files through `fs_read_workspace_file*` and searches them with
+`fs_search_content_workspace`, confined to a root the active project registered. Without remote control
+(`workspace.write`, held by Owner devices and the Control grant) those commands also apply the sensitive
+floor: a credential or repository-internal file (`.env`, private keys, `.git/`, `.ssh/`, …, by name or by
+where a symlink points) is refused with `403`, and content search never reads one. Names still appear in
+listings, so the file tree stays truthful.
+
 ## Device bootstrap
 
 ```mermaid

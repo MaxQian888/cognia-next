@@ -1,7 +1,9 @@
 //! Fleet ingress routes, mounted on the companion API router.
 //!
 //! Auth tier: loopback-source + `X-Cognia-Fleet-Token` (shared token from
-//! `~/.cognia/agent-monitor.json`) — deliberately NOT the device-JWT tier
+//! `~/.cognia/agent-monitor.json`). Loopback means a direct one: cloudflared
+//! reaches this listener from loopback too, so the source is read through
+//! [`cognia_companion_security::request_origin`], never from the peer alone — deliberately NOT the device-JWT tier
 //! (a hook ping must not require mobile pairing) and NOT the pre-auth rate
 //! limiter (hook events fire on every tool call; the token gates them).
 //! Mounted AFTER `with_state` in `companion_api::server::build_router`, so
@@ -16,6 +18,8 @@ use axum::{
     Json, Router,
 };
 use std::net::SocketAddr;
+
+use cognia_companion_security::request_origin::is_direct_loopback;
 
 use super::registry::{FleetAgent, FleetEvent, RegistryEffect};
 use super::{PermissionBehavior, QuestionResponse};
@@ -61,7 +65,7 @@ async fn opencode_commands_handler(
     headers: HeaderMap,
     Json(body): Json<CommandPollBody>,
 ) -> Response {
-    if !addr.ip().is_loopback() {
+    if !is_direct_loopback(Some(addr.ip()), &headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let runtime = super::runtime();
@@ -100,7 +104,7 @@ struct CommandNackBody {
 }
 
 fn authorize_command_route(addr: SocketAddr, headers: &HeaderMap) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
+    if !is_direct_loopback(Some(addr.ip()), headers) {
         return Err(StatusCode::FORBIDDEN);
     }
     let presented = headers
@@ -160,7 +164,7 @@ async fn hook_handler(
     headers: HeaderMap,
     Json(event): Json<FleetEvent>,
 ) -> Response {
-    if !addr.ip().is_loopback() {
+    if !is_direct_loopback(Some(addr.ip()), &headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let runtime = super::runtime();
@@ -313,6 +317,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_tunnelled_request_even_from_a_loopback_peer() {
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
+        let token = arm("routes-test-token-tunnel");
+        // cloudflared's origin connection comes from loopback; its headers
+        // say the caller is elsewhere, with the right token or not.
+        let mut hook = hook_request(
+            loopback_peer(),
+            Some(&token),
+            envelope("SessionStart", "route-tunnel"),
+        );
+        hook.headers_mut()
+            .insert("cf-ray", "test-ray-SJC".parse().unwrap());
+        let resp = router().oneshot(hook).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        for uri in [
+            "/api/fleet/opencode/commands",
+            "/api/fleet/opencode/commands/ack",
+            "/api/fleet/opencode/commands/nack",
+        ] {
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .header(FLEET_TOKEN_HEADER, &token)
+                .header("cf-connecting-ip", "198.51.100.7")
+                .extension(loopback_peer())
+                .body(axum::body::Body::from(
+                    r#"{"session_ids":["x"],"id":"c1","result":null,"error":"e"}"#,
+                ))
+                .unwrap();
+            let resp = router().oneshot(request).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri}");
+        }
     }
 
     #[tokio::test]

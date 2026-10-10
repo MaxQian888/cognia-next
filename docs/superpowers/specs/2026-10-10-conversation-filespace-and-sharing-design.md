@@ -599,7 +599,10 @@ Each phase ships complete: code, co-located tests, en/zh-CN i18n via split sourc
 
 - **P4 (proposal):** serving a remote sandbox's live tree (ADR-0221 Kubernetes/E2B) through the exec channel, multi-node hosts and cross-agent file sharing. The gateway's mount `backing` gains a `remote` kind then; the `remote-sandbox` status reason and its live-grant refusal arrive with the per-session placement ADR-0221 has to expose first.
 
-- Tunnelled requests satisfying `require_loopback_operator` on the companion router.
-- Mobile `cognia://session/<id>` routes to the IM inbox (`/inbox/c?key=`) and likely shows "unavailable" for non-IM sessions.
-- Share viewer has no `workflow-result` case; "Never expires" is 30 days server-side; a passphrase share spends its view before the passphrase is entered.
-- Sensitive floor only on `fs_walk_workspace`; local `fs_*` confinement in shadow mode; no persistent `SecureFileSystem` audit.
+Found while building P0–P3, with their status on 2026-10-11:
+
+- Tunnelled requests satisfying loopback privileges on the companion router. Fixed: `require_loopback_operator`, service tokens and the pre-auth limiter already read the tunnel headers (225d8f177); the fleet hook routes and single-user Owner invitations still read the raw peer and now share `cognia_companion_security::request_origin` with them.
+- Mobile `cognia://session/<id>` routes to the IM inbox (`/inbox/c?key=`) and likely shows "unavailable" for non-IM sessions. Being fixed separately (mobile session deep links).
+- Share viewer has no `workflow-result` case; "Never expires" is 30 days server-side; a passphrase share spends its view before the passphrase is entered. Fixed in 7c24ef342 (viewer cases, server expiry shown, public metadata read before a view is spent).
+- Sensitive floor only on `fs_walk_workspace`. Fixed for paired devices: the remote `fs_read_workspace_file*` arms refuse, and `fs_search_content_workspace` skips, sensitive files unless the device holds `workspace.write` (as the task-resource arms already did). The desktop renderer's own reads are unchanged.
+- Local `fs_*` confinement in shadow mode and no persistent `SecureFileSystem` audit. Unchanged by design: ADR-0028's shadow mode logs `fs_shadow_denial` until real-world out-of-root accesses are known, and remote writes are already enforced; flipping it, or persisting the renderer's audit ring, is a decision of its own.

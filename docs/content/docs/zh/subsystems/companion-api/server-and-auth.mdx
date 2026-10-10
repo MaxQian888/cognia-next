@@ -27,6 +27,10 @@ desktop 管理的 Companion listener 默认使用 loopback，启用 LAN 后才�
 | 规范 `/ws/*` | `POST /api/auth/socket-ticket` 签发的路径绑定 ticket |
 | `/internal/*`、`/ide/content*` | loopback service token |
 
+本表及监听器其他位置所说的“loopback”都指**直连**的 loopback 调用方。cloudflared 也从 `127.0.0.1` 连到同一个监听器，因此带有 `CF-Ray` 或 `CF-Connecting-IP` 的请求无论 socket 对端是什么都按远程处理：不能使用 service token 或本地调试 token，不能访问运维路由、fleet hook 路由（`/api/fleet/*`）、单用户 Owner 邀请，也不享受认证前限流豁免。所有路由由同一个函数判定（`crates/cognia-companion-security/src/request_origin.rs`）。
+
+已配对设备通过 `fs_read_workspace_file*` 读取工作区文件、通过 `fs_search_content_workspace` 搜索内容，范围限定在当前项目登记的根目录内。设备没有远程控制权限（`workspace.write`，Owner 设备和 Control 授权持有）时，这些命令还会应用敏感文件底线：凭据或仓库内部文件（`.env`、私钥、`.git/`、`.ssh/` 等，按文件名或符号链接指向的位置判断）返回 `403`，内容搜索也不会读取它们。文件名仍出现在目录列表中，文件树保持如实。
+
 ## 设备初始化
 
 ```mermaid

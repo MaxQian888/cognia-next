@@ -872,6 +872,22 @@ pub fn fs_search_content_workspace(
     case_sensitive: Option<bool>,
     max_results: Option<usize>,
 ) -> Result<Vec<WorkspaceContentMatch>, String> {
+    search_workspace_content(root, query, is_regex, case_sensitive, max_results, true)
+}
+
+/// [`fs_search_content_workspace`] with the sensitive-name floor chosen by
+/// the caller. With `allow_sensitive` false, files the floor refuses
+/// (`.env`, private keys, anything under `.git` or `.ssh`, …) are never read,
+/// so their lines cannot surface as matches. The desktop's own renderer
+/// searches everything; a paired device without remote control does not.
+pub fn search_workspace_content(
+    root: String,
+    query: String,
+    is_regex: Option<bool>,
+    case_sensitive: Option<bool>,
+    max_results: Option<usize>,
+    allow_sensitive: bool,
+) -> Result<Vec<WorkspaceContentMatch>, String> {
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(format!("root is not a directory: {}", root));
@@ -923,13 +939,17 @@ pub fn fs_search_content_workspace(
         if dent.metadata().ok().map(|m| m.len()).unwrap_or(0) > CONTENT_SEARCH_MAX_FILE_BYTES {
             continue;
         }
-        let contents = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue, // binary / non-UTF-8 / unreadable → skip
-        };
         let rel = match path.strip_prefix(&root_path) {
             Ok(r) => r.to_string_lossy().replace('\\', "/"),
             Err(_) => continue,
+        };
+        // Symlinks are skipped above, so the walked path is the read path.
+        if !allow_sensitive && is_sensitive_workspace_path(&rel) {
+            continue;
+        }
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue, // binary / non-UTF-8 / unreadable → skip
         };
         let abs = path.to_string_lossy().to_string();
         for (idx, raw_line) in contents.lines().enumerate() {
@@ -962,6 +982,18 @@ pub fn fs_read_workspace_file(
     rel_path: String,
     max_bytes: Option<usize>,
 ) -> Result<String, String> {
+    read_workspace_file(root, rel_path, max_bytes, true)
+}
+
+/// [`fs_read_workspace_file`] with the sensitive-name floor chosen by the
+/// caller: with `allow_sensitive` false a path the floor refuses, by name or
+/// by where it resolves, is an error rather than a read.
+pub fn read_workspace_file(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<usize>,
+    allow_sensitive: bool,
+) -> Result<String, String> {
     let root_path = PathBuf::from(&root)
         .canonicalize()
         .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
@@ -976,6 +1008,7 @@ pub fn fs_read_workspace_file(
             root_path.display()
         ));
     }
+    refuse_sensitive_read(&root_path, &rel_path, &canonical, allow_sensitive)?;
     let mut content =
         std::fs::read_to_string(&canonical).map_err(|e| format!("read {}: {}", rel_path, e))?;
     if let Some(limit) = max_bytes {
@@ -1007,8 +1040,20 @@ pub fn fs_read_workspace_file_base64(
     rel_path: String,
     max_bytes: Option<usize>,
 ) -> Result<String, String> {
+    read_workspace_file_base64(root, rel_path, max_bytes, true)
+}
+
+/// [`fs_read_workspace_file_base64`] with the sensitive-name floor chosen by
+/// the caller, as [`read_workspace_file`].
+pub fn read_workspace_file_base64(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<usize>,
+    allow_sensitive: bool,
+) -> Result<String, String> {
     use base64::Engine;
-    let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    let (root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    refuse_sensitive_read(&root_path, &rel_path, &target, allow_sensitive)?;
     let limit = max_bytes
         .unwrap_or(BASE64_READ_HARD_CAP)
         .min(BASE64_READ_HARD_CAP);
@@ -1059,9 +1104,22 @@ pub fn fs_read_workspace_file_chunk(
     offset: u64,
     length: usize,
 ) -> Result<WorkspaceFileChunk, String> {
+    read_workspace_file_chunk(root, rel_path, offset, length, true)
+}
+
+/// [`fs_read_workspace_file_chunk`] with the sensitive-name floor chosen by
+/// the caller, as [`read_workspace_file`].
+pub fn read_workspace_file_chunk(
+    root: String,
+    rel_path: String,
+    offset: u64,
+    length: usize,
+    allow_sensitive: bool,
+) -> Result<WorkspaceFileChunk, String> {
     use base64::Engine;
     use std::io::{Read, Seek, SeekFrom};
-    let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    let (root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    refuse_sensitive_read(&root_path, &rel_path, &target, allow_sensitive)?;
     let mut file = std::fs::File::open(&target).map_err(|e| format!("open {}: {}", rel_path, e))?;
     let metadata = file
         .metadata()
@@ -1335,6 +1393,45 @@ pub fn is_sensitive_workspace_path(rel_path: &str) -> bool {
         parent = Some(directory);
     }
     is_sensitive_workspace_file(file)
+}
+
+/// Whether reading `rel_path` under `root` touches a path the sensitive floor
+/// refuses: by the name asked for, or by where it resolves (`notes.md` that
+/// links to `.env` is `.env`). Used to answer a refusal before any byte is
+/// read; the `read_workspace_file*` functions check again on what they open.
+pub fn is_sensitive_workspace_read(root: &str, rel_path: &str) -> Result<bool, String> {
+    let (root_path, target) = resolve_workspace_target(root, rel_path, true)?;
+    Ok(sensitive_read_target(&root_path, rel_path, &target))
+}
+
+fn sensitive_read_target(canonical_root: &Path, rel_path: &str, target: &Path) -> bool {
+    if is_sensitive_workspace_path(rel_path) {
+        return true;
+    }
+    match target.canonicalize() {
+        Ok(resolved) => resolved
+            .strip_prefix(canonical_root)
+            .map(|under_root| is_sensitive_workspace_path(&under_root.to_string_lossy()))
+            // The callers confine the target to the root before asking; a
+            // target that resolves elsewhere is refused, not waved through.
+            .unwrap_or(true),
+        // Nothing to read; the read itself reports the missing file.
+        Err(_) => false,
+    }
+}
+
+fn refuse_sensitive_read(
+    canonical_root: &Path,
+    rel_path: &str,
+    target: &Path,
+    allow_sensitive: bool,
+) -> Result<(), String> {
+    if allow_sensitive || !sensitive_read_target(canonical_root, rel_path, target) {
+        return Ok(());
+    }
+    Err(format!(
+        "{rel_path} is protected by the sensitive-file floor and cannot be read here"
+    ))
 }
 
 /// Default and hard ceilings for one walk.
@@ -2225,7 +2322,7 @@ mod tests {
 
     #[test]
     fn confined_path_accepts_existing_and_missing_descendants() {
-        let root = make_sandbox("confined-path");
+        let root = make_sandbox("confined-descendants");
         let existing = root.join("existing.txt");
         std::fs::write(&existing, "ok").unwrap();
         let roots = vec![root.to_string_lossy().into_owned()];
@@ -3467,6 +3564,92 @@ mod tests {
         assert_eq!(hits.len(), 1, "symlink target must not be read: {:?}", hits);
         assert_eq!(hits[0].rel_path, "real.txt");
         let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sensitive_floor_refuses_reads_only_when_the_caller_asks_for_it() {
+        let root = make_sandbox("floor-read");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join(".env"), "API_KEY=secret\n").unwrap();
+        std::fs::write(root.join(".git").join("config"), "token=secret\n").unwrap();
+        std::fs::write(root.join("src").join("deploy.pem"), "-----BEGIN\n").unwrap();
+        std::fs::write(root.join(".env.example"), "API_KEY=\n").unwrap();
+        std::fs::write(root.join("README.md"), "hello\n").unwrap();
+        let r = root.to_string_lossy().to_string();
+
+        for refused in [
+            ".env",
+            ".git/config",
+            "src/deploy.pem",
+            "src/../.env",
+            ".ENV",
+        ] {
+            if refused == ".ENV" && !root.join(".ENV").exists() {
+                continue; // case-sensitive file system: there is no such file
+            }
+            assert!(
+                is_sensitive_workspace_read(&r, refused).unwrap(),
+                "{refused}"
+            );
+            let text = read_workspace_file(r.clone(), refused.into(), None, false);
+            assert!(
+                text.unwrap_err().contains("sensitive-file floor"),
+                "{refused}"
+            );
+            assert!(read_workspace_file_base64(r.clone(), refused.into(), None, false).is_err());
+            assert!(read_workspace_file_chunk(r.clone(), refused.into(), 0, 16, false).is_err());
+            // The desktop's own reads are unchanged.
+            assert!(fs_read_workspace_file(r.clone(), refused.into(), None).is_ok());
+            assert!(read_workspace_file_chunk(r.clone(), refused.into(), 0, 16, true).is_ok());
+        }
+        for allowed in ["README.md", ".env.example"] {
+            assert!(
+                !is_sensitive_workspace_read(&r, allowed).unwrap(),
+                "{allowed}"
+            );
+            assert!(read_workspace_file(r.clone(), allowed.into(), None, false).is_ok());
+            assert!(read_workspace_file_base64(r.clone(), allowed.into(), None, false).is_ok());
+            assert!(read_workspace_file_chunk(r.clone(), allowed.into(), 0, 16, false).is_ok());
+        }
+        // A missing file is a read error, not a floor decision.
+        assert!(is_sensitive_workspace_read(&r, "missing.txt").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_floor_follows_a_symlink_to_what_it_names() {
+        let root = make_sandbox("floor-link");
+        std::fs::write(root.join(".env"), "API_KEY=secret\n").unwrap();
+        std::os::unix::fs::symlink(root.join(".env"), root.join("notes.txt")).unwrap();
+        let r = root.to_string_lossy().to_string();
+        assert!(is_sensitive_workspace_read(&r, "notes.txt").unwrap());
+        assert!(read_workspace_file(r.clone(), "notes.txt".into(), None, false).is_err());
+        assert!(read_workspace_file_base64(r.clone(), "notes.txt".into(), None, false).is_err());
+        assert!(read_workspace_file_chunk(r, "notes.txt".into(), 0, 16, false).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn content_search_skips_sensitive_files_only_when_the_caller_asks_for_it() {
+        let root = make_sandbox("floor-grep");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".env"), "TOKEN=hunter2\n").unwrap();
+        std::fs::write(root.join(".git").join("config"), "TOKEN=hunter2\n").unwrap();
+        std::fs::write(root.join("id_rsa"), "TOKEN=hunter2\n").unwrap();
+        std::fs::write(root.join("app.ts"), "const TOKEN = 1\n").unwrap();
+        let r = root.to_string_lossy().to_string();
+
+        let floored =
+            search_workspace_content(r.clone(), "TOKEN".into(), None, None, None, false).unwrap();
+        let paths: Vec<&str> = floored.iter().map(|hit| hit.rel_path.as_str()).collect();
+        assert_eq!(paths, vec!["app.ts"]);
+
+        let everything = fs_search_content_workspace(r, "TOKEN".into(), None, None, None).unwrap();
+        assert!(everything.iter().any(|hit| hit.rel_path == ".env"));
+        assert!(everything.iter().any(|hit| hit.rel_path == "id_rsa"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

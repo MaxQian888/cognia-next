@@ -23,5 +23,6 @@ pub mod operations;
 pub mod principal;
 pub mod rate_limit;
 pub mod replay_cache;
+pub mod request_origin;
 pub mod secret;
 pub mod security_store;

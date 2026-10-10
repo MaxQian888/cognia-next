@@ -196,13 +196,16 @@ pub(super) async fn dispatch(
             let is_regex: Option<bool> = optional(&args, "isRegex")?;
             let case_sensitive: Option<bool> = optional(&args, "caseSensitive")?;
             let max_results: Option<usize> = optional(&args, "maxResults")?;
+            // A chat-only device's matches never come from a sensitive file.
+            let allow_sensitive = sensitive_reads_allowed(device_id, scope);
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_search_content_workspace(
+                crate::files::search_workspace_content(
                     root,
                     query,
                     is_regex,
                     case_sensitive,
                     max_results,
+                    allow_sensitive,
                 )
             })
             .await
@@ -214,8 +217,9 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
+            let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_read_workspace_file(root, rel_path, max_bytes)
+                crate::files::read_workspace_file(root, rel_path, max_bytes, allow_sensitive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -226,8 +230,9 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
+            let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_read_workspace_file_base64(root, rel_path, max_bytes)
+                crate::files::read_workspace_file_base64(root, rel_path, max_bytes, allow_sensitive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -239,8 +244,15 @@ pub(super) async fn dispatch(
             let rel_path: String = required(&args, "relPath")?;
             let offset: u64 = required(&args, "offset")?;
             let length: usize = required(&args, "length")?;
+            let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_read_workspace_file_chunk(root, rel_path, offset, length)
+                crate::files::read_workspace_file_chunk(
+                    root,
+                    rel_path,
+                    offset,
+                    length,
+                    allow_sensitive,
+                )
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?

@@ -489,10 +489,13 @@ fn authenticate_owner_request(
 ) -> Result<DeviceContext, Problem> {
     if deployment_mode() == DeploymentMode::SingleUser
         && request.uri().path() == "/api/invitations"
-        && !request
-            .extensions()
-            .get::<ConnectInfo<SocketAddr>>()
-            .is_some_and(|peer| peer.0.ip().is_loopback())
+        && !cognia_companion_security::request_origin::is_direct_loopback(
+            request
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|peer| peer.0.ip()),
+            request.headers(),
+        )
     {
         return Err(api_error(
             StatusCode::FORBIDDEN,
@@ -2563,6 +2566,43 @@ mod tests {
             headers.insert(ORIGIN, origin.parse().expect("a valid header value"));
         }
         headers
+    }
+
+    fn invitation_request(peer: [u8; 4], tunnel: bool) -> Request {
+        let mut builder = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/invitations")
+            .header(axum::http::header::AUTHORIZATION, "Bearer not-a-token");
+        if tunnel {
+            builder = builder.header("cf-ray", "test-ray-SJC");
+        }
+        let mut request = builder.body(axum::body::Body::empty()).unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((peer, 45678))));
+        request
+    }
+
+    #[test]
+    fn single_user_owner_invitations_refuse_tunnelled_and_lan_requests() {
+        // cloudflared reaches the listener from loopback; its headers mark
+        // the request as remote, so the loopback rule refuses it before the
+        // bearer token is even read.
+        for (peer, tunnel) in [([127, 0, 0, 1], true), ([192, 168, 1, 20], false)] {
+            let refused =
+                authenticate_owner_request(&test_state(), &invitation_request(peer, tunnel))
+                    .expect_err("only a direct loopback caller may invite an Owner");
+            assert_eq!(
+                refused.code, "loopback_required",
+                "{peer:?} tunnel={tunnel}"
+            );
+        }
+        // A direct loopback caller passes the origin rule and fails later, on
+        // its (invalid) token.
+        let direct =
+            authenticate_owner_request(&test_state(), &invitation_request([127, 0, 0, 1], false))
+                .expect_err("the token is not valid");
+        assert_ne!(direct.code, "loopback_required");
     }
 
     const BOUND: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";

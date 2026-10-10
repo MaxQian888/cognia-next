@@ -3120,6 +3120,14 @@ fn authorize_workspace_root(
         .map_err(|error| RpcError::malformed(format!("workspace root does not resolve: {error}")))
 }
 
+/// Whether a caller may read past the sensitive-file floor (`.env`, private
+/// keys, `.git`, `.ssh`, …): the Headless service, or a device holding
+/// remote control (`workspace.write`), which could reach the same bytes
+/// through a terminal or a write anyway. A chat-only paired device cannot.
+fn sensitive_reads_allowed(device_id: &str, scope: Option<&str>) -> bool {
+    scope == Some("service") || canonical_device_has_capability(device_id, "workspace.write")
+}
+
 fn authorize_sensitive_resource(
     requested: bool,
     device_id: &str,
@@ -3128,12 +3136,34 @@ fn authorize_sensitive_resource(
     if !requested {
         return Ok(false);
     }
-    if scope == Some("service") || canonical_device_has_capability(device_id, "workspace.write") {
+    if sensitive_reads_allowed(device_id, scope) {
         return Ok(true);
     }
     Err(RpcError::forbidden(
         "sensitive task resources require remote-control authorization",
     ))
+}
+
+/// Answer a paired device's workspace read of a sensitive file with a 403
+/// before any byte is read, unless [`sensitive_reads_allowed`]. Returns what
+/// the read itself should enforce, so a file swapped in between is still
+/// refused (then as the read's own error).
+fn authorize_workspace_read(
+    root: &str,
+    rel_path: &str,
+    device_id: &str,
+    scope: Option<&str>,
+) -> Result<bool, (StatusCode, Json<RpcError>)> {
+    if sensitive_reads_allowed(device_id, scope) {
+        return Ok(true);
+    }
+    // A path that does not resolve is left to the read, which reports it.
+    if crate::files::is_sensitive_workspace_read(root, rel_path).unwrap_or(false) {
+        return Err(RpcError::forbidden(format!(
+            "{rel_path} is a sensitive file (credentials or repository internals); reading it from a paired device needs remote control"
+        )));
+    }
+    Ok(false)
 }
 
 /// Serialize a command result into the JSON [`Value`] envelope, mapping any

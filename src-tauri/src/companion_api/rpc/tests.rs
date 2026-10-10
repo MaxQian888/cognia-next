@@ -4148,6 +4148,31 @@ fn headless_workspace_roots_are_bound_to_the_server_policy() {
 }
 
 #[test]
+fn a_chat_only_device_cannot_read_sensitive_workspace_files() {
+    let root = std::env::temp_dir().join(format!("cognia-rpc-floor-{}", std::process::id()));
+    std::fs::create_dir_all(root.join(".ssh")).unwrap();
+    std::fs::write(root.join(".env"), "API_KEY=secret\n").unwrap();
+    std::fs::write(root.join(".ssh").join("config"), "Host x\n").unwrap();
+    std::fs::write(root.join("README.md"), "hello\n").unwrap();
+    let root = root.to_string_lossy().into_owned();
+    // No capabilities at all: a chat-only paired device.
+    let device = "unregistered-floor-device";
+
+    for sensitive in [".env", ".ssh/config"] {
+        let refused = authorize_workspace_read(&root, sensitive, device, None)
+            .expect_err("a sensitive file is refused before it is read");
+        assert_eq!(refused.0, StatusCode::FORBIDDEN, "{sensitive}");
+    }
+    // Ordinary files pass, with the floor still applied by the read itself.
+    assert!(!authorize_workspace_read(&root, "README.md", device, None).unwrap());
+    // A missing file is the read's error to report, not a refusal.
+    assert!(!authorize_workspace_read(&root, "missing.txt", device, None).unwrap());
+    // The Headless service reads everything.
+    assert!(authorize_workspace_read(&root, ".env", device, Some("service")).unwrap());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn device_capabilities_report_is_known_and_mutating() {
     assert!(KNOWN_COMMANDS.contains(&"device_capabilities_report"));
     // Mutating (persists onto pairedDevices) → must keep idempotency.
