@@ -1093,6 +1093,48 @@ mod tests {
             .expect("reqwest client")
     }
 
+    #[tokio::test]
+    async fn cloudflare_tunnel_cannot_use_loopback_operator_routes() {
+        use tower::ServiceExt as _;
+
+        let (_guard, router) = build_desktop_router().await;
+        let local = router
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/metrics")
+                    .extension(test_peer())
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(local.status(), StatusCode::OK);
+
+        for (method, path) in [
+            ("GET", "/metrics"),
+            ("POST", "/operator/maintenance/backups"),
+            ("POST", "/operator/lark/admin"),
+            ("GET", "/operator/lark/admin/test-request"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .extension(test_peer())
+                        .header("CF-Connecting-IP", "198.51.100.201")
+                        .header("CF-Ray", "test-ray-SJC")
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        }
+    }
+
     async fn shutdown_and_wait(mut handle: ServerHandle) {
         let _ = handle.shutdown.send(());
         if !*handle.terminated.borrow() {

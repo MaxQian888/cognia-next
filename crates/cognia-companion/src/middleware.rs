@@ -36,14 +36,14 @@
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use super::{
@@ -148,20 +148,54 @@ pub async fn require_service_jwt(
     .await
 }
 
-/// Operator-only surface for metrics and local diagnostics. The real socket
-/// peer is authoritative; forwarding headers are deliberately ignored.
+/// Request provenance shared by loopback gates and pre-auth rate limiting.
+struct RequestOrigin {
+    direct_loopback: bool,
+    client_ip: Option<IpAddr>,
+}
+
+fn request_origin(peer: Option<IpAddr>, headers: &HeaderMap) -> RequestOrigin {
+    let peer = peer.map(|ip| ip.to_canonical());
+    let peer_is_loopback = peer.is_some_and(|ip| ip.is_loopback());
+    // cloudflared connects to the same HTTPS listener from loopback. Header
+    // presence removes local privileges even when the value is empty, invalid,
+    // or itself loopback. CF-Ray also covers a removed visitor-IP header.
+    let via_cloudflare = headers.contains_key("cf-connecting-ip") || headers.contains_key("cf-ray");
+    // Only the local proxy may supply the rate-limit identity. A LAN client
+    // must not rotate buckets by spoofing forwarding headers. Missing or
+    // ambiguous IPs fall back to the peer bucket, never to an exemption.
+    let forwarded_ip = if peer_is_loopback {
+        let mut values = headers.get_all("cf-connecting-ip").iter();
+        let ip = values
+            .next()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<IpAddr>().ok());
+        ip.filter(|_| values.next().is_none())
+            .map(|ip| ip.to_canonical())
+    } else {
+        None
+    };
+    RequestOrigin {
+        direct_loopback: peer_is_loopback && !via_cloudflare,
+        client_ip: forwarded_ip.or(peer),
+    }
+}
+
+/// Operator-only surface for metrics and local diagnostics. Tunnel requests
+/// require an operator bearer even when their socket peer is loopback.
 pub async fn require_loopback_operator(request: Request, next: Next) -> Response {
-    let is_loopback = request
+    let peer = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .is_some_and(|peer| peer.0.ip().is_loopback());
+        .map(|peer| peer.0.ip());
+    let origin = request_origin(peer, request.headers());
     let operator_bearer = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::to_owned);
-    if !is_loopback && !has_operator_bearer(operator_bearer.as_deref()).await {
+    if !origin.direct_loopback && !has_operator_bearer(operator_bearer.as_deref()).await {
         return cognia_problem::Problem::with_status(
             StatusCode::FORBIDDEN,
             "operator_identity_required",
@@ -231,17 +265,18 @@ async fn authenticate_request(
     mut request: Request,
     next: Next,
 ) -> Response {
-    // Peer address for the service-token loopback check. Read from extensions
+    // Peer address for the service-token origin check. Read from extensions
     // (populated by `into_make_service_with_connect_info`) rather than a
     // `ConnectInfo` extractor param, because axum 0.8's `Option<ConnectInfo>`
     // isn't a valid extractor and a required one would 500 the bare-request
     // unit tests. Absent ⇒ treated as non-loopback, so a service token can
-    // never slip through without a verified peer.
-    let peer_is_loopback = request
+    // never slip through without a verified peer. Tunnel traffic is remote
+    // even though cloudflared's origin connection comes from loopback.
+    let peer = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0.ip().is_loopback())
-        .unwrap_or(false);
+        .map(|ci| ci.0.ip());
+    let peer_is_loopback = request_origin(peer, request.headers()).direct_loopback;
     // ── 1. Extract token ────────────────────────────────────────────────────
     let header_token = request
         .headers()
@@ -515,17 +550,12 @@ pub async fn pre_auth_rate_limit(
     request: Request,
     next: Next,
 ) -> Response {
-    // Loopback is the desktop talking to itself — no realistic brute-force
-    // surface, and
-    // gating it would deplete the shared bucket during integration tests
-    // that issue many requests from 127.0.0.1. The threat model targets
-    // *other-host* peers reachable when `bind_loopback_only=false`.
-    let ip = addr.ip();
-    if ip.is_loopback() {
+    let origin = request_origin(Some(addr.ip()), request.headers());
+    if origin.direct_loopback {
         return next.run(request).await;
     }
     let limiter = super::pre_auth_rate_limiter();
-    let key = ip.to_string();
+    let key = origin.client_ip.unwrap_or(addr.ip()).to_string();
     match limiter.check(&key) {
         RateLimitDecision::Accept => next.run(request).await,
         RateLimitDecision::Reject { retry_after } => {
@@ -584,6 +614,94 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
+
+    #[test]
+    fn cloudflare_origin_rejects_ambiguous_ips_and_canonicalizes_addresses() {
+        let peer = Some("127.0.0.1".parse().unwrap());
+        for values in [
+            vec![axum::http::HeaderValue::from_static(
+                "198.51.100.1, 198.51.100.2",
+            )],
+            vec![axum::http::HeaderValue::from_bytes(&[0xff]).unwrap()],
+            vec![
+                axum::http::HeaderValue::from_static("198.51.100.1"),
+                axum::http::HeaderValue::from_static("198.51.100.2"),
+            ],
+        ] {
+            let mut headers = HeaderMap::new();
+            for value in values {
+                headers.append("cf-connecting-ip", value);
+            }
+            let origin = request_origin(peer, &headers);
+            assert!(!origin.direct_loopback);
+            assert_eq!(origin.client_ip, peer);
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", "::ffff:198.51.100.1".parse().unwrap());
+        let origin = request_origin(peer, &headers);
+        assert!(!origin.direct_loopback);
+        assert_eq!(origin.client_ip, Some("198.51.100.1".parse().unwrap()));
+        let unknown = request_origin(None, &headers);
+        assert!(!unknown.direct_loopback);
+        assert_eq!(unknown.client_ip, None);
+    }
+
+    #[tokio::test]
+    async fn cloudflare_tunnel_headers_remove_operator_loopback_privileges() {
+        let router = Router::new()
+            .route("/metrics", get(|| async { StatusCode::OK }))
+            .layer(from_fn(require_loopback_operator));
+        for peer in ["127.0.0.1:54321", "[::1]:54321"] {
+            for headers in [
+                vec![],
+                vec![("CF-Connecting-IP", "198.51.100.200")],
+                vec![("CF-Ray", "test-ray-SJC")],
+                vec![("CF-Connecting-IP", "")],
+                vec![("CF-Connecting-IP", "invalid")],
+                vec![("CF-Connecting-IP", "127.0.0.1")],
+                vec![("CF-Connecting-IP", "::1")],
+            ] {
+                let expected = if headers.is_empty() {
+                    StatusCode::OK
+                } else {
+                    StatusCode::FORBIDDEN
+                };
+                let mut request = Request::builder()
+                    .uri("/metrics")
+                    .extension(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+                for (name, value) in &headers {
+                    request = request.header(*name, *value);
+                }
+                let response = router
+                    .clone()
+                    .oneshot(request.body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    expected,
+                    "peer {peer}, headers {headers:?}"
+                );
+                if expected == StatusCode::FORBIDDEN {
+                    assert_eq!(
+                        body_json(response).await["code"],
+                        "operator_identity_required"
+                    );
+                }
+            }
+        }
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 
     fn test_state() -> SharedState {
         use crate::{event_bus::EventBus, idempotency::IdempotencyCache};
@@ -685,6 +803,22 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body_json(response).await["code"],
+            "local_debug_token_remote"
+        );
+    }
+
+    #[tokio::test]
+    async fn cloudflare_tunnel_cannot_use_local_debug_tokens() {
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let mut request = local_debug_request("/internal/test", "127.0.0.1");
+        request
+            .headers_mut()
+            .insert("cf-ray", "test-ray-SJC".parse().unwrap());
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(
             body_json(response).await["code"],
@@ -949,6 +1083,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cloudflare_tunnel_is_rate_limited_by_forwarded_client_ip() {
+        let router = build_metered_router();
+        for client in ["198.51.100.202", "2001:db8::202"] {
+            for index in 0..6 {
+                let mut request = metered_request("127.0.0.1");
+                request
+                    .headers_mut()
+                    .insert("cf-connecting-ip", client.parse().unwrap());
+                request
+                    .headers_mut()
+                    .insert("cf-ray", "test-ray-SJC".parse().unwrap());
+                let response = router.clone().oneshot(request).await.unwrap();
+                assert_eq!(
+                    response.status(),
+                    if index < 5 {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::TOO_MANY_REQUESTS
+                    },
+                    "client {client}, request {index}"
+                );
+                if index == 5 {
+                    assert!(response.headers().contains_key("retry-after"));
+                    assert_eq!(body_json(response).await["code"], "rate_limited");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cloudflare_tunnel_missing_or_invalid_ip_still_consumes_a_bucket() {
+        let router = build_metered_router();
+        // Each case has its own loopback peer so process-global buckets do not
+        // interfere. Even a loopback-valued forwarded IP must be metered.
+        for (peer, client) in [
+            ("127.0.0.21", None),
+            ("127.0.0.22", Some("invalid")),
+            ("127.0.0.23", Some("")),
+            ("127.0.0.24", Some("198.51.100.1, 198.51.100.2")),
+            ("127.0.0.25", Some("127.0.0.25")),
+            ("127.0.0.26", Some("::1")),
+        ] {
+            for index in 0..6 {
+                let mut request = metered_request(peer);
+                request
+                    .headers_mut()
+                    .insert("cf-ray", "test-ray-SJC".parse().unwrap());
+                if let Some(client) = client {
+                    request
+                        .headers_mut()
+                        .insert("cf-connecting-ip", client.parse().unwrap());
+                }
+                let response = router.clone().oneshot(request).await.unwrap();
+                assert_eq!(
+                    response.status(),
+                    if index < 5 {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::TOO_MANY_REQUESTS
+                    },
+                    "peer {peer}, client {client:?}, request {index}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cloudflare_headers_from_remote_peers_cannot_rotate_rate_limit_buckets() {
+        let router = build_metered_router();
+        for index in 0..6 {
+            let mut request = metered_request("198.51.100.203");
+            request.headers_mut().insert(
+                "cf-connecting-ip",
+                format!("127.0.0.{}", index + 1).parse().unwrap(),
+            );
+            let response = router.clone().oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                if index < 5 {
+                    StatusCode::OK
+                } else {
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn non_loopback_eventually_returns_429_with_retry_after() {
         // Use a per-test IP so the shared process-global bucket starts
         // fresh from this caller's perspective.
@@ -1019,6 +1241,22 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
         assert_eq!(body["device_id"], crate::jwt::SERVICE_DEVICE_ID);
+    }
+
+    #[tokio::test]
+    async fn cloudflare_tunnel_cannot_use_loopback_service_tokens() {
+        for router in [
+            build_router(test_state()),
+            build_service_router(test_state()),
+        ] {
+            let mut request = service_request_from(Some("127.0.0.1"));
+            request
+                .headers_mut()
+                .insert("cf-ray", "test-ray-SJC".parse().unwrap());
+            let response = router.oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(body_json(response).await["code"], "service_token_remote");
+        }
     }
 
     #[tokio::test]
