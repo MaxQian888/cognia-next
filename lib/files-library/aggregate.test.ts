@@ -9,6 +9,7 @@ import {
   type FilesAggregateInput,
   type RawUpload,
 } from "./aggregate"
+import { workspaceFileSourceId } from "./workspace-files"
 
 function input(overrides: Partial<FilesAggregateInput> = {}): FilesAggregateInput {
   return {
@@ -600,5 +601,105 @@ describe("isItemHidden", () => {
     expect(isItemHidden({ hiddenAt: 6 }, 5)).toBe(true)
     expect(isItemHidden({ hiddenAt: 6 }, 7)).toBe(false)
     expect(isItemHidden({ hiddenAt: 6, trashedAt: 6 }, 5)).toBe(false)
+  })
+})
+
+describe("workspace files (ADR-0223 §8)", () => {
+  const file = {
+    sessionId: "s1",
+    workspaceRoot: "/repo",
+    executionRoot: "/exec/run-1",
+    relPath: "docs/plan.md",
+    change: "created" as const,
+    mediaType: "text/markdown",
+    byteSize: 12,
+    createdAt: 10,
+    updatedAt: 20,
+  }
+  const sourceId = workspaceFileSourceId("s1", "/repo", "docs/plan.md")
+
+  it("is one AI-made card per conversation and path, found by its name and path", () => {
+    const entries = aggregateFilesEntries(input({ workspaceFiles: [file, { ...file }] }))
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      key: `workspace-file:${sourceId}`,
+      kind: "workspace-file",
+      sourceId,
+      title: "plan.md",
+      mediaType: "text/markdown",
+      byteSize: 12,
+      projectIds: ["p1"],
+      sessionIds: ["s1"],
+      originSessionId: "s1",
+      originAlive: true,
+      creator: "ai",
+      createdAt: 10,
+      updatedAt: 20,
+      workspace: {
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        executionRoot: "/exec/run-1",
+        relPath: "docs/plan.md",
+        change: "created",
+      },
+    })
+    expect(entries[0]!.searchText).toContain("docs/plan.md")
+    // Its conversation gone, the card stays; it can no longer open there.
+    const [orphan] = aggregateFilesEntries(
+      input({ workspaceFiles: [{ ...file, sessionId: "gone" }] })
+    )
+    expect(orphan).toMatchObject({ originAlive: false, sessionIds: [] })
+  })
+
+  it("folds the Files metadata in, and rebuilds a kept one the ledger no longer lists", () => {
+    const kept = item({
+      key: `workspace-file:${sourceId}`,
+      kind: "workspace-file",
+      sourceId,
+      favoritedAt: 5,
+      displayName: "The plan",
+      keptAt: 7,
+      snapshot: {
+        title: "plan.md",
+        mediaType: "text/markdown",
+        byteSize: 12,
+        workspace: {
+          sessionId: "s1",
+          workspaceRoot: "/repo",
+          executionRoot: "/exec/run-1",
+          relPath: "docs/plan.md",
+        },
+      },
+    })
+    const [listed] = aggregateFilesEntries(input({ workspaceFiles: [file], items: [kept] }))
+    expect(listed).toMatchObject({ title: "The plan", sourceTitle: "plan.md", favoritedAt: 5 })
+
+    const [rebuilt] = aggregateFilesEntries(input({ workspaceFiles: [], items: [kept] }))
+    expect(rebuilt).toMatchObject({
+      key: `workspace-file:${sourceId}`,
+      title: "The plan",
+      originAlive: true,
+      updatedAt: 7,
+      workspace: { relPath: "docs/plan.md" },
+    })
+    // What the agent did last is not known any more.
+    expect(rebuilt!.workspace).not.toHaveProperty("change")
+    // Not kept: nothing to rebuild.
+    expect(
+      aggregateFilesEntries(
+        input({ workspaceFiles: [], items: [{ ...kept, favoritedAt: undefined }] })
+      )
+    ).toEqual([])
+  })
+
+  it("lists none where there are no workspace files, kept ones included", () => {
+    const kept = item({
+      key: `workspace-file:${sourceId}`,
+      kind: "workspace-file",
+      sourceId,
+      folderId: "root",
+      snapshot: { title: "plan.md", workspace: { ...file } },
+    })
+    expect(aggregateFilesEntries(input({ items: [kept] }))).toEqual([])
   })
 })

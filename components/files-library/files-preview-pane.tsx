@@ -137,6 +137,25 @@ export function FilesPreviewPane({
               <dd className="[overflow-wrap:anywhere]">{entry.language}</dd>
             </>
           ) : null}
+          {entry.workspace ? (
+            <>
+              <dt className="text-muted-foreground">{t("preview.details.path")}</dt>
+              <dd
+                className="[overflow-wrap:anywhere] font-mono"
+                data-testid="files-preview-workspace-path"
+              >
+                {entry.workspace.relPath}
+              </dd>
+              {entry.workspace.change ? (
+                <>
+                  <dt className="text-muted-foreground">{t("preview.details.change")}</dt>
+                  <dd data-testid="files-preview-workspace-change">
+                    {t(`preview.workspaceChange.${entry.workspace.change}`)}
+                  </dd>
+                </>
+              ) : null}
+            </>
+          ) : null}
           {entry.byteSize !== undefined ? (
             <>
               <dt className="text-muted-foreground">{t("preview.details.size")}</dt>

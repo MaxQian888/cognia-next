@@ -1,7 +1,8 @@
 "use client"
 
 /**
- * The Files sidebar (ADR-0223): the places — All, the type groups, Recents,
+ * The Files sidebar (ADR-0223): the places — All, the type groups (Workspace
+ * files held back, and labelled so, where this device has none), Recents,
  * the folder tree and the Trash. Folders and the Trash accept drops; Recents
  * lists the newest few and "Show more" opens the Recents place.
  */
@@ -13,6 +14,7 @@ import {
   FileIcon,
   FilmIcon,
   FolderPlusIcon,
+  HardDriveIcon,
   ImageIcon,
   LayoutGridIcon,
   PenLineIcon,
@@ -21,6 +23,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files-actions"
 import { ROOT_LIBRARY_FOLDER_ID, type LibraryFolder } from "@/lib/db/files-library-types"
 import { sameFilesSection } from "@/lib/files-library/deep-link"
@@ -43,6 +46,7 @@ const GROUP_ICONS: Record<FilesTypeGroup, ComponentType<{ className?: string }>>
   images: ImageIcon,
   videos: FilmIcon,
   uploads: FileIcon,
+  workspace: HardDriveIcon,
 }
 
 export interface FilesSidebarProps {
@@ -93,6 +97,39 @@ function PlaceButton({
       <span className="truncate">{label}</span>
       {trailing}
     </button>
+  )
+}
+
+/**
+ * The Workspace files group where this device lists none (ADR-0223 §8): shown,
+ * inert, and saying where they are instead of vanishing without a word.
+ */
+function HeldBackPlace({
+  group,
+  reason,
+  touch,
+}: {
+  group: FilesTypeGroup
+  reason: string
+  touch: boolean
+}) {
+  const t = useTranslations("files")
+  const Icon = GROUP_ICONS[group]
+  return (
+    <div
+      aria-disabled="true"
+      title={t("places.workspaceHeldBackHint")}
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground opacity-70",
+        rowHeight(touch)
+      )}
+      data-testid={`files-place-group-${group}`}
+      data-held-back={reason}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span className="truncate">{t(`places.groups.${group}`)}</span>
+      <span className="ml-auto shrink-0 text-xs">{t("places.workspaceHeldBack")}</span>
+    </div>
   )
 }
 
@@ -168,6 +205,7 @@ export function FilesSidebar({
   const t = useTranslations("files")
   const setSection = useFilesLibraryStore((s) => s.setSection)
   const openFolderDialog = useFilesLibraryStore((s) => s.openFolderDialog)
+  const { workspaceFiles } = useFilesOps().capabilities
 
   return (
     <nav
@@ -186,16 +224,20 @@ export function FilesSidebar({
           testId="files-place-all"
           touch={touch}
         />
-        {FILES_TYPE_GROUPS.map((group) => (
-          <PlaceButton
-            key={group}
-            section={{ kind: "group", group }}
-            icon={GROUP_ICONS[group]}
-            label={t(`places.groups.${group}`)}
-            testId={`files-place-group-${group}`}
-            touch={touch}
-          />
-        ))}
+        {FILES_TYPE_GROUPS.map((group) =>
+          group === "workspace" && workspaceFiles !== true ? (
+            <HeldBackPlace key={group} group={group} reason={workspaceFiles.reason} touch={touch} />
+          ) : (
+            <PlaceButton
+              key={group}
+              section={{ kind: "group", group }}
+              icon={GROUP_ICONS[group]}
+              label={t(`places.groups.${group}`)}
+              testId={`files-place-group-${group}`}
+              touch={touch}
+            />
+          )
+        )}
 
         <SectionLabel>{t("places.recents")}</SectionLabel>
         {recents.length === 0 ? (

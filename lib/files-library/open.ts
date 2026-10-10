@@ -1,8 +1,11 @@
 /**
  * Where "Open" takes a Files entry (ADR-0200). An artifact whose conversation
  * is alive opens in that conversation's artifact panel; a canvas document
- * opens in the Canvas guild. Everything else — images, uploads, and an
- * artifact whose conversation is gone — is previewed inside Files.
+ * opens in the Canvas guild. A workspace file (ADR-0223 §8) opens in its
+ * conversation's Files panel, through the opener a `view=files` link uses
+ * (ADR-0222). Everything else — images, uploads, an artifact or workspace
+ * file whose conversation is gone, a workspace file outside its
+ * conversation's FileSpace — is previewed inside Files.
  */
 
 import { guildFromSession } from "@/lib/claude/guild"
@@ -16,12 +19,13 @@ export interface FilesNavigator {
   push: (href: string) => void
 }
 
-export type FilesOpenTarget = "artifact" | "canvas" | "preview"
+export type FilesOpenTarget = "artifact" | "canvas" | "workspace" | "preview"
 
 /** Where `open` will take the entry, without doing it. */
 export function openTargetFor(entry: FilesEntry): FilesOpenTarget {
   if (entry.kind === "canvas") return "canvas"
   if (entry.kind === "artifact" && entry.originAlive && entry.originSessionId) return "artifact"
+  if (entry.kind === "workspace-file" && entry.originAlive && entry.workspace) return "workspace"
   return "preview"
 }
 
@@ -41,6 +45,12 @@ export async function openFilesEntry(
     return (await openArtifactInSession(entry.sourceId, entry.originSessionId!, navigator))
       ? "artifact"
       : "preview"
+  }
+  if (target === "workspace") {
+    // Loaded on demand: the opener pulls in the FileSpace resolver.
+    const { openWorkspaceFileInConversation } = await import("./workspace-files-io")
+    const result = await openWorkspaceFileInConversation(entry, navigator)
+    return result === "outside" ? "preview" : "workspace"
   }
   return "preview"
 }

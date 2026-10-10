@@ -2,6 +2,10 @@ jest.mock("@/lib/db/chat-drafts", () => {
   const actual = jest.requireActual("@/lib/db/chat-drafts")
   return { ...actual, DRAFT_ATTACHMENT_QUOTA_BYTES: 32 }
 })
+jest.mock("./workspace-files-io", () => ({
+  ...jest.requireActual("./workspace-files-io"),
+  readWorkspaceFileBytes: jest.fn(),
+}))
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
@@ -20,6 +24,7 @@ import {
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { selectComposerContextSelections } from "@/stores/chat/chat-store"
 import type { FilesEntry } from "./types"
+import { FilesWorkspaceFileError, readWorkspaceFileBytes } from "./workspace-files-io"
 
 jest.setTimeout(30_000)
 const fixture = createDbTestFixture()
@@ -214,6 +219,57 @@ describe("attachEntryToSession", () => {
       attachEntryToSession(entry({ kind: "artifact", sourceId: "a" }), "s1")
     ).rejects.toMatchObject({
       code: "files_not_attachable",
+    })
+  })
+})
+
+describe("a workspace file in a chat (ADR-0223 §8)", () => {
+  const workspace = {
+    sessionId: "s1",
+    workspaceRoot: "/repo",
+    executionRoot: "/exec",
+    relPath: "notes.md",
+  }
+  const file = entry({
+    kind: "workspace-file",
+    sourceId: "w1",
+    title: "notes.md",
+    mediaType: "text/markdown",
+    workspace,
+  })
+
+  it("drafts the bytes read off the disk, never more than a draft holds", async () => {
+    ;(readWorkspaceFileBytes as jest.Mock).mockResolvedValueOnce(new Uint8Array([104, 105]))
+    await expect(attachEntryToSession(file, "s1")).resolves.toBe("draft")
+    expect(readWorkspaceFileBytes).toHaveBeenCalledWith(workspace, { maxBytes: 32 })
+    const draft = await getDraft("s1")
+    expect(draft?.attachments).toEqual([
+      expect.objectContaining({ name: "notes.md", mediaType: "text/markdown", size: 2 }),
+    ])
+  })
+
+  it("binds a copy of the bytes to a paired device's conversation", async () => {
+    ;(readWorkspaceFileBytes as jest.Mock).mockResolvedValueOnce(new Uint8Array([1, 2, 3]))
+    await bindEntryToSession(file, "s2")
+    const bound = await getDb().messageMediaRefs.where("sessionId").equals("s2").toArray()
+    expect(bound).toHaveLength(1)
+    expect((await getSessionAsset("s2", bound[0]!.sessionAsset!.assetId))?.filename).toBe(
+      "notes.md"
+    )
+  })
+
+  it("is gone when the file left the disk, and too large past a draft", async () => {
+    ;(readWorkspaceFileBytes as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_missing")
+    )
+    await expect(attachEntryToSession(file, "s1")).rejects.toMatchObject({
+      code: "files_source_missing",
+    })
+    ;(readWorkspaceFileBytes as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_too_large")
+    )
+    await expect(attachEntryToSession(file, "s1")).rejects.toMatchObject({
+      code: "files_workspace_too_large",
     })
   })
 })

@@ -22,8 +22,12 @@ export const ROOT_LIBRARY_FOLDER_ID = "root" as const
  * - `image` — a canonical `messageMedia` image (one card per content hash).
  * - `session-upload` — a non-image original uploaded into one or more conversations.
  * - `upload` — a non-image original uploaded straight into Files (Files-owned).
+ * - `workspace-file` — a file an agent created, modified or renamed on disk in
+ *   a conversation's workspace (ADR-0223 §8), listed from the task-workspace
+ *   ledger. Files never writes to or deletes it on disk.
  */
-export type LibraryItemKind = "artifact" | "canvas" | "image" | "session-upload" | "upload"
+export type LibraryItemKind =
+  "artifact" | "canvas" | "image" | "session-upload" | "upload" | "workspace-file"
 
 export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
   "artifact",
@@ -31,6 +35,7 @@ export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
   "image",
   "session-upload",
   "upload",
+  "workspace-file",
 ]
 
 /** What a generated video's job recorded about it (ADR-0205). */
@@ -42,6 +47,21 @@ export interface LibraryItemGeneratedVideo {
   durationSec?: number
   width?: number
   height?: number
+}
+
+/**
+ * Where a workspace file lives on the host's disk (ADR-0223 §8). Kept on the
+ * item so a favorited or filed workspace file is still found once its run has
+ * left the ledger.
+ */
+export interface LibraryItemWorkspaceLocation {
+  sessionId: string
+  /** The conversation's workspace root; the file lives here once its run's root is gone. */
+  workspaceRoot: string
+  /** Root the run that changed it last wrote under; tried first. */
+  executionRoot: string
+  /** Relative to either root, forward slashes. */
+  relPath: string
 }
 
 /** Display metadata copied at keep/upload time so an item outlives its source row. */
@@ -58,6 +78,8 @@ export interface LibraryItemSnapshot {
    * started it, so the kept item carries a copy.
    */
   generated?: LibraryItemGeneratedVideo
+  /** A workspace file's place on disk. */
+  workspace?: LibraryItemWorkspaceLocation
 }
 
 export interface LibraryItemRow {
@@ -67,7 +89,8 @@ export interface LibraryItemRow {
   /**
    * artifact id | canvas id | canonical image hash |
    * original content hash for a conversation upload (one card per file, however
-   * many conversations it was attached to) | asset id for a Files upload.
+   * many conversations it was attached to) | asset id for a Files upload |
+   * `workspaceFileSourceId(...)` for a workspace file.
    */
   sourceId: string
   /** Conversation the item came from; the session purge reads it to find kept items. */

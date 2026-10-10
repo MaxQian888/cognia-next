@@ -12,7 +12,14 @@ import {
 
 describe("files-library types", () => {
   it("lists the type groups, lenses, sort columns and filter options in display order", () => {
-    expect(FILES_TYPE_GROUPS).toEqual(["documents", "artifacts", "images", "videos", "uploads"])
+    expect(FILES_TYPE_GROUPS).toEqual([
+      "documents",
+      "artifacts",
+      "images",
+      "videos",
+      "uploads",
+      "workspace",
+    ])
     expect(FILES_LENSES).toEqual(["suggested", "favorites", "mine", "ai", "shared"])
     expect(FILES_SORT_KEYS).toEqual(["name", "source", "activity", "size", "type"])
     expect(FILES_MODIFIED_WITHIN).toEqual(["any", "day", "week", "month", "year"])
@@ -78,6 +85,23 @@ describe("files-library types", () => {
     expect(entrySource({ ...entry, title: "Renamed in Files" }).snapshot?.title).toBe("SPEC.md")
     const generated = { jobId: "vjob_1", prompt: "waves", providerId: "google", modelId: "veo" }
     expect(entrySource({ ...entry, generated }).snapshot?.generated).toEqual(generated)
+    // A workspace file keeps where it lives, but not what the agent did last.
+    const workspace = {
+      sessionId: "s1",
+      workspaceRoot: "/repo",
+      executionRoot: "/exec/run-1",
+      relPath: "docs/plan.md",
+      change: "created" as const,
+      oldPath: "plan.md",
+    }
+    expect(
+      entrySource({ ...entry, kind: "workspace-file", workspace }).snapshot?.workspace
+    ).toEqual({
+      sessionId: "s1",
+      workspaceRoot: "/repo",
+      executionRoot: "/exec/run-1",
+      relPath: "docs/plan.md",
+    })
   })
 
   it("labels an uploaded video as a video, and nothing else", () => {
@@ -92,5 +116,10 @@ describe("files-library types", () => {
     expect(entryKindLabelKey({ kind: "canvas" })).toBe("canvas")
     expect(entryKindLabelKey({ kind: "image", mediaType: "video/mp4" })).toBe("image")
     expect(isVideoEntry({ kind: "upload" })).toBe(false)
+    // A video an agent left on disk is a workspace file, not a video.
+    expect(isVideoEntry({ kind: "workspace-file", mediaType: "video/mp4" })).toBe(false)
+    expect(entryKindLabelKey({ kind: "workspace-file", mediaType: "video/mp4" })).toBe(
+      "workspace-file"
+    )
   })
 })

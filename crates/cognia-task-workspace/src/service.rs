@@ -3266,6 +3266,13 @@ impl TaskWorkspaceService {
         self.store.lock().list_resources(task_id)
     }
 
+    /// The files agents left in each conversation's workspace, newest change
+    /// first (ADR-0223 §8).
+    pub fn list_resource_index(&self) -> Result<Vec<crate::ResourceIndexEntry>, String> {
+        let rows = self.store.lock().list_resource_index_rows()?;
+        Ok(crate::resource_index::fold_resource_index(rows))
+    }
+
     pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
         self.store.lock().get_patch_set(run_id)
     }

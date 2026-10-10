@@ -553,3 +553,55 @@ describe("sortFilesEntries", () => {
     })
   })
 })
+
+describe("workspace files keep to their own group (ADR-0223 §8)", () => {
+  const file = (key: string, overrides: Partial<FilesEntry> = {}) =>
+    entry({ key, kind: "workspace-file", creator: "ai", ...overrides })
+  const loose = file("w-loose")
+  const favorite = file("w-fav", { favoritedAt: 5 })
+  const filed = file("w-filed", { folderId: "lbf_1" })
+  const opened = file("w-opened", { lastAccessedAt: 9 })
+  const artifact = entry({ key: "a", creator: "ai" })
+  const all = [loose, favorite, filed, opened, artifact]
+
+  it("is the Workspace files group, and nothing else's", () => {
+    expect(matchesGroup(loose, "workspace")).toBe(true)
+    expect(matchesGroup(artifact, "workspace")).toBe(false)
+    const video = file("w-video", { mediaType: "video/mp4" })
+    const image = file("w-image", { mediaType: "image/png" })
+    for (const group of ["documents", "artifacts", "images", "videos", "uploads"] as const) {
+      expect(matchesGroup(video, group)).toBe(false)
+      expect(matchesGroup(image, group)).toBe(false)
+    }
+    expect(
+      keys(filterFilesEntries(all, query({ section: { kind: "group", group: "workspace" } })))
+    ).toEqual(["w-loose", "w-fav", "w-filed", "w-opened"])
+  })
+
+  it("stays out of All and its lenses, except a favorite under Favorites", () => {
+    expect(keys(filterFilesEntries(all, query()))).toEqual(["a"])
+    expect(keys(filterFilesEntries(all, query({ lens: "ai" })))).toEqual(["a"])
+    expect(keys(filterFilesEntries(all, query({ lens: "favorites" })))).toEqual(["w-fav"])
+    expect(matchesSection(favorite, { kind: "all" })).toBe(false)
+    expect(matchesSection(favorite, { kind: "all" }, "favorites")).toBe(true)
+  })
+
+  it("shows in Recents once kept or opened, and in its folder", () => {
+    expect(keys(filterFilesEntries(all, query({ section: { kind: "recent" } })))).toEqual([
+      "w-fav",
+      "w-filed",
+      "w-opened",
+      "a",
+    ])
+    expect(
+      keys(filterFilesEntries(all, query({ section: { kind: "folder", folderId: "lbf_1" } })))
+    ).toEqual(["w-filed"])
+  })
+
+  it("goes to the Trash like anything else", () => {
+    const trashed = file("w-trash", { trashedAt: 3 })
+    expect(
+      keys(filterFilesEntries([trashed, loose], query({ section: { kind: "trash" } })))
+    ).toEqual(["w-trash"])
+  })
+})

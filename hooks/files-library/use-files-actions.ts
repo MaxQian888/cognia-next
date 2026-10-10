@@ -39,6 +39,7 @@ import { FilesRemoteError } from "@/lib/files-library/remote/client"
 import { FilesRenameError } from "@/lib/files-library/rename"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { FilesUseInChatError } from "@/lib/files-library/use-in-chat"
+import { FilesWorkspaceFileError } from "@/lib/files-library/workspace-files-io"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -57,7 +58,8 @@ function errorKey(error: unknown): string {
     error instanceof FilesExportError ||
     error instanceof SessionAssetError ||
     error instanceof DocumentTemplateError ||
-    error instanceof FilesRemoteError
+    error instanceof FilesRemoteError ||
+    error instanceof FilesWorkspaceFileError
   ) {
     return error.code
   }

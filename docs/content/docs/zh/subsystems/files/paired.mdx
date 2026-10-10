@@ -9,7 +9,7 @@ description: "与桌面端配对的手机或浏览器如何管理桌面端的文
 
 <TLDR>
   配对的手机或浏览器实时管理**桌面端**的文件库，不做任何镜像：页面挂载一个远程后端，分页读取主机的列表，
-  并把每次修改作为 22 个 `files_library_*` 主机命令之一发出，由桌面端用自己文件页的同一套写入代码执行。
+  并把每次修改作为 23 个 `files_library_*` 主机命令之一发出，由桌面端用自己文件页的同一套写入代码执行。
   字节走已有的 `session-media` 资源，上限 10 MiB。创建文档和分享留在桌面端，页面会注明。
 </TLDR>
 
@@ -54,7 +54,7 @@ flowchart LR
 
 ## 命令
 
-22 个命令都是 `target: execution`，经 `src-tauri/src/companion_api/rpc/data_sync.rs` 桥接到桌面端渲染进程，
+23 个命令都是 `target: execution`，经 `src-tauri/src/companion_api/rpc/data_sync.rs` 桥接到桌面端渲染进程，
 并由 `lib/companion/desktop-write-source.ts` 整组委派，与 `pet_*` 一族相同。服务器会把经过验证的
 `callerDeviceId` 注入每一个命令。读取使用 `client.read` 并跳过幂等缓存；写入使用 `client.write`，并要求
 `Idempotency-Key`。
@@ -65,6 +65,7 @@ flowchart LR
 | `files_library_folder_list` | 按 id 顺序返回一页文件夹 |
 | `files_library_search` | 按文件页自己的规则返回正文匹配的条目；排除回收站中和已移除的条目 |
 | `files_library_get` | 单个条目，以及文档的文本（最多 128 Ki 个字符） |
+| `files_library_read_chunk` | 凭条目键读取[工作区文件](/docs/subsystems/files/workspace)最多 512 KiB 的字节 |
 | `files_library_favorite` / `_move` / `_trash` / `_restore` | 对所选条目一次性写入；返回实际处理的条目数 |
 | `files_library_purge` | 只彻底删除回收站中的条目，规则见[回收站](/docs/subsystems/files/data) |
 | `files_library_touch` / `_rename` | 记录一次打开；重命名 |
@@ -117,6 +118,9 @@ flowchart LR
 
 该资源 10 MiB 的上限就是设备的上限（`FILES_REMOTE_MAX_BYTES`）：超过时，预览提示到桌面端打开，下载会被拒绝，
 zip 导出会在读取任何内容之前点名拒绝。
+
+工作区文件的字节在主机磁盘上，而不在会话媒体中，所以它们改由 `files_library_read_chunk` 读取，上限同样是 10 MiB
+（见[工作区文件](/docs/subsystems/files/workspace#在配对设备上)）。
 
 ## 打开、在对话中使用、上传
 

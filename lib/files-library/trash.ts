@@ -15,6 +15,9 @@
  *   and pin go, so media GC collects bytes nobody references; an orphaned
  *   artifact or canvas row (spared at its conversation's purge only because
  *   Files kept it) is deleted with it.
+ * - **Workspace files** (ADR-0223 §8) follow their conversation: alive, the
+ *   item is retired as "removed from Files"; gone, its row goes. The file on
+ *   disk is never touched either way.
  */
 
 import { LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
@@ -161,6 +164,9 @@ export async function resolveTrashPurgeTargets(
         break
       case "upload":
         originAlive = true
+        break
+      case "workspace-file":
+        originAlive = row.originSessionId ? live.has(row.originSessionId) : false
         break
     }
     return {

@@ -1,15 +1,15 @@
 ---
 title: 概览
-description: "文件页：在产物、画布文档、聊天图片和上传文件之上的一个可管理空间。位置与视角交叉，回收站保留字节 30 天，支持批量与拖拽管理、文档模板和文件链接。ADR-0200 与 ADR-0223。"
+description: "文件页：在产物、画布文档、聊天图片、上传文件以及 Agent 写到磁盘上的文件之上的一个可管理空间。位置与视角交叉，回收站保留字节 30 天，支持批量与拖拽管理、文档模板和文件链接。ADR-0200 与 ADR-0223。"
 ---
 
 # 文件
 
-<Status variant="beta">桌面端、网页端与手机（独立和配对模式）已交付 · 工作区文件待实现（ADR-0223 §8）</Status>
+<Status variant="beta">桌面端、网页端与手机（独立和配对模式）已交付 · 工作区文件在桌面端和配对设备上可用</Status>
 
 <TLDR>
   `/files` 把对话产生的所有内容，以及直接上传到文件库的文件，集中到一个可以管理的地方。内容仍留在各自的存储中
-  （产物、画布文档、聊天图片、对话上传）。文件库只在其上增加自己的状态——收藏、文件夹、回收站、显示名称、链接标记——
+  （产物、画布文档、聊天图片、对话上传、Agent 写入工作区的文件）。文件库只在其上增加自己的状态——收藏、文件夹、回收站、显示名称、链接标记——
   存在两张表里，并通过持有引用而不是复制来让条目的字节保持存活。
 </TLDR>
 
@@ -26,6 +26,7 @@ flowchart LR
     M["messageMedia + messageMediaRefs<br/>（聊天图片）"]
     S["会话资源<br/>（对话上传）"]
     L["文件库资源<br/>（文件库上传）"]
+    W["任务工作区账本<br/>+ codeAdoptionTurns<br/>（工作区文件）"]
   end
   subgraph Files["文件库状态"]
     LI["libraryItems<br/>收藏、文件夹、trashedAt、<br/>displayName、sharedLinkCodes"]
@@ -46,9 +47,10 @@ flowchart LR
 
 ## 位置 × 视角
 
-二级侧栏放的是**位置**：全部、五个类型分组（文档、产物、图片、视频、上传）、最近（五项，之后是“显示更多”）、
+二级侧栏放的是**位置**：全部、六个类型分组（文档、产物、图片、视频、上传、工作区文件）、最近（五项，之后是“显示更多”）、
 文件夹树和回收站。列表上方的一排**视角**——推荐、收藏、我的、AI 生成、与我共享——可以和任意位置组合。
-回收站忽略视角，并隐藏视角栏。
+回收站忽略视角，并隐藏视角栏。工作区文件只待在自己的分组里，直到用户把它放进文件夹、收藏或打开它
+（见[工作区文件](/docs/subsystems/files/workspace#在哪里显示)）。
 
 | 视角 | 显示 | 默认排序 |
 | --- | --- | --- |
@@ -69,6 +71,7 @@ flowchart LR
 | `image` | `messageMedia` | 一个规范图片哈希，无论有多少对话显示它 |
 | `session-upload` | 会话资源 | 一个原始内容哈希，无论它被附加到多少对话 |
 | `upload` | 文件库资源 | 直接上传到文件库的文件（归文件库所有） |
+| `workspace-file` | 任务工作区资源索引、代码采纳轮次 | Agent 新建、修改或重命名的一个对话、工作区根目录和路径 |
 
 生成的视频不是单独的类型：生成任务产出的视频，会把任务记录附在它本来所在的上传卡片上。
 
@@ -86,6 +89,8 @@ flowchart LR
 | 重命名、复制副本、zip、上传、下载 | `lib/files-library/{rename,duplicate,export-zip,upload,download}.ts` |
 | 拖放、键盘、深度链接 | `lib/files-library/{dnd,keyboard,deep-link}.ts` |
 | 分享 | `lib/files-library/share.ts` |
+| 工作区文件：合并（纯函数）、磁盘读取与打开 | `lib/files-library/workspace-files.ts`、`workspace-files-io.ts`、`hooks/files-library/use-workspace-file-index.ts` |
+| 工作区文件：账本索引 | `crates/cognia-task-workspace/src/resource_index.rs`、`crates/cognia-task-workspace-host/src/host_surface.rs` 中的 `task_workspace_list_resource_index`、`lib/task-workspace/client.ts` |
 | 文档模板 | `lib/document-templates/`、`lib/db/document-templates.ts` |
 | 页面与对话框 | `components/files-library/` |
 | 手机布局 | `components/files-library/mobile/` |
@@ -96,12 +101,6 @@ flowchart LR
 | Store | `stores/files-library/files-library-store.ts` |
 | ⌘K | `lib/global-search/providers/files.ts` |
 
-## 尚未交付
-
-ADR-0223 已接受，还有一部分待实现，需要主机端的 Rust 改动。
-
-- **工作区文件（§8）。** 目前没有 `workspace-file` 类型，也没有“工作区文件”分组：类型分组就是上面五个。
-
 ## 页面
 
 - [数据](/docs/subsystems/files/data)：表结构、保留如何持有字节、聚合、回收站及其清理、推荐分和 ⌘K。
@@ -110,3 +109,4 @@ ADR-0223 已接受，还有一部分待实现，需要主机端的 Rust 改动�
 - [分享](/docs/subsystems/files/sharing)：把条目发布为加密的文件链接。
 - [在配对设备上](/docs/subsystems/files/paired)：经 `files_library_*` 管理主机的文件库，以及字节、刷新、
   在对话中使用、上传和留在桌面端的功能。
+- [工作区文件](/docs/subsystems/files/workspace)：Agent 写到磁盘上的文件，来自账本索引，在原处读取，并在所属对话中打开。

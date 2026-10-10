@@ -1,3 +1,7 @@
+jest.mock("./workspace-files-io", () => ({
+  openWorkspaceFileInConversation: jest.fn(async () => "opened"),
+}))
+
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
@@ -6,6 +10,7 @@ import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import { goToSession, openArtifactInSession, openFilesEntry, openTargetFor } from "./open"
 import type { FilesEntry } from "./types"
+import { openWorkspaceFileInConversation } from "./workspace-files-io"
 
 jest.setTimeout(30_000)
 const fixture = createDbTestFixture()
@@ -54,6 +59,13 @@ describe("openTargetFor", () => {
       )
     ).toBe("preview")
     expect(openTargetFor(entry({ kind: "image", sourceId: "h" }))).toBe("preview")
+    const workspace = { sessionId: "s1", workspaceRoot: "/r", executionRoot: "/r", relPath: "a" }
+    expect(openTargetFor(entry({ kind: "workspace-file", sourceId: "w", workspace }))).toBe(
+      "workspace"
+    )
+    expect(
+      openTargetFor(entry({ kind: "workspace-file", sourceId: "w", workspace, originAlive: false }))
+    ).toBe("preview")
   })
 })
 
@@ -92,6 +104,31 @@ describe("openFilesEntry", () => {
       "preview"
     )
     expect(push).not.toHaveBeenCalled()
+  })
+})
+
+describe("opening a workspace file (ADR-0223 §8)", () => {
+  const workspace = { sessionId: "s1", workspaceRoot: "/r", executionRoot: "/r", relPath: "a.md" }
+  const file = entry({ kind: "workspace-file", sourceId: "w", workspace })
+
+  it("opens it in its conversation's Files panel", async () => {
+    const push = jest.fn()
+    await expect(openFilesEntry(file, { push })).resolves.toBe("workspace")
+    expect(openWorkspaceFileInConversation).toHaveBeenCalledWith(file, { push })
+  })
+
+  it("previews in place one outside the conversation's FileSpace", async () => {
+    ;(openWorkspaceFileInConversation as jest.Mock).mockResolvedValueOnce("outside")
+    await expect(openFilesEntry(file, { push: jest.fn() })).resolves.toBe("preview")
+  })
+
+  it("lets a gone file say so", async () => {
+    ;(openWorkspaceFileInConversation as jest.Mock).mockRejectedValueOnce(
+      Object.assign(new Error("x"), { code: "files_workspace_missing" })
+    )
+    await expect(openFilesEntry(file, { push: jest.fn() })).rejects.toMatchObject({
+      code: "files_workspace_missing",
+    })
   })
 })
 

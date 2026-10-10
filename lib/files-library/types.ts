@@ -8,6 +8,7 @@ import type {
   LibraryItemGeneratedVideo,
   LibraryItemKind,
   LibraryItemRow,
+  LibraryItemWorkspaceLocation,
 } from "@/lib/db/files-library-types"
 import type { LibraryItemSource } from "@/lib/db/files-library-items"
 
@@ -22,8 +23,13 @@ export type FilesSection =
   | { kind: "recent" }
   | { kind: "trash" }
 
-/** The sidebar's type groups, by what an item is rather than its file format. */
-export type FilesTypeGroup = "documents" | "artifacts" | "images" | "videos" | "uploads"
+/**
+ * The sidebar's type groups, by what an item is rather than its file format.
+ * `workspace` holds the files agents left on disk (ADR-0223 §8), which show
+ * nowhere else until the person keeps one (see `filter.ts`).
+ */
+export type FilesTypeGroup =
+  "documents" | "artifacts" | "images" | "videos" | "uploads" | "workspace"
 
 export const FILES_TYPE_GROUPS: readonly FilesTypeGroup[] = [
   "documents",
@@ -31,6 +37,7 @@ export const FILES_TYPE_GROUPS: readonly FilesTypeGroup[] = [
   "images",
   "videos",
   "uploads",
+  "workspace",
 ]
 
 /** How to look (ADR-0223): the row of lenses above the main area. */
@@ -145,12 +152,25 @@ export interface FilesEntry {
   excerpt?: string
   /** Set when the upload is a video a generation job made (ADR-0205). */
   generated?: FilesGeneratedVideo
+  /** Set on a workspace file (ADR-0223 §8): where it lives on the host's disk. */
+  workspace?: FilesWorkspaceFile
   /** Lower-cased haystack for search: title, media type and a bounded body excerpt. */
   searchText: string
 }
 
 /** What a generated video's job recorded about it. */
 export type FilesGeneratedVideo = LibraryItemGeneratedVideo
+
+/** Where a workspace file lives on disk, and what the agent did to it last. */
+export interface FilesWorkspaceFile extends LibraryItemWorkspaceLocation {
+  /**
+   * `created` sticks through later edits: the agent wrote this file. Absent
+   * when the card was rebuilt from a kept item after its record had gone.
+   */
+  change?: "created" | "modified" | "renamed"
+  /** Where a renamed file was before. */
+  oldPath?: string
+}
 
 /**
  * The `files.kinds.*` label of an entry: its kind, except that an upload which
@@ -184,6 +204,16 @@ export function entrySource(entry: FilesEntry): LibraryItemSource {
       ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),
       ...(entry.excerpt ? { extractedText: entry.excerpt } : {}),
       ...(entry.generated ? { generated: entry.generated } : {}),
+      ...(entry.workspace
+        ? {
+            workspace: {
+              sessionId: entry.workspace.sessionId,
+              workspaceRoot: entry.workspace.workspaceRoot,
+              executionRoot: entry.workspace.executionRoot,
+              relPath: entry.workspace.relPath,
+            },
+          }
+        : {}),
     },
   }
 }

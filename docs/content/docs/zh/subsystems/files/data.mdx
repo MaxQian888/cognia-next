@@ -24,7 +24,7 @@ description: "文件库的两张表、保留的条目如何持有字节、为每
 | `folderId` | 文件夹 id，或表示文件夹顶层的 `root` |
 | `ownedByFiles` | 直接上传到文件库：删除它会删除文件本身 |
 | `mediaHash` | 保留引用所持有的 `messageMedia` 键（图片和上传） |
-| `snapshot` | 保留时复制的标题、媒体类型、大小、哈希和提取文本，使来源消失后条目仍有名称 |
+| `snapshot` | 保留时复制的标题、媒体类型、大小、哈希和提取文本，使来源消失后条目仍有名称；工作区文件还会存下它的位置（`snapshot.workspace`） |
 | `lastOpenedAt` | 从文件库打开或预览过（决定媒体的“最近”） |
 | `hiddenAt` | “从文件中移除”：现在只在清理任务让回收站条目退役时写入 |
 | `trashedAt` | 进入回收站的时间 |
@@ -49,7 +49,8 @@ description: "文件库的两张表、保留的条目如何持有字节、为每
 
 `loadFilesSources`（`lib/files-library/sources.ts`）并行读取会话资源、文件库资源、条目行和成功的视频任务，
 然后读取最新的 500 张图片（`FILES_IMAGE_PAGE_SIZE`，需要时加载更多）以及比这一页更早的所有保留图片、
-它们引用的存活会话，以及仍然有效的分享链接短码。只读取元数据和 Blob 句柄。
+它们引用的存活会话，以及仍然有效的分享链接短码。只读取元数据和 Blob 句柄。本设备列出工作区文件时，
+还会取账本的资源索引并读取 `codeAdoptionTurns`（见[工作区文件](/docs/subsystems/files/workspace#与代码采纳轮次合并)）。
 
 `aggregateFilesEntries`（`lib/files-library/aggregate.ts`）是纯函数。它把各个来源折叠为每个条目一个
 `FilesEntry`，并用条目行补充信息：
@@ -119,7 +120,7 @@ score = exp(-ageDays / 14)               // ageDays 取最后打开和最后修�
 ## ⌘K
 
 `lib/global-search/providers/files.ts` 注册三个提供者（`builtin.files.artifacts`、`builtin.files.canvas`、
-`builtin.files.items`）。它们都排除回收站中和已移除的条目，并以文件库中的名称列出重命名过的条目。
+`builtin.files.items`）。它们都排除回收站中和已移除的条目，并以文件库中的名称列出重命名过的条目。工作区文件从不列出。
 结果在 `/files?item=<key>` 打开条目的预览。页面在哪里运行（基于界面契约的
 `resolveSurfaceAvailability`），提供者就在哪里应答。在拥有自己数据库的客户端上，它们读取本地数据；在已配对的
 客户端上，产物和画布提供者不返回结果，条目提供者改为按标题列出主机的文件库

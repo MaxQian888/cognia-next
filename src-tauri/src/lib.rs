@@ -981,6 +981,7 @@ pub fn run() {
             task_workspace::task_workspace_managed_delete,
             task_workspace::task_workspace_list_runs,
             task_workspace::task_workspace_list_resources,
+            task_workspace::task_workspace_list_resource_index,
             task_workspace::task_workspace_list_resource_events,
             task_workspace::task_workspace_get_resource_summary,
             task_workspace::task_workspace_export_resource_manifest,
@@ -1943,6 +1944,7 @@ mod tests {
             .expect("production lib.rs source");
         for command in [
             "task_workspace::task_workspace_list_resource_events,",
+            "task_workspace::task_workspace_list_resource_index,",
             "task_workspace::task_workspace_get_resource_summary,",
             "task_workspace::task_workspace_export_resource_manifest,",
             "task_workspace::task_workspace_record_tool_event,",

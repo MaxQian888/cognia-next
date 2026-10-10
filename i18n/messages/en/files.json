@@ -109,6 +109,14 @@
     "trash": {
       "description": "Items you move to the Trash stay here for 30 days, then go for good.",
       "title": "The Trash is empty"
+    },
+    "workspace": {
+      "description": "Files an agent creates, edits or renames in a conversation's workspace show up here. Files only reads them; they stay where the agent left them.",
+      "title": "No workspace files yet"
+    },
+    "workspaceHeldBack": {
+      "description": "Files agents write to disk live in a workspace this device cannot read. Open Files in the desktop app, or pair this device with it, to see them.",
+      "title": "Workspace files are on the desktop app"
     }
   },
   "errors": {
@@ -141,6 +149,9 @@
     "files_remote_zip_too_large": "“{name}” {more, plural, =0 {is} other {and # more are}} larger than 10 MB. Download {more, plural, =0 {it} other {them}} on the desktop.",
     "files_source_empty": "This item has no content to use.",
     "files_source_missing": "This item’s content is no longer stored on this device.",
+    "files_workspace_missing": "This file is no longer on disk.",
+    "files_workspace_too_large": "This file is too large to read here.",
+    "files_workspace_unavailable": "The workspace this file is in can't be reached right now.",
     "headless_host": "The paired host can’t manage its Files library. Open Files on the desktop app.",
     "library_folder_cycle": "A folder can’t be moved into itself.",
     "library_folder_name_required": "Enter a folder name.",
@@ -253,7 +264,8 @@
     "image": "Image",
     "session-upload": "File",
     "upload": "File",
-    "video": "Video"
+    "video": "Video",
+    "workspace-file": "Workspace file"
   },
   "lenses": {
     "ai": "AI-generated",
@@ -309,16 +321,20 @@
       "documents": "Documents",
       "images": "Images",
       "uploads": "Uploads",
-      "videos": "Videos"
+      "videos": "Videos",
+      "workspace": "Workspace files"
     },
     "recents": "Recents",
-    "trash": "Trash"
+    "trash": "Trash",
+    "workspaceHeldBack": "Desktop app",
+    "workspaceHeldBackHint": "Files agents write to disk are listed by the desktop app, which can read the workspace they are in."
   },
   "preview": {
     "close": "Close preview",
     "conversations": "Conversations",
     "details": {
       "added": "Added",
+      "change": "Change",
       "dimensions": "Dimensions",
       "dimensionsValue": "{width} × {height}",
       "duration": "Duration",
@@ -327,6 +343,7 @@
       "generatedWithValue": "{provider} · {model}",
       "language": "Language",
       "modified": "Modified",
+      "path": "Path",
       "prompt": "Prompt",
       "size": "Size",
       "type": "Type"
@@ -336,7 +353,12 @@
     "openConversation": "Open conversation",
     "sourceDeleted": "Its conversation was deleted. Files keeps it because it is a favorite or in a folder.",
     "trashedNotice": "Moved to the Trash on {date}. It will be deleted for good on {purge}.",
-    "unavailable": "The content is no longer stored on this device."
+    "unavailable": "The content is no longer stored on this device.",
+    "workspaceChange": {
+      "created": "Created by an agent",
+      "modified": "Edited by an agent",
+      "renamed": "Renamed by an agent"
+    }
   },
   "remote": {
     "createOnDesktopHint": "Canvas documents and templates are edited on the desktop app.",
@@ -433,7 +455,8 @@
     "canvas": "Untitled document",
     "image": "Untitled image",
     "session-upload": "Untitled file",
-    "upload": "Untitled file"
+    "upload": "Untitled file",
+    "workspace-file": "Untitled file"
   },
   "untitledDocument": "Untitled document",
   "view": {

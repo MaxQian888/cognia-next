@@ -18,6 +18,10 @@ jest.mock("./trash", () => ({
 }))
 jest.mock("./duplicate", () => ({ duplicateFilesEntry: jest.fn() }))
 jest.mock("./upload", () => ({ uploadFileToLibrary: jest.fn(async () => ({ key: "upload:x" })) }))
+jest.mock("./workspace-files-io", () => ({
+  ...jest.requireActual("./workspace-files-io"),
+  hasLocalWorkspaceFiles: jest.fn(() => false),
+}))
 jest.mock("./use-in-chat", () => ({
   attachEntryToSession: jest.fn(async () => "draft"),
   mentionCandidateFor: jest.fn((entry: { kind: string }) =>
@@ -31,10 +35,16 @@ import { restoreLibraryItems, trashLibraryItems } from "@/lib/db/files-library-i
 import { createLibraryFolder, deleteLibraryFolder } from "@/lib/db/files-library-folders"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { duplicateFilesEntry } from "./duplicate"
-import { createLocalFilesOps, LOCAL_FILES_CAPABILITIES } from "./ops"
+import {
+  createLocalFilesOps,
+  FILES_WORKSPACE_FILES_HELD_BACK,
+  LOCAL_FILES_CAPABILITIES,
+  localFilesCapabilities,
+} from "./ops"
 import { purgeTrashedItems } from "./trash"
 import type { FilesEntry } from "./types"
 import { attachEntryToSession, stageEntryMention } from "./use-in-chat"
+import { hasLocalWorkspaceFiles } from "./workspace-files-io"
 
 function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
   return {
@@ -62,12 +72,23 @@ const ops = createLocalFilesOps()
 describe("local Files ops", () => {
   it("can do everything here, and Open leaves Files", () => {
     expect(ops.mode).toBe("local")
-    expect(ops.capabilities).toBe(LOCAL_FILES_CAPABILITIES)
     expect(LOCAL_FILES_CAPABILITIES).toEqual({
       createDocuments: true,
       share: true,
       open: "navigate",
+      workspaceFiles: true,
     })
+  })
+
+  it("holds workspace files back off the desktop app, saying where they are (dormancy, rule 7)", () => {
+    // Not the desktop app: no ledger, no disk.
+    expect(ops.capabilities).toEqual({
+      ...LOCAL_FILES_CAPABILITIES,
+      workspaceFiles: { reason: "no-fs-backend", remedy: "desktop" },
+    })
+    expect(FILES_WORKSPACE_FILES_HELD_BACK.remedy).toBe("desktop")
+    ;(hasLocalWorkspaceFiles as jest.Mock).mockReturnValueOnce(true)
+    expect(localFilesCapabilities()).toBe(LOCAL_FILES_CAPABILITIES)
   })
 
   it("write through the library's own writers", async () => {

@@ -1,4 +1,4 @@
 {
   "title": "Files",
-  "pages": ["index", "data", "management", "templates", "sharing", "paired"]
+  "pages": ["index", "data", "management", "templates", "sharing", "paired", "workspace"]
 }

@@ -12,6 +12,7 @@ use cognia_task_workspace::{
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
     ConflictResolution, DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome,
     ReconcileOutcome, RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind,
+    ResourceIndexEntry,
     ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch, RunState,
     ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
@@ -774,6 +775,38 @@ pub fn task_workspace_list_resource_events(
     resource_events_page(&*service()?, &run_id, &page)
 }
 
+/// The files agents left in each conversation's workspace, newest change
+/// first (ADR-0223 §8). The Files page lists them as workspace files.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_list_resource_index(
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<cognia_problem::paging::Page<ResourceIndexEntry>, String> {
+    let page = cognia_problem::paging::PageRequest::from_parts(page_size, page_token.as_deref())
+        .map_err(|error| error.to_string())?;
+    resource_index_page(&*service()?, &page)
+}
+
+/// One page of the resource index. The index is folded afresh on every page,
+/// so the token is an offset into its newest-first order: a change between
+/// two pages can repeat or skip an entry, which a reader folds by key.
+pub fn resource_index_page(
+    service: &TaskWorkspaceService,
+    page: &cognia_problem::paging::PageRequest,
+) -> Result<cognia_problem::paging::Page<ResourceIndexEntry>, String> {
+    let offset = page.offset().map_err(|error| error.to_string())?;
+    let page_size = page.page_size_or(500) as usize;
+    let entries = service.list_resource_index()?;
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(entries.len());
+    let end = start.saturating_add(page_size).min(entries.len());
+    let more = end < entries.len();
+    Ok(cognia_problem::paging::Page::from_offset(
+        entries[start..end].to_vec(),
+        offset,
+        more,
+    ))
+}
+
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn task_workspace_get_resource_summary(run_id: String) -> Result<TaskResourceSummary, String> {
     service()?.get_resource_summary(&run_id)
@@ -1464,6 +1497,45 @@ mod tests {
                 .state,
             cognia_task_workspace::WorkspaceState::Active
         );
+    }
+
+    #[test]
+    fn the_resource_index_lists_settled_agent_files_a_page_at_a_time() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = install(data.path().to_path_buf()).unwrap();
+        let run = service.begin_run(begin_input(&workspace, "run-index")).unwrap();
+        let root = std::path::Path::new(&run.execution_root);
+        for name in ["a.md", "b.md", "c.md"] {
+            std::fs::write(root.join(name), name).unwrap();
+        }
+        service.settle_run("run-index").unwrap();
+
+        let first = task_workspace_list_resource_index(Some(2), None).unwrap();
+        assert_eq!(first.items.len(), 2);
+        let token = first.next_page_token.clone().expect("a second page");
+        let second = task_workspace_list_resource_index(Some(2), Some(token)).unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert_eq!(second.next_page_token, None);
+
+        let mut paths: Vec<_> = first
+            .items
+            .iter()
+            .chain(&second.items)
+            .map(|entry| entry.path.clone())
+            .collect();
+        paths.sort();
+        assert_eq!(paths, ["a.md", "b.md", "c.md"]);
+        let entry = &second.items[0];
+        assert_eq!(entry.session_id, "session-test");
+        assert_eq!(entry.execution_root, run.execution_root);
+        assert_eq!(
+            std::path::Path::new(&entry.workspace_root),
+            workspace.path().canonicalize().unwrap()
+        );
+        assert_eq!(entry.kind, cognia_task_workspace::ChangeKind::Created);
+        assert!(task_workspace_list_resource_index(Some(2), Some("nonsense".into())).is_err());
     }
 
     #[test]

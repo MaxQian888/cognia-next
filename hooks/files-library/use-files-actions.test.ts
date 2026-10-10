@@ -129,6 +129,7 @@ import { FilesRenameError, renameFilesEntry } from "@/lib/files-library/rename"
 import { purgeTrashedItems } from "@/lib/files-library/trash"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { uploadFileToLibrary } from "@/lib/files-library/upload"
+import { FilesWorkspaceFileError } from "@/lib/files-library/workspace-files-io"
 import {
   attachEntryToSession,
   FilesUseInChatError,
@@ -217,6 +218,15 @@ describe("open / preview", () => {
     const h = hook()
     await act(() => h.open(entry()))
     expect(error).toHaveBeenCalledWith("Something went wrong. Try again.")
+  })
+
+  it("names a workspace file that left the disk", async () => {
+    ;(openFilesEntry as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_missing")
+    )
+    const h = hook()
+    await act(() => h.open(entry({ kind: "workspace-file", key: "workspace-file:w" })))
+    expect(error).toHaveBeenCalledWith("This file is no longer on disk.")
   })
 })
 

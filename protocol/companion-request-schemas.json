@@ -6431,6 +6431,41 @@
       },
       "additionalProperties": false
     },
+    "files_library_read_chunk": {
+      "type": "object",
+      "description": "One slice of a workspace file's bytes, read off the host's disk where the file is now (ADR-0223 §8). Only for a workspace file the host lists, and only under the paired ceiling (10 MiB).",
+      "required": [
+        "key",
+        "offset"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "A Files item key (`<kind>:<sourceId>`) from `files_library_list`."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10485760,
+          "description": "Where the slice starts."
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 524288,
+          "description": "Bytes to read; absent means the most one slice holds (512 KiB)."
+        },
+        "imageLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Images the device has loaded. The host resolves its entries over the same window, so a key the device holds is a key the host can find."
+        }
+      },
+      "additionalProperties": false
+    },
     "files_library_rename": {
       "type": "object",
       "required": [
@@ -14722,6 +14757,23 @@
           "type": "string",
           "example": ""
         },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_list_resource_index": {
+      "type": "object",
+      "properties": {
         "pageSize": {
           "type": "integer",
           "minimum": 1,

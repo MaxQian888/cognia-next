@@ -59,6 +59,7 @@ import {
   getBundleHandoffUndoOutcome,
   getTaskResourceSummary,
   listTaskResourceEvents,
+  listTaskResourceIndex,
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
   reconcileManagedWorkspaces,
@@ -1180,6 +1181,39 @@ describe("task workspace client", () => {
     expect(call.mock.calls).toEqual([
       ["task_workspace_bundle_handoff_undo", { bundleId: "bundle-1", bundleTurnId: "turn-1" }],
       ["task_workspace_bundle_handoff_undo_get", { bundleTurnId: "turn-1" }],
+    ])
+  })
+
+  it("walks the resource index to its end and folds repeats onto the newest", async () => {
+    const entry = (sessionId: string, path: string, changedAt: number) => ({
+      sessionId,
+      taskId: "task",
+      runId: "run",
+      workspaceRoot: "/repo",
+      executionRoot: "/exec",
+      path,
+      kind: "created",
+      oldPath: null,
+      mediaType: "text/markdown",
+      size: 1,
+      hash: null,
+      binary: false,
+      firstChangedAt: changedAt,
+      changedAt,
+    })
+    call
+      .mockResolvedValueOnce({ items: [entry("s1", "a.md", 3)], nextPageToken: "o1" })
+      .mockResolvedValueOnce({ items: [entry("s1", "a.md", 2), entry("s2", "a.md", 1)] })
+
+    const entries = await listTaskResourceIndex()
+
+    expect(entries.map((e) => [e.sessionId, e.path, e.changedAt])).toEqual([
+      ["s1", "a.md", 3],
+      ["s2", "a.md", 1],
+    ])
+    expect(call.mock.calls).toEqual([
+      ["task_workspace_list_resource_index", { pageSize: 500 }],
+      ["task_workspace_list_resource_index", { pageSize: 500, pageToken: "o1" }],
     ])
   })
 

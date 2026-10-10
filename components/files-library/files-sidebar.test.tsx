@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider } from "@/hooks/files-library/files-backend"
+import { createLocalFilesOps, LOCAL_FILES_CAPABILITIES } from "@/lib/files-library/ops"
 import { FilesSidebar } from "./files-sidebar"
 
 function entry(key: string, title: string): FilesEntry {
@@ -124,4 +126,41 @@ it("grows every row and control to a touch target in the phone's place sheet", (
   )
   expect(screen.getByTestId("files-place-all")).toHaveClass("h-8")
   expect(screen.getByTestId("files-tree-folder-lbf_a")).toHaveClass("h-8")
+})
+
+describe("the Workspace files group (ADR-0223 §8)", () => {
+  it("is shown inert where this device lists none, saying where they are (dormancy, rule 7)", async () => {
+    renderSidebar()
+    const group = screen.getByTestId("files-place-group-workspace")
+    expect(group).toHaveAttribute("aria-disabled", "true")
+    expect(group).toHaveAttribute("data-held-back", "no-fs-backend")
+    expect(group).toHaveTextContent("Workspace files")
+    expect(group).toHaveTextContent("Desktop app")
+    expect(group.getAttribute("title")).toMatch(/desktop app/i)
+    await userEvent.setup().click(group)
+    expect(useFilesLibraryStore.getState().section).toEqual({ kind: "all" })
+  })
+
+  it("is a place like the others where the library lists them", async () => {
+    const ops = { ...createLocalFilesOps(), capabilities: LOCAL_FILES_CAPABILITIES }
+    render(
+      <FilesBackendProvider
+        backend={{
+          source: { entries: [], imagesTruncated: false, loadMoreImages: jest.fn(), folders: [] },
+          ops,
+        }}
+      >
+        <FilesSidebar
+          folders={folders}
+          recents={[]}
+          trashCount={0}
+          actions={{ preview: jest.fn(), setFolderStyle: jest.fn() }}
+        />
+      </FilesBackendProvider>
+    )
+    const group = screen.getByTestId("files-place-group-workspace")
+    expect(group).not.toHaveAttribute("data-held-back")
+    await userEvent.setup().click(group)
+    expect(useFilesLibraryStore.getState().section).toEqual({ kind: "group", group: "workspace" })
+  })
 })

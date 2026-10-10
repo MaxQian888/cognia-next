@@ -44,3 +44,22 @@ it("says how to fill an empty folder by tap on the phone, and by drag elsewhere"
   rerender(<FilesEmpty {...props} />)
   expect(screen.getByTestId("files-empty-folder")).toHaveTextContent("Drag items here")
 })
+
+describe("the Workspace files group (ADR-0223 §8)", () => {
+  const workspace = { kind: "group", group: "workspace" } as const
+
+  it("says what lands there, or that the desktop app lists them", () => {
+    expect(filesEmptyCopy(workspace, "suggested", false)).toBe("workspace")
+    expect(filesEmptyCopy(workspace, "favorites", false)).toBe("favorites")
+    expect(filesEmptyCopy(workspace, "favorites", false, true)).toBe("workspaceHeldBack")
+    expect(filesEmptyCopy(workspace, "suggested", true, true)).toBe("search")
+    expect(filesEmptyCopy({ kind: "all" }, "suggested", false, true)).toBe("all")
+  })
+
+  it("is held back off the desktop app, and says so (dormancy, rule 7)", () => {
+    render(<FilesEmpty section={workspace} lens="suggested" filtered={false} onClear={jest.fn()} />)
+    expect(screen.getByTestId("files-empty-workspaceHeldBack")).toHaveTextContent(
+      "Workspace files are on the desktop app"
+    )
+  })
+})

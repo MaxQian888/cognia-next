@@ -213,6 +213,15 @@ describe("loadRemoteFileSearchRows", () => {
           hidden: true,
         },
         { key: "image:x", kind: "image", title: "", projectIds: [], updatedAt: 1, hidden: false },
+        // The palette never lists an agent's workspace files (ADR-0223 §8).
+        {
+          key: "workspace-file:w",
+          kind: "workspace-file",
+          title: "index.ts",
+          projectIds: [],
+          updatedAt: 5,
+          hidden: false,
+        },
       ],
     }))
     const rows = await loadRemoteFileSearchRows({ list } as never)

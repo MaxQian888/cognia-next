@@ -27,7 +27,7 @@ import type { LibraryFolder } from "@/lib/db/files-library-types"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { DEFAULT_FILES_VIEW_FILTERS, useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
-import { LOCAL_FILES_CAPABILITIES, type FilesOps } from "@/lib/files-library/ops"
+import { localFilesCapabilities, type FilesOps } from "@/lib/files-library/ops"
 import { PAIRED_FILES_CAPABILITIES } from "@/lib/files-library/remote/remote-ops"
 import { FilesBackendProvider, type FilesBackend } from "./files-backend"
 import { FILES_PAGE_SIZE, useFilesPage } from "./use-files-page"
@@ -230,7 +230,7 @@ describe("over a mounted backend (ADR-0223 §9)", () => {
   it("is this device's own library without a provider, with no refresh to offer", () => {
     entriesState.entries = [entry("artifact:local")]
     const { result } = renderHook(() => useFilesPage())
-    expect(result.current.ops.capabilities).toBe(LOCAL_FILES_CAPABILITIES)
+    expect(result.current.ops.capabilities).toEqual(localFilesCapabilities())
     expect(result.current.refresh).toBeUndefined()
     expect(result.current.error).toBeUndefined()
   })

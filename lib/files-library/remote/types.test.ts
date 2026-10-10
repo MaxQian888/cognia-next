@@ -1,5 +1,7 @@
 import type { FilesEntry } from "../types"
 import {
+  base64ToBytes,
+  bytesToBase64,
   decodePageToken,
   encodePageToken,
   entryFromRemote,
@@ -7,6 +9,7 @@ import {
   FILES_REMOTE_KEYS_MAX,
   FILES_REMOTE_MAX_BYTES,
   FILES_REMOTE_PAGE_SIZE_DEFAULT,
+  FILES_REMOTE_READ_CHUNK_MAX,
   FilesRemoteRequestError,
   isFilesRemoteListPage,
   isRefused,
@@ -20,6 +23,7 @@ import {
   parseListRequest,
   parseMoveRequest,
   parsePageRequest,
+  parseReadChunkRequest,
   parseRenameRequest,
   parseSearchRequest,
   parseUploadChunkRequest,
@@ -74,6 +78,23 @@ describe("entries on the wire", () => {
     const back = entryFromRemote(entryToRemote(entry({ mediaType: "text/markdown" })))
     expect(back.searchText).toBe("plan\nplan v1\ntext/markdown")
     expect(back.searchText).not.toContain("secret")
+    // A workspace file is found by its path as well.
+    const file = entryFromRemote(
+      entryToRemote(
+        entry({
+          kind: "workspace-file",
+          title: "plan.md",
+          sourceTitle: "plan.md",
+          workspace: {
+            sessionId: "s1",
+            workspaceRoot: "/repo",
+            executionRoot: "/repo",
+            relPath: "docs/plan.md",
+          },
+        })
+      )
+    )
+    expect(file.searchText).toBe("plan.md\nplan.md\ndocs/plan.md")
   })
 
   it("are checked as a list page before use", () => {
@@ -90,6 +111,14 @@ describe("entries on the wire", () => {
     ).toBe(false)
     expect(isFilesRemoteListPage({ ok: true, items: [], imagesTruncated: false })).toBe(false)
     expect(isFilesRemoteListPage({ ok: false, code: "x" })).toBe(false)
+  })
+})
+
+describe("chunk bytes", () => {
+  it("go to base64 and back, and refuse what is not base64", () => {
+    const bytes = new Uint8Array([0, 1, 254, 255])
+    expect(base64ToBytes(bytesToBase64(bytes))).toEqual(bytes)
+    expect(base64ToBytes("@@")).toBeNull()
   })
 })
 
@@ -188,6 +217,20 @@ describe("request parsing", () => {
     expect(parseFolderDeleteRequest({ folderId: "f", cascade: true }).mode).toBe("cascade")
     expect(parseFolderDeleteRequest({ folderId: "f", cascade: false }).mode).toBe("reparent")
     invalid(() => parseFolderDeleteRequest({ folderId: "f" }))
+  })
+
+  it("bounds a workspace file's read slice", () => {
+    expect(parseReadChunkRequest({ key: "workspace-file:w", offset: 0 })).toEqual({
+      key: "workspace-file:w",
+      offset: 0,
+      length: FILES_REMOTE_READ_CHUNK_MAX,
+    })
+    expect(parseReadChunkRequest({ key: "k", offset: 8, length: 4 }).length).toBe(4)
+    invalid(() => parseReadChunkRequest({ key: "k" }))
+    invalid(() => parseReadChunkRequest({ key: "k", offset: -1 }))
+    invalid(() =>
+      parseReadChunkRequest({ key: "k", offset: 0, length: FILES_REMOTE_READ_CHUNK_MAX + 1 })
+    )
   })
 
   it("bounds an upload at the paired ceiling and checks its hash", () => {

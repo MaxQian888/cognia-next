@@ -110,6 +110,9 @@ describe("resolveTrashPurgeTargets", () => {
       { kind: "artifact", sourceId: "a-dead", originSessionId: "gone" },
       { kind: "canvas", sourceId: "c-standalone" },
       { kind: "session-upload", sourceId: "sha-gone" },
+      // A workspace file follows its conversation; its disk is never touched.
+      { kind: "workspace-file", sourceId: "w-live", originSessionId: "s1" },
+      { kind: "workspace-file", sourceId: "w-dead", originSessionId: "gone" },
     ])
     const rows = (await db.libraryItems.toArray()) as LibraryItemRow[]
     const byKey = new Map(
@@ -122,6 +125,8 @@ describe("resolveTrashPurgeTargets", () => {
       "artifact:a-dead": false,
       "canvas:c-standalone": true,
       "session-upload:sha-gone": false,
+      "workspace-file:w-live": true,
+      "workspace-file:w-dead": false,
     })
   })
 })

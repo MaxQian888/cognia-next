@@ -11,6 +11,14 @@ jest.mock("@/lib/files-library/sources", () => ({
   FILES_IMAGE_PAGE_SIZE: 500,
   loadFilesSources: jest.fn(async () => ({ input: {}, imagesTruncated: false })),
 }))
+const workspaceIndex = jest.fn()
+jest.mock("./use-workspace-file-index", () => ({
+  useWorkspaceFileIndex: (enabled: boolean) => workspaceIndex(enabled),
+}))
+const localWorkspace = jest.fn(() => false)
+jest.mock("@/lib/files-library/workspace-files-io", () => ({
+  hasLocalWorkspaceFiles: () => localWorkspace(),
+}))
 jest.mock("@/lib/files-library/aggregate", () => ({
   aggregateFilesEntries: jest.fn(() => [{ key: "artifact:a" }]),
 }))
@@ -51,4 +59,32 @@ it("reads nothing while disabled, for a page drawing another device's library", 
   expect(await liveQuery.mock.calls.at(-1)![0]()).toBeUndefined()
   expect(loadFilesSources).not.toHaveBeenCalled()
   expect(result.current.entries).toBeUndefined()
+})
+
+describe("workspace files (ADR-0223 §8)", () => {
+  beforeEach(() => {
+    liveQuery.mockReturnValue(undefined)
+    ;(loadFilesSources as jest.Mock).mockClear()
+    workspaceIndex.mockReset()
+  })
+
+  it("asks for the ledger's index only on the desktop app, and passes it on", async () => {
+    localWorkspace.mockReturnValue(true)
+    workspaceIndex.mockReturnValue({ index: [] })
+    renderHook(() => useFilesEntries())
+    expect(workspaceIndex).toHaveBeenLastCalledWith(true)
+    await liveQuery.mock.calls.at(-1)![0]()
+    expect(loadFilesSources).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: { index: [] } })
+    )
+  })
+
+  it("lists none elsewhere, or while the index is still loading", async () => {
+    localWorkspace.mockReturnValue(false)
+    workspaceIndex.mockReturnValue(undefined)
+    renderHook(() => useFilesEntries())
+    expect(workspaceIndex).toHaveBeenLastCalledWith(false)
+    await liveQuery.mock.calls.at(-1)![0]()
+    expect((loadFilesSources as jest.Mock).mock.calls.at(-1)![0]).not.toHaveProperty("workspace")
+  })
 })

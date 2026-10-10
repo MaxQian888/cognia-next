@@ -1,0 +1,172 @@
+---
+title: Workspace files
+description: "Files an agent created, modified or renamed on disk, listed in Files from the task-workspace ledger with code-adoption turns as the fallback: the index fold, where they show, how they are read and opened, the paired-device read, and their dormancy on plain web. ADR-0223 §8."
+---
+
+# Workspace files
+
+<Status variant="beta">Desktop and paired devices shipped · dormant on plain web (ADR-0223 §8)</Status>
+
+<TLDR>
+  A file an agent wrote into a conversation's workspace is a `workspace-file` item, one per
+  conversation, workspace root and path. The list comes from the task-workspace ledger's resource
+  index, with code-adoption turns filling in conversations the ledger never saw. Files reads the
+  bytes where they are now and never writes to or deletes them on disk. Without a filesystem backend
+  the kind is dormant and says so.
+</TLDR>
+
+## The whole path
+
+```mermaid
+flowchart LR
+  subgraph Host["Desktop host (Rust)"]
+    R["task_resources ⋈ task_runs ⋈ task_workspaces"] --> F["fold_resource_index"]
+    F --> C["task_workspace_list_resource_index<br/>(pages of 500)"]
+  end
+  subgraph Renderer["Desktop renderer"]
+    C --> H["useWorkspaceFileIndex"]
+    T["codeAdoptionTurns (Dexie)"] --> M["mergeWorkspaceFiles"]
+    H --> M
+    M --> A["aggregateFilesEntries<br/>kind workspace-file"]
+    A --> P["/files: Workspace files group"]
+    P -- "Open" --> O["openWorkspaceFileInConversation<br/>(ADR-0222 Files panel)"]
+    P -- "Download, duplicate,<br/>Use in chat" --> B["readWorkspaceFileBytes<br/>(execution root, then workspace root)"]
+  end
+  Phone["Paired device"] -- "files_library_read_chunk<br/>(512 KiB, 10 MiB cap)" --> Renderer
+```
+
+## The resource index
+
+The ledger stores one row per task, run and path in `task_resources`, each with its `ResourceChange`.
+`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:587`) joins
+those rows to their run and to the `task_workspaces` row that names the owning conversation
+(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:88`) replays
+them in the order they settled (the run's `settled_at`, else its `created_at`), keyed by conversation,
+workspace root and path:
+
+- only a change whose origin is the **agent** adds a path;
+- a **delete** by anyone removes it, and a **rename** by anyone moves it to the new path (keeping
+  `oldPath`);
+- a change classified **sensitive**, **generated** (build output) or a **symlink** removes it;
+- a path first **created** stays `created` through later edits; `firstChangedAt` is when it entered
+  the index, `changedAt` its last change.
+
+The result is sorted newest first. `task_workspace_list_resource_index`
+(`crates/cognia-task-workspace-host/src/host_surface.rs:781`) serves it in offset pages of 500
+(`resource_index_page`), as a read-only `host.observe` command. `listTaskResourceIndex`
+(`lib/task-workspace/client.ts:717`) collects the pages, at most 20 000 entries, and drops duplicates.
+
+## Merging with code-adoption turns
+
+`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:131`) takes the index as it stands, then
+adds files from `codeAdoptionTurns` **only for conversations the index holds nothing for** — an
+external agent that edited files without running through the ledger. A conversation the ledger does
+hold is never patched from turn rows: what the ledger dropped stays dropped. Turn rows fold oldest
+first, skip rejected or reverted turns and files, and leave out the paths `isSensitiveResourcePath`
+matches (`.env`, private keys and the like). Their execution root is the workspace root.
+
+Where there is no ledger to ask (the index read failed), `index` is `null` and the turn rows are all
+there is.
+
+## The item
+
+`aggregateFilesEntries` makes one card per file (`lib/files-library/aggregate.ts:470`):
+
+| Field | Value |
+| --- | --- |
+| `key` | `workspace-file:<sourceId>` |
+| `sourceId` | 16 hex digits: a 64-bit FNV-1a digest of conversation, workspace root and path (`workspaceFileSourceId`), because item keys are capped at 300 characters |
+| `title` | the path's last segment, unless renamed in Files |
+| `creator` | `ai` |
+| `originAlive` | the conversation still exists |
+| `workspace` | `{ sessionId, workspaceRoot, executionRoot, relPath, change, oldPath }` |
+| `searchText` | name, relative path and media type |
+
+A kept workspace file (favorited, filed or trashed) stores its location in `snapshot.workspace`, so the
+card is rebuilt from the snapshot after the ledger prunes the run.
+
+## Where it shows
+
+`matchesSection` (`lib/files-library/filter.ts:178`) keeps an agent's busy run from burying what the
+person made:
+
+| Place | Shows a workspace file |
+| --- | --- |
+| Workspace files group | always |
+| A folder | once filed there |
+| All | only under the Favorites lens, once favorited |
+| Recents | once opened, favorited or filed |
+| Trash | once trashed |
+
+⌘K does not list them.
+
+## Reading the bytes
+
+A path is relative to the run's execution root. An isolated run (a shadow copy or a git worktree) can
+lose its root once its changes are applied back, so `locateWorkspaceFile`
+(`lib/files-library/workspace-files-io.ts:93`) tries the execution root, then the workspace root,
+skipping a root the host refuses and ignoring directories. A file in neither is gone:
+`FilesWorkspaceFileError("files_workspace_missing")`, "This file is no longer on disk." Existence is
+checked when the file is used, not when it is listed.
+
+`readWorkspaceFileBytes` reads in chunks through `lib/files/workspace-fs.ts`, up to 256 MiB
+(`FILES_WORKSPACE_READ_MAX_BYTES`), and refuses a file over the caller's ceiling before reading it, or
+one that grows past it (`files_workspace_too_large`). Download, duplicate (into a Files-owned upload)
+and Use in chat (capped at the draft attachment quota) all read this way.
+
+## Opening
+
+`openFilesEntry` routes a workspace file whose conversation is alive to
+`openWorkspaceFileInConversation` (`lib/files-library/workspace-files-io.ts:199`):
+
+1. locate the file, or report it missing;
+2. load the conversation's FileSpace (`lib/filespace/load.ts`) and map the file's absolute path into
+   it;
+3. if the FileSpace is deleted or does not contain the path, answer `outside`: Files previews the
+   file in place, read-only, without leaving the page;
+4. otherwise go to the conversation and open the path in its Files panel through ADR-0222's opener.
+   `not-found` becomes `files_workspace_missing`; no backend or offline becomes
+   `files_workspace_unavailable`.
+
+A workspace file whose conversation is gone opens in the preview pane, which shows its path and
+whether it was created, modified or renamed.
+
+## Files never touches the disk copy
+
+Rename stores a display name. Trash is Files' own state. Duplicate copies the bytes into a Files-owned
+upload. A purge forgets the item: with its conversation alive the item is hidden; with it gone the
+row is dropped. Nothing writes to, moves or deletes the file on disk.
+
+## On a paired device
+
+The host lists its own workspace files in the library the device reads
+(`lib/files-library/remote/host-dispatch.ts`). Their bytes are not session media, so the device reads
+them with `files_library_read_chunk` (`client.read`, byte-range):
+
+- the request names the **item key**, an offset and at most 512 KiB (`FILES_REMOTE_READ_CHUNK_MAX`);
+  the host resolves the key in its own aggregate, so the device never names a path and the host reads
+  only a file it lists itself;
+- a key that is not a workspace file is an invalid request; a file over 10 MiB is
+  `files_remote_too_large`, and past it the preview says to use the desktop;
+- `FilesRemoteClient.readWorkspaceFile` (`lib/files-library/remote/client.ts:388`) loops the slices,
+  restarts once if the size changes mid-read, then gives up with `files_remote_busy`.
+
+## Dormancy
+
+Plain web has no ledger and no disk to read. The capability `workspaceFiles` in
+`lib/files-library/ops.ts` is `true` on the desktop and on a paired device, and
+`FILES_WORKSPACE_FILES_HELD_BACK` (`{ reason: "no-fs-backend", remedy: "desktop" }`) elsewhere
+(`hasLocalWorkspaceFiles` is `isTauri()`). With it held back:
+
+- the type is documented as dormant on `FilesCapabilities.workspaceFiles`;
+- the sidebar keeps the Workspace files group, disabled (`aria-disabled`, `data-held-back`), with a
+  hint to use the desktop, and its empty state says the same;
+- nothing reads the ledger or the turn table for workspace files;
+- `ops.test.ts`, `files-sidebar.test.tsx` and `files-empty.test.tsx` pin it.
+
+## Refresh
+
+`useWorkspaceFileIndex` (`hooks/files-library/use-workspace-file-index.ts:34`) reads the index on
+mount, when the window regains focus or the page becomes visible, and whenever the code-adoption turn
+table's revision (count and newest timestamp) moves, which a settled turn does. A read that loses the
+race to a newer one is dropped.

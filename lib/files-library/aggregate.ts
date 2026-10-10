@@ -16,6 +16,11 @@
  *     deleted as that upload. Once the job row is gone (it goes with its
  *     conversation), the record comes from the copy on the item's snapshot.
  *
+ * Workspace files (ADR-0223 §8): one card per conversation, root and path an
+ * agent left on disk (`workspace-files.ts`). A kept one whose record has gone
+ * from the ledger and the turn rows is rebuilt from its item's snapshot,
+ * which carries where it lives; whether it is still there is checked on open.
+ *
  * Files metadata folded onto every card (ADR-0223):
  *   - A trashed item (`trashedAt`) is never "hidden" and never revives; only
  *     the Trash section shows it.
@@ -31,6 +36,7 @@ import {
   type LibraryItemRow,
 } from "@/lib/db/files-library-types"
 import type { FilesCreator, FilesEntry, FilesGeneratedVideo } from "./types"
+import { workspaceFileName, workspaceFileSourceId, type RawWorkspaceFile } from "./workspace-files"
 
 /** Characters of body text kept for search and for a kept item's snapshot. */
 export const FILES_BODY_EXCERPT_CHARS = 20_000
@@ -103,6 +109,8 @@ export interface FilesAggregateInput {
   sessionUploads: RawUpload[]
   libraryUploads: RawUpload[]
   generatedVideos: RawGeneratedVideo[]
+  /** Files agents left on disk; absent where there is no workspace to list. */
+  workspaceFiles?: RawWorkspaceFile[]
   items: LibraryItemRow[]
   /** Live conversations referenced by any source. */
   sessions: ReadonlyMap<string, FilesSessionInfo>
@@ -451,6 +459,79 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
             newest.extractedText
           ),
           creator: generated ? "ai" : "user",
+        },
+        item,
+        input
+      )
+    )
+  }
+
+  const listedWorkspaceFiles = new Set<string>()
+  for (const file of input.workspaceFiles ?? []) {
+    const sourceId = workspaceFileSourceId(file.sessionId, file.workspaceRoot, file.relPath)
+    if (listedWorkspaceFiles.has(sourceId)) continue
+    listedWorkspaceFiles.add(sourceId)
+    const name = workspaceFileName(file.relPath)
+    const alive = input.sessions.has(file.sessionId)
+    entries.push(
+      withItem(
+        {
+          key: libraryItemKey("workspace-file", sourceId),
+          kind: "workspace-file",
+          sourceId,
+          title: name,
+          ...(file.mediaType ? { mediaType: file.mediaType } : {}),
+          ...(file.byteSize !== undefined ? { byteSize: file.byteSize } : {}),
+          projectIds: unique([projectOf(file.sessionId)]),
+          sessionIds: alive ? [file.sessionId] : [],
+          originSessionId: file.sessionId,
+          originAlive: alive,
+          createdAt: file.createdAt,
+          updatedAt: file.updatedAt,
+          creator: "ai",
+          workspace: {
+            sessionId: file.sessionId,
+            workspaceRoot: file.workspaceRoot,
+            executionRoot: file.executionRoot,
+            relPath: file.relPath,
+            change: file.change,
+            ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+          },
+          searchText: haystack(name, file.relPath, file.mediaType),
+        },
+        itemFor("workspace-file", sourceId),
+        input
+      )
+    )
+  }
+
+  // Kept workspace files the ledger and the turn rows no longer list. Only
+  // where workspace files are listed at all: elsewhere there is no disk to
+  // find them on, and the kind is held back.
+  for (const item of input.workspaceFiles ? input.items : []) {
+    if (item.kind !== "workspace-file" || listedWorkspaceFiles.has(item.sourceId)) continue
+    const location = item.snapshot?.workspace
+    if (!isLibraryItemKept(item) || !location) continue
+    const name = item.snapshot?.title || workspaceFileName(location.relPath)
+    const alive = input.sessions.has(location.sessionId)
+    entries.push(
+      withItem(
+        {
+          key: item.key,
+          kind: "workspace-file",
+          sourceId: item.sourceId,
+          title: name,
+          ...(item.snapshot?.mediaType ? { mediaType: item.snapshot.mediaType } : {}),
+          ...(item.snapshot?.byteSize !== undefined ? { byteSize: item.snapshot.byteSize } : {}),
+          projectIds: [],
+          sessionIds: alive ? [location.sessionId] : [],
+          originSessionId: location.sessionId,
+          originAlive: alive,
+          createdAt: item.createdAt,
+          updatedAt: item.keptAt ?? item.createdAt,
+          creator: "ai",
+          workspace: { ...location },
+          searchText: haystack(name, location.relPath, item.snapshot?.mediaType),
         },
         item,
         input

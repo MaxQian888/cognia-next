@@ -23,6 +23,10 @@ jest.mock("../upload", () => ({
   uploadFileToLibrary: jest.fn(async () => ({ key: "upload:new" })),
 }))
 jest.mock("../use-in-chat", () => ({ bindEntryToSession: jest.fn(async () => undefined) }))
+jest.mock("../workspace-files-io", () => ({
+  ...jest.requireActual("../workspace-files-io"),
+  readWorkspaceFileSlice: jest.fn(),
+}))
 jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(async () => ({ id: "s-new" })),
   getSession: jest.fn(async () => undefined),
@@ -48,6 +52,7 @@ import { duplicateFilesEntry } from "../duplicate"
 import type { FilesEntry } from "../types"
 import { uploadFileToLibrary } from "../upload"
 import { bindEntryToSession } from "../use-in-chat"
+import { FilesWorkspaceFileError, readWorkspaceFileSlice } from "../workspace-files-io"
 import { dispatchFilesHostCommand, type FilesHostDispatchDeps } from "./host-dispatch"
 import { createFilesIdempotencyLedger } from "./idempotency"
 import { FILES_REMOTE_TEXT_MAX, type FilesRemoteListPage } from "./types"
@@ -215,6 +220,58 @@ describe("reads", () => {
     // Other cases' folders may share the table; these three come back in order.
     expect(ids.filter((id) => created.includes(id))).toEqual([...created].sort())
     expect(second.nextPageToken).toBeUndefined()
+  })
+})
+
+describe("a workspace file's bytes (ADR-0223 §8)", () => {
+  const workspace = {
+    sessionId: "s1",
+    workspaceRoot: "/repo",
+    executionRoot: "/exec",
+    relPath: "notes.md",
+  }
+
+  beforeEach(() => {
+    library = [entry("workspace-file:w1", { workspace }), entry("upload:u1")]
+  })
+
+  it("answers a slice of a file the host lists, read where it is now", async () => {
+    ;(readWorkspaceFileSlice as jest.Mock).mockResolvedValueOnce({
+      bytes: new Uint8Array([104, 105]),
+      size: 2,
+      eof: true,
+    })
+    await expect(
+      call("files_library_read_chunk", { key: "workspace-file:w1", offset: 0, length: 4 })
+    ).resolves.toEqual({ ok: true, dataBase64: "aGk=", size: 2, eof: true })
+    expect(readWorkspaceFileSlice).toHaveBeenCalledWith(workspace, 0, 4)
+  })
+
+  it("never reads a path the device names, nor another kind's bytes", async () => {
+    await expect(
+      call("files_library_read_chunk", { key: "workspace-file:forged", offset: 0 })
+    ).resolves.toEqual({ ok: false, code: "files_remote_not_found" })
+    await expect(
+      call("files_library_read_chunk", { key: "upload:u1", offset: 0 })
+    ).resolves.toEqual({ ok: false, code: "files_remote_invalid_request" })
+    expect(readWorkspaceFileSlice).not.toHaveBeenCalled()
+  })
+
+  it("refuses a file over the paired ceiling, and says when it is gone", async () => {
+    ;(readWorkspaceFileSlice as jest.Mock).mockResolvedValueOnce({
+      bytes: new Uint8Array(1),
+      size: 10 * 1024 * 1024 + 1,
+      eof: false,
+    })
+    await expect(
+      call("files_library_read_chunk", { key: "workspace-file:w1", offset: 0 })
+    ).resolves.toEqual({ ok: false, code: "files_remote_too_large" })
+    ;(readWorkspaceFileSlice as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_missing")
+    )
+    await expect(
+      call("files_library_read_chunk", { key: "workspace-file:w1", offset: 0 })
+    ).resolves.toEqual({ ok: false, code: "files_workspace_missing" })
   })
 })
 

@@ -211,6 +211,20 @@ it("lists the newest few live items as recents", () => {
   ])
 })
 
+it("keeps a workspace file out of the recents until it is kept or opened (ADR-0223 §8)", () => {
+  const entries = [
+    entry("workspace-file:loose", { kind: "workspace-file", updatedAt: NOW }),
+    entry("workspace-file:opened", {
+      kind: "workspace-file",
+      updatedAt: NOW - DAY,
+      lastAccessedAt: NOW - 1,
+    }),
+    entry("artifact:a", { updatedAt: NOW - 2 * DAY }),
+  ]
+  const { result } = view(entries)
+  expect(keys(result.current.recents)).toEqual(["workspace-file:opened", "artifact:a"])
+})
+
 it("breaks recency ties by key", () => {
   const entries = [entry("artifact:z"), entry("artifact:m"), entry("artifact:a")]
   const { result } = view(entries)

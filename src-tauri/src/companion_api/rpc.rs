@@ -572,6 +572,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "files_library_folder_list",
     "files_library_search",
     "files_library_get",
+    "files_library_read_chunk",
     "files_library_favorite",
     "files_library_move",
     "files_library_trash",
@@ -861,6 +862,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_workspace_list_runs",
     "task_workspace_list_resources",
     "task_workspace_list_resource_events",
+    "task_workspace_list_resource_index",
     "task_workspace_get_resource_summary",
     "task_workspace_export_resource_manifest",
     "task_workspace_record_tool_event",
@@ -1268,12 +1270,13 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Remote pet care reads: the live snapshot and the chat history page.
     "pet_get",
     "pet_chat_list",
-    // The Files library's reads (ADR-0223 §9): list and folder pages, search
-    // and one entry's detail.
+    // The Files library's reads (ADR-0223 §9): list and folder pages, search,
+    // one entry's detail and a slice of a workspace file's bytes.
     "files_library_list",
     "files_library_folder_list",
     "files_library_search",
     "files_library_get",
+    "files_library_read_chunk",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -1458,6 +1461,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_workspace_list_runs",
     "task_workspace_list_resources",
     "task_workspace_list_resource_events",
+    "task_workspace_list_resource_index",
     "task_workspace_get_resource_summary",
     "task_workspace_export_resource_manifest",
     "task_workspace_get_resource",
@@ -2165,6 +2169,7 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "files_library_folder_list",
     "files_library_search",
     "files_library_get",
+    "files_library_read_chunk",
     "files_library_favorite",
     "files_library_move",
     "files_library_trash",

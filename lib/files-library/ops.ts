@@ -43,6 +43,7 @@ import { renameFilesEntry } from "./rename"
 import { purgeTrashedItems } from "./trash"
 import { entrySource, type FilesEntry } from "./types"
 import { uploadFileToLibrary } from "./upload"
+import { hasLocalWorkspaceFiles } from "./workspace-files-io"
 import {
   attachEntryToSession,
   mentionCandidateFor,
@@ -53,7 +54,8 @@ import {
 /**
  * Something the library cannot do here, held back on purpose (CLAUDE.md
  * rule 7): the reason is the type, the UI labels the entry point with it, and
- * a test pins both. Only a paired device holds anything back today.
+ * a test pins both. A paired device holds back what needs the desktop's
+ * editors; a device with no workspace of its own holds back workspace files.
  */
 export interface FilesHeldBack {
   reason: string
@@ -76,12 +78,32 @@ export interface FilesCapabilities {
   open: "navigate" | "preview"
   /** Largest file one upload, download, preview or zip item may move; none = no ceiling. */
   maxTransferBytes?: number
+  /**
+   * The Workspace files group (ADR-0223 §8). Held back where no task-workspace
+   * ledger or disk is in reach: a browser or a phone using its own library.
+   * A paired device lists the host's.
+   */
+  workspaceFiles: true | FilesHeldBack
+}
+
+/** Why this device lists no workspace files of its own. */
+export const FILES_WORKSPACE_FILES_HELD_BACK: FilesHeldBack = {
+  reason: "no-fs-backend",
+  remedy: "desktop",
 }
 
 export const LOCAL_FILES_CAPABILITIES: FilesCapabilities = {
   createDocuments: true,
   share: true,
   open: "navigate",
+  workspaceFiles: true,
+}
+
+/** What this device's own library can do: workspace files need the desktop app. */
+export function localFilesCapabilities(): FilesCapabilities {
+  return hasLocalWorkspaceFiles()
+    ? LOCAL_FILES_CAPABILITIES
+    : { ...LOCAL_FILES_CAPABILITIES, workspaceFiles: FILES_WORKSPACE_FILES_HELD_BACK }
 }
 
 /** Where "Use in chat" put the item. */
@@ -130,7 +152,7 @@ export interface FilesOps {
 export function createLocalFilesOps(): FilesOps {
   return {
     mode: "local",
-    capabilities: LOCAL_FILES_CAPABILITIES,
+    capabilities: localFilesCapabilities(),
     setFavorite: (entries, favorite) =>
       setLibraryItemsFavorite(entries.map(entrySource), favorite).then(() => undefined),
     moveToFolder: (entries, folderId) =>

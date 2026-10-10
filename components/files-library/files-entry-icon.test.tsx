@@ -24,3 +24,11 @@ it("classifies uploads by filename", () => {
   expect(container.firstChild).not.toBeNull()
   render(<FilesEntryIcon entry={{ kind: "session-upload", title: "" }} />)
 })
+
+it("classifies a workspace file by its name, as a file on disk", () => {
+  const { container } = render(
+    <FilesEntryIcon entry={{ kind: "workspace-file", title: "index.ts" }} />
+  )
+  expect(screen.queryByTestId(/files-entry-icon-/)).toBeNull()
+  expect(container.firstChild).not.toBeNull()
+})

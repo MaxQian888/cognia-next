@@ -582,6 +582,42 @@ impl WorkspaceStore {
         .collect()
     }
 
+    /// Every ledger row with its conversation and run, for the resource index
+    /// (ADR-0223 §8). Rows of a run whose task has gone are gone with it.
+    pub fn list_resource_index_rows(
+        &self,
+    ) -> Result<Vec<crate::resource_index::ResourceIndexRow>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT w.session_id, w.workspace_root, u.payload, r.payload
+                 FROM task_resources r
+                 JOIN task_runs u ON u.run_id = r.run_id
+                 JOIN task_workspaces w ON w.task_id = r.task_id",
+            )
+            .map_err(|error| format!("prepare resource index: {error}"))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|error| format!("query resource index: {error}"))?;
+        rows.map(|row| {
+            let (session_id, workspace_root, run, change) = row.map_err(|error| error.to_string())?;
+            Ok(crate::resource_index::ResourceIndexRow {
+                session_id,
+                workspace_root,
+                run: serde_json::from_str(&run).map_err(|error| error.to_string())?,
+                change: serde_json::from_str(&change).map_err(|error| error.to_string())?,
+            })
+        })
+        .collect()
+    }
+
     pub fn list_run_resources(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
         let mut statement = self
             .connection
@@ -1748,6 +1784,83 @@ mod tests {
         ResourceTrackingPolicy, TaskWorkspaceState,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn resource_index_rows_carry_their_conversation_and_run() {
+        let dir = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        store
+            .put_task(&TaskWorkspace {
+                task_id: "task-1".into(),
+                session_id: "session-1".into(),
+                workspace_root: "/repo".into(),
+                state: TaskWorkspaceState::Active,
+                revision: 0,
+                created_at: 1,
+                expires_at: 2,
+                pinned: false,
+            })
+            .unwrap();
+        let run = TaskRun {
+            run_id: "run-1".into(),
+            task_id: "task-1".into(),
+            parent_run_id: None,
+            agent_id: "agent-1".into(),
+            agent_kind: "test".into(),
+            execution_root: "/exec/run-1".into(),
+            isolation_kind: IsolationKind::Shadow,
+            isolation_ref: None,
+            workspace_id: None,
+            base: crate::WorkspaceBaseSpec::WorkingState,
+            workspace_key: None,
+            execution_run_id: None,
+            trace_id: None,
+            turn_id: None,
+            attempt_id: None,
+            provider_attempt_id: None,
+            surface: None,
+            tracking_policy: ResourceTrackingPolicy::default(),
+            baseline_revision: 0,
+            state: RunState::Ready,
+            created_at: 1,
+            settled_at: Some(5),
+        };
+        store.put_run(&run, &serde_json::json!({})).unwrap();
+        let change = ResourceChange {
+            run_id: "run-1".into(),
+            path: "notes.md".into(),
+            old_path: None,
+            kind: crate::ChangeKind::Created,
+            origin: ContributionOrigin::Agent,
+            agent_id: Some("agent-1".into()),
+            media_type: "text/markdown".into(),
+            size: 3,
+            hash: Some("h".into()),
+            before_hash: None,
+            insertions: None,
+            deletions: None,
+            binary: false,
+            resource_kind: ResourceKind::File,
+            before_mode: None,
+            after_mode: None,
+            sensitive: false,
+            revision: 1,
+            capture_class: ResourceCaptureClass::Source,
+            content_captured: true,
+        };
+        store
+            .replace_resources("task-1", "run-1", 1, std::slice::from_ref(&change))
+            .unwrap();
+        let rows = store.list_resource_index_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "session-1");
+        assert_eq!(rows[0].workspace_root, "/repo");
+        assert_eq!(rows[0].run, run);
+        assert_eq!(rows[0].change, change);
+        // A task's rows go with it.
+        store.delete_task("task-1").unwrap();
+        assert!(store.list_resource_index_rows().unwrap().is_empty());
+    }
 
     #[test]
     fn resource_events_are_sequenced_paged_and_reconciled() {

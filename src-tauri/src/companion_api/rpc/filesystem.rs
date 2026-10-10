@@ -51,6 +51,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_list_runs",
     "task_workspace_list_resources",
     "task_workspace_list_resource_events",
+    "task_workspace_list_resource_index",
     "task_workspace_get_resource_summary",
     "task_workspace_record_tool_event",
     "task_workspace_export_resource_manifest",
@@ -656,6 +657,13 @@ pub(super) async fn dispatch(
                 .and_then(|service| {
                     crate::task_workspace::resource_events_page(&service, &run_id, &page)
                 })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_list_resource_index" => {
+            let page = page_request(&args)?;
+            crate::task_workspace::service()
+                .and_then(|service| crate::task_workspace::resource_index_page(&service, &page))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }

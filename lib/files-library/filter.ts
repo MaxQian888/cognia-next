@@ -6,6 +6,11 @@
  * the filter popover (format, modified, size, workspace) and the search box.
  * The Trash is its own place: it shows trashed items only and ignores the lens.
  * Every other place leaves trashed and removed ("hidden") items out.
+ *
+ * Workspace files (ADR-0223 §8) are many and mostly source code, so they keep
+ * to their own group: All and the lenses over it never show one the person
+ * has not kept. A favorited one shows under Favorites, a filed one in its
+ * folder, and Recents shows those and any one opened from Files.
  */
 
 import { entryRecency, isImageMediaType } from "./aggregate"
@@ -89,6 +94,8 @@ export function matchesGroup(entry: FilesEntry, group: FilesTypeGroup): boolean 
         !isVideoEntry(entry) &&
         !isImageEntry(entry)
       )
+    case "workspace":
+      return entry.kind === "workspace-file"
   }
 }
 
@@ -164,13 +171,29 @@ export function matchesLens(entry: FilesEntry, lens: FilesLens): boolean {
   }
 }
 
-export function matchesSection(entry: FilesEntry, section: FilesSection): boolean {
+/**
+ * Whether a place shows the entry. `lens` matters only for a workspace file
+ * under All, which shows there through Favorites alone.
+ */
+export function matchesSection(
+  entry: FilesEntry,
+  section: FilesSection,
+  lens: FilesLens = "suggested"
+): boolean {
   if (section.kind === "trash") return entry.trashedAt !== undefined
   if (entry.trashedAt !== undefined || entry.hidden) return false
   switch (section.kind) {
     case "all":
+      return (
+        entry.kind !== "workspace-file" || (lens === "favorites" && entry.favoritedAt !== undefined)
+      )
     case "recent":
-      return true
+      return (
+        entry.kind !== "workspace-file" ||
+        entry.favoritedAt !== undefined ||
+        entry.folderId !== undefined ||
+        entry.lastAccessedAt !== undefined
+      )
     case "group":
       return matchesGroup(entry, section.group)
     case "folder":
@@ -186,7 +209,7 @@ export function filterFilesEntries(
   const formats = filters.formats.length > 0 ? new Set(filters.formats) : null
   return entries.filter(
     (entry) =>
-      matchesSection(entry, query.section) &&
+      matchesSection(entry, query.section, query.lens) &&
       (query.section.kind === "trash" || matchesLens(entry, query.lens)) &&
       (formats === null || formats.has(filesFormatOf(entry))) &&
       matchesModified(entry, filters.modified, query.now) &&

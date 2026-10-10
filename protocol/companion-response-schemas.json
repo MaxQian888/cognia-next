@@ -10381,7 +10381,7 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["artifact", "canvas", "image", "session-upload", "upload"]
+          "enum": ["artifact", "canvas", "image", "session-upload", "upload", "workspace-file"]
         },
         "sourceId": {
           "type": "string"
@@ -10474,6 +10474,33 @@
         "generated": {
           "type": "object",
           "description": "What the generation job recorded about a video (ADR-0205)."
+        },
+        "workspace": {
+          "type": "object",
+          "description": "Set on a workspace file (ADR-0223 \u00a78): where it lives on the host's disk and what the agent did to it last.",
+          "required": ["sessionId", "workspaceRoot", "executionRoot", "relPath"],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "workspaceRoot": {
+              "type": "string"
+            },
+            "executionRoot": {
+              "type": "string"
+            },
+            "relPath": {
+              "type": "string"
+            },
+            "change": {
+              "type": "string",
+              "enum": ["created", "modified", "renamed"]
+            },
+            "oldPath": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -10598,7 +10625,14 @@
                   },
                   "kind": {
                     "type": "string",
-                    "enum": ["artifact", "canvas", "image", "session-upload", "upload"]
+                    "enum": [
+                      "artifact",
+                      "canvas",
+                      "image",
+                      "session-upload",
+                      "upload",
+                      "workspace-file"
+                    ]
                   },
                   "title": {
                     "type": "string"
@@ -10729,6 +10763,34 @@
             "count": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteReadChunk": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "dataBase64", "size", "eof"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dataBase64": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The file's size when the slice was read."
+            },
+            "eof": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false
@@ -10883,6 +10945,98 @@
           "$ref": "#/$defs/FilesRemoteRefused"
         }
       ]
+    },
+    "Page_of_ResourceIndexEntry": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ResourceIndexEntry"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "type": "object"
+    },
+    "ResourceIndexEntry": {
+      "additionalProperties": false,
+      "description": "One file an agent created, modified or renamed in a conversation, as the\nlatest net change to that path across the conversation's runs.\n\n`path` is relative to the run's `execution_root`. An isolated run's root\nis removed once its changes are applied back or discarded, so the same\nrelative path under `workspace_root` is where the file lives after that;\na reader tries the execution root first, then the workspace root.",
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "changedAt": {
+          "description": "When the run that changed it last settled (epoch ms).",
+          "format": "int64",
+          "type": "integer"
+        },
+        "executionRoot": {
+          "type": "string"
+        },
+        "firstChangedAt": {
+          "description": "When the run that first put the path in the index settled (epoch ms).",
+          "format": "int64",
+          "type": "integer"
+        },
+        "hash": {
+          "type": ["string", "null"]
+        },
+        "kind": {
+          "$ref": "#/$defs/ChangeKind",
+          "description": "Never `deleted`: a deleted path leaves the index. `created` sticks\nthrough later edits, so a file the agent wrote reads as its own."
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "oldPath": {
+          "description": "Where a renamed file was before its first rename in the index.",
+          "type": ["string", "null"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "runId": {
+          "description": "The run that changed the path last.",
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "workspaceRoot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binary",
+        "changedAt",
+        "executionRoot",
+        "firstChangedAt",
+        "hash",
+        "kind",
+        "mediaType",
+        "oldPath",
+        "path",
+        "runId",
+        "sessionId",
+        "size",
+        "taskId",
+        "workspaceRoot"
+      ],
+      "type": "object"
     }
   },
   "commands": {
@@ -13461,6 +13615,9 @@
     "task_workspace_list_resource_events": {
       "$ref": "#/$defs/Page_of_ResourceEvent"
     },
+    "task_workspace_list_resource_index": {
+      "$ref": "#/$defs/Page_of_ResourceIndexEntry"
+    },
     "task_workspace_list_resources": {
       "items": {
         "$ref": "#/$defs/ResourceChange"
@@ -16008,6 +16165,9 @@
     },
     "files_library_get": {
       "$ref": "#/$defs/FilesRemoteDetail"
+    },
+    "files_library_read_chunk": {
+      "$ref": "#/$defs/FilesRemoteReadChunk"
     },
     "files_library_favorite": {
       "$ref": "#/$defs/FilesRemoteCount"

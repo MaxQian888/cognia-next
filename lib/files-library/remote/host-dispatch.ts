@@ -58,6 +58,11 @@ import { duplicateFilesEntry } from "../duplicate"
 import { matchesSearch } from "../filter"
 import { renameFilesEntry } from "../rename"
 import { FILES_IMAGE_PAGE_SIZE, loadFilesSources } from "../sources"
+import {
+  hasLocalWorkspaceFiles,
+  loadWorkspaceFileIndex,
+  readWorkspaceFileSlice,
+} from "../workspace-files-io"
 import { purgeTrashedItems } from "../trash"
 import { entrySource, type FilesEntry } from "../types"
 import { uploadFileToLibrary } from "../upload"
@@ -65,6 +70,7 @@ import { bindEntryToSession } from "../use-in-chat"
 import { FILES_REMOTE_COMMANDS, isFilesRemoteCommand } from "./commands"
 import { createFilesIdempotencyLedger, type FilesIdempotencyLedger } from "./idempotency"
 import {
+  bytesToBase64,
   encodePageToken,
   entryToRemote,
   FILES_REMOTE_MAX_BYTES,
@@ -85,6 +91,7 @@ import {
   parsePageRequest,
   parseMoveRequest,
   parseName,
+  parseReadChunkRequest,
   parseRenameRequest,
   parseSearchRequest,
   parseUploadChunkRequest,
@@ -93,6 +100,7 @@ import {
   parseUploadInitRequest,
   refused,
   type FilesRemoteAttach,
+  type FilesRemoteReadChunk,
   type FilesRemoteDetail,
   type FilesRemoteDuplicate,
   type FilesRemoteFolders,
@@ -122,7 +130,14 @@ export interface FilesHostDispatchDeps {
 
 async function loadHostLibrary(imageLimit: number): Promise<FilesHostLibrary> {
   const { artifacts, canvasDocuments } = useArtifactStore.getState()
-  const loaded = await loadFilesSources({ artifacts, canvasDocuments, imageLimit })
+  // The host's own workspace files go to the paired device too (§8).
+  const workspace = hasLocalWorkspaceFiles() ? { index: await loadWorkspaceFileIndex() } : null
+  const loaded = await loadFilesSources({
+    artifacts,
+    canvasDocuments,
+    imageLimit,
+    ...(workspace ? { workspace } : {}),
+  })
   return {
     entries: aggregateFilesEntries(loaded.input),
     imagesTruncated: loaded.imagesTruncated,
@@ -235,6 +250,32 @@ async function search(
       updatedAt: entry.updatedAt,
       projectIds: entry.projectIds,
     })),
+  }
+}
+
+/**
+ * One slice of a workspace file, read off the host's disk where the file is
+ * now (ADR-0223 §8). Only for a workspace file the host itself lists, so the
+ * device never names a path; only under the paired ceiling, so a preview is
+ * refused up front rather than streamed past what the device would show.
+ */
+async function readChunk(
+  d: Resolved,
+  payload: Record<string, unknown>
+): Promise<FilesRemoteResult<FilesRemoteReadChunk>> {
+  const request = parseReadChunkRequest(payload)
+  const entry = await resolveEntry(d, payload)
+  if (!entry) return refused("files_remote_not_found")
+  if (entry.kind !== "workspace-file" || !entry.workspace) {
+    return refused("files_remote_invalid_request")
+  }
+  const slice = await readWorkspaceFileSlice(entry.workspace, request.offset, request.length)
+  if (slice.size > FILES_REMOTE_MAX_BYTES) return refused("files_remote_too_large")
+  return {
+    ok: true,
+    dataBase64: bytesToBase64(slice.bytes),
+    size: slice.size,
+    eof: slice.eof,
   }
 }
 
@@ -595,6 +636,8 @@ export async function dispatchFilesHostCommand(
         return await search(d, payload)
       case FILES_REMOTE_COMMANDS.get:
         return await get(d, payload)
+      case FILES_REMOTE_COMMANDS.readChunk:
+        return await readChunk(d, payload)
       case FILES_REMOTE_COMMANDS.favorite:
         return await favorite(d, payload)
       case FILES_REMOTE_COMMANDS.move:

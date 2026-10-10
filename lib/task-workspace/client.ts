@@ -1,4 +1,4 @@
-import type { Page, PageRequest } from "@/lib/tauri/companion-paging"
+import { collectPages, type Page, type PageRequest } from "@/lib/tauri/companion-paging"
 import { onTauriEvent } from "@/lib/tauri"
 // Every call in this file goes through the approval-aware transport, reads
 // included. A read carries no pending lease so it is passed through untouched,
@@ -34,6 +34,7 @@ import type {
   ResourceChange,
   ResourceEvent,
   ResourceRead,
+  TaskResourceIndexEntry,
   TaskResourceManifest,
   TaskResourceSummary,
   TaskRun,
@@ -697,6 +698,37 @@ export function listTaskResourceEvents(
   page: PageRequest = { pageSize: 200 }
 ): Promise<Page<ResourceEvent>> {
   return transport.call("task_workspace_list_resource_events", { runId, ...page })
+}
+
+/**
+ * One page of the files agents left in conversations' workspaces, newest
+ * change first (ADR-0223 §8).
+ */
+export function listTaskResourceIndexPage(
+  page: PageRequest = {}
+): Promise<Page<TaskResourceIndexEntry>> {
+  return transport.call("task_workspace_list_resource_index", { ...page })
+}
+
+/**
+ * The whole resource index, folded by conversation, root and path: offset
+ * pages over a live index can repeat an entry, and the first (newest) wins.
+ */
+export async function listTaskResourceIndex(
+  options: { maxItems?: number } = {}
+): Promise<TaskResourceIndexEntry[]> {
+  const items = await collectPages(
+    (pageToken) =>
+      listTaskResourceIndexPage({ pageSize: 500, ...(pageToken ? { pageToken } : {}) }),
+    { maxItems: options.maxItems ?? 20_000 }
+  )
+  const seen = new Set<string>()
+  return items.filter((entry) => {
+    const key = `${entry.sessionId}\u0000${entry.workspaceRoot}\u0000${entry.path}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function getTaskResourceSummary(runId: string): Promise<TaskResourceSummary> {

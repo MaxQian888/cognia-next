@@ -1,16 +1,16 @@
 ---
 title: Overview
-description: "The Files page: one managed space over artifacts, canvas documents, chat images and uploads. Places crossed with lenses, a Trash that keeps bytes for 30 days, bulk and drag-and-drop management, document templates and file links. ADR-0200 and ADR-0223."
+description: "The Files page: one managed space over artifacts, canvas documents, chat images, uploads and the files agents wrote on disk. Places crossed with lenses, a Trash that keeps bytes for 30 days, bulk and drag-and-drop management, document templates and file links. ADR-0200 and ADR-0223."
 ---
 
 # Files
 
-<Status variant="beta">Desktop, web and phones (standalone and paired) shipped · workspace files pending (ADR-0223 §8)</Status>
+<Status variant="beta">Desktop, web and phones (standalone and paired) shipped · workspace files on the desktop and paired devices</Status>
 
 <TLDR>
   `/files` lists everything conversations produce, plus files uploaded straight into Files, in one
   place you can manage. The content stays in its own stores (artifacts, canvas documents, chat images,
-  conversation uploads). Files adds only its own state on top — favorites, folders, a Trash, display
+  conversation uploads, files agents wrote into a workspace). Files adds only its own state on top — favorites, folders, a Trash, display
   names, link markers — in two tables, and keeps an item's bytes alive by holding a reference rather
   than a copy.
 </TLDR>
@@ -29,6 +29,7 @@ flowchart LR
     M["messageMedia + messageMediaRefs<br/>(chat images)"]
     S["session assets<br/>(conversation uploads)"]
     L["library assets<br/>(Files uploads)"]
+    W["task-workspace ledger<br/>+ codeAdoptionTurns<br/>(workspace files)"]
   end
   subgraph Files["Files state"]
     LI["libraryItems<br/>favorite, folder, trashedAt,<br/>displayName, sharedLinkCodes"]
@@ -49,10 +50,11 @@ flowchart LR
 
 ## Places × lenses
 
-The secondary sidebar holds **places**: All, five type groups (Documents, Artifacts, Images, Videos,
-Uploads), Recents (five, then "Show more"), the folder tree and the Trash. The row of **lenses** over
+The secondary sidebar holds **places**: All, six type groups (Documents, Artifacts, Images, Videos,
+Uploads, Workspace files), Recents (five, then "Show more"), the folder tree and the Trash. The row of **lenses** over
 the list — Suggested, Favorites, Mine, AI-generated, Shared with me — combines with any place. The
-Trash ignores lenses and hides the lens row.
+Trash ignores lenses and hides the lens row. Workspace files keep to their own group until the person
+files, favorites or opens one ([Workspace files](/docs/subsystems/files/workspace#where-it-shows)).
 
 | Lens | Shows | Default order |
 | --- | --- | --- |
@@ -73,6 +75,7 @@ A column header in the list view overrides the default order (see [Management](/
 | `image` | `messageMedia` | canonical image hash, however many conversations show it |
 | `session-upload` | session assets | original content hash, however many conversations it was attached to |
 | `upload` | library assets | file uploaded straight into Files (Files-owned) |
+| `workspace-file` | task-workspace resource index, code-adoption turns | conversation, workspace root and path an agent created, modified or renamed |
 
 Generated videos are not a kind: a video a generation job made carries its job record on the upload
 card it already is.
@@ -91,6 +94,8 @@ card it already is.
 | Rename, duplicate, zip, upload, download | `lib/files-library/{rename,duplicate,export-zip,upload,download}.ts` |
 | Drag and drop, keyboard, deep links | `lib/files-library/{dnd,keyboard,deep-link}.ts` |
 | Sharing | `lib/files-library/share.ts` |
+| Workspace files: merge (pure), disk reads and open | `lib/files-library/workspace-files.ts`, `workspace-files-io.ts`, `hooks/files-library/use-workspace-file-index.ts` |
+| Workspace files: the ledger's index | `crates/cognia-task-workspace/src/resource_index.rs`, `task_workspace_list_resource_index` in `crates/cognia-task-workspace-host/src/host_surface.rs`, `lib/task-workspace/client.ts` |
 | Document templates | `lib/document-templates/`, `lib/db/document-templates.ts` |
 | Page and dialogs | `components/files-library/` |
 | Phone layout | `components/files-library/mobile/` |
@@ -100,13 +105,6 @@ card it already is.
 | Hooks | `hooks/files-library/`, `hooks/document-templates/` |
 | Store | `stores/files-library/files-library-store.ts` |
 | ⌘K | `lib/global-search/providers/files.ts` |
-
-## Not yet shipped
-
-ADR-0223 is accepted, with one piece still to build, which needs host-side Rust work.
-
-- **Workspace files (§8).** There is no `workspace-file` kind and no Workspace files group: the type
-  groups are the five above.
 
 ## Pages
 
@@ -118,3 +116,5 @@ ADR-0223 is accepted, with one piece still to build, which needs host-side Rust 
 - [On a paired device](/docs/subsystems/files/paired): the host's library over `files_library_*`, its
   bytes, refresh, Use in chat, uploads and what stays on the desktop.
 - [Sharing](/docs/subsystems/files/sharing): publishing items as an encrypted file link.
+- [Workspace files](/docs/subsystems/files/workspace): files agents wrote on disk, from the ledger's
+  index, read where they are and opened in their conversation.

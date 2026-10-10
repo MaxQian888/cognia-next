@@ -113,7 +113,8 @@ export function filesFormatOf(
       return "code"
     }
     case "session-upload":
-    case "upload": {
+    case "upload":
+    case "workspace-file": {
       const byName = formatOfIconKind(resolveFileTypeIcon(entry.sourceTitle || entry.title).kind)
       return byName !== "other" ? byName : formatOfMediaType(entry.mediaType)
     }

@@ -59932,6 +59932,7 @@ paths:
                               - image
                               - session-upload
                               - upload
+                              - workspace-file
                           sourceId:
                             type: string
                           title:
@@ -59996,6 +59997,33 @@ paths:
                           generated:
                             type: object
                             description: What the generation job recorded about a video (ADR-0205).
+                          workspace:
+                            type: object
+                            description: "Set on a workspace file (ADR-0223 §8): where it lives on the host's disk and what the agent did to it
+                              last."
+                            required:
+                              - sessionId
+                              - workspaceRoot
+                              - executionRoot
+                              - relPath
+                            properties:
+                              sessionId:
+                                type: string
+                              workspaceRoot:
+                                type: string
+                              executionRoot:
+                                type: string
+                              relPath:
+                                type: string
+                              change:
+                                type: string
+                                enum:
+                                  - created
+                                  - modified
+                                  - renamed
+                              oldPath:
+                                type: string
+                            additionalProperties: false
                         additionalProperties: false
                       text:
                         type: string
@@ -60234,6 +60262,7 @@ paths:
                                 - image
                                 - session-upload
                                 - upload
+                                - workspace-file
                             sourceId:
                               type: string
                             title:
@@ -60298,6 +60327,33 @@ paths:
                             generated:
                               type: object
                               description: What the generation job recorded about a video (ADR-0205).
+                            workspace:
+                              type: object
+                              description: "Set on a workspace file (ADR-0223 §8): where it lives on the host's disk and what the agent did to it
+                                last."
+                              required:
+                                - sessionId
+                                - workspaceRoot
+                                - executionRoot
+                                - relPath
+                              properties:
+                                sessionId:
+                                  type: string
+                                workspaceRoot:
+                                  type: string
+                                executionRoot:
+                                  type: string
+                                relPath:
+                                  type: string
+                                change:
+                                  type: string
+                                  enum:
+                                    - created
+                                    - modified
+                                    - renamed
+                                oldPath:
+                                  type: string
+                              additionalProperties: false
                           additionalProperties: false
                       imagesTruncated:
                         type: boolean
@@ -60732,6 +60788,224 @@ paths:
                       count:
                         type: integer
                         minimum: 0
+                    additionalProperties: false
+                  - type: object
+                    description: "A refused `files_library_*` call: a `files.errors.*` code, or `headless_host` from a brain that has no
+                      library."
+                    required:
+                      - ok
+                      - code
+                    properties:
+                      ok:
+                        const: false
+                      code:
+                        type: string
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/files_library_read_chunk:
+    post:
+      operationId: internalRpcFilesLibraryReadChunk
+      tags:
+        - headless-rpc
+      summary: files_library_read_chunk (client.read)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: One slice of a workspace file's bytes, read off the host's disk where the file is now (ADR-0223 §8). Only
+                for a workspace file the host lists, and only under the paired ceiling (10 MiB).
+              required:
+                - key
+                - offset
+              properties:
+                key:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+                  description: A Files item key (`<kind>:<sourceId>`) from `files_library_list`.
+                offset:
+                  type: integer
+                  minimum: 0
+                  maximum: 10485760
+                  description: Where the slice starts.
+                length:
+                  type: integer
+                  minimum: 1
+                  maximum: 524288
+                  description: Bytes to read; absent means the most one slice holds (512 KiB).
+                imageLimit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100000
+                  description: Images the device has loaded. The host resolves its entries over the same window, so a key the device holds
+                    is a key the host can find.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - dataBase64
+                      - size
+                      - eof
+                    properties:
+                      ok:
+                        const: true
+                      dataBase64:
+                        type: string
+                      size:
+                        type: integer
+                        minimum: 0
+                        description: The file's size when the slice was read.
+                      eof:
+                        type: boolean
                     additionalProperties: false
                   - type: object
                     description: "A refused `files_library_*` call: a `files.errors.*` code, or `headless_host` from a brain that has no
@@ -61365,6 +61639,7 @@ paths:
                                 - image
                                 - session-upload
                                 - upload
+                                - workspace-file
                             title:
                               type: string
                             mediaType:
@@ -145661,6 +145936,268 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_list_resource_index:
+    post:
+      operationId: internalRpcTaskWorkspaceListResourceIndex
+      tags:
+        - headless-rpc
+      summary: task_workspace_list_resource_index (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: |-
+                  One page of a collection.
+
+                  Sparse rather than closed: `nextPageToken` is absent on the last page, and
+                  that absence is the signal a client reads.
+                properties:
+                  items:
+                    items:
+                      additionalProperties: false
+                      description: |-
+                        One file an agent created, modified or renamed in a conversation, as the
+                        latest net change to that path across the conversation's runs.
+
+                        `path` is relative to the run's `execution_root`. An isolated run's root
+                        is removed once its changes are applied back or discarded, so the same
+                        relative path under `workspace_root` is where the file lives after that;
+                        a reader tries the execution root first, then the workspace root.
+                      properties:
+                        binary:
+                          type: boolean
+                        changedAt:
+                          description: When the run that changed it last settled (epoch ms).
+                          format: int64
+                          type: integer
+                        executionRoot:
+                          type: string
+                        firstChangedAt:
+                          description: When the run that first put the path in the index settled (epoch ms).
+                          format: int64
+                          type: integer
+                        hash:
+                          type:
+                            - string
+                            - "null"
+                        kind:
+                          enum:
+                            - created
+                            - modified
+                            - deleted
+                            - renamed
+                          type: string
+                          description: |-
+                            Never `deleted`: a deleted path leaves the index. `created` sticks
+                            through later edits, so a file the agent wrote reads as its own.
+                        mediaType:
+                          type: string
+                        oldPath:
+                          description: Where a renamed file was before its first rename in the index.
+                          type:
+                            - string
+                            - "null"
+                        path:
+                          type: string
+                        runId:
+                          description: The run that changed the path last.
+                          type: string
+                        sessionId:
+                          type: string
+                        size:
+                          format: uint64
+                          minimum: 0
+                          type: integer
+                        taskId:
+                          type: string
+                        workspaceRoot:
+                          type: string
+                      required:
+                        - binary
+                        - changedAt
+                        - executionRoot
+                        - firstChangedAt
+                        - hash
+                        - kind
+                        - mediaType
+                        - oldPath
+                        - path
+                        - runId
+                        - sessionId
+                        - size
+                        - taskId
+                        - workspaceRoot
+                      type: object
+                    type: array
+                  nextPageToken:
+                    description: Present exactly when another page exists.
+                    type:
+                      - string
+                      - "null"
+                required:
+                  - items
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/task_workspace_list_resources:
     post:
       operationId: internalRpcTaskWorkspaceListResources
@@ -170139,6 +170676,7 @@ components:
           - files_library_list
           - files_library_move
           - files_library_purge
+          - files_library_read_chunk
           - files_library_rename
           - files_library_restore
           - files_library_search
@@ -170546,6 +171084,7 @@ components:
           - task_workspace_get_resource_summary
           - task_workspace_list
           - task_workspace_list_resource_events
+          - task_workspace_list_resource_index
           - task_workspace_list_resources
           - task_workspace_list_runs
           - task_workspace_maintenance_events
@@ -170915,10 +171454,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 798
-  generatedRequestSchemaCount: 798
+  internalCommandCount: 800
+  generatedRequestSchemaCount: 800
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 798
+  contractRequestSchemaCount: 800
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 798
+  generatedResponseSchemaCount: 800
   loopbackOnly: true

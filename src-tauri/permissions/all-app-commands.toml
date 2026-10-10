@@ -1053,6 +1053,7 @@ commands.allow = [
   "task_workspace_get_resource_summary",
   "task_workspace_list",
   "task_workspace_list_resource_events",
+  "task_workspace_list_resource_index",
   "task_workspace_list_resources",
   "task_workspace_list_runs",
   "task_workspace_maintenance_events",

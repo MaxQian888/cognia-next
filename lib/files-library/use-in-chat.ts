@@ -162,6 +162,27 @@ async function loadHeldSource(entry: FilesEntry): Promise<HeldSource> {
       ...(metadata?.extractedContent ? { extractedContent: metadata.extractedContent } : {}),
     }
   }
+  if (entry.kind === "workspace-file" && entry.workspace) {
+    // Read off the disk where it is now; a draft holds no more than this.
+    const { FilesWorkspaceFileError, readWorkspaceFileBytes } = await import("./workspace-files-io")
+    let bytes: Uint8Array<ArrayBuffer>
+    try {
+      bytes = await readWorkspaceFileBytes(entry.workspace, {
+        maxBytes: DRAFT_ATTACHMENT_QUOTA_BYTES,
+      })
+    } catch (error) {
+      if (error instanceof FilesWorkspaceFileError && error.code === "files_workspace_missing") {
+        throw new FilesUseInChatError("files_source_missing")
+      }
+      throw error
+    }
+    const mediaType = entry.mediaType || "application/octet-stream"
+    return {
+      blob: new Blob([bytes], { type: mediaType }),
+      name: entry.title || "file",
+      mediaType,
+    }
+  }
   throw new FilesUseInChatError("files_not_attachable")
 }
 

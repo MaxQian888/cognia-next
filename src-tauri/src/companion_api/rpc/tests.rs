@@ -5076,7 +5076,7 @@ fn pet_remote_care_commands_are_bridged_and_bind_the_caller() {
 /// A paired device's Files page (ADR-0223 §9). Every arm rides the generic
 /// desktop-writes bridge to the renderer that owns the library, binds the
 /// verified caller (the keyed writes and the upload staging are scoped to it),
-/// stays off the remote-control gate, and only the four reads skip the
+/// stays off the remote-control gate, and only the five reads skip the
 /// idempotency cache.
 #[test]
 fn files_library_commands_are_bridged_and_bind_the_caller() {
@@ -5085,6 +5085,7 @@ fn files_library_commands_are_bridged_and_bind_the_caller() {
         "files_library_folder_list",
         "files_library_search",
         "files_library_get",
+        "files_library_read_chunk",
     ];
     let writes = [
         "files_library_favorite",

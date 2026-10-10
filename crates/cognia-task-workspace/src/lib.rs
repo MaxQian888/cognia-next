@@ -11,6 +11,7 @@ mod lifecycle;
 mod registry;
 mod remote_source;
 mod resource;
+mod resource_index;
 mod revision_patch;
 mod sensitive;
 mod service;
@@ -74,6 +75,7 @@ pub use sensitive::{
     decide_access, validate_include_pattern, IncludePatternError, SensitiveAuditEntry,
     SensitiveDecision, SensitiveGrant, SensitiveGrantStore,
 };
+pub use resource_index::{fold_resource_index, ResourceIndexEntry, ResourceIndexRow};
 pub use service::{ServiceConfig, TaskWorkspaceService};
 pub use transfer::{
     DownloadHandle, TransferChunk, TransferRegistry, UploadHandle, MAX_TRANSFER_CHUNK_BYTES,

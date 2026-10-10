@@ -39,6 +39,8 @@ export const PAIRED_FILES_CAPABILITIES: FilesCapabilities = {
   share: FILES_PAIRED_HELD_BACK.share,
   open: "preview",
   maxTransferBytes: FILES_REMOTE_MAX_BYTES,
+  // The host lists its own and reads their bytes for this device.
+  workspaceFiles: true,
 }
 
 export interface RemoteFilesOpsDeps {
@@ -52,7 +54,9 @@ export interface RemoteFilesOpsDeps {
 function isGone(error: unknown): boolean {
   return (
     error instanceof FilesRemoteError &&
-    (error.code === "files_source_missing" || error.code === "files_remote_not_found")
+    (error.code === "files_source_missing" ||
+      error.code === "files_remote_not_found" ||
+      error.code === "files_workspace_missing")
   )
 }
 
@@ -111,6 +115,13 @@ export function createRemoteFilesOps({
           return {
             blob: new Blob([text], { type: "text/plain;charset=utf-8" }),
             filename: documentFilenameFor(entry),
+          }
+        }
+        if (entry.kind === "workspace-file") {
+          const bytes = await client.readWorkspaceFile(entry, imageLimit())
+          return {
+            blob: new Blob([bytes], { type: entry.mediaType || "application/octet-stream" }),
+            filename: mediaFilenameFor(entry, entry.mediaType || "application/octet-stream"),
           }
         }
         const media = await client.readMedia(entry, "original")

@@ -112,6 +112,17 @@ export interface FilesRemoteDetail {
   textTruncated?: boolean
 }
 
+/**
+ * `files_library_read_chunk`: one slice of a workspace file's bytes, read off
+ * the host's disk (ADR-0223 §8). Other kinds' bytes travel as session media.
+ */
+export interface FilesRemoteReadChunk {
+  dataBase64: string
+  /** The file's size when the slice was read; a change between slices restarts the read. */
+  size: number
+  eof: boolean
+}
+
 export interface FilesRemoteDuplicate {
   kind: "canvas" | "upload"
   key: string
@@ -171,6 +182,31 @@ export const FILES_REMOTE_TEXT_MAX = 128 * 1024
  * phone is told up front instead of waiting out a dropped frame.
  */
 export const FILES_REMOTE_MAX_BYTES = 10 * 1024 * 1024
+/** Bytes one `files_library_read_chunk` answers with at most. */
+export const FILES_REMOTE_READ_CHUNK_MAX = 512 * 1024
+
+/** Bytes as the base64 the upload and read chunks carry. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  const step = 0x8000
+  for (let index = 0; index < bytes.length; index += step) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + step))
+  }
+  return btoa(binary)
+}
+
+/** The other way; null when it is not base64. */
+export function base64ToBytes(data: string): Uint8Array<ArrayBuffer> | null {
+  let binary: string
+  try {
+    binary = atob(data)
+  } catch {
+    return null
+  }
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
 
 // ── Request parsing (host side) ──────────────────────────────────────────────
 
@@ -437,6 +473,24 @@ export function parseUploadChunkRequest(payload: Record<string, unknown>): {
   }
 }
 
+export function parseReadChunkRequest(payload: Record<string, unknown>): {
+  key: string
+  offset: number
+  length: number
+} {
+  return {
+    key: parseKey(payload),
+    offset: requiredInteger(payload, "offset", 0, FILES_REMOTE_MAX_BYTES),
+    length: boundedInteger(
+      payload,
+      "length",
+      1,
+      FILES_REMOTE_READ_CHUNK_MAX,
+      FILES_REMOTE_READ_CHUNK_MAX
+    ),
+  }
+}
+
 export function parseUploadCommitRequest(payload: Record<string, unknown>): {
   uploadId: string
   folderId?: string
@@ -458,7 +512,14 @@ export function parseUploadCommitRequest(payload: Record<string, unknown>): {
  * own search reads — titles and media type. Body text is matched on the host.
  */
 export function entryFromRemote(remote: FilesRemoteEntry): FilesEntry {
-  const searchText = [remote.title, remote.sourceTitle, remote.mediaType ?? ""]
+  const searchText = [
+    remote.title,
+    remote.sourceTitle,
+    remote.mediaType ?? "",
+    // A workspace file is found by its path too, as it is on the host.
+    remote.workspace?.relPath ?? "",
+  ]
+    .filter(Boolean)
     .join("\n")
     .toLowerCase()
   return { ...remote, searchText }

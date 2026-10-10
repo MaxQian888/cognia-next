@@ -110,7 +110,9 @@ export interface FileSearchRow {
 /**
  * A paired host's library as palette rows: what its Files page shows (not
  * trashed, not removed), under the name Files gives each item. Images
- * without a name are left out, as they are on the desktop's palette.
+ * without a name are left out, as they are on the desktop's palette, and so
+ * are workspace files (ADR-0223 §8): the palette never lists those, which
+ * would bury every other result under an agent's source tree.
  */
 export async function loadRemoteFileSearchRows(
   client: Pick<FilesRemoteClient, "list">
@@ -119,6 +121,7 @@ export async function loadRemoteFileSearchRows(
   const rows: FileSearchRow[] = []
   for (const entry of entries) {
     if (entry.trashedAt !== undefined || entry.hidden || !entry.title.trim()) continue
+    if (entry.kind === "workspace-file") continue
     rows.push({
       key: entry.key,
       title: entry.title,

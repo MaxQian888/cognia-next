@@ -1,6 +1,7 @@
 /**
  * What "Download" hands the user for a Files entry (ADR-0200): the original
- * upload for images and files, the text for artifacts and canvas documents.
+ * upload for images and files, the text for artifacts and canvas documents,
+ * the bytes on disk for a workspace file (read where it is now, never moved).
  */
 
 import { getFileExtension } from "@/lib/canvas/utils"
@@ -9,6 +10,7 @@ import { getHeldSessionAssetSource, getLibraryAsset } from "@/lib/db/session-ass
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { safeFilename } from "./safe-filename"
 import type { FilesEntry } from "./types"
+import { FilesWorkspaceFileError, readWorkspaceFileBytes } from "./workspace-files-io"
 
 export interface FilesDownloadPayload {
   blob: Blob
@@ -104,6 +106,25 @@ export async function downloadPayloadFor(entry: FilesEntry): Promise<FilesDownlo
     case "session-upload": {
       const blob = await getHeldSessionAssetSource(entry.sourceId)
       return blob ? { blob, filename: safeFilename(entry.title, "file") } : null
+    }
+    case "workspace-file": {
+      if (!entry.workspace) return null
+      try {
+        const bytes = await readWorkspaceFileBytes(entry.workspace)
+        return {
+          blob: new Blob([bytes], {
+            type: entry.mediaType || "application/octet-stream",
+          }),
+          filename: safeFilename(entry.title, "file"),
+        }
+      } catch (error) {
+        // Gone from disk since the list was read: the same "source gone" as
+        // every other kind. Anything else (too large, host unreachable) says so.
+        if (error instanceof FilesWorkspaceFileError && error.code === "files_workspace_missing") {
+          return null
+        }
+        throw error
+      }
     }
   }
 }

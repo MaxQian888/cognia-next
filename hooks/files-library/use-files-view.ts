@@ -13,7 +13,12 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import type { LibraryFolder } from "@/lib/db/files-library-types"
 import { entryRecency } from "@/lib/files-library/aggregate"
-import { filterFilesEntries, hasActiveFilters, sortFilesEntries } from "@/lib/files-library/filter"
+import {
+  filterFilesEntries,
+  hasActiveFilters,
+  matchesSection,
+  sortFilesEntries,
+} from "@/lib/files-library/filter"
 import { childLibraryFolders } from "@/lib/files-library/folder-tree"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
@@ -21,6 +26,8 @@ import { useProjectStore } from "@/stores/project/project-store"
 
 /** How many recent items the sidebar lists before "Show more". */
 export const FILES_SIDEBAR_RECENTS = 5
+
+const RECENT_SECTION = { kind: "recent" } as const
 
 const CLOCK_MS = 60_000
 
@@ -99,7 +106,8 @@ export function useFilesView(
     const live: FilesEntry[] = []
     for (const entry of entries) {
       if (entry.trashedAt !== undefined) trashed += 1
-      else if (!entry.hidden) live.push(entry)
+      // The Recents place's own rule: an unkept, unopened workspace file waits in its group.
+      else if (matchesSection(entry, RECENT_SECTION)) live.push(entry)
     }
     live.sort((a, b) => entryRecency(b) - entryRecency(a) || a.key.localeCompare(b.key))
     return { recents: live.slice(0, FILES_SIDEBAR_RECENTS), trashCount: trashed }

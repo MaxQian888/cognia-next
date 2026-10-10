@@ -24,7 +24,7 @@ An item row (`LibraryItemRow`, `lib/db/files-library-types.ts`) is keyed `kind:s
 | `folderId` | a folder id, or `root` for the top of Folders |
 | `ownedByFiles` | uploaded straight into Files: deleting it deletes the file |
 | `mediaHash` | the `messageMedia` key the keep pin holds (images and uploads) |
-| `snapshot` | title, media type, size, hash and extracted text copied at keep time, so a kept item still has a name after its source is gone |
+| `snapshot` | title, media type, size, hash and extracted text copied at keep time, so a kept item still has a name after its source is gone; a workspace file's location (`snapshot.workspace`) too |
 | `lastOpenedAt` | opened or previewed from Files (drives Recents for media) |
 | `hiddenAt` | "removed from Files": now only written when the purge retires a trashed item |
 | `trashedAt` | in the Trash since this time |
@@ -53,7 +53,9 @@ it when it stopped being kept — and the hashes it released are collected after
 `loadFilesSources` (`lib/files-library/sources.ts`) reads the session assets, library assets, item
 rows and succeeded video jobs in parallel, then the newest 500 images (`FILES_IMAGE_PAGE_SIZE`, more on
 demand) plus every kept image older than that page, the live sessions they reference, and the codes of
-share links that are still live. Only metadata and Blob handles are read.
+share links that are still live. Only metadata and Blob handles are read. Where this device lists
+workspace files, it also takes the ledger's resource index and reads `codeAdoptionTurns`
+([Workspace files](/docs/subsystems/files/workspace#merging-with-code-adoption-turns)).
 
 `aggregateFilesEntries` (`lib/files-library/aggregate.ts`) is pure. It folds the sources into one
 `FilesEntry` per item and decorates each with its row:
@@ -132,7 +134,7 @@ The 14 days are a time constant, not a half-life (the half-life is about 9.7 day
 
 `lib/global-search/providers/files.ts` registers three providers (`builtin.files.artifacts`,
 `builtin.files.canvas`, `builtin.files.items`). Each leaves out trashed and removed items and lists a
-renamed item under its Files name. Results open the item's preview at `/files?item=<key>`. They answer
+renamed item under its Files name. Workspace files are never listed. Results open the item's preview at `/files?item=<key>`. They answer
 wherever the page runs (`resolveSurfaceAvailability` over the surface contract). On a client that
 owns its database they read it; on a paired client the artifact and canvas providers return nothing,
 and the items provider lists the host's library by title instead

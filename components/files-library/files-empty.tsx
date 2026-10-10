@@ -3,7 +3,8 @@
 /**
  * What an empty Files view says (ADR-0223). A search or filter that hid
  * everything offers to clear it; the Trash, a lens and each kind of place
- * explain what would appear there.
+ * explain what would appear there. The Workspace files group says what lands
+ * in it, or, where this device lists none, that the desktop app does.
  */
 
 import { useTranslations } from "next-intl"
@@ -11,6 +12,7 @@ import {
   BotIcon,
   ClockIcon,
   FolderOpenIcon,
+  HardDriveIcon,
   SearchXIcon,
   StarIcon,
   Trash2Icon,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import {
   Empty,
   EmptyContent,
@@ -40,6 +43,8 @@ export type FilesEmptyCopy =
   | "recent"
   | "folder"
   | "group"
+  | "workspace"
+  | "workspaceHeldBack"
   | "all"
 
 const ICONS: Record<FilesEmptyCopy, LucideIcon> = {
@@ -52,19 +57,27 @@ const ICONS: Record<FilesEmptyCopy, LucideIcon> = {
   recent: ClockIcon,
   folder: FolderOpenIcon,
   group: FolderOpenIcon,
+  workspace: HardDriveIcon,
+  workspaceHeldBack: HardDriveIcon,
   all: FolderOpenIcon,
 }
 
-/** Which copy an empty view gets: filters first, then the Trash, a lens, the place. */
+/**
+ * Which copy an empty view gets: filters first, then the Trash, a Workspace
+ * files group this device lists none for, a lens, the place.
+ */
 export function filesEmptyCopy(
   section: FilesSection,
   lens: FilesLens,
-  filtered: boolean
+  filtered: boolean,
+  workspaceHeldBack = false
 ): FilesEmptyCopy {
   if (filtered) return "search"
   if (section.kind === "trash") return "trash"
+  const workspace = section.kind === "group" && section.group === "workspace"
+  if (workspace && workspaceHeldBack) return "workspaceHeldBack"
   if (lens !== "suggested") return lens
-  return section.kind
+  return workspace ? "workspace" : section.kind
 }
 
 export function FilesEmpty({
@@ -82,7 +95,8 @@ export function FilesEmpty({
   touch?: boolean
 }) {
   const t = useTranslations("files.empty")
-  const copy = filesEmptyCopy(section, lens, filtered)
+  const heldBack = useFilesOps().capabilities.workspaceFiles !== true
+  const copy = filesEmptyCopy(section, lens, filtered, heldBack)
   const Icon = ICONS[copy]
   return (
     <Empty className="border-0 py-16" data-testid={`files-empty-${copy}`}>

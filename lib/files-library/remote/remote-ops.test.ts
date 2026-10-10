@@ -66,6 +66,7 @@ function client(over: Partial<FilesRemoteClient> = {}): jest.Mocked<FilesRemoteC
     deleteFolder: ok,
     upload: jest.fn(async () => "upload:new"),
     readMedia: jest.fn(async () => ({ bytes: new Uint8Array([1, 2]), mediaType: "image/png" })),
+    readWorkspaceFile: jest.fn(async () => new Uint8Array()),
     ...over,
   } as unknown as jest.Mocked<FilesRemoteClient>
 }
@@ -82,6 +83,8 @@ describe("paired capabilities", () => {
       share: { reason: "host-owns-share-records", remedy: "desktop" },
       open: "preview",
       maxTransferBytes: FILES_REMOTE_MAX_BYTES,
+      // The host lists its own workspace files and reads them for the device.
+      workspaceFiles: true,
     })
     expect(FILES_PAIRED_HELD_BACK.share.remedy).toBe("desktop")
   })
@@ -144,6 +147,34 @@ describe("remote ops", () => {
       onChanged: jest.fn(),
     })
     await expect(gone.payloadFor(entry({ kind: "upload", key: "upload:u" }))).resolves.toBeNull()
+  })
+
+  it("reads a workspace file off the host's disk, and is gone when the disk lost it", async () => {
+    const c = client({
+      readWorkspaceFile: jest.fn(async () => new Uint8Array([104, 105])),
+    })
+    const ops = createRemoteFilesOps({ client: c, imageLimit: () => 60, onChanged: jest.fn() })
+    const file = entry({
+      kind: "workspace-file",
+      key: "workspace-file:w",
+      title: "notes.md",
+      mediaType: "text/markdown",
+    })
+    const payload = await ops.payloadFor(file)
+    expect(c.readWorkspaceFile).toHaveBeenCalledWith(file, 60)
+    expect(c.readMedia).not.toHaveBeenCalled()
+    expect(payload).toMatchObject({ filename: "notes.md" })
+    expect(payload!.blob.type).toBe("text/markdown")
+    const gone = createRemoteFilesOps({
+      client: client({
+        readWorkspaceFile: jest.fn(async () =>
+          Promise.reject(new FilesRemoteError("files_workspace_missing"))
+        ),
+      }),
+      imageLimit: () => 60,
+      onChanged: jest.fn(),
+    })
+    await expect(gone.payloadFor(file)).resolves.toBeNull()
   })
 
   it("builds a read-only artifact for the preview from the host's text", async () => {

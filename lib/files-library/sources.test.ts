@@ -364,3 +364,54 @@ describe("live share codes (ADR-0223)", () => {
     expect(after.input.liveShareCodes).toBeUndefined()
   })
 })
+
+describe("workspace files (ADR-0223 §8)", () => {
+  const indexEntry = {
+    sessionId: "s1",
+    taskId: "task-1",
+    runId: "run-1",
+    workspaceRoot: "/repo",
+    executionRoot: "/exec/run-1",
+    path: "docs/plan.md",
+    kind: "created" as const,
+    oldPath: null,
+    mediaType: "text/markdown",
+    size: 12,
+    hash: null,
+    binary: false,
+    firstChangedAt: 10,
+    changedAt: 20,
+  }
+
+  it("merges the ledger's index with turn rows, and knows their conversations", async () => {
+    await getDb().codeAdoptionTurns.put({
+      id: "s2:1",
+      runId: 1,
+      sessionId: "s2",
+      workspaceRoot: "/other",
+      agentKind: "in-app",
+      model: null,
+      ts: 30,
+      totalFiles: 1,
+      totalAdded: 1,
+      totalRemoved: 0,
+      truncated: false,
+      files: [{ path: "src/a.ts", added: 1, removed: 0, isNew: true, hunks: [] }],
+    })
+    const { input } = await loadFilesSources({
+      artifacts: {},
+      canvasDocuments: {},
+      workspace: { index: [indexEntry] },
+    })
+    expect(input.workspaceFiles?.map((file) => [file.sessionId, file.relPath])).toEqual([
+      ["s1", "docs/plan.md"],
+      ["s2", "src/a.ts"],
+    ])
+    expect([...input.sessions.keys()].sort()).toEqual(["s1", "s2"])
+  })
+
+  it("lists none where this device has no workspace", async () => {
+    const { input } = await loadFilesSources({ artifacts: {}, canvasDocuments: {} })
+    expect(input).not.toHaveProperty("workspaceFiles")
+  })
+})

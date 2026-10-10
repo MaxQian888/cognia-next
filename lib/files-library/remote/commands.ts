@@ -13,6 +13,7 @@ export const FILES_REMOTE_COMMANDS = {
   folderList: "files_library_folder_list",
   search: "files_library_search",
   get: "files_library_get",
+  readChunk: "files_library_read_chunk",
   favorite: "files_library_favorite",
   move: "files_library_move",
   trash: "files_library_trash",
@@ -44,12 +45,13 @@ export function isFilesRemoteCommand(command: string): command is FilesRemoteCom
   return NAME_SET.has(command)
 }
 
-/** The four reads; everything else changes the host's library. */
+/** The five reads; everything else changes the host's library. */
 export const FILES_REMOTE_READ_COMMANDS: readonly FilesRemoteCommand[] = [
   FILES_REMOTE_COMMANDS.list,
   FILES_REMOTE_COMMANDS.folderList,
   FILES_REMOTE_COMMANDS.search,
   FILES_REMOTE_COMMANDS.get,
+  FILES_REMOTE_COMMANDS.readChunk,
 ]
 
 /**

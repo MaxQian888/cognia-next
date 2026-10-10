@@ -301,3 +301,62 @@ describe("readMedia", () => {
     ).rejects.toMatchObject({ code: "files_remote_too_large" })
   })
 })
+
+describe("readWorkspaceFile (ADR-0223 §8)", () => {
+  const file = entry({
+    key: "workspace-file:w1",
+    kind: "workspace-file",
+    sourceId: "w1",
+    byteSize: 5,
+  })
+  const slice = (bytes: number[], size: number, eof: boolean) => ({
+    ok: true,
+    dataBase64: btoa(String.fromCharCode(...bytes)),
+    size,
+    eof,
+  })
+
+  it("reads the file a slice at a time to its end", async () => {
+    const t = transport({
+      files_library_read_chunk: [slice([1, 2, 3], 5, false), slice([4, 5], 5, true)],
+    })
+    const bytes = await createFilesRemoteClient({ call: t.call as never }).readWorkspaceFile(
+      file,
+      60
+    )
+    expect(bytes).toEqual(new Uint8Array([1, 2, 3, 4, 5]))
+    expect(t.calls.map((c) => c.args.offset)).toEqual([0, 3])
+    expect(t.calls[0]!.args).toMatchObject({ key: "workspace-file:w1", imageLimit: 60 })
+  })
+
+  it("starts over once when the file changes size mid-read, then gives up", async () => {
+    const t = transport({
+      files_library_read_chunk: [slice([1], 5, false), slice([2], 6, false), slice([9], 1, true)],
+    })
+    await expect(
+      createFilesRemoteClient({ call: t.call as never }).readWorkspaceFile(file, 60)
+    ).resolves.toEqual(new Uint8Array([9]))
+    let size = 0
+    const restless = transport({ files_library_read_chunk: () => slice([1], ++size, false) })
+    await expect(
+      createFilesRemoteClient({ call: restless.call as never }).readWorkspaceFile(file, 60)
+    ).rejects.toMatchObject({ code: "files_remote_busy" })
+  })
+
+  it("refuses what is over the paired ceiling, and raises the host's refusal", async () => {
+    const t = transport({})
+    await expect(
+      createFilesRemoteClient({ call: t.call as never }).readWorkspaceFile(
+        { ...file, byteSize: FILES_REMOTE_MAX_BYTES + 1 },
+        60
+      )
+    ).rejects.toMatchObject({ code: "files_remote_too_large" })
+    expect(t.call).not.toHaveBeenCalled()
+    const gone = transport({
+      files_library_read_chunk: [{ ok: false, code: "files_workspace_missing" }],
+    })
+    await expect(
+      createFilesRemoteClient({ call: gone.call as never }).readWorkspaceFile(file, 60)
+    ).rejects.toMatchObject({ code: "files_workspace_missing" })
+  })
+})

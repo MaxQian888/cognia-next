@@ -1,3 +1,8 @@
+jest.mock("./workspace-files-io", () => ({
+  ...jest.requireActual("./workspace-files-io"),
+  readWorkspaceFileBytes: jest.fn(),
+}))
+
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { putLibraryAsset, putSessionAsset } from "@/lib/db/session-assets"
@@ -5,6 +10,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { documentFilenameFor, downloadPayloadFor, mediaFilenameFor } from "./download"
 import type { FilesEntry } from "./types"
+import { FilesWorkspaceFileError, readWorkspaceFileBytes } from "./workspace-files-io"
 
 jest.setTimeout(30_000)
 const fixture = createDbTestFixture()
@@ -135,5 +141,44 @@ describe("filenames without the source at hand (a paired device's download)", ()
     expect(
       mediaFilenameFor({ kind: "upload", title: "deck.pdf", sourceId: "x" }, "application/pdf")
     ).toBe("deck.pdf")
+  })
+})
+
+describe("a workspace file's download (ADR-0223 §8)", () => {
+  const workspace = {
+    sessionId: "s1",
+    workspaceRoot: "/repo",
+    executionRoot: "/exec",
+    relPath: "docs/plan.md",
+  }
+  const file = entry({
+    kind: "workspace-file",
+    sourceId: "w1",
+    title: "plan.md",
+    mediaType: "text/markdown",
+    workspace,
+  })
+
+  it("is the bytes on disk, under the name Files shows", async () => {
+    ;(readWorkspaceFileBytes as jest.Mock).mockResolvedValueOnce(new Uint8Array([104, 105]))
+    const payload = await downloadPayloadFor(file)
+    expect(readWorkspaceFileBytes).toHaveBeenCalledWith(workspace)
+    expect(payload?.filename).toBe("plan.md")
+    expect(payload?.blob.type).toBe("text/markdown")
+    expect(payload?.blob.size).toBe(2)
+  })
+
+  it("is gone when the file left the disk, and says why otherwise", async () => {
+    ;(readWorkspaceFileBytes as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_missing")
+    )
+    await expect(downloadPayloadFor(file)).resolves.toBeNull()
+    ;(readWorkspaceFileBytes as jest.Mock).mockRejectedValueOnce(
+      new FilesWorkspaceFileError("files_workspace_too_large")
+    )
+    await expect(downloadPayloadFor(file)).rejects.toMatchObject({
+      code: "files_workspace_too_large",
+    })
+    await expect(downloadPayloadFor({ ...file, workspace: undefined })).resolves.toBeNull()
   })
 })

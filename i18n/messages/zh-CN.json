@@ -17630,6 +17630,14 @@
       "trash": {
         "description": "移到回收站的内容会保留 30 天，之后永久删除。",
         "title": "回收站是空的"
+      },
+      "workspace": {
+        "description": "Agent 在对话工作区里新建、修改或重命名的文件会显示在这里。Files 只读取它们，文件仍留在 Agent 放置的位置。",
+        "title": "还没有工作区文件"
+      },
+      "workspaceHeldBack": {
+        "description": "Agent 写到磁盘上的文件位于本设备无法读取的工作区。请在桌面端打开 Files，或将本设备与桌面端配对后查看。",
+        "title": "工作区文件在桌面端"
       }
     },
     "errors": {
@@ -17662,6 +17670,9 @@
       "files_remote_zip_too_large": "“{name}”{more, plural, =0 {} other {等另外 # 项}}超过 10 MB。请在桌面端下载。",
       "files_source_empty": "此项没有可用的内容。",
       "files_source_missing": "此项内容已不在本设备上。",
+      "files_workspace_missing": "这个文件已不在磁盘上。",
+      "files_workspace_too_large": "这个文件太大，无法在这里读取。",
+      "files_workspace_unavailable": "暂时无法访问这个文件所在的工作区。",
       "headless_host": "已配对的主机无法管理其文件库。请在桌面端打开文件。",
       "library_folder_cycle": "文件夹不能移到自身之中。",
       "library_folder_name_required": "请输入文件夹名称。",
@@ -17774,7 +17785,8 @@
       "image": "图片",
       "session-upload": "文件",
       "upload": "文件",
-      "video": "视频"
+      "video": "视频",
+      "workspace-file": "工作区文件"
     },
     "lenses": {
       "ai": "AI 生成",
@@ -17830,16 +17842,20 @@
         "documents": "文档",
         "images": "图片",
         "uploads": "上传",
-        "videos": "视频"
+        "videos": "视频",
+        "workspace": "工作区文件"
       },
       "recents": "最近",
-      "trash": "回收站"
+      "trash": "回收站",
+      "workspaceHeldBack": "桌面端",
+      "workspaceHeldBackHint": "Agent 写到磁盘上的文件由桌面端列出，它能读取这些文件所在的工作区。"
     },
     "preview": {
       "close": "关闭预览",
       "conversations": "所在对话",
       "details": {
         "added": "添加时间",
+        "change": "改动",
         "dimensions": "分辨率",
         "dimensionsValue": "{width} × {height}",
         "duration": "时长",
@@ -17848,6 +17864,7 @@
         "generatedWithValue": "{provider} · {model}",
         "language": "语言",
         "modified": "修改时间",
+        "path": "路径",
         "prompt": "提示词",
         "size": "大小",
         "type": "类型"
@@ -17857,7 +17874,12 @@
       "openConversation": "打开对话",
       "sourceDeleted": "所在对话已删除。因为它已收藏或在文件夹中，所以仍保留在这里。",
       "trashedNotice": "于 {date} 移到回收站，将在 {purge} 永久删除。",
-      "unavailable": "内容已不在本设备上。"
+      "unavailable": "内容已不在本设备上。",
+      "workspaceChange": {
+        "created": "由 Agent 新建",
+        "modified": "由 Agent 修改",
+        "renamed": "由 Agent 重命名"
+      }
     },
     "remote": {
       "createOnDesktopHint": "画布文档和模板需在桌面端编辑。",
@@ -17954,7 +17976,8 @@
       "canvas": "未命名文档",
       "image": "未命名图片",
       "session-upload": "未命名文件",
-      "upload": "未命名文件"
+      "upload": "未命名文件",
+      "workspace-file": "未命名文件"
     },
     "untitledDocument": "未命名文档",
     "view": {

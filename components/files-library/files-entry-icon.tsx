@@ -42,7 +42,11 @@ export function FilesEntryIcon({
   entry: Pick<FilesEntry, "kind" | "subtype" | "title">
   className?: string
 }) {
-  if (entry.kind === "session-upload" || entry.kind === "upload") {
+  if (
+    entry.kind === "session-upload" ||
+    entry.kind === "upload" ||
+    entry.kind === "workspace-file"
+  ) {
     return <FileTypeIcon path={entry.title || "file"} className={cn("size-8", className)} />
   }
   const Icon =

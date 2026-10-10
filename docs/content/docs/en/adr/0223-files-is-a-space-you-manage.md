@@ -5,7 +5,7 @@ description: "The Files page becomes a managed space: a sidebar of places (all, 
 
 # ADR 0223 — Files is a space you manage
 
-**Status:** Accepted. Implemented: §1–§7, §9 and §10. Pending: §8 (workspace files), which needs host-side Rust work; until it ships, the Workspace files group is absent.
+**Status:** Accepted. Implemented: §1–§10.
 **Date:** 2026-10-10
 **Related:** [ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep) (Files, partly superseded),
 [ADR-0222](./0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant) (FileSpace and file sharing),
@@ -111,13 +111,50 @@ clear). Folders carry a color and an icon from fixed sets.
 
 ### 8. Workspace files
 
-Files an agent created, modified or renamed are a kind of their own, listed from
-the task-workspace ledger with code-adoption turns filling the gaps, one entry
-per conversation and path. Paths and mount status come from the conversation's
-FileSpace (ADR-0222); opening one uses its `view=files` link; existence is
-checked on open. Files never writes to or deletes them on disk: rename is a
-display name, Trash is Files' own, duplicate copies into a Files upload. Without
-a filesystem backend (plain web) the kind is dormant and says so.
+Files an agent created, modified or renamed in a conversation's workspace are a
+kind of their own, `workspace-file`, one entry per conversation, workspace root
+and path.
+
+- **Where the list comes from.** The task-workspace ledger answers
+  `task_workspace_list_resource_index`: its settled resource changes, joined to
+  the conversation that owns each task and folded in the order they settled.
+  Only an agent's change adds a path; a delete or a rename, by anyone, removes
+  or moves it; a change the ledger marks sensitive, generated or a symlink
+  removes it; a file that was created stays "created" through later edits. A
+  conversation the ledger holds nothing for (an external agent that never ran
+  through it) is filled from its code-adoption turns instead, skipping rejected
+  or reverted turns and files and the same credential-shaped paths
+  (`.env`, private keys and the like). A conversation the ledger does hold is never patched
+  from turn rows.
+- **Where it shows.** Under the sidebar's Workspace files group, and elsewhere
+  only once the person has touched it: in its folder once filed, under All's
+  Favorites lens once favorited, and in Recents once opened, favorited or
+  filed. All under any other lens never lists them, so an agent's busy run
+  does not bury what the person made. ⌘K leaves them out.
+- **Where the bytes are.** A path is relative to the run's execution root. An
+  isolated run's root can vanish once its changes are applied back, so a read
+  tries the execution root, then the workspace root, and a file found in
+  neither is gone ("This file is no longer on disk."). Existence is checked on
+  open, not when listing.
+- **Open** goes to the conversation and opens the file in its Files panel
+  through ADR-0222's opener when the conversation's FileSpace contains it; a
+  file outside it (a run root the FileSpace no longer mounts) is previewed in
+  place, read-only. Download, duplicate and Use in chat read the bytes where
+  they are now.
+- **Files never touches the disk copy.** Rename is a display name, Trash is
+  Files' own state, duplicate copies into a Files-owned upload, and a purge
+  forgets the item. A kept workspace file stores where it was, so it stays
+  listed after the ledger prunes its run.
+- **Paired phone.** The host lists its own workspace files in the library the
+  phone reads. Their bytes are not session media, so the phone reads them with
+  `files_library_read_chunk`: up to 512 KiB a call, at most 10 MiB a file,
+  named by the item's key only, so the device never names a path and the host
+  reads only a file its own listing holds. A file that changes size mid-read
+  restarts once.
+- **Dormant without a filesystem backend.** On plain web there is no ledger
+  and no disk to read. The capability `workspaceFiles` carries the reason
+  (`no-fs-backend`, use the desktop), the group stays in the sidebar disabled
+  with a hint, its empty state says why, and a test pins all three.
 
 ### 9. The phone
 
@@ -128,7 +165,7 @@ selection and drawers, without drag and drop or shortcuts.
 
 On a paired phone:
 
-- **The library is the host's, live.** Every read and write is one of 22
+- **The library is the host's, live.** Every read and write is one of 23
   `files_library_*` host commands, bridged to the desktop renderer and run by
   the same writers the desktop page uses. The host rebuilds its own aggregate
   for every call and acts on the entries it finds there, so a phone can neither

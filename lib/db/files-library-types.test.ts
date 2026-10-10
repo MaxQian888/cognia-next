@@ -13,7 +13,14 @@ import {
 describe("files-library-types", () => {
   it("keys an item by kind and source id", () => {
     expect(libraryItemKey("artifact", "a1")).toBe("artifact:a1")
-    expect(LIBRARY_ITEM_KINDS).toEqual(["artifact", "canvas", "image", "session-upload", "upload"])
+    expect(LIBRARY_ITEM_KINDS).toEqual([
+      "artifact",
+      "canvas",
+      "image",
+      "session-upload",
+      "upload",
+      "workspace-file",
+    ])
   })
 
   it("counts favorite, any folder (root included) and Files ownership as kept", () => {

@@ -386,6 +386,31 @@ export interface ResourceChange {
   contentCaptured: boolean
 }
 
+/**
+ * One file an agent left in a conversation's workspace: the latest net change
+ * to that path across the conversation's runs (ADR-0223 §8). `path` is
+ * relative to `executionRoot`; once an isolated run's root is gone the file
+ * lives at the same path under `workspaceRoot`. Never `deleted`.
+ */
+export interface TaskResourceIndexEntry {
+  sessionId: string
+  taskId: string
+  runId: string
+  workspaceRoot: string
+  executionRoot: string
+  path: string
+  kind: Exclude<ChangeKind, "deleted">
+  oldPath: string | null
+  mediaType: string
+  size: number
+  hash: string | null
+  binary: boolean
+  /** Epoch ms the run that first listed the path settled. */
+  firstChangedAt: number
+  /** Epoch ms the run that changed it last settled. */
+  changedAt: number
+}
+
 export type ResourceEventKind =
   "created" | "modified" | "deleted" | "renamed" | "any" | "gap" | "resync"
 

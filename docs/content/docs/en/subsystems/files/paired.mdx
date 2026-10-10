@@ -9,7 +9,7 @@ description: "How a phone or browser paired to a desktop manages the desktop's F
 
 <TLDR>
   A paired phone or browser manages the **desktop's** library, live. Nothing is mirrored: the page
-  mounts a remote backend that reads the host's list in pages and sends every change as one of 22
+  mounts a remote backend that reads the host's list in pages and sends every change as one of 23
   `files_library_*` host commands, which the desktop runs with the same writers its own page uses.
   Bytes ride the existing `session-media` resource, up to 10 MiB. Creating documents and Share stay on
   the desktop, and the page says so.
@@ -58,7 +58,7 @@ unreachable the page is closed rather than stale, because nothing is mirrored an
 
 ## Commands
 
-All 22 are `target: execution`, bridged through `src-tauri/src/companion_api/rpc/data_sync.rs` to the
+All 23 are `target: execution`, bridged through `src-tauri/src/companion_api/rpc/data_sync.rs` to the
 desktop renderer and delegated wholesale from `lib/companion/desktop-write-source.ts`, like the `pet_*`
 family. The server injects the verified `callerDeviceId` into every one. Reads use `client.read` and
 skip the idempotency cache; writes use `client.write` and require an `Idempotency-Key`.
@@ -69,6 +69,7 @@ skip the idempotency cache; writes use `client.write` and require an `Idempotenc
 | `files_library_folder_list` | One page of folders in id order |
 | `files_library_search` | Items whose body matches, by the page's own rule; trashed and removed items excluded |
 | `files_library_get` | One entry, and a document's text (up to 128 Ki characters) |
+| `files_library_read_chunk` | Up to 512 KiB of a [workspace file](/docs/subsystems/files/workspace)'s bytes, by item key |
 | `files_library_favorite` / `_move` / `_trash` / `_restore` | The selection, in one write; answers how many items it acted on |
 | `files_library_purge` | Ends trashed items only, by the [Trash rule](/docs/subsystems/files/data) |
 | `files_library_touch` / `_rename` | Record an open; rename |
@@ -129,6 +130,10 @@ device's media cache, so an image read once stays readable offline.
 
 The resource's 10 MiB cap is the device's ceiling (`FILES_REMOTE_MAX_BYTES`): past it the preview says
 to open the item on the desktop, Download refuses, and a zip refuses by name before reading anything.
+
+A workspace file's bytes are on the host's disk, not in session media, so they come from
+`files_library_read_chunk` instead, under the same 10 MiB ceiling
+([Workspace files](/docs/subsystems/files/workspace#on-a-paired-device)).
 
 ## Open, Use in chat, upload
 

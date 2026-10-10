@@ -409,3 +409,34 @@ describe("on a paired device (ADR-0223 §9)", () => {
     expect(screen.queryByTestId("files-preview-open")).toBeNull()
   })
 })
+
+it("previews a workspace file's bytes and says where it is and what the agent did (ADR-0223 §8)", async () => {
+  payload.mockResolvedValue({
+    blob: new Blob(["# plan"], { type: "text/markdown" }),
+    filename: "plan.md",
+  })
+  const e = entry({
+    key: "workspace-file:w1",
+    kind: "workspace-file",
+    sourceId: "w1",
+    title: "plan.md",
+    sourceTitle: "plan.md",
+    ownedByFiles: false,
+    creator: "ai",
+    workspace: {
+      sessionId: "s1",
+      workspaceRoot: "/repo",
+      executionRoot: "/repo",
+      relPath: "docs/plan.md",
+      change: "created",
+    },
+  })
+  render(<FilesPreviewPane entry={e} actions={actions()} onClose={jest.fn()} />)
+  expect(await screen.findByTestId("file-part-preview")).toHaveAttribute("data-filename", "plan.md")
+  expect(payload).toHaveBeenCalledWith(e)
+  expect(screen.getByText("Workspace file")).toBeInTheDocument()
+  expect(screen.getByTestId("files-preview-workspace-path")).toHaveTextContent("docs/plan.md")
+  expect(screen.getByTestId("files-preview-workspace-change")).toHaveTextContent(
+    "Created by an agent"
+  )
+})

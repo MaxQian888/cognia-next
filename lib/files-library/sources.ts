@@ -33,6 +33,8 @@ import {
   type FilesSessionInfo,
 } from "./aggregate"
 import type { FilesCreator } from "./types"
+import { mergeWorkspaceFiles } from "./workspace-files"
+import type { TaskResourceIndexEntry } from "@/lib/task-workspace/types"
 
 /** Images read per load; the page asks for more as the user scrolls. */
 export const FILES_IMAGE_PAGE_SIZE = 500
@@ -284,13 +286,24 @@ export async function loadFilesSources(options: {
   artifacts: Record<string, Artifact>
   canvasDocuments: Record<string, CanvasDocument>
   imageLimit?: number
+  /**
+   * Workspace files (ADR-0223 §8), where this device has a workspace: the
+   * ledger's resource index, or null when the ledger could not be asked (the
+   * code-adoption turn rows are then all there is). Absent = none listed.
+   * The index is read by the caller, outside any live query: it is not Dexie.
+   */
+  workspace?: { index: TaskResourceIndexEntry[] | null }
 }): Promise<LoadedFilesSources> {
-  const [sessionAssets, libraryAssets, items, succeededJobs] = await Promise.all([
+  const [sessionAssets, libraryAssets, items, succeededJobs, adoptionTurns] = await Promise.all([
     listAllSessionAssets(),
     listLibraryAssets(),
     listLibraryItems(),
     createDexieMediaJobStore().listByStatus("succeeded"),
+    options.workspace ? getDb().codeAdoptionTurns.toArray() : Promise.resolve([]),
   ])
+  const workspaceFiles = options.workspace
+    ? mergeWorkspaceFiles(options.workspace.index, adoptionTurns)
+    : []
   const { images, truncated } = await loadImages(
     options.imageLimit ?? FILES_IMAGE_PAGE_SIZE,
     items
@@ -306,6 +319,12 @@ export async function loadFilesSources(options: {
   }
   for (const image of images) for (const id of image.sessionIds) sessionIds.add(id)
   for (const asset of sessionAssets) sessionIds.add(asset.sessionId)
+  for (const file of workspaceFiles) sessionIds.add(file.sessionId)
+  for (const item of items) {
+    if (item.kind === "workspace-file" && item.snapshot?.workspace) {
+      sessionIds.add(item.snapshot.workspace.sessionId)
+    }
+  }
   const sessions = new Map<string, FilesSessionInfo>(
     (await getSessionsByIds([...sessionIds])).map((session) => [
       session.id,
@@ -335,6 +354,7 @@ export async function loadFilesSources(options: {
       sessionUploads: sessionAssets.map(rawUpload),
       libraryUploads: libraryAssets.map(rawUpload),
       generatedVideos: rawGeneratedVideos(succeededJobs),
+      ...(options.workspace ? { workspaceFiles } : {}),
       items,
       sessions,
       heldOriginals,
