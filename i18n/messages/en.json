@@ -17567,7 +17567,7 @@
       "type": "Type",
       "uploaded": "Uploaded"
     },
-    "copySuffix": "copy",
+    "copySuffix": " (copy)",
     "deleteFolderDialog": {
       "cancel": "Cancel",
       "cascade": "Delete its subfolders too, and take their items out of Folders",

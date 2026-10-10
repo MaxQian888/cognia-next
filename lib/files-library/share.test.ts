@@ -92,6 +92,7 @@ describe("resolveFilesShareSelection", () => {
     expect(selection.missing.map((e) => e.key)).toEqual(["image:gone"])
     expect([...selection.keyByPath.values()]).toEqual(["canvas:c1", "canvas:c2", "upload:u1"])
     expect(selection.sessions).toEqual([])
+    expect(selection.unverifiableSessionIds).toEqual([])
 
     const source = await selection.files[0]!.open()
     expect(source.size).toBe(6)
@@ -121,10 +122,28 @@ describe("resolveFilesShareSelection", () => {
     )
     expect(getSessions).toHaveBeenCalledWith(["shared:x", "s1"])
     expect(selection.sessions).toEqual([shared])
+    expect(selection.unverifiableSessionIds).toEqual([])
+  })
+
+  it("names shared conversations that are no longer stored here", async () => {
+    const selection = await resolveFilesShareSelection(
+      [entry({ key: "canvas:c1", originSessionId: "shared:gone", sessionIds: ["s-gone"] })],
+      [],
+      { payloadFor, getSessions: async () => [] }
+    )
+    // A missing local conversation is just gone; a missing shared one cannot be asked.
+    expect(selection.unverifiableSessionIds).toEqual(["shared:gone"])
   })
 })
 
 describe("authorizeFilesShare", () => {
+  const sel = (
+    sessions: Pick<ChatSession, "id" | "collaboration">[],
+    unverifiable: string[] = []
+  ) => ({
+    sessions,
+    unverifiableSessionIds: unverifiable,
+  })
   const session = (id: string) =>
     ({ id, collaboration: { orgId: "o", sessionId: id } }) as unknown as Pick<
       ChatSession,
@@ -137,7 +156,10 @@ describe("authorizeFilesShare", () => {
       .mockResolvedValueOnce({ orgId: "o", policyRevision: 3 })
       .mockResolvedValueOnce({ orgId: "o", policyRevision: 7 })
     const loadPolicy = jest.fn().mockResolvedValue({})
-    await authorizeFilesShare([session("a"), session("b")], { authorizeSharedSession, loadPolicy })
+    await authorizeFilesShare(sel([session("a"), session("b")]), {
+      authorizeSharedSession,
+      loadPolicy,
+    })
     expect(authorizeSharedSession).toHaveBeenCalledTimes(2)
     expect(loadPolicy).toHaveBeenCalledWith({ minOrgRevision: 7 })
   })
@@ -145,7 +167,7 @@ describe("authorizeFilesShare", () => {
   it("does nothing for items outside any collaboration conversation", async () => {
     const authorizeSharedSession = jest.fn()
     const loadPolicy = jest.fn()
-    await authorizeFilesShare([], { authorizeSharedSession, loadPolicy })
+    await authorizeFilesShare(sel([]), { authorizeSharedSession, loadPolicy })
     expect(authorizeSharedSession).not.toHaveBeenCalled()
     expect(loadPolicy).not.toHaveBeenCalled()
   })
@@ -157,14 +179,25 @@ describe("authorizeFilesShare", () => {
       .mockRejectedValueOnce(new SharedSessionAccessError("forbidden"))
     const loadPolicy = jest.fn()
     await expect(
-      authorizeFilesShare([session("a"), session("b")], { authorizeSharedSession, loadPolicy })
+      authorizeFilesShare(sel([session("a"), session("b")]), { authorizeSharedSession, loadPolicy })
     ).rejects.toEqual(new FileShareRefusedError("shared-session-forbidden"))
     expect(loadPolicy).not.toHaveBeenCalled()
   })
 
+  it("refuses before asking anyone when a shared conversation is no longer stored", async () => {
+    const authorizeSharedSession = jest.fn()
+    await expect(
+      authorizeFilesShare(sel([session("a")], ["shared:gone"]), {
+        authorizeSharedSession,
+        loadPolicy: jest.fn(),
+      })
+    ).rejects.toEqual(new FileShareRefusedError("shared-session-unavailable"))
+    expect(authorizeSharedSession).not.toHaveBeenCalled()
+  })
+
   it("reads an unreachable plane as unavailable", async () => {
     await expect(
-      authorizeFilesShare([session("a")], {
+      authorizeFilesShare(sel([session("a")]), {
         authorizeSharedSession: jest.fn().mockRejectedValue(new Error("offline")),
         loadPolicy: jest.fn(),
       })

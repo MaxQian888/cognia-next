@@ -405,7 +405,7 @@ describe("rename / duplicate", () => {
     expect(duplicateFilesEntry).toHaveBeenCalledWith(
       expect.objectContaining({ key: "artifact:a" }),
       {
-        suffix: "copy",
+        suffix: " (copy)",
         fallbackName: "Parser",
         projectId: "p1",
       }
@@ -419,7 +419,7 @@ describe("rename / duplicate", () => {
     const h = hook()
     await act(() => h.duplicate(canvas()))
     expect(duplicateFilesEntry).toHaveBeenCalledWith(expect.anything(), {
-      suffix: "copy",
+      suffix: " (copy)",
       fallbackName: "Notes",
     })
     expect(useFilesLibraryStore.getState().selectedKey).toBeNull()

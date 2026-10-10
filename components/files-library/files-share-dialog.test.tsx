@@ -91,6 +91,7 @@ it("reads the picked items, then shares them as one bundle and remembers what it
     ]),
     missing: [],
     sessions: sessions as FilesShareSelection["sessions"],
+    unverifiableSessionIds: [],
   }
   const resolveSelection = jest.fn().mockResolvedValue(selection)
   act(() =>
@@ -104,7 +105,7 @@ it("reads the picked items, then shares them as one bundle and remembers what it
   expect(resolveSelection).toHaveBeenCalledWith([ENTRIES[0], ENTRIES[1]], [])
 
   const built = await lastProps().buildPayload()
-  expect(mockAuthorize).toHaveBeenCalledWith(sessions)
+  expect(mockAuthorize).toHaveBeenCalledWith(selection)
   expect(built).toEqual({
     payload: expect.objectContaining({ kind: "file-bundle", title: "2 files from Files" }),
     attachments: [],
@@ -120,6 +121,7 @@ it("titles a single item by its name and names items with nothing stored", async
     keyByPath: new Map(),
     missing: [ENTRIES[0]],
     sessions: [],
+    unverifiableSessionIds: [],
   })
   act(() => useFilesLibraryStore.getState().openShare(["canvas:a"]))
   render(<FilesShareDialog entries={ENTRIES} folders={[]} resolveSelection={resolveSelection} />)
@@ -145,6 +147,7 @@ it("keeps the files it showed when the list refreshes underneath", async () => {
     keyByPath: new Map([["/files/a.md", "canvas:a"]]),
     missing: [],
     sessions: [],
+    unverifiableSessionIds: [],
   })
   act(() => useFilesLibraryStore.getState().openShare(["canvas:a"]))
   const { rerender } = render(

@@ -8,7 +8,7 @@
  * - everything else — an artifact, a conversation's image or file, an image
  *   uploaded into Files (it has no filename of its own) — keeps its source
  *   title, and Files stores a display name on its item. Renaming back to the
- *   source title, or to nothing, clears the display name.
+ *   source title clears the display name; an empty name is refused.
  */
 
 import { setLibraryItemDisplayName, type LibraryItemSource } from "@/lib/db/files-library-items"

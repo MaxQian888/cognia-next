@@ -122,7 +122,7 @@ export function FilesShareDialog({
       }}
       picked={pickedFiles}
       buildPayload={async () => {
-        await authorizeFilesShare(selection?.sessions ?? [])
+        await authorizeFilesShare(selection ?? { sessions: [], unverifiableSessionIds: [] })
         return { payload: filesSharePayload(title), attachments: [] }
       }}
       onCreated={(share, carried) => {

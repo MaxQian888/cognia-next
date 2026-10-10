@@ -40,6 +40,9 @@ import { numberedPath, zipFolderPath } from "./export-zip"
 import { loadLiveShareCodes } from "./sources"
 import { entrySource, type FilesEntry } from "./types"
 
+/** The id prefix of a conversation somebody else shared in (`isSharedWithMe`). */
+const SHARED_SESSION_PREFIX = "shared:"
+
 /** Where every Files item sits inside a bundle. */
 export const FILES_SHARE_ROOT = "/files"
 
@@ -58,6 +61,13 @@ export interface FilesShareSelection {
   missing: FilesEntry[]
   /** Collaboration conversations the items belong to; each must allow the share. */
   sessions: Pick<ChatSession, "id" | "collaboration">[]
+  /**
+   * Shared conversations (`shared:` ids) an item names that are no longer
+   * stored here — a kept item outliving a projection the person left. Their
+   * organization cannot be asked, so the share is refused rather than
+   * assumed allowed.
+   */
+  unverifiableSessionIds: string[]
 }
 
 export interface FilesShareSelectionDeps {
@@ -123,10 +133,13 @@ export async function resolveFilesShareSelection(
     })
   }
 
-  const sessions = (await getSessions([...sessionIds])).filter(
-    (session) => session.collaboration !== undefined
+  const stored = await getSessions([...sessionIds])
+  const found = new Set(stored.map((session) => session.id))
+  const sessions = stored.filter((session) => session.collaboration !== undefined)
+  const unverifiableSessionIds = [...sessionIds].filter(
+    (id) => id.startsWith(SHARED_SESSION_PREFIX) && !found.has(id)
   )
-  return { files, keyByPath, missing, sessions }
+  return { files, keyByPath, missing, sessions, unverifiableSessionIds }
 }
 
 export interface FilesShareAuthorizeDeps {
@@ -141,16 +154,23 @@ const defaultAuthorizeDeps: FilesShareAuthorizeDeps = {
 
 /**
  * Ask every collaboration conversation whether its files may be published.
- * A refusal is raised as the same `FileShareRefusedError` the share gate
+ * A shared conversation that is no longer stored here cannot be asked, and
+ * refuses the share as unavailable before any other is asked. A refusal is raised as the same `FileShareRefusedError` the share gate
  * raises, so the dialog explains it the same way. The newest policy revision
  * any answer named is then loaded, so the gate's own policy read that follows
  * cannot judge the share by an older cached org policy.
  */
 export async function authorizeFilesShare(
-  sessions: readonly Pick<ChatSession, "id" | "collaboration">[],
+  {
+    sessions,
+    unverifiableSessionIds,
+  }: Pick<FilesShareSelection, "sessions" | "unverifiableSessionIds">,
   deps: Partial<FilesShareAuthorizeDeps> = {}
 ): Promise<void> {
   const { authorizeSharedSession, loadPolicy } = { ...defaultAuthorizeDeps, ...deps }
+  if (unverifiableSessionIds.length > 0) {
+    throw new FileShareRefusedError("shared-session-unavailable")
+  }
   let newest: number | undefined
   for (const session of sessions) {
     let decided: { policyRevision: number } | null

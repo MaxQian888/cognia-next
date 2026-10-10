@@ -17567,7 +17567,7 @@
       "type": "类型",
       "uploaded": "上传"
     },
-    "copySuffix": "副本",
+    "copySuffix": " - 副本",
     "deleteFolderDialog": {
       "cancel": "取消",
       "cascade": "同时删除子文件夹，并将其中内容移出文件夹",
