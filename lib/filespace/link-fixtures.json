@@ -1,0 +1,35 @@
+{
+  "_comment": "Conversation files deep links (ADR-0222 §2). lib/filespace/links.test.ts builds each `deeplink` with buildConversationFilesDeeplink and parses it back; crates/cognia-cli/src/commands/open.rs builds the same string from `cognia open --session <id> --files [--path] [--line]`. Both sides use application/x-www-form-urlencoded query encoding, so the strings must match exactly.",
+  "cases": [
+    {
+      "name": "panel only",
+      "sessionId": "sess-1",
+      "deeplink": "cognia://session/sess-1?view=files"
+    },
+    {
+      "name": "file in the primary root",
+      "sessionId": "sess-1",
+      "path": "/workspace/src/app.ts",
+      "deeplink": "cognia://session/sess-1?view=files&path=%2Fworkspace%2Fsrc%2Fapp.ts"
+    },
+    {
+      "name": "file with a line",
+      "sessionId": "sess-1",
+      "path": "/workspace/src/app.ts",
+      "line": 42,
+      "deeplink": "cognia://session/sess-1?view=files&path=%2Fworkspace%2Fsrc%2Fapp.ts&line=42"
+    },
+    {
+      "name": "spaces and non-ASCII",
+      "sessionId": "s_2",
+      "path": "/roots/root-abc/docs/设计 v2.md",
+      "deeplink": "cognia://session/s_2?view=files&path=%2Froots%2Froot-abc%2Fdocs%2F%E8%AE%BE%E8%AE%A1+v2.md"
+    },
+    {
+      "name": "upload with a disambiguated name",
+      "sessionId": "sess-3",
+      "path": "/uploads/report~a1b2c3d4.pdf",
+      "deeplink": "cognia://session/sess-3?view=files&path=%2Fuploads%2Freport%7Ea1b2c3d4.pdf"
+    }
+  ]
+}

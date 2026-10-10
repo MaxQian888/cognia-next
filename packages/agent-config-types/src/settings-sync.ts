@@ -414,6 +414,11 @@ export const SETTINGS_SYNC = {
       "Rendezvous endpoint. Both peers must dial the same server, and the desktop/cloud host is the one that knows which signaling deployment it is registered with. Mirroring it down is what makes a self-hosted signaling server reach the phone at all (previously the phone always fell back to DEFAULT_SIGNALING_URL).",
   },
   shareUrl: { category: "desktop-only" },
+  fileSharing: {
+    category: "server-authoritative",
+    rationale:
+      "The host enforces file-sharing policy for the files it serves (ADR-0222), so the desktop owns it. A paired phone reads it to offer only what the host will allow, and must never widen it from the phone.",
+  },
   webdavSync: { category: "desktop-only" },
   iceServers: {
     category: "server-authoritative",

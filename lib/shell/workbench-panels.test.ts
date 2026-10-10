@@ -43,6 +43,7 @@ const PANEL_ID_CONSTANTS: Record<string, string> = {
   SQUAD_CONTEXT_PANEL_ID: "squad-context",
   NEW_TAB_PANEL_ID: "new-tab",
   SESSION_USAGE_PANEL_ID: "session-usage",
+  CONVERSATION_FILES_PANEL_ID: "conversation-files",
 }
 
 /**

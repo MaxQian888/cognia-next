@@ -202,6 +202,42 @@ export async function readWorkspaceFileBase64(
   })
 }
 
+/** Largest slice {@link readWorkspaceFileChunk} returns: one share chunk (ADR-0222). */
+export const WORKSPACE_CHUNK_READ_MAX_BYTES = 4 * 1024 * 1024
+
+/** One slice of a workspace file. */
+export interface WorkspaceFileChunk {
+  /** The bytes read, base64. */
+  dataBase64: string
+  offset: number
+  /** Below the requested length only at the end of the file. */
+  bytesRead: number
+  /** The file's size when this slice was read — compare across slices to notice a file changing. */
+  size: number
+  eof: boolean
+}
+
+/**
+ * Read `length` bytes of a workspace file from `offset` — the streaming
+ * counterpart of {@link readWorkspaceFileBase64} for files too large to read
+ * whole (sharing a file uploads it chunk by chunk). The host caps `length` at
+ * {@link WORKSPACE_CHUNK_READ_MAX_BYTES}; a read at or past the end resolves to
+ * an empty slice with `eof`, so a loop ends on `eof` alone.
+ */
+export async function readWorkspaceFileChunk(
+  root: string,
+  relPath: string,
+  offset: number,
+  length: number
+): Promise<WorkspaceFileChunk> {
+  return transport.call<WorkspaceFileChunk>("fs_read_workspace_file_chunk", {
+    root,
+    relPath,
+    offset,
+    length,
+  })
+}
+
 /** Write a text file relative to `root`, creating parent directories. */
 export async function writeWorkspaceFile(
   root: string,

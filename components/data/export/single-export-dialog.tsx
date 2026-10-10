@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { ThemeGallery } from "@/components/share/theme-gallery"
-import { buildChatSharePayload } from "@/lib/share/chat-export"
+import { buildChatShare } from "@/lib/share/chat-export"
 import { InteractivePageDialog } from "@/components/a2ui/from-execution/interactive-page-dialog"
 import { saveExport } from "@/lib/files/save-export"
 import { getDb } from "@/lib/db/schema"
@@ -274,7 +274,7 @@ export function SingleExportDialog({
           />
           <ShareLinkDialog
             buildPayload={() =>
-              buildChatSharePayload({
+              buildChatShare({
                 format,
                 session,
                 theme,
@@ -282,9 +282,11 @@ export function SingleExportDialog({
                 includeMetadata,
                 includeTimestamps,
                 includeTokens,
+                includeAllBranches,
                 withWallpaper,
               })
             }
+            files={{ session }}
             trigger={
               <Button variant="outline">
                 <Link2Icon className="mr-1.5 size-4" />

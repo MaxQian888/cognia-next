@@ -245,11 +245,38 @@ jest.mock("@/components/editor/project/project-editor-tabs", () => ({
   ),
 }))
 jest.mock("@/components/editor/project/project-file-tree", () => ({
-  ProjectFileTree: ({ onOpenFile }: { onOpenFile: (path: string) => void }) => (
-    <button data-testid="file-tree" onClick={() => onOpenFile("src/tree.ts")}>
-      tree
-    </button>
+  ProjectFileTree: ({
+    onOpenFile,
+    onCopyLink,
+  }: {
+    onOpenFile: (path: string) => void
+    onCopyLink?: (path: string) => void
+  }) => (
+    <>
+      <button data-testid="file-tree" onClick={() => onOpenFile("src/tree.ts")}>
+        tree
+      </button>
+      {onCopyLink ? (
+        <button data-testid="file-tree-copy-link" onClick={() => onCopyLink("src/tree.ts")}>
+          link
+        </button>
+      ) : null}
+    </>
   ),
+}))
+const mockCopyConversationFileLink = jest.fn(
+  async (..._args: unknown[]): Promise<string> => "copied"
+)
+jest.mock("@/lib/filespace/copy-link", () => ({
+  copyConversationFileLink: (...args: unknown[]) => mockCopyConversationFileLink(...args),
+}))
+const mockToastSuccess = jest.fn()
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
 }))
 jest.mock("@/components/editor/project/project-search-panel", () => ({
   ProjectSearchPanel: ({
@@ -481,6 +508,22 @@ describe("DockWorkspace", () => {
 
     expect(screen.getByTestId("dock-workspace-toolbar")).toBeInTheDocument()
     expect(screen.getByTestId("panel-root-name")).toHaveTextContent("repo")
+  })
+
+  it("copies a tree entry's link inside this conversation's FileSpace", async () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+    fireEvent.click(screen.getByTestId("file-tree-copy-link"))
+    await act(async () => {})
+    expect(mockCopyConversationFileLink).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      path: "/repo/src/tree.ts",
+    })
+    expect(mockToastSuccess).toHaveBeenCalledWith("toast.linkCopied")
+
+    mockCopyConversationFileLink.mockResolvedValueOnce("outside")
+    fireEvent.click(screen.getByTestId("file-tree-copy-link"))
+    await act(async () => {})
+    expect(mockToastError).toHaveBeenCalledWith("toast.linkOutside")
   })
 
   it("follows the conversation's worktree rather than the workspace root", () => {

@@ -974,6 +974,70 @@ pub fn fs_read_workspace_file_base64(
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+/// Largest slice one ranged read returns: one share chunk (ADR-0222). The
+/// bytes travel IPC and companion frames as base64, so the cap bounds both
+/// the allocation and the frame.
+pub const CHUNK_READ_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// One slice of a workspace file, from [`fs_read_workspace_file_chunk`].
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileChunk {
+    /// The bytes read, base64 (standard alphabet, padded).
+    pub data_base64: String,
+    /// Where the slice starts.
+    pub offset: u64,
+    /// How many bytes were read — fewer than asked only at the end of file.
+    pub bytes_read: u64,
+    /// The file's size when it was opened for this read.
+    pub size: u64,
+    /// Whether this slice reaches the end of the file.
+    pub eof: bool,
+}
+
+/// Read `length` bytes of a workspace file starting at `offset` — the
+/// streaming counterpart of [`fs_read_workspace_file_base64`] for files too
+/// large to read whole, used to upload a shared file chunk by chunk
+/// (ADR-0222). Same root-relative sandbox check; `length` is capped at
+/// [`CHUNK_READ_MAX_BYTES`]. Reading at or past the end returns an empty
+/// slice with `eof`, never an error, so a caller's loop ends on `eof` alone.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn fs_read_workspace_file_chunk(
+    root: String,
+    rel_path: String,
+    offset: u64,
+    length: usize,
+) -> Result<WorkspaceFileChunk, String> {
+    use base64::Engine;
+    use std::io::{Read, Seek, SeekFrom};
+    let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    let mut file = std::fs::File::open(&target).map_err(|e| format!("open {}: {}", rel_path, e))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("stat {}: {}", rel_path, e))?;
+    if metadata.is_dir() {
+        return Err(format!("{} is a directory", rel_path));
+    }
+    let size = metadata.len();
+    let want = length.min(CHUNK_READ_MAX_BYTES) as u64;
+    let available = size.saturating_sub(offset);
+    let take = want.min(available);
+    let mut buffer = vec![0u8; take as usize];
+    if take > 0 {
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| format!("seek {}: {}", rel_path, e))?;
+        file.read_exact(&mut buffer)
+            .map_err(|e| format!("read {}: {}", rel_path, e))?;
+    }
+    Ok(WorkspaceFileChunk {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(&buffer),
+        offset,
+        bytes_read: take,
+        size,
+        eof: offset.saturating_add(take) >= size,
+    })
+}
+
 /// Write a text file inside a workspace, with the same sandboxed path-traversal
 /// check as [`fs_read_workspace_file`]. `rel_path` is joined to `root`; parent
 /// directories are created as needed, and the resolved parent must canonicalize
@@ -1132,19 +1196,38 @@ pub struct WorkspaceWalk {
 /// Enforced host-side rather than left to each plugin: a scanner that forgets
 /// this hands the user's credentials to whatever it feeds. `.env.example` is
 /// the documented exception — it is a template by convention and carries no
-/// secret. Derived from RepoWiki's scanner, which had the same list in Python.
+/// secret. Derived from RepoWiki's scanner, which had the same list in Python,
+/// and widened for ADR-0222's file sharing. `fixtures/sensitive-paths.json`
+/// is the one list both languages use: a test pins these constants to it and
+/// `lib/filespace/sensitive.ts` reads it directly.
 const SENSITIVE_FILE_NAMES: &[&str] = &[
     ".env",
     ".envrc",
+    ".git-credentials",
     ".netrc",
     ".npmrc",
     ".pgpass",
     ".pypirc",
+    "_netrc",
     "id_dsa",
     "id_ecdsa",
+    "id_ecdsa_sk",
     "id_ed25519",
+    "id_ed25519_sk",
     "id_rsa",
 ];
+
+/// `.env.<suffix>` files that are templates, not secrets.
+const ENV_TEMPLATE_SUFFIXES: &[&str] = &["example", "sample", "template", "dist"];
+
+/// Extensions a private key or keychain keeps whatever it is called.
+const SENSITIVE_EXTENSIONS: &[&str] = &["pem", "key", "p12", "pfx", "keychain", "keychain-db"];
+
+/// Directories whose whole content is credentials or repository internals.
+const SENSITIVE_DIRECTORIES: &[&str] = &[".git", ".ssh", ".aws", ".gnupg", ".kube"];
+
+/// `parent/child` directory pairs that hold credentials (`.config/gh`).
+const SENSITIVE_DIRECTORY_PAIRS: &[(&str, &str)] = &[(".config", "gh"), (".config", "gcloud")];
 
 /// Whether a file name is refused by the sensitive-name floor.
 pub fn is_sensitive_workspace_file(name: &str) -> bool {
@@ -1154,11 +1237,11 @@ pub fn is_sensitive_workspace_file(name: &str) -> bool {
     }
     // `.env.production`, `.env.local`, … but not `.env.example`/`.env.sample`.
     if let Some(suffix) = lower.strip_prefix(".env.") {
-        return !matches!(suffix, "example" | "sample" | "template" | "dist");
+        return !ENV_TEMPLATE_SUFFIXES.contains(&suffix);
     }
     // Private keys keep their base name and gain an extension.
     if let Some((base, ext)) = lower.rsplit_once('.') {
-        if matches!(ext, "pem" | "key" | "p12" | "pfx") {
+        if SENSITIVE_EXTENSIONS.contains(&ext) {
             return true;
         }
         if SENSITIVE_FILE_NAMES.contains(&base) {
@@ -1166,6 +1249,41 @@ pub fn is_sensitive_workspace_file(name: &str) -> bool {
         }
     }
     false
+}
+
+/// Whether a directory named `name`, inside a directory named `parent`, is
+/// refused whole by the sensitive floor.
+pub fn is_sensitive_workspace_directory(parent: Option<&str>, name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if SENSITIVE_DIRECTORIES.contains(&lower.as_str()) {
+        return true;
+    }
+    let parent = parent.map(str::to_ascii_lowercase);
+    SENSITIVE_DIRECTORY_PAIRS
+        .iter()
+        .any(|(pair_parent, pair_child)| {
+            parent.as_deref() == Some(*pair_parent) && lower == *pair_child
+        })
+}
+
+/// Whether a `/`-separated path relative to a workspace root is refused by
+/// the sensitive floor: its file name, or any directory on the way to it.
+pub fn is_sensitive_workspace_path(rel_path: &str) -> bool {
+    let segments: Vec<&str> = rel_path
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let Some((file, directories)) = segments.split_last() else {
+        return false;
+    };
+    let mut parent: Option<&str> = None;
+    for directory in directories {
+        if is_sensitive_workspace_directory(parent, directory) {
+            return true;
+        }
+        parent = Some(directory);
+    }
+    is_sensitive_workspace_file(file)
 }
 
 /// Default and hard ceilings for one walk.
@@ -1203,6 +1321,11 @@ pub fn fs_walk_workspace(
         .clamp(1, WALK_HARD_MAX_ENTRIES);
     let depth = max_depth.unwrap_or(WALK_DEFAULT_MAX_DEPTH).max(1);
 
+    // Credential directories (`.ssh`, `.aws`, `.git` internals, …) are pruned
+    // whole rather than walked and filtered file by file; each one pruned
+    // counts once toward `skipped_sensitive`.
+    let pruned = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let pruned_in_filter = pruned.clone();
     let walker = WalkBuilder::new(&dir)
         .hidden(false)
         .git_ignore(respect_ignore)
@@ -1213,6 +1336,24 @@ pub fn fs_walk_workspace(
         .require_git(false)
         .follow_links(false)
         .max_depth(Some(depth))
+        .filter_entry(move |dent| {
+            if dent.depth() == 0 || !dent.file_type().is_some_and(|t| t.is_dir()) {
+                return true;
+            }
+            let path = dent.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            let parent = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned());
+            let sensitive = name
+                .as_deref()
+                .is_some_and(|name| is_sensitive_workspace_directory(parent.as_deref(), name));
+            if sensitive {
+                pruned_in_filter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            !sensitive
+        })
         .build();
 
     let mut entries: Vec<WorkspaceEntry> = Vec::new();
@@ -1235,7 +1376,14 @@ pub fn fs_walk_workspace(
                 .then(|| std::fs::canonicalize(path).ok())
                 .flatten()
                 .and_then(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()));
+            // The path rule also catches a walk that starts inside a refused
+            // directory (`rel_path = ".git"`), which the pruning never sees.
+            let under_root = path
+                .strip_prefix(&root_path)
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
             if name.as_deref().is_some_and(is_sensitive_workspace_file)
+                || is_sensitive_workspace_path(&under_root)
                 || target_name
                     .as_deref()
                     .is_some_and(is_sensitive_workspace_file)
@@ -1275,6 +1423,7 @@ pub fn fs_walk_workspace(
         });
     }
     sort_dir_listing(&mut entries);
+    skipped_sensitive += pruned.load(std::sync::atomic::Ordering::Relaxed);
     Ok(WorkspaceWalk {
         entries,
         truncated,
@@ -2210,15 +2359,13 @@ mod tests {
             .is_err()
         );
         assert!(!root.join("invalid.bin").exists());
-        assert!(
-            fs_write_workspace_file(
-                root_name,
-                "../escape.bin".into(),
-                "AA==".into(),
-                Some("base64".into())
-            )
-            .is_err()
-        );
+        assert!(fs_write_workspace_file(
+            root_name,
+            "../escape.bin".into(),
+            "AA==".into(),
+            Some("base64".into())
+        )
+        .is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2883,6 +3030,165 @@ mod tests {
                 "{allowed} must be allowed"
             );
         }
+    }
+
+    fn sensitive_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!("../fixtures/sensitive-paths.json"))
+            .expect("sensitive-paths.json is valid JSON")
+    }
+
+    fn fixture_strings(value: &serde_json::Value, key: &str) -> Vec<String> {
+        value[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("{key} is an array"))
+            .iter()
+            .map(|entry| entry.as_str().expect("string").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn sensitive_constants_are_the_shared_fixture() {
+        let fixture = sensitive_fixture();
+        let owned = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            fixture_strings(&fixture, "fileNames"),
+            owned(SENSITIVE_FILE_NAMES)
+        );
+        assert_eq!(
+            fixture_strings(&fixture, "envTemplateSuffixes"),
+            owned(ENV_TEMPLATE_SUFFIXES)
+        );
+        assert_eq!(
+            fixture_strings(&fixture, "extensions"),
+            owned(SENSITIVE_EXTENSIONS)
+        );
+        assert_eq!(
+            fixture_strings(&fixture, "directories"),
+            owned(SENSITIVE_DIRECTORIES)
+        );
+        let pairs: Vec<(String, String)> = fixture["directoryPairs"]
+            .as_array()
+            .expect("directoryPairs is an array")
+            .iter()
+            .map(|pair| {
+                (
+                    pair[0].as_str().unwrap().to_string(),
+                    pair[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let expected: Vec<(String, String)> = SENSITIVE_DIRECTORY_PAIRS
+            .iter()
+            .map(|(parent, child)| (parent.to_string(), child.to_string()))
+            .collect();
+        assert_eq!(pairs, expected);
+    }
+
+    #[test]
+    fn sensitive_paths_match_the_shared_conformance_cases() {
+        let fixture = sensitive_fixture();
+        for case in fixture["cases"].as_array().expect("cases") {
+            let path = case["path"].as_str().unwrap();
+            let expected = case["sensitive"].as_bool().unwrap();
+            assert_eq!(is_sensitive_workspace_path(path), expected, "{path}");
+        }
+        assert!(!is_sensitive_workspace_path(""));
+        assert!(is_sensitive_workspace_path("a\\.ssh\\config"));
+    }
+
+    #[test]
+    fn walk_workspace_prunes_credential_directories() {
+        let root = make_sandbox("walk-prune");
+        std::fs::create_dir_all(root.join(".git").join("objects")).unwrap();
+        std::fs::write(root.join(".git").join("config"), "[remote]").unwrap();
+        std::fs::write(root.join(".git").join("objects").join("ab"), "x").unwrap();
+        std::fs::create_dir_all(root.join(".config").join("gh")).unwrap();
+        std::fs::write(root.join(".config").join("gh").join("hosts.yml"), "t").unwrap();
+        std::fs::create_dir_all(root.join(".config").join("nvim")).unwrap();
+        std::fs::write(root.join(".config").join("nvim").join("init.lua"), "").unwrap();
+        std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+
+        let walk = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            Some(true),
+            Some(true),
+            None,
+            None,
+        )
+        .unwrap();
+        let names: Vec<_> = walk.entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(names.iter().any(|n| n == "main.rs"), "{names:?}");
+        assert!(
+            names.iter().any(|n| n == ".config/nvim/init.lua"),
+            "{names:?}"
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.starts_with(".git") || n.starts_with(".config/gh")),
+            "{names:?}"
+        );
+        // Two directories pruned, each counted once.
+        assert_eq!(walk.skipped_sensitive, 2);
+
+        // Starting inside a refused directory does not get around it.
+        let inside = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            Some(".git".into()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(inside.entries.is_empty(), "{:?}", inside.entries);
+        assert_eq!(inside.skipped_sensitive, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_chunk_streams_a_file_in_slices() {
+        use base64::Engine;
+        let root = make_sandbox("chunk-read");
+        let content: Vec<u8> = (0..10u8).collect();
+        std::fs::write(root.join("data.bin"), &content).unwrap();
+        let root_str = root.to_string_lossy().to_string();
+
+        let first =
+            fs_read_workspace_file_chunk(root_str.clone(), "data.bin".into(), 0, 4).unwrap();
+        assert_eq!(first.bytes_read, 4);
+        assert_eq!(first.size, 10);
+        assert!(!first.eof);
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&first.data_base64)
+                .unwrap(),
+            vec![0, 1, 2, 3]
+        );
+        let last = fs_read_workspace_file_chunk(root_str.clone(), "data.bin".into(), 8, 4).unwrap();
+        assert_eq!(last.bytes_read, 2);
+        assert!(last.eof);
+        let past =
+            fs_read_workspace_file_chunk(root_str.clone(), "data.bin".into(), 99, 4).unwrap();
+        assert_eq!(past.bytes_read, 0);
+        assert!(past.eof);
+        assert_eq!(past.data_base64, "");
+        let exact =
+            fs_read_workspace_file_chunk(root_str.clone(), "data.bin".into(), 6, 4).unwrap();
+        assert!(exact.eof);
+
+        // The length is capped at one share chunk.
+        let capped =
+            fs_read_workspace_file_chunk(root_str.clone(), "data.bin".into(), 0, usize::MAX)
+                .unwrap();
+        assert_eq!(capped.bytes_read, 10);
+
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        assert!(fs_read_workspace_file_chunk(root_str.clone(), "dir".into(), 0, 4).is_err());
+        assert!(fs_read_workspace_file_chunk(root_str.clone(), "../escape".into(), 0, 4).is_err());
+        assert!(fs_read_workspace_file_chunk(root_str, "missing".into(), 0, 4).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

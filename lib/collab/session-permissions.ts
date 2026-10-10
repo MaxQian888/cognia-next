@@ -37,6 +37,7 @@ const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
     "session.auditMetadata",
     "attachment.read",
     "attachment.write",
+    "files.share",
   ]),
   owner: new Set([
     "session.discover",
@@ -57,6 +58,7 @@ const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
     "session.auditMetadata",
     "attachment.read",
     "attachment.write",
+    "files.share",
   ]),
 }
 
@@ -69,6 +71,7 @@ const GUEST_DENIED = new Set<SessionAction>([
   "session.export",
   "session.auditMetadata",
   "session.breakGlassRead",
+  "files.share",
 ])
 
 export function authorizeSessionAction(
@@ -80,7 +83,10 @@ export function authorizeSessionAction(
   if (membership.guest && GUEST_DENIED.has(action)) {
     return { allowed: false, reason: "guest_capability_ceiling", policyRevision }
   }
-  if (action === "run.approveHighRisk" && membership.approver) {
+  // The approver flag is an overlay on a member, as on the server
+  // (`crates/cognia-collab-server/src/chat.rs`): a viewer marked approver
+  // still cannot approve, and owners and maintainers already can.
+  if (action === "run.approveHighRisk" && membership.approver && membership.role === "member") {
     return { allowed: true, reason: "explicit_approver", policyRevision }
   }
   if (ROLE_ACTIONS[membership.role].has(action)) {

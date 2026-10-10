@@ -21,17 +21,20 @@ revoke). It never sees the key or the plaintext.
 
 API surface (all under `/v1`):
 
-| Method    | Path                       | Auth   | Success                                                  | Notes                                                       |
-| --------- | -------------------------- | ------ | -------------------------------------------------------- | ----------------------------------------------------------- |
-| `POST`    | `/v1/share`                | Bearer | `201 {code, ownerToken, expiresAt}`                      | `413` over body cap, `400` bad json/envelope, `401`         |
-| `GET`     | `/v1/share/:code`          | public | `200 {envelope}`                                         | `404` if missing/expired/burned/revoked                     |
-| `GET`     | `/v1/share/:code/metadata` | public | `200 {passphrase, burnAfterRead, maxViews?, expiresAt?}` | no envelope or owner data; does not spend a view            |
-| `PATCH`   | `/v1/share/:code`          | Owner  | `200 {expiresAt?}`                                       | extends with `{ttlSeconds}`; never shortens existing expiry |
-| `GET`     | `/v1/share/:code/stats`    | Owner  | `200 {viewCount, expiresAt?, revoked, maxViews?}`        | `X-Owner-Token`; legacy rows fall back to Bearer            |
-| `DELETE`  | `/v1/share/:code`          | Owner  | `204`                                                    | hard delete; unknown codes return `204`                     |
-| `OPTIONS` | any                        | —      | `204` + CORS                                             | preflight                                                   |
-| `GET`     | `/healthz`                 | —      | `200` JSON                                               | liveness probe                                              |
-| `GET`     | `/metrics`                 | —      | `200` Prometheus text                                    | scrape endpoint                                             |
+| Method    | Path                                   | Auth   | Success                                                  | Notes                                                              |
+| --------- | -------------------------------------- | ------ | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| `POST`    | `/v1/share`                            | Bearer | `201 {code, ownerToken, expiresAt}`                      | `413` over body cap, `400` bad json/envelope, `401`                |
+| `GET`     | `/v1/share/:code`                      | public | `200 {envelope, readTicket?, readTicketExpiresAt?}`      | `404` if missing/expired/burned/revoked                            |
+| `GET`     | `/v1/share/:code/metadata`             | public | `200 {passphrase, burnAfterRead, maxViews?, expiresAt?}` | no envelope or owner data; does not spend a view                   |
+| `PATCH`   | `/v1/share/:code`                      | Owner  | `200 {expiresAt?}`                                       | extends with `{ttlSeconds}`; never shortens existing expiry        |
+| `GET`     | `/v1/share/:code/stats`                | Owner  | `200 {viewCount, expiresAt?, revoked, maxViews?}`        | `X-Owner-Token`; legacy rows fall back to Bearer                   |
+| `DELETE`  | `/v1/share/:code`                      | Owner  | `204`                                                    | hard delete; unknown codes return `204`                            |
+| `PUT`     | `/v1/share/:code/blobs/:blobId/:index` | Owner  | `204`                                                    | one encrypted file chunk; `409` once committed, `413` over a limit |
+| `POST`    | `/v1/share/:code/blobs/:blobId/commit` | Owner  | `200 {ok}`                                               | body `{chunkCount, totalBytes}`; `400` if chunks are missing       |
+| `GET`     | `/v1/share/:code/blobs/:blobId/:index` | Ticket | `200` chunk bytes                                        | `X-Read-Ticket` from the envelope read; `401` without one          |
+| `OPTIONS` | any                                    | —      | `204` + CORS                                             | preflight                                                          |
+| `GET`     | `/healthz`                             | —      | `200` JSON                                               | liveness probe                                                     |
+| `GET`     | `/metrics`                             | —      | `200` Prometheus text                                    | scrape endpoint                                                    |
 
 Creating a share without `ttlSeconds` uses the configured maximum lifetime
 (30 days by default); larger requests are clamped. Renewal keeps the later of
@@ -41,6 +44,17 @@ maximum. Legacy links with no expiry keep that unlimited lifetime and return
 but never increments the counter. Its passphrase flag comes from the envelope's
 non-secret `pp` header, including legacy shares, so the viewer can ask for a
 passphrase before spending a limited view.
+
+File blobs (ADR-0222). A share can carry files: the app encrypts each file in
+4 MiB chunks (AES-GCM, a per-file key derived from the share key, so the server
+still never sees a key or plaintext), uploads them with the share's owner token
+after creating the envelope, and commits each blob. Limits are pinned in
+`share-constants.json` and shared with the Worker and the app: 128 chunks per
+blob (512 MiB), 200 blobs and 2 GiB per share. A counted envelope read also
+returns a read ticket, an HMAC over the share and an expiry (one hour, never
+past the share's own), which is the only way to fetch chunks; a burned or
+view-limited share's blobs stay readable until that ticket lapses and are then
+reaped with the envelope.
 
 The viewer (`/share/view?c=…#k=…`) is the app's own route — this server is a
 pure JSON API scoped to `/v1/*`, exactly like the Worker.
@@ -79,22 +93,25 @@ SQLite file and drive it over HTTP with `reqwest`.
 
 All via environment variables (mirrors the `SIGNALING_*` convention):
 
-| Var                          | Default               | Purpose                                                           |
-| ---------------------------- | --------------------- | ----------------------------------------------------------------- |
-| `PORT` / `BIND_ADDR`         | `0.0.0.0:8787`        | Listen address (`BIND_ADDR` wins; PaaS injects `PORT`)            |
-| `SHARE_DB_PATH`              | `./shares.sqlite`     | SQLite database file                                              |
-| `SHARE_UPLOAD_SECRET`        | _(unset)_             | Bearer secret for create/delete/stats. **Unset ⇒ all writes 401** |
-| `SHARE_UPLOAD_SECRET_FILE`   | _(unset)_             | Read the bearer secret from a file instead of the environment     |
-| `SHARE_GRANT_KEY`            | _(unset)_             | Hex HMAC key shared with the collaboration server (ADR-0149 §8)   |
-| `SHARE_GRANT_KEY_FILE`       | _(unset)_             | Read the grant key from a file instead of the environment         |
-| `SHARE_MAX_BODY_BYTES`       | `10485760` (10 MiB)   | Max request body                                                  |
-| `SHARE_MAX_TTL_SECONDS`      | `2592000` (30 days)   | Hard lifetime ceiling; every share expires at or before this      |
-| `SHARE_ALLOWED_ORIGINS`      | _(unset = allow all)_ | Comma-separated `Origin` allowlist                                |
-| `SHARE_TRUST_PROXY_HEADERS`  | `false`               | Trust `Fly-Client-IP` / first `X-Forwarded-For` for rate limits   |
-| `SHARE_RATE_PER_SEC`         | `20`                  | Per-IP sustained request rate                                     |
-| `SHARE_RATE_BURST`           | `40`                  | Per-IP burst bucket size                                          |
-| `SHARE_REAPER_INTERVAL_SECS` | `60`                  | TTL sweep interval                                                |
-| `RUST_LOG`                   | `info,share=info`     | Log filter                                                        |
+| Var                          | Default                 | Purpose                                                                                                       |
+| ---------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `PORT` / `BIND_ADDR`         | `0.0.0.0:8787`          | Listen address (`BIND_ADDR` wins; PaaS injects `PORT`)                                                        |
+| `SHARE_DB_PATH`              | `./shares.sqlite`       | SQLite database file                                                                                          |
+| `SHARE_UPLOAD_SECRET`        | _(unset)_               | Bearer secret for create/delete/stats. **Unset ⇒ all writes 401**                                             |
+| `SHARE_UPLOAD_SECRET_FILE`   | _(unset)_               | Read the bearer secret from a file instead of the environment                                                 |
+| `SHARE_GRANT_KEY`            | _(unset)_               | Hex HMAC key shared with the collaboration server (ADR-0149 §8)                                               |
+| `SHARE_GRANT_KEY_FILE`       | _(unset)_               | Read the grant key from a file instead of the environment                                                     |
+| `SHARE_TICKET_KEY`           | _(unset = random)_      | Hex HMAC key (32 bytes) for file read tickets; unset ⇒ a per-process key, so tickets do not survive a restart |
+| `SHARE_TICKET_KEY_FILE`      | _(unset)_               | Read the ticket key from a file instead of the environment                                                    |
+| `SHARE_BLOB_DIR`             | `<SHARE_DB_PATH>.blobs` | Directory for encrypted file chunks; keep it on the same volume as the database                               |
+| `SHARE_MAX_BODY_BYTES`       | `10485760` (10 MiB)     | Max request body                                                                                              |
+| `SHARE_MAX_TTL_SECONDS`      | `2592000` (30 days)     | Hard lifetime ceiling; every share expires at or before this                                                  |
+| `SHARE_ALLOWED_ORIGINS`      | _(unset = allow all)_   | Comma-separated `Origin` allowlist                                                                            |
+| `SHARE_TRUST_PROXY_HEADERS`  | `false`                 | Trust `Fly-Client-IP` / first `X-Forwarded-For` for rate limits                                               |
+| `SHARE_RATE_PER_SEC`         | `20`                    | Per-IP sustained request rate                                                                                 |
+| `SHARE_RATE_BURST`           | `40`                    | Per-IP burst bucket size                                                                                      |
+| `SHARE_REAPER_INTERVAL_SECS` | `60`                    | TTL sweep interval                                                                                            |
+| `RUST_LOG`                   | `info,share=info`       | Log filter                                                                                                    |
 
 ## Tenancy and identity (ADR-0149 §8)
 

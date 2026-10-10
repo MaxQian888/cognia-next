@@ -1,6 +1,7 @@
 "use client"
 
 import type { ChatSession, SessionAction } from "@cognia/agent-config-types"
+import { CollabError } from "./client"
 import { authorizeSessionAction } from "./session-permissions"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "./runtime-client"
 
@@ -67,6 +68,49 @@ async function assertSharedSessionAccess(
     if (error instanceof SharedSessionAccessError) throw error
     throw new SharedSessionAccessError("not_found")
   }
+}
+
+/**
+ * May the current person publish a shared conversation's files (ADR-0222)?
+ * Resolves to `null` for a conversation that is not shared — local policy
+ * alone decides there — or to the org and the policy revision the server
+ * decided under. A refusal by role or by org policy is `forbidden`; an
+ * unreachable server, a switched account or a conversation the person cannot
+ * see is `not_found`, like every other shared-session check.
+ */
+export async function assertSharedSessionFileShare(
+  session: Pick<ChatSession, "collaboration">,
+  resolveContext: () => Promise<CurrentCollabContext | null> = resolveCurrentCollabContext
+): Promise<{ orgId: string; policyRevision: number } | null> {
+  const binding = session.collaboration
+  if (!binding) return null
+  const context = await resolveContext()
+  if (
+    !context ||
+    context.orgId !== binding.orgId ||
+    (binding.endpoint && binding.endpoint !== context.client.baseUrl)
+  ) {
+    throw new SharedSessionAccessError("not_found")
+  }
+  let decided: { policyRevision: number }
+  try {
+    decided = await context.client.authorizeSessionFileShare(binding.orgId, binding.sessionId)
+  } catch (error) {
+    throw new SharedSessionAccessError(
+      error instanceof CollabError && error.status === 403 ? "forbidden" : "not_found"
+    )
+  }
+  const current = await resolveContext()
+  if (
+    !current ||
+    current.localAccountId !== context.localAccountId ||
+    current.userId !== context.userId ||
+    current.orgId !== context.orgId ||
+    current.client.baseUrl !== context.client.baseUrl
+  ) {
+    throw new SharedSessionAccessError("not_found")
+  }
+  return { orgId: binding.orgId, policyRevision: decided.policyRevision }
 }
 
 export function assertLocalMutationAllowed(

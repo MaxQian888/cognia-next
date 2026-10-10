@@ -103,7 +103,13 @@ pub fn cors_layer(origins: &[HeaderValue]) -> Option<CorsLayer> {
                 header::HeaderName::from_static("x-cognia-run-token"),
                 header::HeaderName::from_static("x-cognia-attachment-ticket"),
             ])
-            .expose_headers([header::ETAG, header::LOCATION])
+            .expose_headers([
+                header::ETAG,
+                header::LOCATION,
+                // The org file-sharing policy revision an export authorization
+                // was decided under (ADR-0222).
+                header::HeaderName::from_static("x-cognia-file-policy-revision"),
+            ])
             .max_age(Duration::from_secs(600)),
     )
 }

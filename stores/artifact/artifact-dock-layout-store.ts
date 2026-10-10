@@ -70,8 +70,21 @@ type WorkspaceRevealReviewRequest = {
 
 export type WorkspaceRevealRequest = WorkspaceRevealFileRequest | WorkspaceRevealReviewRequest
 
+/**
+ * A directory to root the workspace editor at with no file to open — a
+ * conversation's additional root, revealed from the Conversation files panel
+ * (ADR-0222). Context only: there is nothing for the editor to consume.
+ */
+type WorkspaceRootContext = {
+  sessionId: string
+  rootPath: string
+  kind: "root"
+}
+
 export type WorkspaceDockContext =
-  Omit<WorkspaceRevealFileRequest, "id"> | Omit<WorkspaceRevealReviewRequest, "id">
+  | Omit<WorkspaceRevealFileRequest, "id">
+  | Omit<WorkspaceRevealReviewRequest, "id">
+  | WorkspaceRootContext
 
 export const ARTIFACT_DOCK_BOUNDS = {
   min: 24,
@@ -273,6 +286,12 @@ export interface ArtifactDockLayoutState {
     relPath?: string
     scope?: ReviewScopeChoice
   }) => void
+  /**
+   * Open the workspace editor rooted at `rootPath` without opening a file.
+   * Retained like a file reveal's context, so the editor stays on that root
+   * until the conversation changes.
+   */
+  revealWorkspaceRoot: (request: { sessionId: string; rootPath: string }) => void
   clearWorkspaceRevealRequest: (id: string) => void
   /**
    * Drop every reveal the user navigated away from.
@@ -557,6 +576,20 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
             kind: "review",
             ...request,
           },
+        }),
+      revealWorkspaceRoot: (request) =>
+        set({
+          revealIntent: { panelId: "workspace", mode: "wide" },
+          dockProfile: "workspace",
+          dockCollapsed: false,
+          userDismissed: false,
+          unreadArtifact: false,
+          mobileSheetOpen: true,
+          mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
+          workspaceContext: { kind: "root", ...request },
+          // A pending file reveal for another root would re-root the editor on
+          // its next render; the user just asked for this one.
+          workspaceRevealRequest: null,
         }),
       clearWorkspaceRevealRequest: (id) =>
         set((state) =>

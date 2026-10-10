@@ -22,7 +22,7 @@
 import { memo, useMemo, useState } from "react"
 import type { ToolUIPart } from "ai"
 import { useTranslations } from "next-intl"
-import { ExternalLinkIcon } from "lucide-react"
+import { ExternalLinkIcon, LinkIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -38,6 +38,7 @@ import {
 } from "@/components/chat/message-parts/tool-row"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { resultErrorPreview } from "@/lib/chat/tool-result-summary"
+import { copyConversationFileLink } from "@/lib/filespace/copy-link"
 import { asString, resolveToolPartName } from "@/lib/chat/tool-summary"
 import {
   canOfferWorkbenchReview,
@@ -278,6 +279,46 @@ const OpenInWorkspaceButton = memo(function OpenInWorkspaceButton({
   )
 })
 
+/**
+ * Row action that copies a link to the reported file inside this conversation
+ * (ADR-0222), so it can be pasted into another chat, a note or an issue and
+ * still open the same file. Offered wherever the open action is: a file the
+ * conversation cannot address has no link.
+ */
+const CopyFileLinkButton = memo(function CopyFileLinkButton({
+  sessionId,
+  path,
+  line,
+}: {
+  sessionId?: string
+  path: string
+  line?: number
+}) {
+  const t = useTranslations("filespace")
+  if (!sessionId || !canOfferWorkbenchReview() || path.trim() === "") return null
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-6 text-muted-foreground hover:text-foreground"
+      aria-label={t("actions.copyLink")}
+      title={t("actions.copyLink")}
+      data-testid="file-tool-copy-link"
+      onClick={(e) => {
+        e.stopPropagation()
+        void copyConversationFileLink({ sessionId, path, line }).then((result) => {
+          if (result === "copied") toast.success(t("toast.linkCopied"))
+          else if (result === "outside") toast.error(t("toast.linkOutside"))
+          else toast.error(t("toast.copyFailed"))
+        })
+      }}
+    >
+      <LinkIcon className="size-3" />
+    </Button>
+  )
+})
+
 type BodyComponent = (props: { part: ToolUIPart; sessionId?: string }) => React.JSX.Element | null
 
 const BODY_BY_KIND: Record<FileToolKind, BodyComponent> = {
@@ -461,6 +502,9 @@ export const FileToolPart = memo(function FileToolPart({
               <WorkbenchReviewButton sessionId={sessionId} absolutePath={info.path} />
             ) : info.path ? (
               <OpenInWorkspaceButton sessionId={sessionId} path={info.path} line={info.line} />
+            ) : null}
+            {info.path ? (
+              <CopyFileLinkButton sessionId={sessionId} path={info.path} line={info.line} />
             ) : null}
           </>
         ) : undefined

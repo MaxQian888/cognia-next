@@ -1,6 +1,8 @@
+import { CollabError } from "./client"
 import {
   assertLocalMutationAllowed,
   assertSharedSessionExport,
+  assertSharedSessionFileShare,
   assertSharedSessionRead,
 } from "./shared-session-access"
 
@@ -130,4 +132,40 @@ it("hides missing identities and transient authorization failures", async () => 
     )
   ).rejects.toThrow("SESSION_NOT_FOUND")
   expect(() => assertLocalMutationAllowed({}, "session.post")).not.toThrow()
+})
+
+it("authorizes a file share on the server and tells a refusal from a missing session", async () => {
+  await expect(assertSharedSessionFileShare({}, jest.fn())).resolves.toBeNull()
+
+  const client = {
+    baseUrl: "https://collab.example",
+    authorizeSessionFileShare: jest.fn().mockResolvedValue({ policyRevision: 3 }),
+  }
+  const context = { orgId: "org", userId: "user", localAccountId: "local", client }
+  const resolve = async () => context as never
+  await expect(assertSharedSessionFileShare({ collaboration: binding }, resolve)).resolves.toEqual({
+    orgId: "org",
+    policyRevision: 3,
+  })
+  expect(client.authorizeSessionFileShare).toHaveBeenCalledWith("org", "shared")
+
+  client.authorizeSessionFileShare.mockRejectedValueOnce(new CollabError(403, "forbidden"))
+  await expect(
+    assertSharedSessionFileShare({ collaboration: binding }, resolve)
+  ).rejects.toMatchObject({ reason: "forbidden" })
+  client.authorizeSessionFileShare.mockRejectedValueOnce(new CollabError(404, "not found"))
+  await expect(
+    assertSharedSessionFileShare({ collaboration: binding }, resolve)
+  ).rejects.toMatchObject({ reason: "not_found" })
+  await expect(
+    assertSharedSessionFileShare({ collaboration: binding }, async () => null)
+  ).rejects.toMatchObject({ reason: "not_found" })
+
+  // The account switched while the server was answering.
+  let calls = 0
+  const switching = async () =>
+    (calls++ === 0 ? context : { ...context, userId: "someone-else" }) as never
+  await expect(
+    assertSharedSessionFileShare({ collaboration: binding }, switching)
+  ).rejects.toMatchObject({ reason: "not_found" })
 })

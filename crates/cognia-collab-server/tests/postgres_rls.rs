@@ -675,13 +675,14 @@ async fn assert_force_rls(client: &Client) {
                 "issue_events",
                 "org_memberships",
                 "organization_invitations",
+                "org_file_sharing_policies",
                 "workspaces",
                 "workspace_memberships",
             ]],
         )
         .await
         .expect("RLS metadata must be readable");
-    assert_eq!(rows.len(), 10);
+    assert_eq!(rows.len(), 11);
     for row in rows {
         assert!(
             row.get::<_, bool>(1),

@@ -1,0 +1,37 @@
+---
+title: Links
+description: "The conversation files link grammar on desktop, in the app and in the CLI, and the fixtures that hold the three to the same strings."
+---
+
+# Conversation files links
+
+A files link is a conversation link with three more query parameters, so anything that only understands
+the conversation still opens it.
+
+| Shell | Form |
+| --- | --- |
+| Desktop | `cognia://session/<id>?view=files[&path=<FileSpacePath>][&line=<n>]` |
+| App / web | `/?session=<id>&view=files[&path=…][&line=…]` |
+| CLI | `cognia open --session <id> --files [--path <FileSpacePath> [--line <n>]]` |
+
+Rules:
+
+- `view` other than `files` is ignored: the conversation opens.
+- `path` must be a FileSpace path — absolute, POSIX, no `.` or `..` segments, no backslashes or control
+  characters. A malformed path drops the path, not the view, so the link still lands on the Files panel.
+  The CLI refuses a malformed path instead of printing a link the app would degrade.
+- `line` is a whole number from 1 to 10,000,000 and only counts alongside a path.
+- Mobile opens the conversation and ignores the file fields: the phone has no workspace filesystem.
+
+## Copying a link
+
+"Copy Conversation Link" in the dock editor's file tree, the link button on file tool cards and every row of
+the Files panel produce the same link. A tool card's path may be absolute or relative to the working
+directory; it is re-addressed through the conversation's FileSpace, and a path outside every mount has no
+link (the action says so rather than linking to something the link could not open).
+
+## Contract tests
+
+`lib/filespace/link-fixtures.json` lists links as exact strings. `lib/filespace/links.test.ts` builds and
+parses each one; `crates/cognia-cli/src/commands/open.rs` builds the same strings from CLI flags. Both
+sides use form encoding (`/` → `%2F`, space → `+`, `~` → `%7E`), so the strings match exactly.

@@ -1212,6 +1212,12 @@ interface ProjectEditorFileWorkbenchProps {
    * chip in the composer's draft — the same channel the diff pane uses.
    */
   onSendToChat?: (selection: FileSelectionRef) => void
+  /**
+   * "Copy Link" on a tree entry: a link that opens the entry in its
+   * conversation (ADR-0222). Only hosts that belong to a conversation pass
+   * it; the tree offers no item without it.
+   */
+  onCopyFileLink?: (rootPath: string, relPath: string) => void
 }
 
 /** The file context workbench's "wide" preset, as a share of the workbench. */
@@ -1241,6 +1247,7 @@ export function ProjectEditorFileWorkbench({
   searchDeps,
   quickOpenDeps,
   onSendToChat,
+  onCopyFileLink,
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
   const showKeyboardHints = useShowKeyboardHints()
@@ -1656,6 +1663,10 @@ export function ProjectEditorFileWorkbench({
       void navigator.clipboard?.writeText(text)
     },
     [rootPath]
+  )
+  const copyLink = useMemo(
+    () => (onCopyFileLink ? (relPath: string) => onCopyFileLink(rootPath, relPath) : undefined),
+    [onCopyFileLink, rootPath]
   )
 
   /**
@@ -2340,6 +2351,7 @@ export function ProjectEditorFileWorkbench({
         density={layout === "mobile" ? "touch" : "compact"}
         gitDecorations={gitDecorations}
         onCopyPath={copyPath}
+        onCopyLink={copyLink}
         // "Open to the Side" needs a second editor group — desktop only.
         onOpenToSide={layout === "mobile" ? undefined : openToSide}
         onRevealInSystem={revealInSystem}
@@ -2365,6 +2377,7 @@ export function ProjectEditorFileWorkbench({
       layout,
       gitDecorations,
       copyPath,
+      copyLink,
       revealRequest,
       reportTreeFailure,
     ]

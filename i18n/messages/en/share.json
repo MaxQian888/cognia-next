@@ -46,6 +46,7 @@
       "chat-template": "Chat template",
       "chat-text": "Conversation (text)",
       "discover-item": "Discover item",
+      "file-bundle": "Files",
       "template-definition": "Template release",
       "usage-card": "Usage card",
       "workflow-png": "Workflow image",
@@ -62,7 +63,11 @@
     "views": "{count} views",
     "viewsAction": "Check views",
     "expiryUnavailable": "Expiry unavailable",
-    "renewedUnknown": "Expiry updated; the server did not return an expiry timestamp."
+    "renewedUnknown": "Expiry updated; the server did not return an expiry timestamp.",
+    "files": "{count, plural, =1 {1 file} other {# files}} · {size}",
+    "fromConversation": "From {title}",
+    "fromDeletedConversation": "From a deleted conversation",
+    "untitledConversation": "Untitled conversation"
   },
   "notConfiguredBody": "Set your share worker URL and upload secret first.",
   "notConfiguredCta": "Open settings",
@@ -230,9 +235,157 @@
     "confirmTitle": "Open shared content?",
     "confirmBody": "Opening this link uses one of its remaining views.",
     "confirmSubmit": "Open share",
-    "passphraseBurnWarning": "Unlocking uses the link’s single view. Keep this page open to retry if the passphrase is incorrect."
+    "passphraseBurnWarning": "Unlocking uses the link’s single view. Keep this page open to retry if the passphrase is incorrect.",
+    "files": {
+      "title": "Files",
+      "summary": "{count, plural, =1 {1 file} other {# files}} · {size}",
+      "noTicket": "This share server can’t serve files, so they are listed but can’t be downloaded.",
+      "progress": "{percent}%",
+      "download": "Download {name}",
+      "previewTitle": "Preview of {name}",
+      "pdfFallback": "This browser can’t show PDFs inline. Download the file instead.",
+      "loadingPreview": "Loading preview…",
+      "error": {
+        "ticketExpired": "The download window for this link has closed. If the link still opens, reload it to download again.",
+        "unavailable": "This file is no longer on the share server.",
+        "integrity": "This file failed its integrity check and was not saved.",
+        "failed": "The download failed. Try again."
+      },
+      "encrypted": "End-to-end encrypted",
+      "attachmentsTitle": "Attachments",
+      "listLabel": "Files in this share",
+      "select": "Show {name}",
+      "previewRegion": "Preview",
+      "selectPrompt": "Choose a file to preview it here.",
+      "noPreview": "This kind of file can’t be previewed here. Download it to open it.",
+      "showPreview": "Show preview · {size}",
+      "downloadButton": "Download",
+      "availableUntil": "Downloadable until {time}"
+    }
   },
   "createdExpiry": "Expires: {date}",
   "expiryUnavailable": "Expiry unavailable",
-  "ttlHelp": "The server may enforce a shorter limit. The created link shows its actual expiry."
+  "ttlHelp": "The server may enforce a shorter limit. The created link shows its actual expiry.",
+  "files": {
+    "label": "Files",
+    "choose": "Choose files",
+    "hidePicker": "Hide",
+    "none": "No files chosen. Tick files or folders from this conversation to carry them in the link.",
+    "expanding": "Collecting the chosen files…",
+    "summary": "{count, plural, =1 {1 file} other {# files}} · {size}",
+    "loading": "Loading…",
+    "conversationGone": "This conversation is no longer available.",
+    "expandFailed": "The chosen folders could not be read. Check that the files are still reachable.",
+    "skippedSensitive": "{count, plural, =1 {1 file that looks like a credential was left out} other {# files that look like credentials were left out}} of the chosen folders.",
+    "truncated": "A chosen folder has more files than one link can carry. Choose fewer files.",
+    "issue": {
+      "notFound": "{path} was not found.",
+      "outside": "{path} is not part of this conversation.",
+      "offline": "{path} is on a host that is offline.",
+      "noBackend": "{path} cannot be read from this device.",
+      "sourceUnavailable": "{path} has no stored copy on this device."
+    },
+    "sensitiveTitle": "These look like credentials",
+    "sensitiveBody": "Anyone with the link could read them. Tick each one you really mean to share.",
+    "includeSensitive": "Include {path}",
+    "limit": {
+      "tooMany": "{count} files chosen; one link can carry at most {max}.",
+      "fileTooLarge": "{path} is larger than {max}, the most one file can be.",
+      "totalTooLarge": "Together the files are larger than {max}, the most one link can carry."
+    },
+    "folders": "Folders",
+    "uploads": "Uploads",
+    "artifacts": "Artifacts",
+    "empty": "This conversation has no files yet.",
+    "select": "Select {name}",
+    "expand": "Show the contents of {name}",
+    "collapse": "Hide the contents of {name}",
+    "listFailed": "This folder could not be listed.",
+    "unavailable": {
+      "noBackend": "Not readable here",
+      "offline": "Host offline",
+      "missing": "Not on this device",
+      "deleted": "Deleted",
+      "source": "No stored copy"
+    },
+    "refused": {
+      "publicSnapshotsDisabled": "Your file-sharing policy does not allow publishing files as links.",
+      "ttlExceedsPolicy": "Your file-sharing policy does not allow a link with files to last that long.",
+      "sharedSessionForbidden": "You can’t share files from this shared conversation: your role or your organization’s policy doesn’t allow it.",
+      "sharedSessionUnavailable": "This shared conversation could not be checked with its organization. Try again when you’re connected.",
+      "sensitiveNotConfirmed": "Tick each credential-like file you mean to share, or remove it."
+    },
+    "policyOrgUnavailable": "Your organization’s file-sharing policy could not be read, so files can’t be shared until it can.",
+    "ttlLimitedByPolicy": "Lifetimes are limited by your file-sharing policy.",
+    "errorTooLarge": "The chosen files are larger than one link can carry.",
+    "errorChanged": "{path} changed while it was being shared. Nothing was published; try again.",
+    "errorUploadWithdrawn": "Uploading the files failed, so the link was withdrawn. Try again.",
+    "errorUploadNotWithdrawn": "Uploading the files failed and the link could not be withdrawn. Revoke it from My Shares.",
+    "cancelled": "Sharing was cancelled. Nothing stays published.",
+    "createdCount": "{count, plural, =1 {Carries 1 file.} other {Carries # files.}}",
+    "unavailableMedia": "{count, plural, =1 {1 image is no longer stored on this device and is shared by name only.} other {# images are no longer stored on this device and are shared by name only.}}",
+    "hashing": "Checking file {index} of {count}…",
+    "uploading": "Encrypting and uploading file {index} of {count}…",
+    "progressLabel": "Sharing progress",
+    "cancel": "Cancel"
+  },
+  "policy": {
+    "title": "File sharing policy",
+    "description": "What may be shared from your conversations' files. When you belong to an organization, sharing follows whichever policy is stricter — yours or the organization's.",
+    "personal": {
+      "title": "Your policy"
+    },
+    "save": "Save",
+    "saved": "File sharing policy saved",
+    "saveFailed": "Could not save the file sharing policy.",
+    "notYet": "Not available yet",
+    "notYetHint": "Saved now and enforced when this kind of sharing arrives in a later update.",
+    "duration": {
+      "hours": "{count, plural, =1 {1 hour} other {# hours}}",
+      "days": "{count, plural, =1 {1 day} other {# days}}"
+    },
+    "field": {
+      "allowPublicSnapshots": {
+        "label": "Share files as links",
+        "description": "Publish chosen files as end-to-end encrypted links anyone with the link can open."
+      },
+      "allowLiveGrants": {
+        "label": "Live access",
+        "description": "Give people revocable access to a conversation's files as they change."
+      },
+      "allowProtocolCredentials": {
+        "label": "Network drive access",
+        "description": "Let live access connect over WebDAV or SFTP with its own credentials."
+      },
+      "allowLiveWrite": {
+        "label": "Allow changes",
+        "description": "Let live access edit files, not only read them."
+      },
+      "allowAgentSharing": {
+        "label": "Agents may share",
+        "description": "Let an agent share files on your behalf, with your confirmation."
+      },
+      "maxSnapshotTtlSeconds": {
+        "label": "Longest a file link may last"
+      },
+      "maxLiveTtlSeconds": {
+        "label": "Longest live access may last"
+      }
+    },
+    "org": {
+      "title": "Organization policy",
+      "description": "Set by your organization's owners and admins; it applies to everyone in the organization.",
+      "readOnly": "Only owners and admins can change this.",
+      "loading": "Loading the organization's policy…",
+      "loadFailed": "The organization's policy could not be read, so files can't be shared until it can.",
+      "retry": "Retry",
+      "save": "Save for organization",
+      "saved": "Organization policy saved",
+      "conflict": "Someone else changed the organization's policy. Their version is shown; review it and save again.",
+      "forbidden": "Only owners and admins can change the organization's policy.",
+      "saveFailed": "Could not save the organization's policy.",
+      "updated": "Last changed {date}",
+      "defaults": "The organization uses the default policy."
+    }
+  }
 }

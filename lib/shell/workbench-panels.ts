@@ -61,6 +61,7 @@ export const WORKBENCH_PANEL_CATALOG: readonly WorkbenchPanelCatalogItem[] = [
   { id: "squad-context", activity: "ai", labelKey: "contextWorkbench.squadPanel.title" },
   { id: "team-members", activity: "ai", labelKey: "contextWorkbench.teamMembersPanel.title" },
   { id: "project-overview", activity: "workspace", labelKey: "projectOverview.panelTitle" },
+  { id: "conversation-files", activity: "workspace", labelKey: "filespace.panel.title" },
   { id: "workspace", activity: "workspace", labelKey: "artifacts.dock.workspaceMode" },
   {
     id: "source-control",

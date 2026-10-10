@@ -31,6 +31,7 @@ Creating and revoking links requires a bearer secret that only you hold.
 | Workflow image | A PNG |
 | Backup package | A download (re-import under Settings → Data) |
 | A2UI app | Rendered live in the browser (read-only) |
+| Files from a conversation (alone, or with a chat export) | A file list: download, and in-browser preview for images, PDFs and text |
 
 ## Prerequisites
 
@@ -58,6 +59,11 @@ wrangler kv namespace create SHARE_KV
 # 3. Set the bearer secret the app will use to create/revoke links
 wrangler secret put SHARE_UPLOAD_SECRET
 #   → enter a long random string; keep a copy for the app config below
+
+# 3b. Set the key that signs file read tickets (links that carry files)
+wrangler secret put SHARE_TICKET_KEY
+#   → 64 hex characters, e.g. the output of `openssl rand -hex 32`.
+#     Without it, links work but cannot carry files.
 
 # 4. Deploy the API
 wrangler deploy
@@ -138,6 +144,38 @@ Upgrade the deployed Rust server or Cloudflare Worker together with the viewer
 to enable the metadata endpoint. The viewer does not fall back to a consuming
 content request when an older server lacks this endpoint.
 
+## Sharing files
+
+A link can carry files from a conversation (ADR-0222):
+
+- **Share files…** in a conversation's **Files** panel (or the share action on
+  one of its rows) makes a link that is just those files.
+- **Share via link** in the chat export dialog has a **Files** section, so a
+  conversation and its files travel together. Images in the conversation are
+  carried too, either inline or as attachments; one that is no longer stored on
+  this device is shared by name only, and the dialog says so.
+
+Pick files or whole folders. A folder brings everything under it except files
+that look like credentials (`.env`, private keys, `.ssh/`, and so on), which
+are counted and left out; a credential-like file you pick by name needs its own
+tick. One link carries at most 200 files, 512&nbsp;MiB per file and 2&nbsp;GiB
+in total.
+
+Each file is encrypted in the app before upload, with a key derived from the
+link's own key, so files are as zero-knowledge as the rest of the link. If a
+file changes while it is being shared, or the upload fails, nothing stays
+published. A recipient's view unlocks the files for an hour (never past the
+link's expiry): a burn-after-reading link can still be downloaded within that
+hour after it is opened.
+
+**File sharing policy** (Settings → Data) decides whether files may be shared as
+links and the longest such a link may last. If you belong to an organization,
+its owners and admins set an organization policy too, and sharing follows
+whichever is stricter. In a shared conversation, sharing its files also needs
+the `files.share` permission (owners and maintainers). Live access, network
+drive (WebDAV/SFTP) access, writes and agent sharing appear in the policy but
+are not available yet.
+
 ## Security notes
 
 - The worker is **untrusted by design** — it stores ciphertext, lifecycle counters and a
@@ -147,3 +185,5 @@ content request when an older server lacks this endpoint.
   passphrase.
 - Because shares are zero-knowledge, there is no server-side search or preview;
   the artifact's type and title live inside the ciphertext.
+- File names, sizes and checksums are inside the ciphertext as well; the server
+  sees only how many encrypted chunks a link has and their sizes.

@@ -11,6 +11,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "fs_search_content_workspace",
     "fs_read_workspace_file",
     "fs_read_workspace_file_base64",
+    "fs_read_workspace_file_chunk",
     "fs_write_workspace_file",
     "project_environment_execute",
     "task_workspace_status",
@@ -230,6 +231,19 @@ pub(super) async fn dispatch(
             .map_err(|e| RpcError::internal(e.to_string()))?
             .map(Value::String)
             .map_err(RpcError::internal)
+        }
+        "fs_read_workspace_file_chunk" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let rel_path: String = required(&args, "relPath")?;
+            let offset: u64 = required(&args, "offset")?;
+            let length: usize = required(&args, "length")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_read_workspace_file_chunk(root, rel_path, offset, length)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
         }
         "fs_write_workspace_file" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;

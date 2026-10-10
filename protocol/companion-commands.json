@@ -8826,6 +8826,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "fs_read_workspace_file_chunk",
+      "resource": "fs.workspace_file",
+      "verb": "read_chunk",
+      "arm": "fs_read_workspace_file_chunk",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "byte-range",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "fs_rename_workspace_entry",
       "resource": "fs.workspace_entry",
       "verb": "rename",

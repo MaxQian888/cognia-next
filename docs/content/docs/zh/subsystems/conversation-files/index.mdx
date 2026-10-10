@@ -1,0 +1,74 @@
+---
+title: 概览
+description: "每个对话的 FileSpace：从执行根、工作区根、上传文件和产物派生出的命名空间，在停靠栏的“对话文件”面板中展示。ADR-0222 的 P0 阶段。"
+---
+
+# 对话文件
+
+<Status variant="beta">P0 已交付 · 分享（P1–P3）已在 ADR-0222 中设计</Status>
+
+<TLDR>
+  过去，一个对话的文件分散在四处，没有任何地方把它们放在一起：对话运行所在的目录（通常是托管 worktree）、
+  工作区的其他根目录、上传到对话的文件，以及对话生成的产物。`lib/filespace/` 把它们投影为一个
+  **FileSpace**——`/workspace`、`/roots/<id>`、`/uploads`、`/artifacts`——由停靠栏的“对话文件”面板列出，
+  可被链接定位，后续阶段将基于它实现分享。它不做任何存储：FileSpace 每次都由已有的绑定重新计算。
+</TLDR>
+
+决策记录：[ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant)。
+
+## 挂载点
+
+| 挂载点 | 存储 | 权威来源 |
+| --- | --- | --- |
+| `/workspace` | 磁盘 | `resolveExecutionRoot`：主执行租约（ADR-0111），否则为工作区主根 |
+| `/roots/<id>` | 磁盘 | 每个附加执行租约，以及未被租约覆盖的每个工作区根（智能体以 `additionalDirectories` 访问它们） |
+| `/uploads` | Dexie | 会话资产（`listSessionAssets`），只读 |
+| `/artifacts` | Dexie | 会话的产物行，只读 |
+
+对于在 worktree 中运行的对话，不提供项目检出目录的挂载点。把实时检出目录和从它切出的 worktree 副本并排展示，
+正是人们改错目录的原因；面板改为把 worktree 挂载点标记为 **工作树副本**。
+
+每个磁盘挂载点都带有宿主路径；当对话绑定的 Docker 沙箱连接配置了 `workspaceMount` 时，还会带上容器内看到的路径
+（`containerPathFor`）。
+
+## 状态
+
+不可用的挂载点会说明原因。原因直接展示，从不推断：
+
+| 状态 | 原因 | 何时出现 |
+| --- | --- | --- |
+| `offline` | `no-fs-backend` | 网页或移动端，没有桌面或已配对主机——Dexie 挂载点仍可用 |
+| `offline` | `host-offline` | 桌面端正在驱动一台连接已断开的远程主机 |
+| `missing` | `managed-missing-on-device` | 托管工作区位于另一台设备上 |
+| `deleted` | `managed-deleted` | 托管工作区目录已被删除 |
+
+## Dexie 挂载点内的名称
+
+上传文件和产物只有标题，没有路径，而且标题会重复。唯一的名称直接使用（`/uploads/report.pdf`）。名称重复时，
+每一行都以 `stem~<id8>.ext` 寻址，面板和复制的链接显示的就是这种形式。之后才变得重复的裸名称，解析为同名中最早的一行——
+也就是链接在名称仍唯一时所指向的那一行。
+
+## 代码位置
+
+| 关注点 | 模块 |
+| --- | --- |
+| 类型 | `types/filespace/index.ts` |
+| 路径语法 | `lib/filespace/paths.ts` |
+| 解析器（纯函数） | `lib/filespace/resolve.ts` |
+| Dexie 挂载点的行 | `lib/filespace/sources.ts` |
+| 加载器（沙箱绑定、主机、冷启动时的项目查询） | `lib/filespace/load.ts` |
+| 打开路径 | `lib/filespace/open.ts` |
+| 实时 hook | `hooks/filespace/use-conversation-filespace.ts` |
+| 面板 | `components/filespace/conversation-files-panel.tsx`（停靠面板 `conversation-files`） |
+
+## 打开路径
+
+`openFileSpacePath` 是面板、链接和工具卡片共用的唯一入口：
+
+- 磁盘挂载点中的文件，在以**该挂载点**为根的停靠栏工作区编辑器中打开（因此 `/roots/<id>/…` 会落在它自己的根目录，
+  而旧的入口只认识执行根）；
+- 磁盘目录或挂载点本身，会把编辑器的根设为该挂载点（`revealWorkspaceRoot`）；
+- 产物在产物视图中打开；
+- 上传文件、Dexie 挂载点或不带路径的视图，会调出“对话文件”面板并高亮对应行。
+
+对话必须已经处于激活状态，并且每次 `await` 之后都会重新检查：查询过程中用户切换了对话，就不会被拉回原来的对话。

@@ -72,6 +72,8 @@ pub struct AppState {
     pub feed_enabled: bool,
     /// Per-recipient notification rows (ADR-0207).
     pub notification_store: Arc<dyn crate::notifications::NotificationStore>,
+    /// Each org's file-sharing policy (ADR-0222).
+    pub file_sharing_store: Arc<dyn crate::file_sharing::FileSharingPolicyStore>,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -132,6 +134,7 @@ impl AppState {
             feed_hub: Arc::new(crate::feed::FeedHub::default()),
             feed_enabled: true,
             notification_store: Arc::new(crate::notifications::InMemoryNotificationStore::new()),
+            file_sharing_store: Arc::new(crate::file_sharing::InMemoryFileSharingPolicyStore::new()),
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -181,6 +184,14 @@ impl AppState {
         store: Arc<dyn crate::notifications::NotificationStore>,
     ) -> Self {
         self.notification_store = store;
+        self
+    }
+
+    pub fn with_file_sharing_store(
+        mut self,
+        store: Arc<dyn crate::file_sharing::FileSharingPolicyStore>,
+    ) -> Self {
+        self.file_sharing_store = store;
         self
     }
 
@@ -263,7 +274,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org_id}/runs", get(list_runs).post(create_run))
         .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run))
-        .merge(crate::notifications::routes());
+        .merge(crate::notifications::routes())
+        .merge(crate::file_sharing::routes());
     let routes = if state.shared_chat_enabled {
         routes.merge(crate::chat_api::routes())
     } else {
@@ -2582,7 +2594,7 @@ async fn validate_human_assignee(
     }
 }
 
-async fn authorize_org_management(
+pub(crate) async fn authorize_org_management(
     state: &AppState,
     org_id: &str,
     headers: &HeaderMap,

@@ -8,6 +8,10 @@
 //! `kvMinTtlSeconds` is a Cloudflare KV platform constraint with no Rust
 //! equivalent — asserted only by the Worker test.
 
+use cognia_share_server::blobs::{
+    BLOB_CHUNK_BYTES, BLOB_CHUNK_OVERHEAD_BYTES, BLOB_ID_BYTES, MAX_BLOBS_PER_SHARE,
+    MAX_BLOB_BYTES, MAX_SHARE_BLOB_BYTES, READ_TICKET_TTL_SECONDS,
+};
 use cognia_share_server::codegen::{CODE_ALPHABET, CODE_LENGTH};
 use cognia_share_server::server::{
     DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TTL_SECONDS, PUBLIC_METADATA_SUFFIX,
@@ -62,6 +66,23 @@ fn default_max_ttl_seconds_matches_fixture() {
 }
 
 #[test]
+fn blob_limits_match_fixture() {
+    let value = fixture();
+    let number = |key: &str| {
+        value[key]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{key} is a number"))
+    };
+    assert_eq!(number("blobChunkBytes"), BLOB_CHUNK_BYTES);
+    assert_eq!(number("blobChunkOverheadBytes"), BLOB_CHUNK_OVERHEAD_BYTES);
+    assert_eq!(number("blobIdBytes"), BLOB_ID_BYTES as u64);
+    assert_eq!(number("maxBlobBytes"), MAX_BLOB_BYTES);
+    assert_eq!(number("maxShareBlobBytes"), MAX_SHARE_BLOB_BYTES);
+    assert_eq!(number("maxBlobsPerShare"), MAX_BLOBS_PER_SHARE);
+    assert_eq!(number("readTicketTtlSeconds"), READ_TICKET_TTL_SECONDS);
+}
+
+#[test]
 fn fixture_has_no_unknown_numeric_drift_fields() {
     // Guard the fixture's shape so a renamed key can't silently decouple the
     // two suites: every key either maps to a Rust assertion above or is the
@@ -75,6 +96,13 @@ fn fixture_has_no_unknown_numeric_drift_fields() {
         "defaultMaxBodyBytes",
         "defaultMaxTtlSeconds",
         "kvMinTtlSeconds",
+        "blobChunkBytes",
+        "blobChunkOverheadBytes",
+        "blobIdBytes",
+        "maxBlobBytes",
+        "maxShareBlobBytes",
+        "maxBlobsPerShare",
+        "readTicketTtlSeconds",
         "publicMetadataSuffix",
         "publicMetadataFields",
     ];

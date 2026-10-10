@@ -18,6 +18,10 @@ pub struct Metrics {
     pub created_total: AtomicU64,
     pub read_total: AtomicU64,
     pub deleted_total: AtomicU64,
+    /// Encrypted file chunks accepted (ADR-0222).
+    pub blob_chunks_stored_total: AtomicU64,
+    /// Encrypted file chunks served to ticket holders (ADR-0222).
+    pub blob_chunks_served_total: AtomicU64,
     pub rejected_unauthorized: AtomicU64,
     pub rejected_too_large: AtomicU64,
     pub rejected_invalid: AtomicU64,
@@ -32,6 +36,8 @@ impl Metrics {
             created_total: AtomicU64::new(0),
             read_total: AtomicU64::new(0),
             deleted_total: AtomicU64::new(0),
+            blob_chunks_stored_total: AtomicU64::new(0),
+            blob_chunks_served_total: AtomicU64::new(0),
             rejected_unauthorized: AtomicU64::new(0),
             rejected_too_large: AtomicU64::new(0),
             rejected_invalid: AtomicU64::new(0),
@@ -51,6 +57,16 @@ impl Metrics {
 
     pub fn deleted(&self) {
         self.deleted_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn blob_chunk_stored(&self) {
+        self.blob_chunks_stored_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn blob_chunk_served(&self) {
+        self.blob_chunks_served_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn rejected(&self, reason: RejectReason) {
@@ -79,6 +95,8 @@ impl Metrics {
         let rej_invalid = self.rejected_invalid.load(Ordering::Relaxed);
         let rej_not_found = self.rejected_not_found.load(Ordering::Relaxed);
         let rej_rate = self.rejected_rate.load(Ordering::Relaxed);
+        let chunks_stored = self.blob_chunks_stored_total.load(Ordering::Relaxed);
+        let chunks_served = self.blob_chunks_served_total.load(Ordering::Relaxed);
 
         let mut out = String::with_capacity(1024);
         out.push_str("# HELP share_created_total Shares created.\n");
@@ -90,6 +108,12 @@ impl Metrics {
         out.push_str("# HELP share_deleted_total Shares deleted by owner revoke.\n");
         out.push_str("# TYPE share_deleted_total counter\n");
         out.push_str(&format!("share_deleted_total {deleted}\n"));
+        out.push_str("# HELP share_blob_chunks_stored_total Encrypted file chunks stored.\n");
+        out.push_str("# TYPE share_blob_chunks_stored_total counter\n");
+        out.push_str(&format!("share_blob_chunks_stored_total {chunks_stored}\n"));
+        out.push_str("# HELP share_blob_chunks_served_total Encrypted file chunks served.\n");
+        out.push_str("# TYPE share_blob_chunks_served_total counter\n");
+        out.push_str(&format!("share_blob_chunks_served_total {chunks_served}\n"));
         out.push_str("# HELP share_rejected_total Requests rejected, partitioned by reason.\n");
         out.push_str("# TYPE share_rejected_total counter\n");
         out.push_str(&format!(
@@ -154,6 +178,9 @@ mod tests {
         m.created();
         m.read();
         m.deleted();
+        m.blob_chunk_stored();
+        m.blob_chunk_stored();
+        m.blob_chunk_served();
         m.rejected(RejectReason::Unauthorized);
         m.rejected(RejectReason::TooLarge);
         m.rejected(RejectReason::Invalid);
@@ -163,6 +190,8 @@ mod tests {
         assert!(s.contains("share_created_total 2\n"));
         assert!(s.contains("share_read_total 1\n"));
         assert!(s.contains("share_deleted_total 1\n"));
+        assert!(s.contains("share_blob_chunks_stored_total 2\n"));
+        assert!(s.contains("share_blob_chunks_served_total 1\n"));
         assert!(s.contains("share_rejected_total{reason=\"unauthorized\"} 1\n"));
         assert!(s.contains("share_rejected_total{reason=\"too_large\"} 1\n"));
         assert!(s.contains("share_rejected_total{reason=\"invalid\"} 1\n"));
@@ -175,9 +204,10 @@ mod tests {
     fn exposition_has_help_and_type_lines() {
         let m = Metrics::new();
         let s = m.render_prometheus(0);
-        // created, read, deleted, rejected, active, uptime → 6 families.
-        assert_eq!(s.matches("# HELP ").count(), 6);
-        assert_eq!(s.matches("# TYPE ").count(), 6);
+        // created, read, deleted, blob stored, blob served, rejected, active,
+        // uptime → 8 families.
+        assert_eq!(s.matches("# HELP ").count(), 8);
+        assert_eq!(s.matches("# TYPE ").count(), 8);
     }
 
     #[test]

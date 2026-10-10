@@ -11,6 +11,11 @@
 //! Fields deliberately excluded, and why — so a reader who expects one here
 //! finds the reason instead of assuming an oversight:
 //!
+//! `fileSharing` — server-authoritative (mirrored down, never accepted up).
+//!   The host enforces file-sharing policy for the files it serves (ADR-0222), so the desktop
+//!   owns it. A paired phone reads it to offer only what the host will allow, and must never
+//!   widen it from the phone.
+//!
 //! `iceServers` — server-authoritative (mirrored down, never accepted up).
 //!   STUN set belongs to the deployment, not the handset. A self-hosted STUN configured on the
 //!   host has to reach every paired client or NAT traversal silently degrades.

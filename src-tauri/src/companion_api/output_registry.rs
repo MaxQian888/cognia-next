@@ -654,6 +654,7 @@ mod tests {
         ("fs_search_content_workspace", OutputShape::Opaque(RootType::Any)),
         ("fs_read_workspace_file", OutputShape::Scalar(ScalarShape::Text)),
         ("fs_read_workspace_file_base64", OutputShape::Scalar(ScalarShape::Text)),
+        ("fs_read_workspace_file_chunk", OutputShape::Declared(RootType::Object)),
         ("fs_write_workspace_file", OutputShape::Scalar(ScalarShape::Null)),
         ("project_environment_execute", OutputShape::Opaque(RootType::Object)),
         ("task_workspace_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::task_workspace::TaskWorkspaceStatus", schema: schema_of::<crate::task_workspace::TaskWorkspaceStatus> })),

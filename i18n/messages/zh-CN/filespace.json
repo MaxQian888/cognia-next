@@ -1,0 +1,74 @@
+{
+  "actions": {
+    "copyLink": "复制链接",
+    "download": "下载",
+    "open": "打开",
+    "share": "通过链接分享",
+    "shareFiles": "分享文件…"
+  },
+  "entry": {
+    "sourceUnavailable": "原始文件不在此设备上"
+  },
+  "host": {
+    "remote": "文件位于 {label}"
+  },
+  "mount": {
+    "additional": "附加根目录",
+    "container": "沙箱内路径：{path}",
+    "managed": "工作树副本",
+    "managedHint": "此对话在该文件夹的独立副本中工作。应用更改之前，这里的修改不会出现在你的检出目录中。",
+    "primary": "工作目录"
+  },
+  "panel": {
+    "deleted": {
+      "description": "此对话在本设备上已不存在，无法列出其文件。",
+      "title": "找不到对话"
+    },
+    "empty": {
+      "description": "对话关联工作区后会显示文件夹；上传的文件和产物会在添加后显示。",
+      "title": "暂无文件"
+    },
+    "focusedPath": "链接指向：{path}",
+    "loading": "正在加载对话文件",
+    "noSession": {
+      "description": "打开一个对话以查看其文件。",
+      "title": "没有对话"
+    },
+    "title": "对话文件"
+  },
+  "reason": {
+    "hostOffline": "运行此对话的主机未连接。",
+    "managedDeleted": "此对话的工作区文件夹已被删除。",
+    "managedMissingOnDevice": "此对话的工作区位于另一台设备上。",
+    "noFsBackend": "只能在桌面应用中或通过已配对设备打开文件夹。"
+  },
+  "section": {
+    "artifacts": "产物",
+    "folders": "文件夹",
+    "uploads": "上传的文件"
+  },
+  "share": {
+    "bundleTitle": "来自「{title}」的文件",
+    "untitled": "未命名会话"
+  },
+  "status": {
+    "deleted": "已删除",
+    "missing": "不在此设备上",
+    "offline": "离线"
+  },
+  "toast": {
+    "copyFailed": "无法复制链接。",
+    "downloadFailed": "无法下载文件。",
+    "downloadUnavailable": "原始文件不在此设备上。",
+    "linkCopied": "已复制链接",
+    "linkOutside": "该文件不在此对话的文件夹中，因此没有链接。",
+    "openFailed": {
+      "noBackend": "只能在桌面应用中或通过已配对设备打开文件。",
+      "notFound": "该文件已不在此对话中。",
+      "offline": "存放该文件的文件夹当前不可用。",
+      "outside": "该路径不属于此对话的文件。",
+      "sessionChanged": "文件打开前你已切换到其他对话。"
+    },
+    "shareUnavailable": "无法加载此会话以进行分享。"
+  }
+}

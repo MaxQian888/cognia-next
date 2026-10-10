@@ -68,6 +68,58 @@ describe("useSessionLink", () => {
     expect(setActiveSession).not.toHaveBeenCalled()
   })
 
+  it("opens a files link's file once its conversation is focused", async () => {
+    const openFiles = jest.fn(async () => "opened" as const)
+    const onFilesUnresolved = jest.fn()
+    renderHook(() =>
+      useSessionLink({
+        params: new URLSearchParams("session=s1&view=files&path=%2Fworkspace%2Fa.ts&line=4"),
+        lookup: async () => ({ projectId: "p1" }),
+        onConsumed: jest.fn(),
+        onUnresolved: jest.fn(),
+        onFilesUnresolved,
+        openFiles,
+      })
+    )
+    await waitFor(() =>
+      expect(openFiles).toHaveBeenCalledWith({ sessionId: "s1", path: "/workspace/a.ts", line: 4 })
+    )
+    expect(setActiveSession).toHaveBeenCalledWith("s1")
+    expect(onFilesUnresolved).not.toHaveBeenCalled()
+  })
+
+  it("reports a files link whose file could not be shown, after opening the conversation", async () => {
+    const onFilesUnresolved = jest.fn()
+    renderHook(() =>
+      useSessionLink({
+        params: new URLSearchParams("session=s1&view=files&path=%2Fuploads%2Fgone.pdf"),
+        lookup: async () => ({}),
+        onConsumed: jest.fn(),
+        onUnresolved: jest.fn(),
+        onFilesUnresolved,
+        openFiles: async () => "not-found",
+      })
+    )
+    await waitFor(() => expect(onFilesUnresolved).toHaveBeenCalledWith("not-found"))
+    expect(setActiveSession).toHaveBeenCalledWith("s1")
+  })
+
+  it("opens no files for a conversation that does not exist", async () => {
+    const openFiles = jest.fn(async () => "opened" as const)
+    const onUnresolved = jest.fn()
+    renderHook(() =>
+      useSessionLink({
+        params: new URLSearchParams("session=gone&view=files"),
+        lookup: async () => undefined,
+        onConsumed: jest.fn(),
+        onUnresolved,
+        openFiles,
+      })
+    )
+    await waitFor(() => expect(onUnresolved).toHaveBeenCalled())
+    expect(openFiles).not.toHaveBeenCalled()
+  })
+
   it("does nothing for a message permalink or no link", async () => {
     const lookup = jest.fn(async () => ({}))
     run("session=s1&message=m1", lookup)

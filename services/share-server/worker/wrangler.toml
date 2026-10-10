@@ -12,6 +12,9 @@
 #   wrangler r2 bucket create cognia-shares
 #   wrangler kv namespace create SHARE_KV
 #   wrangler secret put SHARE_UPLOAD_SECRET
+#   wrangler secret put SHARE_TICKET_KEY     (64 hex chars; ADR-0222 file
+#                                             read tickets — without it shares
+#                                             carry no files)
 # then paste the KV namespace id below.
 name = "cognia-share"
 main = "src/index.ts"
@@ -48,6 +51,7 @@ enabled = true
 #   wrangler r2 bucket create cognia-shares-staging
 #   wrangler kv namespace create SHARE_KV --env staging   (paste id via CI var)
 #   wrangler secret put SHARE_UPLOAD_SECRET --env staging
+#   wrangler secret put SHARE_TICKET_KEY --env staging
 # The deploy workflow seds REPLACE_WITH_KV_NAMESPACE_ID from the
 # environment-scoped CF_SHARE_KV_NAMESPACE_ID variable, so staging and
 # production each inject their own namespace id.

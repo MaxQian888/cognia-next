@@ -3,6 +3,7 @@
 import {
   recordSharedLink,
   listSharedLinks,
+  listSharedLinksForSession,
   getSharedLinkByCode,
   markSharedLinkRevoked,
   updateSharedLinkExpiry,
@@ -59,6 +60,32 @@ describe("recordSharedLink", () => {
       ownerToken: "owner-secret",
     })
     expect(hydrated?.secretRefs).toBeUndefined()
+  })
+})
+
+describe("file shares (ADR-0222)", () => {
+  it("keeps the file summary and source conversation", async () => {
+    const files = [{ path: "/workspace/a.pdf", size: 3, sha256: "ab".repeat(32) }]
+    await recordSharedLink(input("FILES", { files, sessionId: "s1" }))
+    expect(await getSharedLinkByCode("FILES")).toMatchObject({ files, sessionId: "s1" })
+  })
+
+  it("stores no empty file list", async () => {
+    await recordSharedLink(input("NOFILES", { files: [] }))
+    const persisted = await getDb().sharedLinks.where("code").equals("NOFILES").first()
+    expect(persisted).not.toHaveProperty("files")
+    expect(persisted).not.toHaveProperty("sessionId")
+  })
+
+  it("lists the links made from one conversation", async () => {
+    await recordSharedLink(input("A1", { sessionId: "s1", createdAt: 1 }))
+    await recordSharedLink(input("A2", { sessionId: "s1", createdAt: 2 }))
+    await recordSharedLink(input("B1", { sessionId: "s2" }))
+    await recordSharedLink(input("A3", { sessionId: "s1", revoked: true }))
+    expect((await listSharedLinksForSession("s1")).map((row) => row.code)).toEqual(["A2", "A1"])
+    expect(
+      (await listSharedLinksForSession("s1", { includeRevoked: true })).map((row) => row.code)
+    ).toContain("A3")
   })
 })
 

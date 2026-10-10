@@ -1,11 +1,18 @@
 // Bridges the existing single-export renderer to a share payload: fetch the
 // session's messages, render in the chosen format, wrap as a SharePayload.
 // Reuses `renderSingleExport` verbatim so shared output matches downloaded output.
+//
+// Before rendering, the conversation's private `cognia-media:` references are
+// resolved (`./chat-media`): small images are inlined, larger media travel as
+// the share's encrypted files (ADR-0222). A downloaded export keeps them as
+// they are — it stays on this device, where they resolve.
 
 import { renderSingleExport, type SingleExportFormat } from "@/lib/export/single"
 import { getDb } from "@/lib/db/schema"
 import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { chatExportPayload } from "./payload"
+import { materializeChatShareMedia } from "./chat-media"
+import type { ShareBuild } from "./client"
 import type { SharePayload } from "./types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
@@ -22,6 +29,8 @@ export interface BuildChatShareArgs {
   includeTokens?: boolean
   /** Lay the theme's real wallpaper behind the export (HTML/animated only). */
   withWallpaper?: boolean
+  /** JSONL formats only — include every regeneration branch (see `renderSingleExport`). */
+  includeAllBranches?: boolean
 }
 
 export interface MultiChatShareCopy {
@@ -34,7 +43,7 @@ export interface MultiChatShareCopy {
 
 export interface BuildMultiChatShareArgs extends Omit<
   BuildChatShareArgs,
-  "format" | "session" | "includeTokens"
+  "format" | "session" | "includeTokens" | "includeAllBranches"
 > {
   sessions: ChatSession[]
   title: string
@@ -53,29 +62,41 @@ export async function assertChatShareAccess(sessions: readonly ChatSession[]): P
   }
 }
 
-export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<SharePayload> {
+/** Render one conversation for a share, with its media resolved. */
+export async function buildChatShare(args: BuildChatShareArgs): Promise<ShareBuild> {
   await assertSharedSessionExport(args.session)
-  const messages = await getDb()
+  const stored = await getDb()
     .messages.where("sessionId")
     .equals(args.session.id)
     .sortBy("createdAt")
-  const [wallpaperDataUrl, provenance] = await Promise.all([
+  const [wallpaperDataUrl, provenance, media] = await Promise.all([
     resolveThemeWallpaper(args.theme, args.withWallpaper ?? false),
-    resolveSessionTwinProvenance(args.session, messages),
+    resolveSessionTwinProvenance(args.session, stored),
+    materializeChatShareMedia(stored),
   ])
   const rendered = renderSingleExport({
     format: args.format,
     session: args.session,
-    messages,
+    messages: media.messages,
     theme: args.theme,
     customTheme: args.customTheme,
     includeMetadata: args.includeMetadata,
     includeTimestamps: args.includeTimestamps,
     includeTokens: args.includeTokens,
+    includeAllBranches: args.includeAllBranches,
     wallpaperDataUrl,
     provenance,
   })
-  return chatExportPayload(rendered, args.format, args.session.title || "Conversation", provenance)
+  return {
+    payload: chatExportPayload(
+      rendered,
+      args.format,
+      args.session.title || "Conversation",
+      provenance
+    ),
+    attachments: media.attachments,
+    unavailableMedia: media.unavailable,
+  }
 }
 
 /**
@@ -86,9 +107,7 @@ export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<S
  * keeps a single sandboxed iframe mounted and swaps its `srcdoc`, so selecting
  * many conversations does not mount every transcript at once.
  */
-export async function buildMultiChatSharePayload(
-  args: BuildMultiChatShareArgs
-): Promise<SharePayload> {
+export async function buildMultiChatShare(args: BuildMultiChatShareArgs): Promise<ShareBuild> {
   if (args.sessions.length === 0) {
     throw new Error("At least one conversation is required to build a multi-chat share")
   }
@@ -100,8 +119,11 @@ export async function buildMultiChatSharePayload(
     resolveThemeWallpaper(args.theme, args.withWallpaper ?? false),
     db.messages.where("sessionId").anyOf(sessionIds).sortBy("createdAt"),
   ])
+  // One budget for the whole bundle: the envelope is one request however many
+  // conversations it carries.
+  const media = await materializeChatShareMedia(rows)
   const messagesBySession = new Map<string, StoredMessage[]>()
-  for (const row of rows) {
+  for (const row of media.messages) {
     const messages = messagesBySession.get(row.sessionId)
     if (messages) messages.push(row)
     else messagesBySession.set(row.sessionId, [row])
@@ -129,7 +151,7 @@ export async function buildMultiChatSharePayload(
   }))
 
   const provenance = provenanceBySession.flatMap((entry) => entry ?? [])
-  return {
+  const payload: SharePayload = {
     kind: "chat-animated",
     mime: "text/html",
     data: renderMultiChatDocument({
@@ -142,6 +164,7 @@ export async function buildMultiChatSharePayload(
     title: args.title,
     ...(provenance.length ? { provenance } : {}),
   }
+  return { payload, attachments: media.attachments, unavailableMedia: media.unavailable }
 }
 
 function renderMultiChatDocument({

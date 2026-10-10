@@ -1,3 +1,5 @@
+import sessionActionTable from "@/crates/cognia-collab-server/fixtures/session-actions.json"
+
 import { authorizeSessionAction } from "./session-permissions"
 
 describe("authorizeSessionAction", () => {
@@ -30,5 +32,39 @@ describe("authorizeSessionAction", () => {
         9
       )
     ).toEqual({ allowed: false, reason: "guest_capability_ceiling", policyRevision: 9 })
+  })
+})
+
+describe("the shared action table", () => {
+  // `crates/cognia-collab-server/fixtures/session-actions.json` is the table
+  // the server's `authorize_session_action` is tested against too.
+  const table: {
+    actions: string[]
+    roles: Record<string, string[]>
+    guestDenied: string[]
+    approverOverlay: { roles: string[]; actions: string[] }
+  } = sessionActionTable
+  const roles = ["owner", "maintainer", "member", "viewer"] as const
+
+  it.each(roles)("decides every action for a %s as the server does", (role) => {
+    for (const guest of [false, true]) {
+      for (const approver of [false, true]) {
+        for (const action of table.actions) {
+          const expected =
+            !(guest && table.guestDenied.includes(action)) &&
+            (table.roles[role].includes(action) ||
+              (approver &&
+                table.approverOverlay.roles.includes(role) &&
+                table.approverOverlay.actions.includes(action)))
+          expect([
+            role,
+            guest,
+            approver,
+            action,
+            authorizeSessionAction({ role, guest, approver }, action as never, 1).allowed,
+          ]).toEqual([role, guest, approver, action, expected])
+        }
+      }
+    }
   })
 })

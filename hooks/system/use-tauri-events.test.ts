@@ -77,11 +77,18 @@ jest.mock("next/navigation", () => ({
 
 const toastSuccess = jest.fn()
 const toastMessage = jest.fn()
+const toastError = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
     message: (...args: unknown[]) => toastMessage(...args),
+    error: (...args: unknown[]) => toastError(...args),
   },
+}))
+
+const openFileSpacePath = jest.fn(async (..._args: unknown[]): Promise<string> => "opened")
+jest.mock("@/lib/filespace/open", () => ({
+  openFileSpacePath: (...args: unknown[]) => openFileSpacePath(...args),
 }))
 
 // The hook resolves tray update toasts via next-intl (reusing settings.about
@@ -367,6 +374,26 @@ describe("useTauriEvents", () => {
       await fireDeepLinks(["cognia://chat/abc"])
       expect(setActiveSession).toHaveBeenCalledWith("abc")
       expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    })
+
+    it("a conversation files link opens the conversation, then the linked file", async () => {
+      await fireDeepLinks(["cognia://session/abc?view=files&path=%2Fworkspace%2Fsrc%2Fa.ts&line=7"])
+      await flushPromises()
+      expect(setActiveSession).toHaveBeenCalledWith("abc")
+      expect(openFileSpacePath).toHaveBeenCalledWith({
+        sessionId: "abc",
+        path: "/workspace/src/a.ts",
+        line: 7,
+      })
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("says why a conversation files link's file could not be shown", async () => {
+      openFileSpacePath.mockResolvedValueOnce("not-found")
+      await fireDeepLinks(["cognia://session/abc?view=files&path=%2Fuploads%2Fgone.pdf"])
+      await flushPromises()
+      expect(setActiveSession).toHaveBeenCalledWith("abc")
+      expect(toastError).toHaveBeenCalledWith("toast.openFailed.notFound")
     })
 
     it("hands a Logto callback deep link to the sign-in seam", async () => {

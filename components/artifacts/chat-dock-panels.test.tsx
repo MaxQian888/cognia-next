@@ -43,6 +43,11 @@ jest.mock("@/lib/db/plans", () => ({
   listPlansBySession: jest.fn(async () => sessionPlans),
   listPlanEvents: jest.fn(async () => []),
 }))
+jest.mock("@/components/filespace/conversation-files-panel", () => ({
+  ConversationFilesPanel: ({ sessionId }: { sessionId: string | null }) => (
+    <div data-testid="conversation-files-panel" data-session={sessionId ?? ""} />
+  ),
+}))
 jest.mock("@/components/agent/plan/plan-panel", () => ({
   PlanPanel: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="plan-panel" data-session={sessionId} />
@@ -699,7 +704,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the seventeen session-surface panels, in a stable order", () => {
+  it("offers exactly the eighteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.find((panel) => panel.id === "squad-context")?.icon).toBe(AgentTeamIcon)
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
@@ -709,6 +714,7 @@ describe("useSessionSurfacePanels", () => {
       ["session-sidechat", "ai", 15],
       ["browser", "preview-run", 20],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
+      ["conversation-files", "workspace", 28],
       [WORKSPACE_PANEL_ID, "workspace", 30],
       ["source-control", "workspace", 35],
       ["comments", "comments", 40],
@@ -871,6 +877,21 @@ describe("useSessionSurfacePanels", () => {
     expect(withPlans.getBadge?.(SESSION_RESOURCE)).toBe(1)
     renderPanel(withPlans, SESSION_RESOURCE)
     expect(screen.getByTestId("plan-panel")).toHaveAttribute("data-session", "s1")
+  })
+
+  it("lists the conversation's files beside the workspace editor, for sessions only", () => {
+    const files = panelById(collect(useSessionSurfacePanels, sessionInput()), "conversation-files")
+    expect(files).toMatchObject({
+      activity: "workspace",
+      labelKey: "filespace.panel.title",
+      order: 28,
+      retention: "stateful",
+      scope: "session",
+    })
+    expect(files.appliesTo(SESSION_RESOURCE)).toBe(true)
+    expect(files.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+    renderPanel(files, SESSION_RESOURCE)
+    expect(screen.getByTestId("conversation-files-panel")).toHaveAttribute("data-session", "s1")
   })
 
   it("keeps sidechat off an embedded resource workbench", () => {

@@ -75,6 +75,9 @@ jest.mock("@/components/scheduler/backup-schedule-dialog", () => ({
   BackupScheduleDialog: ({ trigger }: { trigger: React.ReactNode }) => trigger,
 }))
 jest.mock("@/components/share/share-settings-card", () => ({ ShareSettingsCard: () => null }))
+jest.mock("@/components/share/file-sharing-policy-card", () => ({
+  FileSharingPolicyCard: () => <div data-testid="file-sharing-policy-card" />,
+}))
 interface StubPayload {
   data: string
   title: string
@@ -137,6 +140,11 @@ beforeEach(() => {
     manifest,
     checksum: "abc",
   }))
+})
+
+it("offers the file-sharing policy alongside the share settings", () => {
+  render(<BackupRestoreTab />)
+  expect(screen.getByTestId("file-sharing-policy-card")).toBeInTheDocument()
 })
 
 it("requires an explicit warning confirmation before plaintext backup", async () => {

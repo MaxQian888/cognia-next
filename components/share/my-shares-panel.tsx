@@ -6,11 +6,20 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CalendarClockIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
+import {
+  CalendarClockIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  MessageSquareIcon,
+  PaperclipIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { getSessionsByIds } from "@/lib/db/sessions"
 import { listSharedLinks } from "@/lib/db/shared-links"
+import { formatBytes } from "@/lib/perf/backend/format"
 import { revokeShareLink, getShareStats } from "@/lib/share/client"
 import { extendShareLink } from "@/lib/share/renew"
 import { toast } from "sonner"
@@ -22,6 +31,16 @@ export function MySharesPanel() {
   const t = useTranslations("share.myShares")
   // Reactive: revoking a link flips its Dexie row and this list re-renders.
   const rows = useLiveQuery(() => listSharedLinks(), [])
+  // The conversations links came from (ADR-0222), looked up by id so a
+  // renamed conversation reads as it is now and a deleted one says so.
+  const sourceKey = [...new Set(rows?.flatMap((row) => (row.sessionId ? [row.sessionId] : [])))]
+    .sort()
+    .join("\n")
+  const sourceTitles = useLiveQuery(async () => {
+    const ids = sourceKey ? sourceKey.split("\n") : []
+    const sessions = await getSessionsByIds(ids)
+    return new Map(sessions.map((session) => [session.id, session.title]))
+  }, [sourceKey])
   const [revoking, setRevoking] = useState<string | null>(null)
   const [renewing, setRenewing] = useState<string | null>(null)
   // Lazily fetched per-link view counts (avoid N network calls on mount).
@@ -129,6 +148,31 @@ export function MySharesPanel() {
                 {t("created")}: {new Date(row.createdAt).toLocaleString()} · {t("expires")}:{" "}
                 {row.expiresAt ? new Date(row.expiresAt).toLocaleString() : t("expiryUnavailable")}
               </p>
+              {row.files?.length || row.sessionId ? (
+                <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  {row.files?.length ? (
+                    <span className="inline-flex items-center gap-1">
+                      <PaperclipIcon className="size-3" aria-hidden />
+                      {t("files", {
+                        count: row.files.length,
+                        size: formatBytes(row.files.reduce((sum, file) => sum + file.size, 0)),
+                      })}
+                    </span>
+                  ) : null}
+                  {row.sessionId && sourceTitles ? (
+                    <span className="inline-flex min-w-0 items-center gap-1">
+                      <MessageSquareIcon className="size-3 shrink-0" aria-hidden />
+                      <span className="truncate">
+                        {sourceTitles.has(row.sessionId)
+                          ? t("fromConversation", {
+                              title: sourceTitles.get(row.sessionId) || t("untitledConversation"),
+                            })
+                          : t("fromDeletedConversation")}
+                      </span>
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
             </div>
             {views[row.code] !== undefined ? (
               <span className="shrink-0 text-xs text-muted-foreground">

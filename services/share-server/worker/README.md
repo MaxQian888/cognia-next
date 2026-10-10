@@ -40,6 +40,13 @@ Reads are public but lifecycle-gated. Body cap: `MAX_BODY_BYTES` (default
 10 MiB). Share lifetime is capped by `MAX_TTL_SECONDS` (default 30 days), even
 when the creator omits `ttlSeconds`.
 
+Shares can carry files (ADR-0222): encrypted 4 MiB chunks stored in R2 under
+the share, written with the owner token (`PUT /v1/share/:code/blobs/:blobId/:index`,
+then `POST …/:blobId/commit`) and read with the `X-Read-Ticket` a counted
+envelope read returns (`GET …/:blobId/:index`). Limits come from the shared
+`../share-constants.json`. Without `SHARE_TICKET_KEY` the Worker refuses blob
+routes with `503`, so shares carry no files.
+
 ## Develop & test
 
 ```bash
@@ -55,6 +62,7 @@ pnpm dev           # wrangler dev (local)
 wrangler r2 bucket create cognia-shares
 wrangler kv namespace create SHARE_KV        # paste the id into wrangler.toml
 wrangler secret put SHARE_UPLOAD_SECRET      # the bearer the app stores in its keyring
+wrangler secret put SHARE_TICKET_KEY         # 64 hex chars; signs file read tickets (ADR-0222)
 wrangler deploy
 ```
 

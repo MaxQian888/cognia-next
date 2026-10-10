@@ -29,6 +29,8 @@ import { createA2UISurface } from "@/lib/a2ui/parser"
 import { A2UISurface } from "@/components/a2ui/a2ui-surface"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/a2ui/schema"
 import type { SharePayload } from "@/lib/share/types"
+import type { ShareFilesAccess } from "@/lib/share/load"
+import { ShareFilesSection } from "@/components/share/share-files-section"
 import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
 import { parseSharedTemplateDefinition } from "@/lib/share/template-definition"
 import { parseSharedChatTemplate } from "@/lib/share/chat-template"
@@ -49,9 +51,16 @@ export function PayloadView({
   payload,
   className,
   canImport = false,
+  files,
 }: {
   payload: SharePayload
   className?: string
+  /**
+   * How to fetch the files the share carries (ADR-0222), from the envelope
+   * read. Absent in the owner's preview before publishing: the files are
+   * then listed without downloads.
+   */
+  files?: ShareFilesAccess
   /**
    * Whether the reader has a library to add a shared item to.
    *
@@ -65,11 +74,26 @@ export function PayloadView({
   const hasTwinProvenance = payload.provenance?.some(
     (entry) => entry.source === "digital-twin" && entry.disclosure === "ai-generated"
   )
+  const sharedFiles = payload.files ?? []
+  const bundle = payload.kind === "file-bundle"
+  // A column of its own: the viewer centres this in a flex row, where the
+  // disclosure, the body and the files would otherwise sit side by side.
   return (
-    <>
+    <div className="flex w-full min-w-0 flex-col gap-6">
       {hasTwinProvenance ? <TwinDisclosure /> : null}
-      <PayloadBody payload={payload} className={className} canImport={canImport} />
-    </>
+      {bundle ? null : (
+        <PayloadBody payload={payload} className={className} canImport={canImport} />
+      )}
+      {sharedFiles.length > 0 || bundle ? (
+        <ShareFilesSection
+          files={sharedFiles}
+          access={files}
+          title={bundle ? payload.title : undefined}
+          variant={bundle ? "page" : "attachments"}
+          className={className}
+        />
+      ) : null}
+    </div>
   )
 }
 

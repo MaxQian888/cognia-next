@@ -13,6 +13,6 @@ pub mod reaper;
 pub mod server;
 pub mod store;
 
-pub use cognia_share_core::{codegen, limits, policy, proto};
+pub use cognia_share_core::{blobs, codegen, limits, policy, proto, ticket};
 
 pub use server::{build_state, router, serve, serve_for_test, AppState, Config};

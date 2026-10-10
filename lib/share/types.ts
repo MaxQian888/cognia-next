@@ -24,11 +24,42 @@ export type ShareKind =
   | "template-definition"
   // A saved chat template (`lib/share/chat-template.ts`), launch spec demoted.
   | "chat-template"
+  // Files and nothing else (ADR-0222): `data` is empty and `files` carries the
+  // manifest. Chat kinds may carry `files` too.
+  | "file-bundle"
 
 export interface ShareProvenance {
   source: "digital-twin"
   sourceId: string
   disclosure: "ai-generated"
+}
+
+/**
+ * One file a share carries (ADR-0222). The bytes travel separately as an
+ * encrypted blob (`lib/share/blob-crypto.ts`); this manifest row rides inside
+ * the envelope's ciphertext, so the server never learns a name, a path or a
+ * plaintext size.
+ */
+export interface ShareFileEntry {
+  /** Opaque per-share blob id: 16 random bytes, unpadded base64url. */
+  blobId: string
+  /** FileSpace path at share time, e.g. `/workspace/report.pdf`. */
+  path: string
+  name: string
+  mime: string
+  /** Plaintext bytes. */
+  size: number
+  /** Hex SHA-256 of the plaintext, verified after the chunks are reassembled. */
+  sha256: string
+  /** Plaintext bytes per chunk (the last may be shorter). */
+  chunkSize: number
+  /**
+   * Number of encrypted chunks. Zero for an empty file, which has no blob: the
+   * server refuses a chunk with nothing but a tag in it.
+   */
+  chunkCount: number
+  /** Base64 of the 8 random bytes every chunk IV of this blob starts with. */
+  ivPrefix: string
 }
 
 /**
@@ -47,6 +78,8 @@ export interface SharePayload {
   title?: string
   /** Encrypted with the payload; the viewer must render its disclosure. */
   provenance?: ShareProvenance[]
+  /** Files the share carries; inside the ciphertext like everything else. */
+  files?: ShareFileEntry[]
 }
 
 /**
@@ -106,6 +139,15 @@ export interface CreateShareResponse {
 /** Wire body for `GET /v1/share/:code`. */
 export interface ReadShareResponse {
   envelope: ShareEnvelopeV1
+  /**
+   * Presents to the blob download endpoint (`X-Read-Ticket`) so fetching a
+   * share's files does not spend views — and outlives a burn-after-read
+   * share's single view by one ticket lifetime. Absent from servers that
+   * predate file blobs, or a Worker with no `SHARE_TICKET_KEY`.
+   */
+  readTicket?: string
+  /** Epoch ms after which the ticket stops working. */
+  readTicketExpiresAt?: number
 }
 
 /** Wire body for the owner-only `GET /v1/share/:code/stats`. */

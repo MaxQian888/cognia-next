@@ -3790,6 +3790,33 @@ export interface RouterFusionRunSummary {
   timeline: RouterFusionRunTimeline
 }
 
+/**
+ * The adjustable fields of a file-sharing policy (ADR-0222), all optional at rest.
+ *
+ * Dormant until later phases: live access (`allowLiveGrants`,
+ * `allowProtocolCredentials`, `allowLiveWrite`, `maxLiveTtlSeconds`) has no
+ * surface before ADR-0222 phase 2, and agent sharing (`allowAgentSharing`)
+ * none before phase 3. They are stored and enforced by the plane today so a
+ * policy set now already governs those features when they ship; the settings
+ * UI labels them as not yet available (`FileSharingPolicyFields`).
+ */
+export interface FileSharingPolicySettings {
+  /** Publish conversation files as public, end-to-end-encrypted snapshot links. */
+  allowPublicSnapshots?: boolean
+  /** Give people live, revocable access to conversation files. Dormant until phase 2. */
+  allowLiveGrants?: boolean
+  /** Issue WebDAV/SFTP credentials for live access. Dormant until phase 2. */
+  allowProtocolCredentials?: boolean
+  /** Let live access write, not only read. Dormant until phase 2. */
+  allowLiveWrite?: boolean
+  /** Let an agent share files on the person's behalf. Dormant until phase 3. */
+  allowAgentSharing?: boolean
+  /** Longest a snapshot link may live, in seconds. */
+  maxSnapshotTtlSeconds?: number
+  /** Longest live access may last, in seconds. Dormant until phase 2. */
+  maxLiveTtlSeconds?: number
+}
+
 export interface AppSettings {
   knowledgeReading?: Partial<KnowledgeReadingSettings>
   id: "singleton"
@@ -5873,6 +5900,14 @@ export interface AppSettings {
    * stored separately in the OS keyring, not here.
    */
   shareUrl?: string
+  /**
+   * This person's own file-sharing policy (ADR-0222). Absent fields take the
+   * defaults in `lib/filespace/policy.ts` (`DEFAULT_FILE_SHARING_POLICY`).
+   * When the account belongs to a collaboration org, the org's policy is
+   * intersected with this one field by field — the most restrictive value
+   * wins — so neither can widen the other.
+   */
+  fileSharing?: FileSharingPolicySettings
   /**
    * WebDAV snapshot sync (ADR-0001 extension). Periodically uploads the
    * encrypted backup package to a WebDAV server so another device can

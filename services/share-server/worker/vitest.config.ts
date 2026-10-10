@@ -15,6 +15,9 @@ export default defineConfig({
           // verifier's key floor and the Rust test config, so the ADR-0149
           // org plane is exercised here rather than only in production.
           SHARE_GRANT_KEY: "3031323334353637383961626364656630313233343536373839616263646566",
+          // ADR-0222 read tickets — the same key as `ticket-vector.json` and
+          // the Rust test config.
+          SHARE_TICKET_KEY: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
         },
       },
     }),

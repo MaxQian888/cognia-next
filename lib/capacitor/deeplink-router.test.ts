@@ -30,6 +30,21 @@ describe("dispatchRoute", () => {
     expect(navs.redeemPair).not.toHaveBeenCalled()
   })
 
+  it("opens only the conversation for a conversation files link", () => {
+    const navs = makeNavigators()
+    dispatchRoute(
+      {
+        kind: "open_session",
+        sessionId: "sess-1",
+        files: { path: "/workspace/a.ts" as never, line: 3 },
+        raw: "cognia://session/sess-1?view=files&path=%2Fworkspace%2Fa.ts&line=3",
+      },
+      navs
+    )
+    expect(navs.pushSession).toHaveBeenCalledTimes(1)
+    expect(navs.pushSession).toHaveBeenCalledWith("sess-1")
+  })
+
   it("ignores open_session with empty sessionId", () => {
     const navs = makeNavigators()
     dispatchRoute({ kind: "open_session", sessionId: "", raw: "cognia://session/" }, navs)

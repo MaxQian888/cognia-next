@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FileCodeIcon, FolderTreeIcon, GitCompareArrowsIcon, ListChecksIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
@@ -43,6 +44,7 @@ import { WorkspaceFilePreview } from "./workspace-file-preview"
 import { WorkspaceReview } from "./workspace-review"
 import { isSnapshotSelection } from "./snapshot-review"
 import { changedPathCount } from "@/lib/git/conversation-scope"
+import { copyConversationFileLink } from "@/lib/filespace/copy-link"
 
 interface DockWorkspaceProps {
   activeSessionId: string | null
@@ -317,6 +319,21 @@ function WorkspaceEditorBody({
     }
   }, [activeTask, activateTask, sessionId, workingDir])
   const { roots, rootKey, rootPath, selectRoot, pinned, resumeFollow } = editor
+  const tFiles = useTranslations("filespace")
+  // "Copy Link" on a tree entry addresses it inside this conversation's
+  // FileSpace (ADR-0222), whichever root the editor is showing.
+  const copyFileLink = useCallback(
+    (root: string, relPath: string) => {
+      void copyConversationFileLink({ sessionId, path: joinProjectPath(root, relPath) }).then(
+        (result) => {
+          if (result === "copied") toast.success(tFiles("toast.linkCopied"))
+          else if (result === "outside") toast.error(tFiles("toast.linkOutside"))
+          else toast.error(tFiles("toast.copyFailed"))
+        }
+      )
+    },
+    [sessionId, tFiles]
+  )
 
   // One resolver for every directory-facing panel. The pin layer is fed from
   // the editor's own selection rather than a separate store — for this panel
@@ -735,6 +752,7 @@ function WorkspaceEditorBody({
                 workbench={workbench}
                 active={visibleSurface === "file"}
                 panelIdPrefix="workspace"
+                onCopyFileLink={copyFileLink}
               />
             </div>
           ) : null}

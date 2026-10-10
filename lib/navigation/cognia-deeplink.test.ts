@@ -230,3 +230,33 @@ describe("buildSessionDeeplink", () => {
     })
   })
 })
+
+describe("conversation files links (ADR-0222)", () => {
+  it("adds a files view to the session route", () => {
+    expect(
+      parseCogniaDeeplink("cognia://session/s1?view=files&path=%2Fworkspace%2Fa.ts&line=9")
+    ).toEqual({
+      kind: "open_session",
+      sessionId: "s1",
+      files: { path: "/workspace/a.ts", line: 9 },
+      raw: "cognia://session/s1?view=files&path=%2Fworkspace%2Fa.ts&line=9",
+    })
+    expect(parseCogniaDeeplink("cognia://chat/c1?view=files")).toMatchObject({
+      kind: "open_session",
+      sessionId: "c1",
+      files: {},
+    })
+  })
+
+  it("opens just the conversation for an unknown view, and drops a climbing path", () => {
+    const unknown = parseCogniaDeeplink("cognia://session/s1?view=diagram")
+    expect(unknown).toEqual({
+      kind: "open_session",
+      sessionId: "s1",
+      raw: "cognia://session/s1?view=diagram",
+    })
+    expect(
+      parseCogniaDeeplink("cognia://session/s1?view=files&path=%2Fworkspace%2F..%2F..%2Fetc")
+    ).toMatchObject({ files: {} })
+  })
+})

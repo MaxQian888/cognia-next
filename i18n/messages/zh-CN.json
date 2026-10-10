@@ -17846,6 +17846,80 @@
       "toggleAria": "布局"
     }
   },
+  "filespace": {
+    "actions": {
+      "copyLink": "复制链接",
+      "download": "下载",
+      "open": "打开",
+      "share": "通过链接分享",
+      "shareFiles": "分享文件…"
+    },
+    "entry": {
+      "sourceUnavailable": "原始文件不在此设备上"
+    },
+    "host": {
+      "remote": "文件位于 {label}"
+    },
+    "mount": {
+      "additional": "附加根目录",
+      "container": "沙箱内路径：{path}",
+      "managed": "工作树副本",
+      "managedHint": "此对话在该文件夹的独立副本中工作。应用更改之前，这里的修改不会出现在你的检出目录中。",
+      "primary": "工作目录"
+    },
+    "panel": {
+      "deleted": {
+        "description": "此对话在本设备上已不存在，无法列出其文件。",
+        "title": "找不到对话"
+      },
+      "empty": {
+        "description": "对话关联工作区后会显示文件夹；上传的文件和产物会在添加后显示。",
+        "title": "暂无文件"
+      },
+      "focusedPath": "链接指向：{path}",
+      "loading": "正在加载对话文件",
+      "noSession": {
+        "description": "打开一个对话以查看其文件。",
+        "title": "没有对话"
+      },
+      "title": "对话文件"
+    },
+    "reason": {
+      "hostOffline": "运行此对话的主机未连接。",
+      "managedDeleted": "此对话的工作区文件夹已被删除。",
+      "managedMissingOnDevice": "此对话的工作区位于另一台设备上。",
+      "noFsBackend": "只能在桌面应用中或通过已配对设备打开文件夹。"
+    },
+    "section": {
+      "artifacts": "产物",
+      "folders": "文件夹",
+      "uploads": "上传的文件"
+    },
+    "share": {
+      "bundleTitle": "来自「{title}」的文件",
+      "untitled": "未命名会话"
+    },
+    "status": {
+      "deleted": "已删除",
+      "missing": "不在此设备上",
+      "offline": "离线"
+    },
+    "toast": {
+      "copyFailed": "无法复制链接。",
+      "downloadFailed": "无法下载文件。",
+      "downloadUnavailable": "原始文件不在此设备上。",
+      "linkCopied": "已复制链接",
+      "linkOutside": "该文件不在此对话的文件夹中，因此没有链接。",
+      "openFailed": {
+        "noBackend": "只能在桌面应用中或通过已配对设备打开文件。",
+        "notFound": "该文件已不在此对话中。",
+        "offline": "存放该文件的文件夹当前不可用。",
+        "outside": "该路径不属于此对话的文件。",
+        "sessionChanged": "文件打开前你已切换到其他对话。"
+      },
+      "shareUnavailable": "无法加载此会话以进行分享。"
+    }
+  },
   "fleet": {
     "agents": {
       "acp": "ACP",
@@ -32785,6 +32859,7 @@
       "addSelectionToChat": "将所选内容添加到聊天",
       "addToChat": "添加到聊天",
       "copy": "复制",
+      "copyConversationLink": "复制对话链接",
       "copyPath": "复制路径",
       "copyRelativePath": "复制相对路径",
       "cut": "剪切",
@@ -51355,6 +51430,69 @@
     "errorGeneric": "创建分享链接失败。",
     "errorTooLarge": "分享内容过大，请移除部分图片或导出到本地。",
     "expiryUnavailable": "过期时间未知",
+    "files": {
+      "artifacts": "产物",
+      "cancel": "取消",
+      "cancelled": "已取消分享，没有内容保持发布状态。",
+      "choose": "选择文件",
+      "collapse": "收起 {name}",
+      "conversationGone": "此对话已不可用。",
+      "createdCount": "包含 {count} 个文件。",
+      "empty": "此对话还没有文件。",
+      "errorChanged": "{path} 在分享过程中发生了变化。未发布任何内容，请重试。",
+      "errorTooLarge": "所选文件超过了单个链接可承载的上限。",
+      "errorUploadNotWithdrawn": "文件上传失败，且链接未能撤回。请在“我的分享”中撤销它。",
+      "errorUploadWithdrawn": "文件上传失败，链接已撤回。请重试。",
+      "expand": "展开 {name}",
+      "expandFailed": "无法读取所选文件夹，请确认文件仍可访问。",
+      "expanding": "正在收集所选文件…",
+      "folders": "文件夹",
+      "hashing": "正在校验第 {index}/{count} 个文件…",
+      "hidePicker": "收起",
+      "includeSensitive": "包含 {path}",
+      "issue": {
+        "noBackend": "无法在此设备上读取 {path}。",
+        "notFound": "未找到 {path}。",
+        "offline": "{path} 所在的主机已离线。",
+        "outside": "{path} 不属于此对话。",
+        "sourceUnavailable": "{path} 在此设备上没有保存的副本。"
+      },
+      "label": "文件",
+      "limit": {
+        "fileTooLarge": "{path} 超过了单个文件的上限 {max}。",
+        "tooMany": "已选择 {count} 个文件，单个链接最多可承载 {max} 个。",
+        "totalTooLarge": "所选文件合计超过了单个链接的上限 {max}。"
+      },
+      "listFailed": "无法列出此文件夹。",
+      "loading": "加载中…",
+      "none": "尚未选择文件。勾选本对话中的文件或文件夹，即可随链接一起分享。",
+      "policyOrgUnavailable": "无法读取所在组织的文件分享策略，在恢复之前无法分享文件。",
+      "progressLabel": "分享进度",
+      "refused": {
+        "publicSnapshotsDisabled": "你的文件分享策略不允许以链接形式发布文件。",
+        "sensitiveNotConfirmed": "请逐一勾选你确实要分享的疑似凭据文件，或将其移除。",
+        "sharedSessionForbidden": "你无法分享此共享对话中的文件：你的角色或所在组织的策略不允许。",
+        "sharedSessionUnavailable": "无法与组织核实此共享对话，请联网后重试。",
+        "ttlExceedsPolicy": "你的文件分享策略不允许带文件的链接保留这么久。"
+      },
+      "select": "选择 {name}",
+      "sensitiveBody": "任何拿到链接的人都能读取它们。请逐一勾选你确实要分享的文件。",
+      "sensitiveTitle": "以下文件疑似凭据",
+      "skippedSensitive": "所选文件夹中有 {count} 个疑似凭据的文件已被排除。",
+      "summary": "{count} 个文件 · {size}",
+      "truncated": "所选文件夹中的文件数量超过单个链接可承载的上限，请减少所选文件。",
+      "ttlLimitedByPolicy": "可选的有效期受你的文件分享策略限制。",
+      "unavailable": {
+        "deleted": "已删除",
+        "missing": "不在此设备上",
+        "noBackend": "此处不可读",
+        "offline": "主机离线",
+        "source": "无保存副本"
+      },
+      "unavailableMedia": "有 {count} 张图片已不在此设备上保存，仅以名称分享。",
+      "uploading": "正在加密并上传第 {index}/{count} 个文件…",
+      "uploads": "上传"
+    },
     "limit": {
       "burn": "阅后即焚",
       "count": "限制次数",
@@ -51381,6 +51519,9 @@
       "empty": "你还没有创建任何分享链接。",
       "expires": "过期",
       "expiryUnavailable": "过期时间未知",
+      "files": "{count} 个文件 · {size}",
+      "fromConversation": "来自「{title}」",
+      "fromDeletedConversation": "来自已删除的会话",
       "kind": {
         "a2ui": "应用",
         "backup": "备份包",
@@ -51392,6 +51533,7 @@
         "chat-template": "对话模板",
         "chat-text": "对话（文本）",
         "discover-item": "发现条目",
+        "file-bundle": "文件",
         "template-definition": "模板发布版本",
         "usage-card": "使用量卡片",
         "workflow-png": "工作流图片",
@@ -51406,6 +51548,7 @@
       "revoke": "撤销",
       "statsError": "无法加载查看统计。",
       "title": "我的分享链接",
+      "untitledConversation": "未命名会话",
       "views": "{count} 次查看",
       "viewsAction": "查看次数"
     },
@@ -51422,6 +51565,65 @@
       "shareOriginal": "仍然分享",
       "shareRedacted": "移除后继续",
       "title": "发现可能的个人信息"
+    },
+    "policy": {
+      "description": "控制可以从会话文件中分享哪些内容。若你属于某个组织，将以你的策略与组织策略中更严格的一方为准。",
+      "duration": {
+        "days": "{count} 天",
+        "hours": "{count} 小时"
+      },
+      "field": {
+        "allowAgentSharing": {
+          "description": "允许智能体在你确认后代你分享文件。",
+          "label": "允许智能体分享"
+        },
+        "allowLiveGrants": {
+          "description": "授予他人可撤销的访问权限，随会话文件的变化实时查看。",
+          "label": "实时访问"
+        },
+        "allowLiveWrite": {
+          "description": "允许实时访问编辑文件，而不仅是读取。",
+          "label": "允许修改"
+        },
+        "allowProtocolCredentials": {
+          "description": "允许实时访问通过 WebDAV 或 SFTP 使用独立凭据连接。",
+          "label": "网络驱动器访问"
+        },
+        "allowPublicSnapshots": {
+          "description": "将所选文件发布为端到端加密链接，持有链接的任何人都可以打开。",
+          "label": "以链接分享文件"
+        },
+        "maxLiveTtlSeconds": {
+          "label": "实时访问最长有效期"
+        },
+        "maxSnapshotTtlSeconds": {
+          "label": "文件链接最长有效期"
+        }
+      },
+      "notYet": "暂未开放",
+      "notYetHint": "现在保存，待此类分享在后续更新中上线后生效。",
+      "org": {
+        "conflict": "其他人修改了组织策略。已显示其版本，请检查后再次保存。",
+        "defaults": "组织正在使用默认策略。",
+        "description": "由组织的所有者和管理员设置，适用于组织内的所有人。",
+        "forbidden": "只有所有者和管理员可以修改组织策略。",
+        "loadFailed": "无法读取组织策略，在能够读取之前无法分享文件。",
+        "loading": "正在加载组织策略…",
+        "readOnly": "只有所有者和管理员可以修改。",
+        "retry": "重试",
+        "save": "为组织保存",
+        "saveFailed": "无法保存组织策略。",
+        "saved": "组织策略已保存",
+        "title": "组织策略",
+        "updated": "最近修改于 {date}"
+      },
+      "personal": {
+        "title": "你的策略"
+      },
+      "save": "保存",
+      "saveFailed": "无法保存文件分享策略。",
+      "saved": "文件分享策略已保存",
+      "title": "文件分享策略"
     },
     "quoteCard": {
       "cardTitle": "Cognia 消息卡片",
@@ -51529,6 +51731,32 @@
         "notLink": "这不是一个有效的分享链接。"
       },
       "errorTitle": "无法打开此分享",
+      "files": {
+        "attachmentsTitle": "附件",
+        "availableUntil": "可下载至 {time}",
+        "download": "下载 {name}",
+        "downloadButton": "下载",
+        "encrypted": "端到端加密",
+        "error": {
+          "failed": "下载失败，请重试。",
+          "integrity": "此文件未通过完整性校验，未予保存。",
+          "ticketExpired": "此链接的下载时间窗已关闭。如果链接仍可打开，请重新加载后再下载。",
+          "unavailable": "此文件已不在分享服务器上。"
+        },
+        "listLabel": "此分享中的文件",
+        "loadingPreview": "正在加载预览…",
+        "noPreview": "此类文件无法在这里预览，请下载后打开。",
+        "noTicket": "此分享服务器不支持文件下载，因此只能列出文件，无法下载。",
+        "pdfFallback": "此浏览器无法内嵌显示 PDF，请下载后查看。",
+        "previewRegion": "预览",
+        "previewTitle": "{name} 的预览",
+        "progress": "{percent}%",
+        "select": "查看 {name}",
+        "selectPrompt": "选择一个文件，在这里预览。",
+        "showPreview": "显示预览 · {size}",
+        "summary": "{count} 个文件 · {size}",
+        "title": "文件"
+      },
       "footer": "通过 cognia 分享 · 端到端加密 · 服务器永远看不到内容",
       "loading": "正在解密…",
       "passphraseBody": "此分享受额外口令保护。",

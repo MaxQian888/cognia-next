@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{DefaultBodyLimit, State};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::Router;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -15,7 +15,9 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use cognia_share_core::blobs::max_chunk_ciphertext_bytes;
 use cognia_share_core::grant::GrantVerifier;
+use cognia_share_core::ticket::ReadTicketSigner;
 
 use crate::handlers;
 use crate::ip_limits::IpRateLimiter;
@@ -48,6 +50,12 @@ pub struct Config {
     /// service can verify the grants it mints — ADR-0149 §8. Empty ⇒ no
     /// grant is accepted and only the legacy bearer works.
     pub grant_key_hex: String,
+    /// Hex-encoded key that signs file-blob read tickets (ADR-0222). Empty ⇒
+    /// a random key per process, so tickets stop working across a restart.
+    pub ticket_key_hex: String,
+    /// Directory holding encrypted file chunks. `None` ⇒ beside the database
+    /// (`<db_path>.blobs`), so the volume that holds one holds both.
+    pub blob_dir: Option<String>,
     /// Max request body bytes.
     pub max_body_bytes: usize,
     /// Hard ceiling on share TTL seconds. Every share gets at most this long.
@@ -83,6 +91,14 @@ impl Config {
                 std::env::var_os("SHARE_GRANT_KEY_FILE").map(Into::into),
             )
             .unwrap_or_default(),
+            ticket_key_hex: resolve_secret(
+                std::env::var("SHARE_TICKET_KEY").ok(),
+                std::env::var_os("SHARE_TICKET_KEY_FILE").map(Into::into),
+            )
+            .unwrap_or_default(),
+            blob_dir: std::env::var("SHARE_BLOB_DIR")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             max_body_bytes: parse_usize_env("SHARE_MAX_BODY_BYTES")
                 .unwrap_or(DEFAULT_MAX_BODY_BYTES),
             max_ttl_seconds: parse_u64_env("SHARE_MAX_TTL_SECONDS")
@@ -106,6 +122,10 @@ impl Config {
             grant_key_hex: "30313233343536373839616263646566\
                             30313233343536373839616263646566"
                 .to_string(),
+            ticket_key_hex: "000102030405060708090a0b0c0d0e0f\
+                             101112131415161718191a1b1c1d1e1f"
+                .to_string(),
+            blob_dir: None,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             max_ttl_seconds: DEFAULT_MAX_TTL_SECONDS,
             allowed_origins: Vec::new(),
@@ -171,6 +191,8 @@ pub struct AppState {
     /// has no collaboration plane", not "authorize anyone" — every grant path
     /// refuses outright rather than falling through to the legacy secret.
     pub grants: Option<Arc<GrantVerifier>>,
+    /// Signs and checks the read tickets that unlock a share's file blobs.
+    pub tickets: Arc<ReadTicketSigner>,
     pub max_body_bytes: usize,
     pub max_ttl_seconds: u64,
     pub allowed_origins: Arc<Vec<String>>,
@@ -192,14 +214,21 @@ pub fn now_ms_f64() -> f64 {
 
 /// Build the [`AppState`] (opens the SQLite store) from a [`Config`].
 pub fn build_state(config: &Config) -> anyhow::Result<AppState> {
-    let store = Arc::new(Store::open(&config.db_path)?);
+    let blob_dir = config
+        .blob_dir
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| crate::store::default_blob_dir(&config.db_path));
+    let store = Arc::new(Store::open_with_blob_dir(&config.db_path, &blob_dir)?);
     let grants = build_grant_verifier(&config.grant_key_hex)?;
+    let tickets = build_ticket_signer(&config.ticket_key_hex)?;
     Ok(AppState {
         store,
         metrics: Arc::new(Metrics::new()),
         rate: IpRateLimiter::new(config.rate_per_sec, config.rate_burst),
         upload_secret: Arc::new(config.upload_secret.clone()),
         grants,
+        tickets,
         max_body_bytes: config.max_body_bytes,
         max_ttl_seconds: config.max_ttl_seconds,
         allowed_origins: Arc::new(config.allowed_origins.clone()),
@@ -233,11 +262,64 @@ fn build_grant_verifier(hex: &str) -> anyhow::Result<Option<Arc<GrantVerifier>>>
     Ok(Some(Arc::new(verifier)))
 }
 
+/// Build the read-ticket signer from a hex key, or a random one.
+///
+/// Unlike the grant key, an unset ticket key is not "feature off": a share
+/// with files must stay downloadable, and the only cost of a per-process key
+/// is that tickets issued before a restart stop working (a reader reloads the
+/// page). A malformed or short key is still a hard failure — the operator
+/// meant to set one.
+fn build_ticket_signer(hex: &str) -> anyhow::Result<Arc<ReadTicketSigner>> {
+    let hex = hex.trim();
+    let key = if hex.is_empty() {
+        tracing::warn!(
+            target: "share",
+            "SHARE_TICKET_KEY is unset; file read tickets will not survive a restart"
+        );
+        let mut key = [0u8; 32];
+        rand::Rng::fill_bytes(&mut rand::rng(), &mut key);
+        key.to_vec()
+    } else {
+        decode_hex(hex).map_err(|reason| anyhow::anyhow!("SHARE_TICKET_KEY {reason}"))?
+    };
+    let signer = ReadTicketSigner::new(&key)
+        .map_err(|error| anyhow::anyhow!("SHARE_TICKET_KEY is unusable: {error}"))?;
+    Ok(Arc::new(signer))
+}
+
+fn decode_hex(hex: &str) -> Result<Vec<u8>, &'static str> {
+    if !hex.len().is_multiple_of(2) {
+        return Err("must be hex, so it must have an even number of characters");
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).map_err(|_| "is not valid hex"))
+        .collect()
+}
+
 /// Assemble the router. The per-route `fallback` returns `405` for known paths
 /// hit with an unsupported method; the router-level `fallback` returns `404`
 /// (or `204` for `OPTIONS`).
 pub fn router(state: AppState) -> Router {
     let max_body = state.max_body_bytes;
+    // ADR-0222 file chunks have their own body cap: one encrypted chunk, with
+    // headroom, whatever SHARE_MAX_BODY_BYTES says about envelopes.
+    let max_chunk_body = max_chunk_ciphertext_bytes() as usize + 1024;
+    let blobs = Router::new()
+        .route(
+            "/v1/share/{code}/blobs/{blob_id}/commit",
+            post(handlers::commit_blob)
+                .options(handlers::options)
+                .fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/share/{code}/blobs/{blob_id}/{index}",
+            put(handlers::put_blob_chunk)
+                .get(handlers::get_blob_chunk)
+                .options(handlers::options)
+                .fallback(handlers::method_not_allowed),
+        )
+        .layer(RequestBodyLimitLayer::new(max_chunk_body));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics_handler))
@@ -282,10 +364,11 @@ pub fn router(state: AppState) -> Router {
                 .options(handlers::options)
                 .fallback(handlers::method_not_allowed),
         )
-        .fallback(handlers::fallback)
-        // Disable axum's 2 MiB default so our (larger) limit is the only cap.
-        .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(max_body))
+        .merge(blobs)
+        .fallback(handlers::fallback)
+        // Disable axum's 2 MiB default so our limits are the only caps.
+        .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -493,6 +576,15 @@ mod tests {
             .filter(|o| !o.is_empty())
             .collect();
         assert_eq!(parsed, vec!["https://a.example", "https://b.example"]);
+    }
+
+    #[test]
+    fn ticket_signer_accepts_a_hex_key_or_makes_one() {
+        assert!(build_ticket_signer("").is_ok());
+        assert!(build_ticket_signer(&"ab".repeat(32)).is_ok());
+        assert!(build_ticket_signer("abc").is_err());
+        assert!(build_ticket_signer("zz").is_err());
+        assert!(build_ticket_signer(&"ab".repeat(8)).is_err());
     }
 
     #[test]

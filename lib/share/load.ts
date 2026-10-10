@@ -11,7 +11,7 @@
 
 import { decodeShareKey } from "./keys"
 import {
-  decryptShareEnvelope,
+  openShareEnvelope,
   envelopeRequiresPassphrase,
   SharePassphraseRequiredError,
   ShareIntegrityError,
@@ -27,14 +27,43 @@ export interface ShareReadRequest {
   key: string
 }
 
+/**
+ * Where an envelope was read and the read ticket that came with it. Carried
+ * through a passphrase retry so the files stay reachable without spending
+ * another view.
+ */
+export interface ShareEnvelopeReadContext {
+  baseUrl: string
+  code: string
+  readTicket?: string
+  readTicketExpiresAt?: number
+}
+
+/**
+ * What the viewer needs to download a share's files (ADR-0222): the key
+ * material the envelope was opened with — derived once, passphrase included —
+ * and the ticket the envelope read issued. `readTicket` is absent when the
+ * server predates file blobs or has no ticket key; the files are then listed
+ * but cannot be fetched.
+ */
+export interface ShareFilesAccess extends ShareEnvelopeReadContext {
+  material: Uint8Array
+}
+
 export type ShareLoadState =
   | { status: "loading" }
   | { status: "unavailable" }
   | { status: "passphrase-pending"; request: ShareReadRequest; burnAfterRead: boolean }
   | { status: "confirm"; request: ShareReadRequest }
-  | { status: "passphrase"; envelope: ShareEnvelopeV1; key: string; wrong?: boolean }
+  | {
+      status: "passphrase"
+      envelope: ShareEnvelopeV1
+      key: string
+      wrong?: boolean
+      read?: ShareEnvelopeReadContext
+    }
   | { status: "error"; reason: ShareLoadErrorReason }
-  | { status: "ready"; payload: SharePayload }
+  | { status: "ready"; payload: SharePayload; files?: ShareFilesAccess }
 
 /** Extract `{ code, key }` from `?c=<code>` + `#k=<key>`. Null if malformed. */
 export function parseShareLocation(
@@ -47,40 +76,69 @@ export function parseShareLocation(
   return { code, key }
 }
 
-/** GET the opaque envelope. Returns null on 404 (expired / burned / revoked). */
-export async function fetchEnvelope(
+/**
+ * GET the opaque envelope and the read ticket that comes with it. Returns
+ * null on 404 (expired / burned / revoked). This is the counted view.
+ */
+export async function fetchEnvelopeRead(
   baseUrl: string,
   code: string,
   fetchImpl: typeof fetch = fetch
-): Promise<ShareEnvelopeV1 | null> {
+): Promise<(ReadShareResponse & { baseUrl: string; code: string }) | null> {
   const res = await fetchImpl(`${baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     cache: "no-store",
   })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const body = (await res.json()) as ReadShareResponse
-  return body.envelope
+  return {
+    baseUrl,
+    code,
+    envelope: body.envelope,
+    ...(typeof body.readTicket === "string" ? { readTicket: body.readTicket } : {}),
+    ...(typeof body.readTicketExpiresAt === "number"
+      ? { readTicketExpiresAt: body.readTicketExpiresAt }
+      : {}),
+  }
+}
+
+/** GET the opaque envelope. Returns null on 404 (expired / burned / revoked). */
+export async function fetchEnvelope(
+  baseUrl: string,
+  code: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<ShareEnvelopeV1 | null> {
+  return (await fetchEnvelopeRead(baseUrl, code, fetchImpl))?.envelope ?? null
 }
 
 /** Decrypt an envelope into a payload, mapping crypto errors to a load state. */
 export async function decryptEnvelope(
   envelope: ShareEnvelopeV1,
   keyB64: string,
-  passphrase?: string
+  passphrase?: string,
+  read?: ShareEnvelopeReadContext
 ): Promise<ShareLoadState> {
+  const keep = read ? { read } : {}
   try {
-    const payload = await decryptShareEnvelope(envelope, decodeShareKey(keyB64), passphrase)
+    const { payload, material } = await openShareEnvelope(
+      envelope,
+      decodeShareKey(keyB64),
+      passphrase
+    )
+    if (read && payload.files && payload.files.length > 0) {
+      return { status: "ready", payload, files: { ...read, material } }
+    }
     return { status: "ready", payload }
   } catch (err) {
     if (err instanceof SharePassphraseRequiredError) {
-      return { status: "passphrase", envelope, key: keyB64 }
+      return { status: "passphrase", envelope, key: keyB64, ...keep }
     }
     if (err instanceof ShareIntegrityError) {
       return { status: "error", reason: "integrity" }
     }
     // Wrong key, or wrong passphrase on a protected share.
     if (envelopeRequiresPassphrase(envelope) && passphrase !== undefined) {
-      return { status: "passphrase", envelope, key: keyB64, wrong: true }
+      return { status: "passphrase", envelope, key: keyB64, wrong: true, ...keep }
     }
     return { status: "error", reason: "invalid-key" }
   }
@@ -117,16 +175,18 @@ export async function openShare(
   passphrase?: string,
   fetchImpl: typeof fetch = fetch
 ): Promise<ShareLoadState> {
-  let envelope: ShareEnvelopeV1 | null
+  let read: Awaited<ReturnType<typeof fetchEnvelopeRead>>
   try {
-    envelope = await fetchEnvelope(request.baseUrl, request.code, fetchImpl)
+    read = await fetchEnvelopeRead(request.baseUrl, request.code, fetchImpl)
   } catch {
     return { status: "error", reason: "network" }
   }
-  if (!envelope) return { status: "unavailable" }
-  // A wrong passphrase retains the envelope in the returned state. Retrying
-  // decrypts it locally instead of spending another view on the server.
-  return decryptEnvelope(envelope, request.key, passphrase)
+  if (!read) return { status: "unavailable" }
+  const { envelope, ...context } = read
+  // A wrong passphrase retains the envelope (and its read ticket) in the
+  // returned state. Retrying decrypts it locally instead of spending another
+  // view on the server.
+  return decryptEnvelope(envelope, request.key, passphrase, context)
 }
 
 /** Parse → inspect lifecycle → gate protected/limited views → fetch and decrypt. */

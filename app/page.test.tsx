@@ -98,4 +98,17 @@ describe("Home", () => {
     options.onConsumed()
     expect(mockReplace).toHaveBeenCalledWith("/?tab=notes", { scroll: false })
   })
+
+  it("drops a conversation files link's params with the session, keeping the rest", async () => {
+    mockSearch = "session=s1&view=files&path=%2Fworkspace%2Fa.ts&line=2&tab=notes"
+    render(<Home />)
+    await screen.findByTestId("desktop-chat-workspace")
+    const options = mockUseSessionLink.mock.calls.at(-1)![0] as {
+      onConsumed: () => void
+      onFilesUnresolved: (result: string) => void
+    }
+    expect(typeof options.onFilesUnresolved).toBe("function")
+    options.onConsumed()
+    expect(mockReplace).toHaveBeenCalledWith("/?tab=notes", { scroll: false })
+  })
 })

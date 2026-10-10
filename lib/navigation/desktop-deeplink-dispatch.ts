@@ -17,6 +17,9 @@ import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 
+import type { OpenFileSpacePathArgs } from "@/lib/filespace/open"
+import type { OpenFileSpacePathResult } from "@/types/filespace"
+
 import type { CogniaDeeplinkRoute } from "./cognia-deeplink"
 
 export interface DesktopDeeplinkDeps {
@@ -24,6 +27,14 @@ export interface DesktopDeeplinkDeps {
   navigate: (path: string) => void
   /** A link this shell has no handler for, handed back so the caller can say so. */
   onUnknown: (raw: string) => void
+  /**
+   * A conversation files link (ADR-0222) whose conversation opened but whose
+   * file could not be shown — gone, outside the conversation, or on a host
+   * that is offline. Absent: the failure is logged only.
+   */
+  onFilesUnresolved?: (result: Exclude<OpenFileSpacePathResult, "opened">) => void
+  /** Injected for tests; defaults to `openFileSpacePath`. */
+  openFiles?: (args: OpenFileSpacePathArgs) => Promise<OpenFileSpacePathResult>
 }
 
 /** The Settings section the agent task board lives in. */
@@ -76,7 +87,20 @@ export async function dispatchDesktopDeeplink(
 ): Promise<void> {
   switch (route.kind) {
     case "open_session": {
-      if (route.sessionId) openSession(route.sessionId)
+      if (!route.sessionId) return
+      // Focus first, synchronously: the files lookup below awaits Dexie, and
+      // every other route acts before its first `await`.
+      openSession(route.sessionId)
+      if (!route.files) return
+      const openFiles = deps.openFiles ?? (await import("@/lib/filespace/open")).openFileSpacePath
+      const result = await openFiles({
+        sessionId: route.sessionId,
+        ...(route.files.path ? { path: route.files.path } : {}),
+        ...(route.files.line ? { line: route.files.line } : {}),
+      }).catch(() => "not-found" as const)
+      if (result === "opened") return
+      if (deps.onFilesUnresolved) deps.onFilesUnresolved(result)
+      else console.warn("conversation files link did not resolve", result, route.raw)
       return
     }
     case "open_issue": {

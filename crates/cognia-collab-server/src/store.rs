@@ -2506,6 +2506,9 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0013_notifications.sql"))
             .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0014_file_sharing.sql"))
+            .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -3032,7 +3035,14 @@ async fn insert_authorization_audit(
     transaction: &deadpool_postgres::Transaction<'_>,
     event: &AuthorizationAuditEvent,
 ) -> Result<(), StoreError> {
-    let resource_type = if event.invitation_id.is_some() {
+    // A caller that knows what it acted on says so in `source` (a chat
+    // session, a file-sharing policy); membership events are classified by
+    // which of their fields are set.
+    let declared_type = event
+        .source
+        .get("resourceType")
+        .and_then(serde_json::Value::as_str);
+    let resource_type = declared_type.unwrap_or(if event.invitation_id.is_some() {
         "invitation"
     } else if event.workspace_id.is_some() {
         "workspace_membership"
@@ -3040,12 +3050,26 @@ async fn insert_authorization_audit(
         "organization_membership"
     } else {
         "grant"
-    };
+    });
     let resource_id = event
-        .invitation_id
-        .as_ref()
-        .or(event.target_user_id.as_ref())
-        .unwrap_or(&event.org_id);
+        .source
+        .get("resourceId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            event
+                .invitation_id
+                .as_ref()
+                .or(event.target_user_id.as_ref())
+                .unwrap_or(&event.org_id)
+                .clone()
+        });
+    let session_id = (declared_type == Some("chat_session")).then(|| resource_id.clone());
+    let policy_revision = event
+        .source
+        .get("policyRevision")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(1);
     let allowed = event
         .source
         .get("allowed")
@@ -3056,8 +3080,8 @@ async fn insert_authorization_audit(
             "INSERT INTO authorization_audit_events \
                (id, org_id, workspace_id, actor_user_id, action, resource_type, resource_id, \
                 allowed, reason, policy_revision, created_at, target_user_id, invitation_id, \
-                old_role, new_role, request_id, grant_id, source, details) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13, $14, $15, $16, $17, '{}'::jsonb)",
+                old_role, new_role, request_id, grant_id, source, details, session_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $18, $10, $11, $12, $13, $14, $15, $16, $17, '{}'::jsonb, $19)",
             &[
                 &event.id,
                 &event.org_id,
@@ -3076,6 +3100,8 @@ async fn insert_authorization_audit(
                 &event.request_id,
                 &event.grant_id,
                 &event.source,
+                &policy_revision,
+                &session_id,
             ],
         )
         .await

@@ -5903,6 +5903,33 @@
       },
       "additionalProperties": false
     },
+    "fs_read_workspace_file_chunk": {
+      "type": "object",
+      "required": [
+        "root",
+        "relPath",
+        "offset",
+        "length"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "relPath": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        }
+      },
+      "additionalProperties": false
+    },
     "fs_rename_workspace_entry": {
       "type": "object",
       "required": [

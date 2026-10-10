@@ -1,0 +1,78 @@
+---
+title: Overview
+description: "Each conversation's FileSpace: a derived namespace over its execution roots, workspace roots, uploads and artifacts, shown in the dock's Conversation files panel. Phase P0 of ADR-0222."
+---
+
+# Conversation Files
+
+<Status variant="beta">P0 shipped · sharing (P1–P3) designed in ADR-0222</Status>
+
+<TLDR>
+  A conversation's files used to live in four places nobody listed together: the directory it runs in
+  (often a managed worktree), the other roots of its workspace, the files uploaded to it and the
+  artifacts it produced. `lib/filespace/` projects them into one **FileSpace** — `/workspace`,
+  `/roots/<id>`, `/uploads`, `/artifacts` — that the dock's Conversation files panel lists, links address
+  and later phases share. Nothing is stored: the FileSpace is recomputed from bindings that already exist.
+</TLDR>
+
+Decision record: [ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant).
+
+## Mounts
+
+| Mount | Backed by | Source of truth |
+| --- | --- | --- |
+| `/workspace` | disk | `resolveExecutionRoot`: the primary execution lease (ADR-0111), else the workspace's primary root |
+| `/roots/<id>` | disk | each additional execution lease, plus every workspace root no lease covers (the agent reaches those as `additionalDirectories`) |
+| `/uploads` | Dexie | the session's assets (`listSessionAssets`), read-only |
+| `/artifacts` | Dexie | the session's artifact rows, read-only |
+
+There is no mount for the project checkout of a conversation that runs in a worktree. Showing the live
+checkout beside the worktree copy it was cut from is how people edit the wrong tree; the panel marks the
+worktree mount **Worktree copy** instead.
+
+Each disk mount carries its host path and, when the conversation is bound to a Docker sandbox connection
+with a `workspaceMount`, the path the container sees (`containerPathFor`).
+
+## Status
+
+A mount that cannot be used says why. The reason is rendered, never inferred:
+
+| Status | Reason | When |
+| --- | --- | --- |
+| `offline` | `no-fs-backend` | web or mobile with no desktop or paired host — Dexie mounts still work |
+| `offline` | `host-offline` | the desktop is driving a remote host whose connection is down |
+| `missing` | `managed-missing-on-device` | the managed workspace lives on another device |
+| `deleted` | `managed-deleted` | the managed workspace directory was deleted |
+
+## Names inside Dexie mounts
+
+Uploads and artifacts have titles, not paths, and titles collide. A unique name is used as-is
+(`/uploads/report.pdf`). Every row of a colliding name is addressed as `stem~<id8>.ext`, which is what the
+panel and copied links show. A bare name that later became ambiguous resolves to the oldest row of that name —
+the one a link copied while it was still unique pointed at.
+
+## Where it lives
+
+| Concern | Module |
+| --- | --- |
+| Types | `types/filespace/index.ts` |
+| Path grammar | `lib/filespace/paths.ts` |
+| Resolver (pure) | `lib/filespace/resolve.ts` |
+| Dexie mount rows | `lib/filespace/sources.ts` |
+| Loader (sandbox binding, host, cold-start project lookup) | `lib/filespace/load.ts` |
+| Opening a path | `lib/filespace/open.ts` |
+| Live hook | `hooks/filespace/use-conversation-filespace.ts` |
+| Panel | `components/filespace/conversation-files-panel.tsx` (dock panel `conversation-files`) |
+
+## Opening a path
+
+`openFileSpacePath` is the one seam the panel, links and tool cards use:
+
+- a file in a disk mount opens in the dock's workspace editor rooted at **that mount** (so `/roots/<id>/…`
+  lands in its own root, unlike the older execution-root-only seam);
+- a disk directory, or the mount itself, roots the editor at the mount (`revealWorkspaceRoot`);
+- an artifact opens in the artifact surface;
+- an upload, a Dexie mount or the bare view brings the Files panel forward with the row highlighted.
+
+The conversation must already be active, and the check is repeated after every `await`: a user who switches
+conversations while a lookup is in flight is not pulled back.

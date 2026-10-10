@@ -7,6 +7,7 @@ import {
   discoverItemPayload,
   templateDefinitionPayload,
   usageCardPayload,
+  fileBundlePayload,
 } from "./payload"
 import { decodeBase64 } from "./encoding"
 import type { SharedCharacterDef } from "./discover-item"
@@ -154,6 +155,18 @@ describe("chatTemplatePayload", () => {
       data: JSON.stringify(shared),
       encoding: "utf8",
       title: "Bug report",
+    })
+  })
+})
+
+describe("fileBundlePayload", () => {
+  it("is an empty-bodied file-bundle whose files ride in the manifest", () => {
+    expect(fileBundlePayload("Files from Chat")).toEqual({
+      kind: "file-bundle",
+      mime: "application/json",
+      data: "",
+      encoding: "utf8",
+      title: "Files from Chat",
     })
   })
 })

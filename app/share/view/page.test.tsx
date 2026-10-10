@@ -18,8 +18,20 @@ jest.mock("@/lib/share/load", () => ({
 }))
 
 jest.mock("@/components/share/payload-view", () => ({
-  PayloadView: ({ payload, canImport }: { payload: SharePayload; canImport?: boolean }) => (
-    <div data-testid="payload" data-can-import={String(canImport)}>
+  PayloadView: ({
+    payload,
+    canImport,
+    files,
+  }: {
+    payload: SharePayload
+    canImport?: boolean
+    files?: { code: string; readTicket?: string }
+  }) => (
+    <div
+      data-testid="payload"
+      data-can-import={String(canImport)}
+      data-files={files ? `${files.code}:${files.readTicket}` : ""}
+    >
       {payload.kind}
     </div>
   ),
@@ -61,6 +73,13 @@ describe("ShareViewPage", () => {
     expect(mockLoadShare).toHaveBeenCalledWith("https://x", expect.any(String), expect.any(String))
   })
 
+  it("fills the column it is placed in rather than shrinking to its content", async () => {
+    mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    render(<ShareViewPage />)
+    await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
+    expect(screen.getByTestId("share-view-root")).toHaveClass("w-full", "min-w-0")
+  })
+
   it("shows the unavailable state", async () => {
     mockLoadShare.mockResolvedValue({ status: "unavailable" })
     render(<ShareViewPage />)
@@ -80,6 +99,33 @@ describe("ShareViewPage", () => {
     )
   })
 
+  it("hands the payload view the file access the envelope read produced", async () => {
+    const files = {
+      baseUrl: "https://x",
+      code: "c1",
+      readTicket: "t1",
+      material: new Uint8Array(32),
+    }
+    mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD, files })
+    render(<ShareViewPage />)
+    await waitFor(() =>
+      expect(screen.getByTestId("payload")).toHaveAttribute("data-files", "c1:t1")
+    )
+  })
+
+  it("keeps the read ticket through a passphrase retry", async () => {
+    const envelope = { v: 1 } as never
+    const read = { baseUrl: "https://x", code: "c1", readTicket: "t1" }
+    mockLoadShare.mockResolvedValue({ status: "passphrase", envelope, key: "k", wrong: true, read })
+    mockDecrypt.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    render(<ShareViewPage />)
+    await waitFor(() => expect(screen.getByText("Passphrase required")).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "pw" } })
+    fireEvent.click(screen.getByText("Unlock"))
+    await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
+    expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "pw", read)
+  })
+
   it("prompts for a passphrase and decrypts on submit", async () => {
     const envelope = { v: 1 } as never
     mockLoadShare.mockResolvedValue({ status: "passphrase", envelope, key: "k" })
@@ -92,7 +138,7 @@ describe("ShareViewPage", () => {
     fireEvent.click(screen.getByText("Unlock"))
 
     await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
-    expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2")
+    expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2", undefined)
   })
 
   // The importable kinds offer to write into the reader's own library, which
@@ -165,7 +211,7 @@ describe("ShareViewPage", () => {
       fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "hunter2" } })
       fireEvent.click(screen.getByText("Unlock"))
       await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
-      expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2")
+      expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2", undefined)
     })
   })
 })

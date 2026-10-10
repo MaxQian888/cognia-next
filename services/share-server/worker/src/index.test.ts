@@ -151,7 +151,7 @@ describe("public metadata", () => {
     expect(await stats.json()).toMatchObject({ viewCount: 0 })
     const read = await run(req(`/v1/share/${code}`))
     expect(read.status).toBe(200)
-    expect(await read.json()).toEqual({ envelope: protectedEnvelope })
+    expect(await read.json()).toMatchObject({ envelope: protectedEnvelope })
     expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
     expect((await run(req(`/v1/share/${code}/metadata`))).status).toBe(404)
   })
@@ -721,5 +721,220 @@ describe("durable lifecycle authority", () => {
     const broken = { ...env, SHARE_LIFECYCLE: undefined } as unknown as Env
     const response = await worker.fetch(req("/v1/share/missing"), broken, createExecutionContext())
     expect(response.status).toBe(503)
+  })
+})
+
+describe("ADR-0222 file blobs", () => {
+  const BLOB = "AAAAAAAAAAAAAAAAAAAAAA"
+  const FULL = 4 * 1024 * 1024 + 16
+
+  function stub(code: string) {
+    const namespace = (env as Env).SHARE_LIFECYCLE
+    return namespace.get(namespace.idFromName(code))
+  }
+
+  function putChunk(code: string, token: string, index: string, bytes: Uint8Array, blob = BLOB) {
+    return run(
+      req(`/v1/share/${code}/blobs/${blob}/${index}`, {
+        method: "PUT",
+        headers: { "X-Owner-Token": token },
+        body: bytes,
+      })
+    )
+  }
+
+  function commit(code: string, token: string, body: unknown, blob = BLOB) {
+    return run(
+      req(`/v1/share/${code}/blobs/${blob}/commit`, {
+        method: "POST",
+        headers: { "X-Owner-Token": token },
+        body: JSON.stringify(body),
+      })
+    )
+  }
+
+  async function readTicket(code: string): Promise<{ ticket: string; expiresAt: number }> {
+    const response = await run(req(`/v1/share/${code}`))
+    expect(response.status).toBe(200)
+    const body = await response.json<{
+      envelope: unknown
+      readTicket: string
+      readTicketExpiresAt: number
+    }>()
+    expect(body.envelope).toEqual(ENVELOPE)
+    return { ticket: body.readTicket, expiresAt: body.readTicketExpiresAt }
+  }
+
+  function getChunk(code: string, index: string, ticket?: string) {
+    return run(
+      req(`/v1/share/${code}/blobs/${BLOB}/${index}`, {
+        headers: ticket ? { "X-Read-Ticket": ticket } : {},
+      })
+    )
+  }
+
+  async function uploadTwoChunks(code: string, token: string): Promise<void> {
+    expect((await putChunk(code, token, "0", new Uint8Array(FULL).fill(1))).status).toBe(204)
+    expect((await putChunk(code, token, "1", new Uint8Array(100).fill(2))).status).toBe(204)
+    expect((await commit(code, token, { chunkCount: 2, totalBytes: FULL + 100 })).status).toBe(200)
+  }
+
+  it("round-trips chunks without spending views", async () => {
+    const { code, ownerToken } = await create({ maxViews: 2 })
+    await uploadTwoChunks(code, ownerToken)
+    const { ticket, expiresAt } = await readTicket(code)
+    expect(expiresAt).toBeGreaterThan(Date.now())
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await getChunk(code, "0", ticket)
+      expect(response.status).toBe(200)
+      expect((await response.arrayBuffer()).byteLength).toBe(FULL)
+    }
+    const last = await getChunk(code, "1", ticket)
+    expect(new Uint8Array(await last.arrayBuffer())).toEqual(new Uint8Array(100).fill(2))
+    const stats = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    expect(await stats.json()).toMatchObject({ viewCount: 1 })
+  })
+
+  it("needs a ticket minted for this share", async () => {
+    const { code, ownerToken } = await create({})
+    await uploadTwoChunks(code, ownerToken)
+    const other = await create({})
+    const { ticket: otherTicket } = await readTicket(other.code)
+    expect((await getChunk(code, "0")).status).toBe(401)
+    expect((await getChunk(code, "0", otherTicket)).status).toBe(401)
+    expect((await getChunk(code, "0", "1.forged")).status).toBe(401)
+  })
+
+  it("keeps a burned share's files for its last ticket, then purges them", async () => {
+    const { code, ownerToken } = await create({ burnAfterRead: true })
+    await uploadTwoChunks(code, ownerToken)
+    const { ticket, expiresAt } = await readTicket(code)
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+    expect((await getChunk(code, "1", ticket)).status).toBe(200)
+    // The code is not reusable while its files are retained.
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      expect(await state.storage.get("blobRetainUntil")).toBe(expiresAt)
+      expect(await state.storage.getAlarm()).toBe(expiresAt)
+      const created = await _instance.fetch(
+        new Request(
+          `https://lifecycle.internal/${code}?action=create`,
+          authed("POST", { envelope: ENVELOPE })
+        )
+      )
+      expect(created.status).toBe(409)
+      // Fast-forward: retention over.
+      await state.storage.put("blobRetainUntil", Date.now() - 1)
+    })
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect((await getChunk(code, "1", ticket)).status).toBe(404)
+    const listed = await (env as Env).SHARE_BUCKET.list({ prefix: `share/${code}/blob/` })
+    expect(listed.objects).toHaveLength(0)
+  })
+
+  it("revocation purges files a ticket would still allow", async () => {
+    const { code, ownerToken } = await create({})
+    await uploadTwoChunks(code, ownerToken)
+    const { ticket } = await readTicket(code)
+    expect((await run(req(`/v1/share/${code}`, owner("DELETE", ownerToken)))).status).toBe(204)
+    expect((await getChunk(code, "0", ticket)).status).toBe(404)
+    const listed = await (env as Env).SHARE_BUCKET.list({ prefix: `share/${code}/blob/` })
+    expect(listed.objects).toHaveLength(0)
+  })
+
+  it("expiry purges files through the lifecycle alarm", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 60 })
+    await uploadTwoChunks(code, ownerToken)
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      const meta = await state.storage.get<Record<string, unknown>>("meta")
+      await state.storage.put("meta", { ...meta, expiresAt: Date.now() - 1 })
+    })
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    const listed = await (env as Env).SHARE_BUCKET.list({ prefix: `share/${code}/blob/` })
+    expect(listed.objects).toHaveLength(0)
+  })
+
+  it("uploads need the share's owner", async () => {
+    const { code } = await create({})
+    expect((await putChunk(code, "0".repeat(64), "0", new Uint8Array(40))).status).toBe(401)
+    expect((await commit(code, "0".repeat(64), { chunkCount: 1, totalBytes: 40 })).status).toBe(401)
+    const bearer = await run(
+      req(`/v1/share/${code}/blobs/${BLOB}/0`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${SECRET}` },
+        body: new Uint8Array(40),
+      })
+    )
+    expect(bearer.status).toBe(401)
+    expect((await putChunk("NoSuchCode12", "x", "0", new Uint8Array(40))).status).toBe(404)
+  })
+
+  it("refuses malformed requests and enforces commit rules", async () => {
+    const { code, ownerToken } = await create({})
+    for (const [blob, index] of [
+      ["short", "0"],
+      [BLOB, "128"],
+      [BLOB, "01"],
+      [BLOB, "x"],
+    ]) {
+      expect((await putChunk(code, ownerToken, index, new Uint8Array(40), blob)).status).toBe(400)
+    }
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(16))).status).toBe(400)
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(FULL + 1))).status).toBe(413)
+    expect((await commit(code, ownerToken, { chunkCount: 1 })).status).toBe(400)
+    expect((await commit(code, ownerToken, { chunkCount: 1, totalBytes: 40 })).status).toBe(404)
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(40))).status).toBe(204)
+    expect((await commit(code, ownerToken, { chunkCount: 2, totalBytes: 40 })).status).toBe(400)
+    expect((await commit(code, ownerToken, { chunkCount: 1, totalBytes: 40 })).status).toBe(200)
+    expect((await commit(code, ownerToken, { chunkCount: 1, totalBytes: 40 })).status).toBe(200)
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(40))).status).toBe(409)
+    expect((await commit(code, ownerToken, { chunkCount: 1, totalBytes: 41 })).status).toBe(409)
+  })
+
+  it("does not serve an uncommitted blob", async () => {
+    const { code, ownerToken } = await create({})
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(40))).status).toBe(204)
+    const { ticket } = await readTicket(code)
+    expect((await getChunk(code, "0", ticket)).status).toBe(404)
+  })
+
+  it("caps the blobs and bytes one share may hold", async () => {
+    const { code, ownerToken } = await create({})
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      for (let index = 0; index < 200; index++) {
+        await state.storage.put(`blob:${String(index).padStart(22, "0")}`, {
+          committed: false,
+          chunks: {},
+        })
+      }
+    })
+    expect((await putChunk(code, ownerToken, "0", new Uint8Array(40))).status).toBe(413)
+    const roomy = await create({})
+    await runInDurableObject(stub(roomy.code), async (_instance, state) => {
+      await state.storage.put("blobBytes", 2 * 1024 * 1024 * 1024 - 20)
+    })
+    expect((await putChunk(roomy.code, roomy.ownerToken, "0", new Uint8Array(21))).status).toBe(413)
+    expect((await putChunk(roomy.code, roomy.ownerToken, "0", new Uint8Array(20))).status).toBe(204)
+  })
+
+  it("answers preflight and refuses other methods", async () => {
+    expect((await run(req(`/v1/share/abc/blobs/${BLOB}/0`, { method: "OPTIONS" }))).status).toBe(
+      204
+    )
+    expect((await run(req(`/v1/share/abc/blobs/${BLOB}/0`, { method: "DELETE" }))).status).toBe(405)
+    expect((await run(req(`/v1/share/abc/blobs/${BLOB}/commit`))).status).toBe(405)
+  })
+
+  it("serves no files without a ticket key", async () => {
+    // The edge refuses downloads outright when the deployment has no ticket
+    // key; the Durable Object's upload gate reads the same variable, but a
+    // test cannot rebind the object's own environment.
+    const keyless = { ...env, SHARE_TICKET_KEY: undefined } as unknown as Env
+    const get = await worker.fetch(
+      req(`/v1/share/AbCdEf123456/blobs/${BLOB}/0`, { headers: { "X-Read-Ticket": "1.x" } }),
+      keyless,
+      createExecutionContext()
+    )
+    expect(get.status).toBe(503)
+    expect(await get.json()).toEqual({ error: "file sharing is not configured" })
   })
 })

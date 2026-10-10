@@ -89,6 +89,68 @@ describe("CollabClient", () => {
     })
   })
 
+  it("authorizes a file share with the files scope and reads the policy revision", async () => {
+    const { calls, fetchImpl } = harness()
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        const response = await fetchImpl(url, init)
+        return url.includes("/export-authorization")
+          ? new Response(null, {
+              status: 204,
+              headers: { "x-cognia-file-policy-revision": "4" },
+            })
+          : response
+      },
+      now: () => 0,
+    })
+    await expect(client.authorizeSessionFileShare(ORG, "s/1")).resolves.toEqual({
+      policyRevision: 4,
+    })
+    expect(calls[1].url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/chat-sessions/s%2F1/export-authorization?scope=files`
+    )
+    expect(calls[1].init?.cache).toBe("no-store")
+
+    const denied = harness({ issueStatuses: [403] })
+    const deniedClient = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "token",
+      fetchImpl: denied.fetchImpl,
+      now: () => 0,
+    })
+    await expect(deniedClient.authorizeSessionFileShare(ORG, "s")).rejects.toMatchObject({
+      status: 403,
+    })
+  })
+
+  it("reads and saves the org file-sharing policy", async () => {
+    const policy = {
+      allowPublicSnapshots: false,
+      allowLiveGrants: true,
+      allowProtocolCredentials: false,
+      allowLiveWrite: false,
+      allowAgentSharing: false,
+      maxSnapshotTtlSeconds: 86_400,
+      maxLiveTtlSeconds: 604_800,
+      revision: 2,
+    }
+    const { calls, fetchImpl } = harness({ issues: policy as unknown as unknown[] })
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "token",
+      fetchImpl,
+      now: () => 0,
+    })
+    await expect(client.getFileSharingPolicy(ORG)).resolves.toEqual(policy)
+    expect(calls[1].url).toBe(`https://collab.test/v1/orgs/${ORG}/file-sharing-policy`)
+    const { revision: _revision, ...settings } = policy
+    await client.putFileSharingPolicy(ORG, { ...settings, baseRevision: 2 })
+    expect(calls[2].init?.method).toBe("PUT")
+    expect(JSON.parse(calls[2].init?.body as string)).toEqual({ ...settings, baseRevision: 2 })
+  })
+
   it("keeps the acquisition token stable on retry and authenticates release with device credentials", async () => {
     const { calls, fetchImpl } = harness()
     const client = new CollabClient({

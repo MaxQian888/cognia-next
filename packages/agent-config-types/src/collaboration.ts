@@ -22,6 +22,8 @@ export type SessionAction =
   | "session.breakGlassRead"
   | "attachment.read"
   | "attachment.write"
+  /** Publish the conversation's files as a link (ADR-0222). */
+  | "files.share"
 
 export type AuthorKind = "human" | "guest" | "agent" | "app" | "connector" | "system"
 

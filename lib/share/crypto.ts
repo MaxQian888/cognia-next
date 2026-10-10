@@ -61,13 +61,18 @@ async function importRawAesKey(rawKey: Uint8Array): Promise<CryptoKey> {
   ])
 }
 
-/** Bind the URL key and the passphrase together into a single AES key. */
-async function derivePassphraseKey(
+/**
+ * Bind the URL key and the passphrase together into 32 bytes of key material.
+ * Derived as bits rather than as a non-extractable key so the same material
+ * can both key the envelope and seed the share's file keys (ADR-0222) — the
+ * 600 000-iteration PBKDF2 then runs once per share, not once per file.
+ */
+async function derivePassphraseMaterial(
   rawKey: Uint8Array,
   passphrase: string,
   salt: Uint8Array,
   iterations: number
-): Promise<CryptoKey> {
+): Promise<Uint8Array> {
   const subtle = getSubtle()
   const passphraseBytes = new TextEncoder().encode(passphrase)
   const material = new Uint8Array(rawKey.length + passphraseBytes.length)
@@ -75,14 +80,64 @@ async function derivePassphraseKey(
   material.set(passphraseBytes, rawKey.length)
 
   const keyMaterial = await subtle.importKey("raw", toBufferSource(material), "PBKDF2", false, [
-    "deriveKey",
+    "deriveBits",
   ])
-  return subtle.deriveKey(
+  const bits = await subtle.deriveBits(
     { name: "PBKDF2", salt: toBufferSource(salt), iterations, hash: "SHA-256" },
     keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
+    256
+  )
+  return new Uint8Array(bits)
+}
+
+/**
+ * The 32 bytes every key of one share derives from: the raw URL key, or — on
+ * a passphrase share — PBKDF2 over (raw key ‖ passphrase). The envelope is
+ * encrypted with it directly; each file blob with an HKDF of it
+ * (`lib/share/blob-crypto.ts`), so a file is unreadable without the
+ * passphrase too.
+ */
+export interface ShareKeyMaterial {
+  bytes: Uint8Array
+  /** The KDF parameters a passphrase share records in its envelope. */
+  pp?: NonNullable<ShareEnvelopeV1["pp"]>
+}
+
+/** Key material for a new share; a passphrase gets a fresh random salt. */
+export async function prepareShareKeyMaterial(
+  rawKey: Uint8Array,
+  passphrase?: string
+): Promise<ShareKeyMaterial> {
+  if (!passphrase) return { bytes: rawKey }
+  const salt = randomBytes(16)
+  return {
+    bytes: await derivePassphraseMaterial(rawKey, passphrase, salt, PASSPHRASE_PBKDF2_ITERATIONS),
+    pp: {
+      kdf: "PBKDF2",
+      hash: "SHA-256",
+      iterations: PASSPHRASE_PBKDF2_ITERATIONS,
+      salt: encodeBase64(salt),
+    },
+  }
+}
+
+/**
+ * Key material for an existing envelope. Throws
+ * {@link SharePassphraseRequiredError} when the envelope needs a passphrase
+ * that wasn't supplied.
+ */
+export async function recoverShareKeyMaterial(
+  envelope: ShareEnvelopeV1,
+  rawKey: Uint8Array,
+  passphrase?: string
+): Promise<Uint8Array> {
+  if (!envelope.pp) return rawKey
+  if (!passphrase) throw new SharePassphraseRequiredError()
+  return derivePassphraseMaterial(
+    rawKey,
+    passphrase,
+    decodeBase64(envelope.pp.salt),
+    envelope.pp.iterations
   )
 }
 
@@ -95,24 +150,18 @@ export async function encryptSharePayload(
   rawKey: Uint8Array,
   passphrase?: string
 ): Promise<ShareEnvelopeV1> {
+  return encryptSharePayloadWithMaterial(payload, await prepareShareKeyMaterial(rawKey, passphrase))
+}
+
+/** {@link encryptSharePayload} with material the caller also needs for file blobs. */
+export async function encryptSharePayloadWithMaterial(
+  payload: SharePayload,
+  material: ShareKeyMaterial
+): Promise<ShareEnvelopeV1> {
   const subtle = getSubtle()
   const plainText = JSON.stringify(payload)
   const iv = randomBytes(12)
-
-  let key: CryptoKey
-  let pp: ShareEnvelopeV1["pp"]
-  if (passphrase) {
-    const salt = randomBytes(16)
-    key = await derivePassphraseKey(rawKey, passphrase, salt, PASSPHRASE_PBKDF2_ITERATIONS)
-    pp = {
-      kdf: "PBKDF2",
-      hash: "SHA-256",
-      iterations: PASSPHRASE_PBKDF2_ITERATIONS,
-      salt: encodeBase64(salt),
-    }
-  } else {
-    key = await importRawAesKey(rawKey)
-  }
+  const key = await importRawAesKey(material.bytes)
 
   const encrypted = await subtle.encrypt(
     { name: "AES-GCM", iv: toBufferSource(iv) },
@@ -123,7 +172,7 @@ export async function encryptSharePayload(
   return {
     v: 1,
     alg: "AES-GCM",
-    ...(pp ? { pp } : {}),
+    ...(material.pp ? { pp: material.pp } : {}),
     iv: encodeBase64(iv),
     ciphertext: encodeBase64(new Uint8Array(encrypted)),
     checksum: await sha256Hex(plainText),
@@ -142,22 +191,23 @@ export async function decryptShareEnvelope(
   rawKey: Uint8Array,
   passphrase?: string
 ): Promise<SharePayload> {
+  return (await openShareEnvelope(envelope, rawKey, passphrase)).payload
+}
+
+/**
+ * {@link decryptShareEnvelope}, also returning the key material so the
+ * viewer can decrypt the share's files without deriving it again.
+ */
+export async function openShareEnvelope(
+  envelope: ShareEnvelopeV1,
+  rawKey: Uint8Array,
+  passphrase?: string
+): Promise<{ payload: SharePayload; material: Uint8Array }> {
   const subtle = getSubtle()
   const iv = decodeBase64(envelope.iv)
   const ciphertext = decodeBase64(envelope.ciphertext)
-
-  let key: CryptoKey
-  if (envelope.pp) {
-    if (!passphrase) throw new SharePassphraseRequiredError()
-    key = await derivePassphraseKey(
-      rawKey,
-      passphrase,
-      decodeBase64(envelope.pp.salt),
-      envelope.pp.iterations
-    )
-  } else {
-    key = await importRawAesKey(rawKey)
-  }
+  const material = await recoverShareKeyMaterial(envelope, rawKey, passphrase)
+  const key = await importRawAesKey(material)
 
   const decrypted = await subtle.decrypt(
     { name: "AES-GCM", iv: toBufferSource(iv) },
@@ -170,7 +220,7 @@ export async function decryptShareEnvelope(
   if (checksum !== envelope.checksum) {
     throw new ShareIntegrityError(envelope.checksum, checksum)
   }
-  return JSON.parse(plainText) as SharePayload
+  return { payload: JSON.parse(plainText) as SharePayload, material }
 }
 
 /** Does this envelope demand a passphrase? Lets the viewer prompt up-front. */

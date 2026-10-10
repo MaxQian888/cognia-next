@@ -56,6 +56,18 @@ jest.mock("@/lib/files/edit-review-bridge", () => ({
   openFileInWorkbenchWorkspace: jest.fn(async () => true),
   openEditInWorkbenchReview: jest.fn(async () => true),
 }))
+const copyConversationFileLink = jest.fn(async (..._args: unknown[]): Promise<string> => "copied")
+jest.mock("@/lib/filespace/copy-link", () => ({
+  copyConversationFileLink: (...args: unknown[]) => copyConversationFileLink(...args),
+}))
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
 jest.mock("@/hooks/ui", () => ({
   useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
 }))
@@ -278,6 +290,39 @@ describe("FileToolPart row", () => {
     )
     expect(screen.getByTestId("file-tool-copy-target")).toBeTruthy()
     expect(screen.getByTestId("file-tool-open-in-workspace")).toBeTruthy()
+  })
+
+  it("copies a conversation link to the reported file", async () => {
+    render(
+      <FileToolPart
+        sessionId="s1"
+        part={part("tool-Read", { input: { file_path: "src/a.ts", offset: 12 }, output: "x" })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("file-tool-copy-link"))
+    await ReactForMocks.act(async () => {})
+    expect(copyConversationFileLink).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "s1", path: "src/a.ts" })
+    )
+    expect(toastSuccess).toHaveBeenCalledWith("toast.linkCopied")
+  })
+
+  it("says so when the reported file is outside the conversation", async () => {
+    copyConversationFileLink.mockResolvedValueOnce("outside")
+    render(
+      <FileToolPart
+        sessionId="s1"
+        part={part("tool-Read", { input: { file_path: "/etc/hosts" }, output: "x" })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("file-tool-copy-link"))
+    await ReactForMocks.act(async () => {})
+    expect(toastError).toHaveBeenCalledWith("toast.linkOutside")
+  })
+
+  it("offers no link without a conversation", () => {
+    render(<FileToolPart part={part("tool-Read", { input: { file_path: "a.ts" }, output: "x" })} />)
+    expect(screen.queryByTestId("file-tool-copy-link")).toBeNull()
   })
 
   it("shows the file-type glyph for a file target, a folder for LS, none for a pattern", () => {

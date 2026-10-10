@@ -15,6 +15,11 @@
  * session that does not exist. Its workspace becomes the active project first,
  * the same order a sidebar click uses, so the conversation is listed where it
  * opens. The link is consumed either way so a re-render cannot re-fire it.
+ *
+ * A link may also carry a files view (`&view=files[&path=…][&line=…]`,
+ * ADR-0222): once the conversation is focused, the linked file opens — or, with
+ * no path, its Files panel. The conversation opening is the link's first
+ * promise; a file that cannot be shown is reported, not a reason to stay put.
  */
 
 import { useEffect, useRef } from "react"
@@ -25,6 +30,9 @@ import {
   type ReadableParams,
 } from "@/lib/chat/message-permalink"
 import { getSession } from "@/lib/db/sessions"
+import { parseFilesViewParams, type ParsedFilesView } from "@/lib/filespace/link-params"
+import type { OpenFileSpacePathArgs } from "@/lib/filespace/open"
+import type { OpenFileSpacePathResult } from "@/types/filespace"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 
@@ -45,8 +53,17 @@ export interface UseSessionLinkOptions {
   onUnresolved: () => void
   /** Called after a conversation was focused, to bring the chat on screen. */
   onOpened?: () => void
+  /** Called when a files link's conversation opened but its file did not. */
+  onFilesUnresolved?: (result: Exclude<OpenFileSpacePathResult, "opened">) => void
   /** Injected for tests. */
   lookup?: (sessionId: string) => Promise<{ projectId?: string } | undefined>
+  /** Injected for tests; defaults to `openFileSpacePath`. */
+  openFiles?: (args: OpenFileSpacePathArgs) => Promise<OpenFileSpacePathResult>
+}
+
+async function defaultOpenFiles(args: OpenFileSpacePathArgs): Promise<OpenFileSpacePathResult> {
+  const { openFileSpacePath } = await import("@/lib/filespace/open")
+  return openFileSpacePath(args)
 }
 
 export function useSessionLink({
@@ -54,13 +71,20 @@ export function useSessionLink({
   onConsumed,
   onUnresolved,
   onOpened,
+  onFilesUnresolved,
   lookup = getSession,
+  openFiles = defaultOpenFiles,
 }: UseSessionLinkOptions): void {
   const sessionId = parseSessionLink(params)
-  const callbacks = useRef({ onConsumed, onUnresolved, onOpened })
+  const filesView = sessionId ? parseFilesViewParams(params) : null
+  // Primitive keys: the parsed object is new on every render.
+  const filesPath = filesView?.path
+  const filesLine = filesView?.line
+  const wantsFiles = filesView !== null
+  const callbacks = useRef({ onConsumed, onUnresolved, onOpened, onFilesUnresolved, openFiles })
   useEffect(() => {
-    callbacks.current = { onConsumed, onUnresolved, onOpened }
-  }, [onConsumed, onUnresolved, onOpened])
+    callbacks.current = { onConsumed, onUnresolved, onOpened, onFilesUnresolved, openFiles }
+  }, [onConsumed, onUnresolved, onOpened, onFilesUnresolved, openFiles])
 
   useEffect(() => {
     if (!sessionId) return
@@ -84,6 +108,17 @@ export function useSessionLink({
         }
         callbacks.current.onConsumed()
         callbacks.current.onOpened?.()
+        if (!wantsFiles) return
+        const view: ParsedFilesView = {
+          ...(filesPath ? { path: filesPath } : {}),
+          ...(filesLine ? { line: filesLine } : {}),
+        }
+        void callbacks.current
+          .openFiles({ sessionId, ...view })
+          .catch((): OpenFileSpacePathResult => "not-found")
+          .then((result) => {
+            if (result !== "opened") callbacks.current.onFilesUnresolved?.(result)
+          })
       },
       () => {
         if (!cancelled) unresolved()
@@ -92,5 +127,5 @@ export function useSessionLink({
     return () => {
       cancelled = true
     }
-  }, [sessionId, lookup])
+  }, [sessionId, lookup, wantsFiles, filesPath, filesLine])
 }

@@ -12,6 +12,17 @@ import { createKeyringStore } from "@/lib/credentials/keyring-store"
 
 const secretStore = createKeyringStore("share-links")
 
+/**
+ * What a share carried, kept beside the link so "what did I share from this
+ * conversation" is answerable without decrypting anything (ADR-0222). Paths
+ * are FileSpace paths at share time.
+ */
+export interface SharedLinkFileSummary {
+  path: string
+  size: number
+  sha256: string
+}
+
 interface SharedLinkSecretRefs {
   urlFragment?: string
   ownerToken?: string
@@ -49,6 +60,10 @@ export interface SharedLinkRow {
   secretRefs?: SharedLinkSecretRefs
   /** Owner-side revoke flag; the worker DELETE is authoritative. */
   revoked: boolean
+  /** Files the share carries; absent for a share without files. */
+  files?: SharedLinkFileSummary[]
+  /** The conversation the share was made from, when it was made from one. */
+  sessionId?: string
 }
 
 function newId(): string {
@@ -84,6 +99,8 @@ export async function recordSharedLink(
     hasPassphrase: partial.hasPassphrase,
     secretRefs: Object.keys(secretRefs).length > 0 ? secretRefs : undefined,
     revoked: partial.revoked ?? false,
+    ...(partial.files && partial.files.length > 0 ? { files: partial.files } : {}),
+    ...(partial.sessionId ? { sessionId: partial.sessionId } : {}),
   }
   await getDb().sharedLinks.put(row)
   return publicSharedLink(row, partial.url, partial.ownerToken)
@@ -96,6 +113,19 @@ export async function listSharedLinks(opts?: {
   const rows = await getDb().sharedLinks.orderBy("createdAt").reverse().toArray()
   const visible = opts?.includeRevoked ? rows : rows.filter((r) => !r.revoked)
   return Promise.all(visible.map(hydrateSharedLink))
+}
+
+/**
+ * Links made from one conversation, newest first. `sessionId` is not indexed —
+ * the table holds one row per link the owner made, so a scan is cheap and
+ * keeps the schema version where it is.
+ */
+export async function listSharedLinksForSession(
+  sessionId: string,
+  opts?: { includeRevoked?: boolean }
+): Promise<SharedLinkRow[]> {
+  const rows = await listSharedLinks(opts)
+  return rows.filter((row) => row.sessionId === sessionId)
 }
 
 export async function getSharedLinkByCode(code: string): Promise<SharedLinkRow | undefined> {

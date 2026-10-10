@@ -112,7 +112,12 @@ export function ShareView() {
   }, [state])
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-background text-foreground">
+    // `w-full`: inside the app shell this page is a flex item of a row, where
+    // it would otherwise shrink to its content.
+    <div
+      className="flex min-h-[100dvh] w-full min-w-0 flex-col bg-background text-foreground"
+      data-testid="share-view-root"
+    >
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-primary/10 to-transparent"
@@ -204,12 +209,19 @@ function Body({
           wrong={state.wrong}
           onSubmit={async (pass) => {
             onState({ status: "loading" })
-            onState(await decryptEnvelope(state.envelope, state.key, pass))
+            onState(await decryptEnvelope(state.envelope, state.key, pass, state.read))
           }}
         />
       )
     case "ready":
-      return <PayloadView payload={state.payload} className="w-full" canImport={canImport} />
+      return (
+        <PayloadView
+          payload={state.payload}
+          files={state.files}
+          className="w-full"
+          canImport={canImport}
+        />
+      )
   }
 }
 

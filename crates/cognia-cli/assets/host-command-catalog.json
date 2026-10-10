@@ -22038,6 +22038,83 @@
       "outputTyped": true
     },
     {
+      "name": "fs_read_workspace_file_chunk",
+      "category": "development",
+      "resource": "workspace-files",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "fs_read_workspace_file_chunk (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "relPath",
+          "offset",
+          "length"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "relPath": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4194304
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceFileChunk",
+        "description": "One slice of a workspace file, read to upload it chunk by chunk (ADR-0222). `bytesRead` is below the requested length only at the end of the file, and a read at or past the end is an empty slice with `eof`, not an error. `size` is the file's length when this slice was read, so a caller can notice the file changing under it.",
+        "required": [
+          "dataBase64",
+          "offset",
+          "bytesRead",
+          "size",
+          "eof"
+        ],
+        "properties": {
+          "dataBase64": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytesRead": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4194304
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eof": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fs_rename_workspace_entry",
       "category": "development",
       "resource": "workspace-files",
@@ -67558,5 +67635,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "da3f79b04e4daf55310e9c2a36383d5bfea634af0177371bb7140b999cdb5536"
+  "catalogHash": "58478412206ca4ee8c4137542ae0d7229a2fdb9f604477cc532608d2dd20473a"
 }

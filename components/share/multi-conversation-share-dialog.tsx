@@ -7,8 +7,8 @@ import { useLocale, useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
-import { assertChatShareAccess, buildMultiChatSharePayload } from "@/lib/share/chat-export"
-import type { SharePayload } from "@/lib/share/types"
+import { assertChatShareAccess, buildMultiChatShare } from "@/lib/share/chat-export"
+import type { ShareBuild } from "@/lib/share/client"
 import { useReducedMotionVariants } from "@/lib/ui/motion"
 
 interface Props {
@@ -34,7 +34,7 @@ const SUMMARY_VARIANTS = {
 export function MultiConversationShareDialog({ sessions, open, onOpenChange }: Props) {
   const t = useTranslations("share.multiConversation")
   const locale = useLocale()
-  const payloadPromiseRef = useRef<Promise<SharePayload> | null>(null)
+  const payloadPromiseRef = useRef<Promise<ShareBuild> | null>(null)
   const summaryVariants = useReducedMotionVariants(SUMMARY_VARIANTS)
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function MultiConversationShareDialog({ sessions, open, onOpenChange }: P
       return assertChatShareAccess(sessions).then(() => cached)
     }
 
-    const promise = buildMultiChatSharePayload({
+    const promise = buildMultiChatShare({
       sessions,
       title: t("title", { count: sessions.length }),
       lang: locale,

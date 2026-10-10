@@ -12,8 +12,9 @@
  * `invoke`, and the ten `fs_*_workspace` commands the nodes use are classified
  * `execution` in the command manifest, so a desktop routing to a remote Host
  * (ADR-0082) reaches that Host's disk with no work here. The one exception is
- * `fs_walk_workspace`, which is registered only as a local Tauri command. See
- * `canWalkWorkspace` below.
+ * `fs_walk_workspace`, which is registered only as a local Tauri command; the
+ * recursive listing goes through `walkWorkspaceTree`, which degrades to
+ * depth-1 listings where the walk cannot be reached.
  *
  * NOT built on `createFileSystemAPI` (`lib/plugin/core/context.ts`). That seam
  * confines every op to `<install_dir>/<pluginId>/data/`, so it is a per-plugin
@@ -30,12 +31,15 @@ import {
   renameWorkspaceEntry,
   searchWorkspaceContent,
   statWorkspaceFile,
-  walkWorkspace,
   writeWorkspaceFile,
 } from "@/lib/files/workspace-fs"
+import {
+  WALK_CEILING_MAX_ENTRIES,
+  WALK_DEFAULT_MAX_DEPTH,
+  WALK_DEFAULT_MAX_ENTRIES,
+  walkWorkspaceTree,
+} from "@/lib/files/workspace-walk"
 import { searchWorkspace } from "@/lib/files/workspace-search"
-import { detectPlatform } from "@/lib/platform/detect"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "../registry"
@@ -51,26 +55,6 @@ import { optionalRelPath, requireRelPath, resolveFsRoot } from "./root"
  */
 export const FS_READ_DEFAULT_MAX_BYTES = 1024 * 1024
 export const FS_READ_CEILING_BYTES = 8 * 1024 * 1024
-
-/** Caps for the degraded recursive listing. Mirrors `walkWorkspace`'s own. */
-const LIST_DEFAULT_MAX_ENTRIES = 5_000
-const LIST_CEILING_MAX_ENTRIES = 50_000
-const LIST_DEFAULT_MAX_DEPTH = 24
-
-/**
- * Whether `fs_walk_workspace` can be reached from here.
- *
- * It is the one export of `workspace-fs.ts` that does not honour that module's
- * own header: registered at `src-tauri/src/lib.rs` and nowhere else, absent
- * from the companion RPC allowlist, from the generated command index, and from
- * the `workspace.files` operation list in the host feature manifest. Calling it
- * anyway would hand the author a raw `unknown_command` from the wire, so
- * `action.fs.list` degrades to a bounded breadth-first walk built out of
- * `fs_list_workspace_dir`, which every Host answers.
- */
-export function canWalkWorkspace(): boolean {
-  return detectPlatform() === "tauri" && !isRemoteHostActive()
-}
 
 function params(ctx: StepExecutionContext): Record<string, unknown> {
   return ctx.params as Record<string, unknown>
@@ -214,37 +198,15 @@ registerNodeExecutor({
     }
 
     const maxEntries = clamp(
-      intOf(p, "maxEntries") ?? LIST_DEFAULT_MAX_ENTRIES,
+      intOf(p, "maxEntries") ?? WALK_DEFAULT_MAX_ENTRIES,
       1,
-      LIST_CEILING_MAX_ENTRIES
+      WALK_CEILING_MAX_ENTRIES
     )
-    const maxDepth = clamp(intOf(p, "maxDepth") ?? LIST_DEFAULT_MAX_DEPTH, 1, 64)
+    const maxDepth = clamp(intOf(p, "maxDepth") ?? WALK_DEFAULT_MAX_DEPTH, 1, 64)
     const includeDirs = boolOf(p, "includeDirs") ?? false
 
-    if (canWalkWorkspace()) {
-      const walk = await walkWorkspace(root, {
-        relPath,
-        includeIgnored,
-        includeDirs,
-        maxEntries,
-        maxDepth,
-      })
-      return {
-        output: {
-          root,
-          rootMode: mode,
-          relPath: relPath ?? "",
-          recursive: true,
-          entries: walk.entries.map(toListedEntry),
-          entryCount: walk.entries.length,
-          truncated: walk.truncated,
-          skippedSensitive: walk.skippedSensitive,
-          degraded: false,
-        },
-      }
-    }
-
-    const degraded = await breadthFirstList(root, relPath, {
+    const walk = await walkWorkspaceTree(root, {
+      relPath,
       includeIgnored,
       includeDirs,
       maxEntries,
@@ -256,13 +218,14 @@ registerNodeExecutor({
         rootMode: mode,
         relPath: relPath ?? "",
         recursive: true,
-        entries: degraded.entries.map(toListedEntry),
-        entryCount: degraded.entries.length,
-        truncated: degraded.truncated,
-        // The depth-1 command applies its own floors but does not report a
-        // count, so this stays 0 rather than claiming a number it did not get.
-        skippedSensitive: 0,
-        degraded: true,
+        entries: walk.entries.map(toListedEntry),
+        entryCount: walk.entries.length,
+        truncated: walk.truncated,
+        // A degraded walk is built from the depth-1 command, which applies its
+        // own floors but does not report a count, so it reports 0 rather than
+        // claiming a number it did not get.
+        skippedSensitive: walk.skippedSensitive,
+        degraded: walk.degraded,
       },
     }
   },
@@ -464,51 +427,4 @@ function toListedEntry(entry: WorkspaceEntry): ListedEntry {
     size: entry.size,
     mtimeMs: entry.mtimeMs,
   }
-}
-
-interface BreadthFirstOptions {
-  includeIgnored?: boolean
-  includeDirs: boolean
-  maxEntries: number
-  maxDepth: number
-}
-
-/**
- * Recursive listing built from the depth-1 command, for Hosts that cannot
- * answer `fs_walk_workspace`.
- *
- * Breadth-first so a cap truncates the deepest level rather than an arbitrary
- * subtree, which is the same shape `walkWorkspace` reports.
- */
-async function breadthFirstList(
-  root: string,
-  relPath: string | undefined,
-  options: BreadthFirstOptions
-): Promise<{ entries: WorkspaceEntry[]; truncated: boolean }> {
-  const entries: WorkspaceEntry[] = []
-  let queue: Array<{ path: string | undefined; depth: number }> = [{ path: relPath, depth: 0 }]
-  let truncated = false
-
-  while (queue.length > 0) {
-    const next: Array<{ path: string | undefined; depth: number }> = []
-    for (const dir of queue) {
-      const children = await listWorkspaceDir(root, dir.path, options.includeIgnored)
-      for (const child of children) {
-        if (child.isDir) {
-          if (options.includeDirs) {
-            if (entries.length >= options.maxEntries) return { entries, truncated: true }
-            entries.push(child)
-          }
-          if (dir.depth + 1 < options.maxDepth)
-            next.push({ path: child.relPath, depth: dir.depth + 1 })
-          else truncated = true
-        } else {
-          if (entries.length >= options.maxEntries) return { entries, truncated: true }
-          entries.push(child)
-        }
-      }
-    }
-    queue = next
-  }
-  return { entries, truncated }
 }

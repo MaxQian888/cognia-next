@@ -37,6 +37,18 @@ jest.mock("@/lib/files/save-export", () => ({
   saveExport: (...a: unknown[]) => mockSaveExport(...a),
 }))
 
+const mockShareDialogProps = jest.fn()
+jest.mock("@/components/share/share-link-dialog", () => ({
+  ShareLinkDialog: (props: { trigger?: React.ReactNode }) => {
+    mockShareDialogProps(props)
+    return props.trigger ?? null
+  },
+}))
+const mockBuildChatShare = jest.fn()
+jest.mock("@/lib/share/chat-export", () => ({
+  buildChatShare: (...a: unknown[]) => mockBuildChatShare(...a),
+}))
+
 const session = { id: "s1", title: "My chat" } as ChatSession
 
 beforeEach(() => {
@@ -103,6 +115,22 @@ describe("SingleExportDialog", () => {
       ).toBeInTheDocument()
     )
     expect(mockSaveExport).not.toHaveBeenCalled()
+  })
+
+  it("shares through the media-resolving builder and offers the conversation's files", async () => {
+    render(
+      <SingleExportDialog session={session} defaultFormat="jsonl" open onOpenChange={() => {}} />
+    )
+    fireEvent.click(screen.getByRole("switch", { name: "Include all branches" }))
+    const props = mockShareDialogProps.mock.lastCall?.[0] as {
+      buildPayload: () => unknown
+      files?: { session: ChatSession }
+    }
+    expect(props.files).toEqual({ session })
+    await props.buildPayload()
+    expect(mockBuildChatShare).toHaveBeenCalledWith(
+      expect.objectContaining({ format: "jsonl", session, includeAllBranches: true })
+    )
   })
 
   it("surfaces an error when the platform saver rejects the rendered PNG", async () => {

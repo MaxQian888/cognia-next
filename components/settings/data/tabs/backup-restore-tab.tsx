@@ -43,6 +43,7 @@ import {
 } from "@/lib/data/build-package"
 import { loggers } from "@cognia/logging"
 import { ShareSettingsCard } from "@/components/share/share-settings-card"
+import { FileSharingPolicyCard } from "@/components/share/file-sharing-policy-card"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { backupPayload } from "@/lib/share/payload"
 import type { SharePayload } from "@/lib/share/types"
@@ -66,6 +67,7 @@ export function BackupRestoreTab() {
       <QuickSessionExportBlock />
       <RotateKeyBlock />
       <ShareSettingsCard />
+      <FileSharingPolicyCard />
       <WebDavSyncCard />
       <GithubBackupCard />
       <GoogleDriveBackupCard />

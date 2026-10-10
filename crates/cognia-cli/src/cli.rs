@@ -207,6 +207,15 @@ pub(crate) struct OpenArgs {
     /// URL payload for `--share`.
     #[arg(long, requires = "share")]
     pub(crate) url: Option<String>,
+    /// With `--session`: open the conversation's Files panel (ADR-0222).
+    #[arg(long, requires = "session")]
+    pub(crate) files: bool,
+    /// With `--files`: the FileSpace path to open, e.g. `/workspace/src/main.rs`.
+    #[arg(long = "path", value_name = "FILESPACE_PATH", requires = "files")]
+    pub(crate) file_path: Option<String>,
+    /// With `--path`: the 1-based line to reveal.
+    #[arg(long, value_name = "LINE", requires = "file_path", value_parser = clap::value_parser!(u32).range(1..=10_000_000))]
+    pub(crate) line: Option<u32>,
     /// Print the deep link instead of launching it.
     #[arg(long)]
     pub(crate) print: bool,
@@ -1596,6 +1605,37 @@ mod tests {
                 panic!("expected plugin command");
             };
             assert_eq!(endpoint_file, Some(PathBuf::from("/tmp/e.json")));
+        }
+    }
+
+    #[test]
+    fn open_files_flags_need_their_session_and_each_other() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "open",
+            "--session",
+            "s1",
+            "--files",
+            "--path",
+            "/workspace/a.rs",
+            "--line",
+            "12",
+        ])
+        .expect("open --session --files --path --line");
+        let TopCommand::Open(args) = cli.command else {
+            panic!("expected open command");
+        };
+        assert!(args.files);
+        assert_eq!(args.file_path.as_deref(), Some("/workspace/a.rs"));
+        assert_eq!(args.line, Some(12));
+
+        for argv in [
+            vec!["cognia", "open", "--files"],
+            vec!["cognia", "open", "--session", "s1", "--path", "/workspace/a"],
+            vec!["cognia", "open", "--session", "s1", "--files", "--line", "3"],
+            vec!["cognia", "open", "--session", "s1", "--files", "--path", "/a", "--line", "0"],
+        ] {
+            assert!(Cli::try_parse_from(argv.clone()).is_err(), "{argv:?} should be rejected");
         }
     }
 

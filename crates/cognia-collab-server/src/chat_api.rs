@@ -510,20 +510,100 @@ async fn get_session(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportAuthorizationQuery {
+    /// `transcript` (the default) or `files` (ADR-0222).
+    scope: Option<String>,
+}
+
+/// May the caller take a copy of this conversation out of the org right now?
+/// Never cached: membership and policy are read on every call.
+///
+/// `scope=files` asks about publishing the conversation's files, which needs
+/// `files.share` and an org file-sharing policy that allows public snapshots;
+/// the answer then names the policy revision it was decided under.
 async fn authorize_export(
     State(state): State<AppState>,
     Path((org_id, session_id)): Path<(String, String)>,
+    Query(query): Query<ExportAuthorizationQuery>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, ChatFailure> {
-    visible(
+) -> Result<Response, ChatFailure> {
+    let files = match query.scope.as_deref() {
+        None | Some("transcript") => false,
+        Some("files") => true,
+        Some(other) => {
+            return Err(ChatFailure::BadRequest(format!(
+                "unknown export scope {other:?}"
+            )))
+        }
+    };
+    if !files {
+        visible(
+            &state,
+            &headers,
+            &org_id,
+            &session_id,
+            SessionAction::Export,
+        )
+        .await?;
+        return Ok(([("cache-control", "no-store")], StatusCode::NO_CONTENT).into_response());
+    }
+    let (session, _) = visible(
         &state,
         &headers,
         &org_id,
         &session_id,
-        SessionAction::Export,
+        SessionAction::FilesShare,
     )
     .await?;
-    Ok(([("cache-control", "no-store")], StatusCode::NO_CONTENT))
+    let policy = crate::file_sharing::effective_policy(state.file_sharing_store.as_ref(), &org_id)
+        .await
+        .map_err(ChatFailure::Store)?;
+    if !policy.settings.allow_public_snapshots {
+        let claims = claims(&state, &headers, &org_id).await?;
+        state
+            .store
+            .append_authorization_audit(AuthorizationAuditEvent {
+                id: format!("aud_{}", Uuid::new_v4().simple()),
+                org_id: org_id.clone(),
+                workspace_id: Some(session.workspace_id.clone()),
+                actor_user_id: claims.user_id.to_string(),
+                target_user_id: None,
+                invitation_id: None,
+                action: SessionAction::FilesShare.as_str().to_owned(),
+                old_role: None,
+                new_role: None,
+                reason: "org_file_sharing_policy".into(),
+                request_id: headers
+                    .get("x-request-id")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("req_{}", Uuid::new_v4().simple())),
+                grant_id: Some(claims.grant_id.to_string()),
+                source: serde_json::json!({
+                    "resourceType": "chat_session",
+                    "resourceId": session_id,
+                    "policyRevision": policy.revision,
+                    "allowed": false,
+                }),
+                created_at: (state.now)(),
+            })
+            .await
+            .map_err(ChatFailure::Store)?;
+        state.chat_metrics.authorization_denied();
+        return Err(ChatFailure::Store(StoreError::Policy(
+            "org_file_sharing_policy".into(),
+        )));
+    }
+    Ok((
+        [
+            ("cache-control", "no-store".to_owned()),
+            ("x-cognia-file-policy-revision", policy.revision.to_string()),
+        ],
+        StatusCode::NO_CONTENT,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -3033,6 +3113,96 @@ mod tests {
                 assert_eq!(response.headers()["cache-control"], "no-store");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn file_share_authorization_needs_files_share_and_the_org_policy() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let (state, grant) = notification_fixture().await;
+        let app = routes().with_state(state.clone());
+        let ask = |user: &str, scope: &str| {
+            Request::builder()
+                .uri(format!(
+                    "/v1/orgs/{NOTICE_ORG}/chat-sessions/session/export-authorization{scope}"
+                ))
+                .header("authorization", grant(user))
+                .header(
+                    "x-cognia-collab-protocol",
+                    SHARED_CHAT_PROTOCOL_VERSION.to_string(),
+                )
+                .body(Body::empty())
+                .unwrap()
+        };
+        state
+            .chat_store
+            .put_member(
+                NOTICE_ORG,
+                "session",
+                "workspace",
+                BOB,
+                SessionRole::Member,
+                false,
+                false,
+                2,
+            )
+            .await
+            .unwrap();
+
+        // The owner may; the answer names the policy revision it used.
+        let response = app.clone().oneshot(ask(ADA, "?scope=files")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.headers()["x-cognia-file-policy-revision"], "0");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        // A member may not, and the transcript scope is unchanged.
+        let response = app.clone().oneshot(ask(BOB, "?scope=files")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let response = app.clone().oneshot(ask(BOB, "")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let response = app
+            .clone()
+            .oneshot(ask(ADA, "?scope=transcript"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = app
+            .clone()
+            .oneshot(ask(ADA, "?scope=everything"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // The org turns public snapshots off: even the owner is refused, and
+        // the refusal is audited against the conversation.
+        state
+            .file_sharing_store
+            .put_file_sharing_policy(
+                NOTICE_ORG,
+                crate::file_sharing::FileSharingSettings {
+                    allow_public_snapshots: false,
+                    ..Default::default()
+                },
+                0,
+                ADA,
+                5,
+            )
+            .await
+            .unwrap();
+        let response = app.clone().oneshot(ask(ADA, "?scope=files")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let audit = state
+            .store
+            .list_authorization_audit(NOTICE_ORG, 50)
+            .await
+            .unwrap();
+        assert!(audit.iter().any(|event| event.action == "files.share"
+            && event.reason == "org_file_sharing_policy"
+            && event.source["policyRevision"] == 1
+            && event.source["allowed"] == false));
+        // Exporting the transcript is a different question.
+        let response = app.oneshot(ask(ADA, "")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     /// A store and state with Ada (owner of `session`), Bob and Cy all in

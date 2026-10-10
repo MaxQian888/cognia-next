@@ -190,7 +190,7 @@ async fn options_preflight_returns_cors() {
         res.headers()
             .get("access-control-allow-methods")
             .and_then(|v| v.to_str().ok()),
-        Some("GET, POST, PATCH, DELETE, OPTIONS")
+        Some("GET, POST, PUT, PATCH, DELETE, OPTIONS")
     );
     let allow_headers = res
         .headers()
@@ -203,6 +203,13 @@ async fn options_preflight_returns_cors() {
             .map(|header| header.trim().to_ascii_lowercase())
             .any(|header| header == "x-owner-token"),
         "preflight headers must allow owner-token lifecycle requests: {allow_headers}"
+    );
+    assert!(
+        allow_headers
+            .split(',')
+            .map(|header| header.trim().to_ascii_lowercase())
+            .any(|header| header == "x-read-ticket"),
+        "preflight headers must allow file read tickets: {allow_headers}"
     );
 }
 

@@ -195,3 +195,93 @@ describe("protected and limited-view loading", () => {
     }
   })
 })
+
+describe("file access (ADR-0222)", () => {
+  const FILES: SharePayload = {
+    kind: "file-bundle",
+    mime: "application/json",
+    data: "",
+    encoding: "utf8",
+    files: [
+      {
+        blobId: "AAECAwQFBgcICQoLDA0ODw",
+        path: "/workspace/a.txt",
+        name: "a.txt",
+        mime: "text/plain",
+        size: 1,
+        sha256: "0".repeat(64),
+        chunkSize: 4194304,
+        chunkCount: 1,
+        ivPrefix: "AAAAAAAAAAA=",
+      },
+    ],
+  }
+
+  it("hands the viewer the read ticket and the key material for a share with files", async () => {
+    const key = generateShareKey()
+    const envelope = await encryptSharePayload(FILES, key)
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ passphrase: false, burnAfterRead: false }))
+      .mockResolvedValueOnce(
+        jsonResponse({ envelope, readTicket: "123.sig", readTicketExpiresAt: 123 })
+      )
+    const state = await loadShare("https://x", "?c=code", `#k=${encodeShareKey(key)}`, fetchImpl)
+    expect(state).toMatchObject({
+      status: "ready",
+      payload: FILES,
+      files: {
+        baseUrl: "https://x",
+        code: "code",
+        readTicket: "123.sig",
+        readTicketExpiresAt: 123,
+      },
+    })
+    if (state.status !== "ready") throw new Error("expected ready")
+    expect(Array.from(state.files!.material)).toEqual(Array.from(key))
+  })
+
+  it("keeps the ticket through a wrong passphrase and returns passphrase-derived material", async () => {
+    const key = generateShareKey()
+    const envelope = await encryptSharePayload(FILES, key, "pw")
+    const fetchImpl = jest.fn().mockResolvedValueOnce(jsonResponse({ envelope, readTicket: "t" }))
+    const wrong = await openShare(
+      { baseUrl: "https://x", code: "code", key: encodeShareKey(key) },
+      "no",
+      fetchImpl
+    )
+    expect(wrong).toMatchObject({ status: "passphrase", wrong: true, read: { readTicket: "t" } })
+    if (wrong.status !== "passphrase") throw new Error("expected retry")
+    const ready = await decryptEnvelope(wrong.envelope, wrong.key, "pw", wrong.read)
+    expect(ready).toMatchObject({ status: "ready", files: { readTicket: "t", code: "code" } })
+    if (ready.status !== "ready") throw new Error("expected ready")
+    expect(ready.files!.material).toHaveLength(32)
+    expect(Array.from(ready.files!.material)).not.toEqual(Array.from(key))
+  })
+
+  it("gives a share without files no file access, and tolerates a server without tickets", async () => {
+    const key = generateShareKey()
+    const plain = await encryptSharePayload(PAYLOAD, key)
+    const withTicket = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ envelope: plain, readTicket: "t" }))
+    expect(
+      await openShare(
+        { baseUrl: "https://x", code: "c", key: encodeShareKey(key) },
+        undefined,
+        withTicket
+      )
+    ).toEqual({ status: "ready", payload: PAYLOAD })
+
+    const files = await encryptSharePayload(FILES, key)
+    const noTicket = jest.fn().mockResolvedValueOnce(jsonResponse({ envelope: files }))
+    const state = await openShare(
+      { baseUrl: "https://x", code: "c", key: encodeShareKey(key) },
+      undefined,
+      noTicket
+    )
+    expect(state).toMatchObject({ status: "ready", files: { code: "c" } })
+    if (state.status !== "ready") throw new Error("expected ready")
+    expect(state.files).not.toHaveProperty("readTicket")
+  })
+})

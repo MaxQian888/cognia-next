@@ -7,6 +7,7 @@ import {
   listWorkspaceRoots,
   readWorkspaceFile,
   readWorkspaceFileBase64,
+  readWorkspaceFileChunk,
   renameWorkspaceEntry,
   searchWorkspaceContent,
   statWorkspaceFile,
@@ -152,6 +153,18 @@ describe("read/write wrappers", () => {
       root: "/repo",
       relPath: "img.png",
       maxBytes: 512,
+    })
+  })
+
+  it("readWorkspaceFileChunk asks for one slice and returns it as sent", async () => {
+    const chunk = { dataBase64: "QUJD", offset: 8, bytesRead: 3, size: 11, eof: true }
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce(chunk)
+    await expect(readWorkspaceFileChunk("/repo", "big.bin", 8, 4)).resolves.toEqual(chunk)
+    expect(callSpy).toHaveBeenCalledWith("fs_read_workspace_file_chunk", {
+      root: "/repo",
+      relPath: "big.bin",
+      offset: 8,
+      length: 4,
     })
   })
 

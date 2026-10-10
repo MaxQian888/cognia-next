@@ -6,13 +6,20 @@ import {
   createShareLink,
   revokeShareLink,
   getShareStats,
+  ShareFilesTooLargeError,
+  ShareFilesUploadError,
   ShareNotConfiguredError,
   SharePayloadTooLargeError,
   ShareRequestError,
   assertShareRequestSize,
+  type CreateShareFile,
+  type CreateShareProgress,
 } from "./client"
 import type { ShareEndpoint } from "./config"
-import { decryptShareEnvelope } from "./crypto"
+import { decryptShareEnvelope, openShareEnvelope } from "./crypto"
+import { downloadShareBlob } from "./blobs"
+import { SHARE_MAX_BLOB_BYTES } from "./blob-crypto"
+import { bytesShareSource } from "./file-sources"
 import { decodeShareKey } from "./keys"
 import { listSharedLinks, getSharedLinkByCode } from "@/lib/db/shared-links"
 import { getDb } from "@/lib/db/schema"
@@ -300,4 +307,161 @@ it("posts only the non-secret passphrase flag alongside a protected burn envelop
   expect(body.burnAfterRead).toBe(true)
   expect(body.envelope.pp).toBeDefined()
   expect(JSON.stringify(body)).not.toContain("private phrase")
+})
+
+describe("createShareLink with files (ADR-0222)", () => {
+  /** A share server in memory: create, blob upload/commit, delete. */
+  function fileServer(
+    options: { failPut?: number; failDelete?: boolean; noOwnerToken?: boolean } = {}
+  ) {
+    const state = {
+      envelope: undefined as ShareEnvelopeV1 | undefined,
+      chunks: new Map<string, Uint8Array>(),
+      committed: new Set<string>(),
+      deleted: false,
+      puts: 0,
+    }
+    fetchMock.mockImplementation(async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET"
+      const path = new URL(url).pathname
+      if (method === "POST" && path === "/v1/share") {
+        state.envelope = JSON.parse(init.body as string).envelope
+        return Response.json({
+          code: "FileShare1234",
+          ...(options.noOwnerToken ? {} : { ownerToken: "owner" }),
+        })
+      }
+      const blob = /^\/v1\/share\/FileShare1234\/blobs\/([^/]+)\/([^/]+)$/.exec(path)
+      if (blob && method === "PUT") {
+        state.puts++
+        if (options.failPut !== undefined && state.puts > options.failPut) {
+          return Response.json({ error: "quota" }, { status: 413 })
+        }
+        state.chunks.set(`${blob[1]}/${blob[2]}`, new Uint8Array(init.body as ArrayBuffer))
+        return new Response(null, { status: 204 })
+      }
+      if (blob && method === "POST" && blob[2] === "commit") {
+        state.committed.add(blob[1])
+        return Response.json({ ok: true })
+      }
+      if (blob && method === "GET") {
+        return new Response(state.chunks.get(`${blob[1]}/${blob[2]}`)!.slice())
+      }
+      if (method === "DELETE" && path === "/v1/share/FileShare1234") {
+        if (options.failDelete) return Response.json({ error: "down" }, { status: 503 })
+        state.deleted = true
+        return new Response(null, { status: 204 })
+      }
+      return new Response(null, { status: 404 })
+    })
+    return state
+  }
+
+  const file = (path: string, bytes: Uint8Array): CreateShareFile => ({
+    path,
+    name: path.slice(path.lastIndexOf("/") + 1),
+    mime: "application/octet-stream",
+    open: async () => bytesShareSource(bytes),
+  })
+
+  it("seals the manifest into the envelope, uploads the blobs and records a summary", async () => {
+    const state = fileServer()
+    const report = new TextEncoder().encode("quarterly numbers")
+    const progress: CreateShareProgress[] = []
+    const created = await createShareLink(
+      {
+        payload: { kind: "file-bundle", mime: "application/json", data: "", encoding: "utf8" },
+        files: [
+          file("/workspace/report.txt", report),
+          file("/uploads/empty.bin", new Uint8Array()),
+        ],
+        sessionId: "session-1",
+        passphrase: "pw",
+        onProgress: (event) => progress.push(event),
+      },
+      ENDPOINT
+    )
+
+    const key = decodeShareKey(created.url.split("#k=")[1])
+    const { payload, material } = await openShareEnvelope(state.envelope!, key, "pw")
+    expect(payload.files?.map((entry) => [entry.path, entry.size, entry.chunkCount])).toEqual([
+      ["/workspace/report.txt", report.length, 1],
+      ["/uploads/empty.bin", 0, 0],
+    ])
+    // Nothing about the files is visible outside the ciphertext.
+    expect(JSON.stringify(state.envelope)).not.toContain("report")
+    expect(state.committed.size).toBe(1)
+
+    const downloaded = await downloadShareBlob({
+      baseUrl: ENDPOINT.baseUrl,
+      code: created.code,
+      readTicket: "t",
+      material,
+      entry: payload.files![0],
+      fetchImpl: (url, init) => fetchMock(url, init),
+    })
+    expect(new TextDecoder().decode(await downloaded.arrayBuffer())).toBe("quarterly numbers")
+
+    expect(progress.map((event) => event.phase)).toContain("hashing")
+    expect(progress.at(-1)).toMatchObject({
+      phase: "uploading",
+      done: report.length,
+      total: report.length,
+    })
+    const row = await getSharedLinkByCode(created.code)
+    expect(row).toMatchObject({
+      kind: "file-bundle",
+      sessionId: "session-1",
+      files: [
+        { path: "/workspace/report.txt", size: report.length, sha256: payload.files![0].sha256 },
+        { path: "/uploads/empty.bin", size: 0 },
+      ],
+    })
+  })
+
+  it("withdraws the share and records nothing when an upload fails", async () => {
+    const state = fileServer({ failPut: 0 })
+    const error = await createShareLink(
+      { payload: PAYLOAD, files: [file("/workspace/a.bin", new Uint8Array([1, 2, 3]))] },
+      ENDPOINT
+    ).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ShareFilesUploadError)
+    expect((error as ShareFilesUploadError).revoked).toBe(true)
+    expect(state.deleted).toBe(true)
+    expect(await listSharedLinks({ includeRevoked: true })).toEqual([])
+  })
+
+  it("keeps the link in My Shares when it could not be withdrawn", async () => {
+    fileServer({ failPut: 0, failDelete: true })
+    const error = await createShareLink(
+      { payload: PAYLOAD, files: [file("/workspace/a.bin", new Uint8Array([1]))] },
+      ENDPOINT
+    ).catch((caught: unknown) => caught)
+    expect((error as ShareFilesUploadError).revoked).toBe(false)
+    expect((await listSharedLinks()).map((row) => row.code)).toEqual(["FileShare1234"])
+  })
+
+  it("refuses a server that mints no owner token, withdrawing nothing it cannot", async () => {
+    const state = fileServer({ noOwnerToken: true })
+    const error = await createShareLink(
+      { payload: PAYLOAD, files: [file("/workspace/a.bin", new Uint8Array([1]))] },
+      ENDPOINT
+    ).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ShareFilesUploadError)
+    expect(state.puts).toBe(0)
+  })
+
+  it("checks the server's limits before creating anything", async () => {
+    fileServer()
+    const huge: CreateShareFile = {
+      path: "/workspace/huge.iso",
+      name: "huge.iso",
+      mime: "application/octet-stream",
+      open: async () => ({ size: SHARE_MAX_BLOB_BYTES + 1, read: async () => new Uint8Array() }),
+    }
+    await expect(
+      createShareLink({ payload: PAYLOAD, files: [huge] }, ENDPOINT)
+    ).rejects.toBeInstanceOf(ShareFilesTooLargeError)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

@@ -1534,6 +1534,9 @@
     "fs_read_workspace_file": {
       "to": "fs.workspace_file.read"
     },
+    "fs_read_workspace_file_chunk": {
+      "to": "fs.workspace_file.read_chunk"
+    },
     "fs_rename_workspace_entry": {
       "to": "fs.workspace_entry.rename"
     },

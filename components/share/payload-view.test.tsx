@@ -497,4 +497,61 @@ describe("PayloadView", () => {
     render(<PayloadView payload={payload({ kind: "chat-template", data: "not json" })} />)
     expect(screen.getByText("This shared chat template could not be loaded.")).toBeInTheDocument()
   })
+
+  describe("files (ADR-0222)", () => {
+    const file = {
+      blobId: "AAECAwQFBgcICQoLDA0ODw",
+      path: "/workspace/report.pdf",
+      name: "report.pdf",
+      mime: "application/pdf",
+      size: 2048,
+      sha256: "0".repeat(64),
+      chunkSize: 4194304,
+      chunkCount: 1,
+      ivPrefix: "AAAAAAAAAAA=",
+    }
+    const access = {
+      baseUrl: "https://share.example",
+      code: "Code12345678",
+      readTicket: "1.sig",
+      material: new Uint8Array(32),
+    }
+
+    it("renders a file bundle as its file list alone", () => {
+      render(
+        <PayloadView
+          payload={payload({ kind: "file-bundle", mime: "application/json", files: [file] })}
+          files={access}
+        />
+      )
+      expect(screen.getByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Show report.pdf" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Download report.pdf" })).toBeInTheDocument()
+      expect(screen.queryByText(/not supported by this version/)).not.toBeInTheDocument()
+    })
+
+    it("lists a conversation's files under the conversation", () => {
+      render(
+        <PayloadView
+          payload={payload({ kind: "chat-html", data: "<p>hi</p>", files: [file] })}
+          files={access}
+        />
+      )
+      expect(screen.getByTitle("Shared conversation")).toBeInTheDocument()
+      expect(screen.getByRole("region", { name: "Attachments" })).toBeInTheDocument()
+      expect(screen.getByText("report.pdf")).toBeInTheDocument()
+    })
+
+    it("lists files without downloads in the owner's preview", () => {
+      render(<PayloadView payload={payload({ kind: "file-bundle", files: [file] })} />)
+      expect(screen.getByText("report.pdf")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Download report.pdf" })).not.toBeInTheDocument()
+    })
+
+    it("renders no file section for a payload without files", () => {
+      render(<PayloadView payload={payload({ kind: "chat-text", data: "x" })} />)
+      expect(screen.queryByRole("region", { name: "Files" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("region", { name: "Attachments" })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
 
-const buildMultiChatSharePayload = jest.fn()
+const buildMultiChatShare = jest.fn()
 const assertChatShareAccess = jest.fn()
 let currentBuildPayload: () => Promise<unknown>
 
@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("@/lib/share/chat-export", () => ({
-  buildMultiChatSharePayload: (...args: unknown[]) => buildMultiChatSharePayload(...args),
+  buildMultiChatShare: (...args: unknown[]) => buildMultiChatShare(...args),
   assertChatShareAccess: (...args: unknown[]) => assertChatShareAccess(...args),
 }))
 
@@ -55,11 +55,9 @@ const sessions = [
 beforeEach(() => {
   jest.clearAllMocks()
   assertChatShareAccess.mockResolvedValue(undefined)
-  buildMultiChatSharePayload.mockResolvedValue({
-    kind: "chat-animated",
-    mime: "text/html",
-    data: "<html/>",
-    encoding: "utf8",
+  buildMultiChatShare.mockResolvedValue({
+    payload: { kind: "chat-animated", mime: "text/html", data: "<html/>", encoding: "utf8" },
+    attachments: [],
   })
 })
 
@@ -77,8 +75,8 @@ test("reuses one payload snapshot across preview and create requests", async () 
 
   await user.click(screen.getByRole("button", { name: "build twice" }))
 
-  await waitFor(() => expect(buildMultiChatSharePayload).toHaveBeenCalledTimes(1))
-  expect(buildMultiChatSharePayload).toHaveBeenCalledWith(
+  await waitFor(() => expect(buildMultiChatShare).toHaveBeenCalledTimes(1))
+  expect(buildMultiChatShare).toHaveBeenCalledWith(
     expect.objectContaining({
       sessions,
       title: 'title:{"count":2}',
@@ -92,6 +90,6 @@ test("rechecks shared export permission before publishing a cached preview", asy
   await currentBuildPayload()
   assertChatShareAccess.mockRejectedValueOnce(new Error("forbidden"))
   await expect(currentBuildPayload()).rejects.toThrow("forbidden")
-  expect(buildMultiChatSharePayload).toHaveBeenCalledTimes(1)
+  expect(buildMultiChatShare).toHaveBeenCalledTimes(1)
   expect(assertChatShareAccess).toHaveBeenCalledWith(sessions)
 })

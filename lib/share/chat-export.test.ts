@@ -1,8 +1,4 @@
-import {
-  assertChatShareAccess,
-  buildChatSharePayload,
-  buildMultiChatSharePayload,
-} from "./chat-export"
+import { assertChatShareAccess, buildChatShare, buildMultiChatShare } from "./chat-export"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const sortBy = jest.fn().mockResolvedValue([{ id: "m1" }])
@@ -24,6 +20,15 @@ jest.mock("@/lib/export/single", () => ({
   renderSingleExport: (arg: unknown) => renderSingleExport(arg),
 }))
 
+const materializeChatShareMedia = jest.fn(async (messages: unknown[]) => ({
+  messages,
+  attachments: [] as unknown[],
+  unavailable: 0,
+}))
+jest.mock("./chat-media", () => ({
+  materializeChatShareMedia: (messages: unknown[]) => materializeChatShareMedia(messages),
+}))
+
 const session = { id: "s1", title: "My chat" } as ChatSession
 const assertSharedSessionExport = jest.fn()
 jest.mock("@/lib/collab/shared-session-access", () => ({
@@ -36,15 +41,16 @@ beforeEach(() => {
   getCharacter.mockResolvedValue(undefined)
 })
 
-describe("buildChatSharePayload", () => {
+describe("buildChatShare", () => {
   it("rejects unauthorized shared exports before reading the local transcript", async () => {
     assertSharedSessionExport.mockRejectedValueOnce(new Error("forbidden"))
-    await expect(buildChatSharePayload({ format: "html", session })).rejects.toThrow("forbidden")
+    await expect(buildChatShare({ format: "html", session })).rejects.toThrow("forbidden")
     expect(sortBy).not.toHaveBeenCalled()
     expect(renderSingleExport).not.toHaveBeenCalled()
   })
   it("fetches messages, renders, and wraps as a chat payload", async () => {
-    const payload = await buildChatSharePayload({ format: "html", session })
+    const { payload, attachments } = await buildChatShare({ format: "html", session })
+    expect(attachments).toEqual([])
     expect(sortBy).toHaveBeenCalledWith("createdAt")
     expect(renderSingleExport).toHaveBeenCalledWith(
       expect.objectContaining({ format: "html", session, messages: [{ id: "m1" }] })
@@ -59,7 +65,7 @@ describe("buildChatSharePayload", () => {
   })
 
   it("falls back to a default title when the session has none", async () => {
-    const payload = await buildChatSharePayload({
+    const { payload } = await buildChatShare({
       format: "text",
       session: { id: "s2", title: "" } as ChatSession,
     })
@@ -68,7 +74,7 @@ describe("buildChatSharePayload", () => {
 
   it("attaches encrypted structured provenance for a twin-bound conversation", async () => {
     getCharacter.mockResolvedValueOnce({ id: "character-1", twinId: "twin-1" })
-    const payload = await buildChatSharePayload({
+    const { payload } = await buildChatShare({
       format: "text",
       session: { id: "s3", title: "Twin", characterId: "character-1" } as ChatSession,
     })
@@ -78,13 +84,31 @@ describe("buildChatSharePayload", () => {
   })
 })
 
-describe("buildMultiChatSharePayload", () => {
+describe("buildChatShare media and branches (ADR-0222)", () => {
+  it("renders the materialized transcript and hands its attachments over", async () => {
+    const attachment = { path: "/attachments/big.png", name: "big.png", mime: "image/png" }
+    materializeChatShareMedia.mockResolvedValueOnce({
+      messages: [{ id: "m1-resolved" }],
+      attachments: [attachment],
+      unavailable: 2,
+    })
+    const build = await buildChatShare({ format: "jsonl", session, includeAllBranches: true })
+    expect(materializeChatShareMedia).toHaveBeenCalledWith([{ id: "m1" }])
+    expect(renderSingleExport).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: [{ id: "m1-resolved" }], includeAllBranches: true })
+    )
+    expect(build.attachments).toEqual([attachment])
+    expect(build.unavailableMedia).toBe(2)
+  })
+})
+
+describe("buildMultiChatShare", () => {
   it("rejects the entire selection before reading any transcript when one source denies export", async () => {
     assertSharedSessionExport
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("forbidden"))
     await expect(
-      buildMultiChatSharePayload({
+      buildMultiChatShare({
         sessions: [session, { ...session, id: "denied" }],
         title: "Selection",
         copy: {
@@ -147,7 +171,7 @@ describe("buildMultiChatSharePayload", () => {
         filename: "second.html",
       })
 
-    const payload = await buildMultiChatSharePayload({
+    const { payload } = await buildMultiChatShare({
       sessions,
       title: "Selected conversations",
       copy: {
@@ -197,7 +221,7 @@ describe("buildMultiChatSharePayload", () => {
       filename: "unsafe.html",
     })
 
-    const payload = await buildMultiChatSharePayload({
+    const { payload } = await buildMultiChatShare({
       sessions: [{ id: "unsafe", title: "</script><img src=x>" } as ChatSession],
       title: "</script><img src=x>",
       copy: {

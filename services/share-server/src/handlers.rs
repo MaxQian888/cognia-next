@@ -18,6 +18,10 @@ use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
+use cognia_share_core::blobs::{
+    is_storage_safe_code, is_valid_blob_id, max_chunk_ciphertext_bytes, parse_chunk_index,
+    BLOB_CHUNK_OVERHEAD_BYTES, READ_TICKET_TTL_SECONDS,
+};
 use cognia_share_core::codegen::{code_from_bytes, CODE_LENGTH};
 use cognia_share_core::policy::{is_origin_allowed, looks_like_envelope, timing_safe_eq};
 use cognia_share_core::proto::{ShareMeta, StatsView};
@@ -25,11 +29,16 @@ use rand::Rng;
 
 use crate::metrics::RejectReason;
 use crate::server::{now_ms_f64, now_ms_i64, AppState};
-use crate::store::ReadOutcome;
+use crate::store::{CommitOutcome, PutChunkOutcome, ReadOutcome};
 
 const OWNER_TOKEN_HEADER: &str = "x-owner-token";
+const READ_TICKET_HEADER: &str = "x-read-ticket";
 const OWNER_TOKEN_BYTES: usize = 32;
-const CORS_ALLOW_HEADERS: &str = "Authorization, Content-Type, X-Owner-Token";
+const CORS_ALLOW_HEADERS: &str = "Authorization, Content-Type, X-Owner-Token, X-Read-Ticket";
+const CORS_ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+/// Attempts at an unused share code before giving up. A collision needs two
+/// 62^12 draws to meet, so a second attempt is already a curiosity.
+const CREATE_ATTEMPTS: usize = 3;
 
 // ---------------------------------------------------------------------------
 // Response builders — every response carries the same CORS posture as the
@@ -41,10 +50,7 @@ fn full_headers() -> [(HeaderName, &'static str); 6] {
         (CONTENT_TYPE, "application/json"),
         (CACHE_CONTROL, "no-store"),
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        (
-            ACCESS_CONTROL_ALLOW_METHODS,
-            "GET, POST, PATCH, DELETE, OPTIONS",
-        ),
+        (ACCESS_CONTROL_ALLOW_METHODS, CORS_ALLOW_METHODS),
         (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
@@ -53,10 +59,7 @@ fn full_headers() -> [(HeaderName, &'static str); 6] {
 fn cors_only() -> [(HeaderName, &'static str); 4] {
     [
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        (
-            ACCESS_CONTROL_ALLOW_METHODS,
-            "GET, POST, PATCH, DELETE, OPTIONS",
-        ),
+        (ACCESS_CONTROL_ALLOW_METHODS, CORS_ALLOW_METHODS),
         (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
@@ -249,7 +252,6 @@ pub async fn create(
             .map(|n| n.floor() as u64)
     };
 
-    let code = generate_code();
     let owner_token = generate_owner_token();
     let envelope_text = serde_json::to_string(envelope).unwrap_or_default();
     let meta = ShareMeta {
@@ -266,18 +268,33 @@ pub async fn create(
         creator_user_id: caller.as_ref().map(|caller| caller.user_id.clone()),
     };
 
-    let store = state.store.clone();
-    let code_for_store = code.clone();
-    let written =
-        tokio::task::spawn_blocking(move || store.create(&code_for_store, &envelope_text, &meta))
-            .await;
-    match written {
-        Ok(Ok(())) => {}
-        other => {
-            tracing::error!(target: "share", ?other, "store.create failed");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
+    let mut created = None;
+    for _ in 0..CREATE_ATTEMPTS {
+        let code = generate_code();
+        let store = state.store.clone();
+        let code_for_store = code.clone();
+        let envelope_text = envelope_text.clone();
+        let meta = meta.clone();
+        let written = tokio::task::spawn_blocking(move || {
+            store.create(&code_for_store, &envelope_text, &meta)
+        })
+        .await;
+        match written {
+            Ok(Ok(true)) => {
+                created = Some(code);
+                break;
+            }
+            Ok(Ok(false)) => continue,
+            other => {
+                tracing::error!(target: "share", ?other, "store.create failed");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
+            }
         }
     }
+    let Some(code) = created else {
+        tracing::error!(target: "share", "no unused share code after {CREATE_ATTEMPTS} attempts");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
+    };
 
     state.metrics.created();
     let payload = json!({ "code": code, "ownerToken": owner_token, "expiresAt": expires_at });
@@ -377,13 +394,27 @@ pub async fn read(
     }
     let now = now_ms_i64();
     let store = state.store.clone();
-    let outcome = tokio::task::spawn_blocking(move || store.read_and_advance(&code, now)).await;
+    let code_for_store = code.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        store.read_and_advance(&code_for_store, now, READ_TICKET_TTL_SECONDS)
+    })
+    .await;
     match outcome {
-        Ok(Ok(ReadOutcome::Served { envelope })) => {
+        Ok(Ok(ReadOutcome::Served {
+            envelope,
+            ticket_expires_at,
+        })) => {
             state.metrics.read();
+            // ADR-0222: this read is the one counted view, so it also hands
+            // out the ticket that lets the reader fetch the share's files
+            // without spending more views — even when it was the last one.
+            let ticket = state.tickets.mint(&code, ticket_expires_at);
             // Serve the opaque envelope verbatim, matching the Worker's
-            // `{"envelope":<text>}` string assembly (no re-parse).
-            let body = format!("{{\"envelope\":{envelope}}}");
+            // `{"envelope":<text>,…}` string assembly (no re-parse).
+            let body = format!(
+                "{{\"envelope\":{envelope},\"readTicket\":{},\"readTicketExpiresAt\":{ticket_expires_at}}}",
+                serde_json::to_string(&ticket).unwrap_or_default()
+            );
             (StatusCode::OK, full_headers(), body).into_response()
         }
         Ok(Ok(ReadOutcome::NotFound)) => {
@@ -572,6 +603,225 @@ pub async fn delete(
         }
         other => {
             tracing::error!(target: "share", ?other, "store.delete failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0222 file blobs
+//
+// PUT  /v1/share/:code/blobs/:blob_id/:index   (owner) one encrypted chunk
+// POST /v1/share/:code/blobs/:blob_id/commit   (owner) seal the blob
+// GET  /v1/share/:code/blobs/:blob_id/:index   (read ticket) one chunk
+//
+// The server stays blind: a chunk is ciphertext under a key derived from the
+// URL fragment, and a blob id is random. What it enforces is shape and size.
+// ---------------------------------------------------------------------------
+
+fn blob_path_is_valid(code: &str, blob_id: &str) -> bool {
+    is_storage_safe_code(code) && is_valid_blob_id(blob_id)
+}
+
+/// The owner check every blob write shares: the share must exist and be
+/// live, and the caller must own it exactly as for stats / delete.
+async fn authorize_blob_write(
+    state: &AppState,
+    headers: &HeaderMap,
+    code: &str,
+) -> Result<(), Response> {
+    let store = state.store.clone();
+    let code = code.to_string();
+    let meta = tokio::task::spawn_blocking(move || store.stats(&code, now_ms_i64())).await;
+    match meta {
+        Ok(Ok(Some(meta))) => {
+            if owner_authorized(headers, &meta, state) {
+                Ok(())
+            } else {
+                state.metrics.rejected(RejectReason::Unauthorized);
+                Err(err(StatusCode::UNAUTHORIZED, "unauthorized"))
+            }
+        }
+        Ok(Ok(None)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            Err(err(StatusCode::NOT_FOUND, "not found"))
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.stats before blob write failed");
+            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
+        }
+    }
+}
+
+pub async fn put_blob_chunk(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((code, blob_id, index)): Path<(String, String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    let Some(index) = parse_chunk_index(&index).filter(|_| blob_path_is_valid(&code, &blob_id))
+    else {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(StatusCode::BAD_REQUEST, "invalid blob path");
+    };
+    let len = body.len() as u64;
+    if len > max_chunk_ciphertext_bytes() {
+        state.metrics.rejected(RejectReason::TooLarge);
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "chunk too large");
+    }
+    if len <= BLOB_CHUNK_OVERHEAD_BYTES {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(StatusCode::BAD_REQUEST, "chunk too small");
+    }
+    if let Err(response) = authorize_blob_write(&state, &headers, &code).await {
+        return response;
+    }
+    let store = state.store.clone();
+    let stored = tokio::task::spawn_blocking(move || {
+        store.put_chunk(&code, &blob_id, index, &body, now_ms_i64())
+    })
+    .await;
+    match stored {
+        Ok(Ok(PutChunkOutcome::Stored)) => {
+            state.metrics.blob_chunk_stored();
+            no_content()
+        }
+        Ok(Ok(PutChunkOutcome::NotFound)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            err(StatusCode::NOT_FOUND, "not found")
+        }
+        Ok(Ok(PutChunkOutcome::Committed)) => {
+            state.metrics.rejected(RejectReason::Invalid);
+            err(StatusCode::CONFLICT, "blob already committed")
+        }
+        Ok(Ok(PutChunkOutcome::TooManyBlobs)) => {
+            state.metrics.rejected(RejectReason::TooLarge);
+            err(StatusCode::PAYLOAD_TOO_LARGE, "too many blobs")
+        }
+        Ok(Ok(PutChunkOutcome::QuotaExceeded)) => {
+            state.metrics.rejected(RejectReason::TooLarge);
+            err(StatusCode::PAYLOAD_TOO_LARGE, "share blob quota exceeded")
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.put_chunk failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+pub async fn commit_blob(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((code, blob_id)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    if !blob_path_is_valid(&code, &blob_id) {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(StatusCode::BAD_REQUEST, "invalid blob path");
+    }
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            state.metrics.rejected(RejectReason::Invalid);
+            return err(StatusCode::BAD_REQUEST, "invalid json");
+        }
+    };
+    let (Some(chunk_count), Some(total_bytes)) = (
+        parsed.get("chunkCount").and_then(Value::as_u64),
+        parsed.get("totalBytes").and_then(Value::as_u64),
+    ) else {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(
+            StatusCode::BAD_REQUEST,
+            "chunkCount and totalBytes required",
+        );
+    };
+    if let Err(response) = authorize_blob_write(&state, &headers, &code).await {
+        return response;
+    }
+    let store = state.store.clone();
+    let committed = tokio::task::spawn_blocking(move || {
+        store.commit_blob(&code, &blob_id, chunk_count, total_bytes, now_ms_i64())
+    })
+    .await;
+    match committed {
+        Ok(Ok(CommitOutcome::Committed)) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(Ok(CommitOutcome::NotFound)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            err(StatusCode::NOT_FOUND, "not found")
+        }
+        Ok(Ok(CommitOutcome::Invalid(_))) => {
+            state.metrics.rejected(RejectReason::Invalid);
+            err(StatusCode::BAD_REQUEST, "blob incomplete")
+        }
+        Ok(Ok(CommitOutcome::Conflict)) => {
+            state.metrics.rejected(RejectReason::Invalid);
+            err(StatusCode::CONFLICT, "blob already committed")
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.commit_blob failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+pub async fn get_blob_chunk(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((code, blob_id, index)): Path<(String, String, String)>,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    let Some(index) = parse_chunk_index(&index).filter(|_| blob_path_is_valid(&code, &blob_id))
+    else {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(StatusCode::BAD_REQUEST, "invalid blob path");
+    };
+    let ticket = headers
+        .get(READ_TICKET_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let now = now_ms_i64();
+    if !state.tickets.verify(ticket, &code, now) {
+        state.metrics.rejected(RejectReason::Unauthorized);
+        return err(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let store = state.store.clone();
+    let chunk =
+        tokio::task::spawn_blocking(move || store.read_chunk(&code, &blob_id, index, now)).await;
+    match chunk {
+        Ok(Ok(Some(bytes))) => {
+            state.metrics.blob_chunk_served();
+            (
+                StatusCode::OK,
+                [
+                    (CONTENT_TYPE, "application/octet-stream"),
+                    (CACHE_CONTROL, "no-store"),
+                    (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+                    (ACCESS_CONTROL_ALLOW_METHODS, CORS_ALLOW_METHODS),
+                    (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
+                    (ACCESS_CONTROL_MAX_AGE, "86400"),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Ok(Ok(None)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            err(StatusCode::NOT_FOUND, "not found")
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.read_chunk failed");
             err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }

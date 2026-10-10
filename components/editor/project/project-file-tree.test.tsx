@@ -669,6 +669,36 @@ describe("ProjectFileTree", () => {
     expect(onCopyPath).toHaveBeenLastCalledWith("readme.md", true)
   })
 
+  it("offers a conversation link only when the host supplies one", async () => {
+    const onCopyLink = jest.fn()
+    const view = render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath="readme.md"
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+        onCopyLink={onCopyLink}
+      />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(screen.getByTestId("tree-copy-link-readme.md"))
+    expect(onCopyLink).toHaveBeenCalledWith("readme.md")
+    fireEvent.click(screen.getByTestId("tree-copy-link-src"))
+    expect(onCopyLink).toHaveBeenLastCalledWith("src")
+    view.unmount()
+
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath="readme.md"
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+      />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    expect(screen.queryByTestId("tree-copy-link-readme.md")).toBeNull()
+  })
+
   it("supports root context creation and cancellation inside a directory template", async () => {
     const deps = makeDeps()
     render(

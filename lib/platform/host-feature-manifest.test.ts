@@ -298,6 +298,9 @@ describe("host feature manifest", () => {
       "event:automation:consent-request"
     )
     expect(manifest.features["workspace.files"]?.operations).toContain("fs_write_workspace_file")
+    expect(manifest.features["workspace.files"]?.operations).toContain(
+      "fs_read_workspace_file_chunk"
+    )
     expect(
       manifest.operations.find((operation) => operation.name === "browser_capability")
     ).toMatchObject({ healthy: false, reason: "workspace probe failed" })

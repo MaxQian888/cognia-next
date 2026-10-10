@@ -33,6 +33,9 @@ export interface DeeplinkNavigators {
 export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigators): void {
   switch (route.kind) {
     case "open_session":
+      // A conversation files link (`route.files`, ADR-0222) opens just the
+      // conversation here: the phone has no workspace filesystem backend, so
+      // there is no editor or Files panel to land on.
       if (route.sessionId) navigators.pushSession(route.sessionId)
       return
     case "share_target":

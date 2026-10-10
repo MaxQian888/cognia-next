@@ -1,10 +1,15 @@
 import {
   encryptSharePayload,
+  encryptSharePayloadWithMaterial,
   decryptShareEnvelope,
   envelopeRequiresPassphrase,
+  openShareEnvelope,
+  prepareShareKeyMaterial,
+  recoverShareKeyMaterial,
   ShareIntegrityError,
   SharePassphraseRequiredError,
 } from "./crypto"
+import { encodeBase64 } from "./encoding"
 import { generateShareKey } from "./keys"
 import { sha256Hex } from "./hash"
 import type { SharePayload } from "./types"
@@ -100,5 +105,73 @@ describe("binary payloads", () => {
     }
     const env = await encryptSharePayload(binary, key)
     expect(await decryptShareEnvelope(env, key)).toEqual(binary)
+  })
+})
+
+describe("share key material (ADR-0222)", () => {
+  it("is the raw key itself when there is no passphrase", async () => {
+    const key = generateShareKey()
+    const material = await prepareShareKeyMaterial(key)
+    expect(material.bytes).toBe(key)
+    expect(material.pp).toBeUndefined()
+    const env = await encryptSharePayloadWithMaterial(PAYLOAD, material)
+    await expect(openShareEnvelope(env, key)).resolves.toEqual({ payload: PAYLOAD, material: key })
+  })
+
+  it("derives 32 bytes from key and passphrase that the reader recovers exactly", async () => {
+    const key = generateShareKey()
+    const material = await prepareShareKeyMaterial(key, "hunter2")
+    expect(material.bytes).toHaveLength(32)
+    expect(material.pp?.iterations).toBe(600_000)
+    const env = await encryptSharePayloadWithMaterial(PAYLOAD, material)
+    expect(env.pp).toEqual(material.pp)
+    const opened = await openShareEnvelope(env, key, "hunter2")
+    expect(opened.payload).toEqual(PAYLOAD)
+    expect(Array.from(opened.material)).toEqual(Array.from(material.bytes))
+    expect(Array.from(await recoverShareKeyMaterial(env, key, "hunter2"))).toEqual(
+      Array.from(material.bytes)
+    )
+    await expect(recoverShareKeyMaterial(env, key)).rejects.toBeInstanceOf(
+      SharePassphraseRequiredError
+    )
+  })
+
+  it("still opens passphrase envelopes sealed with a PBKDF2-derived AES key", async () => {
+    // Envelopes created before the material refactor derived a non-extractable
+    // AES key with `deriveKey`; `deriveBits` + import must be the same key.
+    const subtle = globalThis.crypto.subtle
+    const key = generateShareKey()
+    const passphrase = "legacy"
+    const salt = globalThis.crypto.getRandomValues(new Uint8Array(16))
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
+    const joined = new Uint8Array([...key, ...new TextEncoder().encode(passphrase)])
+    const base = await subtle.importKey("raw", joined, "PBKDF2", false, ["deriveKey"])
+    const aes = await subtle.deriveKey(
+      { name: "PBKDF2", salt, iterations: 1_000, hash: "SHA-256" },
+      base,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt"]
+    )
+    const plainText = JSON.stringify(PAYLOAD)
+    const ciphertext = await subtle.encrypt(
+      { name: "AES-GCM", iv },
+      aes,
+      new TextEncoder().encode(plainText)
+    )
+    const env = {
+      v: 1 as const,
+      alg: "AES-GCM" as const,
+      pp: {
+        kdf: "PBKDF2" as const,
+        hash: "SHA-256" as const,
+        iterations: 1_000,
+        salt: encodeBase64(salt),
+      },
+      iv: encodeBase64(iv),
+      ciphertext: encodeBase64(new Uint8Array(ciphertext)),
+      checksum: await sha256Hex(plainText),
+    }
+    await expect(decryptShareEnvelope(env, key, passphrase)).resolves.toEqual(PAYLOAD)
   })
 })

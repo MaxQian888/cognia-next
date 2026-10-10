@@ -25,6 +25,7 @@ import {
 import type { TrayActionPayload } from "@/lib/tray/types"
 import { parseCogniaDeeplink } from "@/lib/navigation/cognia-deeplink"
 import { dispatchDesktopDeeplink } from "@/lib/navigation/desktop-deeplink-dispatch"
+import { OPEN_FAILURE_MESSAGE_KEY } from "@/lib/filespace/messages"
 
 function relaySchedulerEvent(
   eventType: "job:exited" | "monitor:fired",
@@ -49,9 +50,12 @@ export function useTauriEvents(): void {
   // every Tauri listener, while still resolving against the current locale.
   const t = useTranslations("settings.about")
   const tRef = useRef(t)
+  const tFiles = useTranslations("filespace")
+  const tFilesRef = useRef(tFiles)
   useEffect(() => {
     tRef.current = t
-  }, [t])
+    tFilesRef.current = tFiles
+  }, [t, tFiles])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -78,6 +82,9 @@ export function useTauriEvents(): void {
             console.warn("unhandled deep link", link)
             toast.message(tRef.current("deepLinkUnknown"), { description: link })
           },
+          // The conversation opened; say why the linked file did not.
+          onFilesUnresolved: (result) =>
+            toast.error(tFilesRef.current(OPEN_FAILURE_MESSAGE_KEY[result])),
         }).catch((error) => {
           console.warn("deep link failed", raw, error)
         })

@@ -1,10 +1,17 @@
 {
-  "_comment": "Canonical share-service constants shared by the Rust axum server (core/codegen.rs + src/server.rs) and the TypeScript Cloudflare Worker (worker/src/index.ts). Both test suites assert against this file (core: tests/constants_parity.rs, worker: src/constants-parity.test.ts) so drift on either side fails that side's CI. kvMinTtlSeconds is a Cloudflare KV platform constraint and is asserted only by the Worker.",
+  "_comment": "Canonical share-service constants shared by the Rust axum server (core/codegen.rs + src/server.rs) and the TypeScript Cloudflare Worker (worker/src/index.ts). Both test suites assert against this file (core: tests/constants_parity.rs, worker: src/constants-parity.test.ts) so drift on either side fails that side's CI. kvMinTtlSeconds is a Cloudflare KV platform constraint and is asserted only by the Worker. The blob* / maxBlob* / readTicketTtlSeconds keys are the ADR-0222 file-blob limits (core/src/blobs.rs on the Rust side).",
   "codeLength": 12,
   "codeAlphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
   "defaultMaxBodyBytes": 10485760,
   "defaultMaxTtlSeconds": 2592000,
   "kvMinTtlSeconds": 60,
+  "blobChunkBytes": 4194304,
+  "blobChunkOverheadBytes": 16,
+  "blobIdBytes": 16,
+  "maxBlobBytes": 536870912,
+  "maxShareBlobBytes": 2147483648,
+  "maxBlobsPerShare": 200,
+  "readTicketTtlSeconds": 3600,
   "publicMetadataSuffix": "metadata",
   "publicMetadataFields": ["passphrase", "burnAfterRead", "maxViews", "expiresAt"]
 }

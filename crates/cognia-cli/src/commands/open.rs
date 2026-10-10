@@ -48,6 +48,11 @@ pub fn run(args: &OpenArgs, ui: &mut RuntimeUi) -> Result<()> {
 /// before we get here. With no selector at all we open the workspace
 /// surface (the app root).
 fn build_deeplink(args: &OpenArgs) -> Result<Url> {
+    // clap's `requires = "session"` is not enforced when another surface of
+    // the exclusive group is present (`--settings --files`), so say it here.
+    if args.files && args.surface.session.is_none() {
+        bail!("--files opens a conversation's files and needs --session <ID>");
+    }
     if let Some(target) = &args.surface.target {
         // Anything carrying a scheme is a URL, not a path — `open https://x`
         // must not silently become a workspace named "https://x".
@@ -68,6 +73,9 @@ fn build_deeplink(args: &OpenArgs) -> Result<Url> {
     if let Some(id) = &args.surface.session {
         let mut url = base("session")?;
         push_segment(&mut url, id)?;
+        if args.files {
+            append_files_view(&mut url, args.file_path.as_deref(), args.line)?;
+        }
         return Ok(url);
     }
     if let Some(tab) = &args.surface.settings {
@@ -120,6 +128,62 @@ fn build_deeplink(args: &OpenArgs) -> Result<Url> {
         return Ok(url);
     }
     base("workspace")
+}
+
+/// `?view=files[&path=…][&line=…]` — the conversation files view
+/// (`lib/filespace/link-params.ts`). The path is checked against the same
+/// grammar the desktop parses (absolute, no `.`/`..`, no backslashes or
+/// control characters) and normalized the same way, so the CLI never prints a
+/// link the app would silently degrade to "open the Files panel".
+fn append_files_view(url: &mut Url, path: Option<&str>, line: Option<u32>) -> Result<()> {
+    let mut query = url.query_pairs_mut();
+    query.append_pair("view", "files");
+    if let Some(raw) = path {
+        let normalized = normalize_filespace_path(raw)
+            .with_context(|| format!("--path is not a FileSpace path (got `{raw}`)"))?;
+        query.append_pair("path", &normalized);
+        if let Some(line) = line {
+            query.append_pair("line", &line.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Mirror of `normalizeFileSpacePath` (`lib/filespace/paths.ts`), minus NFC
+/// composition: the CLI takes the path as typed and rejects rather than
+/// rewrites anything outside the grammar.
+fn normalize_filespace_path(raw: &str) -> Option<String> {
+    if raw.is_empty() || raw.chars().count() > 4096 {
+        return None;
+    }
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in raw.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        if segment == "." || segment == ".." {
+            return None;
+        }
+        if segment
+            .chars()
+            .any(|c| c == '\\' || (c as u32) < 0x20 || c as u32 == 0x7f)
+        {
+            return None;
+        }
+        if segments.is_empty() && is_drive_designator(segment) {
+            return None;
+        }
+        segments.push(segment);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    Some(format!("/{}", segments.join("/")))
+}
+
+fn is_drive_designator(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn base(host: &str) -> Result<Url> {
@@ -222,6 +286,9 @@ mod tests {
             },
             text: None,
             url: None,
+            files: false,
+            file_path: None,
+            line: None,
             print: false,
         }
     }
@@ -243,6 +310,62 @@ mod tests {
     fn session_flag_builds_session_route() {
         let url = build_deeplink(&with(|s| s.session = Some("abc-123".into()))).unwrap();
         assert_eq!(url.as_str(), "cognia://session/abc-123");
+    }
+
+    #[test]
+    fn files_flags_build_the_conversation_files_view() {
+        let mut panel = with(|s| s.session = Some("sess-1".into()));
+        panel.files = true;
+        assert_eq!(
+            build_deeplink(&panel).unwrap().as_str(),
+            "cognia://session/sess-1?view=files"
+        );
+
+        let mut file = panel;
+        file.file_path = Some("workspace//src/app.ts".into());
+        file.line = Some(42);
+        assert_eq!(
+            build_deeplink(&file).unwrap().as_str(),
+            "cognia://session/sess-1?view=files&path=%2Fworkspace%2Fsrc%2Fapp.ts&line=42"
+        );
+
+        let mut no_session = with(|s| s.settings = Some(String::new()));
+        no_session.files = true;
+        assert!(build_deeplink(&no_session).is_err());
+
+        for bad in ["/workspace/../etc", "/", "C:/x", "/a\\b"] {
+            let mut rejected = with(|s| s.session = Some("sess-1".into()));
+            rejected.files = true;
+            rejected.file_path = Some(bad.into());
+            assert!(
+                build_deeplink(&rejected).is_err(),
+                "expected `{bad}` to be rejected"
+            );
+        }
+    }
+
+    /// `lib/filespace/link-fixtures.json` is the contract the desktop's
+    /// `buildConversationFilesDeeplink` is tested against too.
+    #[test]
+    fn files_links_match_the_shared_fixtures() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../lib/filespace/link-fixtures.json"
+        ))
+        .expect("fixture json");
+        let cases = fixtures["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let mut args = with(|s| s.session = case["sessionId"].as_str().map(str::to_owned));
+            args.files = true;
+            args.file_path = case["path"].as_str().map(str::to_owned);
+            args.line = case["line"].as_u64().map(|line| line as u32);
+            assert_eq!(
+                build_deeplink(&args).unwrap().as_str(),
+                case["deeplink"].as_str().expect("deeplink"),
+                "fixture `{}`",
+                case["name"]
+            );
+        }
     }
 
     #[test]

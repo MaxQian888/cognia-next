@@ -108,3 +108,11 @@ export function chatTemplatePayload(shared: SharedChatTemplate, title?: string):
     title: title ?? shared.name,
   }
 }
+
+/**
+ * Files and nothing else (ADR-0222) → payload. `data` is empty: the manifest
+ * rides in `files`, which `createShareLink` fills from the chosen files.
+ */
+export function fileBundlePayload(title: string): SharePayload {
+  return { kind: "file-bundle", mime: "application/json", data: "", encoding: "utf8", title }
+}

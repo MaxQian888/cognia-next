@@ -2,6 +2,8 @@
  * Platform-neutral parser for every first-party `cognia://` route, plus the
  * one route on the reverse-domain scheme (`cn.cognia.app:/auth/callback`).
  */
+import { parseFilesViewParams, type ParsedFilesView } from "@/lib/filespace/link-params"
+
 export type CogniaDeeplinkRoute =
   | {
       kind: "oauth_callback"
@@ -27,7 +29,17 @@ export type CogniaDeeplinkRoute =
       raw: string
     }
   | { kind: "pair_qr"; payload: string; raw: string }
-  | { kind: "open_session"; sessionId: string; raw: string }
+  | {
+      kind: "open_session"
+      sessionId: string
+      /**
+       * `?view=files[&path=…][&line=…]` (ADR-0222): open the conversation's
+       * Files panel, or one file in it. Absent on a plain conversation link;
+       * a link with an unknown `view` opens the conversation only.
+       */
+      files?: ParsedFilesView
+      raw: string
+    }
   /**
    * One issue on the board (`cognia://issues/<id>`). The Browser Companion
    * mints these for a page filed as an issue; `/issues?id=` is the page.
@@ -114,7 +126,13 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
     return { kind: "pair_qr", payload: params.get("payload") ?? path, raw }
   }
   if (host === "session" || host === "chat") {
-    return { kind: "open_session", sessionId: path || params.get("id") || "", raw }
+    const files = parseFilesViewParams(params)
+    return {
+      kind: "open_session",
+      sessionId: path || params.get("id") || "",
+      ...(files ? { files } : {}),
+      raw,
+    }
   }
   if (host === "issues" || host === "issue") {
     return { kind: "open_issue", issueId: firstSegment(path) || params.get("id") || "", raw }

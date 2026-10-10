@@ -10,6 +10,8 @@ import { useShellNav } from "@/components/shell/use-shell-nav"
 import { useMessagePermalink } from "@/hooks/chat/use-message-permalink"
 import { useSessionLink } from "@/hooks/chat/use-session-link"
 import { PERMALINK_SESSION_PARAM } from "@/lib/chat/message-permalink"
+import { FILES_LINK_PARAMS } from "@/lib/filespace/link-params"
+import { OPEN_FAILURE_MESSAGE_KEY, type OpenFileSpaceFailure } from "@/lib/filespace/messages"
 import RouteBody from "./route-body"
 import {
   readTargetedInviteLink,
@@ -53,11 +55,13 @@ function MessagePermalinkConsumer() {
 
 /**
  * Consumes session-only `/?session=…` links (`buildSessionHref`): plan and
- * collaboration notifications, a memory's source, an issue run. Opens the
- * conversation, then drops only the `session` param.
+ * collaboration notifications, a memory's source, an issue run, and a
+ * conversation files link (`&view=files…`, ADR-0222). Opens the conversation,
+ * then drops only the `session` param and the files-view params.
  */
 function SessionLinkConsumer() {
   const t = useTranslations("chat.jump")
+  const tFiles = useTranslations("filespace")
   const router = useRouter()
   const pathname = usePathname() ?? "/"
   const params = useSearchParams()
@@ -65,11 +69,16 @@ function SessionLinkConsumer() {
   const onConsumed = useCallback(() => {
     const rest = new URLSearchParams(params?.toString() ?? "")
     rest.delete(PERMALINK_SESSION_PARAM)
+    for (const key of FILES_LINK_PARAMS) rest.delete(key)
     const query = rest.toString()
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
   }, [router, pathname, params])
   const onUnresolved = useCallback(() => toast.error(t("notFound")), [t])
-  useSessionLink({ params, onConsumed, onUnresolved, onOpened: switchToDm })
+  const onFilesUnresolved = useCallback(
+    (result: OpenFileSpaceFailure) => toast.error(tFiles(OPEN_FAILURE_MESSAGE_KEY[result])),
+    [tFiles]
+  )
+  useSessionLink({ params, onConsumed, onUnresolved, onOpened: switchToDm, onFilesUnresolved })
   return null
 }
 

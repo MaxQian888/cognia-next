@@ -37,6 +37,7 @@ import {
   FolderOpenIcon,
   FolderPlusIcon,
   FolderSearchIcon,
+  LinkIcon,
   ListCollapseIcon,
   MessageSquarePlusIcon,
   RefreshCwIcon,
@@ -128,6 +129,12 @@ interface Props {
   gitDecorations?: Map<string, GitFileStatus>
   /** Copy a row's path to the clipboard (`absolute` = full on-disk path). */
   onCopyPath?: (relPath: string, absolute: boolean) => void
+  /**
+   * Copy a link that opens this entry in its conversation (ADR-0222). Only
+   * offered where the tree belongs to a conversation — the dock's workspace
+   * editor — since a link names a conversation's file, not a bare path.
+   */
+  onCopyLink?: (relPath: string) => void
   /** VS Code's "Open to the Side" — open the file in the other editor group. */
   onOpenToSide?: (relPath: string) => void
   /** VS Code's "Reveal in Finder/Explorer" — the OS file manager, not the tree. */
@@ -244,6 +251,7 @@ export function ProjectFileTree({
   onDeleted,
   gitDecorations,
   onCopyPath,
+  onCopyLink,
   onOpenToSide,
   onRevealInSystem,
   onAddToChat,
@@ -1027,6 +1035,7 @@ export function ProjectFileTree({
           delete: t("delete"),
           copyPath: t("action.copyPath"),
           copyRelativePath: t("action.copyRelativePath"),
+          copyLink: t("action.copyConversationLink"),
           newFromTemplate: t("newFromTemplate"),
           open: t("action.open"),
           openToSide: t("action.openToSide"),
@@ -1050,6 +1059,7 @@ export function ProjectFileTree({
           setRenameTarget(entry.relPath)
         }}
         onCopyPath={onCopyPath ? (absolute) => onCopyPath(entry.relPath, absolute) : undefined}
+        onCopyLink={onCopyLink ? () => onCopyLink(entry.relPath) : undefined}
         onOpenToSide={!entry.isDir && onOpenToSide ? () => onOpenToSide(entry.relPath) : undefined}
         onRevealInSystem={onRevealInSystem ? () => onRevealInSystem(entry.relPath) : undefined}
         onAddToChat={onAddToChat ? () => onAddToChat(entry.relPath, entry.isDir) : undefined}
@@ -1447,6 +1457,7 @@ interface TreeRowProps {
     delete: string
     copyPath: string
     copyRelativePath: string
+    copyLink: string
     newFromTemplate: string
     open: string
     openToSide: string
@@ -1465,6 +1476,7 @@ interface TreeRowProps {
   onNewFolder: () => void
   onRename: () => void
   onCopyPath?: (absolute: boolean) => void
+  onCopyLink?: () => void
   onOpenToSide?: () => void
   onRevealInSystem?: () => void
   onAddToChat?: () => void
@@ -1511,6 +1523,7 @@ function TreeRow({
   onNewFolder,
   onRename,
   onCopyPath,
+  onCopyLink,
   onOpenToSide,
   onRevealInSystem,
   onAddToChat,
@@ -1688,6 +1701,12 @@ function TreeRow({
                 {labels.copyPath}
               </ContextMenuItem>
             </>
+          ) : null}
+          {onCopyLink ? (
+            <ContextMenuItem onSelect={onCopyLink} data-testid={`tree-copy-link-${entry.relPath}`}>
+              <LinkIcon className="size-3.5" />
+              {labels.copyLink}
+            </ContextMenuItem>
           ) : null}
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => menuClose.defer(onRename)}>

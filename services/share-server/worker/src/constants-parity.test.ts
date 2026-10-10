@@ -13,6 +13,15 @@ import {
   PUBLIC_METADATA_SUFFIX,
   PUBLIC_METADATA_FIELDS,
 } from "./index"
+import {
+  BLOB_CHUNK_BYTES,
+  BLOB_CHUNK_OVERHEAD_BYTES,
+  BLOB_ID_BYTES,
+  MAX_BLOBS_PER_SHARE,
+  MAX_BLOB_BYTES,
+  MAX_SHARE_BLOB_BYTES,
+  READ_TICKET_TTL_SECONDS,
+} from "./blobs"
 
 describe("share constants parity (share-constants.json)", () => {
   it("public metadata endpoint and fields match the fixture", () => {
@@ -37,5 +46,15 @@ describe("share constants parity (share-constants.json)", () => {
 
   it("KV minimum TTL matches the fixture (Worker-only constraint)", () => {
     expect(KV_MIN_TTL_SECONDS).toBe(fixture.kvMinTtlSeconds)
+  })
+
+  it("ADR-0222 blob limits match the fixture", () => {
+    expect(BLOB_CHUNK_BYTES).toBe(fixture.blobChunkBytes)
+    expect(BLOB_CHUNK_OVERHEAD_BYTES).toBe(fixture.blobChunkOverheadBytes)
+    expect(BLOB_ID_BYTES).toBe(fixture.blobIdBytes)
+    expect(MAX_BLOB_BYTES).toBe(fixture.maxBlobBytes)
+    expect(MAX_SHARE_BLOB_BYTES).toBe(fixture.maxShareBlobBytes)
+    expect(MAX_BLOBS_PER_SHARE).toBe(fixture.maxBlobsPerShare)
+    expect(READ_TICKET_TTL_SECONDS).toBe(fixture.readTicketTtlSeconds)
   })
 })

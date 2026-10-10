@@ -389,6 +389,40 @@ describe("useArtifactDockLayoutStore", () => {
       })
     })
 
+    it("roots the workspace editor at a directory without queuing a file to open", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() =>
+        result.current.revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      )
+      act(() => result.current.setDockCollapsed(true))
+
+      act(() =>
+        result.current.revealWorkspaceRoot({
+          sessionId: "session-1",
+          rootPath: "/repo/packages/ui",
+        })
+      )
+
+      expect(result.current.revealIntent).toEqual({ panelId: "workspace", mode: "wide" })
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.dockProfile).toBe("workspace")
+      // The earlier file reveal targeted another root; left queued it would
+      // re-root the editor on its next render.
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toEqual({
+        kind: "root",
+        sessionId: "session-1",
+        rootPath: "/repo/packages/ui",
+      })
+
+      act(() => result.current.clearSessionScopedReveals())
+      expect(result.current.workspaceContext).toBeNull()
+    })
+
     it("leaving the workspace profile drops a stale workspace reveal", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.revealWorkspaceReview({ sessionId: "session-1", rootPath: "/repo" }))

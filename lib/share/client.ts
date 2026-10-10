@@ -9,12 +9,24 @@
 // shareable URL `${base}/share/view?c=<code>#k=<key>` → mirror it into Dexie.
 // The viewer is the app's own `/share/view` route (ADR-0037 Phase 4); reads are
 // public and handled there, not by this module.
+//
+// A share may carry files (ADR-0222). Their manifest rides inside the
+// envelope; their bytes are uploaded as encrypted blobs once the server has
+// minted the code. If any file fails, the share is revoked so no half-share
+// stays live.
 
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 import { generateShareKey, encodeShareKey } from "./keys"
-import { encryptSharePayload } from "./crypto"
+import { encryptSharePayloadWithMaterial, prepareShareKeyMaterial } from "./crypto"
 import { resolveShareEndpoint, type ShareEndpoint } from "./config"
+import {
+  prepareShareFileEntry,
+  uploadShareBlob,
+  type ShareBlobSource,
+  type ShareFileDescriptor,
+} from "./blobs"
+import { checkShareSelectionLimits, type ShareSelectionLimitViolation } from "./file-selection"
 import {
   recordSharedLink,
   markSharedLinkRevoked,
@@ -22,7 +34,13 @@ import {
   type SharedLinkRow,
 } from "@/lib/db/shared-links"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import type { CreateShareRequest, CreateShareResponse, SharePayload, ShareStats } from "./types"
+import type {
+  CreateShareRequest,
+  CreateShareResponse,
+  ShareFileEntry,
+  SharePayload,
+  ShareStats,
+} from "./types"
 
 /** Raised when the upload bearer secret hasn't been configured yet. */
 export class ShareNotConfiguredError extends Error {
@@ -71,6 +89,62 @@ export function assertShareRequestSize(
   }
 }
 
+/** Raised before anything is uploaded when the files exceed the server's limits. */
+export class ShareFilesTooLargeError extends Error {
+  constructor(readonly violations: ShareSelectionLimitViolation[]) {
+    super("The selected files exceed what one share can carry")
+    this.name = "ShareFilesTooLargeError"
+  }
+}
+
+/**
+ * Uploading a share's files failed after the share was created. `revoked`
+ * says whether the half-made share was withdrawn; when it was not, the link
+ * stays in My Shares so the owner can revoke it.
+ */
+export class ShareFilesUploadError extends Error {
+  constructor(
+    readonly revoked: boolean,
+    readonly cause: unknown
+  ) {
+    super(
+      revoked
+        ? "Uploading the share's files failed; the link was withdrawn"
+        : "Uploading the share's files failed and the link could not be withdrawn"
+    )
+    this.name = "ShareFilesUploadError"
+  }
+}
+
+/** One file to carry: what the manifest says about it, and how to read it. */
+export interface CreateShareFile extends ShareFileDescriptor {
+  /** Opened twice: once to hash, once to upload. */
+  open: () => Promise<ShareBlobSource>
+}
+
+/**
+ * What an entry point hands the share dialog: the payload, and any files it
+ * produced itself (media a transcript could not inline).
+ */
+export interface ShareBuild {
+  payload: SharePayload
+  attachments: CreateShareFile[]
+  /** Media references whose bytes were gone, named in the payload without a link. */
+  unavailableMedia?: number
+}
+
+/** Where a file share's creation is. Bytes are plaintext bytes. */
+export interface CreateShareProgress {
+  phase: "hashing" | "uploading"
+  /** Index into `files`. */
+  fileIndex: number
+  fileCount: number
+  path: string
+  /** Bytes of this phase done across all files. */
+  done: number
+  total: number
+}
+
 export interface CreateShareInput {
   payload: SharePayload
   ttlSeconds?: number
@@ -80,6 +154,12 @@ export interface CreateShareInput {
   passphrase?: string
   /** Local owner namespace used to authorize domain-specific revocation. */
   ownerScope?: string
+  /** Files the share carries (ADR-0222). Policy is the caller's: see `lib/filespace/share-files.ts`. */
+  files?: CreateShareFile[]
+  /** The conversation the share is made from, recorded beside the link. */
+  sessionId?: string
+  onProgress?: (progress: CreateShareProgress) => void
+  signal?: AbortSignal
 }
 
 export interface CreatedShare {
@@ -157,6 +237,51 @@ export async function resolveShareOwnerRequest(
   return { baseUrl, headers: ownerActionHeaders({ baseUrl, uploadSecret }, row?.ownerToken) }
 }
 
+async function hashShareFiles(
+  files: CreateShareFile[],
+  input: CreateShareInput
+): Promise<ShareFileEntry[]> {
+  const sources = await Promise.all(files.map((file) => file.open()))
+  const violations = checkShareSelectionLimits(
+    files.map((file, index) => ({ path: file.path, size: sources[index].size }))
+  )
+  if (violations.length > 0) throw new ShareFilesTooLargeError(violations)
+  const total = sources.reduce((sum, source) => sum + source.size, 0)
+  const entries: ShareFileEntry[] = []
+  let before = 0
+  for (const [index, file] of files.entries()) {
+    entries.push(
+      await prepareShareFileEntry(file, sources[index], {
+        signal: input.signal,
+        onProgress: (done) =>
+          input.onProgress?.({
+            phase: "hashing",
+            fileIndex: index,
+            fileCount: files.length,
+            path: file.path,
+            done: before + done,
+            total,
+          }),
+      })
+    )
+    before += sources[index].size
+  }
+  return entries
+}
+
+/** Withdraw a share whose files did not all arrive. True when it is gone. */
+async function withdrawShare(baseUrl: string, code: string, ownerToken: string): Promise<boolean> {
+  try {
+    const res = await proxyFetch(`${baseUrl}/v1/share/${encodeURIComponent(code)}`, {
+      method: "DELETE",
+      headers: { "X-Owner-Token": ownerToken, "Content-Type": "application/json" },
+    })
+    return res.ok || res.status === 404
+  } catch {
+    return false
+  }
+}
+
 /** Create a share link and mirror it locally. */
 export async function createShareLink(
   input: CreateShareInput,
@@ -164,9 +289,15 @@ export async function createShareLink(
 ): Promise<CreatedShare> {
   const ep = endpoint ?? (await resolveShareEndpoint())
   const headers = authHeaders(ep)
+  const files = input.files ?? []
+
+  const entries = files.length > 0 ? await hashShareFiles(files, input) : []
+  const payload: SharePayload =
+    entries.length > 0 ? { ...input.payload, files: entries } : input.payload
 
   const key = generateShareKey()
-  const envelope = await encryptSharePayload(input.payload, key, input.passphrase)
+  const material = await prepareShareKeyMaterial(key, input.passphrase)
+  const envelope = await encryptSharePayloadWithMaterial(payload, material)
 
   const body: CreateShareRequest = {
     envelope,
@@ -182,6 +313,7 @@ export async function createShareLink(
     method: "POST",
     headers,
     body: serializedBody,
+    signal: input.signal,
   })
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))
 
@@ -190,8 +322,8 @@ export async function createShareLink(
 
   const row: Omit<SharedLinkRow, "id" | "revoked"> = {
     code,
-    kind: input.payload.kind,
-    title: input.payload.title,
+    kind: payload.kind,
+    title: payload.title,
     url,
     createdAt: Date.now(),
     expiresAt,
@@ -200,15 +332,54 @@ export async function createShareLink(
     hasPassphrase: Boolean(input.passphrase),
     ownerToken,
     ownerScope: input.ownerScope,
+    files: entries.map((entry) => ({ path: entry.path, size: entry.size, sha256: entry.sha256 })),
+    sessionId: input.sessionId,
   }
+
+  if (entries.length > 0) {
+    try {
+      // Blob uploads authenticate with the per-share owner token; a server
+      // that mints none predates file blobs.
+      if (!ownerToken) throw new ShareRequestError(501, "The share server does not accept files")
+      const total = entries.reduce((sum, entry) => sum + entry.size, 0)
+      let before = 0
+      for (const [index, entry] of entries.entries()) {
+        await uploadShareBlob({
+          baseUrl: ep.baseUrl,
+          code,
+          ownerToken,
+          material: material.bytes,
+          entry,
+          source: await files[index].open(),
+          fetchImpl: proxyFetch,
+          signal: input.signal,
+          onProgress: (done) =>
+            input.onProgress?.({
+              phase: "uploading",
+              fileIndex: index,
+              fileCount: entries.length,
+              path: entry.path,
+              done: before + done,
+              total,
+            }),
+        })
+        before += entry.size
+      }
+    } catch (error) {
+      const revoked = ownerToken ? await withdrawShare(ep.baseUrl, code, ownerToken) : false
+      if (!revoked) await recordSharedLink(row)
+      throw new ShareFilesUploadError(revoked, error)
+    }
+  }
+
   await recordSharedLink(row)
 
   // Plugin hook — fragment-stripped URL only (the `#k=` decryption key is
   // never exposed to plugin hooks). Best-effort.
   void getPluginEventHooks().dispatchShareLinkCreate({
     code,
-    kind: input.payload.kind,
-    title: input.payload.title,
+    kind: payload.kind,
+    title: payload.title,
     url: `${ep.baseUrl}/share/view?c=${code}`,
     expiresAt,
   })

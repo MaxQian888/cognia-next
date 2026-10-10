@@ -1,0 +1,74 @@
+{
+  "actions": {
+    "copyLink": "Copy link",
+    "download": "Download",
+    "open": "Open",
+    "share": "Share via link",
+    "shareFiles": "Share files…"
+  },
+  "entry": {
+    "sourceUnavailable": "Original not on this device"
+  },
+  "host": {
+    "remote": "Files on {label}"
+  },
+  "mount": {
+    "additional": "Additional root",
+    "container": "In sandbox: {path}",
+    "managed": "Worktree copy",
+    "managedHint": "This conversation works in its own copy of the folder. Changes here are not in your checkout until you apply them.",
+    "primary": "Working directory"
+  },
+  "panel": {
+    "deleted": {
+      "description": "This conversation no longer exists on this device, so its files cannot be listed.",
+      "title": "Conversation not found"
+    },
+    "empty": {
+      "description": "Folders appear once the conversation has a workspace. Uploads and artifacts appear as they are added.",
+      "title": "No files yet"
+    },
+    "focusedPath": "Linked: {path}",
+    "loading": "Loading conversation files",
+    "noSession": {
+      "description": "Open a conversation to see its files.",
+      "title": "No conversation"
+    },
+    "title": "Conversation files"
+  },
+  "reason": {
+    "hostOffline": "The host running this conversation is not connected.",
+    "managedDeleted": "This conversation's workspace folder was deleted.",
+    "managedMissingOnDevice": "This conversation's workspace lives on another device.",
+    "noFsBackend": "Folders can only be opened in the desktop app or from a paired device."
+  },
+  "section": {
+    "artifacts": "Artifacts",
+    "folders": "Folders",
+    "uploads": "Uploads"
+  },
+  "share": {
+    "bundleTitle": "Files from {title}",
+    "untitled": "Untitled conversation"
+  },
+  "status": {
+    "deleted": "Deleted",
+    "missing": "Not on this device",
+    "offline": "Offline"
+  },
+  "toast": {
+    "copyFailed": "Could not copy the link.",
+    "downloadFailed": "Could not download the file.",
+    "downloadUnavailable": "The original file is not on this device.",
+    "linkCopied": "Link copied",
+    "linkOutside": "This file is outside the conversation's folders, so it has no link.",
+    "openFailed": {
+      "noBackend": "Files can only be opened in the desktop app or from a paired device.",
+      "notFound": "That file no longer exists in this conversation.",
+      "offline": "The folder holding that file is not available right now.",
+      "outside": "That path is not part of this conversation's files.",
+      "sessionChanged": "You switched conversations before the file could open."
+    },
+    "shareUnavailable": "This conversation could not be loaded for sharing."
+  }
+}

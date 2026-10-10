@@ -57,9 +57,34 @@ pub enum SessionAction {
     BreakGlassRead,
     AttachmentRead,
     AttachmentWrite,
+    /// Publish the conversation's files as a link (ADR-0222). Owners and
+    /// maintainers, never a guest; the org's file-sharing policy is checked
+    /// on top.
+    FilesShare,
 }
 
 impl SessionAction {
+    /// Every server-side action, in wire order.
+    pub const ALL: [SessionAction; 17] = [
+        Self::Discover,
+        Self::Read,
+        Self::Post,
+        Self::StartRun,
+        Self::Steer,
+        Self::ManageMembers,
+        Self::ManageSettings,
+        Self::Delete,
+        Self::RedactAny,
+        Self::ApproveOrdinary,
+        Self::ApproveHighRisk,
+        Self::Export,
+        Self::AuditMetadata,
+        Self::BreakGlassRead,
+        Self::AttachmentRead,
+        Self::AttachmentWrite,
+        Self::FilesShare,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discover => "session.discover",
@@ -78,6 +103,7 @@ impl SessionAction {
             Self::BreakGlassRead => "session.breakGlassRead",
             Self::AttachmentRead => "attachment.read",
             Self::AttachmentWrite => "attachment.write",
+            Self::FilesShare => "files.share",
         }
     }
 }
@@ -155,6 +181,7 @@ pub fn authorize_session_action(
             | SessionAction::Export
             | SessionAction::AuditMetadata
             | SessionAction::BreakGlassRead
+            | SessionAction::FilesShare
     );
     if membership.guest && guest_denied {
         return SessionAuthorizationDecision {
@@ -219,6 +246,63 @@ mod tests {
         let decision = authorize_session_action(None, SessionAction::Read, 8);
         assert!(!decision.allowed);
         assert_eq!(decision.reason, "not_a_session_member");
+    }
+
+    /// `fixtures/session-actions.json` is the table the client checks too.
+    #[test]
+    fn decisions_match_the_shared_action_table() {
+        let table: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/session-actions.json")).unwrap();
+        let strings = |value: &serde_json::Value| -> Vec<String> {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item.as_str().unwrap().to_owned())
+                .collect()
+        };
+        let client_only = strings(&table["clientOnlyActions"]);
+        let server_actions: Vec<String> = strings(&table["actions"])
+            .into_iter()
+            .filter(|action| !client_only.contains(action))
+            .collect();
+        let ours: Vec<String> = SessionAction::ALL
+            .iter()
+            .map(|action| action.as_str().to_owned())
+            .collect();
+        assert_eq!(ours, server_actions, "SessionAction::ALL vs the table");
+
+        let guest_denied = strings(&table["guestDenied"]);
+        let overlay_roles = strings(&table["approverOverlay"]["roles"]);
+        let overlay_actions = strings(&table["approverOverlay"]["actions"]);
+        for (name, role) in [
+            ("owner", SessionRole::Owner),
+            ("maintainer", SessionRole::Maintainer),
+            ("member", SessionRole::Member),
+            ("viewer", SessionRole::Viewer),
+        ] {
+            let allowed = strings(&table["roles"][name]);
+            for guest in [false, true] {
+                for approver in [false, true] {
+                    let mut who = membership(role);
+                    who.guest = guest;
+                    who.approver = approver;
+                    for action in SessionAction::ALL {
+                        let wire = action.as_str().to_owned();
+                        let expected = !(guest && guest_denied.contains(&wire))
+                            && (allowed.contains(&wire)
+                                || (approver
+                                    && overlay_roles.iter().any(|r| r == name)
+                                    && overlay_actions.contains(&wire)));
+                        assert_eq!(
+                            authorize_session_action(Some(&who), action, 1).allowed,
+                            expected,
+                            "{name} guest={guest} approver={approver} {wire}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

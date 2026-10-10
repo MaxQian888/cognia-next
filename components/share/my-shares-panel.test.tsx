@@ -233,4 +233,27 @@ describe("MySharesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
+
+  it("shows the files a link carries and the conversation it came from", async () => {
+    await getDb().sessions.put({ id: "s1", title: "Refactor" } as never)
+    await seed({
+      files: [
+        { path: "/workspace/a.txt", size: 1024, sha256: "aa" },
+        { path: "/workspace/b.txt", size: 1024, sha256: "bb" },
+      ],
+      sessionId: "s1",
+    })
+    await seed({
+      code: "DeF",
+      title: "Gone",
+      url: "https://share.test/v/DeF#k=K",
+      sessionId: "gone",
+    })
+    await seed({ code: "GhI", title: "Plain", url: "https://share.test/v/GhI#k=K" })
+    render(<MySharesPanel />)
+    expect(await screen.findByText("2 files · 2.0 KB")).toBeInTheDocument()
+    expect(await screen.findByText("From Refactor")).toBeInTheDocument()
+    expect(screen.getByText("From a deleted conversation")).toBeInTheDocument()
+    expect(screen.getAllByText(/^From /)).toHaveLength(2)
+  })
 })

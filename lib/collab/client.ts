@@ -595,6 +595,24 @@ export interface SetCollabWorkspaceMemberInput {
  * encoding, which the server decodes before the audit row is written. A plain
  * ASCII reason is sent as it is, so the common case stays readable on the wire.
  */
+/** The adjustable part of an org's file-sharing policy (ADR-0222). */
+export interface CollabFileSharingSettings {
+  allowPublicSnapshots: boolean
+  allowLiveGrants: boolean
+  allowProtocolCredentials: boolean
+  allowLiveWrite: boolean
+  allowAgentSharing: boolean
+  maxSnapshotTtlSeconds: number
+  maxLiveTtlSeconds: number
+}
+
+export interface CollabFileSharingPolicy extends CollabFileSharingSettings {
+  /** 0 until an owner or admin first saves one. */
+  revision: number
+  updatedBy?: string
+  updatedAt?: number
+}
+
 export function encodeReasonHeader(reason: string): string {
   const trimmed = reason.trim()
   // Visible ASCII only. Anything else would make `fetch` refuse the header.
@@ -850,6 +868,51 @@ export class CollabClient {
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/export-authorization`,
       { cache: "no-store" }
+    )
+  }
+
+  /**
+   * May the caller publish this shared conversation's files (ADR-0222)? The
+   * server checks `files.share` and the org's file-sharing policy; a refusal
+   * throws a {@link CollabError}. Resolves to the policy revision the answer
+   * was decided under, so a cached policy older than it can be refetched.
+   */
+  async authorizeSessionFileShare(
+    orgId: string,
+    sessionId: string
+  ): Promise<{ policyRevision: number }> {
+    const response = await this.request(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/export-authorization?scope=files`,
+      { cache: "no-store" }
+    )
+    await readJson<void>(response)
+    const revision = Number(response.headers.get("x-cognia-file-policy-revision"))
+    return { policyRevision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0 }
+  }
+
+  /** The org's file-sharing policy; the defaults at revision 0 until one is saved. */
+  async getFileSharingPolicy(orgId: string): Promise<CollabFileSharingPolicy> {
+    return this.json<CollabFileSharingPolicy>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/file-sharing-policy`,
+      { cache: "no-store" }
+    )
+  }
+
+  /**
+   * Save the org's file-sharing policy (owners and admins). `baseRevision` is
+   * the revision the edit started from; a save that raced another throws
+   * {@link CollabConflictError} carrying the current policy.
+   */
+  async putFileSharingPolicy(
+    orgId: string,
+    input: CollabFileSharingSettings & { baseRevision: number }
+  ): Promise<CollabFileSharingPolicy> {
+    return this.json<CollabFileSharingPolicy>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/file-sharing-policy`,
+      { method: "PUT", body: JSON.stringify(input) }
     )
   }
 
@@ -1748,6 +1811,11 @@ export class CollabClient {
   }
 
   private async json<T>(orgId: string, path: string, init: RequestInit = {}): Promise<T> {
+    return readJson<T>(await this.request(orgId, path, init))
+  }
+
+  /** One authenticated call, retried once with a fresh grant on a 401. */
+  private async request(orgId: string, path: string, init: RequestInit = {}): Promise<Response> {
     const attempt = async (grant: string) =>
       this.fetchImpl(`${this.baseUrl}${path}`, {
         ...init,
@@ -1767,7 +1835,7 @@ export class CollabClient {
       this.grants.delete(orgId)
       response = await attempt(await this.grantFor(orgId))
     }
-    return readJson<T>(response)
+    return response
   }
 }
 

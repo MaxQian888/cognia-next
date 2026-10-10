@@ -40,13 +40,14 @@ import {
   agentTaskSessionId,
   dispatchDesktopDeeplink,
   issuePagePath,
+  type DesktopDeeplinkDeps,
 } from "./desktop-deeplink-dispatch"
 
 function deps() {
   return { navigate: jest.fn(), onUnknown: jest.fn() }
 }
 
-async function dispatch(raw: string, handlers = deps()) {
+async function dispatch(raw: string, handlers: DesktopDeeplinkDeps = deps()) {
   await dispatchDesktopDeeplink(parseCogniaDeeplink(raw), handlers)
   return handlers
 }
@@ -69,6 +70,48 @@ describe("dispatchDesktopDeeplink", () => {
     const handlers = await dispatch("cognia://session")
     expect(setActiveSession).not.toHaveBeenCalled()
     expect(handlers.onUnknown).not.toHaveBeenCalled()
+  })
+
+  it("opens a conversation files link's file after focusing the conversation", async () => {
+    const openFiles = jest.fn(async () => "opened" as const)
+    const handlers = { ...deps(), openFiles, onFilesUnresolved: jest.fn() }
+    await dispatch("cognia://session/s-1?view=files&path=%2Froots%2Fr%2Fa.md&line=2", handlers)
+    expect(setActiveSession).toHaveBeenCalledWith("s-1")
+    expect(openFiles).toHaveBeenCalledWith({ sessionId: "s-1", path: "/roots/r/a.md", line: 2 })
+    expect(handlers.onFilesUnresolved).not.toHaveBeenCalled()
+
+    await dispatch("cognia://session/s-1?view=files", handlers)
+    expect(openFiles).toHaveBeenLastCalledWith({ sessionId: "s-1" })
+  })
+
+  it("focuses the conversation even when its linked file cannot be shown", async () => {
+    const handlers = {
+      ...deps(),
+      openFiles: jest.fn(async () => "outside" as const),
+      onFilesUnresolved: jest.fn(),
+    }
+    const pending = dispatchDesktopDeeplink(
+      parseCogniaDeeplink("cognia://session/s-2?view=files&path=%2Fnowhere"),
+      handlers
+    )
+    // Synchronous, before the files lookup resolves.
+    expect(setActiveSession).toHaveBeenCalledWith("s-2")
+    await pending
+    expect(handlers.onFilesUnresolved).toHaveBeenCalledWith("outside")
+
+    const throwing = {
+      ...deps(),
+      openFiles: jest.fn(async () => Promise.reject(new Error("x"))),
+      onFilesUnresolved: jest.fn(),
+    }
+    await dispatch("cognia://session/s-3?view=files&path=%2Fworkspace%2Fa", throwing)
+    expect(throwing.onFilesUnresolved).toHaveBeenCalledWith("not-found")
+  })
+
+  it("does not look for files on a plain conversation link", async () => {
+    const openFiles = jest.fn(async () => "opened" as const)
+    await dispatch("cognia://session/s-1", { ...deps(), openFiles })
+    expect(openFiles).not.toHaveBeenCalled()
   })
 
   it("acts on a session link before its first await", () => {
