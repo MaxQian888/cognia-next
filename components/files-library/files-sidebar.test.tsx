@@ -89,3 +89,39 @@ it("creates a top-level folder and draws the folder tree", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "New folder" }))
   expect(useFilesLibraryStore.getState().folderDialog).toEqual({ mode: "create", parentId: "root" })
 })
+
+it("grows every row and control to a touch target in the phone's place sheet", () => {
+  const actions = { preview: jest.fn(), setFolderStyle: jest.fn() }
+  const { rerender } = render(
+    <FilesSidebar
+      folders={folders}
+      recents={[entry("artifact:a", "Plan")]}
+      trashCount={1}
+      actions={actions}
+      touch
+    />
+  )
+  for (const id of [
+    "files-place-all",
+    "files-place-group-images",
+    "files-place-folders",
+    "files-place-trash",
+    "files-recent-artifact:a",
+    "files-recents-more",
+  ]) {
+    expect(screen.getByTestId(id)).toHaveClass("h-11")
+  }
+  expect(screen.getByTestId("files-sidebar-new-folder")).toHaveClass("size-10")
+  expect(screen.getByTestId("files-tree-folder-lbf_a")).toHaveClass("h-11")
+
+  rerender(
+    <FilesSidebar
+      folders={folders}
+      recents={[entry("artifact:a", "Plan")]}
+      trashCount={1}
+      actions={actions}
+    />
+  )
+  expect(screen.getByTestId("files-place-all")).toHaveClass("h-8")
+  expect(screen.getByTestId("files-tree-folder-lbf_a")).toHaveClass("h-8")
+})

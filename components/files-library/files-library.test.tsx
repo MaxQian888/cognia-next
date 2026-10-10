@@ -49,10 +49,10 @@ jest.mock("./files-preview-pane", () => ({
     <div data-testid={`preview-${entry.key}`} />
   ),
 }))
-let platform = "web"
-jest.mock("@/lib/platform/detect", () => ({
-  ...jest.requireActual("@/lib/platform/detect"),
-  detectPlatform: () => platform,
+let compact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => compact }))
+jest.mock("./mobile/files-mobile-library", () => ({
+  FilesMobileLibrary: () => <div data-testid="files-mobile" />,
 }))
 let params = new URLSearchParams()
 const router = { push: jest.fn(), replace: jest.fn() }
@@ -91,7 +91,7 @@ function entry(key: string, overrides: Partial<FilesEntry> = {}): FilesEntry {
 const grid = () => within(screen.getByTestId("files-grid"))
 
 beforeEach(() => {
-  platform = "web"
+  compact = false
   params = new URLSearchParams()
   router.replace.mockClear()
   folderState.folders = []
@@ -277,9 +277,11 @@ it("keeps the URL on the place and lens the person picks", () => {
   expect(router.replace).toHaveBeenLastCalledWith("/files?section=group%3Aimages&tab=favorites")
 })
 
-it("explains itself on the phone shell instead of reading this database", () => {
-  platform = "mobile"
+it("lays a phone-width page out as the compact list (ADR-0223 §9)", () => {
+  compact = true
+  entriesState.entries = [entry("artifact:a")]
   render(<FilesLibrary />)
-  expect(screen.getByTestId("files-mobile-unsupported")).toBeInTheDocument()
-  expect(screen.queryByTestId("files-body")).toBeNull()
+  expect(screen.getByTestId("files-mobile")).toBeInTheDocument()
+  expect(screen.queryByTestId("files-grid")).toBeNull()
+  expect(screen.queryByTestId("files-sidebar")).toBeNull()
 })

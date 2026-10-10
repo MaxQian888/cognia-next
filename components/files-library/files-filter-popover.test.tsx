@@ -55,3 +55,10 @@ it("switches the workspace scope without counting it as a filter", async () => {
   expect(useFilesLibraryStore.getState().projectScope).toBe("all")
   expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled()
 })
+
+it("sizes its trigger beside the phone's 40px search field", () => {
+  const { rerender } = render(<FilesFilterPopover compact />)
+  expect(screen.getByRole("button", { name: "Filter" })).toHaveClass("h-10")
+  rerender(<FilesFilterPopover />)
+  expect(screen.getByRole("button", { name: "Filter" })).not.toHaveClass("h-10")
+})

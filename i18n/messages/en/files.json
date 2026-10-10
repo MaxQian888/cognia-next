@@ -83,6 +83,7 @@
     },
     "folder": {
       "description": "Drag items here, or use Move to folder in an item’s menu. Items in folders stay even if their conversation is deleted.",
+      "descriptionTouch": "Use Move to folder in an item’s menu, or select items and tap Move. Items in folders stay even if their conversation is deleted.",
       "title": "This folder is empty"
     },
     "group": {
@@ -243,6 +244,23 @@
   "loadMore": "Show more",
   "loadOlderImages": "Load older images",
   "loading": "Loading files",
+  "mobile": {
+    "clear": "Clear",
+    "deletedAgo": "Deleted {when}",
+    "dock": {
+      "download": "Download",
+      "favorite": "Favorite",
+      "move": "Move",
+      "share": "Share",
+      "trash": "Trash",
+      "unfavorite": "Unfavorite"
+    },
+    "done": "Done",
+    "places": "Places — {place}",
+    "placesDescription": "Pick a place, a folder or the Trash.",
+    "select": "Select",
+    "selectHint": "Tap items to select them"
+  },
   "moveDialog": {
     "cancel": "Cancel",
     "confirm": "Move",
@@ -377,10 +395,6 @@
     "description": "Files you uploaded to Files are deleted from this device. Anything from a conversation or the canvas only leaves Files and stays where it is.",
     "emptyConfirm": "Empty Trash",
     "emptyTitle": "Delete {count, plural, one {# item} other {# items}} in the Trash forever?"
-  },
-  "unsupported": {
-    "description": "Open Files in the desktop app or in a browser signed in to this account.",
-    "title": "Files isn’t available on the phone yet"
   },
   "untitled": {
     "artifact": "Untitled artifact",

@@ -50,7 +50,15 @@ export interface FilesSidebarProps {
   recents: readonly FilesEntry[]
   trashCount: number
   actions: Pick<FilesActions, "preview" | "setFolderStyle">
+  /**
+   * Drawn in the phone's place sheet: every row and control grows to a 44px
+   * touch target.
+   */
+  touch?: boolean
 }
+
+/** Row height: the desktop column, or the phone's place sheet. */
+const rowHeight = (touch: boolean) => (touch ? "h-11" : "h-8")
 
 function PlaceButton({
   section,
@@ -58,12 +66,14 @@ function PlaceButton({
   label,
   testId,
   trailing,
+  touch,
 }: {
   section: FilesSection
   icon: ComponentType<{ className?: string }>
   label: string
   testId: string
   trailing?: React.ReactNode
+  touch: boolean
 }) {
   const current = useFilesLibraryStore((s) => sameFilesSection(s.section, section))
   const setSection = useFilesLibraryStore((s) => s.setSection)
@@ -73,7 +83,8 @@ function PlaceButton({
       onClick={() => setSection(section)}
       aria-current={current ? "page" : undefined}
       className={cn(
-        "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60",
+        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60",
+        rowHeight(touch),
         current && "bg-accent font-medium"
       )}
       data-testid={testId}
@@ -100,7 +111,7 @@ function SectionLabel({
   )
 }
 
-function FoldersRoot() {
+function FoldersRoot({ touch }: { touch: boolean }) {
   const t = useTranslations("files")
   const { setNodeRef, isOver } = useFilesFolderDrop(ROOT_LIBRARY_FOLDER_ID)
   return (
@@ -115,12 +126,13 @@ function FoldersRoot() {
         icon={LayoutGridIcon}
         label={t("folders.root")}
         testId="files-place-folders"
+        touch={touch}
       />
     </div>
   )
 }
 
-function TrashPlace({ count }: { count: number }) {
+function TrashPlace({ count, touch }: { count: number; touch: boolean }) {
   const t = useTranslations("files")
   const { setNodeRef, isOver } = useFilesTrashDrop()
   return (
@@ -135,6 +147,7 @@ function TrashPlace({ count }: { count: number }) {
         icon={Trash2Icon}
         label={t("places.trash")}
         testId="files-place-trash"
+        touch={touch}
         trailing={
           count > 0 ? (
             <span className="ml-auto text-xs text-muted-foreground tabular-nums">{count}</span>
@@ -145,7 +158,13 @@ function TrashPlace({ count }: { count: number }) {
   )
 }
 
-export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSidebarProps) {
+export function FilesSidebar({
+  folders,
+  recents,
+  trashCount,
+  actions,
+  touch = false,
+}: FilesSidebarProps) {
   const t = useTranslations("files")
   const setSection = useFilesLibraryStore((s) => s.setSection)
   const openFolderDialog = useFilesLibraryStore((s) => s.openFolderDialog)
@@ -165,6 +184,7 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
           icon={LayoutGridIcon}
           label={t("places.all")}
           testId="files-place-all"
+          touch={touch}
         />
         {FILES_TYPE_GROUPS.map((group) => (
           <PlaceButton
@@ -173,6 +193,7 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
             icon={GROUP_ICONS[group]}
             label={t(`places.groups.${group}`)}
             testId={`files-place-group-${group}`}
+            touch={touch}
           />
         ))}
 
@@ -188,7 +209,10 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
                   <button
                     type="button"
                     onClick={() => actions.preview(entry)}
-                    className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className={cn(
+                      "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60",
+                      rowHeight(touch)
+                    )}
                     aria-label={t("card.open", { title })}
                     data-testid={`files-recent-${entry.key}`}
                   >
@@ -203,7 +227,10 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
         <button
           type="button"
           onClick={() => setSection({ kind: "recent" })}
-          className="flex h-7 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+            touch ? "h-11" : "h-7"
+          )}
           data-testid="files-recents-more"
         >
           <ClockIcon className="size-3.5" aria-hidden />
@@ -215,7 +242,7 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
             <Button
               variant="ghost"
               size="icon"
-              className="size-6"
+              className={touch ? "size-10" : "size-6"}
               aria-label={t("folders.newFolder")}
               onClick={() => openFolderDialog({ mode: "create", parentId: ROOT_LIBRARY_FOLDER_ID })}
               data-testid="files-sidebar-new-folder"
@@ -226,11 +253,16 @@ export function FilesSidebar({ folders, recents, trashCount, actions }: FilesSid
         >
           {t("places.folders")}
         </SectionLabel>
-        <FoldersRoot />
-        <FilesFolderTree folders={folders} parentId={ROOT_LIBRARY_FOLDER_ID} actions={actions} />
+        <FoldersRoot touch={touch} />
+        <FilesFolderTree
+          folders={folders}
+          parentId={ROOT_LIBRARY_FOLDER_ID}
+          actions={actions}
+          touch={touch}
+        />
       </div>
       <div className="shrink-0 border-t px-2 py-2">
-        <TrashPlace count={trashCount} />
+        <TrashPlace count={trashCount} touch={touch} />
       </div>
     </nav>
   )

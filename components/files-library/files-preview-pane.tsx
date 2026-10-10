@@ -31,6 +31,7 @@ import { goToSession } from "@/lib/files-library/open"
 import { getProviderDisplayName } from "@/lib/ai/icons"
 import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
+import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useFilesLibraryStore } from "@/stores/files-library"
 import { useRouter } from "next/navigation"
@@ -41,9 +42,22 @@ export interface FilesPreviewPaneProps {
   entry: FilesEntry
   actions: FilesActions
   onClose: () => void
+  /**
+   * The phone layout's preview drawer: 44px buttons, and room for the home
+   * indicator under the footer.
+   */
+  touch?: boolean
 }
 
-export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPaneProps) {
+/** Footer buttons grow to 44px touch targets in the phone's drawer. */
+const TOUCH_FOOTER = "[&_button]:h-11 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+
+export function FilesPreviewPane({
+  entry,
+  actions,
+  onClose,
+  touch = false,
+}: FilesPreviewPaneProps) {
   const t = useTranslations("files")
   const format = useFormatter()
   const router = useRouter()
@@ -70,7 +84,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
         <Button
           variant="ghost"
           size="icon"
-          className="size-7"
+          className={touch ? "size-11" : "size-7"}
           onClick={onClose}
           aria-label={t("preview.close")}
           data-testid="files-preview-close"
@@ -142,9 +156,12 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
       </div>
 
       {entry.trashedAt !== undefined ? (
-        <TrashFooter entry={entry} actions={actions} />
+        <TrashFooter entry={entry} actions={actions} touch={touch} />
       ) : (
-        <div className="flex flex-wrap gap-2 border-t p-3">
+        <div
+          className={cn("flex flex-wrap gap-2 border-t p-3", touch && TOUCH_FOOTER)}
+          data-testid="files-preview-footer"
+        >
           <Button
             size="sm"
             onClick={() => void actions.open(entry)}
@@ -193,12 +210,23 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
 }
 
 /** In the Trash an item can only come back or go for good. */
-function TrashFooter({ entry, actions }: { entry: FilesEntry; actions: FilesActions }) {
+function TrashFooter({
+  entry,
+  actions,
+  touch,
+}: {
+  entry: FilesEntry
+  actions: FilesActions
+  touch: boolean
+}) {
   const t = useTranslations("files")
   const format = useFormatter()
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
   return (
-    <div className="flex flex-col gap-2 border-t p-3" data-testid="files-preview-trash">
+    <div
+      className={cn("flex flex-col gap-2 border-t p-3", touch && TOUCH_FOOTER)}
+      data-testid="files-preview-trash"
+    >
       <p className="text-xs text-muted-foreground">
         {t("preview.trashedNotice", {
           date: format.dateTime(entry.trashedAt!, { dateStyle: "medium" }),

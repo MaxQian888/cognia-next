@@ -31,3 +31,16 @@ it("offers to clear a search that hid everything", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "Clear filters" }))
   expect(onClear).toHaveBeenCalled()
 })
+
+it("says how to fill an empty folder by tap on the phone, and by drag elsewhere", () => {
+  const props = {
+    section: { kind: "folder", folderId: "f1" } as const,
+    lens: "suggested" as const,
+    filtered: false,
+    onClear: jest.fn(),
+  }
+  const { rerender } = render(<FilesEmpty {...props} touch />)
+  expect(screen.getByTestId("files-empty-folder")).toHaveTextContent("select items and tap Move")
+  rerender(<FilesEmpty {...props} />)
+  expect(screen.getByTestId("files-empty-folder")).toHaveTextContent("Drag items here")
+})

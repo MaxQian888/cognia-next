@@ -36,8 +36,11 @@ import { useFilesLibraryStore } from "@/stores/files-library"
 
 export function FilesNewMenu({
   actions,
+  compact = false,
 }: {
   actions: Pick<FilesActions, "upload" | "newCanvasDocument" | "newFromTemplate">
+  /** The phone layout: a 40px "+" instead of the labelled button. */
+  compact?: boolean
 }) {
   const templates = useDocumentTemplates()
   const t = useTranslations("files")
@@ -63,11 +66,22 @@ export function FilesNewMenu({
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" data-testid="files-new">
-            <PlusIcon aria-hidden />
-            {t("new.label")}
-            <ChevronDownIcon aria-hidden />
-          </Button>
+          {compact ? (
+            <Button
+              size="icon"
+              className="size-10"
+              aria-label={t("new.label")}
+              data-testid="files-new"
+            >
+              <PlusIcon aria-hidden />
+            </Button>
+          ) : (
+            <Button size="sm" data-testid="files-new">
+              <PlusIcon aria-hidden />
+              {t("new.label")}
+              <ChevronDownIcon aria-hidden />
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem

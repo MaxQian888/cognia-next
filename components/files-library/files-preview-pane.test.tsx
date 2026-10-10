@@ -292,3 +292,30 @@ it("draws an image upload's picture from its bytes", () => {
   )
   expect(screen.getByTestId("thumb-h-full")).toBeInTheDocument()
 })
+
+it("grows its buttons to touch targets in the phone's drawer", async () => {
+  payload.mockResolvedValue(null)
+  const { rerender } = render(
+    <FilesPreviewPane entry={entry({})} actions={actions()} onClose={jest.fn()} touch />
+  )
+  await screen.findByTestId("files-preview-unavailable")
+  expect(screen.getByTestId("files-preview-footer").className).toContain("[&_button]:h-11")
+  expect(screen.getByRole("button", { name: "Close preview" })).toHaveClass("size-11")
+  rerender(
+    <FilesPreviewPane
+      entry={entry({ trashedAt: 5 })}
+      actions={actions()}
+      onClose={jest.fn()}
+      touch
+    />
+  )
+  expect(screen.getByTestId("files-preview-trash").className).toContain("[&_button]:h-11")
+})
+
+it("keeps the desktop pane's compact buttons", async () => {
+  payload.mockResolvedValue(null)
+  render(<FilesPreviewPane entry={entry({})} actions={actions()} onClose={jest.fn()} />)
+  await screen.findByTestId("files-preview-unavailable")
+  expect(screen.getByTestId("files-preview-footer").className).not.toContain("h-11")
+  expect(screen.getByRole("button", { name: "Close preview" })).toHaveClass("size-7")
+})

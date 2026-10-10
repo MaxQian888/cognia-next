@@ -37,9 +37,17 @@ export interface FilesFolderTreeProps {
   parentId: string
   depth?: number
   actions: Pick<FilesActions, "setFolderStyle">
+  /** The phone's place sheet: 44px rows and controls. */
+  touch?: boolean
 }
 
-export function FilesFolderTree({ folders, parentId, depth = 0, actions }: FilesFolderTreeProps) {
+export function FilesFolderTree({
+  folders,
+  parentId,
+  depth = 0,
+  actions,
+  touch = false,
+}: FilesFolderTreeProps) {
   if (depth >= MAX_DEPTH) return null
   const children = childLibraryFolders(folders, parentId)
   if (children.length === 0) return null
@@ -52,6 +60,7 @@ export function FilesFolderTree({ folders, parentId, depth = 0, actions }: Files
           folders={folders}
           depth={depth}
           actions={actions}
+          touch={touch}
         />
       ))}
     </ul>
@@ -63,11 +72,13 @@ function FilesFolderTreeNode({
   folders,
   depth,
   actions,
+  touch,
 }: {
   folder: LibraryFolder
   folders: readonly LibraryFolder[]
   depth: number
   actions: Pick<FilesActions, "setFolderStyle">
+  touch: boolean
 }) {
   const t = useTranslations("files")
   const section = useFilesLibraryStore((s) => s.section)
@@ -96,7 +107,8 @@ function FilesFolderTreeNode({
             role={undefined}
             tabIndex={-1}
             className={cn(
-              "group flex h-8 min-w-0 items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent/60",
+              "group flex min-w-0 items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent/60",
+              touch ? "h-11" : "h-8",
               current && "bg-accent font-medium",
               drop.isOver && "ring-2 ring-primary/60",
               drag.isDragging && "opacity-50"
@@ -108,7 +120,8 @@ function FilesFolderTreeNode({
             <button
               type="button"
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground",
+                "flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground",
+                touch ? "size-9" : "size-5",
                 !hasChildren && "invisible"
               )}
               aria-label={t(expanded ? "folders.collapse" : "folders.expand", {
@@ -140,7 +153,8 @@ function FilesFolderTreeNode({
                   size="icon"
                   className={cn(
                     HOVER_REVEAL_CONTROL_CLASS,
-                    "size-6 group-focus-within:opacity-100"
+                    touch ? "size-10" : "size-6",
+                    "group-focus-within:opacity-100"
                   )}
                   aria-label={t("folders.menu", { name: folder.name })}
                   data-testid={`files-tree-menu-${folder.id}`}
@@ -164,6 +178,7 @@ function FilesFolderTreeNode({
           parentId={folder.id}
           depth={depth + 1}
           actions={actions}
+          touch={touch}
         />
       ) : null}
     </li>

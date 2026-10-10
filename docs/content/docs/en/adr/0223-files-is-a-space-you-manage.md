@@ -5,7 +5,7 @@ description: "The Files page becomes a managed space: a sidebar of places (all, 
 
 # ADR 0223 — Files is a space you manage
 
-**Status:** Accepted. Implemented: §1–§7 and §10. Pending: §8 (workspace files) and §9 (the phone), which need host-side Rust work; until they ship, the Workspace files group is absent and the phone keeps ADR-0200's dormant shell.
+**Status:** Accepted. Implemented: §1–§7, §10, and §9 for a standalone phone. Pending: §8 (workspace files) and §9 for a paired phone, which both need host-side Rust work; until they ship, the Workspace files group is absent and a paired phone has no Files page.
 **Date:** 2026-10-10
 **Related:** [ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep) (Files, partly superseded),
 [ADR-0222](./0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant) (FileSpace and file sharing),
@@ -126,6 +126,19 @@ writes the host's library through `files_library_*` host commands and fetches
 bytes on demand as a `library-media` resource; the surface contract moves from
 `companion: hidden` to `companion: remote`. The phone layout is a list with
 long-press selection and drawers, without drag and drop or shortcuts.
+
+On a paired phone:
+
+- the commands use the device capabilities `client.read` and `client.write`, as
+  remote pet care does (ADR-0219): a member device reads, an owner device
+  writes, and an admin can raise a member;
+- opening a canvas document or an artifact previews it read-only — text and
+  images through `library-media`, up to its 10 MiB cap, past which the preview
+  says to open it on the desktop — and an item from a conversation can jump to
+  that conversation on the phone;
+- Share is dormant and says to share from the desktop: the share policy, the
+  collaboration checks and the link records all live on the host, and
+  uploading a large selection would outlast the 30-second host bridge.
 
 ### 10. Sharing rides ADR-0222
 

@@ -83,7 +83,7 @@ describe("Files ⌘K providers", () => {
     expect(referenceCandidateFor(out.items[0]!)).toMatchObject({ entityKind: "canvas", id: "c1" })
   })
 
-  it("finds files, and offers nothing on the phone shell", async () => {
+  it("finds files, on the phone too, and offers nothing on a paired client", async () => {
     const rows: FileSearchRow[] = [
       { key: "upload:u1", title: "SPEC.md", mediaType: "text/markdown", timestamp: 3 },
     ]
@@ -95,13 +95,37 @@ describe("Files ⌘K providers", () => {
       action: { type: "navigate", href: "/files?item=upload%3Au1" },
     })
     expect(referenceCandidateFor(out.items[0]!)).toBeNull()
-    const phone = makeTestContext({ platform: "mobile" })
-    for (const p of [
+    const providers = () => [
       createFilesItemsProvider({ loadItems: async () => rows }),
       createFilesArtifactsProvider({ artifacts: async () => artifacts }),
       createFilesCanvasProvider({ canvasDocuments: async () => canvas }),
-    ]) {
-      expect((await p.search(makeProviderInput("s", { ctx: phone }))).items).toEqual([])
+    ]
+    // An unpaired phone owns its library (ADR-0223 §9).
+    const phone = makeTestContext({
+      platform: "mobile",
+      isTauri: false,
+      runtimeSnapshot: {
+        target: { id: "local", kind: "standalone", platform: "mobile" },
+        vaultState: "unlocked",
+        connectionState: "online",
+      } as never,
+    })
+    for (const p of providers()) {
+      expect((await p.search(makeProviderInput("s", { ctx: phone }))).items).not.toEqual([])
+    }
+    // A paired client's tables are not the host's library: no way in.
+    const paired = makeTestContext({
+      platform: "mobile",
+      isTauri: false,
+      runtimeSnapshot: {
+        target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations: [], grants: ["client.read"] },
+      } as never,
+    })
+    for (const p of providers()) {
+      expect((await p.search(makeProviderInput("s", { ctx: paired }))).items).toEqual([])
     }
   })
 })

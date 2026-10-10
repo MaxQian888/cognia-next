@@ -5,7 +5,7 @@ description: "文件页：在产物、画布文档、聊天图片和上传文件
 
 # 文件
 
-<Status variant="beta">桌面端与网页端已交付 · 工作区文件与手机端待实现（ADR-0223 §8、§9）</Status>
+<Status variant="beta">桌面端、网页端与独立模式手机已交付 · 工作区文件与配对手机待实现（ADR-0223 §8、§9）</Status>
 
 <TLDR>
   `/files` 把对话产生的所有内容，以及直接上传到文件库的文件，集中到一个可以管理的地方。内容仍留在各自的存储中
@@ -88,17 +88,21 @@ flowchart LR
 | 分享 | `lib/files-library/share.ts` |
 | 文档模板 | `lib/document-templates/`、`lib/db/document-templates.ts` |
 | 页面与对话框 | `components/files-library/` |
+| 手机布局 | `components/files-library/mobile/` |
+| 页面模型（两种布局共用） | `hooks/files-library/use-files-page.ts`、`use-files-deep-link.ts` |
 | Hooks | `hooks/files-library/`、`hooks/document-templates/` |
 | Store | `stores/files-library/files-library-store.ts` |
 | ⌘K | `lib/global-search/providers/files.ts` |
 
 ## 尚未交付
 
-ADR-0223 已接受，还有两节待实现，都需要主机端的 Rust 改动。
+ADR-0223 已接受，还有两部分待实现，都需要主机端的 Rust 改动。
 
 - **工作区文件（§8）。** 目前没有 `workspace-file` 类型，也没有“工作区文件”分组：类型分组就是上面五个。
-- **手机端（§9）。** 在手机上，页面仍渲染 ADR-0200 的说明（`FilesMobileUnsupported`），界面契约仍是
-  `companion: hidden`，⌘K 的文件提供者在手机上也不返回结果。
+- **配对的手机（§9）。** 未配对的手机在自己的数据上运行文件页，使用自己的布局
+  （[管理](/docs/subsystems/files/management#在手机上)）。已配对的客户端——手机或浏览器——仍然没有文件页：
+  界面契约是 `companion: hidden`，所以侧栏和 ⌘K 都不提供它，因为它本地的表并不是主机的文件库。为它服务的
+  `files_library_*` 主机命令和 `library-media` 资源尚未构建。
 
 ## 页面
 

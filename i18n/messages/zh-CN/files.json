@@ -83,6 +83,7 @@
     },
     "folder": {
       "description": "把内容拖到这里，或使用条目菜单中的「移到文件夹」。文件夹中的内容在所在对话被删除后仍会保留。",
+      "descriptionTouch": "使用条目菜单中的「移到文件夹」，或选择条目后点「移动」。文件夹中的内容在所在对话被删除后仍会保留。",
       "title": "此文件夹为空"
     },
     "group": {
@@ -243,6 +244,23 @@
   "loadMore": "显示更多",
   "loadOlderImages": "加载更早的图片",
   "loading": "正在加载文件",
+  "mobile": {
+    "clear": "清除",
+    "deletedAgo": "{when}删除",
+    "dock": {
+      "download": "下载",
+      "favorite": "收藏",
+      "move": "移动",
+      "share": "分享",
+      "trash": "删除",
+      "unfavorite": "取消收藏"
+    },
+    "done": "完成",
+    "places": "位置：{place}",
+    "placesDescription": "选择一个位置、文件夹或回收站。",
+    "select": "选择",
+    "selectHint": "点按条目来选择"
+  },
   "moveDialog": {
     "cancel": "取消",
     "confirm": "移动",
@@ -377,10 +395,6 @@
     "description": "上传到文件的内容会从本设备删除；来自对话或画布的内容只会离开文件，原处保留不变。",
     "emptyConfirm": "清空回收站",
     "emptyTitle": "永久删除回收站中的 {count} 项？"
-  },
-  "unsupported": {
-    "description": "请在桌面应用或已登录此账户的浏览器中打开“文件”。",
-    "title": "手机端暂不支持“文件”"
   },
   "untitled": {
     "artifact": "未命名产物",

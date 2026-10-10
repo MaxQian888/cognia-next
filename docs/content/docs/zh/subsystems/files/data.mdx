@@ -120,4 +120,6 @@ score = exp(-ageDays / 14)               // ageDays 取最后打开和最后修�
 
 `lib/global-search/providers/files.ts` 注册三个提供者（`builtin.files.artifacts`、`builtin.files.canvas`、
 `builtin.files.items`）。它们都排除回收站中和已移除的条目，并以文件库中的名称列出重命名过的条目。
-结果在 `/files?item=<key>` 打开条目的预览。在手机上提供者不返回结果，因为页面尚不在手机上运行。
+结果在 `/files?item=<key>` 打开条目的预览。页面在哪里运行，提供者就在哪里应答——桌面端、网页端和
+未配对的手机；在已配对的客户端上不返回结果，因为那里的 `files` 界面是隐藏的（基于界面契约的
+`resolveSurfaceAvailability`）。

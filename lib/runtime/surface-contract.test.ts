@@ -9,7 +9,6 @@ import {
   getSurfaceContract,
   getSurfaceContractForRoute,
   isInternalRouteExempt,
-  filesRequiresDesktopOrWeb,
   petConsoleRequiresPairedHost,
   petRuntimeRequiresDesktopShell,
   resolveSurfaceAvailability,
@@ -182,32 +181,36 @@ describe("/performance (capability-driven, ADR-0035)", () => {
   })
 })
 
-describe("/files (desktop and web, ADR-0200)", () => {
+describe("/files (every client that owns its database, ADR-0200 / ADR-0223)", () => {
   const files = getSurfaceContract("files")!
 
   it("runs standalone on its own database and is hidden from a paired client", () => {
     expect(files).toMatchObject({ standalone: "full", companion: "hidden", offline: "local" })
     expect(files.operation).toBeUndefined()
     expect(resolveSurfaceAvailability(files, snapshot()).state).toBe("available")
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        resolveSurfaceAvailability(
+          files,
+          snapshot({
+            target: { id: "desktop", kind: "companion", hostKind: "desktop", platform },
+          })
+        ).state
+      ).toBe("unsupported")
+    }
+  })
+
+  it("puts the rail entry on the phone too: an unpaired phone owns its library", () => {
+    const meta = SIDEBAR_NAV_META.find((m) => m.id === "files")
+    expect(meta?.route).toBe("/files")
+    expect(meta?.desktopOnly).toBeUndefined()
+    expect(meta?.hostOperationGated).toBeUndefined()
     expect(
       resolveSurfaceAvailability(
         files,
-        snapshot({
-          target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
-        })
+        snapshot({ target: { id: "local", kind: "standalone", platform: "mobile" } })
       ).state
-    ).toBe("unsupported")
-  })
-
-  it("labels its phone-shell dormancy and keeps the rail entry off the phone", () => {
-    expect(filesRequiresDesktopOrWeb).toEqual({
-      surfaceId: "files",
-      reason: "phone-shell-not-built",
-      remedy: "desktop-or-web",
-    })
-    const meta = SIDEBAR_NAV_META.find((m) => m.id === "files")
-    expect(meta).toMatchObject({ route: "/files", mobileHidden: true })
-    expect(meta?.desktopOnly).toBeUndefined()
+    ).toBe("available")
   })
 })
 

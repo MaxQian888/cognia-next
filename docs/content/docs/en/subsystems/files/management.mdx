@@ -21,8 +21,9 @@ flowchart LR
 ```
 
 `components/files-library/files-library.tsx` composes the page on `FeaturePageShell`. The sidebar's
-width is reported once a drag settles and kept in the Files store, not by the shell. Below the `lg`
-breakpoint the side panes become sheets. The list pages in steps of 60 items ("Show more"); older
+width is reported once a drag settles and kept in the Files store, not by the shell. Between the `md`
+and `lg` breakpoints the side panes become sheets; narrower than `md`, or in the phone shell, the page
+switches to [its phone layout](#on-a-phone). The list pages in steps of 60 items ("Show more"); older
 images load 500 at a time.
 
 The sidebar lists All, the type groups, the five most recent items, the folder tree and the Trash
@@ -152,6 +153,41 @@ selects the name without its extension.
 Defaults are left out of the URL. ADR-0200's `?tab=` values redirect with `router.replace`:
 `recent` → the Recents place, `folders` → the Folders root, `images` → the Images group, `all` → All
 (`favorites` is still a lens).
+
+## On a phone
+
+`FilesLibrary` picks its layout with `useCompactLayout`: narrower than `md`, or in the Capacitor
+shell, it renders `FilesMobileLibrary` (`components/files-library/mobile/`). Both layouts read one
+model, `useFilesPage` (`hooks/files-library/use-files-page.ts`): entries, folders, actions, the view,
+the selection, the URL (`useFilesDeepLink`), paging and folder counts. Only the drawing differs.
+
+```mermaid
+flowchart TB
+  H["Header: place button (opens the sidebar as a sheet) · Select · New<br/>breadcrumb in a folder · lenses (scrolling) · search + Filter"]
+  L["Template strip · subfolder rows · item rows<br/>two lines, 56 px, 44 px ⋯ button"]
+  D["Bulk dock while selecting<br/>Favorite · Move · Share · Download · Trash<br/>(Trash: Restore · Delete forever)"]
+  P["Preview drawer<br/>(the preview pane, 44 px buttons)"]
+  H --> L --> D
+  L -. tap .-> P
+```
+
+| Gesture | Effect |
+| --- | --- |
+| Tap a row | Preview it in the bottom drawer (Open, Use in chat, Download, Favorite; in the Trash, Restore and Delete forever) |
+| Long-press a row, or Select in its menu | Start selection with that item selected |
+| Select in the header | Start selection with nothing selected |
+| Tap while selecting | Toggle the item |
+| Done, or a new place or lens | End selection |
+| Place button | Open the sidebar as a sheet; picking a place or a recent item closes it |
+
+The list is the phone's only layout: the grid/list choice is a desktop preference and is left as it
+was. Nothing drags: items move through "Move to folder…" and the dock, and files come in through
+New → Upload files (the system picker). Rows have no right-click menu, which Radix would raise on the
+same long-press. An empty folder says to use Move rather than to drag. Downloads, single or zip, go
+to the system share sheet in the Capacitor shell (`downloadBlob`, `lib/files/download.ts`).
+
+The phone layout serves a standalone phone, which owns its database. A paired phone has no Files page
+yet ([Overview](/docs/subsystems/files#not-yet-shipped)).
 
 ## Store
 

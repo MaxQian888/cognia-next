@@ -72,11 +72,14 @@ export function FilesEmpty({
   lens,
   filtered,
   onClear,
+  touch = false,
 }: {
   section: FilesSection
   lens: FilesLens
   filtered: boolean
   onClear: () => void
+  /** The phone layout: nothing drags there, so an empty folder says how to fill it by tap. */
+  touch?: boolean
 }) {
   const t = useTranslations("files.empty")
   const copy = filesEmptyCopy(section, lens, filtered)
@@ -88,7 +91,9 @@ export function FilesEmpty({
           <Icon aria-hidden />
         </EmptyMedia>
         <EmptyTitle>{t(`${copy}.title`)}</EmptyTitle>
-        <EmptyDescription>{t(`${copy}.description`)}</EmptyDescription>
+        <EmptyDescription>
+          {touch && copy === "folder" ? t("folder.descriptionTouch") : t(`${copy}.description`)}
+        </EmptyDescription>
       </EmptyHeader>
       {filtered ? (
         <EmptyContent>

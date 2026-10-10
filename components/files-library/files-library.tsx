@@ -16,10 +16,11 @@
  * from the system upload. The URL carries the place (`?section=`), the lens
  * (`?tab=`) and the previewed item (`?item=`, what ⌘K links to); ADR-0200's
  * `?tab=` values still resolve and are rewritten.
+ *
+ * A phone-width page draws the same model (`useFilesPage`) as a two-line list
+ * instead (`mobile/files-mobile-library.tsx`, ADR-0223 §9).
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { FolderOpenIcon, Trash2Icon } from "lucide-react"
 
@@ -27,19 +28,10 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useFilesActions } from "@/hooks/files-library/use-files-actions"
-import { useFilesEntries } from "@/hooks/files-library/use-files-entries"
-import { useFilesFolders } from "@/hooks/files-library/use-files-folders"
 import { useFilesKeyboard } from "@/hooks/files-library/use-files-keyboard"
-import { useFilesSelection } from "@/hooks/files-library/use-files-selection"
-import { useFilesView } from "@/hooks/files-library/use-files-view"
-import {
-  filesLocationHref,
-  parseFilesLocation,
-  sameFilesSection,
-} from "@/lib/files-library/deep-link"
+import { useFilesPage } from "@/hooks/files-library/use-files-page"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { FilesEntry } from "@/lib/files-library/types"
-import { detectPlatform } from "@/lib/platform/detect"
 import {
   FILES_SIDEBAR_MAX_PX,
   FILES_SIDEBAR_MIN_PX,
@@ -49,88 +41,38 @@ import {
 import { FilesBreadcrumb, useFilesPlaceTitle } from "./files-breadcrumb"
 import { FilesBulkBar } from "./files-bulk-bar"
 import { FilesCard } from "./files-card"
-import { FilesDeleteFolderDialog } from "./files-delete-folder-dialog"
+import { FilesDialogs } from "./files-dialogs"
 import { FilesDndProvider } from "./files-dnd"
 import { FilesDropZone } from "./files-drop-zone"
 import { FilesEmpty } from "./files-empty"
-import { FilesFolderDialog } from "./files-folder-dialog"
 import { FilesFolderTile } from "./files-folder-item"
 import { FilesLensTabs } from "./files-lens-tabs"
 import { FilesListTable } from "./files-list-table"
-import { FilesMobileUnsupported } from "./files-mobile-unsupported"
-import { FilesMoveDialog } from "./files-move-dialog"
 import { FilesNewMenu } from "./files-new-menu"
 import { FilesPreviewPane } from "./files-preview-pane"
-import { FilesRenameDialog } from "./files-rename-dialog"
-import { FilesSaveTemplateDialog } from "./files-save-template-dialog"
-import { FilesShareDialog } from "./files-share-dialog"
 import { FilesSidebar } from "./files-sidebar"
 import { FilesTemplateStrip } from "./files-template-strip"
 import { FilesToolbar } from "./files-toolbar"
-import { FilesTrashDialogs } from "./files-trash-dialogs"
+import { FilesMobileLibrary } from "./mobile/files-mobile-library"
 
-/** Items rendered per "Show more" step; keeps a large library's first paint cheap. */
-export const FILES_PAGE_SIZE = 60
+export { FILES_PAGE_SIZE } from "@/hooks/files-library/use-files-page"
 
-const noSubscribe = () => () => {}
-
-export function FilesLibrary() {
-  // The platform never changes at runtime; the server snapshot renders the
-  // page so the static export and a desktop hydration agree.
-  const onPhone = useSyncExternalStore(
-    noSubscribe,
-    () => detectPlatform() === "mobile",
-    () => false
-  )
-  return onPhone ? <FilesMobileUnsupported /> : <FilesLibraryBody />
-}
+const NO_ENTRIES: readonly FilesEntry[] = []
 
 /**
- * Apply the URL to the view, and keep the URL on the place and lens the
- * person picks. Writes read the store directly, so the first pass never
- * overwrites a deep link with the defaults it is about to replace.
+ * A phone-width page (the phone shell, or a narrow window) gets the compact
+ * layout; the model under both is `useFilesPage`.
  */
-function useFilesDeepLink() {
-  const router = useRouter()
-  const params = useSearchParams()
-  const section = useFilesLibraryStore((s) => s.section)
-  const lens = useFilesLibraryStore((s) => s.lens)
-  const query = params?.toString() ?? ""
-
-  useEffect(() => {
-    const { location, legacy } = parseFilesLocation(new URLSearchParams(query))
-    const store = useFilesLibraryStore.getState()
-    if (location.section && !sameFilesSection(location.section, store.section)) {
-      store.setSection(location.section)
-    }
-    if (location.lens && location.lens !== store.lens) store.setLens(location.lens)
-    if (location.item) store.select(location.item)
-    if (legacy) router.replace(filesLocationHref(location))
-  }, [query, router])
-
-  useEffect(() => {
-    const store = useFilesLibraryStore.getState()
-    const { location } = parseFilesLocation(new URLSearchParams(query))
-    const urlSection = location.section ?? { kind: "all" as const }
-    const urlLens = location.lens ?? "suggested"
-    if (sameFilesSection(urlSection, store.section) && urlLens === store.lens) return
-    router.replace(filesLocationHref({ section: store.section, lens: store.lens }))
-    // `query` is read, not watched: only a change the person made writes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, lens, router])
+export function FilesLibrary() {
+  const compact = useCompactLayout()
+  return compact ? <FilesMobileLibrary /> : <FilesLibraryBody />
 }
 
 function FilesLibraryBody() {
   const t = useTranslations("files")
-  const { entries, imagesTruncated, loadMoreImages } = useFilesEntries()
-  const folders = useFilesFolders()
-  const actions = useFilesActions()
-  const view = useFilesView(entries, folders)
-  const selection = useFilesSelection(view.visible)
-  useFilesDeepLink()
+  const files = useFilesPage()
+  const { entries, folders, actions, view, selection, section, lens, trash, page } = files
 
-  const section = useFilesLibraryStore((s) => s.section)
-  const lens = useFilesLibraryStore((s) => s.lens)
   const viewMode = useFilesLibraryStore((s) => s.viewMode)
   const sort = useFilesLibraryStore((s) => s.sort)
   const setSort = useFilesLibraryStore((s) => s.setSort)
@@ -141,39 +83,15 @@ function FilesLibraryBody() {
   const setSidebarWidth = useFilesLibraryStore((s) => s.setSidebarWidth)
   const setEmptyTrashOpen = useFilesLibraryStore((s) => s.setEmptyTrashOpen)
   const placeTitle = useFilesPlaceTitle(folders)
-  const trash = section.kind === "trash"
 
   const onKeyDown = useFilesKeyboard({ entries, selection, trash, actions })
 
-  const filters = useFilesLibraryStore((s) => s.filters)
-  const search = useFilesLibraryStore((s) => s.search)
   const visible = view.visible
-  // "Show more" lasts until the view changes, not until an item is trashed.
-  const viewKey = JSON.stringify([section, lens, sort, filters, search])
-  const [limit, setLimit] = useState({ for: "", count: FILES_PAGE_SIZE })
-  const shown = limit.for === viewKey ? limit.count : FILES_PAGE_SIZE
-  const page = useMemo(() => (visible ?? []).slice(0, shown), [visible, shown])
-  const previewed = entries?.find((entry) => entry.key === selectedKey)
-
-  // Items filed directly in each folder, as the folder view would show them.
-  const folderItemCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const entry of entries ?? []) {
-      if (!entry.folderId || entry.trashedAt !== undefined || entry.hidden) continue
-      counts.set(entry.folderId, (counts.get(entry.folderId) ?? 0) + 1)
-    }
-    return counts
-  }, [entries])
-
+  const previewed = files.previewed
+  const folderItemCounts = files.folderItemCounts
   const childFolders = view.childFolders
-  const showImagesMore =
-    imagesTruncated &&
-    (section.kind === "all" ||
-      section.kind === "recent" ||
-      (section.kind === "group" && section.group === "images"))
-  const empty = visible !== undefined && visible.length === 0 && childFolders.length === 0
-  // Templates open Suggested, where a new document is most likely to start.
-  const showTemplates = lens === "suggested" && section.kind === "all" && !view.filtered
+  const empty = files.empty
+  const showTemplates = files.showTemplates
 
   const header = (
     <FeaturePageHeader
@@ -215,7 +133,7 @@ function FilesLibraryBody() {
 
   return (
     <FilesDndProvider
-      entries={entries ?? []}
+      entries={entries ?? NO_ENTRIES}
       folders={folders}
       selected={selection.selected}
       actions={actions}
@@ -354,23 +272,23 @@ function FilesLibraryBody() {
                 now={view.now}
               />
             )}
-            {visible && (visible.length > shown || showImagesMore) ? (
+            {visible && (files.hasMore || files.showImagesMore) ? (
               <div className="flex justify-center gap-2 py-6">
-                {visible.length > shown ? (
+                {files.hasMore ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setLimit({ for: viewKey, count: shown + FILES_PAGE_SIZE })}
+                    onClick={files.showMore}
                     data-testid="files-show-more"
                   >
                     {t("loadMore")}
                   </Button>
                 ) : null}
-                {showImagesMore && visible.length <= shown ? (
+                {files.showImagesMore ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={loadMoreImages}
+                    onClick={files.loadMoreImages}
                     data-testid="files-load-images"
                   >
                     {t("loadOlderImages")}
@@ -381,13 +299,12 @@ function FilesLibraryBody() {
           </div>
         </FilesDropZone>
       </FeaturePageShell>
-      <FilesMoveDialog entries={entries ?? []} folders={folders} actions={actions} />
-      <FilesRenameDialog entries={entries ?? []} actions={actions} />
-      <FilesSaveTemplateDialog entries={entries ?? []} />
-      <FilesShareDialog entries={entries ?? []} folders={folders} />
-      <FilesTrashDialogs entries={entries ?? []} actions={actions} onDeleted={selection.clear} />
-      <FilesFolderDialog />
-      <FilesDeleteFolderDialog folders={folders} />
+      <FilesDialogs
+        entries={entries ?? NO_ENTRIES}
+        folders={folders}
+        actions={actions}
+        onDeleted={selection.clear}
+      />
     </FilesDndProvider>
   )
 }

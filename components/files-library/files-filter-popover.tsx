@@ -39,7 +39,7 @@ function FilterHeading({ children }: { children: React.ReactNode }) {
   return <p className="text-xs font-medium text-muted-foreground">{children}</p>
 }
 
-export function FilesFilterPopover() {
+export function FilesFilterPopover({ compact = false }: { compact?: boolean } = {}) {
   const t = useTranslations("files")
   const filters = useFilesLibraryStore((s) => s.filters)
   const setFilters = useFilesLibraryStore((s) => s.setFilters)
@@ -57,6 +57,8 @@ export function FilesFilterPopover() {
         <Button
           variant="outline"
           size="sm"
+          // The phone layout: a 40px target beside the 40px search field.
+          className={compact ? "h-10" : undefined}
           aria-label={active > 0 ? t("filter.labelActive", { count: active }) : t("filter.label")}
           data-testid="files-filter"
         >

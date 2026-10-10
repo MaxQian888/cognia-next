@@ -132,5 +132,6 @@ The 14 days are a time constant, not a half-life (the half-life is about 9.7 day
 
 `lib/global-search/providers/files.ts` registers three providers (`builtin.files.artifacts`,
 `builtin.files.canvas`, `builtin.files.items`). Each leaves out trashed and removed items and lists a
-renamed item under its Files name. Results open the item's preview at `/files?item=<key>`. On a phone
-the providers return nothing, as the page does not run there yet.
+renamed item under its Files name. Results open the item's preview at `/files?item=<key>`. They answer
+wherever the page runs — desktop, web and an unpaired phone — and return nothing on a paired client,
+whose `files` surface is hidden (`resolveSurfaceAvailability` over the surface contract).

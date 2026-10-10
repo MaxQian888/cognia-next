@@ -68,13 +68,6 @@ export interface SidebarNavMeta {
    * `desktopOnly` this does not drop the entry on mobile.
    */
   hostOperationGated?: boolean
-  /**
-   * Hidden on the phone shell (Capacitor) only; shown on desktop and on the
-   * web. For a surface that runs on any full client but has not been built for
-   * the phone yet — Files (ADR-0200) reads this device's own database, and the
-   * phone mirrors none of what it lists. See `filesRequiresDesktopOrWeb`.
-   */
-  mobileHidden?: boolean
 }
 
 /**
@@ -172,8 +165,9 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // reachable from the navigation — the menubar could go somewhere the rail
   // could not. In "More" by default, like every other auxiliary surface.
   { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary", category: "spaces" },
-  // Files (ADR-0200): artifacts, canvas documents, images and uploads from
-  // every conversation. Desktop and web; not built for the phone yet.
+  // Files (ADR-0200, ADR-0223): artifacts, canvas documents, images and
+  // uploads from every conversation, on every client that owns its database —
+  // the phone included, in its own layout.
   {
     id: "files",
     route: "/files",
@@ -181,7 +175,6 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     group: "auxiliary",
     category: "spaces",
     aliasKey: "files",
-    mobileHidden: true,
   },
   // The conversation manager (ADR-0213): every conversation in every
   // workspace, active and archived, in one table. The chat sidebar stays where

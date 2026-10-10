@@ -94,11 +94,12 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
-    // Files (ADR-0200) aggregates THIS device's artifacts, canvas documents,
-    // media and uploads. None of those tables reach a companion, so a paired
-    // client's local copy is not the host's library: hidden there. Standalone
-    // (the desktop app and the web app) owns its database outright. The phone
-    // shell is dormant on top of that — see {@link filesRequiresDesktopOrWeb}.
+    // Files (ADR-0200, ADR-0223) aggregates THIS device's artifacts, canvas
+    // documents, media and uploads. None of those tables reach a companion,
+    // so a paired client's local copy is not the host's library: hidden there.
+    // Standalone — the desktop app, the web app and an unpaired phone, which
+    // gets its own layout (`components/files-library/mobile/`) — owns its
+    // database outright.
     id: "files",
     route: "/files",
     navigation: true,
@@ -486,26 +487,6 @@ export const petConsoleRequiresPairedHost = {
   surfaceId: "pet",
   reason: "no-paired-pet-host",
   remedy: "/pair",
-} as const
-
-/**
- * Files (ADR-0200) is not built for the phone shell yet — deliberate dormancy,
- * labelled on all three axes (CLAUDE.md rule 7):
- *
- *  1. **Type** — the `files` contract above is `companion: "hidden"`, the
- *     `files` rail entry is `mobileHidden`, and this constant carries why.
- *  2. **UI** — the rail and ⌘K drop it on the phone (`getSidebarCatalog`,
- *     the ⌘K Files providers return nothing on `platform === "mobile"`), and a
- *     deep link renders `components/files-library/files-mobile-unsupported.tsx`.
- *  3. **Test** — pinned by `lib/shell/sidebar-nav.test.ts`,
- *     `components/files-library/files-library.test.tsx`,
- *     `lib/global-search/providers/files.test.ts` and
- *     `lib/runtime/surface-contract.test.ts`.
- */
-export const filesRequiresDesktopOrWeb = {
-  surfaceId: "files",
-  reason: "phone-shell-not-built",
-  remedy: "desktop-or-web",
 } as const
 
 /**

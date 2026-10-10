@@ -34,8 +34,10 @@ was attached to.
 > Files" and deleting a Files upload became the Trash (`trashedAt`, kept 30
 > days, then one purge rule); items can be renamed, duplicated, shared and
 > managed in bulk; ⌘K leaves out trashed items and lists renamed ones by their
-> Files name. "Where Files runs" below still describes the phone until
-> ADR-0223 §9 ships.
+> Files name. The phone dormancy under "Where Files runs" is lifted for a
+> standalone phone, which now runs Files in its own layout (ADR-0223 §9);
+> `filesRequiresDesktopOrWeb` and `files-mobile-unsupported.tsx` are gone. A
+> paired client still gets no Files page.
 
 ### An aggregated view, not a copy
 

@@ -65,3 +65,20 @@ it("stops at a corrupt parent cycle instead of recursing forever", () => {
   render(<FilesFolderTree folders={loop} parentId="x" actions={{ setFolderStyle: jest.fn() }} />)
   expect(screen.getAllByText("Y").length).toBeGreaterThan(0)
 })
+
+it("sizes rows and controls for touch, down the whole tree", () => {
+  useFilesLibraryStore.setState({ expandedFolderIds: ["a"] })
+  render(
+    <FilesFolderTree
+      folders={folders}
+      parentId="root"
+      actions={{ setFolderStyle: jest.fn() }}
+      touch
+    />
+  )
+  for (const id of ["a", "b", "c"]) {
+    expect(screen.getByTestId(`files-tree-folder-${id}`)).toHaveClass("h-11")
+    expect(screen.getByTestId(`files-tree-toggle-${id}`)).toHaveClass("size-9")
+    expect(screen.getByTestId(`files-tree-menu-${id}`)).toHaveClass("size-10")
+  }
+})

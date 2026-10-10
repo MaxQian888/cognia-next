@@ -11,8 +11,11 @@
  * an item renamed in Files is listed under that name (ADR-0223) — the palette
  * offers what the Files page shows, by the same rule (`isItemHidden`).
  *
- * Empty on the phone shell: Files is not built there yet
- * (`filesRequiresDesktopOrWeb`), so the palette must not offer a way in.
+ * Offered wherever the page itself runs: on every client that owns its
+ * database — desktop, web and an unpaired phone — and not on a paired client,
+ * whose `files` surface is hidden (`lib/runtime/surface-contract.ts`): its
+ * local tables are not the host's library, and a hit would link to a page
+ * that refuses to open.
  */
 
 import { FileIcon, PenLineIcon, ShapesIcon } from "lucide-react"
@@ -27,6 +30,7 @@ import {
 import { listAllSessionAssets, listLibraryAssets } from "@/lib/db/session-assets"
 import { isImageMediaType, isItemHidden } from "@/lib/files-library/aggregate"
 import { filesLocationHref } from "@/lib/files-library/deep-link"
+import { getSurfaceContract, resolveSurfaceAvailability } from "@/lib/runtime/surface-contract"
 import { byProjectId } from "../workspace-scope"
 import { createListProvider } from "./list-provider"
 import type { GlobalSearchContext } from "../types"
@@ -163,7 +167,14 @@ const defaultDeps: FilesProviderDeps = {
   loadItems: (ctx) => loadFileSearchRows(ctx.sessions),
 }
 
-const offPhone = (ctx: GlobalSearchContext) => ctx.platform !== "mobile"
+/** The Files page runs on this client (see the module comment). */
+function filesReachable(ctx: GlobalSearchContext): boolean {
+  const contract = getSurfaceContract("files")
+  return (
+    contract !== null &&
+    resolveSurfaceAvailability(contract, ctx.runtimeSnapshot).state === "available"
+  )
+}
 
 export function createFilesArtifactsProvider(
   deps: Pick<FilesProviderDeps, "artifacts"> &
@@ -173,7 +184,7 @@ export function createFilesArtifactsProvider(
     id: FILES_ARTIFACTS_PROVIDER_ID,
     kind: "artifact",
     load: async (ctx) => {
-      if (!offPhone(ctx)) return []
+      if (!filesReachable(ctx)) return []
       const [artifacts, items] = await Promise.all([
         deps.artifacts(),
         (deps.libraryItems ?? libraryItemsByKey)(),
@@ -206,7 +217,7 @@ export function createFilesCanvasProvider(
     id: FILES_CANVAS_PROVIDER_ID,
     kind: "canvas-document",
     load: async (ctx) => {
-      if (!offPhone(ctx)) return []
+      if (!filesReachable(ctx)) return []
       const [documents, items] = await Promise.all([
         deps.canvasDocuments(),
         (deps.libraryItems ?? libraryItemsByKey)(),
@@ -235,7 +246,7 @@ export function createFilesItemsProvider(deps: Pick<FilesProviderDeps, "loadItem
   return createListProvider<FileSearchRow>({
     id: FILES_ITEMS_PROVIDER_ID,
     kind: "library-file",
-    load: async (ctx) => (offPhone(ctx) ? deps.loadItems(ctx) : []),
+    load: async (ctx) => (filesReachable(ctx) ? deps.loadItems(ctx) : []),
     getTitle: (row) => row.title,
     getSecondary: (row) => row.mediaType,
     getTimestamp: (row) => row.timestamp,

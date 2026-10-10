@@ -93,3 +93,13 @@ it("offers no template submenu while the platform is off", async () => {
   await user.click(screen.getByRole("button", { name: "New" }))
   expect(screen.queryByRole("menuitem", { name: "From template" })).toBeNull()
 })
+
+it("draws a 40px plus on the phone, with the same menu", async () => {
+  const user = userEvent.setup()
+  render(<FilesNewMenu actions={actions()} compact />)
+  const trigger = screen.getByRole("button", { name: "New" })
+  expect(trigger).toHaveClass("size-10")
+  expect(trigger).not.toHaveTextContent("New")
+  await user.click(trigger)
+  expect(screen.getByRole("menuitem", { name: "Upload files" })).toBeInTheDocument()
+})

@@ -75,7 +75,6 @@ describe("getSidebarCatalog", () => {
       SIDEBAR_NAV_META.filter(
         (meta) =>
           !meta.desktopOnly &&
-          !meta.mobileHidden &&
           // Shown only while a paired host advertises it; no snapshot here.
           !meta.hostOperationGated &&
           meta.id !== "source-control"
@@ -83,10 +82,26 @@ describe("getSidebarCatalog", () => {
     )
   })
 
-  it("keeps Files off the phone but on the desktop and the web (ADR-0200)", () => {
-    expect(getSidebarCatalog("mobile").map((c) => c.id)).not.toContain("files")
+  it("offers Files on every shell that owns its database, the phone included (ADR-0223 §9)", () => {
     expect(getSidebarCatalog("tauri").find((c) => c.id === "files")?.route).toBe("/files")
     expect(getSidebarCatalog("web").map((c) => c.id)).toContain("files")
+    expect(getSidebarCatalog("mobile").map((c) => c.id)).toContain("files")
+    const standalonePhone: RuntimeSnapshot = {
+      target: { id: "local", kind: "standalone", platform: "mobile" },
+      vaultState: "unlocked",
+      connectionState: "online",
+    } as RuntimeSnapshot
+    expect(getSidebarCatalog("mobile", standalonePhone).map((c) => c.id)).toContain("files")
+  })
+
+  it("keeps Files off a paired client, whose local library is not the host's", () => {
+    const paired: RuntimeSnapshot = {
+      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: [], grants: ["client.read", "client.write"] },
+    } as RuntimeSnapshot
+    expect(getSidebarCatalog("mobile", paired).map((c) => c.id)).not.toContain("files")
   })
 
   it("keeps desktop-only items hidden on mobile even before runtime targeting settles", () => {
