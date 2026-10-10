@@ -73,7 +73,7 @@ of one listing, and a re-read on focus while the ledger is unchanged, share one 
 parsed once for all of its rows. `task_workspace_list_resource_index`
 (`crates/cognia-task-workspace-host/src/host_surface.rs:784`) serves it in offset pages of 500
 (`resource_index_page`), as a read-only `host.observe` command that runs off the main thread. `listTaskResourceIndex`
-(`lib/task-workspace/client.ts:718`) collects the pages, at most 20 000 entries, and drops duplicates.
+(`lib/task-workspace/client.ts:764`) collects the pages, at most 20 000 entries, and drops duplicates.
 
 ## Merging with code-adoption turns
 
@@ -203,7 +203,10 @@ Plain web has no ledger and no disk to read. The capability `workspaceFiles` in
 
 ## Refresh
 
-`useWorkspaceFileIndex` (`hooks/files-library/use-workspace-file-index.ts:34`) reads the index on
-mount, when the window regains focus or the page becomes visible, and whenever the code-adoption turn
-table's revision (count and newest timestamp) moves, which a settled turn does. A read that loses the
-race to a newer one is dropped.
+`useWorkspaceFileIndex` (`hooks/files-library/use-workspace-file-index.ts:37`) reads the index on
+mount; after every ledger write this renderer makes (`onTaskWorkspaceLedgerChange` in
+`lib/task-workspace/client.ts`: a run settled, a patch applied, undone or resolved, a bundle handed
+off or undone, tasks pruned), since an apply rewrites a turn row without moving the turn table's count
+or newest time; whenever that revision moves (an external agent's turn, which has no ledger run); and
+when the window regains focus or the page becomes visible, for a change another device or the CLI
+made. A read that loses the race to a newer one is dropped.

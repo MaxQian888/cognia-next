@@ -12,6 +12,9 @@ const liveQuery = jest.fn((query: () => unknown) => {
 jest.mock("@/hooks/data/use-client-live-query", () => ({
   useClientLiveQuery: (query: () => unknown) => liveQuery(query),
 }))
+jest.mock("@/lib/task-workspace/client", () => ({
+  onTaskWorkspaceLedgerChange: jest.fn(() => () => undefined),
+}))
 jest.mock("@/lib/files-library/workspace-files-io", () => ({
   loadWorkspaceFileIndex: jest.fn(async () => []),
 }))
@@ -67,6 +70,26 @@ it("reads the index, and again when a turn settles or the page comes back", asyn
     window.dispatchEvent(new Event("focus"))
   })
   await waitFor(() => expect(load).toHaveBeenCalledTimes(3))
+})
+
+it("reads again when this renderer changes the ledger, and stops listening on unmount", async () => {
+  const load = jest.fn(async () => [entry("a.md")])
+  let fire: () => void = () => undefined
+  const stop = jest.fn()
+  const onLedgerChange = jest.fn((listener: () => void) => {
+    fire = listener
+    return stop
+  })
+  const { result, unmount } = renderHook(() =>
+    useWorkspaceFileIndex(true, { load, onLedgerChange })
+  )
+  await waitFor(() => expect(result.current).toEqual({ index: [entry("a.md")] }))
+  // An apply or undo rewrites a turn row without moving its count or newest time.
+  load.mockResolvedValueOnce([entry("applied.md")])
+  await act(async () => fire())
+  await waitFor(() => expect(result.current).toEqual({ index: [entry("applied.md")] }))
+  unmount()
+  expect(stop).toHaveBeenCalled()
 })
 
 it("keeps the newest read's answer, and a null when the ledger cannot be asked", async () => {

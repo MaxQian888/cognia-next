@@ -63,7 +63,7 @@ flowchart LR
 （`WorkspaceStore::change_fingerprint`：本连接的 `total_changes()` 和 `PRAGMA data_version`，后者在另一个连接提交时变化），
 因此同一次列出的各页、以及账本未变时获得焦点后的重新读取，共用同一次折叠；一次运行的载荷只为它的所有行解析一次。
 `task_workspace_list_resource_index`（`crates/cognia-task-workspace-host/src/host_surface.rs:784`）以每页 500 条的偏移分页提供它
-（`resource_index_page`），是一个在主线程之外执行的只读 `host.observe` 命令。`listTaskResourceIndex`（`lib/task-workspace/client.ts:718`）收集各页，最多 20 000 条，并去掉重复项。
+（`resource_index_page`），是一个在主线程之外执行的只读 `host.observe` 命令。`listTaskResourceIndex`（`lib/task-workspace/client.ts:764`）收集各页，最多 20 000 条，并去掉重复项。
 
 ## 与代码采纳轮次合并
 
@@ -168,5 +168,7 @@ flowchart LR
 
 ## 刷新
 
-`useWorkspaceFileIndex`（`hooks/files-library/use-workspace-file-index.ts:34`）在挂载时、窗口重新获得焦点或页面变为可见时，
-以及代码采纳轮次表的修订号（条数和最新时间戳）变化时读取索引——结算一个轮次就会让它变化。输给更新一次读取的旧读取会被丢弃。
+`useWorkspaceFileIndex`（`hooks/files-library/use-workspace-file-index.ts:37`）在挂载时读取索引；在本渲染进程每次写入账本之后
+（`lib/task-workspace/client.ts` 中的 `onTaskWorkspaceLedgerChange`：结算运行、应用/撤销/解决补丁、移交或撤销工作区组、清理任务）读取，
+因为应用补丁只改写轮次行，不会改变轮次表的条数或最新时间；在该修订号变化时读取（外部 Agent 的轮次没有账本运行）；
+以及窗口重新获得焦点或页面变为可见时读取，以发现另一台设备或 CLI 做的改动。输给更新一次读取的旧读取会被丢弃。

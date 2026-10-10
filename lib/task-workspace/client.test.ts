@@ -60,6 +60,7 @@ import {
   getTaskResourceSummary,
   listTaskResourceEvents,
   listTaskResourceIndex,
+  onTaskWorkspaceLedgerChange,
   readTaskResourceCapture,
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
@@ -81,6 +82,9 @@ import {
   listWorkspaceMaintenanceEvents,
   pinManagedWorkspace,
   resolveTaskWorkspaceConflict,
+  pruneTaskWorkspaces,
+  settleTaskWorkspaceRun,
+  undoTaskWorkspace,
   runIdForTurn,
   turnRecordId,
   settleTaskWorkspaceTurn,
@@ -1217,6 +1221,39 @@ describe("task workspace client", () => {
       ["task_workspace_list_resource_index", { pageSize: 500 }],
       ["task_workspace_list_resource_index", { pageSize: 500, pageToken: "o1" }],
     ])
+  })
+
+  it("tells listeners after each ledger write that landed, and never after one that failed", async () => {
+    const heard = jest.fn()
+    const stop = onTaskWorkspaceLedgerChange(heard)
+    call.mockResolvedValue({ state: "conflict", revision: 2, conflicts: [] })
+    await applyTaskWorkspace("run-1")
+    await undoTaskWorkspace("run-1")
+    await resolveTaskWorkspaceConflict("run-1", "keepCurrent")
+    call.mockResolvedValue([])
+    await settleTaskWorkspaceRun("run-1")
+    call.mockResolvedValue({ removedTaskIds: [], removedBlobCount: 0, reclaimedBytes: 0 })
+    await pruneTaskWorkspaces()
+    expect(heard).toHaveBeenCalledTimes(5)
+    call.mockRejectedValueOnce(new Error("refused"))
+    await expect(applyTaskWorkspace("run-1")).rejects.toThrow("refused")
+    expect(heard).toHaveBeenCalledTimes(5)
+    // A listener that throws does not stop the write or the others.
+    const second = jest.fn()
+    const stopThrowing = onTaskWorkspaceLedgerChange(() => {
+      throw new Error("listener")
+    })
+    const stopSecond = onTaskWorkspaceLedgerChange(second)
+    const quiet = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    call.mockResolvedValue([])
+    await settleTaskWorkspaceRun("run-1")
+    expect(second).toHaveBeenCalledTimes(1)
+    quiet.mockRestore()
+    stop()
+    stopThrowing()
+    stopSecond()
+    await settleTaskWorkspaceRun("run-1")
+    expect(heard).toHaveBeenCalledTimes(6)
   })
 
   it("reads a change's captured bytes by run and path, a slice at most 4 MiB", async () => {

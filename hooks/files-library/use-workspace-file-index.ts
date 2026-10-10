@@ -3,9 +3,11 @@
 /**
  * The task-workspace ledger's resource index for the Files page (ADR-0223
  * §8). The ledger is not Dexie, so no live query sees it change; the index is
- * re-read when a turn settles (the code-adoption tracker writes its turn row
- * right after the ledger settles the run), when the page comes back into
- * view, and on mount.
+ * re-read when this renderer changes the ledger (a run settled, a patch
+ * applied, undone or resolved, a bundle handed off, tasks pruned), when a
+ * turn row is written (an external agent's turn has no ledger run), when the
+ * page comes back into view — another device or the CLI may have changed it
+ * meanwhile — and on mount.
  */
 
 import { useEffect, useRef, useState } from "react"
@@ -13,6 +15,7 @@ import { useEffect, useRef, useState } from "react"
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 import { getDb } from "@/lib/db/schema"
 import { loadWorkspaceFileIndex } from "@/lib/files-library/workspace-files-io"
+import { onTaskWorkspaceLedgerChange } from "@/lib/task-workspace/client"
 import type { TaskResourceIndexEntry } from "@/lib/task-workspace/types"
 
 export interface WorkspaceFileIndexState {
@@ -33,12 +36,16 @@ async function settledTurnsRevision(): Promise<string> {
  */
 export function useWorkspaceFileIndex(
   enabled: boolean,
-  deps: { load?: () => Promise<TaskResourceIndexEntry[] | null> } = {}
+  deps: {
+    load?: () => Promise<TaskResourceIndexEntry[] | null>
+    onLedgerChange?: (listener: () => void) => () => void
+  } = {}
 ): WorkspaceFileIndexState | undefined {
   const [state, setState] = useState<WorkspaceFileIndexState | undefined>(undefined)
   const [visibleTick, setVisibleTick] = useState(0)
   const generation = useRef(0)
   const load = deps.load ?? loadWorkspaceFileIndex
+  const onLedgerChange = deps.onLedgerChange ?? onTaskWorkspaceLedgerChange
   const loadRef = useRef(load)
   useEffect(() => {
     loadRef.current = load
@@ -51,13 +58,16 @@ export function useWorkspaceFileIndex(
     const onVisible = () => {
       if (document.visibilityState === "visible") setVisibleTick((tick) => tick + 1)
     }
+    const onLedger = () => setVisibleTick((tick) => tick + 1)
     window.addEventListener("focus", onVisible)
     document.addEventListener("visibilitychange", onVisible)
+    const stopLedger = onLedgerChange(onLedger)
     return () => {
       window.removeEventListener("focus", onVisible)
       document.removeEventListener("visibilitychange", onVisible)
+      stopLedger()
     }
-  }, [enabled])
+  }, [enabled, onLedgerChange])
 
   useEffect(() => {
     if (!enabled || turns === undefined) return

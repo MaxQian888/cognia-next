@@ -271,13 +271,43 @@ async function reconcileWorkspaceBundleTurnOutcome(
   return outcome
 }
 
+const ledgerListeners = new Set<() => void>()
+
+/**
+ * Hear about every change this renderer makes to the ledger: a run settled,
+ * a patch applied, undone or resolved, a bundle handed off or undone, tasks
+ * pruned. The ledger is not Dexie, so nothing else announces that what it
+ * lists (the Files page's workspace files, ADR-0223 §8) may have moved.
+ */
+export function onTaskWorkspaceLedgerChange(listener: () => void): () => void {
+  ledgerListeners.add(listener)
+  return () => {
+    ledgerListeners.delete(listener)
+  }
+}
+
+/** Await a ledger write, then tell the listeners. A failed write tells no one. */
+async function changesLedger<T>(write: Promise<T>): Promise<T> {
+  const result = await write
+  for (const listener of [...ledgerListeners]) {
+    try {
+      listener()
+    } catch (error) {
+      console.error("task workspace ledger listener failed", error)
+    }
+  }
+  return result
+}
+
 export async function settleWorkspaceBundleTurn(
   bundleTurnId: string,
   finalState: "ready" | "failed" | "cancelled" = "ready"
 ): Promise<WorkspaceBundleTurnOutcome> {
-  const outcome = await transport.call<WorkspaceBundleTurnOutcome>(
-    "task_workspace_bundle_turn_settle",
-    { bundleTurnId, finalState }
+  const outcome = await changesLedger(
+    transport.call<WorkspaceBundleTurnOutcome>("task_workspace_bundle_turn_settle", {
+      bundleTurnId,
+      finalState,
+    })
   )
   forgetOpenBundleTurn(bundleTurnId)
   // The turn is over, so its standing approval is too. Closed here rather than
@@ -427,10 +457,12 @@ export async function settleTaskWorkspaceTurn(
   try {
     const resources = await withSettleRetry(() =>
       runWorkspaceUserAction("task_workspace_settle", () =>
-        transport.call<ResourceChange[]>("task_workspace_settle", {
-          runId: active.runId,
-          finalState,
-        })
+        changesLedger(
+          transport.call<ResourceChange[]>("task_workspace_settle", {
+            runId: active.runId,
+            finalState,
+          })
+        )
       )
     )
     if (active.executionRunId || active.traceSpanId) {
@@ -469,10 +501,12 @@ export async function settleTaskWorkspaceRun(
   runId: string,
   finalState: "ready" | "failed" | "cancelled" = "ready"
 ): Promise<ResourceChange[]> {
-  return transport.call<ResourceChange[]>("task_workspace_settle", {
-    runId,
-    finalState,
-  })
+  return changesLedger(
+    transport.call<ResourceChange[]>("task_workspace_settle", {
+      runId,
+      finalState,
+    })
+  )
 }
 
 export async function settleTaskWorkspaceRunWithProjection(
@@ -589,14 +623,21 @@ export function applyWorkspaceBundle(
   bundleId: string,
   request: BundleHandoffRequest
 ): Promise<BundleHandoffOutcome> {
-  return transport.call("task_workspace_bundle_apply", { bundleId, request })
+  return changesLedger(
+    transport.call<BundleHandoffOutcome>("task_workspace_bundle_apply", { bundleId, request })
+  )
 }
 
 export function retryWorkspaceBundleHandoff(
   bundleId: string,
   request: BundleHandoffRequest
 ): Promise<BundleHandoffOutcome> {
-  return transport.call("task_workspace_bundle_handoff_retry", { bundleId, request })
+  return changesLedger(
+    transport.call<BundleHandoffOutcome>("task_workspace_bundle_handoff_retry", {
+      bundleId,
+      request,
+    })
+  )
 }
 
 export function getBundleHandoffOutcome(
@@ -609,7 +650,12 @@ export function undoWorkspaceBundleHandoff(
   bundleId: string,
   bundleTurnId: string
 ): Promise<BundleHandoffUndoOutcome> {
-  return transport.call("task_workspace_bundle_handoff_undo", { bundleId, bundleTurnId })
+  return changesLedger(
+    transport.call<BundleHandoffUndoOutcome>("task_workspace_bundle_handoff_undo", {
+      bundleId,
+      bundleTurnId,
+    })
+  )
 }
 
 export function getBundleHandoffUndoOutcome(
@@ -784,7 +830,13 @@ export function pruneTaskWorkspaces(): Promise<{
   removedBlobCount: number
   reclaimedBytes: number
 }> {
-  return transport.call("task_workspace_prune")
+  return changesLedger(
+    transport.call<{
+      removedTaskIds: string[]
+      removedBlobCount: number
+      reclaimedBytes: number
+    }>("task_workspace_prune")
+  )
 }
 
 export function readTaskResource(
@@ -829,17 +881,17 @@ export async function applyTaskWorkspace(
   selection: PatchSelection[] = [],
   allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  const outcome = await transport.call<ApplyOutcome>("task_workspace_apply", {
-    runId,
-    selection,
-    allowIrreversible,
-  })
+  const outcome = await changesLedger(
+    transport.call<ApplyOutcome>("task_workspace_apply", { runId, selection, allowIrreversible })
+  )
   if (outcome.state === "applied") await projectAdoptionOutcome(runId, "apply")
   return outcome
 }
 
 export async function undoTaskWorkspace(runId: string): Promise<ApplyOutcome> {
-  const outcome = await transport.call<ApplyOutcome>("task_workspace_undo", { runId })
+  const outcome = await changesLedger(
+    transport.call<ApplyOutcome>("task_workspace_undo", { runId })
+  )
   if (outcome.state === "reverted") await projectAdoptionOutcome(runId, "undo")
   return outcome
 }
@@ -850,12 +902,14 @@ export async function resolveTaskWorkspaceConflict(
   selection: PatchSelection[] = [],
   allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  const outcome = await transport.call<ApplyOutcome>("task_workspace_resolve_conflict", {
-    runId,
-    resolution,
-    selection,
-    allowIrreversible,
-  })
+  const outcome = await changesLedger(
+    transport.call<ApplyOutcome>("task_workspace_resolve_conflict", {
+      runId,
+      resolution,
+      selection,
+      allowIrreversible,
+    })
+  )
   if (outcome.state === "applied" || outcome.state === "reverted") {
     await projectAdoptionOutcome(runId, resolution === "keepCurrent" ? "keepCurrent" : "apply")
   }
