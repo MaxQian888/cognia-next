@@ -8397,6 +8397,7 @@
         "removed": "来源已移除",
         "unavailable": "此设备上没有原文件"
       },
+      "sourceTab": "源码",
       "toggle": "显示或隐藏 {name} 的预览"
     },
     "grounding": {

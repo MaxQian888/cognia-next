@@ -8397,6 +8397,7 @@
         "removed": "Source removed",
         "unavailable": "Original unavailable on this device"
       },
+      "sourceTab": "Source",
       "toggle": "Show or hide the preview of {name}"
     },
     "grounding": {

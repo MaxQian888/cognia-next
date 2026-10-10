@@ -1289,6 +1289,7 @@
     "loading": "正在加载 {name}…",
     "pdfFallback": "无法预览此 PDF。",
     "preview": "预览",
+    "sourceTab": "源码",
     "source": {
       "download": "下载原文件",
       "remove": "移除来源",

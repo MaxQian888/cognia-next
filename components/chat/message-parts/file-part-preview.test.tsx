@@ -3,11 +3,11 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useTranslations } from "next-intl"
 import { FilePartCard, FilePartPreview, filePreviewKind } from "./file-part-preview"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: jest.fn(),
 }))
 jest.mock("@/components/chat/renderers/code-block", () => ({
   CodeBlock: ({ code, language }: { code: string; language?: string }) => (
@@ -31,6 +31,14 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
 
 const fetchMock = jest.fn()
 beforeEach(() => {
+  const messages = jest.requireActual("@/i18n/messages/en/chat.json").filePreview
+  jest.mocked(useTranslations).mockReturnValue(((key: string, vars?: Record<string, unknown>) => {
+    const message = key
+      .split(".")
+      .reduce<unknown>((value, segment) => (value as Record<string, unknown>)[segment], messages)
+    if (typeof message !== "string") throw new Error(`Translation ${key} must be a string`)
+    return message.replace(/\{(\w+)\}/g, (_, name: string) => String(vars?.[name]))
+  }) as ReturnType<typeof useTranslations>)
   fetchMock.mockReset()
   global.fetch = fetchMock as unknown as typeof fetch
 })
@@ -124,11 +132,13 @@ describe("FilePartPreview", () => {
     render(<FilePartPreview url="blob:md" mediaType="text/markdown" filename="notes.md" />)
     await screen.findByTestId("markdown-preview")
 
-    await userEvent.click(screen.getByRole("tab", { name: "source" }))
+    const sourceTab = screen.getByRole("tab", { name: "Source" })
+    expect(sourceTab).toHaveTextContent("Source")
+    await userEvent.click(sourceTab)
     expect(screen.getByTestId("code-block")).toHaveTextContent("# Notes")
     expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "markdown")
 
-    await userEvent.click(screen.getByRole("tab", { name: "preview" }))
+    await userEvent.click(screen.getByRole("tab", { name: "Preview" }))
     expect(screen.getByTestId("markdown-preview")).toBeInTheDocument()
   })
 
@@ -147,7 +157,9 @@ describe("FilePartPreview", () => {
     await waitFor(() => expect(frame.contentDocument?.body.innerHTML).toContain("Hello"))
     expect(frame.contentDocument?.body.innerHTML).not.toContain("script")
 
-    await userEvent.click(screen.getByRole("tab", { name: "source" }))
+    const sourceTab = screen.getByRole("tab", { name: "Source" })
+    expect(sourceTab).toHaveTextContent("Source")
+    await userEvent.click(sourceTab)
     expect(screen.getByTestId("code-block")).toHaveTextContent("<h1>Hello</h1>")
     expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "html")
   })
@@ -163,6 +175,26 @@ describe("FilePartPreview", () => {
     expect(screen.queryByRole("tab")).toBeNull()
     expect(screen.queryByTestId("markdown-preview")).toBeNull()
   })
+
+  it.each(["notes.md", "page.html"])(
+    "labels the source tab in Chinese for %s",
+    async (filename) => {
+      const messages = jest.requireActual("@/i18n/messages/zh-CN/chat.json").filePreview
+      jest.mocked(useTranslations).mockReturnValue(((key: string) => {
+        const message = messages[key]
+        if (typeof message !== "string") throw new Error(`Translation ${key} must be a string`)
+        return message
+      }) as ReturnType<typeof useTranslations>)
+      fetchMock.mockResolvedValue({ ok: true, text: async () => "Hello" })
+
+      render(<FilePartPreview url={`blob:${filename}`} filename={filename} />)
+
+      const sourceTab = await screen.findByRole("tab", { name: "源码" })
+      expect(sourceTab).toHaveTextContent("源码")
+      await userEvent.click(sourceTab)
+      expect(screen.getByTestId("code-block")).toHaveTextContent("Hello")
+    }
+  )
 })
 
 describe("filePreviewKind", () => {
@@ -184,7 +216,7 @@ describe("FilePartCard", () => {
     render(<FilePartCard url="blob:py" mediaType="text/x-python" filename="main.py" />)
     const card = screen.getByTestId("file-part-card")
     expect(card).toHaveTextContent("main.py")
-    expect(card).toHaveTextContent("kind.text")
+    expect(card).toHaveTextContent("Text file")
     expect(screen.getByTestId("file-part-card-download")).toHaveAttribute("href", "blob:py")
     expect(await screen.findByTestId("code-block")).toHaveTextContent("print(1)")
   })
@@ -192,7 +224,7 @@ describe("FilePartCard", () => {
   it("collapses and reopens the preview from its header", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: async () => "body" })
     render(<FilePartCard url="blob:md" mediaType="text/plain" filename="a.txt" />)
-    const toggle = screen.getByRole("button", { name: /toggle/ })
+    const toggle = screen.getByRole("button", { name: "Show or hide the preview of a.txt" })
     expect(toggle).toHaveAttribute("aria-expanded", "true")
     await userEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "false")

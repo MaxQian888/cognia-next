@@ -278,7 +278,7 @@ export const FilePartPreview = memo(function FilePartPreview({
               {t("preview")}
             </TabsTrigger>
             <TabsTrigger value="source" className="px-2 text-xs">
-              {t("source")}
+              {t("sourceTab")}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="preview">
@@ -303,7 +303,7 @@ export const FilePartPreview = memo(function FilePartPreview({
               {t("preview")}
             </TabsTrigger>
             <TabsTrigger value="source" className="px-2 text-xs">
-              {t("source")}
+              {t("sourceTab")}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="preview" className="max-h-96 overflow-auto rounded border p-3">

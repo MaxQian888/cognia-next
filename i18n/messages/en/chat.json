@@ -1289,6 +1289,7 @@
     "loading": "Loading {name}…",
     "pdfFallback": "PDF preview is unavailable.",
     "preview": "Preview",
+    "sourceTab": "Source",
     "source": {
       "download": "Download original",
       "remove": "Remove source",
