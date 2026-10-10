@@ -3,14 +3,17 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  backendHeldByUnpinnedRoot,
   createDualWriteBackend,
   durabilityRoot,
   ensureDurabilityRoot,
+  inspectDurabilityRoot,
+  isFreshDurabilityRoot,
   openBackend,
   resolveBackend,
 } from "./backend"
 import { writeCheckpoint } from "./checkpoint"
-import { writeManifest } from "./manifest"
+import { manifestFile, readManifest, writeManifest } from "./manifest"
 import type { DurabilityCommit, DurabilityState, HeadlessDurabilityBackend } from "./types"
 
 function tempRoot(): string {
@@ -168,6 +171,97 @@ describe("createDualWriteBackend", () => {
       await shadow.close()
       fs.rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe("durability root inventory", () => {
+  let root: string
+  beforeEach(() => {
+    root = tempRoot()
+  })
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  it("treats a missing or empty root as fresh", () => {
+    expect(isFreshDurabilityRoot(inspectDurabilityRoot(path.join(root, "absent")))).toBe(true)
+    expect(isFreshDurabilityRoot(inspectDurabilityRoot(root))).toBe(true)
+  })
+
+  it("names the backend an un-pinned root already holds", async () => {
+    writeCheckpoint(root, "gen-0001", state(0))
+    expect(backendHeldByUnpinnedRoot(inspectDurabilityRoot(root))).toBe("journal-v4")
+    expect(isFreshDurabilityRoot(inspectDurabilityRoot(root))).toBe(false)
+  })
+
+  it("defers to the manifest once one exists", () => {
+    writeCheckpoint(root, "gen-0001", state(0))
+    writeManifest(root, {
+      manifestFormat: 1,
+      activeBackend: "sqlite-v5",
+      shadowBackend: "journal-v4",
+      rollbackWatermark: null,
+      updatedAt: 0,
+    })
+    expect(backendHeldByUnpinnedRoot(inspectDurabilityRoot(root))).toBeNull()
+  })
+})
+
+describe("resolveBackend with an initial backend", () => {
+  let root: string
+  beforeEach(() => {
+    root = tempRoot()
+  })
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+
+  it("seeds an empty sqlite store so its first commit has a schema to land in", async () => {
+    const resolved = await resolveBackend({
+      root,
+      seed: state(0, { "s:a": { id: "a" } }),
+      initialBackend: "sqlite-v5",
+    })
+    expect(resolved.backend.id).toBe("sqlite-v5")
+    expect(resolved.state.dbs.CogniaDB.rows.sessions).toEqual({ "s:a": { id: "a" } })
+    resolved.backend.commitSync(commit(1, "s:b", { id: "b" }))
+    await resolved.backend.close()
+
+    expect(readManifest(root).activeBackend).toBe("sqlite-v5")
+    // No journal generation is written beside a sqlite pin, so a crash before
+    // the pin can never leave an ambiguous root.
+    expect(inspectDurabilityRoot(root).journal).toBe(false)
+    const reopened = await resolveBackend({ root, seed: state(0), initialBackend: "journal-v4" })
+    expect(reopened.backend.id).toBe("sqlite-v5")
+    expect(reopened.state.dbs.CogniaDB.rows.sessions).toEqual({
+      "s:a": { id: "a" },
+      "s:b": { id: "b" },
+    })
+    await reopened.backend.close()
+  })
+
+  it("pins a journal root the same way", async () => {
+    const resolved = await resolveBackend({
+      root,
+      seed: state(0, { "s:a": 1 }),
+      initialBackend: "journal-v4",
+    })
+    expect(resolved.manifest.activeBackend).toBe("journal-v4")
+    expect(fs.existsSync(manifestFile(root))).toBe(true)
+    await resolved.backend.close()
+  })
+
+  it("never re-seeds a sqlite store that already holds data", async () => {
+    const first = await resolveBackend({
+      root,
+      seed: state(0, { "s:kept": 1 }),
+      initialBackend: "sqlite-v5",
+    })
+    await first.backend.close()
+    fs.rmSync(manifestFile(root))
+    const second = await resolveBackend({
+      root,
+      seed: state(0, { "s:fresh": 1 }),
+      initialBackend: "sqlite-v5",
+    })
+    expect(second.state.dbs.CogniaDB.rows.sessions).toEqual({ "s:kept": 1 })
+    await second.backend.close()
   })
 })
 

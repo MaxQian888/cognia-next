@@ -200,6 +200,8 @@ Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、Po
 
 `HeadlessDurabilityBackend`（`cli/src/serve/persistence/`）是持久化端口，三级实现，由每账户的原子清单（`<home>/durability/<account>/backend-manifest.json`）选定当前档位；清单缺失时回落到 `COGNIA_DURABILITY_BACKEND` 灰度开关，最后回落到 `snapshot-v3`。
 
+> **2026-10-10（[ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings)）**：brain 的默认档位改为 `sqlite-v5`。解析顺序为：清单 → 显式的 `COGNIA_DURABILITY_BACKEND=snapshot-v3` 退出 → 未固定的根目录中已有的账本数据 → 灰度开关 → `sqlite-v5`；首次启动时把选定的档位写入清单固定（此前在全新账号上灰度开关会被静默忽略）。以前通过按表快照持久化的账号会在首次启动时一次性导入到第一个检查点，旧存储保持原样不动。
+
 | 档位 | 形态 | 崩溃窗口 |
 | --- | --- | --- |
 | `snapshot-v3` | 既有的按表 JSON 存储，去抖写入 | 一个去抖间隔 |

@@ -15,9 +15,16 @@
  */
 import { canonicalJson, decodeKey, encodeKey } from "./canonical"
 import { installTransactionCapture, type CaptureDexieLike, type CaptureHandle } from "./capture"
-import { durabilityRoot, resolveBackend, type ResolvedBackend } from "./backend"
+import {
+  durabilityRoot,
+  inspectDurabilityRoot,
+  isFreshDurabilityRoot,
+  resolveBackend,
+  type ResolvedBackend,
+} from "./backend"
 import { applyCommits } from "./journal"
 import type {
+  DurabilityBackendId,
   DurabilityCommit,
   DurabilityMutation,
   DurabilityState,
@@ -57,6 +64,18 @@ export interface DurabilityStoreOptions {
   getSources: () => Promise<readonly DurabilitySourceLike[]>
   /** Await Dexie readiness (seeding) between middleware install and restore. */
   whenReady?: () => Promise<void>
+  /**
+   * Ledger backend to open and pin when the account has no manifest yet. An
+   * account that already has one always boots on what its manifest says.
+   */
+  backend?: Exclude<DurabilityBackendId, "snapshot-v3">
+  /**
+   * One-time import into the freshly opened databases, run only when the
+   * account's durability root has never persisted anything. Its rows become
+   * the first checkpoint; capture is not armed yet, so nothing it writes is
+   * journalled as a commit.
+   */
+  importInitialState?: (sources: readonly DurabilitySourceLike[]) => Promise<void>
   /** Commits between automatic compactions. 0 disables auto-compaction. */
   compactEveryCommits?: number
   /** Injected clock (tests). */
@@ -174,6 +193,7 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
   const now = opts.now ?? Date.now
   const compactEvery = opts.compactEveryCommits ?? 2_000
   const root = durabilityRoot(opts.home, opts.accountId)
+  const fresh = isFreshDurabilityRoot(inspectDurabilityRoot(root))
 
   let backendRef: HeadlessDurabilityBackend | null = null
   let sequence = 0
@@ -229,11 +249,18 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
 
   await opts.whenReady?.()
   for (const source of sources) await source.db.open?.()
+  // `backendRef` is still null here, so `onCommit` drops these writes: the
+  // imported rows reach disk as the seed below, not as journalled commits.
+  if (fresh && opts.importInitialState) await opts.importInitialState(sources)
 
   // Seed the immutable generation from whatever the freshly-opened (seeded)
   // databases hold, so a first boot has a checkpoint to append against.
   const seed = await readSourcesState(sources, 0)
-  const resolved: ResolvedBackend = await resolveBackend({ root, seed })
+  const resolved: ResolvedBackend = await resolveBackend({
+    root,
+    seed,
+    initialBackend: opts.backend,
+  })
   backendRef = resolved.backend
   sequence = resolved.backend.lastSequence()
 

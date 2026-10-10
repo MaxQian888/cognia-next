@@ -216,6 +216,14 @@ it and the active one is chosen by an atomic per-account manifest
 (`<home>/durability/<account>/backend-manifest.json`), falling back to the
 `COGNIA_DURABILITY_BACKEND` rollout gate and finally to `snapshot-v3`.
 
+> **2026-10-10 ([ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings))**: the brain now
+> defaults to `sqlite-v5`. Resolution is manifest → an explicit
+> `COGNIA_DURABILITY_BACKEND=snapshot-v3` opt-out → ledger data already in an
+> un-pinned root → the gate → `sqlite-v5`, and the chosen backend is pinned in
+> the manifest on first boot (the gate used to be silently ignored on a fresh
+> account). An account that persisted through the table store is imported once
+> into the first checkpoint, and the old store is left untouched.
+
 | Rung | Shape | Crash window |
 | --- | --- | --- |
 | `snapshot-v3` | the pre-existing per-table JSON store, debounced | the debounce interval |

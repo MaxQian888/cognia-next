@@ -16,9 +16,19 @@ import fs from "node:fs"
 
 import { getDb } from "@/lib/db/schema"
 
-import { ensureCliDb, type CliDbHandle } from "../db/bootstrap"
-import type { DbLike } from "../db/snapshot"
-import { durabilityRoot } from "./persistence/backend"
+import {
+  ensureCliDb,
+  hasSnapshotStore,
+  importSnapshotStore,
+  type CliDbHandle,
+  type SnapshotStoreImportResult,
+} from "../db/bootstrap"
+import type { DbLike, SnapshotSource } from "../db/snapshot"
+import {
+  backendHeldByUnpinnedRoot,
+  durabilityRoot,
+  inspectDurabilityRoot,
+} from "./persistence/backend"
 import { manifestFile, readManifest } from "./persistence/manifest"
 import {
   openDurabilityStore,
@@ -87,13 +97,17 @@ export function installWriteFlush(
 /**
  * Which rung of the durability ladder this process runs on.
  *
- * Resolution order — the manifest wins, because once an account has been
- * migrated its files ARE that backend and an env var must not be able to boot
- * the brain against the wrong store:
+ * Resolution order — what is already on disk wins, because once an account
+ * holds data in a backend its files ARE that backend and an env var must not be
+ * able to boot the brain against the wrong store:
  *
  *   1. `<home>/durability/<account>/backend-manifest.json` (if present)
- *   2. `COGNIA_DURABILITY_BACKEND` (the rollout gate)
- *   3. `snapshot-v3` — the pre-existing debounced table store
+ *   2. `COGNIA_DURABILITY_BACKEND=snapshot-v3` — the explicit opt-out, kept so
+ *      an operator can always roll an un-pinned account back to the table store
+ *   3. ledger data already in an un-pinned root (journal or SQLite)
+ *   4. `COGNIA_DURABILITY_BACKEND` (the rollout gate)
+ *   5. `sqlite-v5` — the default for a long-lived brain (ADR-0224). An account
+ *      that used to persist through the table store is imported on first boot.
  */
 export function resolveDurabilityBackend(
   home: string,
@@ -111,7 +125,15 @@ export function resolveDurabilityBackend(
     }
   }
   const requested = env.COGNIA_DURABILITY_BACKEND
-  return isDurabilityBackendId(requested) ? requested : "snapshot-v3"
+  if (requested === "snapshot-v3") return requested
+  const held = backendHeldByUnpinnedRoot(inspectDurabilityRoot(root))
+  if (held) return held
+  return isDurabilityBackendId(requested) ? requested : "sqlite-v5"
+}
+
+/** The `snapshot-v3` file name for an account, shared by the snapshot rung and the import. */
+function snapshotFileName(accountId: string): string {
+  return `db-${accountId}.json`
 }
 
 export interface DurabilityOptions {
@@ -129,6 +151,8 @@ export interface DurabilityOptions {
   rssWarningBytes?: number
   /** Injected alert sink (tests/embedding). */
   onRssWarning?: (rssBytes: number, limitBytes: number) => void
+  /** Called once when a ledger rung imported the account's old table store. */
+  onLegacyImport?: (result: SnapshotStoreImportResult) => void
 }
 
 export interface DurabilityHandle {
@@ -184,9 +208,23 @@ async function startLedgerDurability(
   const { installFakeIndexedDb } = await import("@/lib/headless/node-indexeddb")
   await installFakeIndexedDb()
 
+  const fileName = snapshotFileName(opts.accountId)
   const store: DurabilityStore = await openDurabilityStore({
     home: opts.home,
     accountId: opts.accountId,
+    backend: backend === "snapshot-v3" ? undefined : backend,
+    // An account that persisted through the table store before this rung was
+    // its default keeps its data: the old store is imported once into the
+    // first checkpoint and then left untouched as a rollback source.
+    importInitialState: hasSnapshotStore(opts.home, fileName)
+      ? async (sources) => {
+          const result = await importSnapshotStore(sources as unknown as SnapshotSource[], {
+            home: opts.home,
+            fileName,
+          })
+          opts.onLegacyImport?.(result)
+        }
+      : undefined,
     getSources: resolveDurabilitySources,
     whenReady: async () => {
       const { whenSeeded } = await import("@/lib/db/schema")
@@ -211,7 +249,9 @@ async function startLedgerDurability(
 
   return {
     db: null,
-    backend,
+    // Report the backend the store actually opened, which for an account with
+    // a manifest is the manifest's, not whatever was requested.
+    backend: store.backend.id,
     notifyDbWrite: () => {},
     rss: () => ({ rssBytes: readRss(), lastFlushAt: store.sequence() }),
     dispose,
@@ -269,7 +309,7 @@ export async function startDurability(opts: DurabilityOptions): Promise<Durabili
 
   const db = await ensureCliDb({
     home: opts.home,
-    fileName: `db-${opts.accountId}.json`,
+    fileName: snapshotFileName(opts.accountId),
     debounceMs: opts.debounceMs,
     // One database since schema v219: the schedule is `scheduledTasks` inside
     // the account database rather than a separate `CogniaSchedulerDB`. It still

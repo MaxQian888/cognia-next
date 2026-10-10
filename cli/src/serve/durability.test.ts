@@ -102,7 +102,12 @@ describe("startDurability", () => {
       memoryUsage: () => ({ rss: 42_000_000 }) as NodeJS.MemoryUsage,
     } as unknown as Pick<NodeJS.Process, "on" | "off" | "memoryUsage">
 
-    const durability = await startDurability({ home, accountId: "acct_test_1", proc })
+    const durability = await startDurability({
+      home,
+      accountId: "acct_test_1",
+      proc,
+      backend: "snapshot-v3",
+    })
     expect(listeners.has("SIGINT")).toBe(true)
     expect(listeners.has("SIGTERM")).toBe(true)
 
@@ -139,6 +144,7 @@ describe("startDurability", () => {
       const durability = await startDurability({
         home,
         accountId: "acct_rss",
+        backend: "snapshot-v3",
         proc,
         rssWarningBytes: 100,
         onRssWarning,
@@ -181,7 +187,12 @@ describe("startDurability", () => {
 
     let durability: Awaited<ReturnType<typeof startDurability>> | undefined
     try {
-      durability = await startDurability({ home, accountId: "acct_signal", proc })
+      durability = await startDurability({
+        home,
+        accountId: "acct_signal",
+        proc,
+        backend: "snapshot-v3",
+      })
       const manifestPath = path.join(home, "db-acct_signal.json.tables", "manifest.json")
 
       // beforeExit flushes without tearing the handle down. A full flush
@@ -239,7 +250,7 @@ describe("startDurability", () => {
 
     let second: Awaited<ReturnType<typeof startDurability>> | undefined
     try {
-      const first = await startDurability({ home, accountId: "acct_sched" })
+      const first = await startDurability({ home, accountId: "acct_sched", backend: "snapshot-v3" })
       await schedulerDb.createTask(task as never)
       await schedulerDb.createExecution({
         id: "exec_1",
@@ -278,7 +289,7 @@ describe("startDurability", () => {
       await db.scheduledTaskRuns.clear()
       __resetCliDbForTesting()
 
-      second = await startDurability({ home, accountId: "acct_sched" })
+      second = await startDurability({ home, accountId: "acct_sched", backend: "snapshot-v3" })
       expect(await schedulerDb.getTask(task.id)).not.toBeNull()
       expect(await getDb().scheduledTaskRuns.count()).toBe(0)
       await second.dispose()
@@ -302,8 +313,42 @@ describe("resolveDurabilityBackend", () => {
   })
   afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
 
-  it("defaults to the pre-existing snapshot store", () => {
-    expect(resolveDurabilityBackend(home, "acct", {})).toBe("snapshot-v3")
+  it("defaults a fresh account to the sqlite rung (ADR-0224)", () => {
+    expect(resolveDurabilityBackend(home, "acct", {})).toBe("sqlite-v5")
+  })
+
+  it("keeps snapshot-v3 reachable as an explicit opt-out", () => {
+    expect(
+      resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "snapshot-v3" })
+    ).toBe("snapshot-v3")
+  })
+
+  it("resolves an un-pinned journal root to the journal whatever the gate says", () => {
+    const root = durabilityRoot(home, "acct")
+    fs.mkdirSync(path.join(root, "generations", "gen-0001"), { recursive: true })
+    fs.writeFileSync(path.join(root, "generations", "gen-0001", "checkpoint.json"), "{}")
+    expect(resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "sqlite-v5" })).toBe(
+      "journal-v4"
+    )
+    expect(resolveDurabilityBackend(home, "acct", {})).toBe("journal-v4")
+  })
+
+  it("resolves an un-pinned sqlite root to sqlite (a crash before the first pin)", () => {
+    const root = durabilityRoot(home, "acct")
+    fs.mkdirSync(path.join(root, "sqlite"), { recursive: true })
+    fs.writeFileSync(path.join(root, "sqlite", "store.sqlite"), "")
+    expect(
+      resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "journal-v4" })
+    ).toBe("sqlite-v5")
+  })
+
+  it("refuses an un-pinned root that holds both journal and sqlite data", () => {
+    const root = durabilityRoot(home, "acct")
+    fs.mkdirSync(path.join(root, "generations", "gen-0001"), { recursive: true })
+    fs.writeFileSync(path.join(root, "generations", "gen-0001", "checkpoint.json"), "{}")
+    fs.mkdirSync(path.join(root, "sqlite"), { recursive: true })
+    fs.writeFileSync(path.join(root, "sqlite", "store.sqlite"), "")
+    expect(() => resolveDurabilityBackend(home, "acct", {})).toThrow(/both journal and sqlite/)
   })
 
   it("honours the rollout gate when no account has been migrated yet", () => {
@@ -314,7 +359,7 @@ describe("resolveDurabilityBackend", () => {
 
   it("ignores an unknown gate value", () => {
     expect(resolveDurabilityBackend(home, "acct", { COGNIA_DURABILITY_BACKEND: "redis" })).toBe(
-      "snapshot-v3"
+      "sqlite-v5"
     )
   })
 

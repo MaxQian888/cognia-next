@@ -14,9 +14,16 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { latestGeneration } from "./checkpoint"
 import { openJournalBackend, seedCheckpoint } from "./journal"
-import { readManifest, type BackendManifest } from "./manifest"
-import { openSqliteBackend } from "./sqlite"
+import {
+  defaultManifest,
+  manifestFile,
+  readManifest,
+  writeManifest,
+  type BackendManifest,
+} from "./manifest"
+import { openSqliteBackend, sqliteFile } from "./sqlite"
 import {
   DurabilityFault,
   type DurabilityBackendId,
@@ -84,6 +91,56 @@ export function createDualWriteBackend(
   }
 }
 
+/** What an account's durability root already holds, before anything is opened. */
+export interface DurabilityRootInventory {
+  manifest: boolean
+  /** At least one journal checkpoint generation exists. */
+  journal: boolean
+  /** The SQLite store file exists. */
+  sqlite: boolean
+}
+
+export function inspectDurabilityRoot(root: string): DurabilityRootInventory {
+  return {
+    manifest: fs.existsSync(manifestFile(root)),
+    journal: fs.existsSync(root) && latestGeneration(root) !== null,
+    sqlite: fs.existsSync(sqliteFile(root)),
+  }
+}
+
+/** A root that has never persisted anything: no manifest and no backend data. */
+export function isFreshDurabilityRoot(inventory: DurabilityRootInventory): boolean {
+  return !inventory.manifest && !inventory.journal && !inventory.sqlite
+}
+
+/**
+ * The ledger backend whose data an un-pinned root already holds, if any.
+ *
+ * A root without a manifest is not necessarily empty: before manifests were
+ * written on first boot, an env-gated account journalled with no pointer at
+ * all. Its files are what they are, whatever the gate says now. Both kinds of
+ * data with no manifest cannot be told apart safely, so that is a fault.
+ */
+export function backendHeldByUnpinnedRoot(
+  inventory: DurabilityRootInventory
+): Exclude<DurabilityBackendId, "snapshot-v3"> | null {
+  if (inventory.manifest) return null
+  if (inventory.journal && inventory.sqlite) {
+    throw new DurabilityFault(
+      "manifest-corrupt",
+      "durability root holds both journal and sqlite data but no backend manifest; " +
+        "restore the manifest or remove the stale store before starting"
+    )
+  }
+  if (inventory.sqlite) return "sqlite-v5"
+  if (inventory.journal) return "journal-v4"
+  return null
+}
+
+function isEmptyState(state: DurabilityState): boolean {
+  return state.sequence === 0 && Object.keys(state.dbs).length === 0
+}
+
 export interface ResolvedBackend {
   backend: HeadlessDurabilityBackend
   manifest: BackendManifest
@@ -97,6 +154,14 @@ export interface ResolveBackendOptions {
   root: string
   /** Seed state for a first boot with no checkpoint yet (schema + rows). */
   seed?: DurabilityState
+  /**
+   * The ledger backend to open and pin when the root has no manifest yet.
+   *
+   * Without it an un-pinned root opens as the manifest default (`journal-v4`)
+   * and stays un-pinned, which is how a `sqlite-v5` rollout gate used to be
+   * silently ignored on a fresh account.
+   */
+  initialBackend?: Exclude<DurabilityBackendId, "snapshot-v3">
 }
 
 /**
@@ -105,6 +170,9 @@ export interface ResolveBackendOptions {
  */
 export async function resolveBackend(opts: ResolveBackendOptions): Promise<ResolvedBackend> {
   const root = ensureDurabilityRoot(opts.root)
+  if (opts.initialBackend && !fs.existsSync(manifestFile(root))) {
+    return pinInitialBackend(root, opts.initialBackend, opts.seed)
+  }
   const manifest = readManifest(root)
   if (opts.seed) seedCheckpoint(root, opts.seed)
 
@@ -129,6 +197,37 @@ export async function resolveBackend(opts: ResolveBackendOptions): Promise<Resol
     manifest,
     state,
     shadowCatchUp: catchUp,
+  }
+}
+
+/**
+ * Open `id` on an un-pinned root, seed it if it holds nothing, then pin it.
+ *
+ * The manifest is written last, after the seed is durable: a crash before the
+ * pin leaves a root that {@link backendHeldByUnpinnedRoot} resolves back to the
+ * same backend, and a seeded store is never seeded twice because seeding only
+ * happens while the backend is empty. SQLite has no checkpoint to read a seed
+ * from, so an empty SQLite store is seeded by compaction; without that its
+ * first commit would reference a database with no schema row.
+ */
+async function pinInitialBackend(
+  root: string,
+  id: Exclude<DurabilityBackendId, "snapshot-v3">,
+  seed: DurabilityState | undefined
+): Promise<ResolvedBackend> {
+  if (id === "journal-v4" && seed) seedCheckpoint(root, seed)
+  const primary = openBackend(id, root)
+  try {
+    let state = await primary.load()
+    if (seed && isEmptyState(state)) {
+      await primary.compact({ ...seed, sequence: 0 })
+      state = await primary.load()
+    }
+    writeManifest(root, { ...defaultManifest(), activeBackend: id })
+    return { backend: primary, manifest: readManifest(root), state, shadowCatchUp: 0 }
+  } catch (error) {
+    await primary.close()
+    throw error
   }
 }
 

@@ -16,6 +16,7 @@ import { parseArgv } from "../cli/args"
 import { __resetCliDbForTesting } from "../db/bootstrap"
 import type { WebSocketLike } from "./bridge-client"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
+import { durabilityRoot, openBackend } from "./persistence/backend"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
 import { projectWorkerPlacement, resolveServeCollabConfig, serveCommand } from "./serve-command"
 
@@ -280,26 +281,27 @@ describe("serveCommand", () => {
     expect(joined).toContain("account-sync")
     expect(joined).toContain("account sync: not signed in; run `cognia-agent logto login`")
 
-    // The shutdown flush persisted the seeded row.
-    const snapshotDirectory = path.join(home, "db-local_acct_a.json.tables")
-    const files = fs.readdirSync(home)
-    expect(files).toContain("db-local_acct_a.json.tables")
+    // The brain persisted the seeded row in its default store (ADR-0224).
+    expect(joined).toContain("serve: durability sqlite-v5")
+    const root = durabilityRoot(home, "local_acct_a")
     const manifest = JSON.parse(
-      fs.readFileSync(path.join(snapshotDirectory, "manifest.json"), "utf8")
-    ) as { snapshotFormat: number; dbs: Record<string, { tables: string[] }> }
-    expect(manifest.snapshotFormat).toBe(3)
-    // One database since schema v219, so there is nothing to filter out.
-    const [primaryDatabaseName] = Object.keys(manifest.dbs)
-    expect(primaryDatabaseName).toBeDefined()
-    expect(manifest.dbs[primaryDatabaseName!].tables).toContain("sessions")
-    const sessionsFile = fs
-      .readdirSync(snapshotDirectory)
-      .find((name) => name.endsWith("--sessions.json"))
-    expect(sessionsFile).toBeDefined()
-    const sessions = JSON.parse(
-      fs.readFileSync(path.join(snapshotDirectory, sessionsFile!), "utf8")
-    ) as Array<{ id: string }>
-    expect(sessions.some((session) => session.id === "s-e2e")).toBe(true)
+      fs.readFileSync(path.join(root, "backend-manifest.json"), "utf8")
+    ) as { activeBackend: string }
+    expect(manifest.activeBackend).toBe("sqlite-v5")
+    const store = openBackend("sqlite-v5", root)
+    try {
+      const persisted = await store.load()
+      const [primaryDatabaseName] = Object.keys(persisted.dbs)
+      expect(primaryDatabaseName).toBeDefined()
+      const sessions = Object.values(
+        persisted.dbs[primaryDatabaseName!].rows.sessions ?? {}
+      ) as Array<{
+        id: string
+      }>
+      expect(sessions.some((session) => session.id === "s-e2e")).toBe(true)
+    } finally {
+      await store.close()
+    }
 
     const { __resetDbForTesting } = await import("@/lib/db/schema")
     __resetDbForTesting()

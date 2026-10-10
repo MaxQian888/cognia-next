@@ -52,7 +52,7 @@ pnpm audit:data-governance:test
 
 manifest 附带诊断性的写入者元数据（`writer`：pid、host、CLI 版本、写入时间），用于恢复错误信息；格式错误的元数据按缺失处理而非判为损坏。由于快照文件可能被多个进程共享，存储通过独占的 `${file}.lock` 锁文件（`cli/src/db/store-lock.ts`，复用 session-lease 原语：原子创建、pid 存活检测、心跳、过期回收）串行化写入者。抢占锁失败的进程成为只读跟随者：仍可恢复并读取快照，记录一次警告，但绝不刷盘、隔离、采纳或删除文件；状态通过 `CliDbHandle.mode`/`heldBy` 暴露。写入者若在运行中丢失心跳，同样切换为只读，而不与其他写入者争抢。
 
-`cli/src/serve/persistence/` 的 ledger 路径另有快照、journal 和可选 SQLite 后端。压缩必须包含准备 checkpoint 期间已接受的提交，保持序号连续，并由关闭流程等待完成。后端选择由 runtime 单独决定；修改实现不会自动切换已有安装的后端。
+`cli/src/serve/persistence/` 的 ledger 路径另有快照、journal 和可选 SQLite 后端。压缩必须包含准备 checkpoint 期间已接受的提交，保持序号连续，并由关闭流程等待完成。后端选择由 runtime 单独决定。serve brain 默认使用 `sqlite-v5`（ADR-0224），并在首次启动时把选定的后端固定到账号清单里；已有清单或已有 ledger 数据始终优先，`COGNIA_DURABILITY_BACKEND=snapshot-v3` 保留为显式退出、继续使用按表快照存储。以前通过按表快照持久化的账号会在持有存储锁的情况下一次性导入到第一个 checkpoint，按表快照存储保持逐字节不变，作为回滚来源。
 
 ## 原生 SQLite 归属
 

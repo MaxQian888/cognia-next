@@ -29,6 +29,7 @@ import {
   releaseStoreLock,
   startStoreLockHeartbeat,
   type StoreLock,
+  type StoreLockEnvironment,
 } from "./store-lock"
 import {
   decodeSnapshotRowsAsync,
@@ -1060,6 +1061,115 @@ export async function ensureCliDb(opts: EnsureCliDbOptions = {}): Promise<CliDbH
 }
 
 /** Test-only: drop the cached handle. */
+export interface SnapshotStoreImportOptions {
+  /** Directory the snapshot store lives in (the serve home). */
+  home: string
+  /** Snapshot file name within `home`, e.g. `db-<account>.json`. */
+  fileName: string
+  /** Re-declare dynamic schemas before restoring (defaults to the built-in plugin tables). */
+  prepareDynamicSchema?: (
+    sources: readonly SnapshotSource[],
+    snapshotVersions: Readonly<Record<string, number>>
+  ) => Promise<void>
+  /** Store-lock environment (tests). */
+  lockEnvironment?: StoreLockEnvironment
+}
+
+export type SnapshotStoreImportResult =
+  | { kind: "none" }
+  | { kind: "table-store"; tables: number }
+  | { kind: "legacy-file"; tables: number }
+
+/** Whether `home` holds a `snapshot-v3` store (table store or legacy single file) for `fileName`. */
+export function hasSnapshotStore(home: string, fileName: string): boolean {
+  const file = path.join(home, fileName)
+  return fs.existsSync(path.join(`${file}.tables`, "manifest.json")) || fs.existsSync(file)
+}
+
+/**
+ * Restore a `snapshot-v3` store into already-open databases without ever
+ * writing to it.
+ *
+ * This is the one-way import a ledger durability backend runs on its first
+ * boot over an account that used to persist through {@link ensureCliDb}. It
+ * reuses the exact restore path (table store first, then the legacy single
+ * file, with dynamic plugin schemas re-declared) but never renames,
+ * quarantines, adopts or flushes anything: the old store is left byte-for-byte
+ * as it was, so it stays a rollback source. It holds the store lock while it
+ * reads so a still-running snapshot writer cannot change the files mid-import,
+ * and it refuses outright — rather than importing a partial store — when the
+ * lock is held, when a quarantined generation is pending recovery, or when the
+ * store is corrupt or newer than this build.
+ */
+export async function importSnapshotStore(
+  sources: readonly SnapshotSource[],
+  opts: SnapshotStoreImportOptions
+): Promise<SnapshotStoreImportResult> {
+  const file = path.join(opts.home, opts.fileName)
+  const tableDirectory = `${file}.tables`
+  const manifestFile = path.join(tableDirectory, "manifest.json")
+  const prepareDynamicSchema = opts.prepareDynamicSchema ?? prepareBuiltinPluginSchema
+  if (!hasSnapshotStore(opts.home, opts.fileName)) return { kind: "none" }
+
+  const acquisition = acquireStoreLock(file, opts.lockEnvironment)
+  if (!acquisition.ok) {
+    throw new CliDbSnapshotError(
+      `Cannot import the database snapshot at ${file}: it is in use by ${formatStoreLockOwner(acquisition.heldBy)}. Stop that process and start again. No data was changed.`,
+      file,
+      null
+    )
+  }
+  const refuse = (target: string) => (_label: "corrupt" | "incompatible", problem: string) =>
+    new CliDbSnapshotError(
+      `Cannot import the database snapshot at ${target}: it is ${problem}. It was left untouched and nothing was imported.`,
+      target,
+      null
+    )
+  try {
+    if (fs.existsSync(manifestFile)) {
+      assertNoPendingSnapshotRecovery(manifestFile)
+      const manifest = parseTableStoreManifest(fs.readFileSync(manifestFile, "utf8"))
+      if (!manifest) throw refuse(manifestFile)("corrupt", "corrupt (invalid table manifest)")
+      await prepareDynamicSchema(
+        sources,
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+        )
+      )
+      const restore = await restoreTableStore(
+        sources,
+        manifestFile,
+        tableDirectory,
+        refuse(manifestFile)
+      )
+      return { kind: "table-store", tables: restore.restored.size }
+    }
+
+    assertNoPendingSnapshotRecovery(file)
+    const parsed = parseMultiSnapshot(fs.readFileSync(file, "utf8"), sources[0]?.name ?? "CogniaDB")
+    if (parsed.kind === "corrupt") throw refuse(file)("corrupt", `corrupt (${parsed.reason})`)
+    if (parsed.kind === "absent") return { kind: "none" }
+    try {
+      await restoreMultiSnapshot(sources, parsed.snapshot)
+    } catch (error) {
+      if (error instanceof SnapshotVersionMismatchError) {
+        throw refuse(file)(
+          "incompatible",
+          `incompatible: snapshot schema version ${error.snapshotVersion} is newer than database schema version ${error.databaseVersion}; it was written by a newer build`
+        )
+      }
+      throw error
+    }
+    const tables = Object.values(parsed.snapshot.dbs).reduce(
+      (count, db) => count + Object.keys(db.tables).length,
+      0
+    )
+    return { kind: "legacy-file", tables }
+  } finally {
+    releaseStoreLock(acquisition.lock, file)
+  }
+}
+
 export function __resetCliDbForTesting(): void {
   cached = null
 }

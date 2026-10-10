@@ -11,9 +11,12 @@ import { getRecentErrorLogs } from "@/packages/logging/src/recent-errors"
 import {
   __resetCliDbForTesting,
   ensureCliDb,
+  hasSnapshotStore,
+  importSnapshotStore,
   installFakeIndexedDb,
   writeSnapshotAtomically,
 } from "./bootstrap"
+import { acquireStoreLock, releaseStoreLock } from "./store-lock"
 import type { DbLike } from "./snapshot"
 
 class FakeTable {
@@ -1146,6 +1149,96 @@ describe("ensureCliDb — multiple databases", () => {
 // destination first and `syncParentDirectory` is skipped. That branch never runs
 // on the CI platforms, so it is driven here with a stubbed `process.platform` —
 // otherwise the Windows atomic-replace path ships untested.
+describe("importSnapshotStore", () => {
+  let home: string
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-snapshot-import-"))
+  })
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
+
+  const noDynamicSchema = async () => {}
+
+  it("reports nothing to import when the account never had a snapshot store", async () => {
+    const { db } = fakeDb()
+    expect(hasSnapshotStore(home, "db-acct.json")).toBe(false)
+    await expect(
+      importSnapshotStore([{ name: "CogniaDB", db }], {
+        home,
+        fileName: "db-acct.json",
+        prepareDynamicSchema: noDynamicSchema,
+      })
+    ).resolves.toEqual({ kind: "none" })
+  })
+
+  it("imports a legacy single file without touching it or leaving a lock behind", async () => {
+    const file = path.join(home, "db-acct.json")
+    const text = JSON.stringify({ version: 82, tables: { goals: [{ id: "g1" }] } })
+    fs.writeFileSync(file, text, "utf8")
+    const { db, goals } = fakeDb()
+    expect(hasSnapshotStore(home, "db-acct.json")).toBe(true)
+
+    const result = await importSnapshotStore([{ name: "CogniaDB", db }], {
+      home,
+      fileName: "db-acct.json",
+      prepareDynamicSchema: noDynamicSchema,
+    })
+    expect(result).toEqual({ kind: "legacy-file", tables: 1 })
+    expect(goals.rows).toEqual([{ id: "g1" }])
+    expect(fs.readFileSync(file, "utf8")).toBe(text)
+    expect(fs.existsSync(`${file}.lock`)).toBe(false)
+  })
+
+  it("refuses while another process holds the store, changing nothing", async () => {
+    const file = path.join(home, "db-acct.json")
+    fs.writeFileSync(file, JSON.stringify({ version: 82, tables: { goals: [] } }), "utf8")
+    const held = acquireStoreLock(file, { pid: 999_999, isProcessAlive: () => true })
+    if (!held.ok) throw new Error("test could not take the lock")
+    const { db, goals } = fakeDb()
+    try {
+      await expect(
+        importSnapshotStore([{ name: "CogniaDB", db }], {
+          home,
+          fileName: "db-acct.json",
+          prepareDynamicSchema: noDynamicSchema,
+          lockEnvironment: { isProcessAlive: () => true },
+        })
+      ).rejects.toThrow("is in use by")
+      expect(goals.rows).toEqual([{ id: "seed" }])
+    } finally {
+      releaseStoreLock(held.lock, file)
+    }
+  })
+
+  it("refuses a corrupt store without quarantining it", async () => {
+    const file = path.join(home, "db-acct.json")
+    fs.writeFileSync(file, '{"version":82,"tabl', "utf8")
+    const { db } = fakeDb()
+    await expect(
+      importSnapshotStore([{ name: "CogniaDB", db }], {
+        home,
+        fileName: "db-acct.json",
+        prepareDynamicSchema: noDynamicSchema,
+      })
+    ).rejects.toThrow("left untouched")
+    expect(fs.existsSync(file)).toBe(true)
+    expect(fs.existsSync(`${file}.corrupt-1`)).toBe(false)
+    expect(fs.existsSync(`${file}.lock`)).toBe(false)
+  })
+
+  it("refuses a store written by a newer build", async () => {
+    const file = path.join(home, "db-acct.json")
+    fs.writeFileSync(file, JSON.stringify({ version: 9_999, tables: { goals: [] } }), "utf8")
+    const { db } = fakeDb()
+    await expect(
+      importSnapshotStore([{ name: "CogniaDB", db }], {
+        home,
+        fileName: "db-acct.json",
+        prepareDynamicSchema: noDynamicSchema,
+      })
+    ).rejects.toThrow("newer build")
+  })
+})
+
 describe("writeSnapshotAtomically on win32", () => {
   const realPlatform = process.platform
 

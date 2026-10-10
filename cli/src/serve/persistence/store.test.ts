@@ -294,6 +294,40 @@ describe("openDurabilityStore", () => {
     await store.close()
   })
 
+  it("imports initial state into the first checkpoint of a fresh sqlite root only", async () => {
+    const importInitialState = jest.fn(async (sources: readonly DurabilitySourceLike[]) => {
+      await sources[0].db.tables[0].bulkPut([{ id: "imported" }])
+    })
+    const first = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      backend: "sqlite-v5",
+      importInitialState,
+      getSources: async () => [first],
+    })
+    expect(importInitialState).toHaveBeenCalledTimes(1)
+    // The import is the seed, not a journalled commit.
+    expect(store.sequence()).toBe(0)
+    expect(store.backend.id).toBe("sqlite-v5")
+    await first.db.commit("sessions", { type: "put", values: [{ id: "after" }] })
+    await store.close()
+
+    const revived = makeSource()
+    const second = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      backend: "sqlite-v5",
+      importInitialState,
+      getSources: async () => [revived],
+    })
+    expect(importInitialState).toHaveBeenCalledTimes(1)
+    expect(await revived.db.tables[0].toArray()).toEqual(
+      expect.arrayContaining([{ id: "imported" }, { id: "after" }])
+    )
+    await second.close()
+  })
+
   it("does not journal the restore replay", async () => {
     const first = makeSource()
     const store = await openDurabilityStore({

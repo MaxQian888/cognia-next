@@ -6,7 +6,8 @@
  *   1. env/flags → `__COGNIA_HEADLESS__` marker → fake-indexeddb shim
  *   2. `ensureHeadlessAccount` (registry create-if-missing + activate +
  *      guarded host unlock — `desktop-sync-source` rejects pulls otherwise)
- *   3. durability v1 (snapshot db + write-triggered flush + exit hooks)
+ *   3. durability: the account's pinned backend, `sqlite-v5` by default
+ *      (ADR-0224), importing an old snapshot store once on first boot
  *   4. `setTransport(CompanionTransport)` with an in-memory config provider
  *      (service token, never persisted) — the control plane: `claude_send`
  *      flows brain → RPC → cognia-server → its sidecar
@@ -155,7 +156,15 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     accountId: localAccountId,
     debounceMs: flushDebounce,
     proc,
+    env,
+    onLegacyImport: (result) => {
+      if (result.kind === "none") return
+      out.write(
+        `serve: imported ${result.tables} tables from the previous snapshot store; it was left in place as a rollback source\n`
+      )
+    },
   })
+  out.write(`serve: durability ${durability.backend}\n`)
 
   // ── 4. Control plane: CompanionTransport with the service token ───────────
   let currentToken = serviceToken
