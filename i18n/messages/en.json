@@ -45660,6 +45660,7 @@
         "addDescription": "Paste an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
         "addDescriptionScan": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
         "addTitle": "Add a host",
+        "alwaysOn": "Always-on",
         "connect": "Connect",
         "count": "{count, plural, =0 {none} =1 {1 host} other {# hosts}}",
         "disconnect": "Disconnect",
@@ -49958,6 +49959,8 @@
     },
     "remoteHosts": {
       "add": {
+        "alwaysOn": "Always-on host",
+        "alwaysOnHint": "Your own machine (a VPS, NAS or Mac mini) that runs bots, schedules and connectors around the clock. It is recorded as an always-on host, and this window keeps working on this computer.",
         "baseUrlHint": "The remote cognia-server address. Use its public URL (cloudflared or reverse proxy) to reach it across networks.",
         "baseUrlLabel": "Server URL",
         "baseUrlPlaceholder": "https://your-host:27890",
@@ -50003,7 +50006,8 @@
         "seededFrom": "Adding the host at {url}. Paste an invitation from it below: the address alone cannot pair.",
         "submit": "Pair host",
         "submitting": "Pairing…",
-        "success": "Paired {label}."
+        "success": "Paired {label}.",
+        "successAlwaysOn": "{label} is paired as an always-on host."
       },
       "description": "Drive a remote Cognia host — its terminal, files, and git — from this desktop. Files and git read with pairing; writes need the host to grant this device control.",
       "list": {

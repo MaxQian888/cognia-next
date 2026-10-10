@@ -11237,6 +11237,9 @@
               }
             },
             "additionalProperties": false
+          },
+          "relayUnavailable": {
+            "type": "string"
           }
         },
         "additionalProperties": false

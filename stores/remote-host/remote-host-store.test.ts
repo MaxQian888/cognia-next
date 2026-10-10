@@ -99,6 +99,28 @@ describe("addHost", () => {
     expect(useRemoteHostStore.getState().hosts).toHaveLength(1)
   })
 
+  it("records an always-on peer without driving it, and keeps the role across a re-pair", () => {
+    const store = useRemoteHostStore.getState()
+    const host = store.addHost({ label: "Home NAS", config: makeConfig(), alwaysOn: true })
+    expect(host.alwaysOn).toBe(true)
+    expect(useRemoteHostStore.getState().activeHostId).toBeNull()
+    expect(window.localStorage.getItem("cognia-remote-hosts")).toContain('"alwaysOn":true')
+
+    // A fresh invitation for the same host refreshes credentials only.
+    const repaired = useRemoteHostStore.getState().addHost({ config: makeConfig() })
+    expect(repaired.id).toBe(host.id)
+    expect(repaired.alwaysOn).toBe(true)
+    // An explicit answer replaces it.
+    expect(
+      useRemoteHostStore.getState().addHost({ config: makeConfig(), alwaysOn: false }).alwaysOn
+    ).toBe(false)
+    // An ordinary pairing records no role at all.
+    const plain = useRemoteHostStore
+      .getState()
+      .addHost({ config: makeConfig({ baseUrl: "https://other.example:27890" }) })
+    expect(plain).not.toHaveProperty("alwaysOn")
+  })
+
   it("uses an explicit label and normalizes a trailing-slash baseUrl", () => {
     const host = useRemoteHostStore.getState().addHost({
       label: "  Dev box  ",

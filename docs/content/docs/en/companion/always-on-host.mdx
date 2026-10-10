@@ -86,8 +86,37 @@ COGNIA_DATA_DIR="$HOME/Library/Application Support/cognia-server" \
 ```
 
 `pair` asks the running server for an invitation and prints a `cgnp4|…` string with a
-relay room. Paste or scan it on the device's pair screen; it works from any network.
-Whoever redeems it becomes an owner of the host, so hand it only to your own device.
+relay room, a QR code to scan off the terminal, and when it expires (five minutes).
+Paste or scan it on the device's pair screen; it works from any network. Whoever
+redeems it becomes an owner of the host, so hand it only to your own device.
+
+| Flag          | Meaning                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| `--port N`    | The port the host serves on, when it is not 27890                |
+| `--direct`    | Accept an invitation without a relay room (see below)            |
+| `--no-qr`     | Print only the string                                            |
+
+`pair` only hands out an invitation once the relay has accepted its pairing room. When
+it cannot (the host is not running, the relay is switched off or unreachable) it stops
+and says why, instead of printing an invitation that only works on the host's own
+network. Fix the cause, or pass `--direct` if the device can reach the host directly.
+
+### From the desktop
+
+Open Settings → Connectivity → Remote hosts, paste the invitation, and switch on
+**Always-on host**. The desktop records it as an always-on host and keeps working on
+its own: it does not switch to it, and the list marks it **Always-on**.
+
+### From the command line
+
+```bash
+cognia-agent host login home --invitation 'cgnp4|…'
+```
+
+The CLI reaches the host directly when it can, and otherwise pairs through the relay
+room in the invitation. Its later commands are sent to the host's address, so after a
+relay pairing it says so: use it where that address is reachable (same network, a VPN
+or tunnel), or pair with `--endpoint` set to the host's public URL.
 
 ## Keep the master key safe
 

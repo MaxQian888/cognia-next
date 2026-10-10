@@ -149,7 +149,7 @@ describe("AddHostForm", () => {
   it("does not activate when connect-after is off, and reports the pairing at once", async () => {
     const onPaired = jest.fn()
     render(<AddHostForm onPaired={onPaired} />)
-    fireEvent.click(screen.getByRole("switch"))
+    fireEvent.click(screen.getByRole("switch", { name: "add.connectAfter" }))
     await act(async () => {
       await persist?.({ baseUrl: "https://h:27890" })
     })
@@ -157,11 +157,40 @@ describe("AddHostForm", () => {
     expect(onPaired).toHaveBeenCalledTimes(1)
   })
 
+  it("records an always-on host without ever switching to it", async () => {
+    const onPaired = jest.fn()
+    render(<AddHostForm onPaired={onPaired} />)
+    fireEvent.click(screen.getByRole("switch", { name: "add.alwaysOn" }))
+    // Nothing to connect to afterwards: an always-on host is a peer.
+    expect(screen.queryByRole("switch", { name: "add.connectAfter" })).toBeNull()
+    fireEvent.change(screen.getByLabelText("add.labelLabel"), { target: { value: "Home NAS" } })
+    await act(async () => {
+      await persist?.({ baseUrl: "https://h:27890" })
+    })
+    expect(addHost).toHaveBeenCalledWith({
+      label: "Home NAS",
+      config: { baseUrl: "https://h:27890" },
+      alwaysOn: true,
+    })
+    expect(activateHost).not.toHaveBeenCalled()
+    expect(onPaired).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("add-host-success")).toHaveTextContent("add.successAlwaysOn:Home NAS")
+  })
+
+  it("can start with always-on chosen", () => {
+    render(<AddHostForm defaultAlwaysOn />)
+    expect(screen.getByRole("switch", { name: "add.alwaysOn" })).toBeChecked()
+    expect(screen.queryByRole("switch", { name: "add.connectAfter" })).toBeNull()
+  })
+
   it("puts the label and connect-after above the submit they apply to", () => {
     render(<AddHostForm />)
     const submit = screen.getByTestId("pair-submit")
     const form = submit.closest("form")!
-    for (const field of [screen.getByLabelText("add.labelLabel"), screen.getByRole("switch")]) {
+    for (const field of [
+      screen.getByLabelText("add.labelLabel"),
+      screen.getByRole("switch", { name: "add.connectAfter" }),
+    ]) {
       expect(form).toContainElement(field)
       expect(field.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }

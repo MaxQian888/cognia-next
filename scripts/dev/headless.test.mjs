@@ -157,6 +157,60 @@ process.stderr.write("relay room ready\\n")
   assert.equal(result.stderr, "relay room ready\n")
 })
 
+test("pair --direct is forwarded, and only pair accepts it", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-direct-"))
+  const server = path.join(root, "cognia-server")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(
+    server,
+    `#!/usr/bin/env node
+process.stdout.write("cgnp3|direct-invitation\\n")
+process.stderr.write(JSON.stringify(process.argv.slice(2)) + "\\n")
+`
+  )
+  await chmod(server, 0o755)
+  const env = { COGNIA_HEADLESS_SERVER_BIN: server, COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  const result = await run(
+    ["pair", "--skip-build", "--direct", "--data-dir", path.join(root, "data")],
+    env
+  )
+  assert.equal(result.code, 0, result.stderr)
+  assert.match(result.stdout, /cgnp3\|direct-invitation/)
+  assert.ok(JSON.parse(result.stderr).includes("--direct"))
+
+  const serve = await run(["--dry-run", "--direct", "--data-dir", path.join(root, "data")], env)
+  assert.equal(serve.code, 2, serve.stderr)
+  assert.match(serve.stderr, /--direct is only valid for pair/)
+})
+
+test("pair action shows why the issuer refused a relay-less invitation", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-refused-"))
+  const server = path.join(root, "cognia-server")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(
+    server,
+    `#!/bin/sh
+echo '02:06:47.209 [INFO]  store ready (0 sessions total)' >&2
+echo 'Error: no relay invitation: the relay at wss://relay.example did not accept the pairing room.' >&2
+echo 'Pass --direct to issue that invitation anyway.' >&2
+exit 1
+`
+  )
+  await chmod(server, 0o755)
+
+  const result = await run(["pair", "--skip-build", "--data-dir", path.join(root, "data")], {
+    COGNIA_HEADLESS_SERVER_BIN: server,
+    COGNIA_MASTER_KEY: "a".repeat(64),
+  })
+
+  assert.equal(result.code, 3)
+  assert.match(result.stderr, /failed with exit code 1/)
+  assert.match(result.stderr, /did not accept the pairing room/)
+  assert.match(result.stderr, /--direct/)
+  assert.doesNotMatch(result.stderr, /store ready/)
+})
+
 for (const version of [2, 5]) {
   test(`pair action rejects an unsupported cgnp${version} invitation`, async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), `cognia-headless-pair-v${version}-`))

@@ -82,6 +82,13 @@ describe("RemoteHostsPanel", () => {
     expect(screen.getByTestId("github-runner-panel")).toBeInTheDocument()
   })
 
+  it("marks an always-on host in the list", () => {
+    seed([{ ...host("h1", "home nas", "disconnected"), alwaysOn: true }, host("h2", "spare")], null)
+    render(<RemoteHostsPanel />)
+    expect(screen.getByTestId("remote-host-always-on-h1")).toBeInTheDocument()
+    expect(screen.queryByTestId("remote-host-always-on-h2")).toBeNull()
+  })
+
   it("points the console link at the active host", () => {
     seed([host("h1", "active box"), host("h2", "spare", "disconnected")])
     render(<RemoteHostsPanel />)

@@ -10,9 +10,10 @@
 //! - Loads or generates the TLS material in the same directory so the
 //!   self-signed cert is stable across restarts.
 //! - Exposes two subcommands:
-//!   - `cognia-server pair --device-name <name>` issues a one-time Owner
-//!     invitation and prints a `cgnp3|<base64>` payload the user pastes into
-//!     the mobile app.
+//!   - `cognia-server pair --device-name <name>` asks the running server for a
+//!     one-time Owner invitation and prints its `cgnp4|<base64>` relay payload
+//!     with a terminal QR code (ADR-0224 A2); `--direct` accepts a relay-less
+//!     `cgnp3|<base64>` instead.
 //!   - `cognia-server serve --port <port>` boots the axum HTTPS server, the
 //!     `SecurityStore`, the `EventBus`, all four bridges and the signaling hub,
 //!     and supervises the Node brain that owns the data plane.
@@ -110,8 +111,9 @@ enum CliCommand {
         #[arg(long)]
         authorize_credentials: bool,
     },
-    /// Issue a one-shot Owner invitation and print the cgnp3 payload the mobile
-    /// app scans or pastes.
+    /// Issue a one-shot Owner invitation through the running server and print
+    /// the `cgnp4` relay invitation (with a QR code) the app scans or pastes.
+    /// Refuses a relay-less invitation, and says why, unless `--direct`.
     Pair {
         /// Human label for the device being paired.
         #[arg(long, default_value = "headless-pair")]
@@ -121,14 +123,21 @@ enum CliCommand {
         /// `https://127.0.0.1:<port>`.
         #[arg(long)]
         advertise_url: Option<String>,
-        /// Port used for the default advertise URL when neither
-        /// `--advertise-url` nor `COGNIA_PUBLIC_URL` is set.
-        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
-        port: u16,
+        /// Port of the running server to ask for the invitation, also used for
+        /// the default advertise URL. Defaults to `COGNIA_PORT`, else 27890.
+        #[arg(long)]
+        port: Option<u16>,
         /// Tenant/organization encoded into the cgnp3 payload. Defaults to the
         /// tenant this host is bound to.
         #[arg(long)]
         tenant_id: Option<String>,
+        /// Accept an invitation without a relay room: the device must reach
+        /// the advertise URL directly (same network, or a public URL).
+        #[arg(long, default_value_t = false)]
+        direct: bool,
+        /// Print only the invitation string, without the terminal QR code.
+        #[arg(long, default_value_t = false)]
+        no_qr: bool,
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
@@ -561,6 +570,13 @@ fn mdns_instance_name(fingerprint: &str) -> String {
     }
 }
 
+/// The running server `pair` asks: `--port`, else `COGNIA_PORT`, else the
+/// default port.
+fn resolve_pair_port(flag: Option<u16>, env: Option<&str>) -> u16 {
+    flag.or_else(|| env.and_then(|value| value.trim().parse().ok()))
+        .unwrap_or(app_lib::companion_api::server::DEFAULT_PORT)
+}
+
 fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
     flag.or_else(|| std::env::var("COGNIA_PUBLIC_URL").ok())
         .filter(|s| !s.trim().is_empty())
@@ -724,14 +740,14 @@ async fn run_service_command(
                 .as_ref()
                 .map(|id| format!("COGNIA_LOCAL_ACCOUNT_ID={id} "))
                 .unwrap_or_default();
-            // `pair` asks the running server on COGNIA_PORT for a relay invitation.
-            let port_env = if *port == app_lib::companion_api::server::DEFAULT_PORT {
+            // `pair` asks the running server on its port for a relay invitation.
+            let port_arg = if *port == app_lib::companion_api::server::DEFAULT_PORT {
                 String::new()
             } else {
-                format!("COGNIA_PORT={port} ")
+                format!(" --port {port}")
             };
             println!(
-                "Pair a device: {key_pipe}{prefix}{key_env}{port_env}{account}COGNIA_DATA_DIR=\"{}\" \"{}\" pair",
+                "Pair a device: {key_pipe}{prefix}{key_env}{account}COGNIA_DATA_DIR=\"{}\" \"{}\" pair{port_arg}",
                 report.data_dir.display(),
                 report.server_binary.display()
             );
@@ -1130,10 +1146,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             advertise_url,
             port,
             tenant_id,
+            direct,
+            no_qr,
         } => {
+            let port = resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref());
             let base_url = resolve_advertise_url(advertise_url, port);
             let tenant_id = resolve_tenant(tenant_id);
-            run_pair(&store, &tls_material, &device_name, &base_url, &tenant_id).await
+            let options = PairOptions {
+                port,
+                direct,
+                qr: !no_qr,
+            };
+            run_pair(
+                &store,
+                &tls_material,
+                &device_name,
+                &base_url,
+                &tenant_id,
+                &options,
+            )
+            .await
         }
         CliCommand::Serve {
             port,
@@ -1647,12 +1679,88 @@ fn run_rotate_master_key(
     Ok(())
 }
 
+/// How `pair` asks for and prints an invitation.
+struct PairOptions {
+    /// Port of the running server.
+    port: u16,
+    /// Accept an invitation the device must redeem by reaching `base_url`.
+    direct: bool,
+    /// Draw a terminal QR code next to the string.
+    qr: bool,
+}
+
+/// Print an invitation: the string, its QR code and when it expires.
+fn print_pair_invitation(encoded: &str, expires_at_ms: i64, qr: bool) {
+    use cognia_companion_rpc::pair_invitation::{describe_expiry, render_terminal_qr};
+    println!("    {encoded}\n");
+    if qr {
+        match render_terminal_qr(encoded) {
+            Ok(art) => println!("{art}"),
+            Err(error) => println!("({error}; paste the string instead.)\n"),
+        }
+    }
+    if expires_at_ms > 0 {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        println!("The invitation {}.", describe_expiry(expires_at_ms, now_ms));
+    }
+}
+
+/// What `pair` does with the running server's answer: `Ok(None)` prints the
+/// invitation it issued, `Ok(Some(reason))` issues a standalone direct one
+/// (only under `--direct`), `Err` refuses a relay-less invitation.
+fn pair_decision(running: &RunningPair, direct: bool, base_url: &str) -> Result<Option<String>, String> {
+    match running {
+        RunningPair::Issued {
+            relay_unavailable: Some(reason),
+            ..
+        } if !direct => Err(relay_refusal(reason, base_url)),
+        RunningPair::Issued { .. } => Ok(None),
+        RunningPair::NotRunning(reason) if !direct => Err(relay_refusal(
+            &format!(
+                "{reason}; start the host (`cognia-server serve`, or `cognia-server service install`) first"
+            ),
+            base_url,
+        )),
+        RunningPair::Failed(reason) if !direct => Err(relay_refusal(reason, base_url)),
+        RunningPair::NotRunning(reason) | RunningPair::Failed(reason) => Ok(Some(reason.clone())),
+    }
+}
+
+/// A refusal meant for the operator: `main` prints errors with `{:?}`, which
+/// would quote the message and escape its line breaks.
+struct OperatorError(String);
+
+impl std::fmt::Debug for OperatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for OperatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for OperatorError {}
+
+/// Why `pair` will not print a relay-less invitation unless asked to.
+fn relay_refusal(reason: &str, base_url: &str) -> String {
+    format!(
+        "no relay invitation: {reason}.\n\
+         A device can only redeem an invitation without a relay room by reaching {base_url} \
+         directly. Fix the cause and run `pair` again, or pass --direct to issue that \
+         invitation anyway."
+    )
+}
+
 async fn run_pair(
     store: &std::sync::Arc<SqliteAppStore>,
     tls: &tls::TlsMaterial,
     device_name: &str,
     base_url: &str,
     tenant_id: &str,
+    options: &PairOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Make sure the store opens cleanly — a successful list_sessions also
     // exercises the schema migration on first run.
@@ -1666,15 +1774,35 @@ async fn run_pair(
 
     // ADR-0170: a running `serve` can open a relay pairing room that this
     // process cannot (the room's signaling client must live where the server
-    // does). Ask it first over the loopback service plane and print its cgnp4
-    // verbatim; only fall back to the standalone cgnp3 below when nothing is
-    // listening.
-    if let Some(encoded) = pair_through_running_server(base_url).await {
-        println!("\nPair invitation for device \"{device_name}\" (with relay):\n");
-        println!("    {encoded}\n");
-        println!(
-            "Scan / paste the cgnp4|… string into the app's pair screen. It works from any network."
-        );
+    // does). Ask it first over the loopback service plane. ADR-0224 A2: an
+    // invitation without a relay room is refused, with the reason, unless the
+    // operator asked for a direct one; the standalone cgnp3 below is only
+    // issued under `--direct` when nothing is listening.
+    let running = pair_through_running_server(options.port, base_url).await;
+    let standalone_reason =
+        pair_decision(&running, options.direct, base_url).map_err(OperatorError)?;
+    if let RunningPair::Issued {
+        encoded,
+        has_relay,
+        expires_at_ms,
+        ..
+    } = running
+    {
+        if has_relay {
+            println!("\nPair invitation for device \"{device_name}\" (with relay):\n");
+        } else {
+            println!("\nDirect pair invitation for device \"{device_name}\" (no relay):\n");
+        }
+        print_pair_invitation(&encoded, expires_at_ms, options.qr);
+        if has_relay {
+            println!(
+                "Scan or paste it on the app's pair screen. It works from any network."
+            );
+        } else {
+            println!(
+                "Scan or paste it on the app's pair screen. The device must reach {base_url} directly."
+            );
+        }
         return Ok(());
     }
 
@@ -1710,51 +1838,63 @@ async fn run_pair(
         },
     );
 
-    println!("\nPair invitation for device \"{device_name}\":\n");
-    println!("    {encoded}\n");
-    println!("Expires at: {expires_at_ms} (epoch milliseconds)\n");
-    println!("Scan / paste the cgnp3|… string into the mobile app's pair screen.");
+    println!("\nDirect pair invitation for device \"{device_name}\" (no relay):\n");
+    print_pair_invitation(&encoded, expires_at_ms, options.qr);
+    println!("Scan or paste it on the app's pair screen once the host is serving.");
     println!(
-        "(No running `serve` answered on loopback, so this invitation has no relay room: the device must reach {base_url} directly.)"
+        "It has no relay room ({}): the device must reach {base_url} directly.",
+        standalone_reason.as_deref().unwrap_or("no running server answered")
     );
     Ok(())
 }
 
+/// What the running `serve` said when `pair` asked it for an invitation.
+#[derive(Debug, PartialEq)]
+enum RunningPair {
+    /// It issued one. `relay_unavailable` says why `encoded` is a relay-less
+    /// `cgnp3` when it is one.
+    Issued {
+        encoded: String,
+        has_relay: bool,
+        relay_unavailable: Option<String>,
+        expires_at_ms: i64,
+    },
+    /// No server answered on the port.
+    NotRunning(String),
+    /// Something answered, or could not be asked, but no invitation came back.
+    Failed(String),
+}
+
 /// Ask a running `cognia-server serve` on this machine for an invitation
 /// through `companion_create_owner_invitation` on the loopback service plane
-/// (ADR-0170). `None` when nothing answers, which is the standalone case.
-async fn pair_through_running_server(advertised_base_url: &str) -> Option<String> {
-    let port = std::env::var("COGNIA_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(app_lib::companion_api::server::DEFAULT_PORT);
+/// (ADR-0170) on `port`.
+async fn pair_through_running_server(port: u16, advertised_base_url: &str) -> RunningPair {
     let signing_secret = match secret::load_or_generate() {
         Ok(secret) => secret,
         Err(error) => {
-            log::warn!("no service signing secret ({error}); issuing a standalone invitation");
-            return None;
+            return RunningPair::Failed(format!("no service signing secret ({error})"));
         }
     };
     let tenant = app_lib::companion_api::host_identity::current_tenant_or_unbound();
     let token = match app_lib::companion_api::jwt::issue_service_jwt(&signing_secret, &tenant) {
         Ok((token, _)) => token,
         Err(error) => {
-            log::warn!("could not mint a service token ({error}); issuing a standalone invitation");
-            return None;
+            return RunningPair::Failed(format!("could not mint a service token ({error})"));
         }
     };
-    let client = reqwest::Client::builder()
+    // The issuer waits for the relay to accept the pairing room, so allow for
+    // its timeout on top of the loopback round trip.
+    let timeout = app_lib::companion_api::commands::PAIRING_ROOM_READY_TIMEOUT
+        + std::time::Duration::from_secs(5);
+    let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(timeout)
         .no_proxy()
-        .build();
-    let client = match client {
+        .build()
+    {
         Ok(client) => client,
         Err(error) => {
-            log::warn!(
-                "could not build the loopback client ({error}); issuing a standalone invitation"
-            );
-            return None;
+            return RunningPair::Failed(format!("could not build the loopback client ({error})"));
         }
     };
     let url = format!("https://127.0.0.1:{port}/internal/_rpc/companion_create_owner_invitation");
@@ -1768,37 +1908,74 @@ async fn pair_through_running_server(advertised_base_url: &str) -> Option<String
     {
         Ok(response) => response,
         Err(error) => {
-            log::warn!(
-                "no running server on 127.0.0.1:{port} ({error}); issuing a standalone invitation \
-                 that only works on the same network"
-            );
-            return None;
+            return RunningPair::NotRunning(format!(
+                "no running server answered on 127.0.0.1:{port} ({error})"
+            ));
         }
     };
     if !response.status().is_success() {
-        log::warn!(
-            "running server refused the invitation request ({}); issuing a standalone one",
-            response.status()
-        );
-        return None;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|problem| {
+                problem
+                    .get("detail")
+                    .or_else(|| problem.get("message"))
+                    .or_else(|| problem.get("error"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| body.chars().take(300).collect());
+        return RunningPair::Failed(format!(
+            "the running server on 127.0.0.1:{port} refused the invitation request ({status}{})",
+            if detail.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", detail.trim())
+            }
+        ));
     }
     let body: serde_json::Value = match response.json().await {
         Ok(body) => body,
         Err(error) => {
-            log::warn!(
-                "running server answered with an unreadable body ({error}); issuing a standalone one"
-            );
-            return None;
+            return RunningPair::Failed(format!(
+                "the running server answered with an unreadable body ({error})"
+            ));
         }
     };
     let issue = body.get("result").cloned().unwrap_or(body);
-    let encoded = encode_running_pair_invitation(&issue, advertised_base_url);
-    if encoded.is_none() {
-        log::warn!(
-            "running server's invitation is missing a required field; issuing a standalone one"
+    running_pair_from_issue(&issue, advertised_base_url)
+}
+
+/// Classify a running server's invitation answer.
+fn running_pair_from_issue(issue: &serde_json::Value, advertised_base_url: &str) -> RunningPair {
+    let Some(encoded) = encode_running_pair_invitation(issue, advertised_base_url) else {
+        return RunningPair::Failed(
+            "the running server's invitation is missing a required field".to_string(),
         );
+    };
+    let has_relay = issue.get("relay").is_some_and(|relay| !relay.is_null());
+    RunningPair::Issued {
+        encoded,
+        has_relay,
+        relay_unavailable: if has_relay {
+            None
+        } else {
+            Some(
+                issue
+                    .get("relayUnavailable")
+                    .and_then(serde_json::Value::as_str)
+                    // A server older than ADR-0224 A2 does not say why.
+                    .unwrap_or("the running server did not open a relay room")
+                    .to_string(),
+            )
+        },
+        expires_at_ms: issue
+            .get("expiresAtMs")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default(),
     }
-    encoded
 }
 
 fn encode_running_pair_invitation(
@@ -2806,6 +2983,114 @@ mod tests {
                 assert_eq!(payload["relay"], relay);
             }
         }
+    }
+
+    #[test]
+    fn a_running_server_answer_says_whether_it_carries_a_relay_and_why_not() {
+        let issue = |relay: serde_json::Value, reason: Option<&str>| {
+            let mut issue = serde_json::json!({
+                "hostId": "host-a",
+                "tenantId": "tenant-a",
+                "expiresAtMs": 1_900_000_000_000i64,
+                "appVersion": "1.2.3",
+                "invitation": "one-time-owner-invitation",
+                "relay": relay,
+            });
+            if let Some(reason) = reason {
+                issue["relayUnavailable"] = serde_json::json!(reason);
+            }
+            issue
+        };
+        let relay = serde_json::json!({ "url": "wss://relay.example/signaling", "room": { "roomId": "r" } });
+        match super::running_pair_from_issue(&issue(relay, None), "https://127.0.0.1:27890") {
+            super::RunningPair::Issued {
+                encoded,
+                has_relay,
+                relay_unavailable,
+                expires_at_ms,
+            } => {
+                assert!(encoded.starts_with("cgnp4|"));
+                assert!(has_relay);
+                assert_eq!(relay_unavailable, None);
+                assert_eq!(expires_at_ms, 1_900_000_000_000);
+            }
+            other => panic!("expected an issued invitation, got {other:?}"),
+        }
+        let refused = super::running_pair_from_issue(
+            &issue(serde_json::Value::Null, Some("the relay at wss://r did not accept the pairing room")),
+            "https://127.0.0.1:27890",
+        );
+        assert!(matches!(
+            &refused,
+            super::RunningPair::Issued { has_relay: false, relay_unavailable: Some(reason), .. }
+                if reason.contains("did not accept")
+        ));
+        // A server from before ADR-0224 A2 sends no reason; there still is one.
+        let old = super::running_pair_from_issue(&issue(serde_json::Value::Null, None), "https://h");
+        assert!(matches!(
+            old,
+            super::RunningPair::Issued { relay_unavailable: Some(_), .. }
+        ));
+        let mut broken = issue(serde_json::Value::Null, None);
+        broken.as_object_mut().unwrap().remove("invitation");
+        assert!(matches!(
+            super::running_pair_from_issue(&broken, "https://h"),
+            super::RunningPair::Failed(reason) if reason.contains("missing a required field")
+        ));
+    }
+
+    #[test]
+    fn pair_refuses_a_relay_less_invitation_unless_direct() {
+        let base = "https://127.0.0.1:27890";
+        let relayed = super::RunningPair::Issued {
+            encoded: "cgnp4|x".into(),
+            has_relay: true,
+            relay_unavailable: None,
+            expires_at_ms: 1,
+        };
+        assert_eq!(super::pair_decision(&relayed, false, base), Ok(None));
+
+        let relay_less = super::RunningPair::Issued {
+            encoded: "cgnp3|x".into(),
+            has_relay: false,
+            relay_unavailable: Some("the relay is switched off".into()),
+            expires_at_ms: 1,
+        };
+        let refusal = super::pair_decision(&relay_less, false, base).unwrap_err();
+        assert!(refusal.contains("the relay is switched off"));
+        assert!(refusal.contains("--direct"));
+        assert!(refusal.contains(base));
+        assert_eq!(super::pair_decision(&relay_less, true, base), Ok(None));
+
+        let nothing = super::RunningPair::NotRunning("no running server answered on 127.0.0.1:27890".into());
+        let refusal = super::pair_decision(&nothing, false, base).unwrap_err();
+        assert!(refusal.contains("service install"));
+        assert_eq!(
+            super::pair_decision(&nothing, true, base),
+            Ok(Some("no running server answered on 127.0.0.1:27890".into()))
+        );
+
+        // A server that answered with an error is running: no "start it" advice.
+        let failed = super::RunningPair::Failed("the running server refused (500: boom)".into());
+        let refusal = super::pair_decision(&failed, false, base).unwrap_err();
+        assert!(refusal.contains("500: boom"));
+        assert!(!refusal.contains("service install"));
+        assert_eq!(format!("{:?}", super::OperatorError(refusal.clone())), refusal);
+    }
+
+    #[test]
+    fn pair_asks_the_port_it_was_given_before_cognia_port() {
+        let default = app_lib::companion_api::server::DEFAULT_PORT;
+        assert_eq!(super::resolve_pair_port(Some(27990), Some("27991")), 27990);
+        assert_eq!(super::resolve_pair_port(None, Some(" 27991 ")), 27991);
+        assert_eq!(super::resolve_pair_port(None, Some("not-a-port")), default);
+        assert_eq!(super::resolve_pair_port(None, None), default);
+        let cli = Cli::try_parse_from(["cognia-server", "pair", "--port", "27990", "--direct", "--no-qr"])
+            .expect("pair flags parse");
+        assert!(matches!(
+            cli.command,
+            CliCommand::Pair { port: Some(27990), direct: true, no_qr: true, .. }
+        ));
     }
 
     #[test]

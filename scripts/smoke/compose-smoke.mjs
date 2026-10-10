@@ -459,14 +459,26 @@ async function waitForBrainReady() {
 }
 
 async function pairDevice() {
-  const out = await composeExec(["cognia-server", "pair", "--device-name", "smoke"])
-  const match = out.match(/cgnp3\|([A-Za-z0-9_-]+)/)
-  check(!!match, "pair subcommand printed a cgnp3 payload")
+  // The smoke registers over the published port, not through a relay, so it
+  // accepts a relay-less invitation: without --direct `pair` refuses one
+  // (ADR-0224 A2), and a CI runner need not reach the relay.
+  const out = await composeExec([
+    "cognia-server",
+    "pair",
+    "--device-name",
+    "smoke",
+    "--direct",
+    "--no-qr",
+  ])
+  // cgnp4 when the runner can reach the relay, cgnp3 when it cannot; both
+  // carry the direct fields registered against below.
+  const match = out.match(/cgnp[34]\|([A-Za-z0-9_-]+)/)
+  check(!!match, "pair subcommand printed a cgnp3 or cgnp4 payload")
   if (!match) return null
   const payload = JSON.parse(Buffer.from(match[1], "base64url").toString())
   check(payload.mode === "owner-invitation", "pair payload uses Owner invitation mode")
   const config = await fetch(`${SERVER_URL}/api/auth/config`).then((response) => response.json())
-  check(config.hostId === payload.host, "auth config Host matches the cgnp3 payload")
+  check(config.hostId === payload.host, "auth config Host matches the pair payload")
   const authKeys = await webcrypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,

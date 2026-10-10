@@ -278,6 +278,7 @@ pub(super) async fn dispatch(
                     host_id,
                     "host-admin-rpc",
                 )
+                .await
                 .map_err(RpcError::internal)?,
             )
         }

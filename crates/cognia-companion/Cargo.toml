@@ -123,6 +123,8 @@ cognia-fleet = { path = "../cognia-fleet", features = ["test-support"] }
 cognia-gateway = { path = "../cognia-gateway", features = ["test-support"] }
 cognia-power = { path = "../cognia-power", features = ["test-support"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+# A paused clock for the pairing-room readiness wait (ADR-0224 A2).
+tokio = { workspace = true, features = ["test-util"] }
 wiremock.workspace = true
 
 [lints]

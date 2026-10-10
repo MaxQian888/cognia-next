@@ -30,6 +30,11 @@
  * in-flight guard (`useExecutionHostSwitch`), and `onPaired` waits for that
  * answer: the add-host sheet closes on `onPaired`, and closing it first would
  * unmount the confirmation dialog it renders.
+ *
+ * An always-on host (ADR-0224) is the user's own machine running bots,
+ * schedules and connectors around the clock. It is a peer of this desktop,
+ * not a place to move this window's work, so pairing one records it as such
+ * and never switches to it.
  */
 
 import { useCallback, useState, useSyncExternalStore } from "react"
@@ -76,6 +81,8 @@ export interface AddHostFormProps {
   discoveryLane?: "mdns" | "loopback"
   /** Test seams forwarded to the shared pair step. */
   pairStepProps?: Pick<PairStepProps, "isCredentialStoreReady" | "onRequestUnlock">
+  /** Start with "always-on host" on, e.g. from an always-on host entry point. */
+  defaultAlwaysOn?: boolean
 }
 
 export function AddHostForm({
@@ -83,6 +90,7 @@ export function AddHostForm({
   initialBaseUrl,
   discoveryLane,
   pairStepProps,
+  defaultAlwaysOn = false,
 }: AddHostFormProps) {
   const t = useTranslations("settings.remoteHosts")
   const addHost = useRemoteHostStore((s) => s.addHost)
@@ -95,6 +103,7 @@ export function AddHostForm({
   const [seed, setSeed] = useState<{ payload: string; nonce: number }>({ payload: "", nonce: 0 })
   const [label, setLabel] = useState("")
   const [connectAfter, setConnectAfter] = useState(true)
+  const [alwaysOn, setAlwaysOn] = useState(defaultAlwaysOn)
   const [success, setSuccess] = useState<string | null>(null)
 
   const lane = discoveryLane ?? (isTauri() ? "mdns" : "loopback")
@@ -114,10 +123,18 @@ export function AddHostForm({
   // through `onPaired`, which is where the success line and the caller run.
   const persistPairing = useCallback(
     async (config: CompanionConfig) => {
-      const host = addHost({ label: label.trim() || undefined, config })
-      setSuccess(t("add.success", { label: host.label }))
+      const host = addHost({
+        label: label.trim() || undefined,
+        config,
+        ...(alwaysOn ? { alwaysOn: true } : {}),
+      })
+      setSuccess(
+        alwaysOn
+          ? t("add.successAlwaysOn", { label: host.label })
+          : t("add.success", { label: host.label })
+      )
       setLabel("")
-      if (!connectAfter) {
+      if (alwaysOn || !connectAfter) {
         onPaired?.(host)
         return
       }
@@ -128,7 +145,7 @@ export function AddHostForm({
       // over a dialog.
       void requestSwitch(host.id, { onSettled: () => onPaired?.(host) })
     },
-    [addHost, connectAfter, label, onPaired, requestSwitch, t]
+    [addHost, alwaysOn, connectAfter, label, onPaired, requestSwitch, t]
   )
 
   return (
@@ -169,16 +186,29 @@ export function AddHostForm({
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-md border border-border/60 p-3">
-              <Label htmlFor="remote-host-connect-after" className="cursor-pointer">
-                {t("add.connectAfter")}
-              </Label>
-              <Switch
-                id="remote-host-connect-after"
-                checked={connectAfter}
-                onCheckedChange={setConnectAfter}
-              />
+            <div className="flex items-start justify-between gap-3 rounded-md border border-border/60 p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="remote-host-always-on" className="cursor-pointer">
+                  {t("add.alwaysOn")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{t("add.alwaysOnHint")}</p>
+              </div>
+              <Switch id="remote-host-always-on" checked={alwaysOn} onCheckedChange={setAlwaysOn} />
             </div>
+
+            {/* An always-on host is never switched to, so the question does not arise. */}
+            {alwaysOn ? null : (
+              <div className="flex items-center justify-between rounded-md border border-border/60 p-3">
+                <Label htmlFor="remote-host-connect-after" className="cursor-pointer">
+                  {t("add.connectAfter")}
+                </Label>
+                <Switch
+                  id="remote-host-connect-after"
+                  checked={connectAfter}
+                  onCheckedChange={setConnectAfter}
+                />
+              </div>
+            )}
           </>
         }
         {...pairStepProps}

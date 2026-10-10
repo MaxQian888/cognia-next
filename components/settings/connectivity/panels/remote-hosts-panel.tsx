@@ -194,6 +194,15 @@ function HostRow({
                 {t("active")}
               </Badge>
             ) : null}
+            {host.alwaysOn ? (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid={`remote-host-always-on-${host.id}`}
+              >
+                {t("alwaysOn")}
+              </Badge>
+            ) : null}
             {/* The switcher's tone map, so this dot and the status bar's can
                 never disagree about what a state looks like. */}
             <span

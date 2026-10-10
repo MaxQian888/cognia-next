@@ -1,4 +1,5 @@
 //! Shared companion command bodies and wire DTOs.
+use cognia_companion::signaling::PairingRoomUnavailable;
 use cognia_companion::{browser_access, host_identity, reachability_config, security_store};
 use serde::Serialize;
 use std::net::IpAddr;
@@ -49,7 +50,16 @@ pub struct OwnerInvitationIssue {
     /// in which case the invitation is a plain `cgnp3`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relay: Option<cognia_companion::signaling::pairing::PairingRoomIssue>,
+    /// Why `relay` is absent, for the operator (ADR-0224 A2): `pair` refuses
+    /// a relay-less invitation unless asked for a direct one, and says why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay_unavailable: Option<String>,
 }
+
+/// How long issuing an invitation waits for its relay room to be accepted.
+/// Covers the signaling client's connect (8 s) and challenge (5 s) timeouts'
+/// usual case; a relay that is down fails well inside it.
+pub const PAIRING_ROOM_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Renderer-facing view of the browser-access configuration.
 #[derive(Debug, Serialize)]
@@ -96,9 +106,10 @@ pub fn browser_access_summary_from(
 
 /// Mint a one-shot Owner invitation for this Host and, when the Host sits
 /// in a rendezvous, the pairing room it can be redeemed through (ADR-0170).
-/// One implementation behind the desktop command, the host-admin RPC arm,
-/// and the headless `pair` subcommand.
-pub fn issue_owner_invitation(
+/// The room is only handed out once the relay has accepted it; otherwise the
+/// invitation says why it has none. One implementation behind the desktop
+/// command and the host-admin RPC arm the headless `pair` subcommand calls.
+pub async fn issue_owner_invitation(
     base_url: String,
     fingerprint: String,
     app_version: String,
@@ -117,11 +128,16 @@ pub fn issue_owner_invitation(
         .create_owner_invitation(&tenant_id, trust_root, now, INVITATION_TTL_SECS)
         .map_err(|error| error.to_string())?;
     let expires_at_ms = now.saturating_add(INVITATION_TTL_SECS) * 1_000;
-    // Open the pairing room the invitation points at. `None` is not an
-    // error: it means "no relay for this invitation", exactly the QR every
-    // Host issued before the relay existed.
-    let relay = cognia_companion::signaling::installed_hub()
-        .and_then(|hub| hub.open_pairing_room(expires_at_ms));
+    // Open the pairing room the invitation points at. No room is not an
+    // error here: the invitation is still valid over the direct route, and
+    // the caller decides whether a relay-less one is acceptable.
+    let (relay, relay_unavailable) = match open_ready_pairing_room(expires_at_ms).await {
+        Ok(issue) => (Some(issue), None),
+        Err(reason) => {
+            log::warn!("owner invitation has no relay room: {reason}");
+            (None, Some(reason.to_string()))
+        }
+    };
 
     Ok(OwnerInvitationIssue {
         invitation,
@@ -132,7 +148,18 @@ pub fn issue_owner_invitation(
         host_id,
         tenant_id,
         relay,
+        relay_unavailable,
     })
+}
+
+async fn open_ready_pairing_room(
+    expires_at_ms: i64,
+) -> Result<cognia_companion::signaling::pairing::PairingRoomIssue, PairingRoomUnavailable> {
+    let hub = cognia_companion::signaling::installed_hub().ok_or(PairingRoomUnavailable::NoHub)?;
+    let issue = hub.open_pairing_room(expires_at_ms)?;
+    hub.await_pairing_room(&issue.room.room_id, PAIRING_ROOM_READY_TIMEOUT)
+        .await?;
+    Ok(issue)
 }
 
 pub fn unix_time_secs() -> i64 {

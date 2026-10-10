@@ -3904,6 +3904,9 @@
         },
         "relay": {
           "$ref": "#/$defs/PairingRoomIssue"
+        },
+        "relayUnavailable": {
+          "type": "string"
         }
       },
       "additionalProperties": false

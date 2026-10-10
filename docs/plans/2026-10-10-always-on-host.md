@@ -57,6 +57,14 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 5. `cognia-agent host login` accepts `cgnp4` (relay pairing through `createRelayPairFetcher`).
 6. Tests: pair-port probe, relay-less refusal, QR rendering, `cgnp4` consumption in the CLI.
 
+**A2 outcome (2026-10-11).** All six done and run against a live server:
+
+- The invitation issuer now waits (up to 10 s) until the relay has subscribed the pairing room, closes a room that never gets there, and reports why there is no relay (`relayUnavailable` on the invitation, added to the response schema). `pair --port N` asks that port, prints a terminal QR and the expiry, and refuses a relay-less invitation with the reason unless `--direct`.
+- The desktop's add-host form has an **Always-on host** switch: the host is recorded with `alwaysOn` on `RemoteHost`, never switched to, and badged in the list.
+- `cognia-agent host login <name> --invitation 'cgnp4|…'` takes the same direct-first, relay-second path as the pair screen (`lib/companion/pair-path.ts`). Found and fixed on the way: the CLI's direct pairing could not reach a self-signed host (the TLS fingerprint was dropped, so Node refused the certificate); an aborted pinned request held its socket until the OS connect timeout (~75 s); pairing rooms wrote an event cursor to `localStorage` they never used.
+- Not in A2: the CLI sends its later requests to the host's address, so a CLI paired through the relay needs a direct route afterwards. `host login` says so. Requests over the relay belong with the management channel (A4).
+- `pnpm companion-api:gen` fails on HEAD since `ae76e4d69` (ADR-0221 dispositions without command descriptors); the response schema change was mirrored into `crates/cognia-cli/assets/host-command-catalog.json` by hand.
+
 ### A3 — Desktop always-on mode
 
 1. Persisted mode flag with a Rust mirror, following the `exit.close-behavior` + `AtomicU8` pattern (`src-tauri/src/window_behavior.rs`, `lib/tauri/close-behavior.ts`). Device-local in settings sync.
@@ -229,7 +237,7 @@ Record the evidence in `docs/reports/`. Run `preflight` and the gates for every 
 | Defect                                                                                                                          | Item                   |
 | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | `COGNIA_DURABILITY_BACKEND=sqlite-v5` writes journal-v4 on a fresh account                                                      | A1                     |
-| `pair` ignores `--port` and silently emits a relay-less invitation                                                              | A2                     |
+| `pair` ignores `--port` and silently emits a relay-less invitation (fixed)                                                      | A2                     |
 | Persisted `ready` survives relaunch; hosts that are not being routed to are never probed                                        | A4                     |
 | Global timing authority's liveness goes stale for hosts that are not being routed to, so the desktop takes over and fires twice | A5                     |
 | `scheduled_task_import` copies the OS promotion and forces paused tasks active                                                  | A5                     |

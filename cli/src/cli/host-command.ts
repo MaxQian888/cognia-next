@@ -19,6 +19,13 @@ import { emitResult, resolveOutputOptions } from "./format"
 import { realOutput, type OutputSink } from "./output"
 import { resolveHome } from "../config/load"
 import { loginHost } from "../host/login"
+import {
+  isPairInvitation,
+  loginWithInvitation,
+  type InvitationLoginInput,
+} from "../host/pair-invitation"
+import { CompanionWorkerTransport } from "../worker/companion-worker-transport"
+import type { AuthFetcher } from "@/lib/tauri/companion-auth"
 import { describeResolution, resolveHost } from "../host/resolve"
 import {
   addHost,
@@ -41,6 +48,8 @@ Usage:
                               [--tenant <id>] [--token <service token>]
                               [--fingerprint <sha256 hex>] [--use]
   cognia-agent host list
+  cognia-agent host login <name> --invitation 'cgnp4|…' [--endpoint <url>]
+                              [--label <display name>]
   cognia-agent host login <name> --endpoint <url> --pair-code <code>
                               [--fingerprint <sha256 hex>] [--tenant <id>]
                               [--label <display name>]
@@ -58,6 +67,12 @@ Kinds:
   headless  POST /internal/_rpc, loopback service token, carries every command
   device    POST /api/_rpc, DPoP device session, execution and host-admin only
 
+Pairing:
+  An invitation from \`cognia-server pair\` or the host's pairing screen
+  carries the host's address, fingerprint and tenant. A cgnp4 invitation also
+  carries a relay room, so a host that does not answer on its address is paired
+  through the relay instead. --endpoint overrides the address.
+
 Secrets live in hosts.json at 0600. They are never printed back, only shown
 as "(set)".
 `
@@ -70,6 +85,22 @@ export interface HostCommandDeps {
   fs?: HostsFs
   /** Injected so `host login` unit-tests without a real host to pair with. */
   login?: Partial<Parameters<typeof loginHost>[0]>
+  /** Injected relay, probe and registration fakes for invitation logins. */
+  invitationLogin?: Partial<InvitationLoginInput>
+  /** The direct route's fetcher. Defaults to one that pins the host's TLS key. */
+  fetcher?: AuthFetcher
+}
+
+/**
+ * Said after a relay pairing: the device is enrolled, but this CLI calls the
+ * host on its address, which did not answer from here.
+ */
+export function relayLoginNote(endpoint: string): string {
+  return (
+    `paired through the relay: ${endpoint} did not answer from this machine, and commands ` +
+    `against this host are sent there. Use them where that address is reachable (same ` +
+    `network, a VPN or tunnel), or pair again with --endpoint set to the host's public URL.`
+  )
 }
 
 function targetPath(args: ParsedArgs, home: string, cwd: string): string {
@@ -140,17 +171,52 @@ export async function hostCommand(args: ParsedArgs, deps: HostCommandDeps = {}):
       const name = args.positionals[0]
       const endpoint = stringFlag(args, "endpoint")
       const invitation = stringFlag(args, "pair-code") ?? stringFlag(args, "invitation")
+      // Pins the host's TLS key on the direct route; a self-signed host is
+      // otherwise refused by Node before its fingerprint is ever compared.
+      const fetcher = deps.fetcher ?? new CompanionWorkerTransport().fetch
+      if (name && invitation && isPairInvitation(invitation)) {
+        const paired = await loginWithInvitation({
+          invitation,
+          fetcher,
+          ...(endpoint ? { endpoint } : {}),
+          ...(stringFlag(args, "label") ? { displayName: stringFlag(args, "label") } : {}),
+          ...(deps.invitationLogin ?? {}),
+        })
+        if (!paired.ok) return emitFailure(out, paired.failure)
+        const updated = addHost(readHostsFile(file, deps.fs), name, paired.record, {
+          activate: args.flags.use === true,
+        })
+        writeHostsFile(file, updated, deps.fs)
+        emitResult(
+          out,
+          {
+            paired: name,
+            active: updated.active,
+            file,
+            path: paired.path,
+            ...(paired.path === "relay" ? { note: relayLoginNote(paired.record.endpoint) } : {}),
+            ...redactHost(paired.record),
+          },
+          options,
+          "host-login"
+        )
+        return EXIT_OK
+      }
       if (!name || !endpoint || !invitation) {
         return usageFailure(
           out,
-          "host login needs a <name>, --endpoint and --pair-code",
-          ["cognia-agent host login desktop --endpoint https://127.0.0.1:27890 --pair-code ABC123"],
-          ["take a pairing code from Settings then Companion on the host"]
+          "host login needs a <name> and --invitation 'cgnp4|…' (or --endpoint and --pair-code)",
+          [
+            "cognia-agent host login home --invitation 'cgnp4|…'",
+            "cognia-agent host login desktop --endpoint https://127.0.0.1:27890 --pair-code ABC123",
+          ],
+          ["run `cognia-server pair` on the host, or take one from its pairing screen"]
         )
       }
       const result = await loginHost({
         endpoint,
         invitation,
+        fetcher,
         ...(stringFlag(args, "label") ? { displayName: stringFlag(args, "label") } : {}),
         ...(stringFlag(args, "fingerprint")
           ? { serverFingerprint: stringFlag(args, "fingerprint") }

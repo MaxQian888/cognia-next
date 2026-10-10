@@ -1,5 +1,7 @@
 {
   "add": {
+    "alwaysOn": "常驻 host",
+    "alwaysOnHint": "你自己的一台机器（VPS、NAS 或 Mac mini），全天候运行 bot、定时任务和连接器。它会被记录为常驻 host，这个窗口仍然在本机工作。",
     "baseUrlHint": "远程 cognia-server 地址。跨网络访问时请使用其公网 URL(cloudflared 或反向代理)。",
     "baseUrlLabel": "服务器 URL",
     "baseUrlPlaceholder": "https://your-host:27890",
@@ -45,7 +47,8 @@
     "seededFrom": "正在添加 {url} 上的主机。请在下方粘贴它生成的邀请：仅凭地址无法配对。",
     "submit": "配对主机",
     "submitting": "配对中…",
-    "success": "已配对 {label}。"
+    "success": "已配对 {label}。",
+    "successAlwaysOn": "{label} 已作为常驻 host 配对。"
   },
   "description": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。配对后即可读取文件与 git;写入需要主机授权本设备控制。",
   "list": {

@@ -258,6 +258,88 @@ describe("host login", () => {
     expect(d.out.stdout).not.toContain("PRIVATE")
   })
 
+  it("pairs from a cgnp4 invitation alone, and says when it had to use the relay", async () => {
+    const { encodePairPayload } = await import("@/lib/qr/pair-payload")
+    const invitation = encodePairPayload({
+      baseUrl: "https://127.0.0.1:27890",
+      mode: "owner-invitation",
+      invitation: "owner-invitation",
+      hostId: "host_1",
+      tenantId: "tnt_1",
+      expiresAt: Date.now() + 60_000,
+      serverVersion: "1",
+      fingerprint: "ab".repeat(32),
+      relay: {
+        url: "wss://relay.example/signaling",
+        room: {
+          v: 2,
+          roomId: "room-1",
+          roomNonce: "n",
+          desktopSigningKey: "d",
+          mobileSigningKey: "m",
+          notAfter: Date.now() + 60_000,
+        },
+        mobilePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "d", x: "x", y: "y" },
+      },
+    })
+    const close = jest.fn()
+    const d = deps({
+      fetcher: jest.fn(),
+      invitationLogin: {
+        probeDirect: async () => false,
+        createRelayFetcher: async () => ({ fetcher: jest.fn(), close }),
+        login: {
+          fetchConfig: async () =>
+            ({ deploymentMode: "single-user", hostId: "host_1", tenantId: "tnt_1" }) as never,
+          register: async () =>
+            ({
+              baseUrl: "https://127.0.0.1:27890",
+              deviceId: "dev_9",
+              devicePrivateKeyJwk: { kty: "EC", d: "PRIVATE" },
+              serverVersion: "1",
+            }) as never,
+        },
+      },
+    })
+    expect(
+      await run(["host", "login", "home", "--invitation", invitation, "--format", "raw"], d)
+    ).toBe(EXIT_OK)
+    const stored = parseHostsFile(d.fs.files.get(USER_FILE)!)
+    expect(stored.hosts.home).toMatchObject({
+      kind: "device",
+      endpoint: "https://127.0.0.1:27890",
+      deviceId: "dev_9",
+      tenantId: "tnt_1",
+      serverFingerprint: "ab".repeat(32),
+    })
+    expect(d.out.stdout).toContain('"path":"relay"')
+    expect(d.out.stdout).toContain("paired through the relay")
+    expect(d.out.stdout).not.toContain("PRIVATE")
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands the pinned direct fetcher to a pairing-code login", async () => {
+    const fetcher = jest.fn()
+    const used: unknown[] = []
+    const d = deps({
+      fetcher,
+      login: {
+        fetchConfig: async (_url, _fp, given) => {
+          used.push(given)
+          return { deploymentMode: "single-user", hostId: "h", tenantId: "t" } as never
+        },
+        register: async (_input, given) => {
+          used.push(given)
+          return { baseUrl: "https://h", deviceId: "d", serverVersion: "1" } as never
+        },
+      },
+    })
+    expect(
+      await run(["host", "login", "desktop", "--endpoint", "https://h", "--pair-code", "X"], d)
+    ).toBe(EXIT_OK)
+    expect(used).toEqual([fetcher, fetcher])
+  })
+
   it("needs a name, an endpoint and a pairing code", async () => {
     const d = deps()
     expect(await run(["host", "login", "desktop", "--endpoint", "https://h"], d)).toBe(EXIT_USAGE)

@@ -66,6 +66,8 @@ export async function createRelayPairFetcher(
     role: "mobile",
     // No identity yet, so no ICE: the pairing room is relay-only by design.
     p2p: false,
+    // The room lives for one registration; nothing to resume after a reload.
+    persistEventCursor: false,
     relayHandshakeTimeoutMs: options.handshakeTimeoutMs ?? PAIRING_ROOM_HANDSHAKE_TIMEOUT_MS,
     peerWaitTimeoutMs: options.handshakeTimeoutMs ?? PAIRING_ROOM_HANDSHAKE_TIMEOUT_MS,
   })

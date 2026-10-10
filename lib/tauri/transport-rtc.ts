@@ -276,6 +276,13 @@ export interface TransportRtcOptions {
    */
   p2p?: boolean
   /**
+   * Whether the event cursor survives a reload in `localStorage`, keyed by
+   * rendezvous. Default `true`. A one-shot pairing room sets `false`: its
+   * cursor means nothing after the room closes, and Node (the CLI) warns on
+   * any `localStorage` access.
+   */
+  persistEventCursor?: boolean
+  /**
    * How long (ms) after sending `hello` to wait for the Host's relay
    * acknowledgement before deciding this Host does not speak the data lane.
    * Only fatal when `p2p` is `false` (nothing else could open); otherwise the
@@ -535,6 +542,7 @@ export class TransportRtc {
         ((config) => new RTCPeerConnection(config as RTCConfiguration | undefined)),
       signalingClientFactory: opts.signalingClientFactory ?? ((o) => new SignalingClient(o)),
       p2p: opts.p2p ?? true,
+      persistEventCursor: opts.persistEventCursor ?? true,
       relayHandshakeTimeoutMs: opts.relayHandshakeTimeoutMs ?? 8_000,
     }
     this.eventCursor = this.loadEventCursor()
@@ -2440,6 +2448,7 @@ export class TransportRtc {
   }
 
   private loadEventCursor(): number {
+    if (!this.opts.persistEventCursor) return 0
     try {
       if (typeof localStorage === "undefined") return 0
       const value = Number(localStorage.getItem(this.eventCursorStorageKey()))
@@ -2450,6 +2459,7 @@ export class TransportRtc {
   }
 
   private saveEventCursor(): void {
+    if (!this.opts.persistEventCursor) return
     try {
       if (typeof localStorage !== "undefined") {
         localStorage.setItem(this.eventCursorStorageKey(), String(this.eventCursor))

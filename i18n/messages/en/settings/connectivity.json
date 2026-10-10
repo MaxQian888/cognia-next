@@ -120,6 +120,7 @@
     "renameAria": "Rename {label}",
     "renameSave": "Save name",
     "active": "Active",
+    "alwaysOn": "Always-on",
     "state": {
       "disconnected": "Not connected",
       "connecting": "Connecting",

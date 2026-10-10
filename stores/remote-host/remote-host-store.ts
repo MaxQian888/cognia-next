@@ -78,6 +78,13 @@ export interface RemoteHost {
   featureManifest?: HostFeatureManifest
   /** Epoch ms the feature manifest above was fetched. */
   featureManifestAt?: number
+  /**
+   * An always-on host the user brings (ADR-0224): their own VPS, NAS or Mac
+   * mini running bots, schedules and connectors around the clock. It is a
+   * peer of this desktop, so pairing one records it here without switching
+   * this window to it.
+   */
+  alwaysOn?: boolean
 }
 
 export interface RemoteHostState {
@@ -85,8 +92,12 @@ export interface RemoteHostState {
   /** Session-scoped: which host the desktop is driving; `null` = local. */
   activeHostId: string | null
 
-  /** Register (or, on a repeat baseUrl, update) a paired host. Returns it. */
-  addHost: (input: { label?: string; config: CompanionConfig }) => RemoteHost
+  /**
+   * Register (or, on a repeat baseUrl, update) a paired host. Returns it.
+   * `alwaysOn` marks an always-on peer; a re-pair that omits it keeps the
+   * host's existing role.
+   */
+  addHost: (input: { label?: string; config: CompanionConfig; alwaysOn?: boolean }) => RemoteHost
   /** Rename a host. No-op if the id is unknown. */
   updateHostLabel: (id: string, label: string) => void
   /** Remove a host; deactivates first if it is the active one. */
@@ -363,7 +374,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       hosts: [],
       activeHostId: null,
 
-      addHost: ({ label, config }) => {
+      addHost: ({ label, config, alwaysOn }) => {
         if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
           throw new Error("remote host device identity is unavailable; pair again")
         }
@@ -382,6 +393,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
             credentialRef: remoteHostCredentialRef(existing.id),
             connectionState: "disconnected",
             connectionError: undefined,
+            ...(alwaysOn === undefined ? {} : { alwaysOn }),
           }
           set({ hosts: get().hosts.map((h) => (h.id === existing.id ? updated : h)) })
           notifyRemoteHostPairingChanged()
@@ -398,6 +410,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           credentialRef: remoteHostCredentialRef(id),
           addedAt: Date.now(),
           connectionState: "disconnected",
+          ...(alwaysOn ? { alwaysOn: true } : {}),
         }
         set({ hosts: [...get().hosts, host] })
         // The host profile is derived from this list, and localStorage has no

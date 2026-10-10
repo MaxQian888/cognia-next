@@ -1290,6 +1290,7 @@ pub async fn companion_create_owner_invitation(
         super::healthz::derive_server_id(&signing_secret),
         "local-trust-root",
     )
+    .await
 }
 
 // ---------------------------------------------------------------------------

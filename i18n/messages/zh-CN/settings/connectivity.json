@@ -120,6 +120,7 @@
     "renameAria": "重命名 {label}",
     "renameSave": "保存名称",
     "active": "活动",
+    "alwaysOn": "常驻",
     "state": {
       "disconnected": "未连接",
       "connecting": "连接中",

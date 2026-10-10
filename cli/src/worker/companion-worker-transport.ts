@@ -57,8 +57,19 @@ export function verifyPinnedPeer(socket: tls.TLSSocket, expectedFingerprint: str
 }
 
 class PinnedHttpsAgent extends https.Agent {
+  /**
+   * Sockets still connecting or handshaking. The request only receives its
+   * socket once the pin is verified, so until then aborting the request
+   * cannot reach the socket: `abortPending` can.
+   */
+  private readonly pending = new Set<tls.TLSSocket>()
+
   constructor(private readonly fingerprint: string) {
     super({ keepAlive: false })
+  }
+
+  abortPending(error: Error): void {
+    for (const socket of this.pending) socket.destroy(error)
   }
 
   override createConnection(
@@ -77,10 +88,12 @@ class PinnedHttpsAgent extends https.Agent {
       rejectUnauthorized: false,
     } as tls.ConnectionOptions
     const socket = tls.connect(connectionOptions)
+    this.pending.add(socket)
     let settled = false
     const settle = (error?: Error) => {
       if (settled) return
       settled = true
+      this.pending.delete(socket)
       if (error) {
         socket.destroy(error)
         callback?.(error, socket)
@@ -122,6 +135,13 @@ function responseFromNode(
   })
 }
 
+/** The rejection an aborted request settles with, like `fetch`'s. */
+function abortError(signal: AbortSignal | undefined): Error {
+  const reason: unknown = signal?.reason
+  if (reason instanceof Error) return reason
+  return new DOMException("This operation was aborted", "AbortError")
+}
+
 async function pinnedRequest(
   url: URL,
   init: PinnedFetchInit,
@@ -133,19 +153,32 @@ async function pinnedRequest(
       "SPKI pinning requires an HTTPS Companion URL"
     )
   }
+  const signal = init.signal ?? undefined
+  if (signal?.aborted) return Promise.reject(abortError(signal))
   return new Promise((resolve, reject) => {
+    const agent = new PinnedHttpsAgent(fingerprint)
+    // Abort reaches a socket that is still connecting (an unroutable address
+    // otherwise holds the request, and the process, for the OS connect
+    // timeout) as well as one already handed to the request.
+    const onAbort = () => {
+      const error = abortError(signal)
+      agent.abortPending(error)
+      request.destroy(error)
+      reject(error)
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
     const request = https.request(
       url,
       {
         method: init.method ?? "GET",
         headers: init.headers ? Object.fromEntries(new Headers(init.headers).entries()) : undefined,
-        agent: new PinnedHttpsAgent(fingerprint),
-        signal: init.signal ?? undefined,
+        agent,
       },
       (response) => {
         const chunks: Buffer[] = []
         response.on("data", (chunk) => chunks.push(Buffer.from(chunk)))
-        response.once("end", () =>
+        response.once("end", () => {
+          signal?.removeEventListener("abort", onAbort)
           resolve(
             responseFromNode(
               response.statusCode ?? 0,
@@ -154,10 +187,13 @@ async function pinnedRequest(
               Buffer.concat(chunks)
             )
           )
-        )
+        })
       }
     )
-    request.once("error", (error) => reject(error))
+    request.once("error", (error) => {
+      signal?.removeEventListener("abort", onAbort)
+      reject(error)
+    })
     if (init.body == null) request.end()
     else if (typeof init.body === "string" || Buffer.isBuffer(init.body)) request.end(init.body)
     else {

@@ -33,6 +33,7 @@ const cliOptionsSchema = z
     check: z.boolean().default(false),
     dataDir: z.string().min(1, "--data-dir must not be empty").optional(),
     deviceName: z.string().trim().min(1, "--device-name must not be empty").optional(),
+    direct: z.boolean().default(false),
     dryRun: z.boolean().default(false),
     gateway: z.boolean().default(false),
     localDebug: z.boolean().default(false),
@@ -99,9 +100,12 @@ const cliOptionsSchema = z
         !recoverSecretStore),
     {
       message:
-        "pair accepts --data-dir, --device-name, --advertise-url, --port, --tenant-id, and --skip-build",
+        "pair accepts --data-dir, --device-name, --advertise-url, --port, --tenant-id, --direct, and --skip-build",
     }
   )
+  .refine(({ action, direct }) => !direct || action === "pair", {
+    message: "--direct is only valid for pair",
+  })
   // `--device-name` is absent on purpose: a browser device names itself at
   // registration time (the extension sends `displayName` with its own key), so
   // a label passed here would be silently dropped.
@@ -170,6 +174,10 @@ function createProgram() {
       "Human-readable label for a cgnp3 or cgnp4 pairing invitation (pair only)."
     )
     .option("--tenant-id <id>", "Tenant encoded into a pairing invitation or a browser enrollment.")
+    .option(
+      "--direct",
+      "pair: accept an invitation without a relay room (the device must reach the server directly). Without it, pair refuses one and says why."
+    )
     .option("--gateway", "Enable the local LLM gateway.")
     .option(
       "--local-debug",
@@ -315,6 +323,7 @@ function pairArgs(options) {
   if (options.advertiseUrl) args.push("--advertise-url", options.advertiseUrl)
   args.push("--port", String(options.port))
   if (options.tenantId) args.push("--tenant-id", options.tenantId)
+  if (options.direct) args.push("--direct")
   return args
 }
 
@@ -849,7 +858,15 @@ async function runPairProcess(command, args, env) {
   }
   if (result.exitCode !== 0 || result.signal) {
     const status = result.signal ? `signal ${result.signal}` : `exit code ${result.exitCode}`
-    throw new PreflightError(`cognia-server pairing invitation issuer failed with ${status}`)
+    // The issuer explains a refusal (no relay room, no running server) on stderr.
+    const reason = (result.stderr || "")
+      .split("\n")
+      .filter((line) => line.trim() && !/^\d{2}:\d{2}:\d{2}\.\d+ \[(INFO|DEBUG)\]/.test(line))
+      .join("\n")
+      .trim()
+    throw new PreflightError(
+      `cognia-server pairing invitation issuer failed with ${status}${reason ? `:\n${reason}` : ""}`
+    )
   }
   const output = result.stdout || ""
   if (!/cgnp[34]\|/.test(output)) {

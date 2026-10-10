@@ -3,6 +3,7 @@ pub mod codeserver_host;
 pub mod command_services;
 pub mod headless;
 pub mod mcp_oauth;
+pub mod pair_invitation;
 pub mod project_environment;
 pub mod shell;
 pub mod sidecar_runtime;

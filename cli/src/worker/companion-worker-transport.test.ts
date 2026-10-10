@@ -4,6 +4,7 @@ import https from "node:https"
 import os from "node:os"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
+import net from "node:net"
 import tls from "node:tls"
 import { WebSocketServer } from "ws"
 
@@ -200,6 +201,49 @@ describe("CompanionWorkerTransport pinning", () => {
       wss.close()
       await new Promise<void>((resolve) => server.close(() => resolve()))
       rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("gives up as soon as the caller aborts, even mid-handshake", async () => {
+    // Accepts the TCP connection and never answers the TLS ClientHello: the
+    // pinned agent is still waiting for the handshake when the abort lands.
+    const held: net.Socket[] = []
+    const closed: Array<Promise<void>> = []
+    const server = net.createServer((socket) => {
+      held.push(socket)
+      socket.resume()
+      closed.push(new Promise((resolve) => socket.once("close", () => resolve())))
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const port = (server.address() as net.AddressInfo).port
+    try {
+      const transport = new CompanionWorkerTransport()
+      const controller = new AbortController()
+      const started = Date.now()
+      const request = transport.fetch(`https://127.0.0.1:${port}/api/auth/config`, {
+        method: "GET",
+        serverFingerprint: "ab".repeat(32),
+        signal: controller.signal,
+      })
+      setTimeout(() => controller.abort(), 50)
+      await expect(request).rejects.toMatchObject({ name: "AbortError" })
+      expect(Date.now() - started).toBeLessThan(2_000)
+      // The half-open connection was torn down, not left to keep the process alive.
+      expect(held).toHaveLength(1)
+      await Promise.all(closed)
+
+      const aborted = new AbortController()
+      aborted.abort()
+      await expect(
+        transport.fetch(`https://127.0.0.1:${port}/`, {
+          method: "GET",
+          serverFingerprint: "ab".repeat(32),
+          signal: aborted.signal,
+        })
+      ).rejects.toMatchObject({ name: "AbortError" })
+    } finally {
+      for (const socket of held) socket.destroy()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
 })

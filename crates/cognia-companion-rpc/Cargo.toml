@@ -48,6 +48,8 @@ cognia-connectors = { path = "../cognia-connectors" }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt", "process", "macros"] }
 wait-timeout = "0.2"
+# Terminal QR for `cognia-server pair` (ADR-0224 A2); no image backends.
+qrcode = { version = "0.14", default-features = false }
 tauri = { workspace = true, optional = true }
 
 [dev-dependencies]

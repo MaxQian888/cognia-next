@@ -149,6 +149,84 @@ pub const DEFAULT_SIGNALING_URL: &str = match option_env!("NEXT_PUBLIC_SIGNALING
     None => "wss://signaling.cognia.cn/signaling",
 };
 
+/// How often [`SignalingHub::await_pairing_room`] reads the room's tier.
+const PAIRING_ROOM_POLL: Duration = Duration::from_millis(100);
+
+/// Why this Host could not hand out a relay pairing room (ADR-0170,
+/// ADR-0224 A2). Shown to the operator, so each reason says what to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PairingRoomUnavailable {
+    /// No signaling hub runs in this process.
+    NoHub,
+    /// The WebRTC / relay tier is switched off on this Host.
+    Disabled,
+    /// The hub is not attached to a running companion server yet.
+    NotBound,
+    /// The invitation expired before its room could be opened.
+    Expired,
+    /// The room's client never got subscribed at the relay.
+    Unreachable {
+        signaling_url: String,
+        last_error: Option<String>,
+    },
+}
+
+impl std::fmt::Display for PairingRoomUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoHub => f.write_str("this host runs no signaling hub"),
+            Self::Disabled => f.write_str(
+                "the relay (WebRTC tier) is switched off on this host; turn it back on in \
+                 Settings → Connectivity or with the signaling config",
+            ),
+            Self::NotBound => f.write_str("the companion server has not finished starting"),
+            Self::Expired => f.write_str("the invitation expired before its relay room opened"),
+            Self::Unreachable {
+                signaling_url,
+                last_error,
+            } => {
+                write!(f, "the relay at {signaling_url} did not accept the pairing room")?;
+                match last_error {
+                    Some(error) => write!(f, " ({error})"),
+                    None => f.write_str(" in time"),
+                }
+            }
+        }
+    }
+}
+
+impl std::error::Error for PairingRoomUnavailable {}
+
+/// Poll `read` until the room's tier says it is subscribed at the relay.
+/// `Err` carries the client's last reported error when `timeout` runs out.
+async fn wait_until_subscribed(
+    read: impl Fn() -> Option<DeviceTierEntry>,
+    timeout: Duration,
+    poll: Duration,
+) -> Result<(), Option<String>> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut last_error = None;
+    loop {
+        if let Some(entry) = read() {
+            match entry.tier {
+                DeviceTier::Awaiting
+                | DeviceTier::Negotiating
+                | DeviceTier::Relayed
+                | DeviceTier::Connected => return Ok(()),
+                DeviceTier::Offline | DeviceTier::Failed => {
+                    if entry.last_error.is_some() {
+                        last_error = entry.last_error;
+                    }
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(last_error);
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
+
 /// Default STUN servers (Google + Cloudflare public). Mirrored in the
 /// renderer's WebRtcCard component default population.
 fn default_ice_servers() -> Vec<RTCIceServer> {
@@ -227,10 +305,14 @@ impl SignalingHub {
 
     /// Open a one-shot pairing room for an invitation that expires at
     /// `expires_at_ms` (ADR-0170). Returns what the invitation must carry, or
-    /// `None` when this Host cannot sit in a rendezvous right now (the hub is
-    /// disabled or not yet bound to a running companion server), in which
-    /// case the invitation is issued without a relay exactly as before.
-    pub fn open_pairing_room(&self, expires_at_ms: i64) -> Option<pairing::PairingRoomIssue> {
+    /// why this Host cannot sit in a rendezvous right now (the hub is disabled
+    /// or not yet bound to a running companion server). The room's client
+    /// connects in the background; [`Self::await_pairing_room`] waits until
+    /// the relay has actually accepted it.
+    pub fn open_pairing_room(
+        &self,
+        expires_at_ms: i64,
+    ) -> Result<pairing::PairingRoomIssue, PairingRoomUnavailable> {
         let (binding, enabled, signaling_url) = {
             let inner = self.inner.lock();
             (
@@ -240,12 +322,12 @@ impl SignalingHub {
             )
         };
         if !enabled {
-            return None;
+            return Err(PairingRoomUnavailable::Disabled);
         }
-        let binding = binding?;
+        let binding = binding.ok_or(PairingRoomUnavailable::NotBound)?;
         let now = now_ms();
         if expires_at_ms <= now {
-            return None;
+            return Err(PairingRoomUnavailable::Expired);
         }
         let (issue, host_identity) =
             pairing::mint_pairing_room(&signaling_url, now, expires_at_ms - now);
@@ -262,6 +344,8 @@ impl SignalingHub {
             ),
             device_id: device_id.clone(),
             ice_servers: Vec::new(),
+            // Private to the room: pairing rooms never show up in the devices
+            // snapshot, but `await_pairing_room` reads the room's tier from it.
             tier_writer: TierWriter::detached(&room_id, &device_id),
             pairing: Some(pairing::PairingRoom::new(expires_at_ms)),
         };
@@ -277,7 +361,36 @@ impl SignalingHub {
                 hub.close_pairing_room(&room_id);
             }
         });
-        Some(issue)
+        Ok(issue)
+    }
+
+    /// Wait until the pairing room `room_id` is subscribed at the relay, so
+    /// an invitation that names it can actually be redeemed from another
+    /// network. A room that does not get there within `timeout` is closed and
+    /// reported as unreachable with the client's last error.
+    pub async fn await_pairing_room(
+        &self,
+        room_id: &str,
+        timeout: Duration,
+    ) -> Result<(), PairingRoomUnavailable> {
+        let (writer, signaling_url) = {
+            let rooms = self.pairing_rooms.lock();
+            let handle = rooms.get(room_id).ok_or(PairingRoomUnavailable::Expired)?;
+            (
+                handle.config.tier_writer.clone(),
+                handle.config.signaling_url.clone(),
+            )
+        };
+        match wait_until_subscribed(|| writer.current_entry(), timeout, PAIRING_ROOM_POLL).await {
+            Ok(()) => Ok(()),
+            Err(last_error) => {
+                self.close_pairing_room(room_id);
+                Err(PairingRoomUnavailable::Unreachable {
+                    signaling_url,
+                    last_error,
+                })
+            }
+        }
     }
 
     /// Cancel a pairing room's signaling client. Idempotent.
@@ -814,6 +927,11 @@ impl TierWriter {
         self.map.lock().insert(self.rendezvous_id.clone(), entry);
     }
 
+    /// The most recent entry this writer pushed, with its last error.
+    pub fn current_entry(&self) -> Option<DeviceTierEntry> {
+        self.map.lock().get(&self.rendezvous_id).cloned()
+    }
+
     /// Reads the most recent tier this writer pushed. Returns `None` if
     /// the entry has been evicted (device unpaired).
     #[allow(dead_code)] // exported for unit tests; not yet consumed by production code
@@ -1271,5 +1389,85 @@ mod tests {
         assert!(json.contains("\"updatedAtMs\":42"));
         // `last_error` is `None` — should be omitted by `skip_serializing_if`.
         assert!(!json.contains("lastError"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pairing_room_counts_as_ready_once_the_relay_subscribed_it() {
+        let writer = TierWriter::detached("room", "pairing:room");
+        writer.set(DeviceTier::Offline);
+        let reader = writer.clone();
+        let wait = tokio::spawn(async move {
+            wait_until_subscribed(
+                move || reader.current_entry(),
+                Duration::from_secs(10),
+                Duration::from_millis(100),
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        writer.set(DeviceTier::Awaiting);
+        assert_eq!(wait.await.expect("join"), Ok(()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pairing_room_that_never_subscribes_reports_the_last_relay_error() {
+        let writer = TierWriter::detached("room", "pairing:room");
+        writer.set_with_error(DeviceTier::Failed, "signaling connect timed out");
+        // A reconnect attempt resets the tier without an error; the earlier
+        // failure is still the one worth reporting.
+        writer.set(DeviceTier::Offline);
+        let first = writer.clone();
+        let result = wait_until_subscribed(
+            move || first.current_entry(),
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+        )
+        .await;
+        // Only the Offline entry was ever visible, so no error was recorded.
+        assert_eq!(result, Err(None));
+
+        writer.set_with_error(DeviceTier::Failed, "relay refused: 403");
+        let second = writer.clone();
+        let result = wait_until_subscribed(
+            move || second.current_entry(),
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+        )
+        .await;
+        assert_eq!(result, Err(Some("relay refused: 403".to_string())));
+    }
+
+    #[test]
+    fn every_unavailable_reason_tells_the_operator_what_happened() {
+        let unreachable = PairingRoomUnavailable::Unreachable {
+            signaling_url: "wss://relay.example/signaling".into(),
+            last_error: Some("signaling connect timed out".into()),
+        };
+        assert_eq!(
+            unreachable.to_string(),
+            "the relay at wss://relay.example/signaling did not accept the pairing room \
+             (signaling connect timed out)"
+        );
+        assert!(PairingRoomUnavailable::Disabled
+            .to_string()
+            .contains("switched off"));
+        assert!(PairingRoomUnavailable::NotBound
+            .to_string()
+            .contains("not finished starting"));
+    }
+
+    #[test]
+    fn a_disabled_or_unbound_hub_refuses_to_open_a_pairing_room() {
+        let hub = SignalingHub::new();
+        let expires = now_ms() + 60_000;
+        assert_eq!(
+            hub.open_pairing_room(expires).err(),
+            Some(PairingRoomUnavailable::NotBound)
+        );
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        assert_eq!(
+            hub.open_pairing_room(expires).err(),
+            Some(PairingRoomUnavailable::Disabled)
+        );
     }
 }

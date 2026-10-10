@@ -55,6 +55,8 @@ describe("createRelayPairFetcher", () => {
     const { fetcherPromise, rtc } = make()
     await fetcherPromise
     expect(rtc().options.p2p).toBe(false)
+    // A one-shot room leaves nothing behind in localStorage.
+    expect(rtc().options.persistEventCursor).toBe(false)
     expect(rtc().options.rendezvousId).toBe("room-1")
     expect(rtc().options.role).toBe("mobile")
   })

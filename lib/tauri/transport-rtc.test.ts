@@ -769,6 +769,37 @@ describe("TransportRtc", () => {
     })
   })
 
+  it("never touches localStorage when the event cursor is not persisted", async () => {
+    const getItem = jest.fn(() => "3850")
+    const setItem = jest.fn()
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: { getItem, setItem },
+    })
+    try {
+      const { rtc, sig, pcs } = makeRtc({ persistEventCursor: false })
+      const connect = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+      const dc = pcs[0].channels[0]
+      dc.open()
+      await connect
+      // A fresh room resumes from zero, not from a stored cursor.
+      expect(dc.sent.map((raw) => JSON.parse(raw))).toContainEqual({
+        kind: "event-resume",
+        since: 0,
+      })
+      dc.push({ kind: "event", event: "x", seq: 1, payload: {} })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(getItem).not.toHaveBeenCalled()
+      expect(setItem).not.toHaveBeenCalled()
+    } finally {
+      if (previous) Object.defineProperty(globalThis, "localStorage", previous)
+      else Reflect.deleteProperty(globalThis, "localStorage")
+    }
+  })
+
   it("takes a restarted Host's lower cursor from its resync instead of dropping its events", async () => {
     // The phone saved cursor 3850 under the Host's previous process. The
     // restarted Host's bus is at 238, so it answers the resume with a resync;
