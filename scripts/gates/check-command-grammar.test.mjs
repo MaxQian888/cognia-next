@@ -1,13 +1,51 @@
 import assert from "node:assert/strict"
+import childProcess from "node:child_process"
+import { syncBuiltinESMExports } from "node:module"
 import test from "node:test"
 
 import {
   auditContract,
   hasArm,
+  listClientFiles,
   resolveVerb,
   scanClientSource,
   wireName,
 } from "./check-command-grammar.mjs"
+
+test("client file listing handles output over 1 MiB and preserves filtering", (t) => {
+  const sourceFiles = ["lib/tauri/companion-auth.ts", "components/ui/button.tsx"]
+  const padding = "lib/ignored.md\n"
+  const listing = [
+    ...sourceFiles,
+    "lib/utils.test.ts",
+    "lib/utils.stories.tsx",
+    "lib/generated/commands.ts",
+    "lib/__missing_command_grammar_fixture__.ts",
+    "",
+  ].join("\n")
+  assert.ok(Buffer.byteLength(padding.repeat(80_000) + listing) > 1024 * 1024)
+  const mockedExec = t.mock.method(childProcess, "execSync", (cmd, options) => {
+    assert.match(cmd, /git -C .* ls-files/)
+    return childProcess.execFileSync(
+      process.execPath,
+      [
+        "-e",
+        "process.stdout.write(process.argv[1].repeat(80_000) + process.argv[2])",
+        padding,
+        listing,
+      ],
+      options
+    )
+  })
+  syncBuiltinESMExports()
+  try {
+    assert.deepEqual(listClientFiles(), sourceFiles)
+    assert.equal(mockedExec.mock.callCount(), 1)
+  } finally {
+    mockedExec.mock.restore()
+    syncBuiltinESMExports()
+  }
+})
 
 const resources = {
   session: { children: { message: {} } },

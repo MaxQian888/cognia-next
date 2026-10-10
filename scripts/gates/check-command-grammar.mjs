@@ -346,9 +346,9 @@ export function scanClientSource(relPath, src, oldNames) {
   return hits
 }
 
-function listClientFiles() {
+export function listClientFiles() {
   const cmd = `git -C "${REPO_ROOT}" ls-files ${CLIENT_SCAN_DIRS.map((d) => `"${d}"`).join(" ")}`
-  return execSync(cmd, { encoding: "utf8" })
+  return execSync(cmd, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
     .split("\n")
     .filter(
       (p) =>
