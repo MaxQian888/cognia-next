@@ -86,16 +86,28 @@ export interface WorkspaceFileIoDeps {
 }
 
 /**
- * Where the file is now: under the run's own root while that still exists,
- * else under the conversation's workspace root, where an applied run's
- * changes landed. Null when neither holds a file at that path.
+ * The roots that may hold the file, in the order to try them. An applied
+ * change is in the workspace root only: a copy left in the run's root would be
+ * the agent's version, not the file as it is now. A pending one is in the
+ * run's root only: the workspace root holds the person's version. Not known:
+ * the run's root while it exists, then the workspace root.
+ */
+export function workspaceFileRoots(location: LibraryItemWorkspaceLocation): string[] {
+  if (location.adoption === "applied") return [location.workspaceRoot]
+  if (location.adoption === "pending") return [location.executionRoot]
+  return [...new Set([location.executionRoot, location.workspaceRoot])]
+}
+
+/**
+ * Where the file is now (see `workspaceFileRoots`). Null when no root it may
+ * be under holds a file at that path.
  */
 export async function locateWorkspaceFile(
   location: LibraryItemWorkspaceLocation,
   deps: WorkspaceFileIoDeps = {}
 ): Promise<WorkspaceFileOnDisk | null> {
   const stat = deps.stat ?? statWorkspaceFile
-  const roots = [...new Set([location.executionRoot, location.workspaceRoot])]
+  const roots = workspaceFileRoots(location)
   for (const root of roots) {
     try {
       const found = await stat(root, location.relPath)

@@ -644,6 +644,12 @@ describe("workspace files (ADR-0223 §8)", () => {
       },
     })
     expect(entries[0]!.searchText).toContain("docs/plan.md")
+    // Whether the agent's change is in the workspace rides along.
+    const [pending] = aggregateFilesEntries(
+      input({ workspaceFiles: [{ ...file, adoption: "pending" }] })
+    )
+    expect(pending!.workspace).toMatchObject({ adoption: "pending" })
+    expect(entries[0]!.workspace).not.toHaveProperty("adoption")
     // Its conversation gone, the card stays; it can no longer open there.
     const [orphan] = aggregateFilesEntries(
       input({ workspaceFiles: [{ ...file, sessionId: "gone" }] })

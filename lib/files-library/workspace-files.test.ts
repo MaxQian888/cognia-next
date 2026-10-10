@@ -18,6 +18,7 @@ function indexEntry(overrides: Partial<TaskResourceIndexEntry> = {}): TaskResour
     binary: false,
     firstChangedAt: 10,
     changedAt: 20,
+    adoption: "applied",
     ...overrides,
   }
 }
@@ -73,8 +74,13 @@ describe("mergeWorkspaceFiles", () => {
         byteSize: 12,
         createdAt: 10,
         updatedAt: 20,
+        adoption: "applied",
       },
     ])
+    // Where the file is follows from whether it was applied.
+    expect(mergeWorkspaceFiles([indexEntry({ adoption: "pending" })], [])[0]).toMatchObject({
+      adoption: "pending",
+    })
   })
 
   it("keeps a renamed file known by the path it was first listed under", () => {
@@ -144,6 +150,18 @@ describe("mergeWorkspaceFiles", () => {
     ])
     expect(files).toHaveLength(1)
     expect(files[0]).toMatchObject({ change: "created", createdAt: 5, updatedAt: 9 })
+  })
+
+  it("leaves out an in-app turn that was never applied, whose run root went with the ledger", () => {
+    const files = mergeWorkspaceFiles(null, [
+      turn({ measurement: "taskWorkspace", adoptionState: "pending" }),
+      // A turn measured off the workspace itself is already on disk.
+      turn({ sessionId: "s3", measurement: "legacyFingerprint", adoptionState: "pending" }),
+      turn({ sessionId: "s4", measurement: "taskWorkspace", adoptionState: "accepted" }),
+    ] as CodeAdoptionTurnRow[])
+    expect(files.map((file) => file.sessionId)).toEqual(["s3", "s4"])
+    // Turn rows do not say which root holds a file: both are tried.
+    expect(files[0]).not.toHaveProperty("adoption")
   })
 
   it("leaves out discarded changes and credential-shaped paths", () => {

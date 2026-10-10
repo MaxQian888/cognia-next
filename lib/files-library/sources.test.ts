@@ -381,6 +381,7 @@ describe("workspace files (ADR-0223 §8)", () => {
     binary: false,
     firstChangedAt: 10,
     changedAt: 20,
+    adoption: "applied" as const,
   }
 
   it("merges the ledger's index with turn rows, and knows their conversations", async () => {

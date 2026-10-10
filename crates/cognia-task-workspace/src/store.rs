@@ -585,7 +585,8 @@ impl WorkspaceStore {
 
     /// Every ledger row with its conversation and run, for the resource index
     /// (ADR-0223 §8). Rows of a run whose task has gone are gone with it. A
-    /// run's payload is parsed once and shared by all of its rows.
+    /// run's payload is parsed once and shared by all of its rows, and each
+    /// row carries what became of its change in the run's patch set.
     pub fn list_resource_index_rows(
         &self,
     ) -> Result<Vec<crate::resource_index::ResourceIndexRow>, String> {
@@ -608,6 +609,27 @@ impl WorkspaceStore {
                 let run: TaskRun =
                     serde_json::from_str(&payload).map_err(|error| error.to_string())?;
                 runs.insert(run_id, Arc::new(run));
+            }
+        }
+        let mut outcomes = HashMap::new();
+        {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT run_id, payload FROM task_patch_sets
+                     WHERE run_id IN (SELECT DISTINCT run_id FROM task_resources)",
+                )
+                .map_err(|error| format!("prepare resource index patches: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|error| format!("query resource index patches: {error}"))?;
+            for row in rows {
+                let (run_id, payload) = row.map_err(|error| error.to_string())?;
+                let outcome: crate::resource_index::PatchOutcome =
+                    serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+                outcomes.insert(run_id, outcome);
             }
         }
         let mut statement = self
@@ -636,11 +658,18 @@ impl WorkspaceStore {
             let Some(run) = runs.get(&run_id) else {
                 continue;
             };
+            let change: ResourceChange =
+                serde_json::from_str(&change).map_err(|error| error.to_string())?;
+            let adoption = crate::resource_index::PatchOutcome::adoption_of(
+                outcomes.get(&run_id),
+                &change.path,
+            );
             index_rows.push(crate::resource_index::ResourceIndexRow {
                 session_id,
                 workspace_root,
                 run: Arc::clone(run),
-                change: serde_json::from_str(&change).map_err(|error| error.to_string())?,
+                change,
+                adoption,
             });
         }
         Ok(index_rows)
@@ -1897,6 +1926,30 @@ mod tests {
         assert_eq!(rows[0].workspace_root, "/repo");
         assert_eq!(*rows[0].run, run);
         assert_eq!(rows[0].change, change);
+        // No patch set yet: the change waits in the run's root.
+        assert_eq!(rows[0].adoption, crate::ChangeAdoption::Pending);
+        // The run's patch set says what became of it.
+        let mut patch = crate::PatchSet {
+            patch_id: "patch:run-1".into(),
+            task_id: "task-1".into(),
+            run_id: "run-1".into(),
+            state: crate::PatchState::Applied,
+            base_revision: 0,
+            applied_revision: Some(2),
+            files: Vec::new(),
+            applied_files: Vec::new(),
+            applied_selection: Vec::new(),
+            applied_selection_known: true,
+            reversible: true,
+            created_at: 1,
+        };
+        store.put_patch_set(&patch).unwrap();
+        let rows = store.list_resource_index_rows().unwrap();
+        assert_eq!(rows[0].adoption, crate::ChangeAdoption::Applied);
+        patch.state = crate::PatchState::Reverted;
+        store.put_patch_set(&patch).unwrap();
+        let rows = store.list_resource_index_rows().unwrap();
+        assert_eq!(rows[0].adoption, crate::ChangeAdoption::Discarded);
         // A task's rows go with it.
         store.delete_task("task-1").unwrap();
         assert!(store.list_resource_index_rows().unwrap().is_empty());

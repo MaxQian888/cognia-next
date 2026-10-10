@@ -132,11 +132,13 @@ a favorite or a folder follows it through the agent's renames.
   Favorites lens once favorited, and in Recents once opened, favorited or
   filed. All under any other lens never lists them, so an agent's busy run
   does not bury what the person made. ⌘K leaves them out.
-- **Where the bytes are.** A path is relative to the run's execution root. An
-  isolated run's root can vanish once its changes are applied back, so a read
-  tries the execution root, then the workspace root, and a file found in
-  neither is gone ("This file is no longer on disk."). Existence is checked on
-  open, not when listing.
+- **Applied, waiting, or thrown away.** A run works in its own root; its
+  changes reach the workspace only when the person applies its patch set. A
+  change that was undone, or left out of the selection that was applied, is
+  as if it never happened. One not applied yet is listed and labelled "Not
+  applied yet", and read from the run's root; an applied one is read from the
+  workspace root. A file not where it should be is gone ("This file is no
+  longer on disk."); existence is checked on open, not when listing.
 - **Open** goes to the conversation and opens the file in its Files panel
   through ADR-0222's opener when the conversation's FileSpace contains it; a
   file outside it (a run root the FileSpace no longer mounts) is previewed in

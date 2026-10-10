@@ -35,6 +35,7 @@ function entry(path: string): TaskResourceIndexEntry {
     binary: false,
     firstChangedAt: 1,
     changedAt: 1,
+    adoption: "applied",
   }
 }
 

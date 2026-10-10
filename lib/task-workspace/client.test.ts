@@ -1200,6 +1200,7 @@ describe("task workspace client", () => {
       binary: false,
       firstChangedAt: changedAt,
       changedAt,
+      adoption: "applied" as const,
     })
     call
       .mockResolvedValueOnce({ items: [entry("s1", "a.md", 3)], nextPageToken: "o1" })

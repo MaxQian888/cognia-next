@@ -71,7 +71,10 @@ pub use resource::{
     is_sensitive_resource, read_text_resource, ResourceEncoding, ResourceRead,
     DEFAULT_TEXT_PREVIEW_BYTES, MAX_EDITOR_BYTES,
 };
-pub use resource_index::{fold_resource_index, ResourceIndexEntry, ResourceIndexRow};
+pub use resource_index::{
+    fold_resource_index, ChangeAdoption, PatchOutcome, PatchPath, ResourceAdoption,
+    ResourceIndexEntry, ResourceIndexRow,
+};
 pub use sensitive::{
     decide_access, validate_include_pattern, IncludePatternError, SensitiveAuditEntry,
     SensitiveDecision, SensitiveGrant, SensitiveGrantStore,

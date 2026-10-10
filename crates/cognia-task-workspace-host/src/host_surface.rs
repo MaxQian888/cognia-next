@@ -1546,6 +1546,11 @@ mod tests {
             workspace.path().canonicalize().unwrap()
         );
         assert_eq!(entry.kind, cognia_task_workspace::ChangeKind::Created);
+        // Settled, not applied: the file is in the run's own root.
+        assert_eq!(
+            entry.adoption,
+            cognia_task_workspace::ResourceAdoption::Pending
+        );
         assert!(page(Some("nonsense")).is_err());
     }
 

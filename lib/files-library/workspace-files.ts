@@ -88,12 +88,22 @@ function fromIndex(entry: TaskResourceIndexEntry): RawWorkspaceFile {
     byteSize: entry.size,
     createdAt: entry.firstChangedAt,
     updatedAt: entry.changedAt,
+    adoption: entry.adoption,
   }
 }
 
 /** A turn, or a file in it, whose change was thrown away. */
 function discarded(state: string | undefined): boolean {
   return state === "rejected" || state === "reverted"
+}
+
+/**
+ * An in-app agent's turn that was never applied: its change lived only in
+ * the run's own root, which went with the ledger rows that would name it, so
+ * the workspace root holds the person's version, not the agent's.
+ */
+function neverApplied(turn: CodeAdoptionTurnRow, state: string | undefined): boolean {
+  return turn.measurement === "taskWorkspace" && state === "pending"
 }
 
 /**
@@ -109,6 +119,7 @@ function fromAdoption(
   const ordered = [...turns].sort((a, b) => a.ts - b.ts)
   for (const turn of ordered) {
     if (covered.has(turn.sessionId) || discarded(turn.adoptionState)) continue
+    if (neverApplied(turn, turn.adoptionState)) continue
     for (const file of turn.files) {
       if (discarded(file.adoptionState)) continue
       const relPath = normalizeRelPath(file.path)

@@ -9024,4 +9024,44 @@ mod tests {
         let third = service.list_resource_index().unwrap();
         assert!(third.iter().all(|entry| entry.session_id == "session-2"));
     }
+
+    #[test]
+    fn a_workspace_file_is_pending_until_applied_and_gone_once_undone() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("plan.md"), "plan").unwrap();
+        fs::write(Path::new(&run.execution_root).join("notes.md"), "notes").unwrap();
+        service.settle_run("run-1").unwrap();
+
+        let index = service.list_resource_index().unwrap();
+        assert_eq!(index.len(), 2);
+        assert!(index
+            .iter()
+            .all(|entry| entry.adoption == crate::ResourceAdoption::Pending));
+
+        // The person takes one file of the two: the other was turned down.
+        let applied = service
+            .apply_patch_set(
+                "run-1",
+                &[crate::PatchSelection {
+                    path: "plan.md".into(),
+                    hunk_ids: Vec::new(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(applied.state, crate::PatchState::Applied);
+        let index = service.list_resource_index().unwrap();
+        assert_eq!(index.len(), 1);
+        assert_eq!(index[0].path, "plan.md");
+        assert_eq!(index[0].adoption, crate::ResourceAdoption::Applied);
+        assert!(workspace.path().join("plan.md").is_file());
+
+        // Undone: none of it happened.
+        service.undo_patch_set("run-1").unwrap();
+        assert!(service.list_resource_index().unwrap().is_empty());
+    }
 }

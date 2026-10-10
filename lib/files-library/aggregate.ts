@@ -500,6 +500,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
             relPath: file.relPath,
             change: file.change,
             ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+            ...(file.adoption ? { adoption: file.adoption } : {}),
           },
           searchText: haystack(name, file.relPath, file.mediaType),
         },

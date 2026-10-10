@@ -334,6 +334,7 @@
     "conversations": "Conversations",
     "details": {
       "added": "Added",
+      "adoption": "Status",
       "change": "Change",
       "dimensions": "Dimensions",
       "dimensionsValue": "{width} × {height}",
@@ -354,6 +355,10 @@
     "sourceDeleted": "Its conversation was deleted. Files keeps it because it is a favorite or in a folder.",
     "trashedNotice": "Moved to the Trash on {date}. It will be deleted for good on {purge}.",
     "unavailable": "The content is no longer stored on this device.",
+    "workspaceAdoption": {
+      "applied": "Applied to the workspace",
+      "pending": "Not applied yet: only in the agent's working copy"
+    },
     "workspaceChange": {
       "created": "Created by an agent",
       "modified": "Edited by an agent",

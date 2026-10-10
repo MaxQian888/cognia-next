@@ -154,6 +154,14 @@ export function FilesPreviewPane({
                   </dd>
                 </>
               ) : null}
+              {entry.workspace.adoption ? (
+                <>
+                  <dt className="text-muted-foreground">{t("preview.details.adoption")}</dt>
+                  <dd data-testid="files-preview-workspace-adoption">
+                    {t(`preview.workspaceAdoption.${entry.workspace.adoption}`)}
+                  </dd>
+                </>
+              ) : null}
             </>
           ) : null}
           {entry.byteSize !== undefined ? (

@@ -56,12 +56,19 @@ export interface LibraryItemGeneratedVideo {
  */
 export interface LibraryItemWorkspaceLocation {
   sessionId: string
-  /** The conversation's workspace root; the file lives here once its run's root is gone. */
+  /** The conversation's workspace root, where an applied change landed. */
   workspaceRoot: string
-  /** Root the run that changed it last wrote under; tried first. */
+  /** Root the run that changed it last wrote under, where it waits until applied. */
   executionRoot: string
   /** Relative to either root, forward slashes. */
   relPath: string
+  /**
+   * Which root holds the file: `applied` → `workspaceRoot`, `pending` →
+   * `executionRoot`. Absent when not known (turn rows, or a card rebuilt from
+   * a kept item), and then both are tried, the run's own first. Never kept in
+   * a snapshot: it is only true of the listing it came from.
+   */
+  adoption?: "applied" | "pending"
 }
 
 /** Display metadata copied at keep/upload time so an item outlives its source row. */

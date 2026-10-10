@@ -38,9 +38,9 @@ flowchart LR
 ## The resource index
 
 The ledger stores one row per task, run and path in `task_resources`, each with its `ResourceChange`.
-`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:589`) joins
+`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:590`) joins
 those rows to their run and to the `task_workspaces` row that names the owning conversation
-(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:89`) replays
+(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:177`) replays
 them in the order they settled (the run's `settled_at`, else its `created_at`), keyed by conversation,
 workspace root and path:
 
@@ -50,6 +50,21 @@ workspace root and path:
 - a change classified **sensitive**, **generated** (build output) or a **symlink** removes it;
 - a path first **created** stays `created` through later edits; `firstChangedAt` is when it entered
   the index, `changedAt` its last change.
+
+A run works in its own root, and its changes reach the workspace only when the person applies its patch
+set. So each row is first weighed by that patch set (`PatchOutcome::adoption_of`, read from
+`task_patch_sets` with only its state, applied files and applied selection deserialized):
+
+| Patch set | The change | The entry |
+| --- | --- | --- |
+| none yet, `ready`, or a `conflict` from an apply (nothing written) | pending | `adoption: "pending"`: the file is in the run's `executionRoot` |
+| `applied`, or a `conflict` from an undo (still applied), and the path is in the person's selection (an empty selection is all of it; older patch sets without a recorded selection use the files the apply wrote) | applied | `adoption: "applied"`: the file is in the `workspaceRoot` |
+| `applied`, path left out of the selection | discarded | skipped |
+| `reverted` (undone, or a conflict resolved by keeping the current files) | discarded | skipped |
+
+A discarded change is as if it never happened: the fold skips it, so whatever the path was before it
+stands — an undone delete leaves the file listed, an undone create never lists it. A pending change is
+the agent's latest output and is listed as such; the preview says "Not applied yet".
 
 The result is sorted newest first. `TaskWorkspaceService::list_resource_index` keeps the last fold
 with the database's change fingerprint (`WorkspaceStore::change_fingerprint`: this connection's
@@ -62,12 +77,14 @@ parsed once for all of its rows. `task_workspace_list_resource_index`
 
 ## Merging with code-adoption turns
 
-`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:166`) takes the index as it stands, then
+`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:177`) takes the index as it stands, then
 adds files from `codeAdoptionTurns` **only for conversations the index holds nothing for** — an
 external agent that edited files without running through the ledger. A conversation the ledger does
 hold is never patched from turn rows: what the ledger dropped stays dropped. Turn rows fold oldest
-first, skip rejected or reverted turns and files, and leave out the paths `isSensitiveResourcePath`
-matches (`.env`, private keys and the like). Their execution root is the workspace root.
+first, skip rejected or reverted turns and files, skip an in-app (`taskWorkspace`) turn still
+`pending` — its change lived only in a run root that went with the ledger rows, so the workspace holds
+the person's version — and leave out the paths `isSensitiveResourcePath` matches (`.env`, private keys
+and the like). Their execution root is the workspace root, and they carry no `adoption`.
 
 Where there is no ledger to ask (the index read failed), `index` is `null` and the turn rows are all
 there is.
@@ -106,10 +123,13 @@ person made:
 
 ## Reading the bytes
 
-A path is relative to the run's execution root. An isolated run (a shadow copy or a git worktree) can
-lose its root once its changes are applied back, so `locateWorkspaceFile`
-(`lib/files-library/workspace-files-io.ts:93`) tries the execution root, then the workspace root,
-skipping a root the host refuses and ignoring directories. A file in neither is gone:
+A path is relative to both roots, and `adoption` picks the one to read (`workspaceFileRoots`): an
+applied file from the workspace root only (a copy left in the run's root is the agent's version, not
+the file as it is now), a pending one from the run's root only (the workspace root holds the person's
+version). Without `adoption` — a turn row, or a card rebuilt from a kept item, whose snapshot never
+stores it — `locateWorkspaceFile` tries the run's root, then the workspace root. It skips a root the
+host refuses and ignores directories. A pending file whose run root was archived is gone too, as is a
+file in no root it may be under:
 `FilesWorkspaceFileError("files_workspace_missing")`, "This file is no longer on disk." Existence is
 checked when the file is used, not when it is listed.
 
@@ -121,7 +141,7 @@ and Use in chat (capped at the draft attachment quota) all read this way.
 ## Opening
 
 `openFilesEntry` routes a workspace file whose conversation is alive to
-`openWorkspaceFileInConversation` (`lib/files-library/workspace-files-io.ts:199`):
+`openWorkspaceFileInConversation` (`lib/files-library/workspace-files-io.ts:211`):
 
 1. locate the file, or report it missing;
 2. load the conversation's FileSpace (`lib/filespace/load.ts`) and map the file's absolute path into

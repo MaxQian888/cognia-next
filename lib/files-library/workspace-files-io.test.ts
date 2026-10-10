@@ -15,6 +15,7 @@ import {
   loadWorkspaceFileIndex,
   locateWorkspaceFile,
   openWorkspaceFileInConversation,
+  workspaceFileRoots,
   readWorkspaceFileBytes,
   readWorkspaceFileSlice,
 } from "./workspace-files-io"
@@ -90,6 +91,26 @@ describe("locateWorkspaceFile", () => {
       locateWorkspaceFile({ ...location, executionRoot: "/broken" }, applied)
     ).resolves.toMatchObject({ root: "/repo" })
     await expect(locateWorkspaceFile(location, disk({}))).resolves.toBeNull()
+  })
+
+  it("reads an applied file from the workspace and a pending one from the run's root only", async () => {
+    expect(workspaceFileRoots({ ...location, adoption: "applied" })).toEqual(["/repo"])
+    expect(workspaceFileRoots({ ...location, adoption: "pending" })).toEqual(["/exec/run-1"])
+    expect(workspaceFileRoots(location)).toEqual(["/exec/run-1", "/repo"])
+    expect(workspaceFileRoots({ ...location, executionRoot: "/repo" })).toEqual(["/repo"])
+    const both = disk({
+      "/exec/run-1|docs/plan.md": new Uint8Array(3),
+      "/repo|docs/plan.md": new Uint8Array(5),
+    })
+    // Applied: the agent's copy left in its root is not the file as it is now.
+    await expect(
+      locateWorkspaceFile({ ...location, adoption: "applied" }, both)
+    ).resolves.toMatchObject({ root: "/repo", size: 5 })
+    // Pending: the workspace holds the person's version, not the agent's.
+    const runOnly = disk({ "/repo|docs/plan.md": new Uint8Array(5) })
+    await expect(
+      locateWorkspaceFile({ ...location, adoption: "pending" }, runOnly)
+    ).resolves.toBeNull()
   })
 
   it("does not take a directory for the file", async () => {

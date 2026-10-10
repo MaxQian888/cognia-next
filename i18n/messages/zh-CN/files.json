@@ -334,6 +334,7 @@
     "conversations": "所在对话",
     "details": {
       "added": "添加时间",
+      "adoption": "状态",
       "change": "改动",
       "dimensions": "分辨率",
       "dimensionsValue": "{width} × {height}",
@@ -354,6 +355,10 @@
     "sourceDeleted": "所在对话已删除。因为它已收藏或在文件夹中，所以仍保留在这里。",
     "trashedNotice": "于 {date} 移到回收站，将在 {purge} 永久删除。",
     "unavailable": "内容已不在本设备上。",
+    "workspaceAdoption": {
+      "applied": "已应用到工作区",
+      "pending": "尚未应用：只在 Agent 的工作副本中"
+    },
     "workspaceChange": {
       "created": "由 Agent 新建",
       "modified": "由 Agent 修改",

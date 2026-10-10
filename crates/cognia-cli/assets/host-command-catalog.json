@@ -25788,6 +25788,14 @@
                       },
                       "oldPath": {
                         "type": "string"
+                      },
+                      "adoption": {
+                        "type": "string",
+                        "enum": [
+                          "applied",
+                          "pending"
+                        ],
+                        "description": "Whether the agent's last change is in the workspace yet: `applied` reads `workspaceRoot`, `pending` the run's own `executionRoot`; absent tries both."
                       }
                     },
                     "additionalProperties": false
@@ -26041,6 +26049,14 @@
                         },
                         "oldPath": {
                           "type": "string"
+                        },
+                        "adoption": {
+                          "type": "string",
+                          "enum": [
+                            "applied",
+                            "pending"
+                          ],
+                          "description": "Whether the agent's last change is in the workspace yet: `applied` reads `workspaceRoot`, `pending` the run's own `executionRoot`; absent tries both."
                         }
                       },
                       "additionalProperties": false
@@ -61355,8 +61371,23 @@
           "items": {
             "items": {
               "additionalProperties": false,
-              "description": "One file an agent created, modified or renamed in a conversation, as the\nlatest net change to that path across the conversation's runs.\n\n`path` is relative to the run's `execution_root`. An isolated run's root\nis removed once its changes are applied back or discarded, so the same\nrelative path under `workspace_root` is where the file lives after that;\na reader tries the execution root first, then the workspace root.",
+              "description": "One file an agent created, modified or renamed in a conversation, as the\nlatest net change to that path across the conversation's runs.\n\n`path` is relative to both roots. `adoption` says which one holds the\nfile: `workspace_root` once the run's patch was applied, the run's own\n`execution_root` until then (and only while that root is kept).",
               "properties": {
+                "adoption": {
+                  "description": "Whether that last change is in the workspace yet, which says where\nthe file is: `workspace_root` once applied, `execution_root` before.",
+                  "oneOf": [
+                    {
+                      "const": "applied",
+                      "description": "Applied to the workspace: the file is under `workspace_root`.",
+                      "type": "string"
+                    },
+                    {
+                      "const": "pending",
+                      "description": "Not applied yet: the file is only under the run's `execution_root`,\nfor as long as that root is kept.",
+                      "type": "string"
+                    }
+                  ]
+                },
                 "binary": {
                   "type": "boolean"
                 },
@@ -61422,6 +61453,7 @@
                 }
               },
               "required": [
+                "adoption",
                 "binary",
                 "changedAt",
                 "executionRoot",
@@ -73858,5 +73890,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d42797f3a07a16b77f515b06afe509d7cc972d4160dbf5a5b387072e4bed7ac5"
+  "catalogHash": "c0ad38dcf9e812cfc3395cccff64dd2f52091c2048825364a9f65ce2738d26a3"
 }

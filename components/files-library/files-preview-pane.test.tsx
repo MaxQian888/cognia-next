@@ -439,4 +439,37 @@ it("previews a workspace file's bytes and says where it is and what the agent di
   expect(screen.getByTestId("files-preview-workspace-change")).toHaveTextContent(
     "Created by an agent"
   )
+  // Not known whether it was applied (a turn row): no status is claimed.
+  expect(screen.queryByTestId("files-preview-workspace-adoption")).toBeNull()
+})
+
+it("says when a workspace file is not applied yet, and when it is", async () => {
+  payload.mockResolvedValue({ blob: new Blob(["x"], { type: "text/plain" }), filename: "a.txt" })
+  const e = (adoption: "applied" | "pending") =>
+    entry({
+      key: "workspace-file:w2",
+      kind: "workspace-file",
+      sourceId: "w2",
+      title: "a.txt",
+      sourceTitle: "a.txt",
+      creator: "ai",
+      workspace: {
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        executionRoot: "/exec/run-1",
+        relPath: "a.txt",
+        change: "modified",
+        adoption,
+      },
+    })
+  const { rerender } = render(
+    <FilesPreviewPane entry={e("pending")} actions={actions()} onClose={jest.fn()} />
+  )
+  expect(await screen.findByTestId("files-preview-workspace-adoption")).toHaveTextContent(
+    "Not applied yet: only in the agent's working copy"
+  )
+  rerender(<FilesPreviewPane entry={e("applied")} actions={actions()} onClose={jest.fn()} />)
+  expect(screen.getByTestId("files-preview-workspace-adoption")).toHaveTextContent(
+    "Applied to the workspace"
+  )
 })

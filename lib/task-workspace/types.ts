@@ -409,6 +409,12 @@ export interface TaskResourceIndexEntry {
   firstChangedAt: number
   /** Epoch ms the run that changed it last settled. */
   changedAt: number
+  /**
+   * Whether that last change is in the workspace yet: `applied` means the
+   * file is under `workspaceRoot`, `pending` only under `executionRoot`.
+   * A change the person undid or left out of an apply is not listed at all.
+   */
+  adoption: "applied" | "pending"
 }
 
 export type ResourceEventKind =

@@ -6,22 +6,106 @@
 //! that happened to it. That is what the Files page lists as a workspace
 //! file. Nothing here reads or writes the disk: whether the file is still
 //! there is checked by whoever opens it.
+//!
+//! A run works in its own root; its changes reach the workspace only when the
+//! person applies its patch set. So each change is weighed by what became of
+//! that patch: applied, still waiting, or thrown away (undone, or left out of
+//! the selection that was applied). A thrown-away change is as if it never
+//! happened, so whatever the path was before it stands.
 
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ChangeKind, ContributionOrigin, ResourceCaptureClass, ResourceChange, ResourceKind, TaskRun,
+    ChangeKind, ContributionOrigin, PatchState, ResourceCaptureClass, ResourceChange, ResourceKind,
+    TaskRun,
 };
+
+/// Whether a listed change is in the workspace yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ResourceAdoption {
+    /// Applied to the workspace: the file is under `workspace_root`.
+    Applied,
+    /// Not applied yet: the file is only under the run's `execution_root`,
+    /// for as long as that root is kept.
+    Pending,
+}
+
+/// What became of one change, from its run's patch set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeAdoption {
+    Applied,
+    Pending,
+    /// Undone, or left out of the selection that was applied.
+    Discarded,
+}
+
+/// The part of a stored patch set the index reads. Unknown fields (the
+/// files and their hunks) are skipped, not kept.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchOutcome {
+    pub state: PatchState,
+    #[serde(default)]
+    pub applied_files: Vec<PatchPath>,
+    #[serde(default)]
+    pub applied_selection: Vec<PatchPath>,
+    #[serde(default)]
+    pub applied_selection_known: bool,
+}
+
+/// A path named by a patch set's applied files or selection.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PatchPath {
+    pub path: String,
+}
+
+impl PatchOutcome {
+    /// What became of the change to `path`. A run with no patch set has not
+    /// settled into one, so its changes wait like a ready patch's.
+    pub fn adoption_of(outcome: Option<&Self>, path: &str) -> ChangeAdoption {
+        let Some(outcome) = outcome else {
+            return ChangeAdoption::Pending;
+        };
+        let applied = match outcome.state {
+            PatchState::Reverted => return ChangeAdoption::Discarded,
+            PatchState::Ready => return ChangeAdoption::Pending,
+            // An apply that conflicted wrote nothing; an undo that conflicted
+            // left what it was undoing in place.
+            PatchState::Conflict if outcome.applied_files.is_empty() => {
+                return ChangeAdoption::Pending
+            }
+            PatchState::Conflict | PatchState::Applied => outcome,
+        };
+        // The person's selection says what they took; an empty one is all of
+        // it. Patch sets from before the selection was recorded fall back to
+        // the files the apply wrote.
+        let taken = if applied.applied_selection_known {
+            applied.applied_selection.is_empty()
+                || applied
+                    .applied_selection
+                    .iter()
+                    .any(|item| item.path == path)
+        } else {
+            applied.applied_files.is_empty()
+                || applied.applied_files.iter().any(|item| item.path == path)
+        };
+        if taken {
+            ChangeAdoption::Applied
+        } else {
+            ChangeAdoption::Discarded
+        }
+    }
+}
 
 /// One file an agent created, modified or renamed in a conversation, as the
 /// latest net change to that path across the conversation's runs.
 ///
-/// `path` is relative to the run's `execution_root`. An isolated run's root
-/// is removed once its changes are applied back or discarded, so the same
-/// relative path under `workspace_root` is where the file lives after that;
-/// a reader tries the execution root first, then the workspace root.
+/// `path` is relative to both roots. `adoption` says which one holds the
+/// file: `workspace_root` once the run's patch was applied, the run's own
+/// `execution_root` until then (and only while that root is kept).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(transform = cognia_problem::wire_schema::closed_object)]
@@ -46,6 +130,9 @@ pub struct ResourceIndexEntry {
     pub first_changed_at: i64,
     /// When the run that changed it last settled (epoch ms).
     pub changed_at: i64,
+    /// Whether that last change is in the workspace yet, which says where
+    /// the file is: `workspace_root` once applied, `execution_root` before.
+    pub adoption: ResourceAdoption,
 }
 
 /// One ledger row with the conversation and run it belongs to. The run is
@@ -56,6 +143,7 @@ pub struct ResourceIndexRow {
     pub workspace_root: String,
     pub run: Arc<TaskRun>,
     pub change: ResourceChange,
+    pub adoption: ChangeAdoption,
 }
 
 fn settled_at(run: &TaskRun) -> i64 {
@@ -97,6 +185,9 @@ pub fn fold_resource_index(mut rows: Vec<ResourceIndexRow>) -> Vec<ResourceIndex
     });
     let mut index: HashMap<IndexKey, ResourceIndexEntry> = HashMap::new();
     for row in &rows {
+        if row.adoption == ChangeAdoption::Discarded {
+            continue;
+        }
         let change = &row.change;
         let at = settled_at(&row.run);
         match change.kind {
@@ -181,6 +272,11 @@ fn entry_for(row: &ResourceIndexRow, at: i64) -> ResourceIndexEntry {
         binary: change.binary,
         first_changed_at: at,
         changed_at: at,
+        adoption: if row.adoption == ChangeAdoption::Applied {
+            ResourceAdoption::Applied
+        } else {
+            ResourceAdoption::Pending
+        },
     }
 }
 
@@ -242,11 +338,38 @@ mod tests {
     }
 
     fn row(session: &str, run: &TaskRun, change: ResourceChange) -> ResourceIndexRow {
+        adopted(session, run, change, ChangeAdoption::Applied)
+    }
+
+    fn adopted(
+        session: &str,
+        run: &TaskRun,
+        change: ResourceChange,
+        adoption: ChangeAdoption,
+    ) -> ResourceIndexRow {
         ResourceIndexRow {
             session_id: session.into(),
             workspace_root: "/repo".into(),
             run: Arc::new(run.clone()),
             change,
+            adoption,
+        }
+    }
+
+    fn outcome(state: PatchState, applied: &[&str], selection: Option<&[&str]>) -> PatchOutcome {
+        let paths = |items: &[&str]| {
+            items
+                .iter()
+                .map(|path| PatchPath {
+                    path: (*path).into(),
+                })
+                .collect()
+        };
+        PatchOutcome {
+            state,
+            applied_files: paths(applied),
+            applied_selection: paths(selection.unwrap_or(&[])),
+            applied_selection_known: selection.is_some(),
         }
     }
 
@@ -379,5 +502,108 @@ mod tests {
                 ("s2", "a.md", ChangeKind::Created),
             ]
         );
+    }
+
+    #[test]
+    fn a_patch_decides_whether_each_change_counts() {
+        use ChangeAdoption::{Applied, Discarded, Pending};
+        let of = |outcome: &PatchOutcome, path| PatchOutcome::adoption_of(Some(outcome), path);
+        // No patch set yet, or one waiting: the change sits in the run's root.
+        assert_eq!(PatchOutcome::adoption_of(None, "a.md"), Pending);
+        assert_eq!(of(&outcome(PatchState::Ready, &[], None), "a.md"), Pending);
+        // Undone, or kept out by a conflict resolved for the current files.
+        assert_eq!(
+            of(&outcome(PatchState::Reverted, &[], Some(&[])), "a.md"),
+            Discarded
+        );
+        // An apply that conflicted wrote nothing; an undo that did left it applied.
+        assert_eq!(
+            of(&outcome(PatchState::Conflict, &[], None), "a.md"),
+            Pending
+        );
+        assert_eq!(
+            of(&outcome(PatchState::Conflict, &["a.md"], Some(&[])), "a.md"),
+            Applied
+        );
+        // Applied: what the person selected, all of it when they selected nothing.
+        let all = outcome(PatchState::Applied, &["a.md"], Some(&[]));
+        assert_eq!(of(&all, "b.md"), Applied);
+        let some = outcome(PatchState::Applied, &["a.md"], Some(&["a.md"]));
+        assert_eq!(of(&some, "a.md"), Applied);
+        assert_eq!(of(&some, "b.md"), Discarded);
+        // Before selections were recorded: the files the apply wrote.
+        let legacy = outcome(PatchState::Applied, &["a.md"], None);
+        assert_eq!(of(&legacy, "a.md"), Applied);
+        assert_eq!(of(&legacy, "b.md"), Discarded);
+        assert_eq!(
+            of(&outcome(PatchState::Applied, &[], None), "b.md"),
+            Applied
+        );
+    }
+
+    #[test]
+    fn a_thrown_away_change_is_as_if_it_never_happened() {
+        let first = run("run-1", 10);
+        let second = run("run-2", 20);
+        let third = run("run-3", 30);
+        let entries = fold_resource_index(vec![
+            row(
+                "s1",
+                &first,
+                change("run-1", "kept.md", ChangeKind::Created),
+            ),
+            // Undone: the delete never reached the workspace, the edit neither.
+            adopted(
+                "s1",
+                &second,
+                change("run-2", "kept.md", ChangeKind::Deleted),
+                ChangeAdoption::Discarded,
+            ),
+            adopted(
+                "s1",
+                &second,
+                change("run-2", "gone.md", ChangeKind::Created),
+                ChangeAdoption::Discarded,
+            ),
+            // Not applied yet: listed, and where it is says so.
+            adopted(
+                "s1",
+                &third,
+                change("run-3", "draft.md", ChangeKind::Created),
+                ChangeAdoption::Pending,
+            ),
+        ]);
+        assert_eq!(
+            paths(&entries),
+            [
+                ("s1", "draft.md", ChangeKind::Created),
+                ("s1", "kept.md", ChangeKind::Created),
+            ]
+        );
+        assert_eq!(entries[0].adoption, ResourceAdoption::Pending);
+        assert_eq!(entries[1].adoption, ResourceAdoption::Applied);
+        assert_eq!(entries[1].run_id, "run-1");
+    }
+
+    #[test]
+    fn a_stored_patch_set_reads_as_its_outcome() {
+        let json = serde_json::json!({
+            "patchId": "patch:run-1",
+            "state": "applied",
+            "files": [{ "path": "a.md", "hunks": [{ "id": "h1" }] }],
+            "appliedFiles": [{ "path": "a.md", "binary": false }],
+            "appliedSelection": [{ "path": "a.md", "hunkIds": [] }],
+            "appliedSelectionKnown": true
+        });
+        let outcome: PatchOutcome = serde_json::from_value(json).unwrap();
+        assert_eq!(outcome.state, PatchState::Applied);
+        assert_eq!(
+            PatchOutcome::adoption_of(Some(&outcome), "a.md"),
+            ChangeAdoption::Applied
+        );
+        // A patch set written before the applied fields existed.
+        let old: PatchOutcome =
+            serde_json::from_value(serde_json::json!({ "state": "ready" })).unwrap();
+        assert!(old.applied_files.is_empty() && !old.applied_selection_known);
     }
 }
