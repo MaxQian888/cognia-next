@@ -802,4 +802,118 @@ pub(crate) mod tests {
         let wrong = Client::new(&config(&base), "nope".into());
         assert_eq!(wrong.create_user(&json!({})).await.unwrap_err().code, "provider_failed");
     }
+
+    /// Manual spike (ADR-0222 §12) against a real SFTPGo: drives the service's
+    /// own provider path — `set_sftpgo`, `create_grant` with
+    /// `ProviderKind::Sftpgo`, then suspend, resume, rotate and revoke — while
+    /// a real SFTP client checks each step from outside.
+    ///
+    /// `SPIKE_SFTPGO_URL` and `SPIKE_SFTPGO_KEY` (an admin-scope API key) name
+    /// the SFTPGo; `SPIKE_SFTPGO_PREFIX` is where it mounts this process's
+    /// `TMPDIR` (the fixture repo lives in a temp dir, so run with `TMPDIR`
+    /// set to a directory the container also sees). Credentials go to
+    /// `$SPIKE_DIR/spike.json`; writing `suspend`, `resume`, `rotate`,
+    /// `revoke` or `quit` to `$SPIKE_DIR/cmd` runs that step and rewrites
+    /// `$SPIKE_DIR/state.json`.
+    ///
+    /// `cargo test -p cognia-file-share --lib spike_real_sftpgo -- --ignored --nocapture`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "manual spike against a real SFTPGo"]
+    async fn spike_real_sftpgo() {
+        use crate::model::{CreateGrantRequest, Permission, ProviderKind};
+        use crate::service::tests::service_with;
+
+        let _ = cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default());
+        let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("set {name}"));
+        let out = std::path::PathBuf::from(env("SPIKE_DIR"));
+        let (service, dir) = service_with(vec![Permission::Read], vec![]);
+        let host_prefix = dir.path().parent().unwrap().canonicalize().unwrap().to_string_lossy().into_owned();
+        let status = service
+            .set_sftpgo(Some(SftpgoConfigInput {
+                config: SftpgoConfig {
+                    base_url: env("SPIKE_SFTPGO_URL"),
+                    home_base: "/srv/sftpgo/homes".into(),
+                    path_mappings: vec![PathMapping { host_prefix, sftpgo_prefix: env("SPIKE_SFTPGO_PREFIX") }],
+                    public_sftp_host: Some("127.0.0.1".into()),
+                    public_sftp_port: std::env::var("SPIKE_SFTPGO_SFTP_PORT").ok().and_then(|p| p.parse().ok()),
+                    public_webdav_url: std::env::var("SPIKE_SFTPGO_WEBDAV_URL").ok(),
+                },
+                api_key: Some(env("SPIKE_SFTPGO_KEY")),
+            }))
+            .await
+            .unwrap();
+        println!("sftpgo status: {}", serde_json::to_string(&status).unwrap());
+        assert_eq!(status.healthy, Some(true), "{status:?}");
+
+        let created = service
+            .create_grant(
+                CreateGrantRequest {
+                    session_id: "s1".into(),
+                    paths: vec!["/workspace/src".into()],
+                    permissions: vec![Permission::Read, Permission::Download, Permission::Write],
+                    protocols: vec![Protocol::Sftp, Protocol::Webdav],
+                    provider: ProviderKind::Sftpgo,
+                    expires_in_seconds: 3600,
+                    label: Some("sftpgo spike".into()),
+                    ssh_public_key: std::env::var("SPIKE_SSH_KEY").ok(),
+                },
+                "owner",
+            )
+            .await
+            .unwrap();
+        let grant_id = created.grant.id.clone();
+        let mut passwords: std::collections::HashMap<String, String> = created
+            .credentials
+            .iter()
+            .map(|issued| (issued.credential.username.clone(), issued.password.clone()))
+            .collect();
+        let report = |passwords: &std::collections::HashMap<String, String>, view: &serde_json::Value| {
+            json!({
+                "root": dir.path().join("repo"),
+                "endpoints": created.endpoints,
+                "grant": view,
+                "passwords": passwords,
+            })
+        };
+        let first = serde_json::to_value(&created.grant).unwrap();
+        std::fs::write(out.join("spike.json"), serde_json::to_vec_pretty(&report(&passwords, &first)).unwrap()).unwrap();
+        println!("{}", serde_json::to_string_pretty(&report(&passwords, &first)).unwrap());
+
+        let cmd = out.join("cmd");
+        loop {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let Ok(step) = std::fs::read_to_string(&cmd) else { continue };
+            let _ = std::fs::remove_file(&cmd);
+            let view = match step.trim() {
+                "suspend" => service.suspend_grant(&grant_id, "owner").await.map(|v| serde_json::to_value(v).unwrap()),
+                "resume" => service.resume_grant(&grant_id, "owner").await.map(|v| serde_json::to_value(v).unwrap()),
+                "rotate" => {
+                    let sftp = created.credentials.iter().find(|c| c.credential.protocol == Protocol::Sftp).unwrap();
+                    match service.rotate_credential(&sftp.credential.id, "owner").await {
+                        Ok(issued) => {
+                            passwords.insert(issued.credential.username.clone(), issued.password.clone());
+                            Ok(serde_json::to_value(&issued.credential).unwrap())
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                "revoke" => {
+                    let revoked = service.revoke_grant(&grant_id, "owner").await;
+                    service.maintain_now().await;
+                    revoked.map(|v| serde_json::to_value(v).unwrap())
+                }
+                "quit" => break,
+                other => {
+                    println!("unknown step {other}");
+                    continue;
+                }
+            };
+            let state = match view {
+                Ok(view) => json!({ "step": step.trim(), "ok": true, "state": report(&passwords, &view) }),
+                Err(error) => json!({ "step": step.trim(), "ok": false, "error": error.to_string() }),
+            };
+            println!("{}", serde_json::to_string_pretty(&state).unwrap());
+            std::fs::write(out.join("state.json"), serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+        }
+    }
 }
