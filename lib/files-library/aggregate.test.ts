@@ -692,6 +692,40 @@ describe("workspace files (ADR-0223 §8)", () => {
     ).toEqual([])
   })
 
+  it("keeps a favorite on a file the agent renamed, at the file's new place", () => {
+    const kept = item({
+      key: `workspace-file:${sourceId}`,
+      kind: "workspace-file",
+      sourceId,
+      favoritedAt: 5,
+      snapshot: {
+        title: "plan.md",
+        workspace: {
+          sessionId: "s1",
+          workspaceRoot: "/repo",
+          executionRoot: "/exec/run-1",
+          relPath: "docs/plan.md",
+        },
+      },
+    })
+    const renamed = {
+      ...file,
+      relPath: "docs/final.md",
+      change: "renamed" as const,
+      oldPath: "docs/plan.md",
+      identityPath: "docs/plan.md",
+    }
+    const entries = aggregateFilesEntries(input({ workspaceFiles: [renamed], items: [kept] }))
+    // One card, the kept one, where the file is now — not a stale one at the old path.
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      key: `workspace-file:${sourceId}`,
+      title: "final.md",
+      favoritedAt: 5,
+      workspace: { relPath: "docs/final.md", oldPath: "docs/plan.md", change: "renamed" },
+    })
+  })
+
   it("lists none where there are no workspace files, kept ones included", () => {
     const kept = item({
       key: `workspace-file:${sourceId}`,

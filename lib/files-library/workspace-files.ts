@@ -27,6 +27,12 @@ import type { TaskResourceIndexEntry } from "@/lib/task-workspace/types"
 export interface RawWorkspaceFile extends LibraryItemWorkspaceLocation {
   change: "created" | "modified" | "renamed"
   oldPath?: string
+  /**
+   * The path the file's item id is derived from, when it is not `relPath`:
+   * the path a renamed file had before its first rename, so a favorite or a
+   * folder follows the file through the agent's renames.
+   */
+  identityPath?: string
   mediaType?: string
   byteSize?: number
   /** When an agent first put the file in the list (epoch ms). */
@@ -124,6 +130,35 @@ function fromAdoption(
 }
 
 /**
+ * Give each renamed file the id of the path it was first listed under. The
+ * ledger carries that path through every rename (`oldPath`), so the id, and
+ * with it the item's favorite and folder, survives them. A file now standing
+ * at that path keeps it, and of two renamed files from one path the older
+ * does; the other is known by where it is now. No two files share an id.
+ */
+function assignIdentities(files: RawWorkspaceFile[]): RawWorkspaceFile[] {
+  const place = (file: RawWorkspaceFile, path: string) =>
+    `${file.sessionId}\u0000${file.workspaceRoot}\u0000${path}`
+  const occupied = new Set(files.map((file) => place(file, file.relPath)))
+  const claimed = new Set<string>()
+  const byAge = files
+    .map((file, order) => ({ file, order }))
+    .filter(({ file }) => file.oldPath && file.oldPath !== file.relPath)
+    .sort((a, b) => a.file.createdAt - b.file.createdAt || a.order - b.order)
+  const identities = new Map<number, string>()
+  for (const { file, order } of byAge) {
+    const origin = place(file, file.oldPath!)
+    if (occupied.has(origin) || claimed.has(origin)) continue
+    claimed.add(origin)
+    identities.set(order, file.oldPath!)
+  }
+  return files.map((file, order) => {
+    const identityPath = identities.get(order)
+    return identityPath ? { ...file, identityPath } : file
+  })
+}
+
+/**
  * Every workspace file Files lists: the index, then turn rows for the
  * conversations it no longer holds. `index` is null where there is no ledger
  * to ask, in which case the turn rows are all there is.
@@ -132,7 +167,7 @@ export function mergeWorkspaceFiles(
   index: readonly TaskResourceIndexEntry[] | null,
   turns: readonly CodeAdoptionTurnRow[]
 ): RawWorkspaceFile[] {
-  const listed = (index ?? []).map(fromIndex)
+  const listed = assignIdentities((index ?? []).map(fromIndex))
   const covered = new Set(listed.map((file) => file.sessionId))
   return [...listed, ...fromAdoption(turns, covered)]
 }

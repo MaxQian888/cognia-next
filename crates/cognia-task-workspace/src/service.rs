@@ -81,6 +81,11 @@ pub struct TaskWorkspaceService {
     /// and every linked worktree cut from it share one lock: they share the one
     /// administrative area that is being protected.
     git_admin_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// The last resource index folded, with the database change fingerprint
+    /// it was folded at (ADR-0223 §8). The Files page reads the index a page
+    /// at a time and again on every focus; while the ledger is unchanged each
+    /// of those reads is a slice of this one fold.
+    resource_index: Mutex<Option<ResourceIndexFold>>,
 }
 
 #[derive(Clone)]
@@ -255,6 +260,11 @@ impl crate::BundleApplier for ServiceBundleApplier<'_> {
     }
 }
 
+struct ResourceIndexFold {
+    fingerprint: (u64, i64),
+    entries: Arc<Vec<crate::ResourceIndexEntry>>,
+}
+
 impl TaskWorkspaceService {
     pub fn open(config: ServiceConfig) -> Result<Self, String> {
         let service_dir = config.data_dir.join("task-workspaces");
@@ -284,6 +294,7 @@ impl TaskWorkspaceService {
             watchers: WatchManager::new(),
             lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
             git_admin_locks: Mutex::new(HashMap::new()),
+            resource_index: Mutex::new(None),
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
@@ -3267,10 +3278,27 @@ impl TaskWorkspaceService {
     }
 
     /// The files agents left in each conversation's workspace, newest change
-    /// first (ADR-0223 §8).
-    pub fn list_resource_index(&self) -> Result<Vec<crate::ResourceIndexEntry>, String> {
-        let rows = self.store.lock().list_resource_index_rows()?;
-        Ok(crate::resource_index::fold_resource_index(rows))
+    /// first (ADR-0223 §8). Folded once per change to the database: the rows
+    /// are read under the same lock as the fingerprint, so a fold is never
+    /// older than the fingerprint it is kept under, and a write after it moves
+    /// the fingerprint and refolds.
+    pub fn list_resource_index(&self) -> Result<Arc<Vec<crate::ResourceIndexEntry>>, String> {
+        let (fingerprint, rows) = {
+            let store = self.store.lock();
+            let fingerprint = store.change_fingerprint()?;
+            if let Some(fold) = self.resource_index.lock().as_ref() {
+                if fold.fingerprint == fingerprint {
+                    return Ok(Arc::clone(&fold.entries));
+                }
+            }
+            (fingerprint, store.list_resource_index_rows()?)
+        };
+        let entries = Arc::new(crate::resource_index::fold_resource_index(rows));
+        *self.resource_index.lock() = Some(ResourceIndexFold {
+            fingerprint,
+            entries: Arc::clone(&entries),
+        });
+        Ok(entries)
     }
 
     pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
@@ -8953,5 +8981,47 @@ mod tests {
                 .environment_kind,
             crate::WorkspaceEnvironmentKind::Imported
         );
+    }
+
+    #[test]
+    fn the_resource_index_is_folded_once_per_change_to_the_ledger() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("a.md"), "a").unwrap();
+        service.settle_run("run-1").unwrap();
+
+        let first = service.list_resource_index().unwrap();
+        assert_eq!(first.len(), 1);
+        // Nothing changed: the second read is the same fold, not a new one.
+        assert!(Arc::ptr_eq(&first, &service.list_resource_index().unwrap()));
+
+        // A write through this service refolds.
+        let run = service
+            .begin_run(input(&workspace, "task-1", "run-2"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("b.md"), "b").unwrap();
+        service.settle_run("run-2").unwrap();
+        let second = service.list_resource_index().unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+        let mut paths: Vec<_> = second.iter().map(|entry| entry.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["a.md", "b.md"]);
+
+        // So does a write through another connection to the same database.
+        let other = rusqlite::Connection::open(
+            data.path()
+                .join("task-workspaces")
+                .join("task-workspaces.sqlite"),
+        )
+        .unwrap();
+        other
+            .execute("UPDATE task_workspaces SET session_id = 'session-2'", [])
+            .unwrap();
+        let third = service.list_resource_index().unwrap();
+        assert!(third.iter().all(|entry| entry.session_id == "session-2"));
     }
 }

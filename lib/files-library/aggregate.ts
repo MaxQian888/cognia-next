@@ -468,7 +468,11 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
 
   const listedWorkspaceFiles = new Set<string>()
   for (const file of input.workspaceFiles ?? []) {
-    const sourceId = workspaceFileSourceId(file.sessionId, file.workspaceRoot, file.relPath)
+    const sourceId = workspaceFileSourceId(
+      file.sessionId,
+      file.workspaceRoot,
+      file.identityPath ?? file.relPath
+    )
     if (listedWorkspaceFiles.has(sourceId)) continue
     listedWorkspaceFiles.add(sourceId)
     const name = workspaceFileName(file.relPath)

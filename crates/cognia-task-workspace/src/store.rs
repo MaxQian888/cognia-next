@@ -6,10 +6,11 @@ use crate::{
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use uuid::Uuid;
 
@@ -583,16 +584,37 @@ impl WorkspaceStore {
     }
 
     /// Every ledger row with its conversation and run, for the resource index
-    /// (ADR-0223 §8). Rows of a run whose task has gone are gone with it.
+    /// (ADR-0223 §8). Rows of a run whose task has gone are gone with it. A
+    /// run's payload is parsed once and shared by all of its rows.
     pub fn list_resource_index_rows(
         &self,
     ) -> Result<Vec<crate::resource_index::ResourceIndexRow>, String> {
+        let mut runs = HashMap::new();
+        {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT run_id, payload FROM task_runs
+                     WHERE run_id IN (SELECT DISTINCT run_id FROM task_resources)",
+                )
+                .map_err(|error| format!("prepare resource index runs: {error}"))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|error| format!("query resource index runs: {error}"))?;
+            for row in rows {
+                let (run_id, payload) = row.map_err(|error| error.to_string())?;
+                let run: TaskRun =
+                    serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+                runs.insert(run_id, Arc::new(run));
+            }
+        }
         let mut statement = self
             .connection
             .prepare(
-                "SELECT w.session_id, w.workspace_root, u.payload, r.payload
+                "SELECT w.session_id, w.workspace_root, r.run_id, r.payload
                  FROM task_resources r
-                 JOIN task_runs u ON u.run_id = r.run_id
                  JOIN task_workspaces w ON w.task_id = r.task_id",
             )
             .map_err(|error| format!("prepare resource index: {error}"))?;
@@ -606,16 +628,34 @@ impl WorkspaceStore {
                 ))
             })
             .map_err(|error| format!("query resource index: {error}"))?;
-        rows.map(|row| {
-            let (session_id, workspace_root, run, change) = row.map_err(|error| error.to_string())?;
-            Ok(crate::resource_index::ResourceIndexRow {
+        let mut index_rows = Vec::new();
+        for row in rows {
+            let (session_id, workspace_root, run_id, change) =
+                row.map_err(|error| error.to_string())?;
+            // A row whose run record is missing has nothing to order it by.
+            let Some(run) = runs.get(&run_id) else {
+                continue;
+            };
+            index_rows.push(crate::resource_index::ResourceIndexRow {
                 session_id,
                 workspace_root,
-                run: serde_json::from_str(&run).map_err(|error| error.to_string())?,
+                run: Arc::clone(run),
                 change: serde_json::from_str(&change).map_err(|error| error.to_string())?,
-            })
-        })
-        .collect()
+            });
+        }
+        Ok(index_rows)
+    }
+
+    /// Changes to the database since it was opened: this connection's own
+    /// writes, and `data_version`, which moves when another connection to the
+    /// same file commits. Equal fingerprints mean nothing a reader could see
+    /// has changed, so a result derived from the tables may be reused.
+    pub fn change_fingerprint(&self) -> Result<(u64, i64), String> {
+        let data_version = self
+            .connection
+            .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .map_err(|error| format!("read data_version: {error}"))?;
+        Ok((self.connection.total_changes(), data_version))
     }
 
     pub fn list_run_resources(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
@@ -1855,7 +1895,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].session_id, "session-1");
         assert_eq!(rows[0].workspace_root, "/repo");
-        assert_eq!(rows[0].run, run);
+        assert_eq!(*rows[0].run, run);
         assert_eq!(rows[0].change, change);
         // A task's rows go with it.
         store.delete_task("task-1").unwrap();

@@ -113,7 +113,8 @@ clear). Folders carry a color and an icon from fixed sets.
 
 Files an agent created, modified or renamed in a conversation's workspace are a
 kind of their own, `workspace-file`, one entry per conversation, workspace root
-and path.
+and path. A renamed file keeps the id of the path it was first listed under, so
+a favorite or a folder follows it through the agent's renames.
 
 - **Where the list comes from.** The task-workspace ledger answers
   `task_workspace_list_resource_index`: its settled resource changes, joined to

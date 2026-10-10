@@ -38,9 +38,9 @@ flowchart LR
 ## The resource index
 
 The ledger stores one row per task, run and path in `task_resources`, each with its `ResourceChange`.
-`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:587`) joins
+`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:589`) joins
 those rows to their run and to the `task_workspaces` row that names the owning conversation
-(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:88`) replays
+(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:89`) replays
 them in the order they settled (the run's `settled_at`, else its `created_at`), keyed by conversation,
 workspace root and path:
 
@@ -51,14 +51,18 @@ workspace root and path:
 - a path first **created** stays `created` through later edits; `firstChangedAt` is when it entered
   the index, `changedAt` its last change.
 
-The result is sorted newest first. `task_workspace_list_resource_index`
-(`crates/cognia-task-workspace-host/src/host_surface.rs:781`) serves it in offset pages of 500
-(`resource_index_page`), as a read-only `host.observe` command. `listTaskResourceIndex`
+The result is sorted newest first. `TaskWorkspaceService::list_resource_index` keeps the last fold
+with the database's change fingerprint (`WorkspaceStore::change_fingerprint`: this connection's
+`total_changes()` and `PRAGMA data_version`, which moves when another connection commits), so the pages
+of one listing, and a re-read on focus while the ledger is unchanged, share one fold; a run's payload is
+parsed once for all of its rows. `task_workspace_list_resource_index`
+(`crates/cognia-task-workspace-host/src/host_surface.rs:783`) serves it in offset pages of 500
+(`resource_index_page`), as a read-only `host.observe` command that runs off the main thread. `listTaskResourceIndex`
 (`lib/task-workspace/client.ts:717`) collects the pages, at most 20 000 entries, and drops duplicates.
 
 ## Merging with code-adoption turns
 
-`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:131`) takes the index as it stands, then
+`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:166`) takes the index as it stands, then
 adds files from `codeAdoptionTurns` **only for conversations the index holds nothing for** — an
 external agent that edited files without running through the ledger. A conversation the ledger does
 hold is never patched from turn rows: what the ledger dropped stays dropped. Turn rows fold oldest
@@ -75,7 +79,7 @@ there is.
 | Field | Value |
 | --- | --- |
 | `key` | `workspace-file:<sourceId>` |
-| `sourceId` | 16 hex digits: a 64-bit FNV-1a digest of conversation, workspace root and path (`workspaceFileSourceId`), because item keys are capped at 300 characters |
+| `sourceId` | 16 hex digits: a 64-bit FNV-1a digest of conversation, workspace root and path (`workspaceFileSourceId`), because item keys are capped at 300 characters. A renamed file is digested under the path it had before its first rename (`identityPath`), so its favorite and folder follow it; a file now standing at that path keeps the id, and of two files renamed from one path the older does |
 | `title` | the path's last segment, unless renamed in Files |
 | `creator` | `ai` |
 | `originAlive` | the conversation still exists |

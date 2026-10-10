@@ -68,11 +68,47 @@ describe("mergeWorkspaceFiles", () => {
         relPath: "docs/plan.md",
         change: "renamed",
         oldPath: "plan.md",
+        identityPath: "plan.md",
         mediaType: "text/markdown",
         byteSize: 12,
         createdAt: 10,
         updatedAt: 20,
       },
+    ])
+  })
+
+  it("keeps a renamed file known by the path it was first listed under", () => {
+    const [renamed, standing, second] = mergeWorkspaceFiles(
+      [
+        indexEntry({ path: "docs/final.md", kind: "created", oldPath: "draft.md" }),
+        // A new file now stands where another was renamed from: it keeps its own path.
+        indexEntry({ path: "notes.md", kind: "created", oldPath: null }),
+        indexEntry({ path: "b.md", kind: "renamed", oldPath: "notes.md" }),
+      ],
+      []
+    )
+    expect(renamed).toMatchObject({ relPath: "docs/final.md", identityPath: "draft.md" })
+    expect(standing).not.toHaveProperty("identityPath")
+    expect(second).not.toHaveProperty("identityPath")
+  })
+
+  it("gives the id of a path two files were renamed from to the older one", () => {
+    const files = mergeWorkspaceFiles(
+      [
+        indexEntry({ path: "new.md", kind: "renamed", oldPath: "a.md", firstChangedAt: 30 }),
+        indexEntry({ path: "old.md", kind: "renamed", oldPath: "a.md", firstChangedAt: 10 }),
+        // Renamed back to where it began: its own path is its id.
+        indexEntry({ path: "c.md", kind: "created", oldPath: "c.md" }),
+        // Another conversation's file of the same name is not in the way.
+        indexEntry({ sessionId: "s9", path: "a.md", kind: "created" }),
+      ],
+      []
+    )
+    expect(files.map((file) => [file.relPath, file.identityPath])).toEqual([
+      ["new.md", undefined],
+      ["old.md", "a.md"],
+      ["c.md", undefined],
+      ["a.md", undefined],
     ])
   })
 

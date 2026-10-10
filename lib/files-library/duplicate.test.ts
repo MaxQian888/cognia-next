@@ -187,6 +187,41 @@ describe("duplicateFilesEntry", () => {
     expect(license.type).toBe("application/octet-stream")
   })
 
+  it("copies a workspace file off the disk into a Files-owned file, leaving the disk alone", async () => {
+    payloadMock.mockResolvedValue({
+      blob: new Blob(["# Plan"], { type: "text/markdown" }),
+      filename: "plan.md",
+    })
+    uploadMock.mockResolvedValue({ key: "upload:asset-3", kind: "upload", extracted: true })
+    const file = entry({
+      kind: "workspace-file",
+      sourceId: "0123456789abcdef",
+      title: "plan.md",
+      creator: "ai",
+      workspace: {
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        executionRoot: "/repo",
+        relPath: "docs/plan.md",
+        change: "created",
+      },
+    })
+    await expect(duplicateFilesEntry(file, options)).resolves.toEqual({
+      kind: "upload",
+      key: "upload:asset-3",
+    })
+    expect(payloadMock).toHaveBeenCalledWith(file)
+    const [copy] = uploadMock.mock.calls[0] as [File, unknown]
+    expect(copy.name).toBe("plan (copy).md")
+    expect(copy.type).toBe("text/markdown")
+
+    // Gone from disk: nothing to copy.
+    payloadMock.mockResolvedValueOnce(null)
+    await expect(duplicateFilesEntry(file, options)).rejects.toMatchObject({
+      code: "files_source_missing",
+    })
+  })
+
   it("reports a file whose bytes are gone", async () => {
     payloadMock.mockResolvedValue(null)
     const error = await duplicateFilesEntry(

@@ -7,7 +7,7 @@
 //! file. Nothing here reads or writes the disk: whether the file is still
 //! there is checked by whoever opens it.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -48,12 +48,13 @@ pub struct ResourceIndexEntry {
     pub changed_at: i64,
 }
 
-/// One ledger row with the conversation and run it belongs to.
+/// One ledger row with the conversation and run it belongs to. The run is
+/// shared by all of its rows.
 #[derive(Debug, Clone)]
 pub struct ResourceIndexRow {
     pub session_id: String,
     pub workspace_root: String,
-    pub run: TaskRun,
+    pub run: Arc<TaskRun>,
     pub change: ResourceChange,
 }
 
@@ -244,7 +245,7 @@ mod tests {
         ResourceIndexRow {
             session_id: session.into(),
             workspace_root: "/repo".into(),
-            run: run.clone(),
+            run: Arc::new(run.clone()),
             change,
         }
     }
@@ -262,9 +263,21 @@ mod tests {
         let second = run("run-2", 20);
         let entries = fold_resource_index(vec![
             // Out of settle order on purpose: replay sorts.
-            row("s1", &second, change("run-2", "notes.md", ChangeKind::Modified)),
-            row("s1", &first, change("run-1", "notes.md", ChangeKind::Created)),
-            row("s1", &first, change("run-1", "plan.md", ChangeKind::Created)),
+            row(
+                "s1",
+                &second,
+                change("run-2", "notes.md", ChangeKind::Modified),
+            ),
+            row(
+                "s1",
+                &first,
+                change("run-1", "notes.md", ChangeKind::Created),
+            ),
+            row(
+                "s1",
+                &first,
+                change("run-1", "plan.md", ChangeKind::Created),
+            ),
         ]);
         assert_eq!(
             paths(&entries),
@@ -323,7 +336,8 @@ mod tests {
         let mut unknown = change("run-1", "who.md", ChangeKind::Renamed);
         unknown.origin = ContributionOrigin::Unknown;
         unknown.old_path = Some("elsewhere.md".into());
-        let entries = fold_resource_index(vec![row("s1", &first, user), row("s1", &first, unknown)]);
+        let entries =
+            fold_resource_index(vec![row("s1", &first, user), row("s1", &first, unknown)]);
         assert!(entries.is_empty());
     }
 
