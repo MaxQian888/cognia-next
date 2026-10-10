@@ -42,6 +42,10 @@ const acceptHostStateChatTurnMock = jest.fn().mockResolvedValue(null)
 const bindHostStateChatTurnContextMock = jest.fn().mockResolvedValue(false)
 const claimHostStateChatTurnForDispatchMock = jest.fn().mockResolvedValue("legacy")
 const markHostStateChatTurnStartedMock = jest.fn().mockResolvedValue(false)
+const announceFileSpaceMock = jest.fn()
+jest.mock("@/lib/filespace/lifecycle", () => ({
+  announceFileSpaceSessionsChanged: (ids: readonly string[]) => announceFileSpaceMock(ids),
+}))
 jest.mock("@/lib/work-submission/host-adapter", () => ({
   acceptHostStateChatTurn: (...args: unknown[]) => acceptHostStateChatTurnMock(...args),
   bindHostStateChatTurnContext: (...args: unknown[]) => bindHostStateChatTurnContextMock(...args),
@@ -1048,6 +1052,7 @@ describe("HostStateService", () => {
     })
 
     it("refuses to rename or archive a conversation frozen for a handoff", async () => {
+      announceFileSpaceMock.mockClear()
       await getDb().sessions.update("session-1", {
         handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
       })
@@ -1082,6 +1087,28 @@ describe("HostStateService", () => {
       ])
       expect(await getDb().sessions.get("session-1")).toMatchObject({ title: "Before" })
       expect((await getDb().sessions.get("session-1"))?.archivedAt).toBeUndefined()
+      expect(announceFileSpaceMock).not.toHaveBeenCalled()
+    })
+
+    it("tells this Host's file-share host when a paired client archives or restores", async () => {
+      announceFileSpaceMock.mockClear()
+      const { service } = listService()
+      await service.start({ now: 0, heartbeat: false })
+
+      const archived = await service.submit(
+        { ...scope, actions: [action({ kind: "session.archive", archived: true })] },
+        owner
+      )
+      expect(archived.results).toEqual([expect.objectContaining({ outcome: "applied" })])
+      expect(announceFileSpaceMock).toHaveBeenCalledWith(["session-1"])
+
+      // A replay of the same action is a duplicate: nothing changed again.
+      announceFileSpaceMock.mockClear()
+      await service.submit(
+        { ...scope, actions: [action({ kind: "session.archive", archived: true })] },
+        owner
+      )
+      expect(announceFileSpaceMock).not.toHaveBeenCalled()
     })
 
     it("refuses to organize a conversation frozen for a handoff", async () => {

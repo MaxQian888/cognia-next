@@ -17,6 +17,8 @@
  * - The delete is routed (`deleteSessionsRouted`): a paired client asks its
  *   Host, standalone runs the full teardown. Feedback goes through
  *   `useSessionWrite`, so a failure is toasted, never swallowed.
+ * - When any of them was shared as a link, it offers to revoke those links in
+ *   the same step (ADR-0222 §10); the revocation starts with the confirm.
  */
 
 import { useMemo, useState } from "react"
@@ -33,6 +35,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  RevokeShareLinksOption,
+  useRevokeShareLinksAfterDelete,
+} from "@/components/share/revoke-share-links-option"
 import { useSessionWrite } from "@/hooks/chat/use-session-write"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { deleteSessionsRouted } from "@/lib/chat/session-archive-writes"
@@ -63,6 +69,8 @@ export function EmptyArchiveDialog({
   const tRow = useTranslations("desktop.sessionRow")
   const runWrite = useSessionWrite()
   const [busy, setBusy] = useState(false)
+  const [revokeLinksChecked, setRevokeLinksChecked] = useState(false)
+  const revokeLinks = useRevokeShareLinksAfterDelete()
 
   const { deletable, lockedCount } = useMemo(() => {
     const archived = sessions.filter((session) => session.archivedAt != null)
@@ -80,24 +88,33 @@ export function EmptyArchiveDialog({
     [deletable, tRow]
   )
   const count = deletable.length
+  const deletableIds = useMemo(() => deletable.map((session) => session.id), [deletable])
+
+  const changeOpen = (next: boolean) => {
+    if (!next) setRevokeLinksChecked(false)
+    onOpenChange(next)
+  }
 
   const confirm = async () => {
     if (count === 0) return
     setBusy(true)
     void trackConversationRowAction("delete", count)
-    const ids = deletable.map((session) => session.id)
+    const ids = deletableIds
+    // Started with the delete, whatever its outcome: revoking is what was
+    // asked for, and the safe direction if the delete is refused.
+    if (revokeLinksChecked) revokeLinks(ids)
     const ok = await runWrite("delete", deletable, () => deleteSessionsRouted(ids), {
       success: t("success", { count }),
     })
     setBusy(false)
     if (ok) {
-      onOpenChange(false)
+      changeOpen(false)
       onEmptied?.()
     }
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+    <AlertDialog open={open} onOpenChange={(next) => !busy && changeOpen(next)}>
       <AlertDialogContent className="max-w-[90vw] sm:max-w-md" data-testid="empty-archive-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>
@@ -124,6 +141,13 @@ export function EmptyArchiveDialog({
               </li>
             ) : null}
           </ul>
+        ) : null}
+        {open && count > 0 ? (
+          <RevokeShareLinksOption
+            sessionIds={deletableIds}
+            checked={revokeLinksChecked}
+            onCheckedChange={setRevokeLinksChecked}
+          />
         ) : null}
         {lockedCount > 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="empty-archive-locked-note">

@@ -1,7 +1,7 @@
 /**
  * Typed calls to a host's live file-share service (ADR-0222 §7.5).
  *
- * Thirteen commands, one module, so the wire names live in exactly one place:
+ * Fifteen commands, one module, so the wire names live in exactly one place:
  * `crates/cognia-file-share/src/rpc.rs` is the authority on shape, and the
  * desktop's `#[tauri::command]` shells take the same arguments, so one call
  * works over Tauri IPC and over the companion RPC alike.
@@ -26,6 +26,8 @@ import { collectPages, type Page, type PageRequest } from "@/lib/tauri/companion
 import { localTransport, transport } from "@/lib/tauri/transport-instance"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type {
+  CollabHostInput,
+  CollabHostStatus,
   CreatedLiveGrant,
   CreateLiveGrantRequest,
   FileShareAuditQuery,
@@ -56,6 +58,7 @@ export const FILE_SHARE_ERROR_CODES = [
   "policy_live_disabled",
   "policy_credentials_disabled",
   "policy_write_disabled",
+  "policy_agent_disabled",
   "policy_exceeded",
   "ttl_exceeds_policy",
   "session_inactive",
@@ -76,6 +79,13 @@ export const FILE_SHARE_ERROR_CODES = [
   "listener_bind_failed",
   "listener_tls_failed",
   "host_key_failed",
+  // A share for a shared conversation's members (ADR-0222 §6).
+  "collab_host_unregistered",
+  "collab_unreachable",
+  // Refused before the host is asked (`createLiveFileShare`): the
+  // collaboration plane's answer for a shared conversation.
+  "shared_session_forbidden",
+  "shared_session_unavailable",
 ] as const
 
 export type FileShareErrorCode = (typeof FILE_SHARE_ERROR_CODES)[number]
@@ -208,6 +218,28 @@ export function setFileShareListener(
   target?: FileShareTarget
 ): Promise<LiveListenerStatus> {
   return via(target).call<LiveListenerStatus>("file_share_listener_set", { config })
+}
+
+// ── Collaboration members ──────────────────────────────────────────────────
+
+/**
+ * Register the host as the file host of a shared conversation's counterpart
+ * (`host`), or end the registration with `null`: the host unregisters and
+ * revokes the members' shares made under it.
+ */
+export function setCollabHost(
+  sessionId: string,
+  host: CollabHostInput | null,
+  target?: FileShareTarget
+): Promise<CollabHostStatus> {
+  return via(target).call<CollabHostStatus>("file_collab_host_set", { sessionId, host })
+}
+
+export function getCollabHostStatus(
+  sessionId: string,
+  target?: FileShareTarget
+): Promise<CollabHostStatus> {
+  return via(target).call<CollabHostStatus>("file_collab_host_status", { sessionId })
 }
 
 /** Configure (or, with `null`, remove) the SFTPGo provider. */

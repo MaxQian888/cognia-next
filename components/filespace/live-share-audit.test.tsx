@@ -65,6 +65,15 @@ describe("LiveShareAudit", () => {
     expect(screen.getByText("SFTPGo")).toBeInTheDocument()
   })
 
+  it("names a shared conversation's members and their channel", async () => {
+    pageMock.mockResolvedValue({
+      items: [row(1, { principal: "member:usr_ana", channel: "collab" })],
+    })
+    render(<LiveShareAudit />)
+    expect(await screen.findByText("Member usr_ana")).toBeInTheDocument()
+    expect(screen.getByText("Shared conversation")).toBeInTheDocument()
+  })
+
   it("loads the next page on request and keeps the first", async () => {
     const user = userEvent.setup()
     const transport = { call: jest.fn() } as unknown as Transport

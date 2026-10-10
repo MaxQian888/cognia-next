@@ -130,6 +130,16 @@ describe("classifyRisk", () => {
     it("external-send → high from a plugin-contributed send capability", () => {
       expect(surfaceIds(input({ capabilityIds: ["send_email"] }))).toEqual(["external-send"])
     })
+
+    it("external-send → high when an agent may share a conversation's files", () => {
+      for (const id of ["filespace_share", "mcp__cognia-plugin-tools__filespace_enable_webdav"]) {
+        expect(surfaceIds(input({ toolIds: [id] }))).toEqual(["external-send"])
+      }
+      // Reading and revoking give nobody anything.
+      for (const id of ["filespace_list", "filespace_revoke_share", "filespace_disable_webdav"]) {
+        expect(surfaceIds(input({ toolIds: [id] }))).toEqual([])
+      }
+    })
   })
 
   describe("tool-id normalization", () => {

@@ -40,8 +40,10 @@ import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
 import { VideoGenerateCard } from "./mcp-renderers/video-generate-card"
 import { ProjectThreadCard } from "./mcp-renderers/project-thread-card"
+import { FilespaceShareCard } from "./mcp-renderers/filespace-share-card"
 import { SuggestedThreadsCard } from "./mcp-renderers/suggested-threads-card"
 import { PROJECT_COORDINATOR_TOOL_NAMES } from "@/lib/claude/project-coordinator-builtin-tools"
+import { FILESPACE_TOOL_NAMES } from "@/lib/claude/filespace-builtin-tools"
 import { SCHEDULED_TASK_CARDS } from "./mcp-renderers/scheduled-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 import { ManagedMcpAppCard } from "@/components/mcp-apps/managed-mcp-app-card"
@@ -71,6 +73,14 @@ const REGISTRY: Record<string, CardComponent> = {
     ].flatMap((name) => [
       [name, ProjectThreadCard],
       [`mcp__cognia-plugin-tools__${name}`, ProjectThreadCard],
+    ])
+  ),
+  // A conversation's files (ADR-0222 §9): what was shared, and the button
+  // that issues the password the agent never sees. Both name forms, as above.
+  ...Object.fromEntries(
+    [FILESPACE_TOOL_NAMES.share, FILESPACE_TOOL_NAMES.enableWebdav].flatMap((name) => [
+      [name, FilespaceShareCard],
+      [`mcp__cognia-plugin-tools__${name}`, FilespaceShareCard],
     ])
   ),
   [PROJECT_COORDINATOR_TOOL_NAMES.proposeThreads]: SuggestedThreadsCard,

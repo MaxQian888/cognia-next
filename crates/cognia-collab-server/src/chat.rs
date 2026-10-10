@@ -61,11 +61,18 @@ pub enum SessionAction {
     /// maintainers, never a guest; the org's file-sharing policy is checked
     /// on top.
     FilesShare,
+    /// Read the files a host shares live with the conversation's members
+    /// (ADR-0222 §6): every role, a guest too — a grant still has to name
+    /// them.
+    FilesReadLive,
+    /// Change those files through a live grant that allows it: owners,
+    /// maintainers and members, never a viewer or a guest.
+    FilesWriteLive,
 }
 
 impl SessionAction {
     /// Every server-side action, in wire order.
-    pub const ALL: [SessionAction; 17] = [
+    pub const ALL: [SessionAction; 19] = [
         Self::Discover,
         Self::Read,
         Self::Post,
@@ -83,6 +90,8 @@ impl SessionAction {
         Self::AttachmentRead,
         Self::AttachmentWrite,
         Self::FilesShare,
+        Self::FilesReadLive,
+        Self::FilesWriteLive,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -104,6 +113,8 @@ impl SessionAction {
             Self::AttachmentRead => "attachment.read",
             Self::AttachmentWrite => "attachment.write",
             Self::FilesShare => "files.share",
+            Self::FilesReadLive => "files.readLive",
+            Self::FilesWriteLive => "files.writeLive",
         }
     }
 }
@@ -182,6 +193,7 @@ pub fn authorize_session_action(
             | SessionAction::AuditMetadata
             | SessionAction::BreakGlassRead
             | SessionAction::FilesShare
+            | SessionAction::FilesWriteLive
     );
     if membership.guest && guest_denied {
         return SessionAuthorizationDecision {
@@ -206,11 +218,16 @@ pub fn authorize_session_action(
                     | SessionAction::ApproveOrdinary
                     | SessionAction::AttachmentRead
                     | SessionAction::AttachmentWrite
+                    | SessionAction::FilesReadLive
+                    | SessionAction::FilesWriteLive
             ) || (action == SessionAction::ApproveHighRisk && membership.approver)
         }
         SessionRole::Viewer => matches!(
             action,
-            SessionAction::Discover | SessionAction::Read | SessionAction::AttachmentRead
+            SessionAction::Discover
+                | SessionAction::Read
+                | SessionAction::AttachmentRead
+                | SessionAction::FilesReadLive
         ),
     };
     SessionAuthorizationDecision {

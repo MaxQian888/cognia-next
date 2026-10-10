@@ -343,8 +343,6 @@
     "save": "Save",
     "saved": "File sharing policy saved",
     "saveFailed": "Could not save the file sharing policy.",
-    "notYet": "Not available yet",
-    "notYetHint": "Saved now and enforced when this kind of sharing arrives in a later update.",
     "duration": {
       "hours": "{count, plural, =1 {1 hour} other {# hours}}",
       "days": "{count, plural, =1 {1 day} other {# days}}"
@@ -392,5 +390,11 @@
       "updated": "Last changed {date}",
       "defaults": "The organization uses the default policy."
     }
+  },
+  "deleteLinks": {
+    "option": "Also revoke {count, plural, one {# share link} other {# share links}} made from what you are deleting. Otherwise they keep working as independent copies.",
+    "revoked": "Revoked {count, plural, one {# share link} other {# share links}}.",
+    "failed": "{count, plural, one {# share link} other {# share links}} could not be revoked. Finish in My shares.",
+    "failedAll": "The share links could not be revoked. Finish in My shares."
   }
 }

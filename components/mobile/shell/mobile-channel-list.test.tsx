@@ -34,6 +34,13 @@ jest.mock("@/lib/db/sessions", () => ({
   listSessionBranches: (id: string) => listSessionBranches(id),
 }))
 
+// The delete confirms count the conversation's share links (ADR-0222 §10);
+// none were made here, so they offer no revoke option.
+jest.mock("@/lib/share/session-links", () => ({
+  listLiveShareLinksForSessions: jest.fn(async () => []),
+  revokeShareLinksForSessions: jest.fn(async () => ({ revoked: 0, failed: 0 })),
+}))
+
 jest.mock("@/lib/shell/command-palette-request", () => ({
   requestCommandPalette: jest.fn(),
 }))

@@ -5,7 +5,7 @@ description: "每个对话拥有一个 FileSpace：从执行根、工作区根�
 
 # ADR 0222 — 对话的文件是一个视图，分享文件是一次授权
 
-**状态：** 提议中——P0（FileSpace、链接、“对话文件”面板）、P1（附带文件的快照分享、文件分享策略、协作 `files.share`）与 P2（经 WebDAV/SFTP 的实时授权、SFTPGo 提供方、网络驱动器设置）已于 2026-10-10 交付
+**状态：** 已接受——P0（FileSpace、链接、“对话文件”面板）、P1（附带文件的快照分享、文件分享策略、协作 `files.share`）、P2（经 WebDAV/SFTP 的实时授权、SFTPGo 提供方、网络驱动器设置）与 P3（协作成员、智能体工具、生命周期）已于 2026-10-10 交付。已在 macOS 上完成的验证：curl 与访达访问内置 WebDAV 监听器、OpenSSH `sftp` 访问内置 SFTP 监听器，以及 SFTPGo 往返（创建、暂停、恢复、轮换、撤销）。Windows WebClient、rclone、Cyberduck、WinSCP 与 cloudflared 隧道尚未用真实客户端验证。
 **日期：** 2026-10-10
 **设计：** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **相关：** [ADR-0037](./0037-public-share-links)（分享链接）、
@@ -67,6 +67,15 @@ P2 的实际实现：监听器的暴露方式为 `loopback`、`lan`（WebDAV 使
 
 协作服务器为每个共享会话登记一个文件宿主（宿主令牌只存哈希），镜像受众为 `collab` 的授权，并新增请求表。成员的请求被存储，在现有会话流上通知，由宿主领取，经宿主网关再次鉴权后，以有界 JSON 或仅请求者可见、会过期的附件作答。headless brain 的“只读”规则仅为这个响应器放宽。
 
+P3 的实际实现：
+
+- **应答器在宿主 crate 中，而不是 brain。** `crates/cognia-file-share/src/collab.rs` 在持有文件的宿主上（桌面端与 headless 服务器相同）为每个已注册的对话运行一个长轮询循环，并经过与 WebDAV、SFTP 相同的网关作答（主体 `member:<usr_id>`，通道 `collab`，查看者永远不能修改）。brain 不负责作答，因此它的“只读”规则无需放宽。
+- **没有流事件。** 请求不会在会话流上通知。宿主长轮询 `POST …/file-host/claim`（最长 25 秒，有请求到达时在进程内唤醒），成员以退避方式轮询请求。两分钟内无人领取的请求会过期，成员会看到宿主离线；一个对话最多 32 个未完成请求，每位成员 8 个。
+- **注册由人发起，令牌交给宿主。** 注册使用分享者自己的登录（`files.share`）发起，可以来自分享者所在的任意设备；宿主只通过 `file_collab_host_set`（`host-admin`、需要二次验证，因此已配对设备需要管理租约）收到令牌，并以 `collab-host:<account>:<session>` 保存在 `secret_store` 中；`file_collab_host_status` 报告其状态。服务器在每次宿主调用时都会重新检查注册者的 `files.share`。再次注册会替换宿主，并在两端撤销旧注册下的授权（`collab_host_removed`）；授权绑定到创建它时的注册。
+- **镜像是一个发件箱。** 每次授权变更都会递增修订号；宿主持续推送最新状态直到服务器接受，因此重试永远不会携带过时的状态。服务器依据组织策略拒绝时，宿主上的该授权会被暂停（`org_policy`）。
+- **字节。** 上传与应答经附件对象存储、以请求为范围的键传输，而不是 `chat_attachments`，因此附件表没有新增列。传输上限 50 MiB，JSON 应答 256 KiB，列表 1,000 项。
+- **界面。** 成员使用共享对话面板中的“文件”部分（`components/chat/shared-session-files.tsx`）；所有者可以在“文件”面板中看到由哪个宿主为成员提供文件并停止它（`components/filespace/collab-host-status.tsx`）。每个实时共享——无论来自对话框还是智能体——都经由同一个入口创建（`lib/filespace/live-share.ts`）：协作平面的 `files.share` 检查、成员共享所需的宿主注册，然后才是授权。
+
 ### 7. 权限是交集，策略只能收紧
 
 有效访问 = 对话角色（共享会话以服务器为准，新增 `files.share`、`files.readLive`、`files.writeLive` 动作）∩ 挂载能力 ∩ 授权 ∩ 有效策略（本地设置 ∩ `org_file_sharing_policies`）− 敏感文件底线。创建者不能授予自己没有的权限。收紧策略会挂起超出新上限的授权。
@@ -79,9 +88,13 @@ ADR-0162 对 SSH 的规则保持不变：不为 shell、exec 或转发监听套�
 
 `filespace_*` 内置工具族沿用产物工具的模式。`filespace_list`、`filespace_revoke_share`、`filespace_disable_webdav` 直接允许；`filespace_share` 和 `filespace_enable_webdav` 需要询问，不能被持久化为“始终允许”，仅在策略允许智能体分享时注入，并归类为 `external-send`。工具绑定到调用它的会话；工具结果中绝不包含密码。
 
+P3 的实际实现：智能体创建的授权为 `createdBy: agent`，宿主在创建时及其存续期间都会重新检查 `allow_agent_sharing`。聊天中的结果卡片在用户自己的设备上签发密码（`file_credential_rotate`），绝不经过模型。`filespace_share` 支持带最低角色的 `audience: "members"`；逐个挑选成员留给对话框。
+
 ### 10. 生命周期级联是显式的
 
 `SESSION_DELETED` 没有订阅者，因此会话删除流程和路由后的归档写入直接调用级联。删除对话会撤销其实时授权并注销对应凭证；快照分享作为独立的加密副本保留，删除对话框会提示是否一并撤销。归档会挂起实时授权。分叉不复制任何授权。重新绑定或移动会使授权变为 stale。分享被撤销或过期时删除其 blob。
+
+P3 的实际实现：宿主本就依据每份挂载表携带的对话状态暂停、恢复和撤销授权，因此写入方（`deleteSessionsWithTeardown`、`setSessionsArchived`，以及宿主应用已配对客户端的变更）通过 `lib/filespace/lifecycle.ts` 发出通知，正在运行的宿主同步立即推送挂载表，而不是等到下一分钟。删除对话还会在协作服务器上注销它的文件宿主。
 
 ## 影响
 
@@ -89,7 +102,7 @@ ADR-0162 对 SSH 的规则保持不变：不为 shell、exec 或转发监听套�
 - 快照分享保持零知识特性，可承载的大小提升到配置的单文件与单分享上限，而不再是总计 10 MiB。
 - 宿主新增一个入站面：默认关闭、按凭证限定范围、限速、审计，并且每次操作都检查撤销。
 - 协作服务器新增三张表和一组请求路由；从不登记宿主的会话保持现有行为。
-- 分阶段交付（P0 FileSpace 与链接，P1 快照与策略，P2 实时授权与提供方，P3 协作成员、智能体工具与生命周期）。P3 交付且设计中列出的验证（WebDAV 客户端、SFTP 客户端、SFTPGo 往返）通过后，本 ADR 转为已接受。
+- 已分阶段交付（P0 FileSpace 与链接，P1 快照与策略，P2 实时授权与提供方，P3 协作成员、智能体工具与生命周期）。尚未完成的客户端验证（Windows WebClient、rclone、Cyberduck、WinSCP、隧道）只影响界面推荐哪些组合，不影响设计本身。
 
 ## 已否决
 

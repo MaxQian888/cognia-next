@@ -676,13 +676,16 @@ async fn assert_force_rls(client: &Client) {
                 "org_memberships",
                 "organization_invitations",
                 "org_file_sharing_policies",
+                "host_file_requests",
+                "session_file_grants",
+                "session_file_hosts",
                 "workspaces",
                 "workspace_memberships",
             ]],
         )
         .await
         .expect("RLS metadata must be readable");
-    assert_eq!(rows.len(), 11);
+    assert_eq!(rows.len(), 14);
     for row in rows {
         assert!(
             row.get::<_, bool>(1),
@@ -1165,4 +1168,253 @@ fn bootstrap(suffix: &str) -> OperatorBootstrap {
         workspace_name: format!("Workspace {suffix}"),
         now: 1,
     }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn session_files_flow_through_postgres_under_rls() {
+    use cognia_collab_server::chat::{SessionRole, SessionStatus};
+    use cognia_collab_server::chat_store::{ChatStore, NewSharedSession};
+    use cognia_collab_server::session_files::{
+        FileGrant, FileHost, FileOp, FileRequest, GrantPath, RequestOutcome, RequestStatus,
+        ResultObject, SessionFileStore, UploadSpec, REQUEST_WAIT_MS, RESULT_TTL_MS,
+    };
+
+    let database = TestDatabase::create().await;
+    let store = PgStore::connect(&database.url, 4).await.unwrap();
+    let scope = bootstrap("files_owner");
+    store.bootstrap_operator(&scope).await.unwrap();
+    let mut member = bootstrap("files_member");
+    member.org_id = scope.org_id.clone();
+    member.logto_organization_id = scope.logto_organization_id.clone();
+    member.workspace_id = scope.workspace_id.clone();
+    store.bootstrap_operator(&member).await.unwrap();
+    let other = bootstrap("files_other_org");
+    store.bootstrap_operator(&other).await.unwrap();
+    let session_id = format!("session_{}", uuid::Uuid::new_v4());
+    store
+        .create_session(NewSharedSession {
+            id: session_id.clone(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            title: "Files".into(),
+            status: SessionStatus::Active,
+            created_by_user_id: scope.user_id.clone(),
+            now: 1,
+            operation_id: session_id.clone(),
+        })
+        .await
+        .unwrap();
+    store
+        .put_member(
+            &scope.org_id,
+            &session_id,
+            &scope.workspace_id,
+            &member.user_id,
+            SessionRole::Member,
+            false,
+            false,
+            2,
+        )
+        .await
+        .unwrap();
+
+    let host = store
+        .put_host(FileHost {
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            session_id: session_id.clone(),
+            registered_by: scope.user_id.clone(),
+            host_token_hash: "a".repeat(64),
+            host_label: "Mac".into(),
+            registered_at: 10,
+            last_seen_at: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(host.last_seen_at, None);
+    store.touch_host(&scope.org_id, &session_id, 11).await.unwrap();
+    assert_eq!(
+        store.host(&scope.org_id, &session_id).await.unwrap().unwrap().last_seen_at,
+        Some(11)
+    );
+    // Another tenant sees nothing.
+    assert!(store.host(&other.org_id, &session_id).await.unwrap().is_none());
+
+    let grant = store
+        .put_grant(FileGrant {
+            id: "fg_pg".into(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            session_id: session_id.clone(),
+            label: Some("Design".into()),
+            user_ids: Some(vec![member.user_id.clone()]),
+            min_role: SessionRole::Viewer,
+            permissions: vec!["read".into(), "download".into()],
+            paths: vec![GrantPath { path: "/workspace/src".into(), is_dir: true }],
+            status: "active".into(),
+            expires_at: 1_000_000,
+            revoked_at: None,
+            policy_revision: 0,
+            created_by: scope.user_id.clone(),
+            created_at: 12,
+            updated_at: 12,
+        })
+        .await
+        .unwrap();
+    assert_eq!(grant.user_ids.as_deref(), Some(&[member.user_id.clone()][..]));
+    assert_eq!(store.grants(&scope.org_id, &session_id).await.unwrap().len(), 1);
+
+    // A grant id is the host's choice and unique within its org only: another
+    // org holding the same id neither collides nor sees this one.
+    let other_session = format!("session_{}", uuid::Uuid::new_v4());
+    store
+        .create_session(NewSharedSession {
+            id: other_session.clone(),
+            org_id: other.org_id.clone(),
+            workspace_id: other.workspace_id.clone(),
+            title: "Elsewhere".into(),
+            status: SessionStatus::Active,
+            created_by_user_id: other.user_id.clone(),
+            now: 1,
+            operation_id: other_session.clone(),
+        })
+        .await
+        .unwrap();
+    let elsewhere = store
+        .put_grant(FileGrant {
+            id: "fg_pg".into(),
+            org_id: other.org_id.clone(),
+            workspace_id: other.workspace_id.clone(),
+            session_id: other_session.clone(),
+            label: None,
+            user_ids: None,
+            min_role: SessionRole::Viewer,
+            permissions: vec!["read".into()],
+            paths: vec![GrantPath { path: "/workspace".into(), is_dir: true }],
+            status: "active".into(),
+            expires_at: 1_000_000,
+            revoked_at: None,
+            policy_revision: 0,
+            created_by: other.user_id.clone(),
+            created_at: 13,
+            updated_at: 13,
+        })
+        .await
+        .unwrap();
+    assert_eq!(elsewhere.org_id, other.org_id);
+    let ours = store.grant(&scope.org_id, &session_id, "fg_pg").await.unwrap().unwrap();
+    assert_eq!(ours.label.as_deref(), Some("Design"), "untouched by the other org's grant");
+
+    let request = |id: &str, op: FileOp, upload: Option<UploadSpec>| FileRequest {
+        id: id.into(),
+        org_id: scope.org_id.clone(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: session_id.clone(),
+        grant_id: "fg_pg".into(),
+        requester_user_id: member.user_id.clone(),
+        requester_role: SessionRole::Member,
+        op,
+        path: "/workspace/src/a.ts".into(),
+        dest_path: None,
+        status: if upload.is_some() { RequestStatus::AwaitingUpload } else { RequestStatus::Pending },
+        upload,
+        result: None,
+        result_object: None,
+        error: None,
+        created_at: 20,
+        claimed_at: None,
+        completed_at: None,
+        expires_at: 20 + REQUEST_WAIT_MS,
+    };
+    store.create_request(request("frq_read", FileOp::Read, None)).await.unwrap();
+    store
+        .create_request(request(
+            "frq_write",
+            FileOp::Write,
+            Some(UploadSpec { byte_length: 2, sha256: "b".repeat(64), object_key: "obj/upload".into() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(store.open_requests(&scope.org_id, &session_id, 21).await.unwrap().len(), 2);
+
+    // Two claims never take the same request.
+    // A host token that is not the registered one claims nothing.
+    let stranger = "b".repeat(64);
+    assert!(store.claim_next(&scope.org_id, &session_id, &stranger, 30).await.unwrap().is_none());
+    let token_hash = "a".repeat(64);
+    let (a, b) = tokio::join!(
+        store.claim_next(&scope.org_id, &session_id, &token_hash, 30),
+        store.claim_next(&scope.org_id, &session_id, &token_hash, 30)
+    );
+    let claimed: Vec<_> = [a.unwrap(), b.unwrap()].into_iter().flatten().collect();
+    assert_eq!(claimed.len(), 1, "the write still waits for its bytes");
+    assert_eq!(claimed[0].id, "frq_read");
+    assert_eq!(claimed[0].status, RequestStatus::Claimed);
+
+    let done = store
+        .complete_request(
+            &scope.org_id,
+            &session_id,
+            "frq_read",
+            RequestOutcome::Done {
+                result: None,
+                object: Some(ResultObject {
+                    object_key: "obj/result".into(),
+                    byte_length: 5,
+                    media_type: "text/plain".into(),
+                }),
+            },
+            40,
+        )
+        .await
+        .unwrap();
+    assert_eq!(done.status, RequestStatus::Done);
+    assert_eq!(done.expires_at, 40 + RESULT_TTL_MS);
+    // A second answer conflicts.
+    assert!(store
+        .complete_request(
+            &scope.org_id,
+            &session_id,
+            "frq_read",
+            RequestOutcome::Failed { error: "again".into() },
+            41,
+        )
+        .await
+        .is_err());
+
+    let uploaded = store
+        .mark_uploaded(&scope.org_id, &session_id, "frq_write", 50)
+        .await
+        .unwrap();
+    assert_eq!(uploaded.status, RequestStatus::Pending);
+    let mut keys = store.session_object_keys(&scope.org_id, &session_id).await.unwrap();
+    keys.sort();
+    assert_eq!(keys, vec!["obj/result".to_string(), "obj/upload".to_string()]);
+
+    // Past every deadline, the reaper hands back both keys once.
+    let mut reaped = store
+        .reap_requests(&scope.org_id, &session_id, 40 + RESULT_TTL_MS + REQUEST_WAIT_MS)
+        .await
+        .unwrap();
+    reaped.sort();
+    assert_eq!(reaped, keys);
+    assert!(store
+        .reap_requests(&scope.org_id, &session_id, 40 + RESULT_TTL_MS + REQUEST_WAIT_MS)
+        .await
+        .unwrap()
+        .is_empty());
+    let write = store.request(&scope.org_id, &session_id, "frq_write").await.unwrap().unwrap();
+    assert_eq!(write.status, RequestStatus::Expired);
+
+    // Removing the host revokes its grants.
+    store.delete_host(&scope.org_id, &session_id, 99).await.unwrap();
+    assert!(store.host(&scope.org_id, &session_id).await.unwrap().is_none());
+    let revoked = store.grant(&scope.org_id, &session_id, "fg_pg").await.unwrap().unwrap();
+    assert_eq!(revoked.status, "revoked");
+    assert_eq!(revoked.revoked_at, Some(99));
+    assert!(!store.revoke_grant(&scope.org_id, &session_id, "fg_pg", 100).await.unwrap());
+
+    drop(store);
+    database.cleanup().await;
 }

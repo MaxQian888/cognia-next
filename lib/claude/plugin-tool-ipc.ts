@@ -98,6 +98,11 @@ import {
   type ProjectCoordinatorToolDeps,
 } from "./project-coordinator-builtin-tools"
 import {
+  isFilespaceBuiltinTool,
+  runFilespaceBuiltinTool,
+  type FilespaceToolDeps,
+} from "./filespace-builtin-tools"
+import {
   isAgentBuilderBuiltinTool,
   runAgentBuilderBuiltinTool,
   type AgentBuilderToolDeps,
@@ -257,6 +262,20 @@ async function resolveAgentBuilderDeps(): Promise<AgentBuilderToolDeps> {
   if (agentBuilderDepsOverride) return agentBuilderDepsOverride()
   const { resolveAgentBuilderToolDeps } = await import("@/lib/agents/builder/tool-deps")
   return resolveAgentBuilderToolDeps()
+}
+
+/** Resolver for the `filespace_*` tools' host-side deps (ADR-0222 §9). Swappable for tests. */
+let filespaceDepsOverride: (() => FilespaceToolDeps) | null = null
+
+/** Inject `filespace_*` deps (tests). Pass `null` to restore the default. */
+export function __setFilespaceToolDepsForTesting(fn: (() => FilespaceToolDeps) | null): void {
+  filespaceDepsOverride = fn
+}
+
+async function resolveFilespaceDeps(): Promise<FilespaceToolDeps> {
+  if (filespaceDepsOverride) return filespaceDepsOverride()
+  const { resolveFilespaceToolDeps } = await import("@/lib/filespace/agent-tool-deps")
+  return resolveFilespaceToolDeps()
 }
 
 async function resolveProjectCoordinatorDeps(): Promise<ProjectCoordinatorToolDeps> {
@@ -732,6 +751,19 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolveProjectCoordinatorDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── A conversation's files and their shares (ADR-0222 §9) ─────────────
+    // Host-routed: the FileSpace resolver, the share-link mirror and the
+    // file-share host's grants client all live here. Bound to the calling
+    // session; the runner re-checks the sharing policy on every call.
+    if (isFilespaceBuiltinTool(request.name)) {
+      const result = await runFilespaceBuiltinTool(
+        request.name,
+        request.args,
+        await resolveFilespaceDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

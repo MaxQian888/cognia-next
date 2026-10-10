@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::collab::CollabHostInput;
 use crate::error::{FileShareError, FileShareResult};
 use crate::listener::ListenerConfigInput;
 use crate::model::CreateGrantRequest;
@@ -39,6 +40,8 @@ pub const COMMANDS: &[&str] = &[
     "file_audit_list",
     "file_share_listener_set",
     "file_share_sftpgo_set",
+    "file_collab_host_set",
+    "file_collab_host_status",
 ];
 
 /// Commands only the host's own app (the desktop WebView or the headless
@@ -50,12 +53,22 @@ pub const HOST_ONLY_COMMANDS: &[&str] = &[
     "file_share_policy_set",
 ];
 
-/// Commands that change what the host exposes to the network; a paired device
+/// Commands that change what the host exposes to the network — including
+/// which collaboration server it answers members through; a paired device
 /// needs a fresh admin lease for them.
-pub const STEP_UP_COMMANDS: &[&str] = &["file_share_listener_set", "file_share_sftpgo_set"];
+pub const STEP_UP_COMMANDS: &[&str] = &[
+    "file_share_listener_set",
+    "file_share_sftpgo_set",
+    "file_collab_host_set",
+];
 
 /// Commands that read without changing anything.
-pub const READ_ONLY_COMMANDS: &[&str] = &["file_share_status", "file_grant_list", "file_audit_list"];
+pub const READ_ONLY_COMMANDS: &[&str] = &[
+    "file_share_status",
+    "file_grant_list",
+    "file_audit_list",
+    "file_collab_host_status",
+];
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,6 +129,19 @@ struct ListenerArgs {
 #[serde(rename_all = "camelCase")]
 struct SftpgoArgs {
     config: Option<SftpgoConfigInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CollabHostArgs {
+    session_id: String,
+    host: Option<CollabHostInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionArgs {
+    session_id: String,
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> FileShareResult<T> {
@@ -191,6 +217,14 @@ pub async fn dispatch(
         "file_share_sftpgo_set" => {
             let args: SftpgoArgs = parse(args)?;
             to_value(service.set_sftpgo(args.config).await?)
+        }
+        "file_collab_host_set" => {
+            let args: CollabHostArgs = parse(args)?;
+            to_value(service.set_collab_host(&args.session_id, args.host, principal).await?)
+        }
+        "file_collab_host_status" => {
+            let args: SessionArgs = parse(args)?;
+            to_value(service.collab_host_status(&args.session_id).await?)
         }
         other => Err(FileShareError::new(
             "unknown_command",
@@ -367,6 +401,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status["policy"]["revision"], next["revision"]);
+    }
+
+    #[tokio::test]
+    async fn the_collab_host_commands_take_their_wire_shapes() {
+        let (service, _dir) = service();
+        let status = dispatch(
+            &service,
+            "file_collab_host_status",
+            json!({ "sessionId": "s1" }),
+            "owner",
+        )
+        .await
+        .unwrap();
+        assert_eq!(status["registration"], Value::Null);
+        assert_eq!(status["running"], false);
+        // Clearing what was never registered is a no-op answer, not an error.
+        let cleared = dispatch(
+            &service,
+            "file_collab_host_set",
+            json!({ "sessionId": "s1", "host": null }),
+            "owner",
+        )
+        .await
+        .unwrap();
+        assert_eq!(cleared["sessionId"], "s1");
+        let refused = dispatch(
+            &service,
+            "file_collab_host_set",
+            json!({
+                "sessionId": "s1",
+                "host": {
+                    "orgId": "org_1",
+                    "collabSessionId": "ses_1",
+                    "serverUrl": "http://collab.example",
+                    "hostLabel": "Mac",
+                    "hostToken": "fht_x",
+                },
+            }),
+            "owner",
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, "invalid_request");
+        assert!(STEP_UP_COMMANDS.contains(&"file_collab_host_set"));
+        assert!(READ_ONLY_COMMANDS.contains(&"file_collab_host_status"));
     }
 
     #[test]

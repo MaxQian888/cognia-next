@@ -957,6 +957,8 @@ mod tests {
         ("file_audit_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::page::Page<cognia_file_share::store::AuditRow>", schema: schema_of::<cognia_file_share::page::Page<cognia_file_share::store::AuditRow>> })),
         ("file_share_listener_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::listener::ListenerStatus", schema: schema_of::<cognia_file_share::listener::ListenerStatus> })),
         ("file_share_sftpgo_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::sftpgo::SftpgoStatus", schema: schema_of::<cognia_file_share::sftpgo::SftpgoStatus> })),
+        ("file_collab_host_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::collab::CollabHostStatus", schema: schema_of::<cognia_file_share::collab::CollabHostStatus> })),
+        ("file_collab_host_status", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::collab::CollabHostStatus", schema: schema_of::<cognia_file_share::collab::CollabHostStatus> })),
     ];
 
     // ── The ledger ──────────────────────────────────────────────────────────

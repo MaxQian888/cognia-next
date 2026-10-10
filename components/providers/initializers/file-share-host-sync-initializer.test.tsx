@@ -6,6 +6,7 @@ const sync = {
   pushPolicy: jest.fn(async () => {}),
   syncSessions: jest.fn(async () => {}),
   refresh: jest.fn(async () => {}),
+  sessionsChanged: jest.fn(async (_ids: readonly string[]) => {}),
   start: jest.fn(() => stop),
 }
 const createFileShareHostSync = jest.fn(
@@ -49,6 +50,8 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { subscribe: (l: Listener<ProjectState>) => projectStore.subscribe(l) },
 }))
 
+import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
+
 import { FileShareHostSyncInitializer } from "./file-share-host-sync-initializer"
 
 beforeEach(() => {
@@ -89,6 +92,17 @@ it("refreshes the mount tables when projects change", () => {
   expect(sync.refresh).not.toHaveBeenCalled()
   projectStore.emit({ projects: [] }, { projects })
   expect(sync.refresh).toHaveBeenCalledTimes(1)
+})
+
+it("pushes archives, restores and deletes to the host as they happen", async () => {
+  const { unmount } = render(<FileShareHostSyncInitializer />)
+  announceFileSpaceSessionsChanged(["s1"])
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(sync.sessionsChanged).toHaveBeenCalledWith(["s1"])
+  unmount()
+  announceFileSpaceSessionsChanged(["s2"])
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(sync.sessionsChanged).toHaveBeenCalledTimes(1)
 })
 
 it("stops and unsubscribes on unmount, and restarts for another account", () => {

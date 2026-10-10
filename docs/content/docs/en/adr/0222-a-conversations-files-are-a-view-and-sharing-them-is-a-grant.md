@@ -5,7 +5,7 @@ description: "Each conversation gets a FileSpace: a derived virtual namespace ov
 
 # ADR 0222 — A conversation's files are a view, and sharing them is a grant
 
-**Status:** Proposed — P0 (FileSpace, links, Conversation files panel), P1 (snapshot shares with files, file-sharing policy, collab `files.share`) and P2 (live grants over WebDAV/SFTP, the SFTPGo provider, network-drive settings) shipped 2026-10-10
+**Status:** Accepted — P0 (FileSpace, links, Conversation files panel), P1 (snapshot shares with files, file-sharing policy, collab `files.share`), P2 (live grants over WebDAV/SFTP, the SFTPGo provider, network-drive settings) and P3 (collaboration members, agent tools, lifecycle) shipped 2026-10-10. Spikes run on macOS: curl and Finder against the built-in WebDAV listener, OpenSSH `sftp` against the built-in SFTP listener, and the SFTPGo round trip (create, suspend, resume, rotate, revoke). Windows WebClient, rclone, Cyberduck, WinSCP and the cloudflared tunnel have not been run against a real client yet.
 **Date:** 2026-10-10
 **Design:** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **Related:** [ADR-0037](./0037-public-share-links) (share links),
@@ -167,6 +167,45 @@ by the host, re-authorized by the host's gateway, and answered with bounded
 JSON or a requester-only, expiring attachment. The headless brain's
 reader-only rule is amended for this responder alone.
 
+As built in P3:
+
+- **The responder is the host crate, not the brain.** `crates/cognia-file-share/src/collab.rs`
+  runs one long-poll loop per registered conversation on whichever host
+  holds the files, the desktop and a headless server alike, and answers
+  through the same gateway as WebDAV and SFTP (principal `member:<usr_id>`,
+  channel `collab`, a viewer never mutates). The brain does not answer, so its
+  reader-only rule stands unamended.
+- **No stream event.** A request is not announced on the session stream. The
+  host long-polls `POST …/file-host/claim` (up to 25 s, woken in-process
+  when a request arrives) and the member polls the request with backoff. A
+  request nobody claims within two minutes expires and the member sees the
+  host as offline; a conversation holds at most 32 open requests, 8 per member.
+- **Registration from the person, token to the host.** The registration is
+  made with the sharing person's own sign-in (`files.share`), from whichever
+  device they share on; the host receives only the token, through
+  `file_collab_host_set` (`host-admin`, step-up, so a paired device needs an
+  admin lease), and keeps it in `secret_store` under
+  `collab-host:<account>:<session>`. `file_collab_host_status` reports it.
+  The server re-checks the registrant's `files.share` on every host call.
+  Re-registering replaces the host and revokes the old registration's grants
+  on both sides (`collab_host_removed`); a grant binds to the registration it
+  was made under.
+- **Mirror as an outbox.** Every grant change bumps a revision; the host
+  pushes the latest state until the server accepts it, so a retry never
+  carries a stale one. A refusal under the org's policy suspends the grant on
+  the host (`org_policy`).
+- **Bytes.** Uploads and answers travel through the attachment object store
+  under request-scoped keys, not `chat_attachments`, so the attachment table
+  gained no columns. Transfers are capped at 50 MiB, JSON answers at 256 KiB,
+  listings at 1,000 entries.
+- **Surfaces.** Members use a Files section in the shared-conversation panel
+  (`components/chat/shared-session-files.tsx`); the owner sees which host
+  serves them and can stop it from the Files panel
+  (`components/filespace/collab-host-status.tsx`). Every live share, from the
+  dialog or an agent, is created through one door
+  (`lib/filespace/live-share.ts`): the collaboration plane's `files.share`
+  check, the host registration for a members share, then the grant.
+
 ### 7. Permission is an intersection, and policy can only narrow it
 
 Effective access = conversation role (server-authoritative for shared
@@ -192,6 +231,13 @@ persisted as "allow always", are injected only when the policy allows agent
 sharing, and classify as `external-send`. Tools are bound to the calling
 session. A tool result never contains a password.
 
+As built in P3: a grant an agent creates is `createdBy: agent`, and the host
+re-checks `allow_agent_sharing` for it at creation and while it lives. The
+result card in the chat issues the password on the person's device
+(`file_credential_rotate`), never through the model. `filespace_share` takes
+`audience: "members"` with a lowest role; choosing individual members is left
+to the dialog.
+
 ### 10. Lifecycle cascades are explicit
 
 `SESSION_DELETED` has no subscribers, so the session deletion teardown and the
@@ -200,6 +246,14 @@ revokes its live grants and deprovisions their credentials. Snapshot shares
 survive as independent encrypted copies, and the delete dialog offers to
 revoke them. Archiving suspends live grants. Forks copy nothing. A rebind or
 move makes grants stale. A share's revocation or expiry removes its blobs.
+
+As built in P3: the host already suspends, resumes and revokes from the
+conversation state each mount table carries, so the writers
+(`deleteSessionsWithTeardown`, `setSessionsArchived`, and the Host applying a
+paired client's change) announce the change through `lib/filespace/lifecycle.ts`
+and the running host sync pushes the tables at once instead of on its next
+minute. Deleting a conversation also unregisters its file host from the
+collaboration server.
 
 ## Consequences
 
@@ -211,10 +265,10 @@ move makes grants stale. A share's revocation or expiry removes its blobs.
   rate-limited, audited and revocable per operation.
 - Collab-server gains three tables and a request route. Hosts that never
   register keep today's behaviour.
-- Delivery is phased (P0 FileSpace and links, P1 snapshots and policy, P2 live
+- Delivery was phased (P0 FileSpace and links, P1 snapshots and policy, P2 live
   grants and providers, P3 collaboration members, agent tools and lifecycle).
-  This ADR moves to Accepted when P3 ships and the spikes listed in the design
-  (WebDAV clients, SFTP clients, SFTPGo round trip) pass.
+  The client spikes that remain (Windows WebClient, rclone, Cyberduck, WinSCP,
+  the tunnel) gate only which combinations the UI recommends, not the design.
 
 ## Rejected
 

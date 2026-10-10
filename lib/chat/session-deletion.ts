@@ -1,6 +1,7 @@
 import { loggers } from "@cognia/logging"
 import { closeSession } from "@/lib/claude/ipc"
 import { bulkDeleteSessions } from "@/lib/db/sessions"
+import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
@@ -51,6 +52,8 @@ export async function deleteSessionsWithTeardown(ids: readonly string[]): Promis
     notify.disarmSession(id)
     emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
   }
+  // Live file shares of these conversations are revoked now (ADR-0222 §10).
+  announceFileSpaceSessionsChanged(uniqueIds)
   const chat = useChatStore.getState()
   if (chat.activeSessionId && uniqueIds.includes(chat.activeSessionId)) {
     chat.setActiveSession(null)

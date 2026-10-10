@@ -64,6 +64,7 @@ import {
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
+import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
 export const MAX_HOST_STATE_SNAPSHOT_BYTES = 512 * 1024
@@ -1101,6 +1102,16 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
           !committed.duplicate
         ) {
           await relinkRoster(action.sessionId!, movedFrom.projectId, action.action.projectId)
+        }
+        // A paired client's archive or restore suspends or resumes this
+        // Host's live file shares now (ADR-0222 §10). Deletes announce from
+        // `deleteSessionsWithTeardown`, which carried them out above.
+        if (
+          action.action.kind === "session.archive" &&
+          committed.event.outcome === "applied" &&
+          !committed.duplicate
+        ) {
+          announceFileSpaceSessionsChanged([action.sessionId!])
         }
         const row = await getHostStateAction(action.hostGeneration, action.actionId)
         if (!row) throw new Error("host_state_ledger_missing")

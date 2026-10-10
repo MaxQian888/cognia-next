@@ -9,6 +9,7 @@
  * `lib/filespace/grants-client.ts`.
  */
 
+import type { SessionRole } from "@cognia/agent-config-types"
 import type { FileSharingPolicy } from "@/lib/filespace/policy"
 
 /** What a credential may do. `download` is needed for file bytes, `read` for listings. */
@@ -36,6 +37,10 @@ export type LiveGrantStatusReason =
   | "expired"
   | "revoked"
   | "provider_failed"
+  /** A members' share whose host registration ended (replaced, removed, refused). */
+  | "collab_host_removed"
+  /** The collaboration server's org policy refused to publish it. */
+  | "org_policy"
 
 export interface LiveGrantPath {
   mountId: string
@@ -47,12 +52,45 @@ export interface LiveGrantPath {
   virtualPath: string
 }
 
+/**
+ * Who made a grant. `agent`: an agent's `filespace_share` /
+ * `filespace_enable_webdav` call the person approved (ADR-0222 §9); the host
+ * refuses and suspends those unless the policy allows agent sharing.
+ */
+export type LiveGrantCreator = "user" | "agent"
+
+/**
+ * Who a grant is for (ADR-0222 §6).
+ *
+ * - `credentials`: whoever holds one of its WebDAV/SFTP credentials.
+ * - `collab`: members of the shared conversation this host is registered for
+ *   on the collaboration server (`orgId`, `collabSessionId`): the named ones
+ *   (`userIds`), or everyone at `minRole` or above. They reach the files
+ *   through requests the server relays to this host; no credential exists, and
+ *   a viewer only ever reads.
+ */
+export type LiveGrantAudience =
+  | { kind: "credentials" }
+  | {
+      kind: "collab"
+      orgId: string
+      collabSessionId: string
+      userIds: string[] | null
+      minRole: SessionRole
+    }
+
+/** The audience a create request asks for; a members' share binds to the host's registration. */
+export type LiveGrantAudienceRequest =
+  { kind: "credentials" } | { kind: "collab"; userIds?: string[] | null; minRole: SessionRole }
+
 export interface LiveGrant {
   id: string
   sessionId: string
   label: string | null
-  createdBy: "user"
+  createdBy: LiveGrantCreator
   creatorPrincipal: string
+  audience: LiveGrantAudience
+  /** The credentials' protocols; empty for a members' share. */
   protocols: LiveProtocol[]
   provider: LiveProvider
   permissions: LivePermission[]
@@ -123,12 +161,50 @@ export interface CreateLiveGrantRequest {
   /** FileSpace virtual paths, e.g. `/workspace/src`; at most 50. */
   paths: string[]
   permissions: LivePermission[]
+  /** At least one for a credential audience; empty for conversation members. */
   protocols: LiveProtocol[]
   provider?: LiveProvider
   expiresInSeconds: number
   label?: string
   /** OpenSSH public key for SFTP key authentication. */
   sshPublicKey?: string
+  /** `agent` for an agent's tool call; omitted for the person's own grant. */
+  createdBy?: LiveGrantCreator
+  /** Omitted: credential holders. */
+  audience?: LiveGrantAudienceRequest
+}
+
+/** A conversation registered as the file host of its shared counterpart. */
+export interface CollabHostRecord {
+  sessionId: string
+  orgId: string
+  collabSessionId: string
+  serverUrl: string
+  hostLabel: string
+  registeredAt: number
+  updatedAt: number
+}
+
+/** What the app hands the host after registering it; the token is write-only. */
+export interface CollabHostInput {
+  orgId: string
+  collabSessionId: string
+  serverUrl: string
+  hostLabel: string
+  hostToken: string
+}
+
+/** One conversation's registration and how serving its members fares. */
+export interface CollabHostStatus {
+  sessionId: string
+  registration: CollabHostRecord | null
+  tokenPresent: boolean
+  /** A loop is answering the members' requests. */
+  running: boolean
+  lastContactAt: number | null
+  /** `host_unregistered`, `host_token_missing`, `replaced`, `unregistered`, `session_deleted`, or a transport failure. */
+  lastError: string | null
+  unmirroredGrants: number
 }
 
 export type LiveExposure = "loopback" | "lan" | "tunnel"
@@ -250,9 +326,9 @@ export interface FileShareAuditRow {
   at: number
   sessionId: string | null
   grantId: string | null
-  /** `owner`, `device:<id>`, `credential:<username>`, `system`. */
+  /** `owner`, `device:<id>`, `credential:<username>`, `member:<user id>`, `system`. */
   principal: string
-  channel: "app" | "webdav" | "sftp" | "sftpgo"
+  channel: "app" | "webdav" | "sftp" | "sftpgo" | "collab"
   action: string
   path: string | null
   bytes: number | null

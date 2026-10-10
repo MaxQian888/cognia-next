@@ -56,6 +56,12 @@ export interface FileShareHostSync {
   pushPolicy(): Promise<void>
   /** Push these conversations' mount tables. */
   syncSessions(sessionIds: readonly string[]): Promise<void>
+  /**
+   * These conversations were archived, restored or deleted: push the tables
+   * of those the host has grants for, so it suspends, resumes or revokes now
+   * rather than on its next refresh (`./lifecycle.ts`).
+   */
+  sessionsChanged(sessionIds: readonly string[]): Promise<void>
   /** Re-read the host and push what it serves from. */
   refresh(): Promise<void>
   /** Activate now and refresh on an interval; returns the stop function. */
@@ -124,6 +130,14 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
     await syncSessions(status.sessionsWithGrants)
   }
 
+  const sessionsChanged = async (sessionIds: readonly string[]) => {
+    if (!deps.accountId() || sessionIds.length === 0) return
+    const status = await getFileShareStatus(deps.target)
+    if (!status.active || status.accountId !== deps.accountId()) return
+    const granted = new Set(status.sessionsWithGrants)
+    await syncSessions(sessionIds.filter((sessionId) => granted.has(sessionId)))
+  }
+
   const guarded =
     <T>(name: string, task: () => Promise<T>) =>
     () =>
@@ -136,6 +150,7 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
     activate: () => serial(activate),
     pushPolicy: () => serial(pushPolicy),
     syncSessions: (ids) => serial(() => syncSessions(ids)),
+    sessionsChanged: (ids) => serial(() => sessionsChanged(ids)),
     refresh: () => serial(refresh),
     start: ({ intervalMs = HOST_SYNC_INTERVAL_MS } = {}) => {
       void guarded("activation", activate)()

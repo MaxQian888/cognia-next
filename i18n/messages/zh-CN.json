@@ -10198,6 +10198,89 @@
     "denied": "拒绝",
     "deny": "拒绝",
     "featureDisabled": "共享聊天已停用",
+    "files": {
+      "browse": "浏览",
+      "cancel": "取消",
+      "create": "创建",
+      "delete": "删除 {name}",
+      "download": "下载 {name}",
+      "emptyFolder": "此文件夹为空。",
+      "errors": {
+        "cross_mount": "文件只能在同一个共享文件夹内移动。",
+        "exists": "已存在同名项目。",
+        "grant_expired": "此共享已过期。",
+        "grant_inactive": "此共享已暂停或已撤销。",
+        "grant_root": "共享项本身不能删除或重命名。",
+        "host_unavailable": "存放文件的设备没有响应，可能已离线。",
+        "invalid_path": "这不是有效的文件名或路径。",
+        "is_folder": "这是一个文件夹。",
+        "mount_unavailable": "共享的文件夹目前在其设备上不可用。",
+        "no_file_host": "没有设备在共享此对话的文件。",
+        "not_a_folder": "这不是文件夹。",
+        "not_admitted": "此共享不是给你的。",
+        "not_empty": "只能删除空文件夹。",
+        "not_found": "该文件或文件夹不存在，或不在共享范围内。",
+        "permission": "此共享或你的角色不允许这样做。",
+        "policy": "文件共享策略已不再允许此共享。",
+        "read_only": "它只能读取。",
+        "sensitive": "该文件包含机密信息，永远不会共享。",
+        "session_archived": "该对话已在其设备上归档。",
+        "session_deleted": "该对话已在其设备上删除。",
+        "stale": "共享的文件夹在其设备上已移动，需要重新共享。",
+        "symlink": "这是一个链接，不会通过链接修改任何内容。",
+        "timeout": "未能及时收到响应，请重试。",
+        "too_large": "该文件超过 50 MB。",
+        "unavailable": "存放文件的设备目前无法完成此操作。",
+        "unknown": "操作未成功（{code}）。",
+        "upload_mismatch": "上传的内容已损坏，请重试。",
+        "withdrawn": "操作进行中时共享已被撤回。"
+      },
+      "expires": "{when}到期",
+      "host": {
+        "offline": "{host} 离线",
+        "offlineUnnamed": "共享设备离线",
+        "online": "{host} 在线",
+        "onlineUnnamed": "共享设备在线"
+      },
+      "invalidName": "名称不能为空、不能是“.”或“..”，也不能包含 / 或 \\。",
+      "loadFailed": "无法加载共享的文件。",
+      "name": "名称",
+      "newFolder": "新建文件夹",
+      "newFolderTitle": "新建文件夹",
+      "noHost": "没有设备在共享此对话的文件。",
+      "nothingShared": "还没有文件共享给你。",
+      "offlineHint": "存放这些文件的设备当前离线。请求最多等待它两分钟。",
+      "permission": {
+        "download": "下载",
+        "read": "查看名称",
+        "write": "修改"
+      },
+      "refresh": "刷新文件",
+      "removeHost": {
+        "action": "移除共享设备",
+        "confirm": "移除设备",
+        "description": "所有成员都将失去从此设备共享的文件，也不会再向它请求这些文件。适用于设备丢失或无法再连接的情况；设备所有者之后可以重新共享。",
+        "done": "已移除共享设备",
+        "failed": "无法移除共享设备，请重试。",
+        "title": "移除共享设备？"
+      },
+      "rename": "重命名 {name}",
+      "renameConfirm": "重命名",
+      "renameTitle": "重命名",
+      "title": "文件",
+      "toast": {
+        "deleted": "已删除 {name}",
+        "folderCreated": "已创建 {name}",
+        "renamed": "已重命名为 {name}",
+        "uploaded": "已上传 {name}"
+      },
+      "truncated": "只显示前一千项。",
+      "untitled": "共享的文件",
+      "up": "上一级文件夹",
+      "upload": "上传文件",
+      "uploadInput": "要上传的文件",
+      "waiting": "正在等待存放文件的设备…"
+    },
     "guest": "外部 Guest",
     "guestLinkPlaceholder": "可选：为受限 Guest 链接指定用户 ID",
     "historyWarning": "共 {messages} 条消息、{attachments} 个附件将对所有受邀成员可见，包括此前的完整历史。",
@@ -18009,6 +18092,19 @@
       "share": "通过链接分享",
       "shareFiles": "分享文件…"
     },
+    "agentCard": {
+      "copied": "已复制链接。",
+      "copy": "复制链接",
+      "copyFailed": "无法复制链接。",
+      "expires": "{when} 过期",
+      "issuePassword": "签发 {protocol} 密码（{username}）",
+      "issuedDescription": "仅显示这一次，请立即复制。",
+      "liveTitle": "已分享为网络驱动器",
+      "membersNote": "成员在此设备在线时，可从对话的“文件”部分打开这些文件。不会创建密码；可在此对话的“文件 → 以网络驱动器共享”中撤销。",
+      "passwordNote": "智能体不会看到密码。请签发一个密码以连接；再次签发会让使用上一个密码的人退出登录。",
+      "snapshotTitle": "已将 {count} 个文件分享为链接",
+      "withheldSensitive": "已排除 {count} 个包含机密的文件。"
+    },
     "entry": {
       "sourceUnavailable": "原始文件不在此设备上"
     },
@@ -21492,6 +21588,7 @@
       "at": "时间",
       "channel": {
         "app": "应用",
+        "collab": "共享对话",
         "sftp": "SFTP",
         "sftpgo": "SFTPGo",
         "webdav": "WebDAV"
@@ -21510,6 +21607,7 @@
       "principal": {
         "credential": "{username}",
         "device": "已配对设备 {id}",
+        "member": "成员 {id}",
         "owner": "你",
         "system": "Cognia"
       },
@@ -21518,6 +21616,28 @@
       "title": "活动",
       "via": "方式",
       "who": "访问者"
+    },
+    "collabHost": {
+      "notRunning": "{label} 持有成员的共享，但当前没有响应他们的请求。",
+      "pending": "{count} 个共享尚未同步到协作服务器；此设备会持续重试。",
+      "problem": {
+        "conflict": "另一台设备现在负责提供此对话的文件。",
+        "host_token_missing": "此设备丢失了协作服务器的密钥。请再次与成员共享以重新注册。",
+        "host_unregistered": "协作服务器不再接受此设备作为该对话的文件主机。请再次与成员共享以重新注册。",
+        "mirror_rejected": "协作服务器拒绝了一个共享（{detail}）。",
+        "org_policy": "组织的文件共享策略拒绝了一个共享（{detail}），该共享已暂停。",
+        "other": "最近的问题：{detail}",
+        "rejected": "协作服务器拒绝了一个请求（{detail}）。",
+        "unreachable": "无法连接协作服务器（{detail}）。成员的请求会等待其恢复。"
+      },
+      "serving": "成员通过 {label} 访问这些文件。",
+      "stop": "停止与成员共享",
+      "stopConfirm": {
+        "confirm": "停止共享",
+        "description": "成员将失去此对话共享给他们的所有文件，此设备也不再响应他们的请求。再次与成员共享时会重新注册。",
+        "title": "停止与成员共享？"
+      },
+      "stopped": "已停止与成员共享"
     },
     "credentials": {
       "copied": "已复制",
@@ -21554,6 +21674,13 @@
       "username": "用户名"
     },
     "dialog": {
+      "audience": {
+        "credentials": "网络驱动器登录（WebDAV/SFTP）",
+        "credentialsHint": "持有登录信息的任何人都能从访达、资源管理器或 SFTP 客户端连接。",
+        "label": "共享给",
+        "members": "此共享对话的成员",
+        "membersHint": "本设备在线时，成员可在对话的“文件”区域打开这些文件。不会创建密码。"
+      },
       "blocked": {
         "credentialsDisabled": "你的文件共享策略已关闭网络驱动器凭据。",
         "liveDisabled": "你的文件共享策略已关闭文件的实时访问。",
@@ -21575,6 +21702,24 @@
         "off": "此主机的网络驱动器已关闭，开启前无法访问这个共享。",
         "openSettings": "网络驱动器设置",
         "protocolOff": "此主机的网络驱动器设置中已关闭 {protocol}。"
+      },
+      "members": {
+        "chosen": "仅我选择的成员",
+        "everyone": "不低于某角色的所有人",
+        "loading": "正在加载成员…",
+        "minRole": "最低角色",
+        "noOthers": "没有其他成员可选。",
+        "noneChosen": "请至少选择一位成员。",
+        "resultDescription": "本设备在线时，他们可以在对话的“文件”区域打开这些文件。你可以随时在这里撤销。",
+        "resultTitle": "已共享给对话成员",
+        "role": {
+          "maintainer": "维护者",
+          "member": "成员",
+          "owner": "所有者",
+          "viewer": "查看者"
+        },
+        "viewersRead": "即使允许修改，查看者也始终只能读取。",
+        "who": "哪些成员"
       },
       "noProtocol": "请至少选择一种协议。",
       "nothingSelected": "请至少选择一个文件或文件夹。",
@@ -21601,12 +21746,15 @@
       "providerLabel": "提供方",
       "resultDescription": "把下面的地址和登录信息发给需要连接的人。",
       "resultTitle": "已创建网络驱动器访问",
+      "sftpgoWebdavNote": "通过 SFTPGo 时，WebDAV 不会发送 .env 等敏感文件的内容，但会暴露这些文件的存在、大小和修改时间。除非对方必须使用 WebDAV，否则请选 SFTP。",
       "sshKey": "SSH 公钥（可选）",
       "sshKeyHint": "SFTP 客户端可以用这个密钥代替密码登录。",
       "sshKeyPlaceholder": "ssh-ed25519 AAAA…",
       "title": "以网络驱动器共享"
     },
     "errors": {
+      "collab_host_unregistered": "本设备未在为这个共享对话提供文件。请再次共享给成员以完成登记。",
+      "collab_unreachable": "无法连接协作服务器。",
       "credential_conflict": "无法生成未被占用的用户名，请重试。",
       "credential_hash_failed": "无法保护密码，请重试。",
       "credential_revoked": "该登录凭据已被撤销。",
@@ -21624,6 +21772,7 @@
       "mount_read_only": "该文件夹只能读取，无法允许修改。",
       "mount_unavailable": "所选文件夹中有一个当前在此主机上不可用。",
       "not_found": "该访问已不存在。",
+      "policy_agent_disabled": "你的文件共享策略不允许智能体分享文件。",
       "policy_credentials_disabled": "你的文件共享策略已关闭网络驱动器凭据。",
       "policy_exceeded": "此访问超出了当前的文件共享策略。",
       "policy_live_disabled": "你的文件共享策略已关闭文件的实时访问。",
@@ -21634,6 +21783,8 @@
       "session_inactive": "此对话已归档或删除，无法共享其文件。",
       "sftpgo_path_unmapped": "SFTPGo 看不到所选文件夹之一，请为其添加路径映射。",
       "sftpgo_unconfigured": "此主机未配置 SFTPGo。",
+      "shared_session_forbidden": "你在这个共享会话中的角色不允许分享其中的文件。",
+      "shared_session_unavailable": "无法向协作服务器确认你能否分享此会话的文件，请重试。",
       "store_failed": "此主机无法保存更改，请重试。",
       "ttl_exceeds_policy": "该有效期超出了文件共享策略允许的上限。",
       "unknown": "出现问题：{message}",
@@ -21648,14 +21799,21 @@
         "rotateFor": "生成新的 {protocol} 密码",
         "suspend": "暂停"
       },
+      "audience": {
+        "members": "成员 · {role}及以上",
+        "membersNamed": "{count, plural, other {# 位选定成员}}"
+      },
+      "byAgent": "由智能体创建",
       "conversation": "对话 {id}",
       "empty": "还没有以网络驱动器共享的内容。",
       "expired": "已于 {when} 过期",
       "expires": "{when} 过期",
       "newShare": "以网络驱动器共享…",
       "reason": {
+        "collab_host_removed": "本设备已不再为该共享对话提供文件",
         "expired": "已过期",
         "mount_changed": "共享的文件夹已移动或更改。恢复后将按当前内容共享。",
+        "org_policy": "你所在组织的文件共享策略不允许",
         "owner": "已由你暂停",
         "policy": "超出了当前的文件共享策略",
         "provider_failed": "无法更新 SFTPGo",
@@ -52061,6 +52219,12 @@
     "createdHelp": "拥有此链接的人都能查看内容。解密密钥在链接“#”之后。",
     "createdTitle": "分享链接已就绪",
     "creating": "创建中…",
+    "deleteLinks": {
+      "failed": "有 {count} 个分享链接无法撤销，请到“我的分享”中完成。",
+      "failedAll": "无法撤销这些分享链接，请到“我的分享”中完成。",
+      "option": "同时撤销由要删除的内容创建的 {count} 个分享链接。否则它们会作为独立副本继续可用。",
+      "revoked": "已撤销 {count} 个分享链接。"
+    },
     "dialogDescription": "创建一个公开链接。内容在本设备上端到端加密后才上传——服务器只存密文。",
     "dialogTitle": "生成分享链接",
     "done": "完成",
@@ -52242,8 +52406,6 @@
           "label": "文件链接最长有效期"
         }
       },
-      "notYet": "暂未开放",
-      "notYetHint": "现在保存，待此类分享在后续更新中上线后生效。",
       "org": {
         "conflict": "其他人修改了组织策略。已显示其版本，请检查后再次保存。",
         "defaults": "组织正在使用默认策略。",

@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useClientLiveQuery } from "@/hooks/data"
 import { useConversationFileSpace } from "@/hooks/filespace/use-conversation-filespace"
 import { useLiveFileShare } from "@/hooks/filespace/use-live-file-share"
 import { getSessionAsset } from "@/lib/db/session-assets"
@@ -98,6 +99,17 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
   const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null)
   const [liveRequest, setLiveRequest] = useState<LiveShareRequest | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  // A shared conversation's members are a possible audience for a live share.
+  const sharedScope =
+    useClientLiveQuery(
+      async () => {
+        if (!sessionId) return null
+        const binding = (await getSession(sessionId))?.collaboration
+        return binding ? { orgId: binding.orgId, sessionId: binding.sessionId } : null
+      },
+      [sessionId],
+      null
+    ) ?? null
   const live = useLiveFileShare({
     sessionId,
     hostId: loaded?.space.hostId,
@@ -198,7 +210,7 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
     )
   }
   // Only offered where the host would issue a grant; the section says why not.
-  const shareLive = liveSharingOffered(live)
+  const shareLive = liveSharingOffered(live, Boolean(sharedScope))
     ? (paths: FileSpacePath[]) =>
         setLiveRequest((previous) => ({ seq: (previous?.seq ?? 0) + 1, paths }))
     : undefined
@@ -336,6 +348,7 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
         request={liveRequest}
         onRequest={(paths) => shareLive?.(paths)}
         onCloseRequest={() => setLiveRequest(null)}
+        sharedScope={sharedScope}
       />
 
       {shareRequest ? (

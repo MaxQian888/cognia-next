@@ -21195,6 +21195,285 @@
       "outputTyped": true
     },
     {
+      "name": "file_collab_host_set",
+      "category": "development",
+      "resource": "file",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "file_collab_host_set (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "host"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The local conversation whose files the Host serves."
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "orgId",
+                  "collabSessionId",
+                  "serverUrl",
+                  "hostLabel",
+                  "hostToken"
+                ],
+                "properties": {
+                  "orgId": {
+                    "type": "string"
+                  },
+                  "collabSessionId": {
+                    "type": "string",
+                    "description": "The conversation's id on the collaboration server."
+                  },
+                  "serverUrl": {
+                    "type": "string",
+                    "description": "The collaboration server's base URL: https, or http to a loopback address."
+                  },
+                  "hostLabel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "hostToken": {
+                    "type": "string",
+                    "description": "The file host token the server answered the registration with. Write-only: stored in the Host's secret store, never answered."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null ends the registration: the Host unregisters and revokes the members' shares made under it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "One registration, as the settings and the share dialog show it.",
+        "properties": {
+          "lastContactAt": {
+            "description": "When the server last answered a claim.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lastError": {
+            "description": "Why the last call failed, or why the registration ended.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registration": {
+            "anyOf": [
+              {
+                "description": "A conversation registered as the file host of its shared counterpart.",
+                "properties": {
+                  "collabSessionId": {
+                    "type": "string"
+                  },
+                  "hostLabel": {
+                    "type": "string"
+                  },
+                  "orgId": {
+                    "type": "string"
+                  },
+                  "registeredAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "serverUrl": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "orgId",
+                  "collabSessionId",
+                  "serverUrl",
+                  "hostLabel",
+                  "registeredAt",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running": {
+            "description": "A loop is answering this conversation's requests.",
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tokenPresent": {
+            "description": "The token is in the secret store.",
+            "type": "boolean"
+          },
+          "unmirroredGrants": {
+            "description": "Members' grants whose current state the server has not accepted yet.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessionId",
+          "tokenPresent",
+          "running",
+          "unmirroredGrants"
+        ],
+        "type": "object",
+        "title": "CollabHostStatus"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "file_collab_host_status",
+      "category": "development",
+      "resource": "file",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "file_collab_host_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "One registration, as the settings and the share dialog show it.",
+        "properties": {
+          "lastContactAt": {
+            "description": "When the server last answered a claim.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lastError": {
+            "description": "Why the last call failed, or why the registration ended.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registration": {
+            "anyOf": [
+              {
+                "description": "A conversation registered as the file host of its shared counterpart.",
+                "properties": {
+                  "collabSessionId": {
+                    "type": "string"
+                  },
+                  "hostLabel": {
+                    "type": "string"
+                  },
+                  "orgId": {
+                    "type": "string"
+                  },
+                  "registeredAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "serverUrl": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "orgId",
+                  "collabSessionId",
+                  "serverUrl",
+                  "hostLabel",
+                  "registeredAt",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running": {
+            "description": "A loop is answering this conversation's requests.",
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tokenPresent": {
+            "description": "The token is in the secret store.",
+            "type": "boolean"
+          },
+          "unmirroredGrants": {
+            "description": "Members' grants whose current state the server has not accepted yet.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessionId",
+          "tokenPresent",
+          "running",
+          "unmirroredGrants"
+        ],
+        "type": "object",
+        "title": "CollabHostStatus"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "file_credential_rotate",
       "category": "development",
       "resource": "file",
@@ -21332,7 +21611,6 @@
               "sessionId",
               "paths",
               "permissions",
-              "protocols",
               "expiresInSeconds"
             ],
             "properties": {
@@ -21369,7 +21647,7 @@
                     "sftp"
                   ]
                 },
-                "minItems": 1
+                "description": "The credentials' protocols: at least one for a credential audience, none for conversation members."
               },
               "provider": {
                 "type": "string",
@@ -21390,6 +21668,65 @@
               "sshPublicKey": {
                 "type": "string",
                 "description": "An OpenSSH public key for SFTP key authentication."
+              },
+              "createdBy": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "agent"
+                ],
+                "description": "`agent` for a share an agent's tool call made; refused unless the file-sharing policy allows agent sharing. Absent: `user`."
+              },
+              "audience": {
+                "description": "Who the share is for. Absent: whoever holds its credentials.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "credentials"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "minRole"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "collab"
+                      },
+                      "userIds": {
+                        "type": [
+                          "array",
+                          "null"
+                        ],
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "maxItems": 200,
+                        "description": "The members it admits by id. Absent or null: every member whose role is at least minRole."
+                      },
+                      "minRole": {
+                        "type": "string",
+                        "enum": [
+                          "viewer",
+                          "member",
+                          "maintainer",
+                          "owner"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "additionalProperties": false
@@ -21548,16 +21885,75 @@
             "type": "object"
           },
           "grant": {
-            "description": "A live grant for credential holders (P2's only audience).",
+            "description": "A live grant.",
             "properties": {
+              "audience": {
+                "description": "Who a grant is for.\n\n- `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).\n- `collab`: members of the shared conversation the host is registered\n  for on the collaboration server (P3). They reach the files through\n  requests the server relays and this host answers; no credential exists.\n  `org_id` and `collab_session_id` are the registration the grant was made\n  under: a later registration does not inherit it.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "credentials",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "collabSessionId": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "collab",
+                        "type": "string"
+                      },
+                      "minRole": {
+                        "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
+                        "enum": [
+                          "viewer",
+                          "member",
+                          "maintainer",
+                          "owner"
+                        ],
+                        "type": "string"
+                      },
+                      "orgId": {
+                        "type": "string"
+                      },
+                      "userIds": {
+                        "description": "`None`: every member whose role is at least `min_role`.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "orgId",
+                      "collabSessionId",
+                      "minRole"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
               "createdAt": {
                 "format": "int64",
                 "type": "integer"
               },
               "createdBy": {
-                "description": "Who created a grant.",
+                "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
                 "enum": [
-                  "user"
+                  "user",
+                  "agent"
                 ],
                 "type": "string"
               },
@@ -21638,6 +22034,7 @@
                 "type": "integer"
               },
               "protocols": {
+                "description": "The protocols its credentials speak; empty for a collaboration grant.",
                 "items": {
                   "description": "A network protocol a credential speaks.",
                   "enum": [
@@ -21719,6 +22116,7 @@
               "sessionId",
               "createdBy",
               "creatorPrincipal",
+              "audience",
               "protocols",
               "provider",
               "permissions",
@@ -21860,16 +22258,75 @@
                   "type": "array"
                 },
                 "grant": {
-                  "description": "A live grant for credential holders (P2's only audience).",
+                  "description": "A live grant.",
                   "properties": {
+                    "audience": {
+                      "description": "Who a grant is for.\n\n- `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).\n- `collab`: members of the shared conversation the host is registered\n  for on the collaboration server (P3). They reach the files through\n  requests the server relays and this host answers; no credential exists.\n  `org_id` and `collab_session_id` are the registration the grant was made\n  under: a later registration does not inherit it.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "kind": {
+                              "const": "credentials",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "properties": {
+                            "collabSessionId": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "collab",
+                              "type": "string"
+                            },
+                            "minRole": {
+                              "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
+                              "enum": [
+                                "viewer",
+                                "member",
+                                "maintainer",
+                                "owner"
+                              ],
+                              "type": "string"
+                            },
+                            "orgId": {
+                              "type": "string"
+                            },
+                            "userIds": {
+                              "description": "`None`: every member whose role is at least `min_role`.",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": [
+                                "array",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "orgId",
+                            "collabSessionId",
+                            "minRole"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
                     "createdAt": {
                       "format": "int64",
                       "type": "integer"
                     },
                     "createdBy": {
-                      "description": "Who created a grant.",
+                      "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
                       "enum": [
-                        "user"
+                        "user",
+                        "agent"
                       ],
                       "type": "string"
                     },
@@ -21950,6 +22407,7 @@
                       "type": "integer"
                     },
                     "protocols": {
+                      "description": "The protocols its credentials speak; empty for a collaboration grant.",
                       "items": {
                         "description": "A network protocol a credential speaks.",
                         "enum": [
@@ -22031,6 +22489,7 @@
                     "sessionId",
                     "createdBy",
                     "creatorPrincipal",
+                    "audience",
                     "protocols",
                     "provider",
                     "permissions",
@@ -22172,16 +22631,75 @@
             "type": "array"
           },
           "grant": {
-            "description": "A live grant for credential holders (P2's only audience).",
+            "description": "A live grant.",
             "properties": {
+              "audience": {
+                "description": "Who a grant is for.\n\n- `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).\n- `collab`: members of the shared conversation the host is registered\n  for on the collaboration server (P3). They reach the files through\n  requests the server relays and this host answers; no credential exists.\n  `org_id` and `collab_session_id` are the registration the grant was made\n  under: a later registration does not inherit it.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "credentials",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "collabSessionId": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "collab",
+                        "type": "string"
+                      },
+                      "minRole": {
+                        "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
+                        "enum": [
+                          "viewer",
+                          "member",
+                          "maintainer",
+                          "owner"
+                        ],
+                        "type": "string"
+                      },
+                      "orgId": {
+                        "type": "string"
+                      },
+                      "userIds": {
+                        "description": "`None`: every member whose role is at least `min_role`.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "orgId",
+                      "collabSessionId",
+                      "minRole"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
               "createdAt": {
                 "format": "int64",
                 "type": "integer"
               },
               "createdBy": {
-                "description": "Who created a grant.",
+                "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
                 "enum": [
-                  "user"
+                  "user",
+                  "agent"
                 ],
                 "type": "string"
               },
@@ -22262,6 +22780,7 @@
                 "type": "integer"
               },
               "protocols": {
+                "description": "The protocols its credentials speak; empty for a collaboration grant.",
                 "items": {
                   "description": "A network protocol a credential speaks.",
                   "enum": [
@@ -22343,6 +22862,7 @@
               "sessionId",
               "createdBy",
               "creatorPrincipal",
+              "audience",
               "protocols",
               "provider",
               "permissions",
@@ -22469,16 +22989,75 @@
             "type": "array"
           },
           "grant": {
-            "description": "A live grant for credential holders (P2's only audience).",
+            "description": "A live grant.",
             "properties": {
+              "audience": {
+                "description": "Who a grant is for.\n\n- `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).\n- `collab`: members of the shared conversation the host is registered\n  for on the collaboration server (P3). They reach the files through\n  requests the server relays and this host answers; no credential exists.\n  `org_id` and `collab_session_id` are the registration the grant was made\n  under: a later registration does not inherit it.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "credentials",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "collabSessionId": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "collab",
+                        "type": "string"
+                      },
+                      "minRole": {
+                        "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
+                        "enum": [
+                          "viewer",
+                          "member",
+                          "maintainer",
+                          "owner"
+                        ],
+                        "type": "string"
+                      },
+                      "orgId": {
+                        "type": "string"
+                      },
+                      "userIds": {
+                        "description": "`None`: every member whose role is at least `min_role`.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "orgId",
+                      "collabSessionId",
+                      "minRole"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
               "createdAt": {
                 "format": "int64",
                 "type": "integer"
               },
               "createdBy": {
-                "description": "Who created a grant.",
+                "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
                 "enum": [
-                  "user"
+                  "user",
+                  "agent"
                 ],
                 "type": "string"
               },
@@ -22559,6 +23138,7 @@
                 "type": "integer"
               },
               "protocols": {
+                "description": "The protocols its credentials speak; empty for a collaboration grant.",
                 "items": {
                   "description": "A network protocol a credential speaks.",
                   "enum": [
@@ -22640,6 +23220,7 @@
               "sessionId",
               "createdBy",
               "creatorPrincipal",
+              "audience",
               "protocols",
               "provider",
               "permissions",
@@ -22766,16 +23347,75 @@
             "type": "array"
           },
           "grant": {
-            "description": "A live grant for credential holders (P2's only audience).",
+            "description": "A live grant.",
             "properties": {
+              "audience": {
+                "description": "Who a grant is for.\n\n- `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).\n- `collab`: members of the shared conversation the host is registered\n  for on the collaboration server (P3). They reach the files through\n  requests the server relays and this host answers; no credential exists.\n  `org_id` and `collab_session_id` are the registration the grant was made\n  under: a later registration does not inherit it.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "credentials",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "collabSessionId": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "collab",
+                        "type": "string"
+                      },
+                      "minRole": {
+                        "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
+                        "enum": [
+                          "viewer",
+                          "member",
+                          "maintainer",
+                          "owner"
+                        ],
+                        "type": "string"
+                      },
+                      "orgId": {
+                        "type": "string"
+                      },
+                      "userIds": {
+                        "description": "`None`: every member whose role is at least `min_role`.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "orgId",
+                      "collabSessionId",
+                      "minRole"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
               "createdAt": {
                 "format": "int64",
                 "type": "integer"
               },
               "createdBy": {
-                "description": "Who created a grant.",
+                "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
                 "enum": [
-                  "user"
+                  "user",
+                  "agent"
                 ],
                 "type": "string"
               },
@@ -22856,6 +23496,7 @@
                 "type": "integer"
               },
               "protocols": {
+                "description": "The protocols its credentials speak; empty for a collaboration grant.",
                 "items": {
                   "description": "A network protocol a credential speaks.",
                   "enum": [
@@ -22937,6 +23578,7 @@
               "sessionId",
               "createdBy",
               "creatorPrincipal",
+              "audience",
               "protocols",
               "provider",
               "permissions",
@@ -73978,5 +74620,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "6864eeabdceb871347f09fb4f226010a633b96c9338d89b1e1012685fceac6b7"
+  "catalogHash": "8f2b28b2510aea47c46879c42e5d68c218405828d6e9bc6752bf57f41bdd79b3"
 }

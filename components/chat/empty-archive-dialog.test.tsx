@@ -27,6 +27,26 @@ jest.mock("@/lib/telemetry/conversation-list-events", () => ({
   trackConversationRowAction: jest.fn(() => Promise.resolve(true)),
 }))
 
+const revokeLinks = jest.fn()
+jest.mock("@/components/share/revoke-share-links-option", () => ({
+  // The option's own count and toasts are pinned in its suite; here it is a
+  // plain checkbox that records which conversations it was asked about.
+  RevokeShareLinksOption: (props: {
+    sessionIds: readonly string[]
+    checked: boolean
+    onCheckedChange: (checked: boolean) => void
+  }) => (
+    <input
+      type="checkbox"
+      aria-label="revoke share links"
+      data-session-ids={props.sessionIds.join(",")}
+      checked={props.checked}
+      onChange={(event) => props.onCheckedChange(event.target.checked)}
+    />
+  ),
+  useRevokeShareLinksAfterDelete: () => (ids: readonly string[]) => revokeLinks(ids),
+}))
+
 import { EmptyArchiveDialog } from "./empty-archive-dialog"
 
 const LOCK = { ticketId: "tk", lockedAt: 1 } as unknown as ChatSession["handoffLock"]
@@ -46,6 +66,7 @@ beforeEach(() => {
   deleteRouted.mockReset().mockResolvedValue(undefined)
   toastSuccess.mockReset()
   toastError.mockReset()
+  revokeLinks.mockClear()
 })
 
 describe("EmptyArchiveDialog", () => {
@@ -111,5 +132,38 @@ describe("EmptyArchiveDialog", () => {
     render(<EmptyArchiveDialog open onOpenChange={jest.fn()} sessions={[]} />)
     expect(screen.getByText("conversations.archive.empty.nothingTitle")).toBeInTheDocument()
     expect(screen.queryByTestId("empty-archive-confirm")).toBeNull()
+  })
+
+  it("revokes the share links of what it deletes when asked", async () => {
+    render(
+      <EmptyArchiveDialog
+        open
+        onOpenChange={jest.fn()}
+        sessions={[row("a"), row("b"), row("locked", { handoffLock: LOCK })]}
+      />
+    )
+    const option = screen.getByRole("checkbox", { name: "revoke share links" })
+    // A handed-off conversation stays, so its links are not offered.
+    expect(option).toHaveAttribute("data-session-ids", "a,b")
+    fireEvent.click(option)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("empty-archive-confirm"))
+    })
+    expect(revokeLinks).toHaveBeenCalledWith(["a", "b"])
+    expect(deleteRouted).toHaveBeenCalledWith(["a", "b"])
+  })
+
+  it("leaves the share links alone unless asked", async () => {
+    render(<EmptyArchiveDialog open onOpenChange={jest.fn()} sessions={[row("a")]} />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("empty-archive-confirm"))
+    })
+    expect(deleteRouted).toHaveBeenCalledWith(["a"])
+    expect(revokeLinks).not.toHaveBeenCalled()
+  })
+
+  it("offers no revoke option when there is nothing to delete", () => {
+    render(<EmptyArchiveDialog open onOpenChange={jest.fn()} sessions={[]} />)
+    expect(screen.queryByRole("checkbox", { name: "revoke share links" })).toBeNull()
   })
 })

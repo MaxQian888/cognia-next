@@ -242,7 +242,9 @@ export type CollabFetch = (input: string, init?: RequestInit) => Promise<Respons
 export class CollabError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
+    /** Why a policy refused it (`reason` on a 403), when the server said. */
+    readonly reason?: string
   ) {
     super(message)
     this.name = "CollabError"
@@ -611,6 +613,71 @@ export interface CollabFileSharingPolicy extends CollabFileSharingSettings {
   revision: number
   updatedBy?: string
   updatedAt?: number
+}
+
+/**
+ * The device holding a shared conversation's files, as members see it
+ * (ADR-0222 §6). `online`: it answered within the last minute.
+ */
+export interface CollabFileHost {
+  registered: boolean
+  hostLabel?: string
+  registeredBy?: string
+  registeredAt?: number
+  lastSeenAt?: number
+  online: boolean
+}
+
+/** A host's share for the conversation's members, as the server mirrors it. */
+export interface CollabFileGrant {
+  id: string
+  sessionId: string
+  label: string | null
+  /** Hidden (null) in a member's own listing: who else it names is not theirs to see. */
+  userIds: string[] | null
+  minRole: SessionRole
+  permissions: ("read" | "download" | "write")[]
+  paths: { path: string; isDir: boolean }[]
+  status: "active" | "suspended" | "stale" | "expired" | "revoked"
+  expiresAt: number
+  revokedAt: number | null
+  policyRevision: number
+  createdBy: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type CollabFileOp = "list" | "stat" | "read" | "write" | "mkdir" | "delete" | "rename"
+
+export type CollabFileRequestStatus =
+  "awaiting_upload" | "pending" | "claimed" | "done" | "failed" | "expired"
+
+/** A member's request to the host, as its requester reads it. */
+export interface CollabFileRequest {
+  id: string
+  grantId: string
+  op: CollabFileOp
+  path: string
+  destPath?: string
+  status: CollabFileRequestStatus
+  /** The host's answer: entries for a listing, metadata for a stat or read. */
+  result?: unknown
+  resultByteLength?: number
+  resultMediaType?: string
+  /** The host's refusal code (`not_found`, `permission`, `sensitive`, …). */
+  error?: string
+  createdAt: number
+  completedAt?: number
+  expiresAt: number
+}
+
+export interface CreateCollabFileRequestInput {
+  grantId: string
+  op: CollabFileOp
+  path: string
+  destPath?: string
+  /** A write declares its bytes first and uploads them after. */
+  upload?: { byteLength: number; sha256: string }
 }
 
 export function encodeReasonHeader(reason: string): string {
@@ -1664,6 +1731,104 @@ export class CollabClient {
     )
   }
 
+  // ── A shared conversation's files (ADR-0222 §6) ────────────────────────
+
+  /**
+   * Register this device as the conversation's file host (`files.share`).
+   * The token is answered once; the server keeps only its hash. A new
+   * registration replaces the previous host and ends its members' shares.
+   */
+  async registerFileHost(
+    orgId: string,
+    sessionId: string,
+    hostLabel: string
+  ): Promise<{ hostToken: string; host: CollabFileHost }> {
+    return this.json<{ hostToken: string; host: CollabFileHost }>(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-host`,
+      { method: "PUT", body: JSON.stringify({ hostLabel }) }
+    )
+  }
+
+  /** End the conversation's host registration as a member who may share its files. */
+  async unregisterFileHost(orgId: string, sessionId: string): Promise<void> {
+    await this.json<void>(orgId, `${sessionFilesPath(orgId, sessionId)}/file-host`, {
+      method: "DELETE",
+    })
+  }
+
+  /** The shares that admit the caller now, with the host's state. */
+  async listFileGrants(
+    orgId: string,
+    sessionId: string
+  ): Promise<{ host: CollabFileHost; grants: CollabFileGrant[] }> {
+    return this.json<{ host: CollabFileHost; grants: CollabFileGrant[] }>(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-grants`,
+      { cache: "no-store" }
+    )
+  }
+
+  async createFileRequest(
+    orgId: string,
+    sessionId: string,
+    input: CreateCollabFileRequestInput
+  ): Promise<CollabFileRequest> {
+    return this.json<CollabFileRequest>(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    )
+  }
+
+  async getFileRequest(
+    orgId: string,
+    sessionId: string,
+    requestId: string
+  ): Promise<CollabFileRequest> {
+    return this.json<CollabFileRequest>(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-requests/${encodeURIComponent(requestId)}`,
+      { cache: "no-store" }
+    )
+  }
+
+  /** A write's bytes: exactly the length and SHA-256 the request declared. */
+  async uploadFileRequestBytes(
+    orgId: string,
+    sessionId: string,
+    requestId: string,
+    body: Blob | ArrayBuffer | Uint8Array
+  ): Promise<void> {
+    await this.json<void>(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-requests/${encodeURIComponent(requestId)}/upload`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: body as BodyInit,
+      }
+    )
+  }
+
+  /** A finished read's bytes; only its requester may fetch them. */
+  async downloadFileRequestResult(
+    orgId: string,
+    sessionId: string,
+    requestId: string
+  ): Promise<Blob> {
+    const response = await this.request(
+      orgId,
+      `${sessionFilesPath(orgId, sessionId)}/file-requests/${encodeURIComponent(requestId)}/result`,
+      { cache: "no-store" }
+    )
+    if (!response.ok) throw await responseError(response)
+    return response.blob()
+  }
+
   /** Plans this person can see in `orgId`, headers only, newest activity first. */
   async listPlans(
     orgId: string,
@@ -1846,6 +2011,11 @@ export class CollabClient {
  * a narrowing flag, and `?active=false` and no flag at all mean the same thing
  * to the server. Sending the former would just be a longer way to ask.
  */
+/** The conversation-scoped prefix of the file-host and file-request routes. */
+function sessionFilesPath(orgId: string, sessionId: string): string {
+  return `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}`
+}
+
 /** The document-scoped route prefix, which eight Canvas calls share. */
 function canvasPath(orgId: string, documentId: string): string {
   return `/v1/orgs/${encodeURIComponent(orgId)}/canvas-documents/${encodeURIComponent(documentId)}`
@@ -1875,7 +2045,7 @@ async function readJson<T>(response: Response): Promise<T> {
         readFieldClashes((body as { fields?: unknown }).fields)
       )
     }
-    throw new CollabError(response.status, message)
+    throw new CollabError(response.status, message, reasonOf(body))
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
@@ -1887,7 +2057,11 @@ async function responseError(response: Response): Promise<CollabError> {
     typeof body?.error === "string" && body.error
       ? body.error
       : `collaboration plane returned ${response.status}`
-  return new CollabError(response.status, message)
+  return new CollabError(response.status, message, reasonOf(body))
+}
+
+function reasonOf(body: Record<string, unknown> | null): string | undefined {
+  return typeof body?.reason === "string" && body.reason ? body.reason : undefined
 }
 
 async function readErrorBody(response: Response): Promise<Record<string, unknown> | null> {

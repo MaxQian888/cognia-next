@@ -1,7 +1,7 @@
 //! The durable audit log (ADR-0222 §4.3).
 //!
 //! Every grant change and every gateway decision is one row: who
-//! (`owner`, `credential:<username>`), over which channel, what, on which
+//! (`owner`, `credential:<username>`, `member:<user id>`), over which channel, what, on which
 //! FileSpace path, with what outcome and why. Rows are kept for
 //! [`RETENTION_MS`] and pruned by the maintenance loop. Writing an audit row
 //! never fails the operation it describes; a write error is logged instead.
@@ -21,6 +21,8 @@ pub enum Channel {
     Webdav,
     Sftp,
     Sftpgo,
+    /// A member's request relayed by the collaboration server.
+    Collab,
 }
 
 impl Channel {
@@ -30,6 +32,7 @@ impl Channel {
             Channel::Webdav => "webdav",
             Channel::Sftp => "sftp",
             Channel::Sftpgo => "sftpgo",
+            Channel::Collab => "collab",
         }
     }
 }
@@ -70,6 +73,11 @@ pub struct Event<'a> {
 /// The principal string for a credential holder.
 pub fn credential_principal(username: &str) -> String {
     format!("credential:{username}")
+}
+
+/// The principal string for a shared conversation's member.
+pub fn member_principal(user_id: &str) -> String {
+    format!("member:{user_id}")
 }
 
 /// Record `event` at `now`.
@@ -133,6 +141,8 @@ mod tests {
         assert_eq!(rows[0].outcome, "denied");
         assert_eq!(rows[0].reason.as_deref(), Some("sensitive"));
         assert_eq!(rows[1].channel, "app");
+        assert_eq!(member_principal("usr_a"), "member:usr_a");
+        assert_eq!(Channel::Collab.as_str(), "collab");
         assert_eq!(rows[1].outcome, "allowed");
     }
 }

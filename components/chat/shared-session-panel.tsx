@@ -61,9 +61,11 @@ import {
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { syncSharedSession, sharedChatCacheKey } from "@/lib/collab/shared-chat-sync"
+import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
 import { getDb } from "@/lib/db/schema"
-import { deleteSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
+
+import { SharedSessionFiles } from "./shared-session-files"
 
 const ROLES: SessionRole[] = ["viewer", "member", "maintainer", "owner"]
 
@@ -174,6 +176,17 @@ export function SharedSessionPanel({
   const canDelete = authorizeSessionAction(
     myMembership,
     "session.delete",
+    remote?.policyRevision ?? 0
+  ).allowed
+  // ADR-0222 §6: the files a host shares with this conversation's members.
+  const canReadFiles = authorizeSessionAction(
+    myMembership,
+    "files.readLive",
+    remote?.policyRevision ?? 0
+  ).allowed
+  const canShareFiles = authorizeSessionAction(
+    myMembership,
+    "files.share",
     remote?.policyRevision ?? 0
   ).allowed
 
@@ -302,7 +315,8 @@ export function SharedSessionPanel({
         session.collaboration.sessionId,
         context.userId
       )
-      await deleteSession(session.id)
+      // The full local teardown, so its live file shares end at once too.
+      await deleteSessionsWithTeardown([session.id])
       useChatStore.getState().closeSession(session.id)
       setOpen(false)
       toast.success(t("leftConversation"))
@@ -500,7 +514,8 @@ export function SharedSessionPanel({
           baseRevision: remote.revision,
         }
       )
-      await deleteSession(session.id)
+      // The full local teardown, so its live file shares end at once too.
+      await deleteSessionsWithTeardown([session.id])
       useChatStore.getState().closeSession(session.id)
       toast.success(t("deleteAccepted"))
       setOpen(false)
@@ -760,6 +775,16 @@ export function SharedSessionPanel({
                   </div>
                 ))}
               </section>
+
+              {canReadFiles && session.collaboration ? (
+                <SharedSessionFiles
+                  client={context.client}
+                  orgId={session.collaboration.orgId}
+                  sessionId={session.collaboration.sessionId}
+                  role={myMembership?.role ?? null}
+                  canRemoveHost={canShareFiles}
+                />
+              ) : null}
 
               {canManage ? (
                 <section className="space-y-3" aria-labelledby="shared-invite-heading">

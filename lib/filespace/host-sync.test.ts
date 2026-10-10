@@ -109,6 +109,34 @@ describe("createFileShareHostSync", () => {
     void sync
   })
 
+  it("pushes a changed conversation at once, but only one the host has grants for", async () => {
+    const { call, deps, sync } = setup()
+    // "s1" was just deleted: there is no row, so its table says so.
+    ;(deps.getSession as jest.Mock).mockImplementation(async (id: string) =>
+      id === "s1" ? undefined : ({ id } as ChatSession)
+    )
+    await sync.sessionsChanged(["s1", "ungranted"])
+    expect(names(call)).toEqual(["file_share_status", "file_space_sync"])
+    expect(call.mock.calls[1]![1]).toEqual({
+      sessions: [{ sessionId: "s1", state: "deleted", mounts: [], assets: [] }],
+    })
+
+    call.mockClear()
+    await sync.sessionsChanged(["ungranted"])
+    expect(names(call)).toEqual(["file_share_status"])
+  })
+
+  it("pushes no lifecycle change while locked or to a host serving another account", async () => {
+    const locked = setup(null)
+    await locked.sync.sessionsChanged(["s1"])
+    expect(locked.call).not.toHaveBeenCalled()
+
+    const { call, sync } = setup()
+    call.mockImplementationOnce(async () => status({ accountId: "acct-2" }))
+    await sync.sessionsChanged(["s1"])
+    expect(names(call)).toEqual(["file_share_status"])
+  })
+
   it("runs one call at a time so an account switch cannot interleave", async () => {
     const { call, sync, setAccount } = setup()
     const order: string[] = []

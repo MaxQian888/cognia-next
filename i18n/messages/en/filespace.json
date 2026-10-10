@@ -6,6 +6,19 @@
     "share": "Share via link",
     "shareFiles": "Share files…"
   },
+  "agentCard": {
+    "snapshotTitle": "Shared {count, plural, one {# file} other {# files}} as a link",
+    "copy": "Copy link",
+    "copied": "Link copied.",
+    "copyFailed": "Could not copy the link.",
+    "expires": "Expires {when}",
+    "withheldSensitive": "{count, plural, one {# file holding secrets was} other {# files holding secrets were}} left out.",
+    "liveTitle": "Shared as a network drive",
+    "passwordNote": "The agent never sees the password. Issue one to connect; issuing another signs out anyone using the last one.",
+    "issuePassword": "Issue {protocol} password ({username})",
+    "issuedDescription": "Shown only this once. Copy it now.",
+    "membersNote": "Members open these files from the conversation's Files section while this device is online. No password is created; revoke it from this conversation's Files → Shared as network drive."
+  },
   "entry": {
     "sourceUnavailable": "Original not on this device"
   },

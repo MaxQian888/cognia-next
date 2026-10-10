@@ -24,6 +24,10 @@ export type SessionAction =
   | "attachment.write"
   /** Publish the conversation's files as a link (ADR-0222). */
   | "files.share"
+  /** Read files a host shares live with the conversation's members (ADR-0222 §6). */
+  | "files.readLive"
+  /** Change those files through a live grant that allows it. Never a viewer or a guest. */
+  | "files.writeLive"
 
 export type AuthorKind = "human" | "guest" | "agent" | "app" | "connector" | "system"
 

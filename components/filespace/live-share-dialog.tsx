@@ -5,6 +5,11 @@
  * conversation's FileSpace, what may be done with them, for how long and over
  * which protocols, and get a WebDAV/SFTP sign-in for them.
  *
+ * A shared conversation offers a second audience (§6): its members. They get
+ * no sign-in; they reach the files from the conversation's Files section,
+ * through the collaboration server, while this host is online. The share
+ * names everyone at a role or chosen members, and a viewer only ever reads.
+ *
  * The host the files live on is the authority. This dialog offers only what
  * that host's policy allows (its own pushed copy, `status.policy`), says what
  * would make the share unreachable (the listener off, a protocol off), and
@@ -39,8 +44,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import type { SessionRole } from "@cognia/agent-config-types"
+import {
+  useSharedSessionMembers,
+  type SharedSessionScope,
+} from "@/hooks/collab/use-shared-session-members"
 import type { listWorkspaceDir } from "@/lib/files/workspace-fs"
-import { createLiveGrant, fileShareErrorDetails } from "@/lib/filespace/grants-client"
+import { fileShareErrorDetails } from "@/lib/filespace/grants-client"
+import { createLiveFileShare } from "@/lib/filespace/live-share"
 import { isFileSpacePathWithin, normalizeFileSpacePath } from "@/lib/filespace/paths"
 import { FILE_SHARING_TTL_PRESETS_SECONDS } from "@/lib/filespace/policy"
 import { fileSharingPolicyHref, networkDriveSettingsHref } from "@/lib/filespace/settings-links"
@@ -61,6 +72,10 @@ const DAY = 24 * HOUR
 const DEFAULT_TTL_SECONDS = DAY
 const MAX_LABEL_CHARS = 120
 const PROTOCOLS: readonly LiveProtocol[] = ["webdav", "sftp"]
+const ROLES: readonly SessionRole[] = ["viewer", "member", "maintainer", "owner"]
+
+/** Who a new share is for. */
+export type LiveShareAudience = "members" | "credentials"
 
 export interface LiveShareDialogProps {
   open: boolean
@@ -73,15 +88,37 @@ export interface LiveShareDialogProps {
   onCreated?: (created: CreatedLiveGrant) => void
   /** Injectable for tests; the file tree's own listing by default. */
   listDir?: typeof listWorkspaceDir
+  /**
+   * The conversation's counterpart on the collaboration server, when it is a
+   * shared conversation: its members become a possible audience.
+   */
+  sharedScope?: SharedSessionScope | null
 }
 
-/** Why the host would refuse any grant from here, or `null`. */
+/**
+ * Why the host would refuse a grant for `audience` from here, or `null`.
+ * Members need live access; only network-drive credentials need the
+ * credentials switch too.
+ */
 export function liveShareBlock(
-  status: FileShareStatus
+  status: FileShareStatus,
+  audience: LiveShareAudience = "credentials"
 ): "locked" | "liveDisabled" | "credentialsDisabled" | null {
   if (!status.active) return "locked"
   if (!status.policy.allowLiveGrants) return "liveDisabled"
-  if (!status.policy.allowProtocolCredentials) return "credentialsDisabled"
+  if (audience === "credentials" && !status.policy.allowProtocolCredentials) {
+    return "credentialsDisabled"
+  }
+  return null
+}
+
+/** The audience a new share starts on: members when the conversation has them and may. */
+export function initialAudience(
+  status: FileShareStatus,
+  shared: boolean
+): LiveShareAudience | null {
+  if (shared && liveShareBlock(status, "members") === null) return "members"
+  if (liveShareBlock(status, "credentials") === null) return "credentials"
   return null
 }
 
@@ -116,9 +153,13 @@ export function selectionIsWritable(
 
 export function LiveShareDialog(props: LiveShareDialogProps) {
   const t = useTranslations("liveShare")
-  const { open, onOpenChange, status } = props
+  const { open, onOpenChange, status, sharedScope } = props
   const [created, setCreated] = useState<CreatedLiveGrant | null>(null)
-  const block = liveShareBlock(status)
+  const startOn = initialAudience(status, Boolean(sharedScope))
+  // Nothing is offered: say why credentials are off (members, when the
+  // conversation has them, are off for a reason the same alert names).
+  const block = startOn === null ? liveShareBlock(status) : null
+  const forMembers = created?.grant.audience?.kind === "collab"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -126,10 +167,19 @@ export function LiveShareDialog(props: LiveShareDialogProps) {
         {created ? (
           <>
             <DialogHeader>
-              <DialogTitle>{t("dialog.resultTitle")}</DialogTitle>
-              <DialogDescription>{t("dialog.resultDescription")}</DialogDescription>
+              <DialogTitle>
+                {forMembers ? t("dialog.members.resultTitle") : t("dialog.resultTitle")}
+              </DialogTitle>
+              <DialogDescription>
+                {forMembers ? t("dialog.members.resultDescription") : t("dialog.resultDescription")}
+              </DialogDescription>
             </DialogHeader>
-            <LiveShareCredentials credentials={created.credentials} endpoints={created.endpoints} />
+            {forMembers ? null : (
+              <LiveShareCredentials
+                credentials={created.credentials}
+                endpoints={created.endpoints}
+              />
+            )}
             <DialogFooter>
               <Button type="button" onClick={() => onOpenChange(false)}>
                 {t("dialog.done")}
@@ -157,6 +207,7 @@ export function LiveShareDialog(props: LiveShareDialogProps) {
             ) : (
               <LiveShareForm
                 {...props}
+                startOn={startOn ?? "credentials"}
                 onCreated={(next) => {
                   setCreated(next)
                   props.onCreated?.(next)
@@ -178,11 +229,23 @@ function LiveShareForm({
   initialSelection = [],
   onCreated,
   listDir,
-}: LiveShareDialogProps & { onCreated: (created: CreatedLiveGrant) => void }) {
+  sharedScope = null,
+  startOn,
+}: LiveShareDialogProps & {
+  onCreated: (created: CreatedLiveGrant) => void
+  startOn: LiveShareAudience
+}) {
   const t = useTranslations("liveShare")
   const tp = useTranslations("share.policy")
   const policy = status.policy
   const ttl = liveTtlOptions(policy.maxLiveTtlSeconds)
+  const [audience, setAudience] = useState<LiveShareAudience>(startOn)
+  const forMembers = audience === "members"
+  const [who, setWho] = useState<"everyone" | "chosen">("everyone")
+  const [minRole, setMinRole] = useState<SessionRole>("viewer")
+  const [chosen, setChosen] = useState<string[]>([])
+  const roster = useSharedSessionMembers(forMembers ? sharedScope : null)
+  const others = roster.members.filter((member) => member.userId !== roster.selfUserId)
   const [selected, setSelected] = useState<FileSpacePath[]>([...initialSelection])
   const [label, setLabel] = useState("")
   const [download, setDownload] = useState(true)
@@ -199,7 +262,7 @@ function LiveShareForm({
   const effectiveWrite = write && writeAllowed
   const listener = status.listener
   const listenerWarnings: string[] =
-    provider === "builtin"
+    !forMembers && provider === "builtin"
       ? !listener.config.enabled || listener.endpoints.unavailableReason === "listener_off"
         ? [t("dialog.listener.off")]
         : protocols
@@ -211,14 +274,25 @@ function LiveShareForm({
   const problem =
     selected.length === 0
       ? t("dialog.nothingSelected")
-      : protocols.length === 0
-        ? t("dialog.noProtocol")
-        : null
+      : forMembers
+        ? who === "chosen" && chosen.length === 0
+          ? t("dialog.members.noneChosen")
+          : null
+        : protocols.length === 0
+          ? t("dialog.noProtocol")
+          : null
 
   const duration = (seconds: number) =>
     seconds % DAY === 0
       ? tp("duration.days", { count: seconds / DAY })
       : tp("duration.hours", { count: Math.round(seconds / HOUR) })
+
+  // SFTPGo's WebDAV answers a hidden file's size and date before refusing
+  // it, so a share it serves starts as SFTP only; WebDAV stays one click away.
+  const chooseProvider = (next: LiveProvider) => {
+    setProvider(next)
+    if (next === "sftpgo") setProtocols(["sftp"])
+  }
 
   const toggle = (path: FileSpacePath, checked: boolean) =>
     setSelected((current) =>
@@ -234,21 +308,33 @@ function LiveShareForm({
     setError(null)
     try {
       const sftp = protocols.includes("sftp")
-      const created = await createLiveGrant(
-        {
-          sessionId: space.sessionId,
-          paths: selected,
-          permissions: [
-            "read",
-            ...(download ? (["download"] as const) : []),
-            ...(effectiveWrite ? (["write"] as const) : []),
-          ],
-          protocols,
-          provider,
-          expiresInSeconds: ttlSeconds,
-          ...(label.trim() ? { label: label.trim() } : {}),
-          ...(sftp && sshKey.trim() ? { sshPublicKey: sshKey.trim() } : {}),
-        },
+      const common = {
+        sessionId: space.sessionId,
+        paths: selected,
+        permissions: [
+          "read" as const,
+          ...(download ? (["download"] as const) : []),
+          ...(effectiveWrite ? (["write"] as const) : []),
+        ],
+        expiresInSeconds: ttlSeconds,
+        ...(label.trim() ? { label: label.trim() } : {}),
+      }
+      const created = await createLiveFileShare(
+        forMembers
+          ? {
+              ...common,
+              protocols: [],
+              audience:
+                who === "chosen"
+                  ? { kind: "collab", userIds: chosen, minRole: "viewer" }
+                  : { kind: "collab", minRole },
+            }
+          : {
+              ...common,
+              protocols,
+              provider,
+              ...(sftp && sshKey.trim() ? { sshPublicKey: sshKey.trim() } : {}),
+            },
         { hostId: space.hostId }
       )
       onCreated(created)
@@ -268,6 +354,31 @@ function LiveShareForm({
         void submit()
       }}
     >
+      {sharedScope ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="live-share-audience">{t("dialog.audience.label")}</Label>
+          <Select value={audience} onValueChange={(next) => setAudience(next as LiveShareAudience)}>
+            <SelectTrigger id="live-share-audience" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="members" disabled={liveShareBlock(status, "members") !== null}>
+                {t("dialog.audience.members")}
+              </SelectItem>
+              <SelectItem
+                value="credentials"
+                disabled={liveShareBlock(status, "credentials") !== null}
+              >
+                {t("dialog.audience.credentials")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {forMembers ? t("dialog.audience.membersHint") : t("dialog.audience.credentialsHint")}
+          </p>
+        </div>
+      ) : null}
+
       <div className="space-y-1.5">
         <Label>{t("dialog.files")}</Label>
         <ShareFilesPicker
@@ -291,6 +402,62 @@ function LiveShareForm({
         />
       </div>
 
+      {forMembers ? (
+        <fieldset className="space-y-2" data-testid="live-share-members">
+          <legend className="text-sm font-medium">{t("dialog.members.who")}</legend>
+          <Select value={who} onValueChange={(next) => setWho(next as "everyone" | "chosen")}>
+            <SelectTrigger aria-label={t("dialog.members.who")} size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="everyone">{t("dialog.members.everyone")}</SelectItem>
+              <SelectItem value="chosen">{t("dialog.members.chosen")}</SelectItem>
+            </SelectContent>
+          </Select>
+          {who === "everyone" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="live-share-min-role">{t("dialog.members.minRole")}</Label>
+              <Select value={minRole} onValueChange={(next) => setMinRole(next as SessionRole)}>
+                <SelectTrigger id="live-share-min-role" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {t(`dialog.members.role.${role}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : !roster.loaded ? (
+            <p className="text-xs text-muted-foreground">{t("dialog.members.loading")}</p>
+          ) : others.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("dialog.members.noOthers")}</p>
+          ) : (
+            <div className="space-y-1.5">
+              {others.map((member) => (
+                <CheckRow
+                  key={member.userId}
+                  id={`live-share-member-${member.userId}`}
+                  checked={chosen.includes(member.userId)}
+                  onChange={(checked) =>
+                    setChosen((current) =>
+                      checked
+                        ? [...current, member.userId]
+                        : current.filter((id) => id !== member.userId)
+                    )
+                  }
+                  label={member.displayName?.trim() || member.userId}
+                >
+                  {t(`dialog.members.role.${member.role}`)}
+                </CheckRow>
+              ))}
+            </div>
+          )}
+        </fieldset>
+      ) : null}
+
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">{t("dialog.permissions")}</legend>
         <CheckRow id="live-share-read" checked disabled label={t("dialog.permission.read")}>
@@ -313,30 +480,42 @@ function LiveShareForm({
             ? t("dialog.permission.writeDisabledPolicy")
             : !writableSelection
               ? t("dialog.permission.writeReadOnly")
-              : null}
+              : forMembers
+                ? t("dialog.members.viewersRead")
+                : null}
         </CheckRow>
       </fieldset>
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t("dialog.protocols")}</legend>
-        {PROTOCOLS.map((protocol) => (
-          <CheckRow
-            key={protocol}
-            id={`live-share-${protocol}`}
-            checked={protocols.includes(protocol)}
-            onChange={(checked) =>
-              setProtocols((current) =>
-                checked
-                  ? PROTOCOLS.filter((p) => p === protocol || current.includes(p))
-                  : current.filter((p) => p !== protocol)
-              )
-            }
-            label={t(`dialog.protocol.${protocol}`)}
-          >
-            {t(`dialog.protocol.${protocol}Hint`)}
-          </CheckRow>
-        ))}
-      </fieldset>
+      {forMembers ? null : (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("dialog.protocols")}</legend>
+          {PROTOCOLS.map((protocol) => (
+            <CheckRow
+              key={protocol}
+              id={`live-share-${protocol}`}
+              checked={protocols.includes(protocol)}
+              onChange={(checked) =>
+                setProtocols((current) =>
+                  checked
+                    ? PROTOCOLS.filter((p) => p === protocol || current.includes(p))
+                    : current.filter((p) => p !== protocol)
+                )
+              }
+              label={t(`dialog.protocol.${protocol}`)}
+            >
+              {t(`dialog.protocol.${protocol}Hint`)}
+            </CheckRow>
+          ))}
+          {provider === "sftpgo" && protocols.includes("webdav") ? (
+            <p
+              className="text-xs text-amber-600 dark:text-amber-400"
+              data-testid="live-share-sftpgo-webdav"
+            >
+              {t("dialog.sftpgoWebdavNote")}
+            </p>
+          ) : null}
+        </fieldset>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -354,10 +533,10 @@ function LiveShareForm({
             </SelectContent>
           </Select>
         </div>
-        {status.sftpgo.configured ? (
+        {status.sftpgo.configured && !forMembers ? (
           <div className="space-y-1.5">
             <Label htmlFor="live-share-provider">{t("dialog.providerLabel")}</Label>
-            <Select value={provider} onValueChange={(next) => setProvider(next as LiveProvider)}>
+            <Select value={provider} onValueChange={(next) => chooseProvider(next as LiveProvider)}>
               <SelectTrigger id="live-share-provider" size="sm">
                 <SelectValue />
               </SelectTrigger>
@@ -370,7 +549,7 @@ function LiveShareForm({
         ) : null}
       </div>
 
-      {protocols.includes("sftp") ? (
+      {!forMembers && protocols.includes("sftp") ? (
         <div className="space-y-1.5">
           <Label htmlFor="live-share-ssh-key">{t("dialog.sshKey")}</Label>
           <Textarea

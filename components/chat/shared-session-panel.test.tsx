@@ -75,8 +75,8 @@ jest.mock("dexie", () => ({
     },
   }),
 }))
-jest.mock("@/lib/db/sessions", () => ({
-  deleteSession: (...args: unknown[]) => mockDelete(...args),
+jest.mock("@/lib/chat/session-deletion", () => ({
+  deleteSessionsWithTeardown: (...args: unknown[]) => mockDelete(...args),
 }))
 jest.mock("@/stores/chat", () => ({
   useChatStore: { getState: () => ({ closeSession: mockClose, setActiveSession: mockActive }) },
@@ -88,6 +88,23 @@ jest.mock("next-intl", () => ({
 }))
 jest.mock("@/lib/collab/runtime-client", () => ({
   resolveCurrentCollabContext: (...args: unknown[]) => resolveContext(...args),
+}))
+// The members' Files section has its own suite; here only where it mounts.
+jest.mock("./shared-session-files", () => ({
+  SharedSessionFiles: (props: {
+    orgId: string
+    sessionId: string
+    role: string | null
+    canRemoveHost?: boolean
+  }) => (
+    <div
+      data-testid="shared-session-files"
+      data-role={props.role ?? ""}
+      data-can-remove-host={String(Boolean(props.canRemoveHost))}
+    >
+      {`${props.orgId}/${props.sessionId}`}
+    </div>
+  ),
 }))
 
 import { SharedSessionPanel } from "./shared-session-panel"
@@ -215,6 +232,8 @@ it("lets a regular member explicitly leave and closes its local projection", asy
     expect(client.removeSessionMember).toHaveBeenCalledWith("org_1", "shared_1", "me")
   )
   await waitFor(() => expect(mockClose).toHaveBeenCalledWith("local_1"))
+  // The full local teardown, which also ends its live file shares.
+  expect(mockDelete).toHaveBeenCalledWith(["local_1"])
 })
 
 it("creates a restricted invitation and cancels queued requests", async () => {
@@ -348,6 +367,7 @@ it("resolves high-risk approval and deletes only after confirmation", async () =
   expect(client.deleteSharedSession).not.toHaveBeenCalled()
   fireEvent.click(await screen.findByRole("button", { name: "confirmDelete" }))
   await waitFor(() => expect(client.deleteSharedSession).toHaveBeenCalled())
+  await waitFor(() => expect(mockDelete).toHaveBeenCalledWith(["local_1"]))
 })
 it("requires a reason before an organization admin can expose audited raw events", async () => {
   const client = configured()
@@ -488,4 +508,22 @@ describe("opened from outside", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
+})
+
+it("shows a member the files shared with the conversation's members", async () => {
+  configured("viewer")
+  render(<SharedSessionPanel session={shared} />)
+  fireEvent.click(screen.getByRole("button", { name: "openSharedSession" }))
+  const files = await screen.findByTestId("shared-session-files")
+  expect(files).toHaveTextContent("org_1/shared_1")
+  expect(files).toHaveAttribute("data-role", "viewer")
+  expect(files).toHaveAttribute("data-can-remove-host", "false")
+})
+
+it("lets a member who may share the files remove the sharing device", async () => {
+  configured("owner")
+  render(<SharedSessionPanel session={shared} />)
+  fireEvent.click(screen.getByRole("button", { name: "openSharedSession" }))
+  const files = await screen.findByTestId("shared-session-files")
+  expect(files).toHaveAttribute("data-can-remove-host", "true")
 })

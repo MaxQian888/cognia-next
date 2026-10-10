@@ -6,7 +6,8 @@
       "app": "App",
       "sftp": "SFTP",
       "sftpgo": "SFTPGo",
-      "webdav": "WebDAV"
+      "webdav": "WebDAV",
+      "collab": "Shared conversation"
     },
     "description": "Every sign-in, read, change and refusal, newest first.",
     "empty": "No activity yet.",
@@ -23,7 +24,8 @@
       "credential": "{username}",
       "device": "Paired device {id}",
       "owner": "You",
-      "system": "Cognia"
+      "system": "Cognia",
+      "member": "Member {id}"
     },
     "result": "Result",
     "retry": "Try again",
@@ -113,10 +115,36 @@
     "providerLabel": "Served by",
     "resultDescription": "Send the address and sign-in below to whoever should connect.",
     "resultTitle": "Network drive access created",
+    "sftpgoWebdavNote": "Through SFTPGo, WebDAV never sends a secret file such as .env, but it does reveal that the file exists, with its size and date. Prefer SFTP unless they need WebDAV.",
     "sshKey": "SSH public key (optional)",
     "sshKeyHint": "Lets an SFTP client sign in with this key instead of the password.",
     "sshKeyPlaceholder": "ssh-ed25519 AAAA…",
-    "title": "Share as a network drive"
+    "title": "Share as a network drive",
+    "audience": {
+      "label": "Share with",
+      "members": "Members of this shared conversation",
+      "credentials": "A network drive sign-in (WebDAV/SFTP)",
+      "membersHint": "Members open these files from the conversation's Files section while this device is online. No password is created.",
+      "credentialsHint": "Anyone with the sign-in can connect from Finder, Explorer or an SFTP client."
+    },
+    "members": {
+      "who": "Which members",
+      "everyone": "Everyone with at least a role",
+      "chosen": "Only the members I choose",
+      "minRole": "Lowest role",
+      "role": {
+        "viewer": "Viewer",
+        "member": "Member",
+        "maintainer": "Maintainer",
+        "owner": "Owner"
+      },
+      "loading": "Loading members…",
+      "noOthers": "There are no other members to choose.",
+      "noneChosen": "Choose at least one member.",
+      "viewersRead": "Viewers can only ever read, even when changes are allowed.",
+      "resultTitle": "Shared with the conversation's members",
+      "resultDescription": "They can open these files from the conversation's Files section while this device is online. Revoke it here at any time."
+    }
   },
   "errors": {
     "credential_conflict": "Could not pick an unused username. Try again.",
@@ -136,6 +164,7 @@
     "mount_read_only": "That folder can only be read, so changes cannot be allowed.",
     "mount_unavailable": "One of the chosen folders is not available on this host right now.",
     "not_found": "That access no longer exists.",
+    "policy_agent_disabled": "Agents may not share files under your file-sharing policy.",
     "policy_credentials_disabled": "Network-drive credentials are turned off by your file-sharing policy.",
     "policy_exceeded": "This access goes beyond the current file-sharing policy.",
     "policy_live_disabled": "Live access to files is turned off by your file-sharing policy.",
@@ -146,10 +175,14 @@
     "session_inactive": "This conversation is archived or deleted, so its files cannot be shared.",
     "sftpgo_path_unmapped": "SFTPGo cannot see one of the chosen folders. Add a path mapping for it.",
     "sftpgo_unconfigured": "SFTPGo is not configured on this host.",
+    "shared_session_forbidden": "Your role in this shared conversation does not let you share its files.",
+    "shared_session_unavailable": "The collaboration server could not confirm you may share this conversation's files. Try again.",
     "store_failed": "This host could not save the change. Try again.",
     "ttl_exceeds_policy": "That lifetime is longer than your file-sharing policy allows.",
     "unknown": "Something went wrong: {message}",
-    "unknown_command": "This host is too old to share files live."
+    "unknown_command": "This host is too old to share files live.",
+    "collab_host_unregistered": "This device is not serving this shared conversation's files. Share with its members again to register it.",
+    "collab_unreachable": "The collaboration server could not be reached."
   },
   "grants": {
     "actions": {
@@ -173,7 +206,9 @@
       "provider_failed": "SFTPGo could not be updated",
       "revoked": "Revoked",
       "session_archived": "The conversation was archived",
-      "session_deleted": "The conversation was deleted"
+      "session_deleted": "The conversation was deleted",
+      "collab_host_removed": "This device stopped serving the shared conversation's files",
+      "org_policy": "Your organization's file-sharing policy does not allow it"
     },
     "revokeConfirm": {
       "confirm": "Revoke",
@@ -198,7 +233,12 @@
       "revoked": "Access revoked",
       "suspended": "Access suspended"
     },
-    "untitled": "Network drive access"
+    "untitled": "Network drive access",
+    "byAgent": "By an agent",
+    "audience": {
+      "members": "Members · {role} and up",
+      "membersNamed": "{count, plural, one {# chosen member} other {# chosen members}}"
+    }
   },
   "settings": {
     "access": {
@@ -281,5 +321,27 @@
     "sftpgo_no_public_endpoint": "SFTPGo has no public address configured, so there is nowhere to connect yet.",
     "sftpgo_unconfigured": "SFTPGo is not configured on this host.",
     "unknown": "This share cannot be reached right now."
+  },
+  "collabHost": {
+    "serving": "Members reach these files through {label}.",
+    "notRunning": "{label} holds the members' shares but is not answering their requests right now.",
+    "pending": "{count, plural, one {# share has} other {# shares have}} not reached the collaboration server yet; this device keeps trying.",
+    "stop": "Stop sharing with members",
+    "stopped": "Stopped sharing with members",
+    "stopConfirm": {
+      "title": "Stop sharing with members?",
+      "description": "Members lose every file shared with them from this conversation, and this device stops answering their requests. Sharing with them again registers it anew.",
+      "confirm": "Stop sharing"
+    },
+    "problem": {
+      "host_unregistered": "The collaboration server no longer accepts this device as the conversation's file host. Share with its members again to register it.",
+      "host_token_missing": "This device lost its key for the collaboration server. Share with the members again to register it.",
+      "org_policy": "The organization's file-sharing policy refused a share ({detail}); it is suspended.",
+      "mirror_rejected": "The collaboration server refused a share ({detail}).",
+      "rejected": "The collaboration server refused a request ({detail}).",
+      "unreachable": "Could not reach the collaboration server ({detail}). Members' requests wait until it is back.",
+      "conflict": "Another device now serves this conversation's files.",
+      "other": "Last problem: {detail}"
+    }
   }
 }

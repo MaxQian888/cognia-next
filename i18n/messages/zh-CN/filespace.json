@@ -6,6 +6,19 @@
     "share": "通过链接分享",
     "shareFiles": "分享文件…"
   },
+  "agentCard": {
+    "snapshotTitle": "已将 {count} 个文件分享为链接",
+    "copy": "复制链接",
+    "copied": "已复制链接。",
+    "copyFailed": "无法复制链接。",
+    "expires": "{when} 过期",
+    "withheldSensitive": "已排除 {count} 个包含机密的文件。",
+    "liveTitle": "已分享为网络驱动器",
+    "passwordNote": "智能体不会看到密码。请签发一个密码以连接；再次签发会让使用上一个密码的人退出登录。",
+    "issuePassword": "签发 {protocol} 密码（{username}）",
+    "issuedDescription": "仅显示这一次，请立即复制。",
+    "membersNote": "成员在此设备在线时，可从对话的“文件”部分打开这些文件。不会创建密码；可在此对话的“文件 → 以网络驱动器共享”中撤销。"
+  },
   "entry": {
     "sourceUnavailable": "原始文件不在此设备上"
   },

@@ -21,6 +21,9 @@
 //! - [`builtin`] — the built-in provider: a WebDAV listener (`dav-server`) and
 //!   an SFTP listener (`russh` + `russh-sftp`, subsystem only).
 //! - [`sftpgo`] — the optional SFTPGo provider for server deployments.
+//! - [`collab`] — serving a shared conversation's members: this host's
+//!   registration on the collaboration server, the grants it mirrors there,
+//!   and the loops that answer members' requests through the gateway.
 //! - [`listener`] — starting, exposing (loopback, LAN, tunnel) and stopping
 //!   the built-in listeners, and dropping a revoked grant's connections.
 //! - [`service`] — the process-wide facade the host installs once and the
@@ -39,6 +42,7 @@ pub mod assets;
 pub mod audit;
 pub mod backoff;
 pub mod builtin;
+pub mod collab;
 pub mod credentials;
 pub mod error;
 pub mod gateway;

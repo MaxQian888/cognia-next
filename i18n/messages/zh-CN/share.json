@@ -343,8 +343,6 @@
     "save": "保存",
     "saved": "文件分享策略已保存",
     "saveFailed": "无法保存文件分享策略。",
-    "notYet": "暂未开放",
-    "notYetHint": "现在保存，待此类分享在后续更新中上线后生效。",
     "duration": {
       "hours": "{count} 小时",
       "days": "{count} 天"
@@ -392,5 +390,11 @@
       "updated": "最近修改于 {date}",
       "defaults": "组织正在使用默认策略。"
     }
+  },
+  "deleteLinks": {
+    "option": "同时撤销由要删除的内容创建的 {count} 个分享链接。否则它们会作为独立副本继续可用。",
+    "revoked": "已撤销 {count} 个分享链接。",
+    "failed": "有 {count} 个分享链接无法撤销，请到“我的分享”中完成。",
+    "failedAll": "无法撤销这些分享链接，请到“我的分享”中完成。"
   }
 }

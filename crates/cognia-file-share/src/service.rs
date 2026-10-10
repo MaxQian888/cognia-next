@@ -196,6 +196,8 @@ pub struct FileShareService {
     mount_source: RwLock<SharedMountSource>,
     pub(crate) verified: VerifiedCache,
     pub(crate) live: LiveRegistry,
+    /// The collaboration answering loops (ADR-0222 §6).
+    pub(crate) collab: crate::collab::Responders,
     runtime: tokio::sync::Mutex<Runtime>,
     lifecycle: tokio::sync::Mutex<()>,
     maintenance_started: AtomicBool,
@@ -227,6 +229,7 @@ impl FileShareService {
             mount_source: RwLock::new(Arc::new(UnavailableMountSource)),
             verified: VerifiedCache::default(),
             live: LiveRegistry::default(),
+            collab: crate::collab::Responders::default(),
             runtime: tokio::sync::Mutex::new(Runtime::default()),
             lifecycle: tokio::sync::Mutex::new(()),
             maintenance_started: AtomicBool::new(false),
@@ -245,6 +248,19 @@ impl FileShareService {
         let service = Self::new(std::env::temp_dir(), root_validator);
         *service.active.write() = Some(Active {
             account_id: "test".into(),
+            store: Arc::new(store),
+            policy: Arc::new(RwLock::new(policy)),
+        });
+        Arc::new(service)
+    }
+
+    /// [`Self::for_tests`] under its own account id, for tests that touch the
+    /// process-global secret store and must not share keys.
+    #[cfg(test)]
+    pub(crate) fn for_tests_account(store: Store, policy: PolicySnapshot, account_id: &str) -> Arc<Self> {
+        let service = Self::new(std::env::temp_dir(), tests::validator());
+        *service.active.write() = Some(Active {
+            account_id: account_id.into(),
             store: Arc::new(store),
             policy: Arc::new(RwLock::new(policy)),
         });
@@ -369,9 +385,13 @@ impl FileShareService {
                 false
             } else {
                 self.runtime.lock().await.stop();
+                // Cleared before the loops stop, so a sync already running
+                // sees the change and starts none for the old account
+                // (`collab::reconcile` checks it under the loops' lock).
+                *self.active.write() = None;
+                self.collab.stop_all();
                 self.live.disconnect_all();
                 self.verified.clear();
-                *self.active.write() = None;
                 if let Some(id) = account_id.as_deref() {
                     if !valid_account_id(id) {
                         return Err(FileShareError::invalid("not an account id"));
@@ -396,6 +416,7 @@ impl FileShareService {
         if changed && account_id.is_some() {
             self.restart_listener().await;
             self.start_maintenance();
+            crate::collab::spawn_sync(self);
         }
         Ok(())
     }
@@ -410,8 +431,8 @@ impl FileShareService {
         for input in &sessions {
             prepared.push((input.session_id.clone(), mounts::prepare(input, &self.root_validator, now)?));
         }
-        for (session_id, (records, assets)) in &prepared {
-            active.store.replace_session_mounts(session_id, records, assets)?;
+        for (input, (session_id, (records, assets))) in sessions.iter().zip(&prepared) {
+            active.store.replace_session_mounts(session_id, input.state, records, assets, now)?;
         }
         self.maintain_now().await;
         Ok(SyncReport {
@@ -439,8 +460,9 @@ impl FileShareService {
                 "the app answered with another conversation's mount table",
             ));
         }
-        let (records, assets) = mounts::prepare(&input, &self.root_validator, now_ms())?;
-        active.store.replace_session_mounts(session_id, &records, &assets)?;
+        let now = now_ms();
+        let (records, assets) = mounts::prepare(&input, &self.root_validator, now)?;
+        active.store.replace_session_mounts(session_id, input.state, &records, &assets, now)?;
         Ok(true)
     }
 
@@ -517,6 +539,9 @@ impl FileShareService {
                 self.apply_effects(&active, effects).await;
                 return Err(error);
             }
+        }
+        if created.grant.audience.is_collab() {
+            crate::collab::spawn_sync(self);
         }
         let endpoints = self.endpoints_for(&active, created.grant.provider).await;
         Ok(CreatedGrant {
@@ -598,6 +623,7 @@ impl FileShareService {
         let active = self.active()?;
         let effects = grants::revoke(&active.store, grant_id, status_reason::REVOKED, principal, now_ms())?;
         self.apply_effects(&active, effects).await;
+        crate::collab::spawn_sync(self);
         self.grant_view(&active, grant_id)
     }
 
@@ -605,6 +631,7 @@ impl FileShareService {
         let active = self.active()?;
         let effects = grants::suspend(&active.store, grant_id, status_reason::OWNER, principal, now_ms())?;
         self.apply_effects(&active, effects).await;
+        crate::collab::spawn_sync(self);
         self.grant_view(&active, grant_id)
     }
 
@@ -618,6 +645,7 @@ impl FileShareService {
         let policy = active.policy.read().clone();
         let effects = grants::resume(&active.store, &policy, grant_id, principal, now_ms())?;
         self.apply_effects(&active, effects).await;
+        crate::collab::spawn_sync(self);
         self.grant_view(&active, grant_id)
     }
 
@@ -672,9 +700,11 @@ impl FileShareService {
     fn caller_for(row: &CredentialRow, protocol: Protocol, channel: Channel, remote: Option<&str>) -> Caller {
         Caller {
             grant_id: row.view.grant_id.clone(),
-            credential_id: row.view.id.clone(),
-            username: row.view.username.clone(),
-            protocol,
+            holder: crate::gateway::Holder::Credential {
+                credential_id: row.view.id.clone(),
+                username: row.view.username.clone(),
+                protocol,
+            },
             channel,
             remote: remote.map(str::to_string),
         }
@@ -776,7 +806,7 @@ impl FileShareService {
 
     // ── Effects ────────────────────────────────────────────────────────────
 
-    async fn apply_effects(&self, active: &Active, effects: Effects) {
+    pub(crate) async fn apply_effects(&self, active: &Active, effects: Effects) {
         if effects.is_empty() {
             return;
         }
@@ -843,6 +873,7 @@ impl FileShareService {
             Err(error) => log::warn!("file-share maintenance failed: {error}"),
         }
         self.retry_provider_ops(&active).await;
+        crate::collab::spawn_sync(self);
         let prune_due = {
             let mut last = self.last_prune.lock();
             if now - *last >= PRUNE_INTERVAL_MS {
@@ -1056,6 +1087,7 @@ impl FileShareService {
     /// Stop the listeners (host shutdown).
     pub async fn shutdown(&self) {
         self.runtime.lock().await.stop();
+        self.collab.stop_all();
         self.live.disconnect_all();
     }
 
@@ -1150,6 +1182,27 @@ impl FileShareService {
         status
     }
 
+    // ── Collaboration ──────────────────────────────────────────────────────
+
+    /// Register this host for a shared conversation (`Some`) or end the
+    /// registration (`None`).
+    pub async fn set_collab_host(
+        self: &Arc<Self>,
+        session_id: &str,
+        input: Option<crate::collab::CollabHostInput>,
+        principal: &str,
+    ) -> FileShareResult<crate::collab::CollabHostStatus> {
+        crate::collab::set_host(self, session_id, input, principal).await
+    }
+
+    /// One conversation's registration and how serving it fares.
+    pub async fn collab_host_status(
+        self: &Arc<Self>,
+        session_id: &str,
+    ) -> FileShareResult<crate::collab::CollabHostStatus> {
+        crate::collab::status(self, session_id).await
+    }
+
     // ── Status ─────────────────────────────────────────────────────────────
 
     pub async fn status(&self) -> FileShareStatus {
@@ -1203,7 +1256,7 @@ async fn run_provider_op(client: &sftpgo::Client, op: &str, payload: &serde_json
 pub(crate) mod tests {
     use super::*;
     use crate::gateway::tests::{fixture, open_policy};
-    use crate::model::Permission;
+    use crate::model::{CreatedBy, Permission};
 
     pub(crate) fn validator() -> RootValidator {
         Arc::new(|path: &str| {
@@ -1319,6 +1372,8 @@ pub(crate) mod tests {
                 expires_in_seconds: 3600,
                 label: None,
                 ssh_public_key: None,
+                created_by: CreatedBy::User,
+                audience: crate::model::AudienceRequest::Credentials,
             },
             "owner",
             now_ms(),
@@ -1422,6 +1477,8 @@ pub(crate) mod tests {
             expires_in_seconds: 3600,
             label: None,
             ssh_public_key: None,
+            created_by: CreatedBy::User,
+            audience: crate::model::AudienceRequest::Credentials,
         };
         // Nothing pushed for s2 and nothing to pull from: refused.
         let error = service.create_grant(request("s2"), "device:phone").await.unwrap_err();
@@ -1457,6 +1514,8 @@ pub(crate) mod tests {
                     expires_in_seconds: 3600,
                     label: None,
                     ssh_public_key: None,
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
                 },
                 "owner",
             )
@@ -1485,11 +1544,78 @@ pub(crate) mod tests {
                     expires_in_seconds: 3600,
                     label: None,
                     ssh_public_key: None,
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
                 },
                 "owner",
             )
             .await
             .unwrap_err();
         assert_eq!(error.code, "sftpgo_unconfigured");
+    }
+
+    /// A deleted conversation is pushed with no mounts at all; its grants are
+    /// still revoked as `session_deleted`, and an archived one's suspended
+    /// and resumed again, by the push alone.
+    #[tokio::test]
+    async fn pushed_session_states_drive_the_grants() {
+        let (service, _dir) = service_with(vec![Permission::Read], vec![]);
+        let root = service
+            .active()
+            .unwrap()
+            .store
+            .mounts_for_session("s1")
+            .unwrap()
+            .into_iter()
+            .find_map(|mount| mount.host_path)
+            .unwrap();
+        use crate::model::SessionState;
+        let workspace = |state: SessionState| SessionMountsInput {
+            session_id: "s1".into(),
+            state,
+            mounts: vec![crate::mounts::MountInput {
+                mount_id: "workspace".into(),
+                virtual_path: "/workspace".into(),
+                backing: crate::model::Backing::Disk,
+                host_path: Some(root.clone()),
+                writable: true,
+                status: "available".into(),
+            }],
+            assets: vec![],
+        };
+        let created = service
+            .create_grant(
+                CreateGrantRequest {
+                    session_id: "s1".into(),
+                    paths: vec!["/workspace/src".into()],
+                    permissions: vec![Permission::Read],
+                    protocols: vec![Protocol::Webdav],
+                    provider: ProviderKind::Builtin,
+                    expires_in_seconds: 3600,
+                    label: None,
+                    ssh_public_key: None,
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
+                },
+                "owner",
+            )
+            .await
+            .unwrap();
+        let status = |service: &Arc<FileShareService>| {
+            let grant = service.active().unwrap().store.grant(&created.grant.id).unwrap().unwrap();
+            (grant.status, grant.status_reason)
+        };
+
+        service.sync(vec![workspace(SessionState::Archived)]).await.unwrap();
+        assert_eq!(status(&service), (GrantStatus::Suspended, Some("session_archived".into())));
+        service.sync(vec![workspace(SessionState::Active)]).await.unwrap();
+        assert_eq!(status(&service).0, GrantStatus::Active);
+
+        let report = service
+            .sync(vec![SessionMountsInput { session_id: "s1".into(), state: SessionState::Deleted, mounts: vec![], assets: vec![] }])
+            .await
+            .unwrap();
+        assert_eq!(status(&service), (GrantStatus::Revoked, Some("session_deleted".into())));
+        assert!(report.sessions_with_grants.is_empty(), "nothing left to pull for a deleted conversation");
     }
 }

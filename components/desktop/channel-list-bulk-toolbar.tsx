@@ -35,6 +35,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  RevokeShareLinksOption,
+  useRevokeShareLinksAfterDelete,
+} from "@/components/share/revoke-share-links-option"
 import { cn } from "@/lib/utils"
 
 export interface ChannelListBulkToolbarProps {
@@ -125,12 +129,19 @@ export interface ChannelListBulkToolbarProps {
    * trust a selection they could no longer see behind the dialog.
    */
   selectedTitles?: readonly string[]
+  /**
+   * The selected conversations' ids. When any of them was shared as a link,
+   * the delete confirm offers to revoke those links in the same step
+   * (ADR-0222 §10); without ids it offers nothing.
+   */
+  selectedSessionIds?: readonly string[]
 }
 
 /** Titles the delete confirm lists before it summarizes the rest. */
 const DELETE_CONFIRM_TITLE_LIMIT = 5
 
 const NO_BLOCKED_FOLDERS: ReadonlySet<string> = new Set()
+const NO_SESSION_IDS: readonly string[] = []
 
 /**
  * The bar a selection of conversations is acted on from.
@@ -172,9 +183,16 @@ export function ChannelListBulkToolbar({
   onDeselectAll,
   onClear,
   selectedTitles = [],
+  selectedSessionIds = NO_SESSION_IDS,
 }: ChannelListBulkToolbarProps) {
   const t = useTranslations("desktop.channelList.bulk")
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [revokeLinksChecked, setRevokeLinksChecked] = useState(false)
+  const revokeLinks = useRevokeShareLinksAfterDelete()
+  const setDeleteConfirmOpen = (next: boolean) => {
+    setConfirmOpen(next)
+    if (!next) setRevokeLinksChecked(false)
+  }
   const empty = count === 0
   const allSelected = total != null && total > 0 && count >= total
   const selectedArchived = archivedCount ?? (archived ? count : 0)
@@ -380,7 +398,7 @@ export function ChannelListBulkToolbar({
         <ToolbarButton
           label={t("delete")}
           disabled={empty}
-          onClick={() => setConfirmOpen(true)}
+          onClick={() => setDeleteConfirmOpen(true)}
           className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
           testId="channel-list-bulk-delete"
           bar={bar}
@@ -436,7 +454,7 @@ export function ChannelListBulkToolbar({
         </>
       )}
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <AlertDialog open={confirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t("deleteConfirmTitle", { count })}</AlertDialogTitle>
@@ -461,6 +479,13 @@ export function ChannelListBulkToolbar({
               ) : null}
             </ul>
           ) : null}
+          {confirmOpen && selectedSessionIds.length > 0 ? (
+            <RevokeShareLinksOption
+              sessionIds={selectedSessionIds}
+              checked={revokeLinksChecked}
+              onCheckedChange={setRevokeLinksChecked}
+            />
+          ) : null}
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
             <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
@@ -469,7 +494,10 @@ export function ChannelListBulkToolbar({
                 className: "w-full sm:w-auto",
               })}
               onClick={() => {
-                setConfirmOpen(false)
+                // Started with the delete, whatever its outcome: revoking is
+                // what was asked for, and the safe direction if it is refused.
+                if (revokeLinksChecked) revokeLinks(selectedSessionIds)
+                setDeleteConfirmOpen(false)
                 void onDelete?.()
               }}
             >

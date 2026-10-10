@@ -30,7 +30,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type { FileShareAuditRow } from "@/types/filespace/live"
 
 const PAGE_SIZE = 50
-const CHANNELS = ["app", "webdav", "sftp", "sftpgo"] as const
+const CHANNELS = ["app", "webdav", "sftp", "sftpgo", "collab"] as const
 const OUTCOMES = ["allowed", "denied", "failed"] as const
 
 export interface LiveShareAuditProps {
@@ -113,6 +113,7 @@ export function LiveShareAudit({ sessionId, grantId, hostId, transport }: LiveSh
     if (value.startsWith("credential:")) {
       return t("audit.principal.credential", { username: value.slice(11) })
     }
+    if (value.startsWith("member:")) return t("audit.principal.member", { id: value.slice(7) })
     return value
   }
 

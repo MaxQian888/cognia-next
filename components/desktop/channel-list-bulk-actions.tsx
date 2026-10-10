@@ -243,6 +243,7 @@ export function ChannelListBulkActions({
               onSelectAll={onSelectAll}
               onDeselectAll={onDeselectAll}
               selectedTitles={selectedTitles}
+              selectedSessionIds={selectedIds}
               onShare={() => {
                 if (shareSessions.length === 0) return
                 // Every sibling action reports itself through the list's

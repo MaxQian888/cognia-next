@@ -28,7 +28,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::audit::{self, Channel, Event, Outcome};
-use crate::model::{AssetEntry, Backing, Grant, GrantStatus, MountRecord, Permission, Protocol, SessionState};
+use crate::model::{
+    AssetEntry, Audience, Backing, CollabRole, Grant, GrantStatus, MountRecord, Permission, Protocol,
+    SessionState,
+};
 use crate::paths;
 use crate::policy::PolicySnapshot;
 use crate::store::Store;
@@ -76,21 +79,52 @@ impl Op {
     }
 }
 
-/// An authenticated credential holder.
+/// Who holds the access a caller presents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Holder {
+    /// A WebDAV/SFTP credential of a credential grant.
+    Credential {
+        credential_id: String,
+        username: String,
+        protocol: Protocol,
+    },
+    /// A member of a shared conversation, asking through a request the
+    /// collaboration server relayed to this host's registration
+    /// (`org_id`, `collab_session_id`). The server vouches for the user and
+    /// role; the grant decides whether they are admitted.
+    Member {
+        org_id: String,
+        collab_session_id: String,
+        user_id: String,
+        role: CollabRole,
+    },
+}
+
+/// An authenticated caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
     pub grant_id: String,
-    pub credential_id: String,
-    pub username: String,
-    pub protocol: Protocol,
+    pub holder: Holder,
     pub channel: Channel,
-    /// Client address (the `CF-Connecting-IP` behind a tunnel).
+    /// Client address (the `CF-Connecting-IP` behind a tunnel); none for a
+    /// member, whose address only the collaboration server saw.
     pub remote: Option<String>,
 }
 
 impl Caller {
     pub fn principal(&self) -> String {
-        audit::credential_principal(&self.username)
+        match &self.holder {
+            Holder::Credential { username, .. } => audit::credential_principal(username),
+            Holder::Member { user_id, .. } => audit::member_principal(user_id),
+        }
+    }
+
+    /// The credential's username, for a credential holder.
+    pub fn username(&self) -> Option<&str> {
+        match &self.holder {
+            Holder::Credential { username, .. } => Some(username),
+            Holder::Member { .. } => None,
+        }
     }
 }
 
@@ -239,8 +273,13 @@ fn authorize_inner(
     if !grant.allows(op.needs()) {
         return Err(Denial::new(
             "permission",
-            format!("this credential may not {}", op.needs().as_str()),
+            format!("this share does not allow {}", op.needs().as_str()),
         ));
+    }
+    if let Holder::Member { role, .. } = &caller.holder {
+        if op.mutates() && !role.may_write() {
+            return Err(Denial::new("permission", "a viewer may not change files"));
+        }
     }
     if let Some(reason) = ctx.policy.exceeded_by(&grant) {
         return Err(Denial::new(
@@ -343,13 +382,44 @@ fn load_live_grant(ctx: &Context<'_>, caller: &Caller) -> Result<Grant, Denial> 
             format!("this share is {}", grant.status.as_str()),
         ));
     }
-    let credential = ctx
-        .store
-        .credential(&caller.credential_id)
-        .map_err(|error| Denial::new("store", error.to_string()))?;
-    match credential {
-        Some(row) if row.view.revoked_at.is_none() && row.view.grant_id == grant.id => Ok(grant),
-        _ => Err(Denial::new("credential_revoked", "this credential was revoked")),
+    match (&caller.holder, &grant.audience) {
+        (Holder::Credential { credential_id, .. }, Audience::Credentials) => {
+            let credential = ctx
+                .store
+                .credential(credential_id)
+                .map_err(|error| Denial::new("store", error.to_string()))?;
+            match credential {
+                Some(row) if row.view.revoked_at.is_none() && row.view.grant_id == grant.id => Ok(grant),
+                _ => Err(Denial::new("credential_revoked", "this credential was revoked")),
+            }
+        }
+        (
+            Holder::Member {
+                org_id,
+                collab_session_id,
+                user_id,
+                role,
+            },
+            Audience::Collab {
+                org_id: granted_org,
+                collab_session_id: granted_session,
+                user_ids,
+                min_role,
+            },
+        ) => {
+            let admitted = org_id == granted_org
+                && collab_session_id == granted_session
+                && role.rank() >= min_role.rank()
+                && user_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.iter().any(|id| id == user_id));
+            if admitted {
+                Ok(grant)
+            } else {
+                Err(Denial::new("not_admitted", "this share is not for this member"))
+            }
+        }
+        _ => Err(Denial::new("not_admitted", "this share is not for this kind of access")),
     }
 }
 
@@ -691,7 +761,7 @@ pub(crate) mod tests {
             },
         ];
         store
-            .replace_session_mounts("s1", &[workspace.clone(), uploads.clone()], &assets)
+            .replace_session_mounts("s1", SessionState::Active, &[workspace.clone(), uploads.clone()], &assets, 1)
             .unwrap();
         let mut grant = sample_grant("fg_1", "s1");
         grant.permissions = permissions;
@@ -725,12 +795,44 @@ pub(crate) mod tests {
     pub(crate) fn caller() -> Caller {
         Caller {
             grant_id: "fg_1".into(),
-            credential_id: "fc_1".into(),
-            username: "cg-aaaaaaaaaa".into(),
-            protocol: Protocol::Webdav,
+            holder: Holder::Credential {
+                credential_id: "fc_1".into(),
+                username: "cg-aaaaaaaaaa".into(),
+                protocol: Protocol::Webdav,
+            },
             channel: Channel::Webdav,
             remote: Some("10.0.0.9".into()),
         }
+    }
+
+    pub(crate) fn member(user_id: &str, role: CollabRole) -> Caller {
+        Caller {
+            grant_id: "fg_1".into(),
+            holder: Holder::Member {
+                org_id: "org_1".into(),
+                collab_session_id: "ses_1".into(),
+                user_id: user_id.into(),
+                role,
+            },
+            channel: Channel::Collab,
+            remote: None,
+        }
+    }
+
+    /// Make the fixture's grant a members' grant.
+    pub(crate) fn for_members(f: &Fixture, user_ids: Option<Vec<&str>>, min_role: CollabRole) {
+        let mut grant = f.store.grant("fg_1").unwrap().unwrap();
+        grant.id = "fg_m".into();
+        grant.protocols.clear();
+        grant.audience = Audience::Collab {
+            org_id: "org_1".into(),
+            collab_session_id: "ses_1".into(),
+            user_ids: user_ids.map(|ids| ids.into_iter().map(str::to_string).collect()),
+            min_role,
+        };
+        f.store.revoke_credentials_for_grant("fg_1", 0).unwrap();
+        f.store.set_grant_status("fg_1", GrantStatus::Revoked, Some("revoked"), 0).unwrap();
+        f.store.insert_grant(&grant, &[]).unwrap();
     }
 
     fn ctx(f: &Fixture) -> Context<'_> {
@@ -937,7 +1039,7 @@ pub(crate) mod tests {
         let f = fixture(vec![Permission::Read], vec![("workspace", "src", true)]);
         let mut mounts = f.store.mounts_for_session("s1").unwrap();
         mounts[1].fingerprint = mounts::fingerprint("s1", "workspace", "/elsewhere");
-        f.store.replace_session_mounts("s1", &mounts, &[]).unwrap();
+        f.store.replace_session_mounts("s1", SessionState::Active, &mounts, &[], 1).unwrap();
         assert_eq!(denial(&f, Op::List, "/workspace/src"), "stale");
         let grant = f.store.grant("fg_1").unwrap().unwrap();
         assert_eq!(grant.status, GrantStatus::Stale);
@@ -958,7 +1060,7 @@ pub(crate) mod tests {
         for mount in &mut mounts {
             mount.status = "offline".into();
         }
-        f.store.replace_session_mounts("s1", &mounts, &[]).unwrap();
+        f.store.replace_session_mounts("s1", SessionState::Active, &mounts, &[], 1).unwrap();
         assert_eq!(denial(&f, Op::List, "/workspace/src"), "mount_unavailable");
     }
 
@@ -996,6 +1098,69 @@ pub(crate) mod tests {
         assert!(authorize(&ctx(&f), &caller(), Op::Read, "/workspace/README.md").is_ok());
         assert_eq!(denial(&f, Op::Read, "/workspace/README.md/x"), "outside_grant");
         assert_eq!(denial(&f, Op::Read, "/workspace/src/a.txt"), "outside_grant");
+    }
+
+    #[test]
+    fn members_are_admitted_by_name_or_role_and_viewers_only_read() {
+        let f = fixture(
+            vec![Permission::Read, Permission::Download, Permission::Write],
+            vec![("workspace", "src", true)],
+        );
+        for_members(&f, None, CollabRole::Viewer);
+        let as_member = |user: &str, role: CollabRole| Caller {
+            grant_id: "fg_m".into(),
+            ..member(user, role)
+        };
+        assert!(authorize(&ctx(&f), &as_member("usr_v", CollabRole::Viewer), Op::Read, "/workspace/src/a.txt").is_ok());
+        assert_eq!(
+            authorize(&ctx(&f), &as_member("usr_v", CollabRole::Viewer), Op::Write, "/workspace/src/n.txt")
+                .unwrap_err()
+                .reason,
+            "permission"
+        );
+        assert!(authorize(&ctx(&f), &as_member("usr_m", CollabRole::Member), Op::Write, "/workspace/src/n.txt").is_ok());
+        // The floor and the grant's paths hold for members as for credentials.
+        assert_eq!(
+            authorize(&ctx(&f), &as_member("usr_m", CollabRole::Member), Op::Read, "/workspace/src/.env")
+                .unwrap_err()
+                .reason,
+            "sensitive"
+        );
+        // Another registration's member is not admitted, nor is a credential.
+        let elsewhere = Caller {
+            holder: Holder::Member {
+                org_id: "org_1".into(),
+                collab_session_id: "ses_other".into(),
+                user_id: "usr_m".into(),
+                role: CollabRole::Owner,
+            },
+            ..as_member("usr_m", CollabRole::Owner)
+        };
+        assert_eq!(authorize(&ctx(&f), &elsewhere, Op::List, "/").unwrap_err().reason, "not_admitted");
+        let credential = Caller {
+            grant_id: "fg_m".into(),
+            ..caller()
+        };
+        assert_eq!(authorize(&ctx(&f), &credential, Op::List, "/").unwrap_err().reason, "not_admitted");
+        let rows = f.store.list_audit(Some("s1"), Some("fg_m"), None, 20).unwrap();
+        assert!(rows.iter().any(|row| row.principal == "member:usr_v" && row.channel == "collab"));
+
+        let f = fixture(vec![Permission::Read], vec![("workspace", "src", true)]);
+        for_members(&f, Some(vec!["usr_a"]), CollabRole::Member);
+        let named = |user: &str, role: CollabRole| Caller {
+            grant_id: "fg_m".into(),
+            ..member(user, role)
+        };
+        assert!(authorize(&ctx(&f), &named("usr_a", CollabRole::Member), Op::List, "/").is_ok());
+        assert_eq!(
+            authorize(&ctx(&f), &named("usr_b", CollabRole::Owner), Op::List, "/").unwrap_err().reason,
+            "not_admitted"
+        );
+        assert_eq!(
+            authorize(&ctx(&f), &named("usr_a", CollabRole::Viewer), Op::List, "/").unwrap_err().reason,
+            "not_admitted",
+            "a named member below the minimum role is not admitted"
+        );
     }
 
     #[test]

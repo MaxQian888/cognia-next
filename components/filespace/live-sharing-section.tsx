@@ -5,6 +5,9 @@
  * conversation's live shares on the host its files live on, the button that
  * starts a new one, and the dialog it opens.
  *
+ * In a shared conversation it also shows whether the members are being
+ * served (`CollabHostStatusBlock`).
+ *
  * The panel reads the host (`useLiveFileShare`) because its rows need to know
  * whether live sharing is offered at all; this section renders what that read
  * found. A host that cannot share live (`file_share_unavailable`, or one too
@@ -17,12 +20,14 @@ import { HardDriveIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { SharedSessionScope } from "@/hooks/collab/use-shared-session-members"
 import type { LiveFileShareState } from "@/hooks/filespace/use-live-file-share"
 import type { FileSpaceDexieListing } from "@/lib/filespace/sources"
 import type { ConversationFileSpace, FileSpacePath } from "@/types/filespace"
 
+import { CollabHostStatusBlock } from "./collab-host-status"
 import { LiveGrantsList } from "./live-grants-list"
-import { LiveShareDialog, liveShareBlock } from "./live-share-dialog"
+import { initialAudience, LiveShareDialog, liveShareBlock } from "./live-share-dialog"
 
 /** One request to open the dialog; `seq` remounts it with this selection. */
 export interface LiveShareRequest {
@@ -35,9 +40,19 @@ export function liveSharingSupported(live: LiveFileShareState): boolean {
   return live.error !== "file_share_unavailable" && live.error !== "unknown_command"
 }
 
-/** Whether a new share can be started from here right now. */
-export function liveSharingOffered(live: LiveFileShareState): boolean {
-  return live.status !== null && liveShareBlock(live.status) === null
+/**
+ * Whether a new share can be started from here right now: for credential
+ * holders, or — in a shared conversation — for its members.
+ */
+export function liveSharingOffered(live: LiveFileShareState, shared = false): boolean {
+  return live.status !== null && initialAudience(live.status, shared) !== null
+}
+
+/** Changes whenever a grant is added or changes state, for the members block to read again. */
+function grantsKey(live: LiveFileShareState): string {
+  return live.grants
+    .map((view) => `${view.grant.id}:${view.grant.status}:${view.grant.updatedAt}`)
+    .join(",")
 }
 
 export interface LiveSharingSectionProps {
@@ -47,6 +62,8 @@ export interface LiveSharingSectionProps {
   request: LiveShareRequest | null
   onRequest: (paths: FileSpacePath[]) => void
   onCloseRequest: () => void
+  /** The shared conversation's counterpart, when it has members to share with. */
+  sharedScope?: SharedSessionScope | null
 }
 
 export function LiveSharingSection({
@@ -56,10 +73,12 @@ export function LiveSharingSection({
   request,
   onRequest,
   onCloseRequest,
+  sharedScope = null,
 }: LiveSharingSectionProps) {
   const t = useTranslations("liveShare")
   if (!liveSharingSupported(live)) return null
-  const block = live.status ? liveShareBlock(live.status) : null
+  const offered = liveSharingOffered(live, Boolean(sharedScope))
+  const block = live.status && !offered ? liveShareBlock(live.status) : null
 
   return (
     <section
@@ -79,7 +98,7 @@ export function LiveSharingSection({
           variant="ghost"
           size="sm"
           className="h-7 gap-1.5 text-xs"
-          disabled={!liveSharingOffered(live)}
+          disabled={!offered}
           title={block ? t(`dialog.blocked.${block}`) : undefined}
           onClick={() => onRequest([])}
         >
@@ -94,12 +113,22 @@ export function LiveSharingSection({
       ) : live.status === null ? (
         <Skeleton className="h-10 w-full" />
       ) : (
-        <LiveGrantsList
-          grants={live.grants}
-          status={live.status}
-          hostId={space.hostId}
-          onChanged={live.reload}
-        />
+        <>
+          {sharedScope ? (
+            <CollabHostStatusBlock
+              sessionId={space.sessionId}
+              hostId={space.hostId}
+              refreshKey={grantsKey(live)}
+              onEnded={live.reload}
+            />
+          ) : null}
+          <LiveGrantsList
+            grants={live.grants}
+            status={live.status}
+            hostId={space.hostId}
+            onChanged={live.reload}
+          />
+        </>
       )}
       {request && live.status ? (
         <LiveShareDialog
@@ -113,6 +142,7 @@ export function LiveSharingSection({
           status={live.status}
           initialSelection={request.paths}
           onCreated={live.reload}
+          sharedScope={sharedScope}
         />
       ) : null}
     </section>

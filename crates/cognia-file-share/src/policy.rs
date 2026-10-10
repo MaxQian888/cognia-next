@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 
 use crate::error::{FileShareError, FileShareResult};
-use crate::model::{Grant, Permission};
+use crate::model::{Audience, CreatedBy, Grant, Permission};
 
 /// Shortest live grant accepted.
 pub const MIN_LIVE_TTL_SECONDS: i64 = 60;
@@ -108,20 +108,30 @@ impl PolicySnapshot {
         })
     }
 
-    /// Why a new credential grant with these terms is refused, or `Ok`.
+    /// Why a new grant with these terms is refused, or `Ok`. Only a
+    /// credential audience needs network-drive credentials allowed; a
+    /// collaboration audience is live access without them.
     pub fn check_create(
         &self,
+        created_by: CreatedBy,
+        credentials: bool,
         permissions: &[Permission],
         ttl_seconds: i64,
     ) -> FileShareResult<()> {
         let fields = &self.fields;
+        if created_by == CreatedBy::Agent && !fields.allow_agent_sharing {
+            return Err(FileShareError::new(
+                "policy_agent_disabled",
+                "agents may not share files under the file-sharing policy",
+            ));
+        }
         if !fields.allow_live_grants {
             return Err(FileShareError::new(
                 "policy_live_disabled",
                 "live file access is turned off by the file-sharing policy",
             ));
         }
-        if !fields.allow_protocol_credentials {
+        if credentials && !fields.allow_protocol_credentials {
             return Err(FileShareError::new(
                 "policy_credentials_disabled",
                 "network-drive credentials are turned off by the file-sharing policy",
@@ -148,10 +158,13 @@ impl PolicySnapshot {
     /// Why an existing grant may not be served under this policy, or `None`.
     pub fn exceeded_by(&self, grant: &Grant) -> Option<&'static str> {
         let fields = &self.fields;
+        if grant.created_by == CreatedBy::Agent && !fields.allow_agent_sharing {
+            return Some("agent_sharing_disabled");
+        }
         if !fields.allow_live_grants {
             return Some("live_disabled");
         }
-        if !fields.allow_protocol_credentials {
+        if grant.audience == Audience::Credentials && !fields.allow_protocol_credentials {
             return Some("credentials_disabled");
         }
         if grant.allows(Permission::Write) && !fields.allow_live_write {
@@ -183,7 +196,7 @@ mod tests {
         let snapshot = PolicySnapshot::default();
         assert_eq!(snapshot.revision, 0);
         let error = snapshot
-            .check_create(&[Permission::Read], 3600)
+            .check_create(CreatedBy::User, true, &[Permission::Read], 3600)
             .unwrap_err();
         assert_eq!(error.code, "policy_credentials_disabled");
     }
@@ -253,17 +266,17 @@ mod tests {
             revision: 1,
             ..PolicySnapshot::default()
         };
-        assert!(snapshot.check_create(&[Permission::Read], 3600).is_ok());
+        assert!(snapshot.check_create(CreatedBy::User, true, &[Permission::Read], 3600).is_ok());
         assert_eq!(
             snapshot
-                .check_create(&[Permission::Read], 30)
+                .check_create(CreatedBy::User, true, &[Permission::Read], 30)
                 .unwrap_err()
                 .code,
             "ttl_exceeds_policy"
         );
         assert_eq!(
             snapshot
-                .check_create(&[Permission::Read], 8 * 24 * 3600)
+                .check_create(CreatedBy::User, true, &[Permission::Read], 8 * 24 * 3600)
                 .unwrap_err()
                 .code,
             "ttl_exceeds_policy"
@@ -277,7 +290,7 @@ mod tests {
         };
         assert_eq!(
             read_only
-                .check_create(&[Permission::Read, Permission::Write], 3600)
+                .check_create(CreatedBy::User, true, &[Permission::Read, Permission::Write], 3600)
                 .unwrap_err()
                 .code,
             "policy_write_disabled"
@@ -290,9 +303,39 @@ mod tests {
             ..snapshot
         };
         assert_eq!(
-            off.check_create(&[Permission::Read], 3600).unwrap_err().code,
+            off.check_create(CreatedBy::User, true, &[Permission::Read], 3600).unwrap_err().code,
             "policy_live_disabled"
         );
+    }
+
+    #[test]
+    fn an_agent_grant_needs_agent_sharing_at_creation_and_while_it_lives() {
+        let allowed = PolicySnapshot {
+            fields: PolicyFields {
+                allow_agent_sharing: true,
+                ..open()
+            },
+            revision: 1,
+            ..PolicySnapshot::default()
+        };
+        assert!(allowed.check_create(CreatedBy::Agent, true, &[Permission::Read], 3600).is_ok());
+        let refused = PolicySnapshot {
+            fields: open(),
+            ..allowed.clone()
+        };
+        assert_eq!(
+            refused.check_create(CreatedBy::Agent, true, &[Permission::Read], 3600).unwrap_err().code,
+            "policy_agent_disabled"
+        );
+        // The person's own grants are not the agent's.
+        assert!(refused.check_create(CreatedBy::User, true, &[Permission::Read], 3600).is_ok());
+
+        let mut grant = sample_grant("fg_1", "s1");
+        grant.created_at = 0;
+        grant.expires_at = 3600 * 1000;
+        grant.created_by = CreatedBy::Agent;
+        assert_eq!(allowed.exceeded_by(&grant), None);
+        assert_eq!(refused.exceeded_by(&grant), Some("agent_sharing_disabled"));
     }
 
     #[test]
@@ -326,6 +369,51 @@ mod tests {
         assert_eq!(
             PolicySnapshot::default().exceeded_by(&grant),
             Some("credentials_disabled")
+        );
+    }
+
+    #[test]
+    fn members_need_live_access_but_not_network_drive_credentials() {
+        let members_only = PolicySnapshot {
+            fields: PolicyFields {
+                allow_protocol_credentials: false,
+                ..open()
+            },
+            revision: 1,
+            ..PolicySnapshot::default()
+        };
+        assert!(members_only
+            .check_create(CreatedBy::User, false, &[Permission::Read], 3600)
+            .is_ok());
+        assert_eq!(
+            members_only
+                .check_create(CreatedBy::User, true, &[Permission::Read], 3600)
+                .unwrap_err()
+                .code,
+            "policy_credentials_disabled"
+        );
+        let mut grant = sample_grant("fg_1", "s1");
+        grant.created_at = 0;
+        grant.expires_at = 3600 * 1000;
+        grant.protocols.clear();
+        grant.audience = Audience::Collab {
+            org_id: "org_1".into(),
+            collab_session_id: "ses_1".into(),
+            user_ids: None,
+            min_role: crate::model::CollabRole::Viewer,
+        };
+        assert_eq!(members_only.exceeded_by(&grant), None);
+        let off = PolicySnapshot {
+            fields: PolicyFields {
+                allow_live_grants: false,
+                ..open()
+            },
+            ..members_only
+        };
+        assert_eq!(off.exceeded_by(&grant), Some("live_disabled"));
+        assert_eq!(
+            off.check_create(CreatedBy::User, false, &[Permission::Read], 3600).unwrap_err().code,
+            "policy_live_disabled"
         );
     }
 }

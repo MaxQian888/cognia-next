@@ -1,5 +1,5 @@
 {
-  "_comment": "Who may do what in a shared conversation — the one table both sides check (ADR-0149 shared chat, ADR-0222 files.share). crates/cognia-collab-server/src/chat.rs (authoritative) and lib/collab/session-permissions.ts (what the client greys out) both test against it. clientOnlyActions are decided on the client alone and have no server variant. A case is allowed when the role lists the action, or the approver overlay covers it; a guest never gets a guestDenied action.",
+  "_comment": "Who may do what in a shared conversation — the one table both sides check (ADR-0149 shared chat, ADR-0222 files.share, files.readLive, files.writeLive). crates/cognia-collab-server/src/chat.rs (authoritative) and lib/collab/session-permissions.ts (what the client greys out) both test against it. clientOnlyActions are decided on the client alone and have no server variant. A case is allowed when the role lists the action, or the approver overlay covers it; a guest never gets a guestDenied action.",
   "clientOnlyActions": ["session.readHistory", "message.correctOwn", "message.redactOwn"],
   "actions": [
     "session.discover",
@@ -21,7 +21,9 @@
     "session.breakGlassRead",
     "attachment.read",
     "attachment.write",
-    "files.share"
+    "files.share",
+    "files.readLive",
+    "files.writeLive"
   ],
   "roles": {
     "owner": [
@@ -43,7 +45,9 @@
       "session.auditMetadata",
       "attachment.read",
       "attachment.write",
-      "files.share"
+      "files.share",
+      "files.readLive",
+      "files.writeLive"
     ],
     "maintainer": [
       "session.discover",
@@ -63,7 +67,9 @@
       "session.auditMetadata",
       "attachment.read",
       "attachment.write",
-      "files.share"
+      "files.share",
+      "files.readLive",
+      "files.writeLive"
     ],
     "member": [
       "session.discover",
@@ -75,9 +81,17 @@
       "message.redactOwn",
       "run.approveOrdinary",
       "attachment.read",
-      "attachment.write"
+      "attachment.write",
+      "files.readLive",
+      "files.writeLive"
     ],
-    "viewer": ["session.discover", "session.read", "session.readHistory", "attachment.read"]
+    "viewer": [
+      "session.discover",
+      "session.read",
+      "session.readHistory",
+      "attachment.read",
+      "files.readLive"
+    ]
   },
   "guestDenied": [
     "session.manageMembers",
@@ -88,7 +102,8 @@
     "session.export",
     "session.auditMetadata",
     "session.breakGlassRead",
-    "files.share"
+    "files.share",
+    "files.writeLive"
   ],
   "approverOverlay": { "roles": ["member"], "actions": ["run.approveHighRisk"] }
 }

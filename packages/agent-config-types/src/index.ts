@@ -3797,10 +3797,10 @@ export interface RouterFusionRunSummary {
  * `allowLiveWrite`, `maxLiveTtlSeconds`) governs the network-drive grants of
  * ADR-0222 phase 2; the host re-checks every grant against it.
  *
- * Dormant: agent sharing (`allowAgentSharing`) has no surface before phase 3.
- * It is stored and enforced by the plane today so a policy set now already
- * governs agents when they can share; the settings UI labels it as not yet
- * available (`FileSharingPolicyFields`).
+ * Agent sharing (`allowAgentSharing`, phase 3) decides whether an agent is
+ * offered the `filespace_share` / `filespace_enable_webdav` tools
+ * (`lib/claude/filespace-builtin-tools.ts`); the runner re-checks it per call
+ * and the host refuses an agent-created grant without it.
  */
 export interface FileSharingPolicySettings {
   /** Publish conversation files as public, end-to-end-encrypted snapshot links. */
@@ -3811,7 +3811,7 @@ export interface FileSharingPolicySettings {
   allowProtocolCredentials?: boolean
   /** Let live access write, not only read. */
   allowLiveWrite?: boolean
-  /** Let an agent share files on the person's behalf. Dormant until phase 3. */
+  /** Let an agent share files on the person's behalf, each share approved by the person. */
   allowAgentSharing?: boolean
   /** Longest a snapshot link may live, in seconds. */
   maxSnapshotTtlSeconds?: number

@@ -266,9 +266,15 @@ test("firstHardDenial runs only the checks it is given and never counts a doom c
 const FILL = "mcp__cognia-plugin-tools__browser_fill_credential"
 const NAVIGATE = "mcp__cognia-plugin-tools__browser_navigate"
 const SET_FILES = "mcp__cognia-plugin-tools__browser_set_files"
+// ADR-0222 §9: an agent giving someone access to a conversation's files.
+const SHARE_FILES = "mcp__cognia-plugin-tools__filespace_share"
+const ENABLE_WEBDAV = "mcp__cognia-plugin-tools__filespace_enable_webdav"
 const MANIFEST = [
   { name: "browser_fill_credential", requiresApproval: true },
   { name: "browser_set_files", requiresApproval: true },
+  { name: "filespace_share", requiresApproval: true },
+  { name: "filespace_enable_webdav", requiresApproval: true },
+  { name: "filespace_list" },
   { name: "browser_evaluate", requiresApproval: true },
   { name: "browser_navigate", requiresApproval: false },
   { name: "ask_user", requiresApproval: true },
@@ -280,9 +286,19 @@ const PER_CALL = buildPerCallApprovalSet(MANIFEST)
 test("the per-call set keeps only listed plugin tools that declared requiresApproval", () => {
   assert.deepEqual(
     [...buildApprovalRequiredSet(MANIFEST)],
-    ["browser_fill_credential", "browser_set_files", "browser_evaluate"]
+    [
+      "browser_fill_credential",
+      "browser_set_files",
+      "filespace_share",
+      "filespace_enable_webdav",
+      "browser_evaluate",
+    ]
   )
-  assert.deepEqual([...PER_CALL], ["browser_fill_credential", "browser_set_files"])
+  assert.deepEqual(
+    [...PER_CALL],
+    ["browser_fill_credential", "browser_set_files", "filespace_share", "filespace_enable_webdav"]
+  )
+  assert.equal(requiresPerCallApproval("mcp__cognia-plugin-tools__filespace_list", PER_CALL), false)
   assert.equal(requiresPerCallApproval(SET_FILES, PER_CALL), true)
   assert.deepEqual([...buildPerCallApprovalSet([{ name: "browser_set_files" }])], [])
   // A name alone does not qualify: the manifest must declare it.
@@ -296,7 +312,7 @@ test("the per-call set keeps only listed plugin tools that declared requiresAppr
 
 test("a per-call tool skips every allow shortcut and asks", () => {
   const steps = profile(["bypass", "grants"], { acceptsEdit: () => true })
-  for (const tool of [FILL, SET_FILES]) {
+  for (const tool of [FILL, SET_FILES, SHARE_FILES, ENABLE_WEBDAV]) {
     for (const mode of ["bypassPermissions", "acceptEdits", "default"]) {
       const granted = call(
         tool,
@@ -325,7 +341,7 @@ test("a per-call tool skips every allow shortcut and asks", () => {
 })
 
 test("dontAsk denies a per-call tool even when granted", () => {
-  for (const tool of [FILL, SET_FILES]) {
+  for (const tool of [FILL, SET_FILES, SHARE_FILES, ENABLE_WEBDAV]) {
     const outcome = decidePermission(
       profile(["dont-ask"]),
       call(

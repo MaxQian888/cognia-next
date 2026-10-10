@@ -19,9 +19,15 @@ jest.mock("@/lib/chat/session-deletion", () => ({
   deleteSessionsWithTeardown: (ids: readonly string[]) => deleteWithTeardownMock(ids),
 }))
 
+const announceMock = jest.fn()
+jest.mock("@/lib/filespace/lifecycle", () => ({
+  announceFileSpaceSessionsChanged: (ids: readonly string[]) => announceMock(ids),
+}))
+
 import { deleteSessionsRouted, setSessionsArchived } from "./session-archive-writes"
 
 beforeEach(() => {
+  announceMock.mockReset()
   enqueueMock.mockReset().mockResolvedValue(null)
   for (const mock of [
     archiveSessionMock,
@@ -76,6 +82,15 @@ describe("setSessionsArchived", () => {
     await setSessionsArchived(["hosted", "local"], true)
     expect(archiveSessionMock).toHaveBeenCalledWith("local")
     expect(bulkArchiveMock).not.toHaveBeenCalled()
+    // Only what this device wrote reaches its own file-share host.
+    expect(announceMock).toHaveBeenCalledWith(["local"])
+  })
+
+  it("tells the file-share host about every local archive and restore", async () => {
+    await setSessionsArchived(["a", "b"], true)
+    expect(announceMock).toHaveBeenLastCalledWith(["a", "b"])
+    await setSessionsArchived(["a"], false)
+    expect(announceMock).toHaveBeenLastCalledWith(["a"])
   })
 
   it("writes nothing locally when the Host took every id", async () => {
@@ -83,11 +98,13 @@ describe("setSessionsArchived", () => {
     await setSessionsArchived(["a", "b"], true)
     expect(archiveSessionMock).not.toHaveBeenCalled()
     expect(bulkArchiveMock).not.toHaveBeenCalled()
+    expect(announceMock).not.toHaveBeenCalled()
   })
 
   it("lets a refused local write reach the caller", async () => {
     archiveSessionMock.mockRejectedValue(new Error("locked"))
     await expect(setSessionsArchived(["a"], true)).rejects.toThrow("locked")
+    expect(announceMock).not.toHaveBeenCalled()
   })
 })
 

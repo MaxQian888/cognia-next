@@ -15,8 +15,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::{FileShareError, FileShareResult};
 use crate::model::{
-    AssetEntry, Backing, CreatedBy, CredentialView, Grant, GrantPath, GrantStatus, MountRecord,
-    Permission, Protocol, ProviderKind, SessionState,
+    AssetEntry, Audience, Backing, CollabRole, CreatedBy, CredentialView, Grant, GrantPath,
+    GrantStatus, MountRecord, Permission, Protocol, ProviderKind, SessionState,
 };
 
 const MIGRATIONS: &[&str] = &[
@@ -127,10 +127,55 @@ const MIGRATIONS: &[&str] = &[
       created_at INTEGER NOT NULL
     );
     "#,
+    // 2 — ADR-0222 P3: a conversation's state outlives its mount table. A
+    // deleted conversation is pushed with no mounts, so the state the
+    // lifecycle cascade acts on cannot live on the mount rows alone.
+    r#"
+    CREATE TABLE file_space_sessions (
+      session_id TEXT PRIMARY KEY,
+      state TEXT NOT NULL CHECK (state IN ('active','archived','deleted')),
+      updated_at INTEGER NOT NULL
+    );
+    INSERT OR IGNORE INTO file_space_sessions (session_id, state, updated_at)
+      SELECT session_id, session_state, MAX(updated_at) FROM file_space_mounts GROUP BY session_id;
+    "#,
+    // 3 — ADR-0222 P3: collaboration members. A conversation's registration
+    // as the file host of its shared counterpart (the token lives in the
+    // secret store), and per grant a revision every state change bumps and
+    // the revision last mirrored to the collaboration server, so a mirror
+    // that failed is retried with the grant's latest state.
+    r#"
+    CREATE TABLE file_collab_hosts (
+      session_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL,
+      collab_session_id TEXT NOT NULL,
+      server_url TEXT NOT NULL,
+      host_label TEXT NOT NULL,
+      registered_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    ALTER TABLE file_grants ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE file_grants ADD COLUMN mirrored_revision INTEGER;
+    "#,
 ];
 
-/// The audience every P2 grant has. Rows with any other value are skipped.
+/// A grant for credential holders (P2).
 const AUDIENCE_CREDENTIAL: &str = "credential";
+/// A grant for a shared conversation's members (P3).
+const AUDIENCE_COLLAB: &str = "collab";
+
+/// A conversation registered as the file host of its shared counterpart.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CollabHostRecord {
+    pub session_id: String,
+    pub org_id: String,
+    pub collab_session_id: String,
+    pub server_url: String,
+    pub host_label: String,
+    pub registered_at: i64,
+    pub updated_at: i64,
+}
 
 /// A credential row, including what is never sent to a client.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,15 +267,19 @@ impl Store {
 
     // ── Mounts ─────────────────────────────────────────────────────────────
 
-    /// Replace one conversation's mount table and Dexie entries.
+    /// Replace one conversation's mount table and Dexie entries, and record
+    /// its state (kept even when, deleted, it has no mounts left).
     pub fn replace_session_mounts(
         &self,
         session_id: &str,
+        state: SessionState,
         mounts: &[MountRecord],
         assets: &[AssetEntry],
+        now: i64,
     ) -> FileShareResult<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        upsert_session_state(&tx, session_id, state, now)?;
         tx.execute(
             "DELETE FROM file_space_mounts WHERE session_id = ?1",
             params![session_id],
@@ -277,19 +326,23 @@ impl Store {
         Ok(())
     }
 
-    /// Mark every mount of a conversation with a new session state, keeping
-    /// the table (an archived conversation's mounts still exist).
+    /// Record a conversation's new state and mark its mounts with it,
+    /// keeping the table (an archived conversation's mounts still exist).
     pub fn set_session_state(
         &self,
         session_id: &str,
         state: SessionState,
         now: i64,
     ) -> FileShareResult<usize> {
-        let conn = self.conn.lock();
-        Ok(conn.execute(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        upsert_session_state(&tx, session_id, state, now)?;
+        let marked = tx.execute(
             "UPDATE file_space_mounts SET session_state = ?2, updated_at = ?3 WHERE session_id = ?1",
             params![session_id, state.as_str(), now],
-        )?)
+        )?;
+        tx.commit()?;
+        Ok(marked)
     }
 
     pub fn mounts_for_session(&self, session_id: &str) -> FileShareResult<Vec<MountRecord>> {
@@ -356,8 +409,8 @@ impl Store {
     pub fn insert_grant(&self, grant: &Grant, credentials: &[CredentialRow]) -> FileShareResult<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
-        let protocols: Vec<&str> = grant.protocols.iter().map(|p| p.as_str()).collect();
         let permissions: Vec<&str> = grant.permissions.iter().map(|p| p.as_str()).collect();
+        let (audience_kind, audience_json) = audience_columns(grant);
         tx.execute(
             "INSERT INTO file_grants (id, session_id, label, created_by, creator_principal, \
              audience_kind, audience_json, provider, permissions, status, status_reason, \
@@ -369,8 +422,8 @@ impl Store {
                 grant.label,
                 grant.created_by.as_str(),
                 grant.creator_principal,
-                AUDIENCE_CREDENTIAL,
-                serde_json::json!({ "protocols": protocols }).to_string(),
+                audience_kind,
+                audience_json,
                 grant.provider.as_str(),
                 serde_json::to_string(&permissions).map_err(FileShareError::store)?,
                 grant.status.as_str(),
@@ -466,7 +519,7 @@ impl Store {
             let sql = format!(
                 // Only audiences this build serves, so a page is never short
                 // of rows that exist.
-                "{GRANT_SELECT} WHERE audience_kind = '{AUDIENCE_CREDENTIAL}' \
+                "{GRANT_SELECT} WHERE audience_kind IN ('{AUDIENCE_CREDENTIAL}', '{AUDIENCE_COLLAB}') \
                  AND (?1 IS NULL OR session_id = ?1) \
                  AND (?2 IS NULL OR created_at < ?2 OR (created_at = ?2 AND id < ?3)) \
                  ORDER BY created_at DESC, id DESC LIMIT ?4"
@@ -516,7 +569,7 @@ impl Store {
         };
         let changed = conn.execute(
             "UPDATE file_grants SET status = ?2, status_reason = ?3, updated_at = ?4, \
-             revoked_at = COALESCE(?5, revoked_at) \
+             revoked_at = COALESCE(?5, revoked_at), revision = revision + 1 \
              WHERE id = ?1 AND status NOT IN ('expired','revoked')",
             params![id, status.as_str(), reason, now, revoked_at],
         )?;
@@ -541,12 +594,105 @@ impl Store {
         Ok(())
     }
 
-    /// The conversation's state as its mount table last reported it.
+    // ── Collaboration mirror ───────────────────────────────────────────────
+
+    /// Collaboration grants whose current revision the server has not
+    /// accepted yet, with that revision.
+    pub fn grants_to_mirror(&self) -> FileShareResult<Vec<(Grant, i64)>> {
+        let conn = self.conn.lock();
+        let mut out = Vec::new();
+        {
+            let mut stmt = conn.prepare(&format!(
+                "{GRANT_SELECT} WHERE audience_kind = '{AUDIENCE_COLLAB}' \
+                 AND (mirrored_revision IS NULL OR mirrored_revision < revision) \
+                 ORDER BY created_at"
+            ))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((grant_from_row(row)?, row.get::<_, i64>(GRANT_REVISION_COLUMN)?))
+            })?;
+            for row in rows {
+                let (grant, revision) = row?;
+                if let Some(grant) = grant {
+                    out.push((grant, revision));
+                }
+            }
+        }
+        for (grant, _) in &mut out {
+            grant.paths = grant_paths(&conn, &grant.id)?;
+        }
+        Ok(out)
+    }
+
+    /// Record that the server holds `revision` of a grant (never moving
+    /// backwards past a newer one).
+    pub fn mark_mirrored(&self, grant_id: &str, revision: i64) -> FileShareResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE file_grants SET mirrored_revision = ?2 \
+             WHERE id = ?1 AND (mirrored_revision IS NULL OR mirrored_revision < ?2)",
+            params![grant_id, revision],
+        )?;
+        Ok(())
+    }
+
+    // ── Collaboration hosts ────────────────────────────────────────────────
+
+    pub fn put_collab_host(&self, host: &CollabHostRecord) -> FileShareResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO file_collab_hosts (session_id, org_id, collab_session_id, server_url, \
+             host_label, registered_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(session_id) DO UPDATE SET org_id = excluded.org_id, \
+             collab_session_id = excluded.collab_session_id, server_url = excluded.server_url, \
+             host_label = excluded.host_label, registered_at = excluded.registered_at, \
+             updated_at = excluded.updated_at",
+            params![
+                host.session_id,
+                host.org_id,
+                host.collab_session_id,
+                host.server_url,
+                host.host_label,
+                host.registered_at,
+                host.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn collab_host(&self, session_id: &str) -> FileShareResult<Option<CollabHostRecord>> {
+        let conn = self.conn.lock();
+        Ok(conn
+            .query_row(
+                &format!("{COLLAB_HOST_SELECT} WHERE session_id = ?1"),
+                params![session_id],
+                collab_host_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn collab_hosts(&self) -> FileShareResult<Vec<CollabHostRecord>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&format!("{COLLAB_HOST_SELECT} ORDER BY session_id"))?;
+        let rows = stmt.query_map([], collab_host_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Forget a registration; reports whether there was one.
+    pub fn delete_collab_host(&self, session_id: &str) -> FileShareResult<bool> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "DELETE FROM file_collab_hosts WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// The conversation's state as the app last reported it.
     pub fn session_state(&self, session_id: &str) -> FileShareResult<Option<SessionState>> {
         let conn = self.conn.lock();
         let raw: Option<String> = conn
             .query_row(
-                "SELECT session_state FROM file_space_mounts WHERE session_id = ?1 LIMIT 1",
+                "SELECT state FROM file_space_sessions WHERE session_id = ?1",
                 params![session_id],
                 |row| row.get(0),
             )
@@ -862,7 +1008,87 @@ impl Store {
 
 const GRANT_SELECT: &str = "SELECT id, session_id, label, created_by, creator_principal, \
      audience_kind, audience_json, provider, permissions, status, status_reason, expires_at, \
-     policy_revision, created_at, updated_at, revoked_at FROM file_grants";
+     policy_revision, created_at, updated_at, revoked_at, revision FROM file_grants";
+
+/// The index of `revision` in [`GRANT_SELECT`].
+const GRANT_REVISION_COLUMN: usize = 16;
+
+const COLLAB_HOST_SELECT: &str = "SELECT session_id, org_id, collab_session_id, server_url, \
+     host_label, registered_at, updated_at FROM file_collab_hosts";
+
+fn collab_host_from_row(row: &Row<'_>) -> rusqlite::Result<CollabHostRecord> {
+    Ok(CollabHostRecord {
+        session_id: row.get(0)?,
+        org_id: row.get(1)?,
+        collab_session_id: row.get(2)?,
+        server_url: row.get(3)?,
+        host_label: row.get(4)?,
+        registered_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+/// How a grant's audience is stored: its kind, and a JSON object with what
+/// the kind needs (credential protocols; the collaboration binding).
+fn audience_columns(grant: &Grant) -> (&'static str, String) {
+    match &grant.audience {
+        Audience::Credentials => {
+            let protocols: Vec<&str> = grant.protocols.iter().map(|p| p.as_str()).collect();
+            (
+                AUDIENCE_CREDENTIAL,
+                serde_json::json!({ "protocols": protocols }).to_string(),
+            )
+        }
+        Audience::Collab {
+            org_id,
+            collab_session_id,
+            user_ids,
+            min_role,
+        } => (
+            AUDIENCE_COLLAB,
+            serde_json::json!({
+                "orgId": org_id,
+                "collabSessionId": collab_session_id,
+                "userIds": user_ids,
+                "minRole": min_role.as_str(),
+            })
+            .to_string(),
+        ),
+    }
+}
+
+/// The audience and protocols of a stored row, or `None` for a kind or shape
+/// this build does not know.
+fn audience_of(kind: &str, json: &str) -> Option<(Audience, Vec<Protocol>)> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    match kind {
+        AUDIENCE_CREDENTIAL => {
+            let protocols = value["protocols"]
+                .as_array()?
+                .iter()
+                .filter_map(|item| item.as_str().and_then(|s| Protocol::parse(s).ok()))
+                .collect();
+            Some((Audience::Credentials, protocols))
+        }
+        AUDIENCE_COLLAB => {
+            let min_role: CollabRole = serde_json::from_value(value["minRole"].clone()).ok()?;
+            let user_ids: Option<Vec<String>> = match &value["userIds"] {
+                serde_json::Value::Null => None,
+                other => Some(serde_json::from_value(other.clone()).ok()?),
+            };
+            Some((
+                Audience::Collab {
+                    org_id: value["orgId"].as_str()?.to_string(),
+                    collab_session_id: value["collabSessionId"].as_str()?.to_string(),
+                    user_ids,
+                    min_role,
+                },
+                Vec::new(),
+            ))
+        }
+        _ => None,
+    }
+}
 
 const CREDENTIAL_SELECT: &str = "SELECT id, grant_id, protocol, provider, username, \
      password_hash, ssh_public_key, ssh_key_fingerprint, provider_account_id, created_at, \
@@ -902,17 +1128,9 @@ fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<AssetEntry> {
 
 fn grant_from_row(row: &Row<'_>) -> rusqlite::Result<Option<Grant>> {
     let audience_kind: String = row.get(5)?;
-    if audience_kind != AUDIENCE_CREDENTIAL {
+    let Some((audience, protocols)) = audience_of(&audience_kind, &row.get::<_, String>(6)?) else {
         return Ok(None);
-    }
-    let audience: serde_json::Value =
-        serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default();
-    let protocols: Option<Vec<Protocol>> = audience["protocols"].as_array().map(|items| {
-        items
-            .iter()
-            .filter_map(|item| item.as_str().and_then(|s| Protocol::parse(s).ok()))
-            .collect()
-    });
+    };
     let permissions: Option<Vec<Permission>> =
         serde_json::from_str::<Vec<String>>(&row.get::<_, String>(8)?)
             .ok()
@@ -925,12 +1143,11 @@ fn grant_from_row(row: &Row<'_>) -> rusqlite::Result<Option<Grant>> {
     let created_by: String = row.get(3)?;
     let provider: String = row.get(7)?;
     let status: String = row.get(9)?;
-    let (Some(protocols), Some(permissions), Ok(provider), Ok(status), "user") = (
-        protocols,
+    let (Some(permissions), Ok(provider), Ok(status), Some(created_by)) = (
         permissions,
         ProviderKind::parse(&provider),
         GrantStatus::parse(&status),
-        created_by.as_str(),
+        CreatedBy::parse(&created_by),
     ) else {
         return Ok(None);
     };
@@ -938,8 +1155,9 @@ fn grant_from_row(row: &Row<'_>) -> rusqlite::Result<Option<Grant>> {
         id: row.get(0)?,
         session_id: row.get(1)?,
         label: row.get(2)?,
-        created_by: CreatedBy::User,
+        created_by,
         creator_principal: row.get(4)?,
+        audience,
         protocols,
         provider,
         permissions,
@@ -952,6 +1170,20 @@ fn grant_from_row(row: &Row<'_>) -> rusqlite::Result<Option<Grant>> {
         revoked_at: row.get(15)?,
         paths: Vec::new(),
     }))
+}
+
+fn upsert_session_state(
+    conn: &Connection,
+    session_id: &str,
+    state: SessionState,
+    now: i64,
+) -> FileShareResult<()> {
+    conn.execute(
+        "INSERT INTO file_space_sessions (session_id, state, updated_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(session_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
+        params![session_id, state.as_str(), now],
+    )?;
+    Ok(())
 }
 
 fn grant_paths(conn: &Connection, grant_id: &str) -> rusqlite::Result<Vec<GrantPath>> {
@@ -1030,6 +1262,7 @@ pub(crate) mod tests {
             label: Some("Report".into()),
             created_by: CreatedBy::User,
             creator_principal: "owner".into(),
+            audience: Audience::Credentials,
             protocols: vec![Protocol::Webdav, Protocol::Sftp],
             provider: ProviderKind::Builtin,
             permissions: vec![Permission::Read, Permission::Download],
@@ -1109,21 +1342,53 @@ pub(crate) mod tests {
             source_id: "m1".into(),
         };
         store
-            .replace_session_mounts("s1", &[mount("s1", "workspace")], std::slice::from_ref(&asset))
+            .replace_session_mounts("s1", SessionState::Active, &[mount("s1", "workspace")], std::slice::from_ref(&asset), 1)
             .unwrap();
         assert_eq!(store.mounts_for_session("s1").unwrap().len(), 1);
         assert_eq!(store.assets("s1", "uploads").unwrap(), vec![asset.clone()]);
         assert_eq!(store.asset("s1", "uploads", "a.png").unwrap(), Some(asset));
-        store.replace_session_mounts("s1", &[], &[]).unwrap();
+        store.replace_session_mounts("s1", SessionState::Active, &[], &[], 1).unwrap();
         assert!(store.mounts_for_session("s1").unwrap().is_empty());
         assert!(store.assets("s1", "uploads").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_deleted_conversation_keeps_its_state_without_mounts() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .replace_session_mounts("s1", SessionState::Active, &[mount("s1", "workspace")], &[], 1)
+            .unwrap();
+        store.replace_session_mounts("s1", SessionState::Deleted, &[], &[], 2).unwrap();
+        assert!(store.mounts_for_session("s1").unwrap().is_empty());
+        assert_eq!(store.session_state("s1").unwrap(), Some(SessionState::Deleted));
+        assert_eq!(store.session_state("s2").unwrap(), None);
+    }
+
+    #[test]
+    fn upgrading_backfills_session_states_from_the_mount_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file-share.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute(
+                "INSERT INTO file_space_mounts (session_id, mount_id, virtual_path, backing, host_path, \
+                 writable, status, fingerprint, session_state, updated_at) \
+                 VALUES ('s1', 'workspace', '/workspace', 'disk', '/repo', 1, 'available', 'fp', 'archived', 7)",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.session_state("s1").unwrap(), Some(SessionState::Archived));
     }
 
     #[test]
     fn session_state_changes_keep_the_mounts() {
         let store = Store::open_in_memory().unwrap();
         store
-            .replace_session_mounts("s1", &[mount("s1", "workspace")], &[])
+            .replace_session_mounts("s1", SessionState::Active, &[mount("s1", "workspace")], &[], 1)
             .unwrap();
         store
             .set_session_state("s1", SessionState::Archived, 9)
@@ -1183,12 +1448,97 @@ pub(crate) mod tests {
             .conn
             .lock()
             .execute(
-                "UPDATE file_grants SET audience_kind = 'collab' WHERE id = 'fg_1'",
+                "UPDATE file_grants SET audience_kind = 'future' WHERE id = 'fg_1'",
                 [],
             )
             .unwrap();
         assert_eq!(store.grant("fg_1").unwrap(), None);
         assert!(store.list_grants(None).unwrap().is_empty());
+    }
+
+    pub(crate) fn sample_collab_grant(id: &str, session_id: &str) -> Grant {
+        Grant {
+            audience: Audience::Collab {
+                org_id: "org_1".into(),
+                collab_session_id: "ses_1".into(),
+                user_ids: Some(vec!["usr_a".into()]),
+                min_role: CollabRole::Member,
+            },
+            protocols: Vec::new(),
+            ..sample_grant(id, session_id)
+        }
+    }
+
+    #[test]
+    fn collab_grants_round_trip_and_are_paged_with_the_rest() {
+        let store = Store::open_in_memory().unwrap();
+        store.insert_grant(&sample_grant("fg_1", "s1"), &[]).unwrap();
+        let mut collab = sample_collab_grant("fg_2", "s1");
+        collab.created_at = 200;
+        store.insert_grant(&collab, &[]).unwrap();
+        assert_eq!(store.grant("fg_2").unwrap().unwrap(), collab);
+        let page = store.list_grants_page(Some("s1"), None, 10).unwrap();
+        assert_eq!(
+            page.iter().map(|grant| grant.id.as_str()).collect::<Vec<_>>(),
+            vec!["fg_2", "fg_1"]
+        );
+        // A collab row whose binding is unreadable is skipped, not served.
+        store
+            .conn
+            .lock()
+            .execute("UPDATE file_grants SET audience_json = '{}' WHERE id = 'fg_2'", [])
+            .unwrap();
+        assert_eq!(store.grant("fg_2").unwrap(), None);
+    }
+
+    #[test]
+    fn every_state_change_needs_mirroring_again() {
+        let store = Store::open_in_memory().unwrap();
+        store.insert_grant(&sample_grant("fg_1", "s1"), &[]).unwrap();
+        store.insert_grant(&sample_collab_grant("fg_2", "s1"), &[]).unwrap();
+        let due = store.grants_to_mirror().unwrap();
+        assert_eq!(due.len(), 1, "only collaboration grants are mirrored");
+        let (grant, revision) = &due[0];
+        assert_eq!(grant.id, "fg_2");
+        assert_eq!(grant.paths.len(), 1);
+        store.mark_mirrored("fg_2", *revision).unwrap();
+        assert!(store.grants_to_mirror().unwrap().is_empty());
+        store
+            .set_grant_status("fg_2", GrantStatus::Suspended, Some("owner"), 300)
+            .unwrap();
+        let (_, next) = store.grants_to_mirror().unwrap().remove(0);
+        assert!(next > *revision);
+        // An older revision acknowledged late does not hide the newer one.
+        store.mark_mirrored("fg_2", *revision).unwrap();
+        assert_eq!(store.grants_to_mirror().unwrap().len(), 1);
+        store.mark_mirrored("fg_2", next).unwrap();
+        assert!(store.grants_to_mirror().unwrap().is_empty());
+    }
+
+    #[test]
+    fn collab_host_registrations_are_kept_per_conversation() {
+        let store = Store::open_in_memory().unwrap();
+        let host = CollabHostRecord {
+            session_id: "s1".into(),
+            org_id: "org_1".into(),
+            collab_session_id: "ses_1".into(),
+            server_url: "https://collab.example".into(),
+            host_label: "Studio Mac".into(),
+            registered_at: 10,
+            updated_at: 10,
+        };
+        store.put_collab_host(&host).unwrap();
+        assert_eq!(store.collab_host("s1").unwrap(), Some(host.clone()));
+        let moved = CollabHostRecord {
+            collab_session_id: "ses_2".into(),
+            updated_at: 20,
+            ..host
+        };
+        store.put_collab_host(&moved).unwrap();
+        assert_eq!(store.collab_hosts().unwrap(), vec![moved]);
+        assert!(store.delete_collab_host("s1").unwrap());
+        assert!(!store.delete_collab_host("s1").unwrap());
+        assert_eq!(store.collab_host("s1").unwrap(), None);
     }
 
     #[test]

@@ -3374,6 +3374,16 @@ describe("resolveSendOptions — permission ruleset merge", () => {
   // in "artifact authoring tools" below; leaving it on here would mean every
   // expectation restating eight rules that are not what is under test.
   const noArtifactTier = { artifacts: { agentAuthoring: false } }
+  // A conversation's files (ADR-0222 §9): reading and revoking are offered to
+  // every conversation, so a case with a session carries their allows.
+  const filespaceTier = {
+    filespace_disable_webdav: "allow",
+    filespace_list: "allow",
+    filespace_revoke_share: "allow",
+    "mcp__cognia-plugin-tools__filespace_disable_webdav": "allow",
+    "mcp__cognia-plugin-tools__filespace_list": "allow",
+    "mcp__cognia-plugin-tools__filespace_revoke_share": "allow",
+  }
   it("wraps legacy commandRules under Bash (unchanged behavior)", async () => {
     const opts = await resolveSendOptions({
       appSettings: {
@@ -3435,6 +3445,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     })
     expect(opts.permissionRuleset).toEqual({
       Bash: { "git *": "allow", "git push --force": "deny" },
+      ...filespaceTier,
     })
     __resetSessionDenialsForTesting()
   })
@@ -3450,7 +3461,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     })
     // Both are sent; `canUseTool` returns on the deny before it reads the list.
     expect(opts.alwaysAllowTools).toEqual(["Bash"])
-    expect(opts.permissionRuleset).toEqual({ Bash: { "rm -rf /tmp/x": "deny" } })
+    expect(opts.permissionRuleset).toEqual({ Bash: { "rm -rf /tmp/x": "deny" }, ...filespaceTier })
     __resetSessionDenialsForTesting()
   })
 
@@ -3466,7 +3477,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
         alwaysAllowTools: ["Read"],
       } as unknown as AppSettings,
     })
-    expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" } })
+    expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" }, ...filespaceTier })
     expect(opts.alwaysAllowTools).toEqual(["Read"])
   })
 
@@ -3475,6 +3486,48 @@ describe("resolveSendOptions — permission ruleset merge", () => {
       appSettings: { agentPermissions: {}, ...noArtifactTier } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — filespace tools (ADR-0222 §9)", () => {
+  const names = (opts: { pluginTools?: { name: string }[] }) =>
+    (opts.pluginTools ?? [])
+      .map((tool) => tool.name)
+      .filter((name) => name.startsWith("filespace_"))
+
+  it("offers reading and revoking to a conversation, sharing not by default", async () => {
+    const opts = await resolveSendOptions({ session: { id: "s-files" } as never })
+    expect(names(opts)).toEqual([
+      "filespace_list",
+      "filespace_revoke_share",
+      "filespace_disable_webdav",
+    ])
+    expect(opts.permissionRuleset?.filespace_list).toBe("allow")
+    expect(opts.permissionRuleset?.filespace_share).toBeUndefined()
+  })
+
+  it("adds the sharing tools, each asking, when the policy allows agent sharing", async () => {
+    const opts = await resolveSendOptions({
+      session: { id: "s-files" } as never,
+      appSettings: { fileSharing: { allowAgentSharing: true } } as unknown as AppSettings,
+    })
+    expect(names(opts)).toEqual([
+      "filespace_list",
+      "filespace_revoke_share",
+      "filespace_disable_webdav",
+      "filespace_share",
+      "filespace_enable_webdav",
+    ])
+    const share = (opts.pluginTools ?? []).find((tool) => tool.name === "filespace_share") as {
+      requiresApproval?: boolean
+    }
+    expect(share.requiresApproval).toBe(true)
+    expect(opts.permissionRuleset?.["mcp__cognia-plugin-tools__filespace_share"]).toBe("ask")
+  })
+
+  it("offers nothing without a conversation", async () => {
+    const opts = await resolveSendOptions({})
+    expect(names(opts)).toEqual([])
   })
 })
 
@@ -4570,6 +4623,10 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     "canvas_update",
     "canvas_read",
     "canvas_open",
+    // A conversation's files (ADR-0222 §9): offered to every conversation.
+    "filespace_list",
+    "filespace_revoke_share",
+    "filespace_disable_webdav",
   ])
   const notWeb = (n: string) => !ALWAYS_ON.has(n)
 
@@ -4813,6 +4870,10 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       "canvas_update",
       "canvas_read",
       "canvas_open",
+      // The conversation's own files (ADR-0222 §9), first-class like the above.
+      "filespace_list",
+      "filespace_revoke_share",
+      "filespace_disable_webdav",
       "working_set",
       "attachment_list",
       "attachment_search",

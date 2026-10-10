@@ -3,8 +3,8 @@
 //! The implementation is `cognia_file_share`; this module only maps its
 //! command surface onto the RPC envelope. Whether a caller may run a command
 //! was decided before dispatch reaches here: the command manifest's capability
-//! and approval, the admin lease for the two network-exposure settings
-//! (`STEP_UP_COMMANDS`), and the service scope for the three commands that
+//! and approval, the admin lease for the network-exposure settings and the
+//! collaboration registration (`STEP_UP_COMMANDS`), and the service scope for the three commands that
 //! carry the account, the mount tables and the policy (`target: service`). The
 //! one decision left here is who the audit names: the brain acts for the
 //! owner, a paired device for itself.
@@ -21,7 +21,7 @@ fn status_of(code: &str) -> StatusCode {
         "file_share_unavailable" | "file_share_locked" | "secret_store_unavailable" => {
             StatusCode::SERVICE_UNAVAILABLE
         }
-        "provider_failed" => StatusCode::BAD_GATEWAY,
+        "provider_failed" | "collab_unreachable" => StatusCode::BAD_GATEWAY,
         "store_failed" | "credential_hash_failed" | "host_key_failed" => {
             StatusCode::INTERNAL_SERVER_ERROR
         }
@@ -80,6 +80,8 @@ mod tests {
         assert_eq!(status_of("not_found"), StatusCode::NOT_FOUND);
         assert_eq!(status_of("file_share_locked"), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(status_of("provider_failed"), StatusCode::BAD_GATEWAY);
+        assert_eq!(status_of("collab_unreachable"), StatusCode::BAD_GATEWAY);
+        assert_eq!(status_of("collab_host_unregistered"), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(status_of("store_failed"), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(status_of("policy_exceeded"), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(status_of("mount_not_synced"), StatusCode::UNPROCESSABLE_ENTITY);

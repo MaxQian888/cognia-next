@@ -454,6 +454,8 @@ commands.allow = [
   "external_agent_state_root_info",
   "external_agent_state_root_remove",
   "file_audit_list",
+  "file_collab_host_set",
+  "file_collab_host_status",
   "file_credential_rotate",
   "file_grant_create",
   "file_grant_list",

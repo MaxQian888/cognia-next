@@ -1,22 +1,25 @@
 ---
 title: Live sharing
-description: "Revocable WebDAV and SFTP access to chosen folders of one conversation, served by the host that has the files or by SFTPGo. Phase P2 of ADR-0222."
+description: "Revocable access to chosen folders of one conversation: WebDAV and SFTP sign-ins served by the host that has the files or by SFTPGo, access for a shared conversation's members through the collaboration server, and agents that share with approval. Phases P2 and P3 of ADR-0222."
 ---
 
 # Live sharing
 
-<Status variant="beta">P2 shipped · collaboration members (P3) designed</Status>
+<Status variant="beta">P2 and P3 shipped</Status>
 
 <TLDR>
-  A share link is a frozen, encrypted copy. A **live share** is a grant: a WebDAV/SFTP sign-in for some
-  folders or files of one conversation, served live from the machine that holds them, until it expires or
-  you revoke it. `crates/cognia-file-share` owns the grants, the credentials, a gateway every request goes
-  through, the built-in WebDAV/SFTP listener and the optional SFTPGo provider. The app manages it from the
-  Files panel and Settings → Connectivity → Network drive.
+  A share link is a frozen, encrypted copy. A **live share** is a grant: access to some folders or files of
+  one conversation, served live from the machine that holds them, until it expires or you revoke it. A grant
+  is for whoever holds its WebDAV/SFTP sign-in, or — in a conversation shared through an organization — for
+  that conversation's members, who reach the files through the collaboration server without any sign-in.
+  `crates/cognia-file-share` owns the grants, the credentials, a gateway every request goes through, the
+  built-in WebDAV/SFTP listener, the optional SFTPGo provider and the responder that answers members. The
+  app manages it from the Files panel and Settings → Connectivity → Network drive; an agent can share too,
+  only inside its own conversation and only once you approve.
 </TLDR>
 
 Decision record: [ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant)
-§4–§5 and §8 (which amends [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)).
+§4–§10 (§8 amends [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)).
 
 ## Using it
 
@@ -46,6 +49,10 @@ What a share cannot do:
 - survive its conversation being archived (suspended) or deleted (revoked), or its folder moving
   (it becomes **Needs attention** until resumed against the new place).
 
+macOS Finder writes `._name` sidecars (a file's extended attributes) and `.DS_Store` next to what it copies
+onto a WebDAV volume. The built-in WebDAV listener accepts those writes and drops them, and never lists or
+serves the names, so they do not end up in your folders or a repository's `git status`.
+
 ## Status and reasons
 
 | Status | Reason | Meaning |
@@ -54,12 +61,96 @@ What a share cannot do:
 | Suspended | `owner` | you suspended it; Resume brings it back |
 | Suspended | `policy` | goes beyond the current file-sharing policy |
 | Suspended | `session_archived` | the conversation was archived |
+| Suspended | `org_policy` | the collaboration server refused it under the organization's file-sharing policy |
 | Needs attention (`stale`) | `mount_changed` | a granted folder now points somewhere else; Resume rebinds it |
 | Expired | `expired` | past its lifetime |
 | Revoked | `revoked`, `session_deleted`, `provider_failed` | permanently off |
+| Revoked | `collab_host_removed` | a members share whose host registration was replaced or removed |
 
 A card with no addresses says why: `listener_off` (the network drive is off), `sftpgo_unconfigured`, or
 `sftpgo_no_public_endpoint` (SFTPGo has no public address configured).
+
+## Sharing with a shared conversation's members
+
+In a conversation shared through an organization, the share dialog asks **Share with**: a network-drive
+sign-in, or **Members of this shared conversation**. A members share creates no credential at all. Choose
+everyone from a role up (viewer, member, maintainer, owner) or only the members you pick; a viewer only ever
+reads, whatever the share allows.
+
+Members open the files from the conversation's **Files** section in the shared-conversation panel: browse,
+download, and — where the share allows changes and their role is not viewer — upload, make folders, rename
+and delete. The files never leave the device that holds them except as the answer to one request, so that
+device must be online; the section says when it is not.
+
+```
+member ──► collab-server ──────────► host (cognia-file-share/collab.rs)
+  POST file-requests        claim (long poll, host token)
+  (files.readLive /         ─► gateway: grant, admission, mount, policy, path, sensitive floor
+   files.writeLive +        ─► answer: JSON, or a read's bytes as a request-scoped object
+   a covering grant)
+  GET  file-requests/{id} ◄── complete
+```
+
+- **Registration.** Sharing with members first registers this device as the conversation's file host
+  (`ensureCollabFileHost`): the request is made with *your* sign-in, which must hold `files.share`, and the
+  server answers with a host token it keeps only as a SHA-256. The host receives that token alone
+  (`file_collab_host_set`, kept in the system keychain) and authenticates every later call with it. Every
+  host call re-checks that the person who registered it still holds `files.share`. A conversation has one
+  host: registering again replaces it, and the old registration's members shares are revoked on both sides
+  (`collab_host_removed`).
+- **Mirror.** The host mirrors each members grant to the server (who, which paths, which permissions, until
+  when), and again on every change, so members can list what is shared with them. The server clamps the
+  mirror to the organization's file-sharing policy; a refusal suspends the grant on the host (`org_policy`).
+  The host's own grant stays authoritative and is re-checked on every request.
+- **Requests.** A member's request names one operation (list, stat, read, write, mkdir, delete, rename)
+  under one grant that admits them. The server checks `files.readLive` (plus `files.writeLive` for a change)
+  and the grant; the host claims it, checks it again in its gateway with the principal `member:<user id>`
+  on the `collab` channel, does it, and answers. A write's bytes are uploaded before the host can claim it;
+  a read's bytes are stored for the requester alone. Transfers are capped at 50 MiB, listings at 1,000
+  entries.
+- **Offline host.** A request nobody claims expires after two minutes, and the member sees the host as
+  offline. A conversation holds at most 32 unanswered requests (8 per member).
+- **Watching and ending it.** In a shared conversation the "Shared as network drive" section shows which
+  host serves the members, whether it is answering, shares that have not reached the server yet and the
+  last problem. Revoking one share revokes its mirror. **Stop sharing with members** there, or deleting the
+  conversation, unregisters the host on the server and revokes every members share made under it. A member
+  who may share the files can also **Remove sharing device** from the conversation's Files section, which is
+  how a lost or unreachable device's sharing is ended from anywhere else. Locking or switching the account stops answering until
+  the account is unlocked again; a server that no longer accepts the host token ends the registration.
+
+## Agents
+
+An agent can see and manage the sharing of **its own conversation** through the `filespace_*` tools:
+
+| Tool | Consent | Does |
+| --- | --- | --- |
+| `filespace_list` | allowed | the conversation's mounts, a folder's entries, its share links and its live grants (with who each admits) |
+| `filespace_share` | asks every time | a snapshot link, or live access: a network-drive sign-in, or `audience: "members"` with a lowest role |
+| `filespace_enable_webdav` | asks every time | live WebDAV access, `/workspace` by default |
+| `filespace_revoke_share` | allowed | revokes one link or grant of this conversation |
+| `filespace_disable_webdav` | allowed | revokes this conversation's WebDAV access |
+
+The sharing tools are offered only while the file-sharing policy allows agent sharing, cannot be turned into
+"allow always" by any rule, grant or permission mode, and classify as `external-send` in the risk policy.
+Every path must lie in the calling conversation's files, and the sensitive floor has no agent override. A
+tool result never holds a password: the result card in the chat has an **Issue password** button that
+rotates the credential on the host serving it and shows the new password once. A grant an agent made is
+marked **By an agent**, and the host re-checks the agent-sharing policy for it while it lives. An agent shares
+with members by role only; picking individual members is left to the dialog.
+
+## Lifecycle
+
+| Event | Live grants | Share links |
+| --- | --- | --- |
+| Conversation archived / restored | suspended (`session_archived`) / resumed | kept |
+| Conversation deleted | revoked (`session_deleted`); a members registration is removed from the server | kept as independent copies; the delete confirmation offers to revoke them |
+| Conversation forked | not copied | not copied |
+| A granted folder moves | **Needs attention** until resumed | unaffected |
+
+The writers that archive, restore or delete conversations (`lib/chat/session-archive-writes.ts`,
+`deleteSessionsWithTeardown`, and the host applying a paired client's change) announce it through
+`lib/filespace/lifecycle.ts`, and the running host sync pushes the affected mount tables at once rather than
+on its next minute.
 
 ## How it works
 
@@ -72,13 +163,14 @@ brain / WebView push ────┘     │                 └── SFTP (rus
                          (per account)          grant → mount → policy → path → sensitive floor
 ```
 
-- **One command surface.** `crates/cognia-file-share/src/rpc.rs` holds the thirteen `file_*` commands; the
+- **One command surface.** `crates/cognia-file-share/src/rpc.rs` holds the fifteen `file_*` commands; the
   desktop's Tauri shells (`commands.rs`, `tauri-host` feature) and the companion RPC
   (`src-tauri/src/companion_api/rpc/file_share.rs`) both dispatch into it, so a paired phone sends the same
   arguments the WebView does. Host-only: `file_share_activate`, `file_space_sync`, `file_share_policy_set`.
   Reads (`file_share_status`, `file_grant_list`, `file_audit_list`) need `host.observe` and page by token.
   Grant changes (`file_grant_create/revoke/suspend/resume`, `file_credential_rotate`) are `workspace.write`
-  control commands. `file_share_listener_set` and `file_share_sftpgo_set` are `host-admin` with step-up.
+  control commands. `file_share_listener_set`, `file_share_sftpgo_set` and `file_collab_host_set` are
+  `host-admin` with step-up; `file_collab_host_status` is a `host.observe` read.
 - **Mount tables.** The host serves a conversation from the table the app gave it: which directory each disk
   mount is, which uploads and artifacts are listed. The app pushes tables for conversations with grants
   (`lib/filespace/host-sync.ts`, mounted as `FileShareHostSyncInitializer` on the desktop and as a brain
@@ -105,7 +197,9 @@ On a server whose workspaces SFTPGo already serves, set Settings → Connectivit
 to the paths SFTPGo sees, and the public SFTP/WebDAV address). Choosing **Served by: SFTPGo** in the share
 dialog then creates one SFTPGo user per credential, with a virtual folder per granted path, the sensitive
 floor as denied patterns and the grant's expiry; revoking deletes it. A path with no mapping refuses the grant
-(`sftpgo_path_unmapped`). Failed SFTPGo changes are retried in the background while the grant stays revoked
+(`sftpgo_path_unmapped`). A share served by SFTPGo starts as SFTP only: SFTPGo's WebDAV never sends
+a hidden file such as `.env`, but answers that it exists, with its size and date, before refusing it, so
+WebDAV is an explicit choice there and the dialog says what it reveals. Failed SFTPGo changes are retried in the background while the grant stays revoked
 locally. Deployment: `deploy/compose/compose.sftpgo.yaml` (see the compose README). SFTPGo is AGPL-3.0 and is
 never bundled into the app.
 
@@ -122,3 +216,9 @@ never bundled into the app.
 | Hook | `hooks/filespace/use-live-file-share.ts` |
 | Share dialog, credential card, grants list, audit | `components/filespace/live-*.tsx` |
 | Settings | `components/settings/connectivity/panels/network-drive-panel.tsx` and its blocks |
+| Members: host registration, responder, server routes | `crates/cognia-file-share/src/collab.rs`, `lib/collab/file-host.ts`, `crates/cognia-collab-server/src/session_files.rs` |
+| Members: requests and UI | `lib/collab/file-requests.ts`, `components/chat/shared-session-files.tsx` |
+| Members: the owner's view | `components/filespace/collab-host-status.tsx` |
+| One door for creating live shares | `lib/filespace/live-share.ts` |
+| Agent tools, consent, result card | `lib/claude/filespace-builtin-tools.ts`, `lib/claude/permissions/filespace-tool-rules.ts`, `components/chat/message-parts/mcp-renderers/filespace-share-card.tsx` |
+| Lifecycle announcements | `lib/filespace/lifecycle.ts` |

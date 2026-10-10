@@ -86,6 +86,8 @@ const KNOWN_REASONS = [
   "expired",
   "revoked",
   "provider_failed",
+  "collab_host_removed",
+  "org_policy",
 ] as const
 
 export interface LiveGrantsListProps {
@@ -279,6 +281,7 @@ function GrantRow({
 }) {
   const t = useTranslations("liveShare")
   const tp = useTranslations("liveShare.dialog.permission")
+  const tr = useTranslations("liveShare.dialog.members.role")
   const format = useFormatter()
   const now = useNow({ updateInterval: 60_000 })
   const { grant, credentials } = view
@@ -296,6 +299,19 @@ function GrantRow({
             <Badge variant={STATUS_VARIANT[grant.status]} className="text-[10px]">
               {t(`grants.status.${grant.status}`)}
             </Badge>
+            {grant.audience?.kind === "collab" ? (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid={`live-grant-members-${grant.id}`}
+              >
+                {grant.audience.userIds
+                  ? t("grants.audience.membersNamed", { count: grant.audience.userIds.length })
+                  : t("grants.audience.members", {
+                      role: tr(grant.audience.minRole),
+                    })}
+              </Badge>
+            ) : null}
             {grant.protocols.map((protocol) => (
               <Badge key={protocol} variant="outline" className="text-[10px]">
                 {t(`credentials.protocol.${protocol}`)}
@@ -304,6 +320,15 @@ function GrantRow({
             {grant.provider === "sftpgo" ? (
               <Badge variant="outline" className="text-[10px]">
                 {t("dialog.provider.sftpgo")}
+              </Badge>
+            ) : null}
+            {grant.createdBy === "agent" ? (
+              <Badge
+                variant="secondary"
+                className="text-[10px]"
+                data-testid={`live-grant-by-agent-${grant.id}`}
+              >
+                {t("grants.byAgent")}
               </Badge>
             ) : null}
           </div>

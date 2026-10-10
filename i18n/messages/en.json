@@ -10198,6 +10198,89 @@
     "denied": "Denied",
     "deny": "Deny",
     "featureDisabled": "Shared chat is disabled",
+    "files": {
+      "browse": "Browse",
+      "cancel": "Cancel",
+      "create": "Create",
+      "delete": "Delete {name}",
+      "download": "Download {name}",
+      "emptyFolder": "This folder is empty.",
+      "errors": {
+        "cross_mount": "Files can only be moved within the same shared folder.",
+        "exists": "Something with that name already exists.",
+        "grant_expired": "This share has expired.",
+        "grant_inactive": "This share is paused or was revoked.",
+        "grant_root": "The shared item itself cannot be deleted or renamed.",
+        "host_unavailable": "The device holding the files did not answer. It may be offline.",
+        "invalid_path": "That is not a valid file name or path.",
+        "is_folder": "That is a folder.",
+        "mount_unavailable": "The shared folder is not available on its device right now.",
+        "no_file_host": "No device is sharing this conversation's files.",
+        "not_a_folder": "That is not a folder.",
+        "not_admitted": "This share is not for you.",
+        "not_empty": "Only an empty folder can be deleted.",
+        "not_found": "That file or folder does not exist, or is not part of what was shared.",
+        "permission": "This share or your role does not allow that.",
+        "policy": "The file-sharing policy no longer allows this share.",
+        "read_only": "That can only be read.",
+        "sensitive": "That file holds secrets and is never shared.",
+        "session_archived": "The conversation was archived on its device.",
+        "session_deleted": "The conversation was deleted on its device.",
+        "stale": "The shared folder moved on its device and must be shared again.",
+        "symlink": "That is a link, and nothing is changed through a link.",
+        "timeout": "No answer arrived in time. Try again.",
+        "too_large": "That file is larger than 50 MB.",
+        "unavailable": "The device holding the files could not do this right now.",
+        "unknown": "That did not work ({code}).",
+        "upload_mismatch": "The upload arrived damaged. Try again.",
+        "withdrawn": "The share was withdrawn while this was running."
+      },
+      "expires": "Expires {when}",
+      "host": {
+        "offline": "{host} is offline",
+        "offlineUnnamed": "The sharing device is offline",
+        "online": "{host} is online",
+        "onlineUnnamed": "The sharing device is online"
+      },
+      "invalidName": "A name cannot be empty, “.” or “..”, or contain / or \\.",
+      "loadFailed": "Could not load the shared files.",
+      "name": "Name",
+      "newFolder": "New folder",
+      "newFolderTitle": "New folder",
+      "noHost": "No device is sharing this conversation's files.",
+      "nothingShared": "Nothing has been shared with you yet.",
+      "offlineHint": "The device holding these files is offline. A request waits up to two minutes for it.",
+      "permission": {
+        "download": "Download",
+        "read": "See names",
+        "write": "Change"
+      },
+      "refresh": "Refresh files",
+      "removeHost": {
+        "action": "Remove sharing device",
+        "confirm": "Remove device",
+        "description": "Every member loses the files shared from this device, and it stops being asked for them. Use this when the device is lost or no longer reachable; its owner can share again later.",
+        "done": "Removed the sharing device",
+        "failed": "Could not remove the sharing device. Try again.",
+        "title": "Remove the sharing device?"
+      },
+      "rename": "Rename {name}",
+      "renameConfirm": "Rename",
+      "renameTitle": "Rename",
+      "title": "Files",
+      "toast": {
+        "deleted": "Deleted {name}",
+        "folderCreated": "Created {name}",
+        "renamed": "Renamed to {name}",
+        "uploaded": "Uploaded {name}"
+      },
+      "truncated": "Only the first thousand items are shown.",
+      "untitled": "Shared files",
+      "up": "Up one folder",
+      "upload": "Upload a file",
+      "uploadInput": "File to upload",
+      "waiting": "Waiting for the device holding the files…"
+    },
     "guest": "External guest",
     "guestLinkPlaceholder": "Optional user ID for a restricted guest link",
     "historyWarning": "{messages, plural, one {# message} other {# messages}} and {attachments, plural, one {# attachment} other {# attachments}} will become visible to every invited member, including the complete earlier history.",
@@ -18009,6 +18092,19 @@
       "share": "Share via link",
       "shareFiles": "Share files…"
     },
+    "agentCard": {
+      "copied": "Link copied.",
+      "copy": "Copy link",
+      "copyFailed": "Could not copy the link.",
+      "expires": "Expires {when}",
+      "issuePassword": "Issue {protocol} password ({username})",
+      "issuedDescription": "Shown only this once. Copy it now.",
+      "liveTitle": "Shared as a network drive",
+      "membersNote": "Members open these files from the conversation's Files section while this device is online. No password is created; revoke it from this conversation's Files → Shared as network drive.",
+      "passwordNote": "The agent never sees the password. Issue one to connect; issuing another signs out anyone using the last one.",
+      "snapshotTitle": "Shared {count, plural, one {# file} other {# files}} as a link",
+      "withheldSensitive": "{count, plural, one {# file holding secrets was} other {# files holding secrets were}} left out."
+    },
     "entry": {
       "sourceUnavailable": "Original not on this device"
     },
@@ -21492,6 +21588,7 @@
       "at": "When",
       "channel": {
         "app": "App",
+        "collab": "Shared conversation",
         "sftp": "SFTP",
         "sftpgo": "SFTPGo",
         "webdav": "WebDAV"
@@ -21510,6 +21607,7 @@
       "principal": {
         "credential": "{username}",
         "device": "Paired device {id}",
+        "member": "Member {id}",
         "owner": "You",
         "system": "Cognia"
       },
@@ -21518,6 +21616,28 @@
       "title": "Activity",
       "via": "Via",
       "who": "Who"
+    },
+    "collabHost": {
+      "notRunning": "{label} holds the members' shares but is not answering their requests right now.",
+      "pending": "{count, plural, one {# share has} other {# shares have}} not reached the collaboration server yet; this device keeps trying.",
+      "problem": {
+        "conflict": "Another device now serves this conversation's files.",
+        "host_token_missing": "This device lost its key for the collaboration server. Share with the members again to register it.",
+        "host_unregistered": "The collaboration server no longer accepts this device as the conversation's file host. Share with its members again to register it.",
+        "mirror_rejected": "The collaboration server refused a share ({detail}).",
+        "org_policy": "The organization's file-sharing policy refused a share ({detail}); it is suspended.",
+        "other": "Last problem: {detail}",
+        "rejected": "The collaboration server refused a request ({detail}).",
+        "unreachable": "Could not reach the collaboration server ({detail}). Members' requests wait until it is back."
+      },
+      "serving": "Members reach these files through {label}.",
+      "stop": "Stop sharing with members",
+      "stopConfirm": {
+        "confirm": "Stop sharing",
+        "description": "Members lose every file shared with them from this conversation, and this device stops answering their requests. Sharing with them again registers it anew.",
+        "title": "Stop sharing with members?"
+      },
+      "stopped": "Stopped sharing with members"
     },
     "credentials": {
       "copied": "Copied",
@@ -21554,6 +21674,13 @@
       "username": "Username"
     },
     "dialog": {
+      "audience": {
+        "credentials": "A network drive sign-in (WebDAV/SFTP)",
+        "credentialsHint": "Anyone with the sign-in can connect from Finder, Explorer or an SFTP client.",
+        "label": "Share with",
+        "members": "Members of this shared conversation",
+        "membersHint": "Members open these files from the conversation's Files section while this device is online. No password is created."
+      },
       "blocked": {
         "credentialsDisabled": "Network-drive credentials are turned off by your file-sharing policy.",
         "liveDisabled": "Live access to files is turned off by your file-sharing policy.",
@@ -21575,6 +21702,24 @@
         "off": "The network drive is off on this host, so this share cannot be reached until you turn it on.",
         "openSettings": "Network drive settings",
         "protocolOff": "{protocol} is turned off in this host's network drive settings."
+      },
+      "members": {
+        "chosen": "Only the members I choose",
+        "everyone": "Everyone with at least a role",
+        "loading": "Loading members…",
+        "minRole": "Lowest role",
+        "noOthers": "There are no other members to choose.",
+        "noneChosen": "Choose at least one member.",
+        "resultDescription": "They can open these files from the conversation's Files section while this device is online. Revoke it here at any time.",
+        "resultTitle": "Shared with the conversation's members",
+        "role": {
+          "maintainer": "Maintainer",
+          "member": "Member",
+          "owner": "Owner",
+          "viewer": "Viewer"
+        },
+        "viewersRead": "Viewers can only ever read, even when changes are allowed.",
+        "who": "Which members"
       },
       "noProtocol": "Choose at least one protocol.",
       "nothingSelected": "Choose at least one file or folder.",
@@ -21601,12 +21746,15 @@
       "providerLabel": "Served by",
       "resultDescription": "Send the address and sign-in below to whoever should connect.",
       "resultTitle": "Network drive access created",
+      "sftpgoWebdavNote": "Through SFTPGo, WebDAV never sends a secret file such as .env, but it does reveal that the file exists, with its size and date. Prefer SFTP unless they need WebDAV.",
       "sshKey": "SSH public key (optional)",
       "sshKeyHint": "Lets an SFTP client sign in with this key instead of the password.",
       "sshKeyPlaceholder": "ssh-ed25519 AAAA…",
       "title": "Share as a network drive"
     },
     "errors": {
+      "collab_host_unregistered": "This device is not serving this shared conversation's files. Share with its members again to register it.",
+      "collab_unreachable": "The collaboration server could not be reached.",
       "credential_conflict": "Could not pick an unused username. Try again.",
       "credential_hash_failed": "Could not secure the password. Try again.",
       "credential_revoked": "That sign-in was already revoked.",
@@ -21624,6 +21772,7 @@
       "mount_read_only": "That folder can only be read, so changes cannot be allowed.",
       "mount_unavailable": "One of the chosen folders is not available on this host right now.",
       "not_found": "That access no longer exists.",
+      "policy_agent_disabled": "Agents may not share files under your file-sharing policy.",
       "policy_credentials_disabled": "Network-drive credentials are turned off by your file-sharing policy.",
       "policy_exceeded": "This access goes beyond the current file-sharing policy.",
       "policy_live_disabled": "Live access to files is turned off by your file-sharing policy.",
@@ -21634,6 +21783,8 @@
       "session_inactive": "This conversation is archived or deleted, so its files cannot be shared.",
       "sftpgo_path_unmapped": "SFTPGo cannot see one of the chosen folders. Add a path mapping for it.",
       "sftpgo_unconfigured": "SFTPGo is not configured on this host.",
+      "shared_session_forbidden": "Your role in this shared conversation does not let you share its files.",
+      "shared_session_unavailable": "The collaboration server could not confirm you may share this conversation's files. Try again.",
       "store_failed": "This host could not save the change. Try again.",
       "ttl_exceeds_policy": "That lifetime is longer than your file-sharing policy allows.",
       "unknown": "Something went wrong: {message}",
@@ -21648,14 +21799,21 @@
         "rotateFor": "New {protocol} password",
         "suspend": "Suspend"
       },
+      "audience": {
+        "members": "Members · {role} and up",
+        "membersNamed": "{count, plural, one {# chosen member} other {# chosen members}}"
+      },
+      "byAgent": "By an agent",
       "conversation": "Conversation {id}",
       "empty": "Nothing shared as a network drive yet.",
       "expired": "Expired {when}",
       "expires": "Expires {when}",
       "newShare": "Share as network drive…",
       "reason": {
+        "collab_host_removed": "This device stopped serving the shared conversation's files",
         "expired": "Expired",
         "mount_changed": "A shared folder moved or changed. Resume to share it as it is now.",
+        "org_policy": "Your organization's file-sharing policy does not allow it",
         "owner": "Suspended by you",
         "policy": "Goes beyond the current file-sharing policy",
         "provider_failed": "SFTPGo could not be updated",
@@ -52061,6 +52219,12 @@
     "createdHelp": "Anyone with this link can view the content. The decryption key is in the link after “#”.",
     "createdTitle": "Your share link is ready",
     "creating": "Creating…",
+    "deleteLinks": {
+      "failed": "{count, plural, one {# share link} other {# share links}} could not be revoked. Finish in My shares.",
+      "failedAll": "The share links could not be revoked. Finish in My shares.",
+      "option": "Also revoke {count, plural, one {# share link} other {# share links}} made from what you are deleting. Otherwise they keep working as independent copies.",
+      "revoked": "Revoked {count, plural, one {# share link} other {# share links}}."
+    },
     "dialogDescription": "Create a public link. The contents are end-to-end encrypted on this device before upload — the server only ever stores ciphertext.",
     "dialogTitle": "Share via link",
     "done": "Done",
@@ -52242,8 +52406,6 @@
           "label": "Longest a file link may last"
         }
       },
-      "notYet": "Not available yet",
-      "notYetHint": "Saved now and enforced when this kind of sharing arrives in a later update.",
       "org": {
         "conflict": "Someone else changed the organization's policy. Their version is shown; review it and save again.",
         "defaults": "The organization uses the default policy.",

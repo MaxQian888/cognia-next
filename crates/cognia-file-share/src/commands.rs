@@ -10,6 +10,7 @@
 use cognia_core::command_error::CommandError;
 
 use crate::audit::OWNER;
+use crate::collab::{CollabHostInput, CollabHostStatus};
 use crate::error::FileShareError;
 use crate::listener::{ListenerConfigInput, ListenerStatus};
 use crate::model::{CreateGrantRequest, CreatedGrant, GrantView, IssuedCredential};
@@ -36,6 +37,8 @@ pub const SHELLS: &[&str] = &[
     "file_audit_list",
     "file_share_listener_set",
     "file_share_sftpgo_set",
+    "file_collab_host_set",
+    "file_collab_host_status",
 ];
 
 fn wire(error: FileShareError) -> CommandError {
@@ -139,6 +142,21 @@ pub async fn file_share_listener_set(config: ListenerConfigInput) -> Result<List
 pub async fn file_share_sftpgo_set(config: Option<SftpgoConfigInput>) -> Result<SftpgoStatus, CommandError> {
     let service = service::require().map_err(wire)?;
     service.set_sftpgo(config).await.map_err(wire)
+}
+
+#[tauri::command]
+pub async fn file_collab_host_set(
+    session_id: String,
+    host: Option<CollabHostInput>,
+) -> Result<CollabHostStatus, CommandError> {
+    let service = service::require().map_err(wire)?;
+    service.set_collab_host(&session_id, host, OWNER).await.map_err(wire)
+}
+
+#[tauri::command]
+pub async fn file_collab_host_status(session_id: String) -> Result<CollabHostStatus, CommandError> {
+    let service = service::require().map_err(wire)?;
+    service.collab_host_status(&session_id).await.map_err(wire)
 }
 
 #[cfg(test)]

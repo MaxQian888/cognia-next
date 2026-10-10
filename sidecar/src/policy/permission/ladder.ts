@@ -211,13 +211,17 @@ const ALLOW: LadderOutcome = { kind: "allow" }
  * Plugin tools whose approval can never be remembered, turned into a standing
  * grant, or skipped by a permission mode — each call asks a human (ADR-0201:
  * `browser_fill_credential` puts a stored password into a page;
- * `browser_set_files` hands local files to a web page). A tool is treated this
- * way only when it is in this list AND its manifest entry says
- * `requiresApproval: true`, so the catalog cannot be satisfied by a name alone.
+ * `browser_set_files` hands local files to a web page; ADR-0222 §9:
+ * `filespace_share` / `filespace_enable_webdav` give someone outside the
+ * conversation access to its files). A tool is treated this way only when it
+ * is in this list AND its manifest entry says `requiresApproval: true`, so the
+ * catalog cannot be satisfied by a name alone.
  */
 export const PER_CALL_PLUGIN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "browser_fill_credential",
   "browser_set_files",
+  "filespace_share",
+  "filespace_enable_webdav",
 ])
 
 /** Bare names of the plugin tools whose manifest entry says `requiresApproval: true`. */

@@ -766,7 +766,7 @@ async fn apply_attrs(file: tokio::fs::File, attrs: &FileAttributes) -> Result<()
 mod tests {
     use super::*;
     use crate::assets::tests::MemoryAssets;
-    use crate::model::{CreateGrantRequest, ProviderKind};
+    use crate::model::{CreateGrantRequest, CreatedBy, ProviderKind};
     use crate::service::tests::service_with;
 
     struct Client;
@@ -813,6 +813,8 @@ mod tests {
             expires_in_seconds: 3600,
             label: Some("spike".into()),
             ssh_public_key: key,
+            created_by: CreatedBy::User,
+            audience: crate::model::AudienceRequest::Credentials,
         };
         let writable = service
             .create_grant(
@@ -895,6 +897,8 @@ mod tests {
                     expires_in_seconds: 3600,
                     label: None,
                     ssh_public_key: None,
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
                 },
                 "owner",
             )

@@ -2509,6 +2509,9 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0014_file_sharing.sql"))
             .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0015_session_files.sql"))
+            .await?;
         transaction.commit().await?;
         Ok(())
     }

@@ -820,7 +820,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "manual spike against a real SFTPGo"]
     async fn spike_real_sftpgo() {
-        use crate::model::{CreateGrantRequest, Permission, ProviderKind};
+        use crate::model::{CreateGrantRequest, CreatedBy, Permission, ProviderKind};
         use crate::service::tests::service_with;
 
         let _ = cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default());
@@ -856,6 +856,8 @@ pub(crate) mod tests {
                     expires_in_seconds: 3600,
                     label: Some("sftpgo spike".into()),
                     ssh_public_key: std::env::var("SPIKE_SSH_KEY").ok(),
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
                 },
                 "owner",
             )

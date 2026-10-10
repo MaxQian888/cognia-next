@@ -194,6 +194,7 @@ async fn main() -> anyhow::Result<()> {
         .with_canvas_store(store.clone())
         .with_notification_store(store.clone())
         .with_file_sharing_store(store.clone())
+        .with_session_files_store(store.clone())
         .with_chat_store(store)
         .with_chat_attachments(Arc::new(attachment_store))
         .with_shared_chat_enabled(args.shared_chat_enabled)

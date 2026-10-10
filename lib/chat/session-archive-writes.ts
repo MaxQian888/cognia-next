@@ -16,6 +16,7 @@
 
 import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 import {
   archiveSession,
   bulkArchiveSessions,
@@ -53,9 +54,12 @@ export async function setSessionsArchived(
   if (local.length === 0) return
   if (local.length === 1) {
     await (archived ? archiveSession(local[0]!) : unarchiveSession(local[0]!))
-    return
+  } else {
+    await (archived ? bulkArchiveSessions(local) : bulkUnarchiveSessions(local))
   }
-  await (archived ? bulkArchiveSessions(local) : bulkUnarchiveSessions(local))
+  // Live file shares are suspended while archived and resumed on restore
+  // (ADR-0222 §10); a Host that took the write announces it itself.
+  announceFileSpaceSessionsChanged(local)
 }
 
 /**

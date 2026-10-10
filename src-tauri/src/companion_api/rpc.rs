@@ -1248,6 +1248,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "file_audit_list",
     "file_share_listener_set",
     "file_share_sftpgo_set",
+    "file_collab_host_set",
+    "file_collab_host_status",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -1576,11 +1578,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "environment_probe_get",
     "environment_driver_status",
     "environment_image_inspect",
-    // Live file shares: the service's state, the grant list and the audit
-    // trail.
+    // Live file shares: the service's state, the grant list, the audit
+    // trail and a conversation's collaboration registration.
     "file_share_status",
     "file_grant_list",
     "file_audit_list",
+    "file_collab_host_status",
 ];
 
 // ---------------------------------------------------------------------------
@@ -2009,8 +2012,11 @@ const STEP_UP_COMMANDS: &[&str] = &[
     // ADR-0222 — what the host exposes on the network: the built-in WebDAV /
     // SFTP listener (port, LAN or tunnel exposure) and the SFTPGo provider's
     // admin key. A paired device needs a fresh admin lease, as for the relay.
+    // So does registering the host with a collaboration server (P3): the
+    // server it names decides which members' requests this host answers.
     "file_share_listener_set",
     "file_share_sftpgo_set",
+    "file_collab_host_set",
 ];
 
 /// True when `name` requires the remote-control capability.

@@ -125,6 +125,82 @@ describe("CollabClient", () => {
     })
   })
 
+  it("speaks the file-host and file-request routes of a shared conversation", async () => {
+    const calls: Call[] = []
+    const answers: Record<string, () => Response> = {
+      "PUT /file-host": () =>
+        jsonResponse({ hostToken: "fht_abc", host: { registered: true, online: false } }, 201),
+      "DELETE /file-host": () => new Response(null, { status: 204 }),
+      "GET /file-grants": () =>
+        jsonResponse({ host: { registered: true, online: true }, grants: [{ id: "fg_1" }] }),
+      "POST /file-requests": () => jsonResponse({ id: "frq_1", status: "awaiting_upload" }, 201),
+      "GET /file-requests/frq_1": () => jsonResponse({ id: "frq_1", status: "done" }),
+      "PUT /file-requests/frq_1/upload": () => new Response(null, { status: 204 }),
+      "GET /file-requests/frq_1/result": () =>
+        new Response("bytes", { status: 200, headers: { "content-type": "text/plain" } }),
+    }
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        if (url.endsWith("/grants")) {
+          return jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+        }
+        const tail = url.split("/chat-sessions/ses%2F1")[1]!
+        const answer = answers[`${init?.method ?? "GET"} ${tail}`]
+        return answer ? answer() : jsonResponse({ error: "unexpected" }, 500)
+      },
+      now: () => 0,
+    })
+    await expect(client.registerFileHost(ORG, "ses/1", "Studio Mac")).resolves.toEqual({
+      hostToken: "fht_abc",
+      host: { registered: true, online: false },
+    })
+    expect(JSON.parse(calls[1].init?.body as string)).toEqual({ hostLabel: "Studio Mac" })
+    await client.unregisterFileHost(ORG, "ses/1")
+    await expect(client.listFileGrants(ORG, "ses/1")).resolves.toMatchObject({
+      grants: [{ id: "fg_1" }],
+    })
+    await client.createFileRequest(ORG, "ses/1", {
+      grantId: "fg_1",
+      op: "write",
+      path: "/workspace/a.txt",
+      upload: { byteLength: 5, sha256: "ab".repeat(32) },
+    })
+    await client.uploadFileRequestBytes(ORG, "ses/1", "frq_1", new Uint8Array([1, 2]))
+    const upload = calls.find((call) => call.url.endsWith("/upload"))!
+    expect((upload.init?.headers as Record<string, string>)["content-type"]).toBe(
+      "application/octet-stream"
+    )
+    expect(grantHeader(upload)).toBe("Bearer grant-1")
+    await expect(client.getFileRequest(ORG, "ses/1", "frq_1")).resolves.toEqual({
+      id: "frq_1",
+      status: "done",
+    })
+    const blob = await client.downloadFileRequestResult(ORG, "ses/1", "frq_1")
+    expect(await blob.text()).toBe("bytes")
+  })
+
+  it("keeps a policy refusal's reason", async () => {
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "g", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse({ error: "forbidden", reason: "no_file_host" }, 403),
+      now: () => 0,
+    })
+    await expect(
+      client.createFileRequest(ORG, "s", { grantId: "fg_1", op: "list", path: "/" })
+    ).rejects.toMatchObject({ status: 403, reason: "no_file_host" })
+    await expect(client.downloadFileRequestResult(ORG, "s", "frq_1")).rejects.toMatchObject({
+      status: 403,
+      reason: "no_file_host",
+    })
+  })
+
   it("reads and saves the org file-sharing policy", async () => {
     const policy = {
       allowPublicSnapshots: false,

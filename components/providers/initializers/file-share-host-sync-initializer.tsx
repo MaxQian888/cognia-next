@@ -5,7 +5,9 @@
  * (ADR-0222 §7.5): confirms the unlocked account, pushes the effective
  * file-sharing policy whenever the person's own or the org's may have
  * changed, and pushes the granted conversations' mount tables. The host pulls
- * a table itself when it needs one fresh; this keeps it current between pulls.
+ * a table itself when it needs one fresh; this keeps it current between pulls,
+ * and pushes a conversation's table the moment it is archived, restored or
+ * deleted (`lib/filespace/lifecycle.ts`).
  *
  * Which account the host serves is not this component's call: the Rust
  * account session binds it on unlock and unbinds it on lock
@@ -25,6 +27,7 @@ import {
   defaultLoadPolicy,
   type FileShareHostSync,
 } from "@/lib/filespace/host-sync"
+import { registerFileSpaceLifecycleSink } from "@/lib/filespace/lifecycle"
 import { defaultMountTableDeps } from "@/lib/filespace/mount-table"
 import { LOCAL_FILESPACE_HOST_ID } from "@/lib/filespace/resolve"
 import { createLogger } from "@cognia/logging"
@@ -46,6 +49,12 @@ export function FileShareHostSyncInitializer() {
       log: (level, message) => log[level](message),
     })
     const stop = sync.start()
+    // Archives, restores and deletes reach the host at once.
+    const removeSink = registerFileSpaceLifecycleSink((ids) =>
+      sync
+        .sessionsChanged(ids)
+        .catch((error) => log.warn(`lifecycle push failed: ${String(error)}`))
+    )
     const unsubSettings = useSettingsStore.subscribe((state, prev) => {
       if (state.settings?.fileSharing !== prev.settings?.fileSharing) {
         void sync.pushPolicy().catch((error) => log.warn(`policy push failed: ${String(error)}`))
@@ -59,6 +68,7 @@ export function FileShareHostSyncInitializer() {
     })
     return () => {
       stop()
+      removeSink()
       unsubSettings()
       unsubProjects()
     }

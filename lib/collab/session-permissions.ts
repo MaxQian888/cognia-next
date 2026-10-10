@@ -6,7 +6,13 @@ import type {
 } from "@cognia/agent-config-types"
 
 const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
-  viewer: new Set(["session.discover", "session.read", "session.readHistory", "attachment.read"]),
+  viewer: new Set([
+    "session.discover",
+    "session.read",
+    "session.readHistory",
+    "attachment.read",
+    "files.readLive",
+  ]),
   member: new Set([
     "session.discover",
     "session.read",
@@ -18,6 +24,8 @@ const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
     "run.approveOrdinary",
     "attachment.read",
     "attachment.write",
+    "files.readLive",
+    "files.writeLive",
   ]),
   maintainer: new Set([
     "session.discover",
@@ -38,6 +46,8 @@ const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
     "attachment.read",
     "attachment.write",
     "files.share",
+    "files.readLive",
+    "files.writeLive",
   ]),
   owner: new Set([
     "session.discover",
@@ -59,6 +69,8 @@ const ROLE_ACTIONS: Record<SessionRole, ReadonlySet<SessionAction>> = {
     "attachment.read",
     "attachment.write",
     "files.share",
+    "files.readLive",
+    "files.writeLive",
   ]),
 }
 
@@ -72,6 +84,7 @@ const GUEST_DENIED = new Set<SessionAction>([
   "session.auditMetadata",
   "session.breakGlassRead",
   "files.share",
+  "files.writeLive",
 ])
 
 export function authorizeSessionAction(

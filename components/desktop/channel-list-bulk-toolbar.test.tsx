@@ -9,6 +9,26 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+const revokeLinks = jest.fn()
+jest.mock("@/components/share/revoke-share-links-option", () => ({
+  // The option's own count and toasts are pinned in its suite; here it is a
+  // plain checkbox that records which conversations it was asked about.
+  RevokeShareLinksOption: (props: {
+    sessionIds: readonly string[]
+    checked: boolean
+    onCheckedChange: (checked: boolean) => void
+  }) => (
+    <input
+      type="checkbox"
+      aria-label="revoke share links"
+      data-session-ids={props.sessionIds.join(",")}
+      checked={props.checked}
+      onChange={(event) => props.onCheckedChange(event.target.checked)}
+    />
+  ),
+  useRevokeShareLinksAfterDelete: () => (ids: readonly string[]) => revokeLinks(ids),
+}))
+
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 
 function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> = {}) {
@@ -345,5 +365,47 @@ describe("bar layout", () => {
     setup()
     expect(screen.getByTestId("channel-list-bulk-toolbar")).toHaveAttribute("data-layout", "rail")
     expect(screen.getByRole("button", { name: "archive" })).toHaveTextContent("")
+  })
+})
+
+describe("revoking the selection's share links", () => {
+  beforeEach(() => revokeLinks.mockClear())
+
+  const confirmDelete = async (user: ReturnType<typeof userEvent.setup>) => {
+    const dialogButtons = screen.getAllByRole("button")
+    const destructive = dialogButtons.filter((b) => b.textContent?.trim() === "delete").at(-1)!
+    await user.click(destructive)
+  }
+
+  test("offers the option for the selected conversations and revokes with the delete", async () => {
+    const user = userEvent.setup()
+    const { onDelete } = setup({ selectedSessionIds: ["s1", "s2"] })
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    const option = await screen.findByRole("checkbox", { name: "revoke share links" })
+    expect(option).toHaveAttribute("data-session-ids", "s1,s2")
+    await user.click(option)
+    await confirmDelete(user)
+    expect(revokeLinks).toHaveBeenCalledWith(["s1", "s2"])
+    expect(onDelete).toHaveBeenCalled()
+  })
+
+  test("leaves the links alone unless asked, and forgets the choice on cancel", async () => {
+    const user = userEvent.setup()
+    const { onDelete } = setup({ selectedSessionIds: ["s1"] })
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    await user.click(await screen.findByRole("checkbox", { name: "revoke share links" }))
+    await user.click(screen.getByRole("button", { name: "cancel" }))
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    expect(await screen.findByRole("checkbox", { name: "revoke share links" })).not.toBeChecked()
+    await confirmDelete(user)
+    expect(onDelete).toHaveBeenCalled()
+    expect(revokeLinks).not.toHaveBeenCalled()
+  })
+
+  test("offers nothing without the selection's ids", async () => {
+    const user = userEvent.setup()
+    setup()
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    expect(screen.queryByRole("checkbox", { name: "revoke share links" })).toBeNull()
   })
 })

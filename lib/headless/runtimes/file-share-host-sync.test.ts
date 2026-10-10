@@ -4,11 +4,13 @@ import { bootstrapHeadlessRuntimes } from "../bootstrap"
 import { __resetHeadlessRuntimesForTesting } from "../registry"
 import type { HeadlessRuntimeContext } from "../types"
 import { createFileShareHostSync } from "@/lib/filespace/host-sync"
+import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 
 const stop = jest.fn()
 const start = jest.fn(() => stop)
+const sessionsChanged = jest.fn(async (_ids: readonly string[]) => {})
 jest.mock("@/lib/filespace/host-sync", () => ({
-  createFileShareHostSync: jest.fn(() => ({ start })),
+  createFileShareHostSync: jest.fn(() => ({ start, sessionsChanged })),
   defaultLoadPolicy: jest.fn(),
 }))
 jest.mock("@/lib/filespace/mount-table", () => ({
@@ -55,4 +57,16 @@ it("stops refreshing when the brain shuts down", async () => {
   const result = await bootstrapHeadlessRuntimes(context())
   await result.stop()
   expect(stop).toHaveBeenCalledTimes(1)
+})
+
+it("pushes the brain's archives, restores and deletes as they happen, until it stops", async () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const result = await bootstrapHeadlessRuntimes(context())
+  announceFileSpaceSessionsChanged(["s1"])
+  await flush()
+  expect(sessionsChanged).toHaveBeenCalledWith(["s1"])
+  await result.stop()
+  announceFileSpaceSessionsChanged(["s2"])
+  await flush()
+  expect(sessionsChanged).toHaveBeenCalledTimes(1)
 })

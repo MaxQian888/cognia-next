@@ -14,6 +14,13 @@
 //!   running on this origin.
 //! - Revoking a grant bumps its epoch: open files stop mid-transfer, and an
 //!   upload still being received is cut off.
+//! - macOS Finder writes AppleDouble sidecars (`._name`, holding a file's
+//!   extended attributes) and `.DS_Store` next to whatever it copies onto a
+//!   WebDAV volume. Those would land in the user's real folders (and in a
+//!   repository's `git status`), so a write the grant allows is accepted and
+//!   dropped, and the names are never listed or found (deleting or moving
+//!   one answers not found and leaves disk alone). Refusing the write
+//!   instead makes Finder abort the whole copy.
 
 use std::collections::HashMap;
 use std::io::SeekFrom;
@@ -219,7 +226,7 @@ async fn handle(
         .unwrap_or_default();
     let handler = state.handler(&caller.grant_id, writable);
     let guard = state.service.register_connection(&caller.grant_id);
-    let principal = caller.username.clone();
+    let principal = caller.username().unwrap_or_default().to_string();
     let (parts, body) = request.into_parts();
     let request = http::Request::from_parts(parts, body);
     let served = tokio::select! {
@@ -311,6 +318,17 @@ fn dav_path(path: &DavPath) -> FsResult<String> {
     String::from_utf8(path.as_bytes().to_vec()).map_err(|_| FsError::NotFound)
 }
 
+/// Whether `name` is a file macOS writes for its own bookkeeping: an
+/// AppleDouble sidecar (`._name`) or a folder's `.DS_Store`.
+fn is_macos_metadata(name: &str) -> bool {
+    (name.len() > 2 && name.starts_with("._")) || name.eq_ignore_ascii_case(".DS_Store")
+}
+
+/// [`is_macos_metadata`] for the last segment of a virtual path.
+fn is_macos_metadata_path(path: &str) -> bool {
+    is_macos_metadata(path.trim_end_matches('/').rsplit('/').next().unwrap_or_default())
+}
+
 impl GatewayFs {
     fn authorize(&self, caller: &Caller, op: Op, path: &str) -> FsResult<(Target, Arc<crate::store::Store>)> {
         let (store, policy) = self.service.context().ok_or(FsError::Forbidden)?;
@@ -353,6 +371,13 @@ impl GuardedFileSystem<Creds> for GatewayFs {
             let writing = options.write || options.append || options.create || options.create_new || options.truncate;
             let op = if writing { Op::Write } else { Op::Read };
             let (target, store) = self.authorize(credentials, op, &vpath)?;
+            if is_macos_metadata_path(&vpath) {
+                return match (&target, writing) {
+                    (Target::Disk { .. }, true) => Ok(Box::new(SinkFile::default()) as Box<dyn DavFile>),
+                    (_, true) => Err(FsError::Forbidden),
+                    (_, false) => Err(FsError::NotFound),
+                };
+            }
             let epoch = self.service.live().epoch(&credentials.grant_id);
             match &target {
                 Target::Disk { abs, .. } => {
@@ -440,6 +465,7 @@ impl GuardedFileSystem<Creds> for GatewayFs {
                         .map_err(|error| io_error(&error))?;
                     listed
                         .into_iter()
+                        .filter(|entry| !is_macos_metadata(&entry.name))
                         .map(|entry| {
                             Box::new(Entry {
                                 meta: Meta {
@@ -468,6 +494,9 @@ impl GuardedFileSystem<Creds> for GatewayFs {
         async move {
             let vpath = dav_path(path)?;
             let (target, _) = self.authorize(credentials, Op::Stat, &vpath)?;
+            if is_macos_metadata_path(&vpath) {
+                return Err(FsError::NotFound);
+            }
             let meta = self.meta_for(credentials, &target).await?;
             Ok(Box::new(meta) as Box<dyn DavMetaData>)
         }
@@ -505,6 +534,9 @@ impl GuardedFileSystem<Creds> for GatewayFs {
             let Target::Disk { abs, .. } = target else {
                 return Err(FsError::Forbidden);
             };
+            if is_macos_metadata_path(&vpath) {
+                return Ok(());
+            }
             let meta = tokio::fs::symlink_metadata(&abs).await.map_err(|error| io_error(&error))?;
             if meta.is_dir() {
                 return Err(FsError::Forbidden);
@@ -516,8 +548,15 @@ impl GuardedFileSystem<Creds> for GatewayFs {
 
     fn rename<'a>(&'a self, from: &'a DavPath, to: &'a DavPath, credentials: &'a Creds) -> FsFuture<'a, ()> {
         async move {
-            let (from_target, _) = self.authorize(credentials, Op::Rename, &dav_path(from)?)?;
-            let (to_target, _) = self.authorize(credentials, Op::Write, &dav_path(to)?)?;
+            let (from_path, to_path) = (dav_path(from)?, dav_path(to)?);
+            let (from_target, _) = self.authorize(credentials, Op::Rename, &from_path)?;
+            let (to_target, _) = self.authorize(credentials, Op::Write, &to_path)?;
+            // Finder moves a file's sidecar along with it; there is none.
+            match (is_macos_metadata_path(&from_path), is_macos_metadata_path(&to_path)) {
+                (true, _) => return Ok(()),
+                (false, true) => return Err(FsError::Forbidden),
+                (false, false) => {}
+            }
             match (from_target, to_target) {
                 (
                     Target::Disk { abs: source, mount_id: from_mount, .. },
@@ -532,8 +571,14 @@ impl GuardedFileSystem<Creds> for GatewayFs {
 
     fn copy<'a>(&'a self, from: &'a DavPath, to: &'a DavPath, credentials: &'a Creds) -> FsFuture<'a, ()> {
         async move {
-            let (from_target, store) = self.authorize(credentials, Op::Read, &dav_path(from)?)?;
-            let (to_target, _) = self.authorize(credentials, Op::Write, &dav_path(to)?)?;
+            let (from_path, to_path) = (dav_path(from)?, dav_path(to)?);
+            let (from_target, store) = self.authorize(credentials, Op::Read, &from_path)?;
+            let (to_target, _) = self.authorize(credentials, Op::Write, &to_path)?;
+            match (is_macos_metadata_path(&from_path), is_macos_metadata_path(&to_path)) {
+                (true, _) => return Ok(()),
+                (false, true) => return Err(FsError::Forbidden),
+                (false, false) => {}
+            }
             match (&from_target, &to_target) {
                 (Target::Disk { abs: source, .. }, Target::Disk { abs: dest, .. }) => {
                     let copied = tokio::fs::copy(source, dest).await.map_err(|error| io_error(&error))?;
@@ -706,6 +751,51 @@ impl DavFile for DiskFile {
     }
 }
 
+/// Where a macOS metadata write goes: accepted, counted for the response,
+/// and dropped.
+#[derive(Debug, Default)]
+struct SinkFile {
+    len: u64,
+    pos: u64,
+}
+
+impl DavFile for SinkFile {
+    fn metadata(&mut self) -> FsFuture<'_, Box<dyn DavMetaData>> {
+        let meta = Meta { len: self.len, modified: SystemTime::now(), is_dir: false };
+        async move { Ok(Box::new(meta) as Box<dyn DavMetaData>) }.boxed()
+    }
+
+    fn write_buf(&mut self, buf: Box<dyn Buf + Send>) -> FsFuture<'_, ()> {
+        self.pos += buf.remaining() as u64;
+        self.len = self.len.max(self.pos);
+        async move { Ok(()) }.boxed()
+    }
+
+    fn write_bytes(&mut self, buf: Bytes) -> FsFuture<'_, ()> {
+        self.pos += buf.len() as u64;
+        self.len = self.len.max(self.pos);
+        async move { Ok(()) }.boxed()
+    }
+
+    fn read_bytes(&mut self, _count: usize) -> FsFuture<'_, Bytes> {
+        async move { Ok(Bytes::new()) }.boxed()
+    }
+
+    fn seek(&mut self, pos: SeekFrom) -> FsFuture<'_, u64> {
+        self.pos = match pos {
+            SeekFrom::Start(at) => at,
+            SeekFrom::End(delta) => self.len.saturating_add_signed(delta),
+            SeekFrom::Current(delta) => self.pos.saturating_add_signed(delta),
+        };
+        let pos = self.pos;
+        async move { Ok(pos) }.boxed()
+    }
+
+    fn flush(&mut self) -> FsFuture<'_, ()> {
+        async move { Ok(()) }.boxed()
+    }
+}
+
 struct AssetFile {
     service: Arc<FileShareService>,
     grant_id: String,
@@ -794,7 +884,7 @@ impl DavFile for AssetFile {
 mod tests {
     use super::*;
     use crate::assets::tests::MemoryAssets;
-    use crate::model::{CreateGrantRequest, ProviderKind};
+    use crate::model::{CreateGrantRequest, CreatedBy, ProviderKind};
     use crate::service::tests::service_with;
 
     struct Served {
@@ -822,6 +912,8 @@ mod tests {
                     expires_in_seconds: 3600,
                     label: None,
                     ssh_public_key: None,
+                    created_by: CreatedBy::User,
+                    audience: crate::model::AudienceRequest::Credentials,
                 },
                 "owner",
             )
@@ -934,6 +1026,59 @@ mod tests {
             .unwrap()
             .items;
         assert!(audit.iter().any(|row| row.action == "fs.write" && row.bytes == Some(body.len() as i64)));
+    }
+
+    #[tokio::test]
+    async fn finder_metadata_is_accepted_and_dropped() {
+        let (s, user, pass, _) = served(vec![Permission::Read, Permission::Download, Permission::Write], &["/workspace/src"]).await;
+        let c = client();
+        let src = std::path::Path::new(&s.root).join("src");
+        // A real sidecar already on disk is neither listed nor served.
+        std::fs::write(src.join("._a.txt"), "xattrs").unwrap();
+        for name in ["._new.txt", ".DS_Store", ".ds_store"] {
+            let put = c.put(format!("{}/workspace/src/{name}", s.base)).basic_auth(&user, Some(&pass)).body("x").send().await.unwrap();
+            assert!(put.status().is_success(), "{name}: {}", put.status());
+            assert!(!src.join(name).exists(), "{name} never reaches disk");
+            let get = c.get(format!("{}/workspace/src/{name}", s.base)).basic_auth(&user, Some(&pass)).send().await.unwrap();
+            assert_eq!(get.status(), 404, "{name}");
+        }
+        let listing = propfind(&c, &format!("{}/workspace/src/", s.base), &user, &pass).send().await.unwrap().text().await.unwrap();
+        assert!(listing.contains("a.txt") && !listing.contains("._a.txt") && !listing.contains("DS_Store"), "{listing}");
+        assert_eq!(c.get(format!("{}/workspace/src/._a.txt", s.base)).basic_auth(&user, Some(&pass)).send().await.unwrap().status(), 404);
+
+        // Deleting a sidecar finds nothing and leaves disk alone.
+        let delete = c.delete(format!("{}/workspace/src/._a.txt", s.base)).basic_auth(&user, Some(&pass)).send().await.unwrap();
+        assert_eq!(delete.status(), 404);
+        assert!(src.join("._a.txt").exists());
+        // Nothing may become a sidecar name, which would hide it.
+        let hide = c
+            .request(Method::from_bytes(b"MOVE").unwrap(), format!("{}/workspace/src/a.txt", s.base))
+            .basic_auth(&user, Some(&pass))
+            .header("Destination", format!("{}/workspace/src/._hidden", s.base))
+            .send()
+            .await
+            .unwrap();
+        assert!(hide.status().is_client_error(), "{}", hide.status());
+        assert!(src.join("a.txt").exists());
+
+        // The grant still decides: outside it, or on a read-only grant, the write is refused.
+        let outside = c.put(format!("{}/workspace/._x", s.base)).basic_auth(&user, Some(&pass)).body("x").send().await.unwrap();
+        assert!(outside.status().is_client_error());
+        let (ro, ro_user, ro_pass, _) = served(vec![Permission::Read, Permission::Download], &["/workspace/src"]).await;
+        let refused = c.put(format!("{}/workspace/src/._a.txt", ro.base)).basic_auth(&ro_user, Some(&ro_pass)).body("x").send().await.unwrap();
+        assert!(refused.status().is_client_error());
+    }
+
+    #[test]
+    fn macos_metadata_names() {
+        for name in ["._a.txt", "._", ".DS_Store", ".ds_store"] {
+            assert_eq!(is_macos_metadata(name), name != "._", "{name}");
+        }
+        for name in ["a._b", "_.a", ".DS_Store.bak", "DS_Store", ".env"] {
+            assert!(!is_macos_metadata(name), "{name}");
+        }
+        assert!(is_macos_metadata_path("/workspace/src/._a.txt"));
+        assert!(!is_macos_metadata_path("/workspace/._dir/a.txt"));
     }
 
     #[tokio::test]

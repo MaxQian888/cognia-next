@@ -1,4 +1,4 @@
-# ADR-0222 P2 — live file grants for a conversation's FileSpace.
+# ADR-0222 P2/P3 — live file grants for a conversation's FileSpace.
 #
 # Owns `file-share.sqlite` (mount tables pushed by the WebView or headless
 # brain, grants, credentials, auth backoff, audit), the file gateway every live
@@ -7,7 +7,9 @@
 # provider. Platform layer: it depends on `cognia-files` for confinement and
 # the sensitive-file floor, and on `cognia-companion-connectivity` for the
 # companion TLS certificate (LAN WebDAV) and the cloudflared launcher (tunnel
-# exposure). The renderer bridge that reads Dexie-backed mounts is injected by
+# exposure). P3 adds a collaboration audience: this host registers as a shared
+# conversation's file host and answers members' requests the server relays
+# (`collab`). The renderer bridge that reads Dexie-backed mounts is injected by
 # the host (`AssetReader`), so this crate never reaches up into the companion
 # layer.
 [package]
@@ -53,6 +55,9 @@ hex.workspace = true
 base64.workspace = true
 rand.workspace = true
 data-encoding = "2"
+# The media type a member's download is answered with (P3); already in the
+# workspace through cognia-local-browser.
+mime_guess = "2"
 unicode-normalization = "0.1"
 bytes.workspace = true
 futures-util = { workspace = true, features = ["std"] }

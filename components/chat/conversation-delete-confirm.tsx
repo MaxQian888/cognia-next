@@ -17,10 +17,21 @@
  * while the dialog is open: a desktop list hosts one confirm per row, and an
  * always-live count would be one index subscription per row re-run on every
  * session write.
+ *
+ * A share link made from the conversation is an independent copy and keeps
+ * working after the delete; when there is one, the confirm offers to revoke
+ * it in the same step (ADR-0222 §10). The revocation starts with the confirm
+ * itself, whatever the delete's outcome: it is what the reader asked for, and
+ * the safe direction if the delete is then refused.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 
+import {
+  RevokeShareLinksOption,
+  useRevokeShareLinksAfterDelete,
+} from "@/components/share/revoke-share-links-option"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +60,14 @@ export function ConversationDeleteConfirm({
   onConfirm,
 }: ConversationDeleteConfirmProps) {
   const t = useTranslations("desktop.sessionRow")
+  const revokeLinks = useRevokeShareLinksAfterDelete()
+  // Keyed by the conversation, so a choice made for one never carries to the
+  // next confirm (a row list hosts one confirm, re-pointed per row).
+  const [revokeChoice, setRevokeChoice] = useState<{ sessionId: string; checked: boolean } | null>(
+    null
+  )
+  const revokeChecked =
+    session !== null && revokeChoice?.sessionId === session.id && revokeChoice.checked
   const title = session
     ? sessionDisplayTitle(session.title, {
         untitled: t("untitled"),
@@ -60,7 +79,10 @@ export function ConversationDeleteConfirm({
     <AlertDialog
       open={session !== null}
       onOpenChange={(next) => {
-        if (!next) onCancel()
+        if (!next) {
+          setRevokeChoice(null)
+          onCancel()
+        }
       }}
     >
       <AlertDialogContent
@@ -76,6 +98,13 @@ export function ConversationDeleteConfirm({
             {session ? <BranchNote sessionId={session.id} /> : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {session ? (
+          <RevokeShareLinksOption
+            sessionIds={[session.id]}
+            checked={revokeChecked}
+            onCheckedChange={(checked) => setRevokeChoice({ sessionId: session.id, checked })}
+          />
+        ) : null}
         <AlertDialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <AlertDialogCancel className="h-11 w-full sm:h-9 sm:w-auto">
             {t("cancel")}
@@ -85,7 +114,10 @@ export function ConversationDeleteConfirm({
             className="h-11 w-full sm:h-9 sm:w-auto"
             data-testid="conversation-delete-confirm-action"
             onClick={() => {
-              if (session) onConfirm(session)
+              if (!session) return
+              if (revokeChecked) revokeLinks([session.id])
+              setRevokeChoice(null)
+              onConfirm(session)
             }}
           >
             {t("deleteConfirmAction")}

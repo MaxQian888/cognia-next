@@ -30,7 +30,7 @@ const SOCKET_TICKET_TTL_MS: i64 = 30_000;
 const LEASE_TOKEN_TTL_MS: i64 = 5 * 60_000;
 const LEASE_HEARTBEAT_TTL_MS: i64 = 90_000;
 const ATTACHMENT_TICKET_TTL_MS: i64 = 60_000;
-const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
+pub(crate) const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
 const SHARED_CHAT_PROTOCOL_VERSION: u32 = 2;
 const MAX_PENDING_TICKETS: usize = 8_192;
 
@@ -261,7 +261,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Debug)]
-enum ChatFailure {
+pub(crate) enum ChatFailure {
     Unauthorized,
     ProtocolUpgrade,
     Forbidden,
@@ -345,7 +345,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-fn require_shared_chat_protocol(headers: &HeaderMap) -> Result<(), ChatFailure> {
+pub(crate) fn require_shared_chat_protocol(headers: &HeaderMap) -> Result<(), ChatFailure> {
     let protocol_version = headers
         .get("x-cognia-collab-protocol")
         .and_then(|value| value.to_str().ok())
@@ -357,7 +357,7 @@ fn require_shared_chat_protocol(headers: &HeaderMap) -> Result<(), ChatFailure> 
     Ok(())
 }
 
-async fn claims(
+pub(crate) async fn claims(
     state: &AppState,
     headers: &HeaderMap,
     org_id: &str,
@@ -368,7 +368,7 @@ async fn claims(
         .map_err(|_| ChatFailure::Unauthorized)
 }
 
-async fn visible(
+pub(crate) async fn visible(
     state: &AppState,
     headers: &HeaderMap,
     org_id: &str,
@@ -711,6 +711,25 @@ async fn delete_session(
                 return;
             }
         }
+        // The live-file requests' bytes (ADR-0222 §6) go with the conversation.
+        let request_objects = match state
+            .session_files_store
+            .session_object_keys(&org_id, &session_id)
+            .await
+        {
+            Ok(keys) => keys,
+            Err(error) => {
+                tracing::error!(%org_id, %session_id, %error, "shared chat deletion could not list file request objects");
+                return;
+            }
+        };
+        for key in request_objects {
+            if let Err(error) = state.chat_attachments.delete(&key).await {
+                tracing::error!(%org_id, %session_id, %key, %error, "shared chat file request object deletion failed");
+                return;
+            }
+        }
+        state.session_files_hub.forget(&session_id);
         if let Err(error) = state
             .chat_store
             .delete_session_data(&org_id, &session_id)
@@ -1793,7 +1812,7 @@ struct LeaseResponse {
     lease: crate::chat_store::ChatRunLease,
     token: String,
 }
-fn token_hash(value: &str) -> String {
+pub(crate) fn token_hash(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 

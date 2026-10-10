@@ -74,6 +74,11 @@ pub struct AppState {
     pub notification_store: Arc<dyn crate::notifications::NotificationStore>,
     /// Each org's file-sharing policy (ADR-0222).
     pub file_sharing_store: Arc<dyn crate::file_sharing::FileSharingPolicyStore>,
+    /// Shared conversations' file hosts, mirrored grants and member requests
+    /// (ADR-0222 §6).
+    pub session_files_store: Arc<dyn crate::session_files::SessionFileStore>,
+    /// Wakes a host's waiting claim when a request becomes claimable.
+    pub session_files_hub: Arc<crate::session_files::SessionFilesHub>,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -135,6 +140,8 @@ impl AppState {
             feed_enabled: true,
             notification_store: Arc::new(crate::notifications::InMemoryNotificationStore::new()),
             file_sharing_store: Arc::new(crate::file_sharing::InMemoryFileSharingPolicyStore::new()),
+            session_files_store: Arc::new(crate::session_files::InMemorySessionFileStore::new()),
+            session_files_hub: Arc::new(crate::session_files::SessionFilesHub::default()),
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -192,6 +199,14 @@ impl AppState {
         store: Arc<dyn crate::file_sharing::FileSharingPolicyStore>,
     ) -> Self {
         self.file_sharing_store = store;
+        self
+    }
+
+    pub fn with_session_files_store(
+        mut self,
+        store: Arc<dyn crate::session_files::SessionFileStore>,
+    ) -> Self {
+        self.session_files_store = store;
         self
     }
 
@@ -277,7 +292,10 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::notifications::routes())
         .merge(crate::file_sharing::routes());
     let routes = if state.shared_chat_enabled {
-        routes.merge(crate::chat_api::routes())
+        // A shared conversation's live files ride on shared chat (ADR-0222 §6).
+        routes
+            .merge(crate::chat_api::routes())
+            .merge(crate::session_files::routes())
     } else {
         routes
     };

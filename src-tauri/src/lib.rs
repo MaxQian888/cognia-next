@@ -935,6 +935,8 @@ pub fn run() {
             cognia_file_share::commands::file_audit_list,
             cognia_file_share::commands::file_share_listener_set,
             cognia_file_share::commands::file_share_sftpgo_set,
+            cognia_file_share::commands::file_collab_host_set,
+            cognia_file_share::commands::file_collab_host_status,
             files::scan_claude_skills,
             files::read_claude_user_config,
             files::default_export_dir,

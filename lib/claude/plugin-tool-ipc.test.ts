@@ -12,6 +12,7 @@ import {
   __setProjectHistoryToolDepsForTesting,
   __setSpawnTaskToolDepsForTesting,
   __setProjectCoordinatorToolDepsForTesting,
+  __setFilespaceToolDepsForTesting,
   __setSessionPeerToolDepsForTesting,
   __setTemplateToolDepsForTesting,
   handlePluginToolExec,
@@ -142,6 +143,7 @@ describe("handlePluginToolExec", () => {
     __setSessionPeerToolDepsForTesting(null)
     __setTemplateToolDepsForTesting(null)
     __setProjectCoordinatorToolDepsForTesting(null)
+    __setFilespaceToolDepsForTesting(null)
   })
 
   it("binds the project API to the trusted invocation session and disposes on success or error", async () => {
@@ -193,6 +195,32 @@ describe("handlePluginToolExec", () => {
     expect(execute).not.toHaveBeenCalled()
     expect(response.error).toBeUndefined()
     expect(response.result).toEqual({ ok: true, threads: [] })
+  })
+
+  it("routes the filespace tools to the host runner, bound to the calling session", async () => {
+    const execute = jest.fn().mockResolvedValue({ from: "plugin" })
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "some-plugin", execute }),
+    })
+    const listShareLinks = jest.fn(async () => [])
+    __setFilespaceToolDepsForTesting(
+      () =>
+        ({
+          revokeShareLink: jest.fn(),
+          listShareLinks,
+          describeError: () => ({ code: "unknown", message: "x" }),
+        }) as never
+    )
+    const response = await handlePluginToolExec(
+      makeRequest({
+        name: "filespace_revoke_share",
+        sessionId: "trusted-session",
+        args: { code: "ELSEWHERE" },
+      })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    expect(listShareLinks).toHaveBeenCalledWith("trusted-session")
+    expect(response.result).toMatchObject({ ok: false, code: "not_found" })
   })
 
   it("routes the template and squad tools to the host runner before the plugin registry", async () => {

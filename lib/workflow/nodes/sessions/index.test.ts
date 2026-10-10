@@ -12,6 +12,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession } from "@/lib/db/sessions"
+import { registerFileSpaceLifecycleSink } from "@/lib/filespace/lifecycle"
 import "."
 import { getExecutor } from "../registry"
 import type { StepExecutionContext } from "@/types/workflow/visual"
@@ -260,6 +261,21 @@ describe("action.session.archive", () => {
     expect((await getSession("sess1"))?.archivedAt).toBeDefined()
     await run("action.session.archive", { sessionId: "sess1", archived: false })
     expect((await getSession("sess1"))?.archivedAt).toBeUndefined()
+  })
+
+  it("tells the file-share host at once, as every archive writer does", async () => {
+    const changed: string[][] = []
+    const remove = registerFileSpaceLifecycleSink(async (ids) => {
+      changed.push([...ids])
+    })
+    try {
+      await seedSession({ id: "sess2" })
+      await run("action.session.archive", { sessionId: "sess2" })
+      await run("action.session.archive", { sessionId: "sess2", archived: false })
+    } finally {
+      remove()
+    }
+    expect(changed).toEqual([["sess2"], ["sess2"]])
   })
 })
 

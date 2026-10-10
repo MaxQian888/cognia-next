@@ -34,6 +34,11 @@ jest.mock("@/stores/chat/im-notify-store", () => ({
   useImNotifyStore: { getState: () => ({ disarmSession: disarmSessionMock }) },
 }))
 
+const announceMock = jest.fn()
+jest.mock("@/lib/filespace/lifecycle", () => ({
+  announceFileSpaceSessionsChanged: (ids: readonly string[]) => announceMock(ids),
+}))
+
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { deleteSessionsWithTeardown } from "./session-deletion"
 
@@ -41,6 +46,7 @@ beforeEach(() => {
   closeSessionMock.mockReset().mockResolvedValue(undefined)
   bulkDeleteSessionsMock.mockReset().mockResolvedValue(undefined)
   emitMock.mockReset()
+  announceMock.mockReset()
   isTauriMock.mockReset().mockReturnValue(true)
   disarmSessionMock.mockReset()
   chatState.activeSessionId = null
@@ -67,6 +73,8 @@ describe("deleteSessionsWithTeardown", () => {
     expect(emitMock).toHaveBeenCalledWith("system:session:deleted", { sessionId: "s1" })
     expect(emitMock).toHaveBeenCalledWith("system:session:deleted", { sessionId: "s2" })
     expect(chatState.setActiveSession).toHaveBeenCalledWith(null)
+    // Their live file shares are revoked now, not on the next refresh.
+    expect(announceMock).toHaveBeenCalledWith(["s1", "s2"])
   })
 
   it("tolerates a sidecar that is not tracking the session", async () => {
@@ -104,6 +112,7 @@ describe("deleteSessionsWithTeardown", () => {
     expect(emitMock).not.toHaveBeenCalled()
     expect(disarmSessionMock).not.toHaveBeenCalled()
     expect(chatState.setActiveSession).not.toHaveBeenCalled()
+    expect(announceMock).not.toHaveBeenCalled()
   })
 
   it("does nothing for an empty selection", async () => {

@@ -22,6 +22,7 @@ import {
   fileShareErrorCode,
   fileShareErrorDetails,
   fileShareTransport,
+  getCollabHostStatus,
   getFileShareStatus,
   listFileShareAuditPage,
   listLiveGrants,
@@ -29,6 +30,7 @@ import {
   revokeLiveGrant,
   resumeLiveGrant,
   rotateLiveCredential,
+  setCollabHost,
   setFileShareListener,
   setSftpgoProvider,
   suspendLiveGrant,
@@ -99,6 +101,19 @@ describe("command shapes", () => {
       target
     )
     await setSftpgoProvider(null, target)
+    await setCollabHost(
+      "s1",
+      {
+        orgId: "org_1",
+        collabSessionId: "ses_1",
+        serverUrl: "https://collab.example",
+        hostLabel: "Mac",
+        hostToken: "fht_x",
+      },
+      target
+    )
+    await setCollabHost("s1", null, target)
+    await getCollabHostStatus("s1", target)
     expect(t.call.mock.calls.map(([name, args]) => [name, Object.keys(args)])).toEqual([
       ["file_share_activate", ["accountId"]],
       ["file_space_sync", ["sessions"]],
@@ -112,7 +127,11 @@ describe("command shapes", () => {
       ["file_audit_list", ["grantId", "pageSize"]],
       ["file_share_listener_set", ["config"]],
       ["file_share_sftpgo_set", ["config"]],
+      ["file_collab_host_set", ["sessionId", "host"]],
+      ["file_collab_host_set", ["sessionId", "host"]],
+      ["file_collab_host_status", ["sessionId"]],
     ])
+    expect(t.call).toHaveBeenCalledWith("file_collab_host_set", { sessionId: "s1", host: null })
   })
 
   it("collects every page of grants", async () => {
@@ -176,7 +195,11 @@ describe("fileShareErrorCode", () => {
         codes.add(match[1]!)
       }
     }
-    expect([...codes].sort()).toEqual([...FILE_SHARE_ERROR_CODES].sort())
+    // `createLiveFileShare` refuses with these before the host is asked.
+    const clientOnly = new Set(["shared_session_forbidden", "shared_session_unavailable"])
+    expect([...codes].sort()).toEqual(
+      FILE_SHARE_ERROR_CODES.filter((code) => !clientOnly.has(code)).sort()
+    )
     expect(new Set(FILE_SHARE_ERROR_CODES).size).toBe(FILE_SHARE_ERROR_CODES.length)
   })
 })

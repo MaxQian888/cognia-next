@@ -38,6 +38,26 @@ jest.mock("@/hooks/data", () => {
   }
 })
 
+const revokeLinks = jest.fn()
+jest.mock("@/components/share/revoke-share-links-option", () => ({
+  // The option's own count and toasts are pinned in its suite; here it is a
+  // plain checkbox that records which conversations it was asked about.
+  RevokeShareLinksOption: (props: {
+    sessionIds: readonly string[]
+    checked: boolean
+    onCheckedChange: (checked: boolean) => void
+  }) => (
+    <input
+      type="checkbox"
+      aria-label="revoke share links"
+      data-session-ids={props.sessionIds.join(",")}
+      checked={props.checked}
+      onChange={(event) => props.onCheckedChange(event.target.checked)}
+    />
+  ),
+  useRevokeShareLinksAfterDelete: () => (ids: readonly string[]) => revokeLinks(ids),
+}))
+
 import { ConversationDeleteConfirm } from "./conversation-delete-confirm"
 
 const session: ChatSession = {
@@ -51,6 +71,7 @@ const session: ChatSession = {
 beforeEach(() => {
   branchesRef.current = 0
   listSessionBranches.mockClear()
+  revokeLinks.mockClear()
 })
 
 describe("<ConversationDeleteConfirm />", () => {
@@ -124,5 +145,46 @@ describe("<ConversationDeleteConfirm />", () => {
     expect(await screen.findByTestId("conversation-delete-confirm")).toHaveTextContent(
       'deleteConfirmTitle:{"title":"placeholderTitle"}'
     )
+  })
+
+  it("offers to revoke the conversation's share links, and revokes them only when asked", async () => {
+    const user = userEvent.setup()
+    const onConfirm = jest.fn()
+    const { rerender } = render(
+      <ConversationDeleteConfirm session={session} onCancel={jest.fn()} onConfirm={onConfirm} />
+    )
+    const option = await screen.findByRole("checkbox", { name: "revoke share links" })
+    expect(option).toHaveAttribute("data-session-ids", "s1")
+    await user.click(option)
+    await user.click(screen.getByTestId("conversation-delete-confirm-action"))
+    expect(revokeLinks).toHaveBeenCalledWith(["s1"])
+    expect(onConfirm).toHaveBeenCalledWith(session)
+
+    // The next conversation's confirm starts unchecked.
+    revokeLinks.mockClear()
+    const other = { ...session, id: "s2", title: "Retro" }
+    rerender(
+      <ConversationDeleteConfirm session={other} onCancel={jest.fn()} onConfirm={onConfirm} />
+    )
+    expect(await screen.findByRole("checkbox", { name: "revoke share links" })).not.toBeChecked()
+    await user.click(screen.getByTestId("conversation-delete-confirm-action"))
+    expect(revokeLinks).not.toHaveBeenCalled()
+  })
+
+  it("forgets the choice when the reader backs out", async () => {
+    const user = userEvent.setup()
+    const onCancel = jest.fn()
+    const { rerender } = render(
+      <ConversationDeleteConfirm session={session} onCancel={onCancel} onConfirm={jest.fn()} />
+    )
+    await user.click(await screen.findByRole("checkbox", { name: "revoke share links" }))
+    await user.click(screen.getByRole("button", { name: "cancel" }))
+    expect(onCancel).toHaveBeenCalled()
+    rerender(<ConversationDeleteConfirm session={null} onCancel={onCancel} onConfirm={jest.fn()} />)
+    rerender(
+      <ConversationDeleteConfirm session={session} onCancel={onCancel} onConfirm={jest.fn()} />
+    )
+    expect(await screen.findByRole("checkbox", { name: "revoke share links" })).not.toBeChecked()
+    expect(revokeLinks).not.toHaveBeenCalled()
   })
 })

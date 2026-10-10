@@ -151,6 +151,11 @@ pub mod status_reason {
     pub const EXPIRED: &str = "expired";
     /// The owner revoked it.
     pub const REVOKED: &str = "revoked";
+    /// A collaboration audience's host registration ended: replaced,
+    /// removed, or refused by the server (the registrant lost `files.share`).
+    pub const COLLAB_HOST_REMOVED: &str = "collab_host_removed";
+    /// The collaboration server's org policy refused to publish it.
+    pub const ORG_POLICY: &str = "org_policy";
 }
 
 /// The conversation's state as the mount table last reported it.
@@ -259,22 +264,123 @@ pub struct GrantPath {
     pub virtual_path: String,
 }
 
-/// Who created a grant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Who created a grant. `Agent` is an agent's `filespace_share` /
+/// `filespace_enable_webdav` call the person approved (ADR-0222 §9): the
+/// policy's `allow_agent_sharing` gates it at creation and while it lives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CreatedBy {
+    #[default]
     User,
+    Agent,
 }
 
 impl CreatedBy {
     pub fn as_str(self) -> &'static str {
         match self {
             CreatedBy::User => "user",
+            CreatedBy::Agent => "agent",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(CreatedBy::User),
+            "agent" => Some(CreatedBy::Agent),
+            _ => None,
         }
     }
 }
 
-/// A live grant for credential holders (P2's only audience).
+/// A member's role in a shared conversation, as the collaboration server
+/// names it (`SessionRole` there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CollabRole {
+    Viewer,
+    Member,
+    Maintainer,
+    Owner,
+}
+
+impl CollabRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CollabRole::Viewer => "viewer",
+            CollabRole::Member => "member",
+            CollabRole::Maintainer => "maintainer",
+            CollabRole::Owner => "owner",
+        }
+    }
+
+    pub fn rank(self) -> u8 {
+        match self {
+            CollabRole::Viewer => 0,
+            CollabRole::Member => 1,
+            CollabRole::Maintainer => 2,
+            CollabRole::Owner => 3,
+        }
+    }
+
+    /// A viewer reads; changing files takes at least a member, as the
+    /// server's `files.writeLive` says.
+    pub fn may_write(self) -> bool {
+        self.rank() >= CollabRole::Member.rank()
+    }
+}
+
+/// Most members one collaboration grant may name.
+pub const MAX_AUDIENCE_USERS: usize = 200;
+
+/// Who a grant is for.
+///
+/// - `credentials`: whoever holds one of its WebDAV/SFTP credentials (P2).
+/// - `collab`: members of the shared conversation the host is registered
+///   for on the collaboration server (P3). They reach the files through
+///   requests the server relays and this host answers; no credential exists.
+///   `org_id` and `collab_session_id` are the registration the grant was made
+///   under: a later registration does not inherit it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "lowercase", rename_all_fields = "camelCase")]
+pub enum Audience {
+    Credentials,
+    Collab {
+        org_id: String,
+        collab_session_id: String,
+        /// `None`: every member whose role is at least `min_role`.
+        user_ids: Option<Vec<String>>,
+        min_role: CollabRole,
+    },
+}
+
+impl Audience {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Audience::Credentials => "credentials",
+            Audience::Collab { .. } => "collab",
+        }
+    }
+
+    pub fn is_collab(&self) -> bool {
+        matches!(self, Audience::Collab { .. })
+    }
+}
+
+/// The audience a create request asks for. A collaboration audience takes its
+/// org and conversation from the host's current registration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "lowercase", rename_all_fields = "camelCase")]
+pub enum AudienceRequest {
+    #[default]
+    Credentials,
+    Collab {
+        #[serde(default)]
+        user_ids: Option<Vec<String>>,
+        min_role: CollabRole,
+    },
+}
+
+/// A live grant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
@@ -283,6 +389,8 @@ pub struct Grant {
     pub label: Option<String>,
     pub created_by: CreatedBy,
     pub creator_principal: String,
+    pub audience: Audience,
+    /// The protocols its credentials speak; empty for a collaboration grant.
     pub protocols: Vec<Protocol>,
     pub provider: ProviderKind,
     pub permissions: Vec<Permission>,
@@ -351,6 +459,9 @@ pub struct CreateGrantRequest {
     /// FileSpace paths (`/workspace/src`, `/uploads/report.pdf`).
     pub paths: Vec<String>,
     pub permissions: Vec<Permission>,
+    /// Required for a credential audience; must be empty for a collaboration
+    /// one.
+    #[serde(default)]
     pub protocols: Vec<Protocol>,
     #[serde(default = "default_provider")]
     pub provider: ProviderKind,
@@ -360,6 +471,12 @@ pub struct CreateGrantRequest {
     /// OpenSSH public key accepted for SFTP in addition to the password.
     #[serde(default)]
     pub ssh_public_key: Option<String>,
+    /// `agent` for a grant an agent's tool call made; refused unless the
+    /// policy allows agent sharing.
+    #[serde(default)]
+    pub created_by: CreatedBy,
+    #[serde(default)]
+    pub audience: AudienceRequest,
 }
 
 fn default_provider() -> ProviderKind {
@@ -409,5 +526,61 @@ mod tests {
         .unwrap();
         assert_eq!(request.provider, ProviderKind::Builtin);
         assert_eq!(request.label, None);
+        assert_eq!(request.audience, AudienceRequest::Credentials);
+    }
+
+    #[test]
+    fn audiences_are_tagged_by_kind() {
+        let request: CreateGrantRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "s1",
+            "paths": ["/workspace"],
+            "permissions": ["read"],
+            "expiresInSeconds": 3600,
+            "audience": { "kind": "collab", "minRole": "member", "userIds": ["usr_a"] }
+        }))
+        .unwrap();
+        assert!(request.protocols.is_empty());
+        assert_eq!(
+            request.audience,
+            AudienceRequest::Collab {
+                user_ids: Some(vec!["usr_a".into()]),
+                min_role: CollabRole::Member,
+            }
+        );
+        let audience = Audience::Collab {
+            org_id: "org_1".into(),
+            collab_session_id: "ses_1".into(),
+            user_ids: None,
+            min_role: CollabRole::Viewer,
+        };
+        assert_eq!(
+            serde_json::to_value(&audience).unwrap(),
+            serde_json::json!({
+                "kind": "collab",
+                "orgId": "org_1",
+                "collabSessionId": "ses_1",
+                "userIds": null,
+                "minRole": "viewer"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(Audience::Credentials).unwrap(),
+            serde_json::json!({ "kind": "credentials" })
+        );
+        assert_eq!(audience.kind(), "collab");
+        assert!(!Audience::Credentials.is_collab());
+    }
+
+    #[test]
+    fn roles_rank_and_only_members_and_up_write() {
+        assert!(CollabRole::Owner.rank() > CollabRole::Maintainer.rank());
+        assert!(CollabRole::Maintainer.rank() > CollabRole::Member.rank());
+        assert!(CollabRole::Member.rank() > CollabRole::Viewer.rank());
+        assert!(!CollabRole::Viewer.may_write());
+        assert!(CollabRole::Member.may_write());
+        assert_eq!(
+            serde_json::to_value(CollabRole::Maintainer).unwrap(),
+            serde_json::json!("maintainer")
+        );
     }
 }

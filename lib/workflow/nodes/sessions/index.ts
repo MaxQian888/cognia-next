@@ -28,14 +28,13 @@
 
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
-  archiveSession,
   assignSessionToFolder,
   bulkSetSessionsPinned,
   getSession,
   listScopedSessions,
-  unarchiveSession,
   updateSession,
 } from "@/lib/db/sessions"
+import { setSessionsArchived } from "@/lib/chat/session-archive-writes"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
@@ -286,8 +285,9 @@ registerNodeExecutor({
     const p = params(ctx)
     const session = await requireSession(ctx, "action.session.archive")
     const archived = bool(p, "archived") ?? true
-    if (archived) await archiveSession(session.id)
-    else await unarchiveSession(session.id)
+    // The routed writer: a paired client's Host takes it, and live file
+    // shares of the conversation follow at once (ADR-0222 §10).
+    await setSessionsArchived([session.id], archived)
     const updated = await getSession(session.id)
     return {
       output: {

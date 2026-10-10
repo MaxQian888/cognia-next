@@ -22,8 +22,9 @@ use crate::audit::{self, Event, Outcome};
 use crate::credentials::{self, SshKey};
 use crate::error::{FileShareError, FileShareResult};
 use crate::model::{
-    status_reason, Backing, CreateGrantRequest, CreatedBy, CredentialView, Grant, GrantPath,
-    GrantStatus, IssuedCredential, MountRecord, Permission, Protocol, ProviderKind, SessionState,
+    status_reason, Audience, AudienceRequest, Backing, CreateGrantRequest, CredentialView, Grant,
+    GrantPath, GrantStatus, IssuedCredential, MountRecord, Permission, Protocol, ProviderKind,
+    SessionState, MAX_AUDIENCE_USERS,
 };
 use crate::paths;
 use crate::policy::PolicySnapshot;
@@ -199,6 +200,74 @@ fn normalized_protocols(requested: &[Protocol]) -> FileShareResult<Vec<Protocol>
     Ok(set.into_iter().collect())
 }
 
+/// A collaboration user id as the server mints them (`usr_…`): one short
+/// safe segment. The server decides who exists; this only keeps junk out.
+fn valid_user_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
+
+/// The audience a request resolves to. A collaboration audience binds to the
+/// conversation's current host registration; there must be one.
+fn resolve_audience(store: &Store, request: &CreateGrantRequest) -> FileShareResult<Audience> {
+    match &request.audience {
+        AudienceRequest::Credentials => Ok(Audience::Credentials),
+        AudienceRequest::Collab { user_ids, min_role } => {
+            if !request.protocols.is_empty()
+                || request.provider != ProviderKind::Builtin
+                || request
+                    .ssh_public_key
+                    .as_deref()
+                    .is_some_and(|key| !key.trim().is_empty())
+            {
+                return Err(FileShareError::invalid(
+                    "a share for conversation members has no protocols, provider or SSH key",
+                ));
+            }
+            let user_ids = match user_ids {
+                None => None,
+                Some(ids) => {
+                    let set: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
+                    if set.is_empty() || set.len() > MAX_AUDIENCE_USERS || !set.iter().all(|id| valid_user_id(id)) {
+                        return Err(FileShareError::invalid(format!(
+                            "name between 1 and {MAX_AUDIENCE_USERS} members, or none for everyone"
+                        )));
+                    }
+                    Some(set.into_iter().map(str::to_string).collect())
+                }
+            };
+            let host = store.collab_host(&request.session_id)?.ok_or_else(|| {
+                FileShareError::new(
+                    "collab_host_unregistered",
+                    "this device is not registered as the file host of the shared conversation",
+                )
+            })?;
+            Ok(Audience::Collab {
+                org_id: host.org_id,
+                collab_session_id: host.collab_session_id,
+                user_ids,
+                min_role: *min_role,
+            })
+        }
+    }
+}
+
+/// Whether a collaboration grant's binding is the conversation's current
+/// registration (a credential grant always is).
+pub fn binding_current(store: &Store, grant: &Grant) -> FileShareResult<bool> {
+    match &grant.audience {
+        Audience::Credentials => Ok(true),
+        Audience::Collab {
+            org_id,
+            collab_session_id,
+            ..
+        } => Ok(store.collab_host(&grant.session_id)?.is_some_and(|host| {
+            &host.org_id == org_id && &host.collab_session_id == collab_session_id
+        })),
+    }
+}
+
 fn mint_username(store: &Store) -> FileShareResult<String> {
     for _ in 0..8 {
         let candidate = credentials::new_username();
@@ -221,8 +290,17 @@ pub fn create(
     now: i64,
 ) -> FileShareResult<Created> {
     let permissions = normalized_permissions(&request.permissions)?;
-    let protocols = normalized_protocols(&request.protocols)?;
-    policy.check_create(&permissions, request.expires_in_seconds)?;
+    let audience = resolve_audience(store, request)?;
+    let protocols = match audience {
+        Audience::Credentials => normalized_protocols(&request.protocols)?,
+        Audience::Collab { .. } => Vec::new(),
+    };
+    policy.check_create(
+        request.created_by,
+        audience == Audience::Credentials,
+        &permissions,
+        request.expires_in_seconds,
+    )?;
     let label = request
         .label
         .as_deref()
@@ -285,8 +363,9 @@ pub fn create(
         id: grant_id,
         session_id: request.session_id.clone(),
         label,
-        created_by: CreatedBy::User,
+        created_by: request.created_by,
         creator_principal: creator_principal.to_string(),
+        audience,
         protocols,
         provider: request.provider,
         permissions,
@@ -308,6 +387,7 @@ pub fn create(
             grant_id: Some(&grant.id),
             principal: creator_principal,
             action: "grant.create",
+            reason: Some(grant.audience.kind()),
             ..Event::default()
         },
     );
@@ -442,6 +522,12 @@ pub fn resume(
             format!("the file-sharing policy no longer allows this share ({reason})"),
         ));
     }
+    if !binding_current(store, &grant)? {
+        return Err(FileShareError::new(
+            "collab_host_unregistered",
+            "this device is no longer the shared conversation's file host",
+        ));
+    }
     if grant.status == GrantStatus::Stale {
         for path in &grant.paths {
             let mount = store
@@ -530,6 +616,12 @@ pub fn maintain(store: &Store, policy: &PolicySnapshot, now: i64) -> FileShareRe
             effects.merge(revoke(store, &grant.id, status_reason::SESSION_DELETED, "system", now)?);
             continue;
         }
+        // A members' grant lives only as long as the registration it was
+        // made under: the server revoked it when that registration ended.
+        if !binding_current(store, &grant)? {
+            effects.merge(revoke(store, &grant.id, status_reason::COLLAB_HOST_REMOVED, "system", now)?);
+            continue;
+        }
         let reason = grant.status_reason.as_deref();
         match grant.status {
             GrantStatus::Active => {
@@ -596,6 +688,7 @@ pub fn audit_auth(
 mod tests {
     use super::*;
     use crate::gateway::tests::{fixture, open_policy, Fixture};
+    use crate::model::CreatedBy;
 
     /// The gateway fixture without its own grant, so only the grants a test
     /// creates are in play.
@@ -615,7 +708,108 @@ mod tests {
             expires_in_seconds: 3600,
             label: Some("  Design review  ".into()),
             ssh_public_key: None,
+            created_by: CreatedBy::User,
+            audience: AudienceRequest::Credentials,
         }
+    }
+
+    fn register_host(f: &Fixture, collab_session_id: &str) {
+        f.store
+            .put_collab_host(&crate::store::CollabHostRecord {
+                session_id: "s1".into(),
+                org_id: "org_1".into(),
+                collab_session_id: collab_session_id.into(),
+                server_url: "https://collab.example".into(),
+                host_label: "Studio".into(),
+                registered_at: 1,
+                updated_at: 1,
+            })
+            .unwrap();
+    }
+
+    fn members(paths: &[&str], permissions: &[Permission], user_ids: Option<Vec<&str>>) -> CreateGrantRequest {
+        CreateGrantRequest {
+            protocols: Vec::new(),
+            label: None,
+            audience: AudienceRequest::Collab {
+                user_ids: user_ids.map(|ids| ids.into_iter().map(str::to_string).collect()),
+                min_role: crate::model::CollabRole::Member,
+            },
+            ..request(paths, permissions)
+        }
+    }
+
+    #[test]
+    fn a_members_grant_binds_to_the_registration_and_issues_no_credentials() {
+        let f = fresh();
+        let mut policy = open_policy();
+        // Members need live access, not network-drive credentials.
+        policy.fields.allow_protocol_credentials = false;
+        let unregistered = create(&f.store, &policy, &members(&["/workspace/src"], &[Permission::Read], None), "owner", 1)
+            .unwrap_err();
+        assert_eq!(unregistered.code, "collab_host_unregistered");
+        register_host(&f, "ses_1");
+        let created = create(
+            &f.store,
+            &policy,
+            &members(&["/workspace/src"], &[Permission::Read], Some(vec!["usr_b", "usr_a", "usr_a"])),
+            "owner",
+            1,
+        )
+        .unwrap();
+        assert!(created.credentials.is_empty() && created.rows.is_empty());
+        assert!(created.grant.protocols.is_empty());
+        assert_eq!(
+            created.grant.audience,
+            Audience::Collab {
+                org_id: "org_1".into(),
+                collab_session_id: "ses_1".into(),
+                user_ids: Some(vec!["usr_a".into(), "usr_b".into()]),
+                min_role: crate::model::CollabRole::Member,
+            }
+        );
+        assert_eq!(f.store.grant(&created.grant.id).unwrap().unwrap(), created.grant);
+        let audit = f.store.list_audit(Some("s1"), Some(&created.grant.id), None, 10).unwrap();
+        assert!(audit
+            .iter()
+            .any(|row| row.action == "grant.create" && row.reason.as_deref() == Some("collab")));
+
+        let code = |req: CreateGrantRequest| create(&f.store, &policy, &req, "owner", 1).unwrap_err().code;
+        let mut with_protocol = members(&["/workspace/src"], &[Permission::Read], None);
+        with_protocol.protocols = vec![Protocol::Webdav];
+        assert_eq!(code(with_protocol), "invalid_request");
+        assert_eq!(code(members(&["/workspace/src"], &[Permission::Read], Some(vec![]))), "invalid_request");
+        assert_eq!(code(members(&["/workspace/src"], &[Permission::Read], Some(vec!["usr a"]))), "invalid_request");
+        assert_eq!(code(members(&["/workspace/.git"], &[Permission::Read], None)), "sensitive_path");
+    }
+
+    #[test]
+    fn a_new_registration_ends_the_grants_made_under_the_old_one() {
+        let f = fresh();
+        let policy = open_policy();
+        register_host(&f, "ses_1");
+        let id = create(&f.store, &policy, &members(&["/workspace/src"], &[Permission::Read], None), "owner", 1)
+            .unwrap()
+            .grant
+            .id;
+        suspend(&f.store, &id, status_reason::OWNER, "owner", 2).unwrap();
+        register_host(&f, "ses_2");
+        assert_eq!(resume(&f.store, &policy, &id, "owner", 3).unwrap_err().code, "collab_host_unregistered");
+        let effects = maintain(&f.store, &policy, 4).unwrap();
+        assert_eq!(effects.disconnect, vec![id.clone()]);
+        let grant = f.store.grant(&id).unwrap().unwrap();
+        assert_eq!(
+            (grant.status, grant.status_reason.as_deref()),
+            (GrantStatus::Revoked, Some(status_reason::COLLAB_HOST_REMOVED))
+        );
+        // Removing the registration ends them too.
+        let other = create(&f.store, &policy, &members(&["/workspace/src"], &[Permission::Read], None), "owner", 5)
+            .unwrap()
+            .grant
+            .id;
+        f.store.delete_collab_host("s1").unwrap();
+        maintain(&f.store, &policy, 6).unwrap();
+        assert_eq!(f.store.grant(&other).unwrap().unwrap().status, GrantStatus::Revoked);
     }
 
     #[test]
@@ -652,6 +846,24 @@ mod tests {
         let audit = f.store.list_audit(Some("s1"), Some(&grant.id), None, 10).unwrap();
         assert_eq!(audit.iter().filter(|r| r.action == "credential.issue").count(), 2);
         assert!(audit.iter().any(|r| r.action == "grant.create"));
+    }
+
+    #[test]
+    fn an_agents_grant_says_so_and_needs_the_policy_to_allow_it() {
+        let f = fresh();
+        let agent = CreateGrantRequest {
+            created_by: CreatedBy::Agent,
+            ..request(&["/workspace/src"], &[Permission::Read])
+        };
+        let error = create(&f.store, &open_policy(), &agent, "owner", 1_000).unwrap_err();
+        assert_eq!(error.code, "policy_agent_disabled");
+
+        let mut policy = open_policy();
+        policy.fields.allow_agent_sharing = true;
+        let created = create(&f.store, &policy, &agent, "owner", 1_000).unwrap();
+        assert_eq!(created.grant.created_by, CreatedBy::Agent);
+        let stored = f.store.grant(&created.grant.id).unwrap().unwrap();
+        assert_eq!(stored.created_by, CreatedBy::Agent);
     }
 
     #[test]
@@ -753,7 +965,7 @@ mod tests {
         let mut mounts = f.store.mounts_for_session("s1").unwrap();
         let workspace = mounts.iter_mut().find(|m| m.mount_id == "workspace").unwrap();
         workspace.fingerprint = "retargeted".into();
-        f.store.replace_session_mounts("s1", &mounts, &[]).unwrap();
+        f.store.replace_session_mounts("s1", SessionState::Active, &mounts, &[], 1).unwrap();
         f.store.set_grant_status(&id, GrantStatus::Stale, Some("mount_changed"), 2).unwrap();
         resume(&f.store, &policy, &id, "owner", 3).unwrap();
         let grant = f.store.grant(&id).unwrap().unwrap();

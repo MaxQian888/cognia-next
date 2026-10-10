@@ -40,6 +40,7 @@ function view(id: string, patch: Partial<LiveGrantView["grant"]> = {}): LiveGran
       label: `Share ${id}`,
       createdBy: "user",
       creatorPrincipal: "owner",
+      audience: { kind: "credentials" },
       protocols: ["webdav"],
       provider: "builtin",
       permissions: ["read", "download"],
@@ -122,6 +123,46 @@ describe("endpointsForProvider", () => {
 })
 
 describe("LiveGrantsList", () => {
+  it("marks a grant an agent made", () => {
+    renderList([view("g1"), view("g2", { createdBy: "agent" })])
+    expect(screen.queryByTestId("live-grant-by-agent-g1")).toBeNull()
+    expect(screen.getByTestId("live-grant-by-agent-g2")).toHaveTextContent("By an agent")
+  })
+
+  it("says which members a members' share admits, and why one ended", () => {
+    renderList([
+      view("m1", {
+        protocols: [],
+        audience: {
+          kind: "collab",
+          orgId: "org_1",
+          collabSessionId: "ses_1",
+          userIds: null,
+          minRole: "member",
+        },
+      }),
+      view("m2", {
+        protocols: [],
+        audience: {
+          kind: "collab",
+          orgId: "org_1",
+          collabSessionId: "ses_1",
+          userIds: ["usr_a", "usr_b"],
+          minRole: "viewer",
+        },
+        status: "revoked",
+        statusReason: "collab_host_removed",
+      }),
+      view("c1"),
+    ])
+    expect(screen.getByTestId("live-grant-members-m1")).toHaveTextContent("Members · Member and up")
+    expect(screen.getByTestId("live-grant-members-m2")).toHaveTextContent("2 chosen members")
+    expect(
+      within(screen.getByTestId("live-grant-m2")).getByTestId("live-grant-reason")
+    ).toHaveTextContent("This device stopped serving the shared conversation's files")
+    expect(screen.queryByTestId("live-grant-members-c1")).toBeNull()
+  })
+
   it("says when nothing is shared", () => {
     renderList([])
     expect(screen.getByText("Nothing shared as a network drive yet.")).toBeInTheDocument()

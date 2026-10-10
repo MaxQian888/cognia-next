@@ -4,14 +4,13 @@
  * The fields of one file-sharing policy (ADR-0222 §6.4), edited in place.
  * Used for the person's own policy and, by owners and admins, for the org's.
  *
- * Agent sharing has no surface yet (ADR-0222 phase 3). Its switch is real —
- * the value is stored and the plane enforces it, so a policy set now governs
- * agents the day they can share — and it is labelled as not yet available.
+ * Every field is live: agent sharing (ADR-0222 §9) decides whether an agent is
+ * offered `filespace_share` / `filespace_enable_webdav` at all, and the host
+ * refuses an agent's grant without it.
  */
 
 import { useTranslations } from "next-intl"
 
-import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -34,24 +33,19 @@ type TtlKey = "maxSnapshotTtlSeconds" | "maxLiveTtlSeconds"
 
 interface FlagRow {
   key: FlagKey
-  /** No surface reads it yet; labelled so. */
-  dormant: boolean
   /** Shown nested under live access, which it needs. */
   needsLive?: boolean
 }
 
 const FLAGS: readonly FlagRow[] = [
-  { key: "allowPublicSnapshots", dormant: false },
-  { key: "allowLiveGrants", dormant: false },
-  { key: "allowProtocolCredentials", dormant: false, needsLive: true },
-  { key: "allowLiveWrite", dormant: false, needsLive: true },
-  { key: "allowAgentSharing", dormant: true },
+  { key: "allowPublicSnapshots" },
+  { key: "allowLiveGrants" },
+  { key: "allowProtocolCredentials", needsLive: true },
+  { key: "allowLiveWrite", needsLive: true },
+  { key: "allowAgentSharing" },
 ]
 
-const TTLS: readonly { key: TtlKey; dormant: boolean }[] = [
-  { key: "maxSnapshotTtlSeconds", dormant: false },
-  { key: "maxLiveTtlSeconds", dormant: false },
-]
+const TTLS: readonly TtlKey[] = ["maxSnapshotTtlSeconds", "maxLiveTtlSeconds"]
 
 const HOUR = 60 * 60
 const DAY = 24 * HOUR
@@ -75,11 +69,6 @@ export function FileSharingPolicyFields({
     seconds % DAY === 0
       ? t("duration.days", { count: seconds / DAY })
       : t("duration.hours", { count: Math.round(seconds / HOUR) })
-  const notYet = (
-    <Badge variant="outline" className="shrink-0 text-[10px]" title={t("notYetHint")}>
-      {t("notYet")}
-    </Badge>
-  )
 
   return (
     <div className="space-y-3">
@@ -99,39 +88,33 @@ export function FileSharingPolicyFields({
               }
             />
             <div className="min-w-0 flex-1 space-y-0.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Label htmlFor={id} className="text-sm">
-                  {t(`field.${row.key}.label`)}
-                </Label>
-                {row.dormant ? notYet : null}
-              </div>
+              <Label htmlFor={id} className="text-sm">
+                {t(`field.${row.key}.label`)}
+              </Label>
               <p className="text-xs text-muted-foreground">{t(`field.${row.key}.description`)}</p>
             </div>
           </div>
         )
       })}
 
-      {TTLS.map((row) => {
-        const id = `${idPrefix}-${row.key}`
-        const current = value[row.key]
+      {TTLS.map((key) => {
+        const id = `${idPrefix}-${key}`
+        const current = value[key]
         // A ceiling set elsewhere (another client, the API) that is not one of
         // the presets is still offered, so the select never misstates it.
         const options = FILE_SHARING_TTL_PRESETS_SECONDS.includes(current)
           ? FILE_SHARING_TTL_PRESETS_SECONDS
           : [...FILE_SHARING_TTL_PRESETS_SECONDS, current].sort((a, b) => a - b)
         return (
-          <div key={row.key} className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <Label htmlFor={id} className="text-sm">
-                {t(`field.${row.key}.label`)}
-              </Label>
-              {row.dormant ? notYet : null}
-            </div>
+          <div key={key} className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor={id} className="text-sm">
+              {t(`field.${key}.label`)}
+            </Label>
             <Select
               value={String(current)}
               disabled={disabled}
               onValueChange={(next) =>
-                onChange(editFileSharingPolicy(value, { [row.key]: Number(next) }))
+                onChange(editFileSharingPolicy(value, { [key]: Number(next) }))
               }
             >
               <SelectTrigger id={id} className="w-40" size="sm">

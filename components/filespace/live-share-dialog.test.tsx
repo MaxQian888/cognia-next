@@ -1,26 +1,66 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("@/lib/filespace/grants-client", () => ({
-  ...jest.requireActual("@/lib/filespace/grants-client"),
-  createLiveGrant: jest.fn(),
-}))
+// The dialog creates through the one door (`createLiveFileShare`), whose own
+// suite pins the shared-conversation check in front of the host.
+jest.mock("@/lib/filespace/live-share", () => ({ createLiveFileShare: jest.fn() }))
 jest.mock("@/lib/tauri/clipboard", () => ({ writeClipboardText: jest.fn(async () => undefined) }))
+jest.mock("@/hooks/collab/use-shared-session-members", () => ({
+  useSharedSessionMembers: jest.fn((scope: unknown) =>
+    scope
+      ? {
+          loaded: true,
+          selfUserId: "usr_me",
+          members: [
+            {
+              sessionId: "ses_1",
+              userId: "usr_me",
+              role: "owner",
+              approver: true,
+              guest: false,
+              createdAt: 0,
+              updatedAt: 0,
+            },
+            {
+              sessionId: "ses_1",
+              userId: "usr_ana",
+              displayName: "Ana",
+              role: "member",
+              approver: false,
+              guest: false,
+              createdAt: 0,
+              updatedAt: 0,
+            },
+            {
+              sessionId: "ses_1",
+              userId: "usr_bo",
+              role: "viewer",
+              approver: false,
+              guest: false,
+              createdAt: 0,
+              updatedAt: 0,
+            },
+          ],
+        }
+      : { loaded: true, selfUserId: null, members: [] }
+  ),
+}))
 
-import { createLiveGrant } from "@/lib/filespace/grants-client"
+import { createLiveFileShare } from "@/lib/filespace/live-share"
 import { DEFAULT_FILE_SHARING_POLICY } from "@/lib/filespace/policy"
 import type { FileSpaceDexieListing } from "@/lib/filespace/sources"
 import type { ConversationFileSpace, FileSpaceDexieEntry, FileSpacePath } from "@/types/filespace"
 import type { CreatedLiveGrant, FileShareStatus } from "@/types/filespace/live"
 
 import {
+  initialAudience,
   LiveShareDialog,
   liveShareBlock,
   liveTtlOptions,
   selectionIsWritable,
 } from "./live-share-dialog"
 
-const createMock = createLiveGrant as jest.Mock
+const createMock = createLiveFileShare as jest.Mock
 const p = (value: string) => value as FileSpacePath
 const DAY = 24 * 60 * 60
 
@@ -182,6 +222,17 @@ describe("liveShareBlock", () => {
     expect(liveShareBlock(status({}, { allowProtocolCredentials: false }))).toBe(
       "credentialsDisabled"
     )
+    // Members need live access, not credentials.
+    expect(liveShareBlock(status({}, { allowProtocolCredentials: false }), "members")).toBeNull()
+    expect(liveShareBlock(status({}, { allowLiveGrants: false }), "members")).toBe("liveDisabled")
+  })
+
+  it("starts a shared conversation's share on its members", () => {
+    expect(initialAudience(status(), true)).toBe("members")
+    expect(initialAudience(status(), false)).toBe("credentials")
+    expect(initialAudience(status({}, { allowProtocolCredentials: false }), false)).toBeNull()
+    expect(initialAudience(status({}, { allowProtocolCredentials: false }), true)).toBe("members")
+    expect(initialAudience(status({ active: false }), true)).toBeNull()
   })
 })
 
@@ -321,9 +372,29 @@ describe("LiveShareDialog", () => {
     await user.click(screen.getByLabelText("Served by"))
     await user.click(screen.getByRole("option", { name: "SFTPGo" }))
     expect(screen.queryByTestId("live-share-listener-warning")).toBeNull()
+    // SFTPGo's WebDAV leaks a hidden file's size and date: SFTP is the default.
+    expect(screen.getByLabelText("SFTP")).toBeChecked()
+    expect(screen.getByLabelText("WebDAV")).not.toBeChecked()
+    expect(screen.queryByTestId("live-share-sftpgo-webdav")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Create access" }))
     await waitFor(() => expect(createMock).toHaveBeenCalled())
     expect(createMock.mock.calls[0]![0].provider).toBe("sftpgo")
+    expect(createMock.mock.calls[0]![0].protocols).toEqual(["sftp"])
+  })
+
+  it("explains what WebDAV through SFTPGo reveals when it is opted into", async () => {
+    const user = userEvent.setup()
+    const base = status()
+    renderDialog({ status: { ...base, sftpgo: { ...base.sftpgo, configured: true } } })
+    await user.click(screen.getByLabelText("Served by"))
+    await user.click(screen.getByRole("option", { name: "SFTPGo" }))
+    await user.click(screen.getByLabelText("WebDAV"))
+    expect(screen.getByTestId("live-share-sftpgo-webdav")).toHaveTextContent(
+      "reveal that the file exists, with its size and date"
+    )
+    await user.click(screen.getByLabelText("Served by"))
+    await user.click(screen.getByRole("option", { name: "This host" }))
+    expect(screen.queryByTestId("live-share-sftpgo-webdav")).toBeNull()
   })
 
   it("will not submit without files or a protocol", async () => {
@@ -344,5 +415,92 @@ describe("LiveShareDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This host has not seen this conversation's files yet."
     )
+  })
+
+  it("explains a shared conversation whose files the person may not share", async () => {
+    const user = userEvent.setup()
+    createMock.mockRejectedValue({
+      code: "shared_session_forbidden",
+      message: "x",
+      retryable: false,
+    })
+    renderDialog()
+    await user.click(screen.getByRole("button", { name: "Create access" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your role in this shared conversation does not let you share its files."
+    )
+  })
+
+  describe("for a shared conversation's members", () => {
+    const sharedScope = { orgId: "org_1", sessionId: "ses_1" }
+    const membersCreated = {
+      grant: { id: "fg_2", audience: { kind: "collab" } },
+      credentials: [],
+      endpoints: status().listener.endpoints,
+    } as unknown as CreatedLiveGrant
+
+    it("shares with everyone at a role, without protocols or a sign-in", async () => {
+      const user = userEvent.setup()
+      createMock.mockResolvedValue(membersCreated)
+      // Members are offered even where network-drive credentials are off.
+      renderDialog({ sharedScope, status: status({}, { allowProtocolCredentials: false }) })
+      expect(screen.queryByTestId("live-share-blocked")).toBeNull()
+      expect(screen.getByTestId("live-share-members")).toBeInTheDocument()
+      expect(screen.queryByText("Protocols")).toBeNull()
+      expect(screen.queryByTestId("live-share-listener-warning")).toBeNull()
+      await user.click(screen.getByLabelText("Lowest role"))
+      await user.click(await screen.findByRole("option", { name: "Member" }))
+      await user.click(screen.getByLabelText("Make changes"))
+      expect(
+        screen.getByText("Viewers can only ever read, even when changes are allowed.")
+      ).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Create access" }))
+      await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1))
+      expect(createMock).toHaveBeenCalledWith(
+        {
+          sessionId: "s1",
+          paths: ["/workspace"],
+          permissions: ["read", "download", "write"],
+          expiresInSeconds: DAY,
+          protocols: [],
+          audience: { kind: "collab", minRole: "member" },
+        },
+        { hostId: "local" }
+      )
+      expect(await screen.findByText("Shared with the conversation's members")).toBeInTheDocument()
+      expect(screen.queryByText("Password")).toBeNull()
+    })
+
+    it("names chosen members, never the person sharing", async () => {
+      const user = userEvent.setup()
+      createMock.mockResolvedValue(membersCreated)
+      renderDialog({ sharedScope })
+      await user.click(screen.getByRole("combobox", { name: "Which members" }))
+      await user.click(await screen.findByRole("option", { name: "Only the members I choose" }))
+      expect(screen.queryByLabelText("usr_me")).toBeNull()
+      expect(screen.getByRole("button", { name: "Create access" })).toBeDisabled()
+      await user.click(screen.getByLabelText("Ana"))
+      await user.click(screen.getByRole("button", { name: "Create access" }))
+      await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1))
+      expect(createMock.mock.calls[0][0].audience).toEqual({
+        kind: "collab",
+        userIds: ["usr_ana"],
+        minRole: "viewer",
+      })
+    })
+
+    it("can still switch to a network-drive sign-in", async () => {
+      const user = userEvent.setup()
+      renderDialog({ sharedScope })
+      await user.click(screen.getByLabelText("Share with"))
+      await user.click(
+        await screen.findByRole("option", { name: "A network drive sign-in (WebDAV/SFTP)" })
+      )
+      expect(screen.getByText("Protocols")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Create access" }))
+      await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1))
+      expect(createMock.mock.calls[0][0]).not.toHaveProperty("audience")
+      expect(createMock.mock.calls[0][0].protocols).toEqual(["webdav"])
+    })
   })
 })

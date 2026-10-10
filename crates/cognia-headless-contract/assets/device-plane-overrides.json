@@ -2522,6 +2522,69 @@
         ]
       }
     },
+    "file_collab_host_set": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "host",
+          "adminLease"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The local conversation whose files the Host serves."
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "orgId",
+                  "collabSessionId",
+                  "serverUrl",
+                  "hostLabel",
+                  "hostToken"
+                ],
+                "properties": {
+                  "orgId": {
+                    "type": "string"
+                  },
+                  "collabSessionId": {
+                    "type": "string",
+                    "description": "The conversation's id on the collaboration server."
+                  },
+                  "serverUrl": {
+                    "type": "string",
+                    "description": "The collaboration server's base URL: https, or http to a loopback address."
+                  },
+                  "hostLabel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "hostToken": {
+                    "type": "string",
+                    "description": "The file host token the server answered the registration with. Write-only: stored in the Host's secret store, never answered."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null ends the registration: the Host unregisters and revokes the members' shares made under it."
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "file_share_listener_set": {
       "inputSchemaSource": "contract",
       "inputSchema": {

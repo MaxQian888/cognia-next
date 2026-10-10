@@ -1,21 +1,23 @@
 ---
 title: 实时共享
-description: "对某个对话中选定文件夹的可撤销 WebDAV 与 SFTP 访问，由持有文件的宿主或 SFTPGo 提供。ADR-0222 的 P2 阶段。"
+description: "对某个对话中选定文件夹的可撤销访问：由持有文件的宿主或 SFTPGo 提供的 WebDAV 与 SFTP 登录、经协作服务器供共享对话成员使用的访问，以及经批准后才分享的智能体。ADR-0222 的 P2 与 P3 阶段。"
 ---
 
 # 实时共享
 
-<Status variant="beta">P2 已交付 · 协作成员（P3）已设计</Status>
+<Status variant="beta">P2 与 P3 已交付</Status>
 
 <TLDR>
-  分享链接是一份冻结的加密副本。**实时共享**则是一次授权：针对某个对话中的部分文件夹或文件，签发一个
-  WebDAV/SFTP 登录，由持有这些文件的机器实时提供，直到过期或被你撤销。`crates/cognia-file-share`
-  负责授权、凭证、每个请求都必须经过的网关、内置的 WebDAV/SFTP 监听器，以及可选的 SFTPGo 提供方。
-  应用中通过“文件”面板和“设置 → 连接 → 网络驱动器”管理。
+  分享链接是一份冻结的加密副本。**实时共享**则是一次授权：对某个对话中部分文件夹或文件的访问，由持有这些
+  文件的机器实时提供，直到过期或被你撤销。授权的对象可以是持有其 WebDAV/SFTP 登录的人，也可以是——在通过组织
+  共享的对话中——该对话的成员，他们经协作服务器访问文件，无需任何登录。`crates/cognia-file-share`
+  负责授权、凭证、每个请求都必须经过的网关、内置的 WebDAV/SFTP 监听器、可选的 SFTPGo 提供方，以及响应成员
+  请求的应答器。应用中通过“文件”面板和“设置 → 连接 → 网络驱动器”管理；智能体也可以分享，但只限于它自己的
+  对话，并且必须经你批准。
 </TLDR>
 
 决策记录：[ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant)
-§4–§5 与 §8（修订了 [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)）。
+§4–§10（§8 修订了 [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)）。
 
 ## 使用方式
 
@@ -40,6 +42,9 @@ description: "对某个对话中选定文件夹的可撤销 WebDAV 与 SFTP 访�
   事后收紧时，超出新上限的共享会被暂停；
 - 在对话被归档（暂停）或删除（撤销）、或其文件夹被移动后继续服务（会变为 **需要处理**，恢复后按新位置重新绑定）。
 
+macOS 访达向 WebDAV 卷拷贝文件时，会在旁边写入 `._文件名` 伴随文件（保存文件的扩展属性）和 `.DS_Store`。内置 WebDAV
+监听器会接受并丢弃这些写入，也从不列出或提供这些名字，因此它们不会出现在你的文件夹或仓库的 `git status` 里。
+
 ## 状态与原因
 
 | 状态 | 原因 | 含义 |
@@ -48,12 +53,83 @@ description: "对某个对话中选定文件夹的可撤销 WebDAV 与 SFTP 访�
 | 已暂停 | `owner` | 由你暂停；恢复即可继续 |
 | 已暂停 | `policy` | 超出了当前的文件分享策略 |
 | 已暂停 | `session_archived` | 对话已归档 |
+| 已暂停 | `org_policy` | 协作服务器依据组织的文件分享策略拒绝了它 |
 | 需要处理（`stale`） | `mount_changed` | 被授权的文件夹现在指向别处；恢复后重新绑定 |
 | 已过期 | `expired` | 已超过有效期 |
 | 已撤销 | `revoked`、`session_deleted`、`provider_failed` | 永久关闭 |
+| 已撤销 | `collab_host_removed` | 成员共享所依附的宿主注册已被替换或移除 |
 
 没有地址的卡片会说明原因：`listener_off`（网络驱动器已关闭）、`sftpgo_unconfigured`，或
 `sftpgo_no_public_endpoint`（SFTPGo 未配置公共地址）。
+
+## 与共享对话的成员共享
+
+在通过组织共享的对话中，共享对话框会询问 **共享给**：网络驱动器登录，或 **此共享对话的成员**。成员共享不会创建
+任何凭证。可以选择某个角色及以上的所有人（查看者、成员、维护者、所有者），或只选你指定的成员；无论共享允许什么，
+查看者都只能读取。
+
+成员在共享对话面板的 **文件** 部分打开这些文件：浏览、下载，以及——在共享允许修改且其角色不是查看者时——上传、
+新建文件夹、重命名和删除。文件只会作为单个请求的应答离开持有它们的设备，因此该设备必须在线；它不在线时，该部分
+会提示。
+
+```
+成员 ──► collab-server ──────────► 宿主（cognia-file-share/collab.rs）
+  POST file-requests        claim（长轮询，宿主令牌）
+  （files.readLive /        ─► 网关：授权、准入、挂载、策略、路径、敏感底线
+   files.writeLive +        ─► 应答：JSON，或以请求为范围的对象保存读取的字节
+   覆盖该路径的授权）
+  GET  file-requests/{id} ◄── complete
+```
+
+- **注册。** 与成员共享时，会先把此设备注册为该对话的文件宿主（`ensureCollabFileHost`）：请求使用*你自己*的
+  登录发出，你必须拥有 `files.share`；服务器返回一个宿主令牌，自身只保存其 SHA-256。宿主只收到这个令牌
+  （`file_collab_host_set`，保存在系统钥匙串中），之后的每次调用都用它认证。宿主的每次调用都会重新确认注册它的
+  人仍拥有 `files.share`。一个对话只有一个宿主：再次注册会替换它，旧注册下的成员共享在两端都会被撤销
+  （`collab_host_removed`）。
+- **镜像。** 宿主把每个成员授权（对象、路径、权限、到期时间）镜像到服务器，并在每次变更后再次镜像，成员因此能
+  列出共享给他们的内容。服务器会按组织的文件分享策略裁剪镜像；被拒绝时，宿主上的该授权会被暂停（`org_policy`）。
+  宿主自己的授权始终是权威，每个请求都会依据它重新检查。
+- **请求。** 成员的一个请求指定一个操作（list、stat、read、write、mkdir、delete、rename），并归属于一个准入该成员
+  的授权。服务器检查 `files.readLive`（修改还需 `files.writeLive`）以及该授权；宿主认领请求，在自己的网关中以
+  主体 `member:<用户 id>`、通道 `collab` 再次检查，执行后应答。写入的字节须先上传，宿主才能认领；读取的字节只为
+  请求者保存。单次传输上限 50 MiB，列表上限 1,000 项。
+- **宿主离线。** 两分钟内无人认领的请求会过期，成员会看到宿主离线。一个对话最多保留 32 个未应答请求（每位成员 8 个）。
+- **查看与结束。** 在共享对话中，“以网络驱动器共享”分区会显示由哪个宿主为成员提供文件、它是否在应答、尚未同步到
+  服务器的共享以及最近的问题。撤销单个共享会同时撤销其镜像。在那里点击 **停止与成员共享**，或删除对话，会在服务器
+  上注销宿主，并撤销该注册下的所有成员共享。有权共享文件的成员也可以在对话的“文件”部分点击 **移除共享设备**，
+  这样即使设备丢失或无法连接，也能从别处结束它的共享。锁定或切换账号会暂停应答，直到重新解锁；服务器不再接受宿主令牌时，
+  注册随之结束。
+
+## 智能体
+
+智能体可以通过 `filespace_*` 工具查看和管理**它自己所在对话**的共享：
+
+| 工具 | 同意方式 | 作用 |
+| --- | --- | --- |
+| `filespace_list` | 允许 | 对话的挂载、某个文件夹的条目、分享链接与实时授权（含各自准入的对象） |
+| `filespace_share` | 每次询问 | 快照链接，或实时访问：网络驱动器登录，或带最低角色的 `audience: "members"` |
+| `filespace_enable_webdav` | 每次询问 | 实时 WebDAV 访问，默认 `/workspace` |
+| `filespace_revoke_share` | 允许 | 撤销此对话的一个链接或授权 |
+| `filespace_disable_webdav` | 允许 | 撤销此对话的 WebDAV 访问 |
+
+只有当文件分享策略允许智能体分享时才会提供分享类工具；任何规则、授权或权限模式都无法把它们变成“始终允许”；
+在风险策略中它们归为 `external-send`。每个路径都必须位于调用方对话的文件中，敏感文件底线对智能体没有例外。
+工具结果从不包含密码：聊天中的结果卡片有 **签发密码** 按钮，会在提供该凭证的宿主上轮换它，并只显示一次新密码。
+智能体创建的授权标记为 **由智能体创建**，宿主在其存续期间会持续依据“允许智能体分享”策略重新检查。智能体只能按
+角色与成员共享；逐个挑选成员留给对话框。
+
+## 生命周期
+
+| 事件 | 实时授权 | 分享链接 |
+| --- | --- | --- |
+| 对话归档 / 恢复 | 暂停（`session_archived`）/ 恢复 | 保留 |
+| 对话删除 | 撤销（`session_deleted`）；成员注册从服务器移除 | 作为独立副本保留；删除确认会提供一并撤销的选项 |
+| 对话分叉 | 不复制 | 不复制 |
+| 被授权的文件夹移动 | **需要处理**，直到恢复 | 不受影响 |
+
+归档、恢复或删除对话的写入方（`lib/chat/session-archive-writes.ts`、`deleteSessionsWithTeardown`，以及宿主应用
+已配对客户端的变更）会通过 `lib/filespace/lifecycle.ts` 发出通知，正在运行的宿主同步会立即推送受影响的挂载表，
+而不是等到下一分钟。
 
 ## 工作原理
 
@@ -66,12 +142,13 @@ brain / WebView 推送 ────┘     │                 └── SFTP（
                          （按账号）           授权 → 挂载 → 策略 → 路径 → 敏感底线
 ```
 
-- **一套命令面。** `crates/cognia-file-share/src/rpc.rs` 包含十三个 `file_*` 命令；桌面的 Tauri 外壳
+- **一套命令面。** `crates/cognia-file-share/src/rpc.rs` 包含十五个 `file_*` 命令；桌面的 Tauri 外壳
   （`commands.rs`，`tauri-host` 特性）和伴侣 RPC（`src-tauri/src/companion_api/rpc/file_share.rs`）都分发到这里，
   因此已配对手机发送的参数与 WebView 完全相同。仅限宿主：`file_share_activate`、`file_space_sync`、
   `file_share_policy_set`。读取（`file_share_status`、`file_grant_list`、`file_audit_list`）需要 `host.observe`
   并按令牌分页。授权变更（`file_grant_create/revoke/suspend/resume`、`file_credential_rotate`）是
-  `workspace.write` 控制命令。`file_share_listener_set` 与 `file_share_sftpgo_set` 属于 `host-admin` 并需要二次验证。
+  `workspace.write` 控制命令。`file_share_listener_set`、`file_share_sftpgo_set` 与 `file_collab_host_set` 属于
+  `host-admin` 并需要二次验证；`file_collab_host_status` 是 `host.observe` 读取。
 - **挂载表。** 宿主依据应用提供的挂载表服务一个对话：每个磁盘挂载对应哪个目录、列出哪些上传文件和产物。应用为
   有授权的对话推送挂载表（`lib/filespace/host-sync.ts`，在桌面端挂载为 `FileShareHostSyncInitializer`，在 headless
   服务器上作为 brain 运行时），宿主也会在每次创建授权、恢复时，以及对每个有授权的对话每分钟一次主动拉取
@@ -90,7 +167,8 @@ brain / WebView 推送 ────┘     │                 └── SFTP（
 在 SFTPGo 已能访问工作区的服务器上，配置“设置 → 连接 → 网络驱动器 → SFTPGo”（管理 API 地址、保存在系统钥匙串
 中的管理员级 API 密钥、主目录根路径、从宿主路径到 SFTPGo 所见路径的映射，以及公共 SFTP/WebDAV 地址）。之后在
 共享对话框中选择 **提供方：SFTPGo**，就会为每个凭证创建一个 SFTPGo 用户：每个被授权路径一个虚拟目录，敏感文件
-底线作为禁止模式，过期时间与授权一致；撤销时删除该用户。没有映射的路径会拒绝授权（`sftpgo_path_unmapped`）。
+底线作为禁止模式，过期时间与授权一致；撤销时删除该用户。没有映射的路径会拒绝授权（`sftpgo_path_unmapped`）。由 SFTPGo 提供的共享默认只用 SFTP：SFTPGo 的 WebDAV 不会发送 `.env`
+等隐藏文件的内容，但在拒绝之前会先返回文件存在、大小和修改时间，因此在那里 WebDAV 需要显式选择，对话框也会说明它暴露了什么。
 失败的 SFTPGo 变更会在后台重试，同时授权在本地保持已撤销。部署：`deploy/compose/compose.sftpgo.yaml`（见 compose
 README）。SFTPGo 采用 AGPL-3.0 许可，从不打包进应用。
 
@@ -107,3 +185,9 @@ README）。SFTPGo 采用 AGPL-3.0 许可，从不打包进应用。
 | Hook | `hooks/filespace/use-live-file-share.ts` |
 | 共享对话框、凭证卡片、授权列表、审计 | `components/filespace/live-*.tsx` |
 | 设置 | `components/settings/connectivity/panels/network-drive-panel.tsx` 及其区块 |
+| 成员：宿主注册、应答器、服务器路由 | `crates/cognia-file-share/src/collab.rs`、`lib/collab/file-host.ts`、`crates/cognia-collab-server/src/session_files.rs` |
+| 成员：请求与界面 | `lib/collab/file-requests.ts`、`components/chat/shared-session-files.tsx` |
+| 成员：所有者视图 | `components/filespace/collab-host-status.tsx` |
+| 创建实时共享的唯一入口 | `lib/filespace/live-share.ts` |
+| 智能体工具、同意规则、结果卡片 | `lib/claude/filespace-builtin-tools.ts`、`lib/claude/permissions/filespace-tool-rules.ts`、`components/chat/message-parts/mcp-renderers/filespace-share-card.tsx` |
+| 生命周期通知 | `lib/filespace/lifecycle.ts` |

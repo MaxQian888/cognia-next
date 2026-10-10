@@ -65,6 +65,12 @@ describe("isStructuredMcpToolPart", () => {
     expect(isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__video_generate"))).toBe(
       true
     )
+    // ADR-0222 §9: what an agent shared, with the button for its password.
+    for (const name of ["filespace_share", "filespace_enable_webdav"]) {
+      expect(isStructuredMcpToolPart(part(`tool-${name}`))).toBe(true)
+      expect(isStructuredMcpToolPart(part(`tool-mcp__cognia-plugin-tools__${name}`))).toBe(true)
+    }
+    expect(isStructuredMcpToolPart(part("tool-filespace_list"))).toBe(false)
   })
 
   it("recognises the Claude built-ins that still own cards here", () => {
