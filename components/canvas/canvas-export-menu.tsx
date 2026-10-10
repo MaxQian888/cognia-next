@@ -6,10 +6,22 @@
  * (`getCanvasExportFormats`), so previewable documents can additionally export
  * as HTML / SVG while plain code exports its raw source. Serialization + the
  * download/clipboard side effects live in `lib/canvas/document-export.ts`.
+ *
+ * "Save as template…" (ADR-0223, while the template platform is on) keeps the
+ * document's current text as a document template Files can start from.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Copy, Download, FileCode2, FileDown, FileText, ImageIcon } from "lucide-react"
+import {
+  Copy,
+  Download,
+  FileCode2,
+  FileDown,
+  FileText,
+  ImageIcon,
+  LayoutTemplateIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +32,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  SaveDocumentTemplateDialog,
+  type SaveDocumentTemplateRequest,
+} from "@/components/document-templates/save-document-template-dialog"
+import { isUnifiedTemplatePlatformEnabled } from "@/lib/templates/feature-flags"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
   copyCanvasDocumentToClipboard,
@@ -52,6 +69,8 @@ export function CanvasExportMenu({ documentId, className }: CanvasExportMenuProp
   const doc = useArtifactStore((s) => (documentId ? s.canvasDocuments[documentId] : undefined))
 
   const formats = doc ? getCanvasExportFormats(doc) : []
+  const [saveRequest, setSaveRequest] = useState<SaveDocumentTemplateRequest | null>(null)
+  const templatesEnabled = isUnifiedTemplatePlatformEnabled()
 
   // `png` / `pdf` render before they save, so this is async now. A `null`
   // filename means "unsupported, failed, or the user cancelled the save
@@ -69,45 +88,63 @@ export function CanvasExportMenu({ documentId, className }: CanvasExportMenuProp
   }
 
   return (
-    <DropdownMenu>
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={className ?? "size-7"}
-              disabled={!doc}
-              aria-label={t("label")}
-              data-testid="canvas-export-trigger"
-            >
-              <Download className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{t("label")}</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end" className="w-48">
-        {doc && (
-          <>
-            {formats.map((format) => {
-              const meta = FORMAT_META[format]
-              const Icon = meta.icon
-              return (
-                <DropdownMenuItem key={format} onClick={() => void handleExport(doc, format)}>
-                  <Icon className="mr-2 size-3.5" />
-                  {t(meta.labelKey)}
+    <>
+      <DropdownMenu>
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={className ?? "size-7"}
+                disabled={!doc}
+                aria-label={t("label")}
+                data-testid="canvas-export-trigger"
+              >
+                <Download className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("label")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-48">
+          {doc && (
+            <>
+              {formats.map((format) => {
+                const meta = FORMAT_META[format]
+                const Icon = meta.icon
+                return (
+                  <DropdownMenuItem key={format} onClick={() => void handleExport(doc, format)}>
+                    <Icon className="mr-2 size-3.5" />
+                    {t(meta.labelKey)}
+                  </DropdownMenuItem>
+                )
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void handleCopy(doc)}>
+                <Copy className="mr-2 size-3.5" />
+                {t("copy")}
+              </DropdownMenuItem>
+              {templatesEnabled ? (
+                <DropdownMenuItem
+                  onClick={() =>
+                    setSaveRequest({
+                      mode: "create",
+                      name: doc.title,
+                      draft: { content: doc.content, language: doc.language, type: doc.type },
+                    })
+                  }
+                  data-testid="canvas-save-template"
+                >
+                  <LayoutTemplateIcon className="mr-2 size-3.5" />
+                  {t("saveAsTemplate")}
                 </DropdownMenuItem>
-              )
-            })}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => void handleCopy(doc)}>
-              <Copy className="mr-2 size-3.5" />
-              {t("copy")}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+              ) : null}
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <SaveDocumentTemplateDialog request={saveRequest} onClose={() => setSaveRequest(null)} />
+    </>
   )
 }

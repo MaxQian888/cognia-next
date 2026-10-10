@@ -1,0 +1,52 @@
+{
+  "blank": {
+    "description": "Start from an empty page.",
+    "name": "Blank document"
+  },
+  "builtin": {
+    "guide": {
+      "content": "# Guide title\n\nOne sentence on what this guide helps someone do.\n\n## Before you start\n\n- What you need\n- Who this is for\n\n## Steps\n\n1. First step\n2. Second step\n3. Third step\n\n## If something goes wrong\n\n- **Problem:** what to try\n\n## Related\n\n- Further reading\n",
+      "description": "Explain how to do something, step by step.",
+      "name": "Guide"
+    },
+    "meeting-notes": {
+      "content": "# Meeting title\n\n**Date:** \n**Attendees:** \n\n## Agenda\n\n1. \n\n## Notes\n\n- \n\n## Decisions\n\n- \n\n## Action items\n\n- [ ] Owner — task — due date\n",
+      "description": "Agenda, notes, decisions and action items.",
+      "name": "Meeting notes"
+    },
+    "project-tracker": {
+      "content": "# Project name\n\n**Owner:** \n**Status:** On track\n**Target date:** \n\n## Goal\n\nWhat done looks like.\n\n## Milestones\n\n| Milestone | Owner | Due | Status |\n| --- | --- | --- | --- |\n|  |  |  | Not started |\n\n## Risks\n\n- \n\n## Decisions\n\n- \n\n## Updates\n\n### Date\n\n- \n",
+      "description": "Goal, milestones, risks and a running log of updates.",
+      "name": "Project tracker"
+    },
+    "todo": {
+      "content": "# To-do\n\n## Today\n\n- [ ] \n\n## This week\n\n- [ ] \n\n## Later\n\n- [ ] \n\n## Done\n\n- [x] \n",
+      "description": "Today, this week, later — and what is done.",
+      "name": "To-do list"
+    },
+    "weekly-update": {
+      "content": "# Weekly update\n\n**Week of:** \n\n## Highlights\n\n- \n\n## Progress\n\n- \n\n## Blockers\n\n- \n\n## Next week\n\n- \n\n## Asks\n\n- \n",
+      "description": "Highlights, progress, blockers and next steps.",
+      "name": "Weekly update"
+    }
+  },
+  "errors": {
+    "document_template_name_required": "Enter a template name.",
+    "document_template_not_found": "That template no longer exists.",
+    "unknown": "Something went wrong. Try again."
+  },
+  "saveDialog": {
+    "cancel": "Cancel",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What is it for? (optional)",
+    "hint": "Saves the current content as a template you can start new documents from.",
+    "nameLabel": "Name",
+    "save": "Save template",
+    "title": "Save as template"
+  },
+  "toasts": {
+    "deleted": "Deleted the template “{name}”.",
+    "saved": "Saved “{name}” as a template.",
+    "updated": "Updated the template “{name}”."
+  }
+}

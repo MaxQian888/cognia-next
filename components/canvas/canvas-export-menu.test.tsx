@@ -41,6 +41,14 @@ jest.mock("@/lib/canvas/document-export", () => ({
   copyCanvasDocumentToClipboard: jest.fn(async () => true),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+let mockTemplatesEnabled = true
+jest.mock("@/lib/templates/feature-flags", () => ({
+  isUnifiedTemplatePlatformEnabled: () => mockTemplatesEnabled,
+}))
+jest.mock("@/components/document-templates/save-document-template-dialog", () => ({
+  SaveDocumentTemplateDialog: ({ request }: { request: unknown }) =>
+    request ? <div data-testid="save-template-request">{JSON.stringify(request)}</div> : null,
+}))
 
 import { CanvasExportMenu } from "./canvas-export-menu"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -73,6 +81,7 @@ function seedDoc() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockTemplatesEnabled = true
   mockFormats.mockReturnValue(["raw", "html"])
   act(() => {
     Object.keys(useArtifactStore.getState().canvasDocuments).forEach((id) =>
@@ -162,5 +171,23 @@ describe("CanvasExportMenu", () => {
 
     await user.click(screen.getByText("PNG image"))
     expect(mockToast.error).toHaveBeenCalledWith("Couldn't render the document")
+  })
+
+  it("saves the document's current text as a template", async () => {
+    const id = seedDoc()
+    render(<CanvasExportMenu documentId={id} />)
+    await userEvent.setup().click(screen.getByText("Save as template…"))
+    expect(JSON.parse(screen.getByTestId("save-template-request").textContent!)).toEqual({
+      mode: "create",
+      name: "Doc",
+      draft: { content: "hi", language: "markdown", type: "text" },
+    })
+  })
+
+  it("offers no template entry while the template platform is off", () => {
+    mockTemplatesEnabled = false
+    const id = seedDoc()
+    render(<CanvasExportMenu documentId={id} />)
+    expect(screen.queryByText("Save as template…")).toBeNull()
   })
 })

@@ -33,7 +33,13 @@ import type {
   LibraryFolderColor,
   LibraryFolderIcon,
 } from "@/lib/db/files-library-types"
+import { deleteDocumentTemplate, DocumentTemplateError } from "@/lib/db/document-templates"
 import { SessionAssetError } from "@/lib/db/session-assets"
+import {
+  createDocumentFromTemplate,
+  saveDocumentAsTemplate,
+  type DocumentTemplateOption,
+} from "@/lib/document-templates/service"
 import { downloadBlob } from "@/lib/files/download"
 import { downloadPayloadFor } from "@/lib/files-library/download"
 import { duplicateFilesEntry, FilesDuplicateError } from "@/lib/files-library/duplicate"
@@ -66,7 +72,8 @@ function errorKey(error: unknown): string {
     error instanceof FilesRenameError ||
     error instanceof FilesDuplicateError ||
     error instanceof FilesExportError ||
-    error instanceof SessionAssetError
+    error instanceof SessionAssetError ||
+    error instanceof DocumentTemplateError
   ) {
     return error.code
   }
@@ -93,6 +100,10 @@ export interface FilesActions {
   /** Into Files; into `folderId` when a folder is in view. */
   upload: (files: readonly File[], folderId?: string) => Promise<void>
   newCanvasDocument: () => void
+  /** A new canvas document from a template, opened on the canvas. */
+  newFromTemplate: (template: DocumentTemplateOption) => void
+  /** Delete a saved template, with an Undo on the toast. */
+  deleteTemplate: (template: DocumentTemplateOption) => Promise<void>
   moveFolder: (folderId: string, parentId: string) => Promise<void>
   setFolderStyle: (
     folderId: string,
@@ -395,6 +406,15 @@ export function useFilesActions(): FilesActions {
     [t]
   )
 
+  const openOnCanvas = useCallback(
+    (id: string) => {
+      useArtifactStore.getState().setActiveCanvas(id)
+      useUIStore.getState().setSelectedGuild({ kind: "canvas" })
+      router.push("/")
+    },
+    [router]
+  )
+
   const newCanvasDocument = useCallback(() => {
     const id = useArtifactStore.getState().createCanvasDocument({
       title: t("untitledDocument"),
@@ -403,10 +423,41 @@ export function useFilesActions(): FilesActions {
       type: "text",
       createdBy: "user",
     })
-    useArtifactStore.getState().setActiveCanvas(id)
-    useUIStore.getState().setSelectedGuild({ kind: "canvas" })
-    router.push("/")
-  }, [router, t])
+    openOnCanvas(id)
+  }, [openOnCanvas, t])
+
+  const newFromTemplate = useCallback(
+    (template: DocumentTemplateOption) => {
+      const id = createDocumentFromTemplate(template, {
+        createCanvasDocument: (params) => useArtifactStore.getState().createCanvasDocument(params),
+      })
+      openOnCanvas(id)
+    },
+    [openOnCanvas]
+  )
+
+  const deleteTemplate = useCallback(
+    async (template: DocumentTemplateOption) => {
+      if (template.source !== "user") return
+      try {
+        await deleteDocumentTemplate(template.id)
+        toast.success(t("toasts.templateDeleted", { name: template.name }), {
+          action: {
+            label: t("toasts.undo"),
+            // The undo saves the same template again; it gets a new id, which
+            // nothing outside the template list refers to.
+            onClick: () =>
+              void saveDocumentAsTemplate(template).catch((error: unknown) =>
+                fail("restore-template", error)
+              ),
+          },
+        })
+      } catch (error) {
+        fail("delete-template", error)
+      }
+    },
+    [t, fail]
+  )
 
   const moveFolder = useCallback(
     async (folderId: string, parentId: string) => {
@@ -451,6 +502,8 @@ export function useFilesActions(): FilesActions {
     goToConversation,
     upload,
     newCanvasDocument,
+    newFromTemplate,
+    deleteTemplate,
     moveFolder,
     setFolderStyle,
   }

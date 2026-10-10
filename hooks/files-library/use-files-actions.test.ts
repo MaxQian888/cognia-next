@@ -36,6 +36,18 @@ jest.mock("@/lib/db/files-library-folders", () => {
   }
 })
 jest.mock("@/lib/files/download", () => ({ downloadBlob: jest.fn() }))
+jest.mock("@/lib/db/document-templates", () => {
+  class DocumentTemplateError extends Error {
+    constructor(readonly code: string) {
+      super(code)
+    }
+  }
+  return { DocumentTemplateError, deleteDocumentTemplate: jest.fn(async () => {}) }
+})
+jest.mock("@/lib/document-templates/service", () => ({
+  ...jest.requireActual("@/lib/document-templates/service"),
+  saveDocumentAsTemplate: jest.fn(async () => ({ id: "dtpl_again" })),
+}))
 jest.mock("@/lib/files-library/download", () => ({ downloadPayloadFor: jest.fn() }))
 jest.mock("@/lib/files-library/duplicate", () => {
   class FilesDuplicateError extends Error {
@@ -599,6 +611,70 @@ describe("newCanvasDocument", () => {
     expect(push).toHaveBeenCalledWith("/")
     create.mockRestore()
     activate.mockRestore()
+  })
+})
+
+describe("document templates", () => {
+  const template = {
+    id: "dtpl_p",
+    source: "user" as const,
+    name: "Postmortem",
+    content: "# P",
+    language: "markdown" as const,
+    type: "text" as const,
+    icon: "saved" as const,
+  }
+
+  it("starts a document from a template and opens Canvas", () => {
+    const create = jest
+      .spyOn(useArtifactStore.getState(), "createCanvasDocument")
+      .mockReturnValue("c-tpl")
+    const activate = jest
+      .spyOn(useArtifactStore.getState(), "setActiveCanvas")
+      .mockImplementation(() => {})
+    hook().newFromTemplate(template)
+    expect(create).toHaveBeenCalledWith({
+      title: "Postmortem",
+      content: "# P",
+      language: "markdown",
+      type: "text",
+      createdBy: "user",
+    })
+    expect(activate).toHaveBeenCalledWith("c-tpl")
+    expect(push).toHaveBeenCalledWith("/")
+    create.mockRestore()
+    activate.mockRestore()
+  })
+
+  it("deletes a saved template with an Undo that saves it again", async () => {
+    const { deleteDocumentTemplate } = jest.requireMock("@/lib/db/document-templates") as {
+      deleteDocumentTemplate: jest.Mock
+    }
+    const { saveDocumentAsTemplate } = jest.requireMock("@/lib/document-templates/service") as {
+      saveDocumentAsTemplate: jest.Mock
+    }
+    const h = hook()
+    await act(() => h.deleteTemplate(template))
+    expect(deleteDocumentTemplate).toHaveBeenCalledWith("dtpl_p")
+    const [message, options] = success.mock.calls.at(-1)!
+    expect(message).toBe("Deleted the template “Postmortem”.")
+    options.action.onClick()
+    expect(saveDocumentAsTemplate).toHaveBeenCalledWith(template)
+  })
+
+  it("never deletes a built-in and maps a refused delete", async () => {
+    const { deleteDocumentTemplate, DocumentTemplateError } = jest.requireMock(
+      "@/lib/db/document-templates"
+    ) as { deleteDocumentTemplate: jest.Mock; DocumentTemplateError: new (code: string) => Error }
+    deleteDocumentTemplate.mockClear()
+    await hook().deleteTemplate({ ...template, id: "guide", source: "builtin" })
+    expect(deleteDocumentTemplate).not.toHaveBeenCalled()
+    deleteDocumentTemplate.mockRejectedValueOnce(
+      new DocumentTemplateError("document_template_not_found")
+    )
+    const h = hook()
+    await act(() => h.deleteTemplate(template))
+    expect(error).toHaveBeenLastCalledWith("That template no longer exists.")
   })
 })
 

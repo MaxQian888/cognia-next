@@ -41,6 +41,9 @@ jest.mock("@/hooks/files-library/use-files-actions", () => ({
   useFilesActions: () => actions,
 }))
 jest.mock("./files-image-thumb", () => ({ FilesImageThumb: () => <div data-testid="thumb" /> }))
+jest.mock("@/hooks/document-templates/use-document-templates", () => ({
+  useDocumentTemplates: () => ({ enabled: true, options: [] }),
+}))
 jest.mock("./files-preview-pane", () => ({
   FilesPreviewPane: ({ entry }: { entry: { key: string } }) => (
     <div data-testid={`preview-${entry.key}`} />
@@ -134,6 +137,27 @@ it("lists this workspace's entries and hides removed and trashed ones", () => {
   }
   expect(screen.getByText("2 items")).toBeInTheDocument()
   expect(screen.getByRole("heading", { name: "All" })).toBeInTheDocument()
+})
+
+it("opens Suggested with the template strip, and nowhere else", () => {
+  entriesState.entries = [entry("a")]
+  const { rerender } = render(<FilesLibrary />)
+  expect(screen.getByTestId("files-template-strip")).toBeInTheDocument()
+  act(() => useFilesLibraryStore.getState().setLens("favorites"))
+  rerender(<FilesLibrary />)
+  expect(screen.queryByTestId("files-template-strip")).toBeNull()
+  act(() => {
+    useFilesLibraryStore.getState().setLens("suggested")
+    useFilesLibraryStore.getState().setSection({ kind: "trash" })
+  })
+  rerender(<FilesLibrary />)
+  expect(screen.queryByTestId("files-template-strip")).toBeNull()
+  act(() => {
+    useFilesLibraryStore.getState().setSection({ kind: "all" })
+    useFilesLibraryStore.getState().setSearch("zzz")
+  })
+  rerender(<FilesLibrary />)
+  expect(screen.queryByTestId("files-template-strip")).toBeNull()
 })
 
 it("narrows by lens", () => {

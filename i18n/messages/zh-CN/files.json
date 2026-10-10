@@ -10,6 +10,7 @@
     "removeFromFolder": "移出文件夹",
     "rename": "重命名…",
     "restore": "恢复",
+    "saveAsTemplate": "另存为模板…",
     "share": "分享…",
     "shareSoon": "即将推出",
     "trash": "移到回收站",
@@ -110,6 +111,8 @@
     }
   },
   "errors": {
+    "document_template_name_required": "请输入模板名称。",
+    "document_template_not_found": "该模板已不存在。",
     "files_export_empty": "所选内容都无法导出。",
     "files_export_too_large": "所选内容超过 512 MB，请分批下载。",
     "files_name_required": "请输入名称。",
@@ -252,6 +255,7 @@
   "new": {
     "canvas": "画布文档",
     "folder": "文件夹",
+    "fromTemplate": "从模板新建",
     "label": "新建",
     "upload": "上传文件",
     "uploadInputAria": "选择要上传的文件"
@@ -320,6 +324,15 @@
     "noRecents": "还没有打开过内容",
     "showMore": "显示更多"
   },
+  "templates": {
+    "collapse": "隐藏模板",
+    "create": "用「{name}」新建文档",
+    "delete": "删除模板",
+    "edit": "编辑信息…",
+    "expand": "显示模板",
+    "menu": "「{name}」的模板操作",
+    "title": "从模板开始"
+  },
   "title": "文件",
   "toasts": {
     "attached": "「{title}」已附加到下一条消息。",
@@ -338,6 +351,7 @@
     "renamed": "已重命名为「{title}」。",
     "restored": "已恢复 {count} 项。",
     "retiredHint": "{count} 项仍保留在所在对话或画布中。",
+    "templateDeleted": "已删除模板「{name}」。",
     "trashed": "已将「{title}」移到回收站。",
     "trashedHint": "回收站中的内容保留 30 天。",
     "trashedMany": "已将 {count} 项移到回收站。",

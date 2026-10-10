@@ -1,6 +1,13 @@
 import type { ChatTemplateDefinition } from "@/lib/chat/template/template"
 import { appTemplates } from "@/lib/a2ui/templates"
 import { listChatTemplates, subscribeChatTemplates } from "@/lib/db/chat-templates"
+import { listDocumentTemplates, subscribeDocumentTemplates } from "@/lib/db/document-templates"
+import {
+  BUILTIN_DOCUMENT_TEMPLATE_FORMAT,
+  BUILTIN_DOCUMENT_TEMPLATE_IDS,
+  BUILTIN_DOCUMENT_TEMPLATE_LOCALES,
+  builtinDocumentTemplateCopy,
+} from "@/lib/document-templates/builtin"
 import { listGoalTemplates } from "@/lib/db/goal-templates"
 import { listPresets } from "@/lib/db/prompt-presets"
 import { getDb } from "@/lib/db/schema"
@@ -36,6 +43,8 @@ interface CatalogOnlyRecord {
    * indistinguishable from the last inside the catalog.
    */
   version?: string
+  /** Per-locale names, for records whose copy is localized (built-in documents). */
+  localized?: Record<string, { name: string; description?: string }>
 }
 
 export interface CatalogOnlyReaders {
@@ -127,16 +136,50 @@ function defaultReaders(): CatalogOnlyReaders {
           )
       ),
     /**
-     * Always empty, on purpose.
-     *
-     * `document` is a declared catalog-only domain with no store behind it:
-     * nothing in the app owns a "document template" the catalog could project.
-     * It stays declared because the domain vocabulary is shared with the plugin
-     * SDK and removing a member is a breaking change to a published union,
-     * and the Studio labels the facet inert rather than offering a filter that
-     * silently returns nothing. Pinned by a test so it stays deliberate.
+     * Document templates (ADR-0223): the built-ins in code, named in every
+     * locale they ship in, then the ones people saved from Files or the
+     * canvas. Starting a document from one happens in Files, which copies the
+     * content into a new canvas document — so, like chat templates, this
+     * domain is catalog-only. A saved template's revision moves with its
+     * content, and is spent as the catalog version.
      */
-    document: async () => [],
+    document: async () => [
+      ...BUILTIN_DOCUMENT_TEMPLATE_IDS.map((id) => {
+        const copy = builtinDocumentTemplateCopy(id, "en")
+        return {
+          id,
+          name: copy.name,
+          description: copy.description,
+          payload: projectPortableTemplateValue({
+            name: copy.name,
+            description: copy.description,
+            content: copy.content,
+            ...BUILTIN_DOCUMENT_TEMPLATE_FORMAT,
+          }),
+          trust: "built-in" as const,
+          localized: Object.fromEntries(
+            Object.keys(BUILTIN_DOCUMENT_TEMPLATE_LOCALES).map((locale) => {
+              const local = builtinDocumentTemplateCopy(id, locale)
+              return [locale, { name: local.name, description: local.description }]
+            })
+          ),
+        }
+      }),
+      ...(await listDocumentTemplates()).map((template) => ({
+        id: template.id,
+        name: template.name,
+        ...(template.description ? { description: template.description } : {}),
+        payload: projectPortableTemplateValue({
+          name: template.name,
+          ...(template.description ? { description: template.description } : {}),
+          content: template.content,
+          language: template.language,
+          type: template.type,
+        }),
+        trust: "unsigned" as const,
+        version: `${Math.max(1, template.revision)}.0.0`,
+      })),
+    ],
     /**
      * Saved chat templates, projected as the PORTABLE half of the row.
      *
@@ -181,6 +224,7 @@ async function definitionsFor(
           description: record.description,
           category: record.category,
           tags: record.tags,
+          ...(record.localized ? { localized: record.localized } : {}),
         },
         payload: record.payload,
         inputs: [],
@@ -207,42 +251,51 @@ const CATALOG_ONLY_DOMAIN_ORDER = [
 ] as const
 
 /**
- * The live half of the chat-template projection.
+ * The live half of the chat-template and document-template projections.
  *
  * Every other catalog-only domain reads a store that is edited somewhere the
  * Studio can see, or does not change at all at runtime. Chat templates are
- * saved from the COMPOSER, one keystroke away from the surface that is supposed
- * to list them, so a projection built once at boot was wrong the first time
- * anybody used the feature it exists to describe.
+ * saved from the COMPOSER and document templates from Files and the canvas,
+ * one click away from the surfaces that list them, so a projection built once
+ * at boot would be wrong the first time anybody used the feature.
  *
  * Installed by `refreshCatalogOnlyTemplateAdapters`, which the template
  * platform initializer already calls at boot, so there is no second thing to
  * remember to wire. Re-installing against the same catalog is a no-op, and
  * against a different one (a test, or a runtime rebuilt after a reset) it drops
- * the old subscription first so a discarded catalog is not kept alive by it.
+ * the old subscriptions first so a discarded catalog is not kept alive by them.
  */
-let watchedCatalog: TemplateCatalog | null = null
-let unwatchChatTemplates: (() => void) | null = null
+type LiveDomain = "chatTemplate" | "document"
 
-function watchChatTemplates(catalog: TemplateCatalog, read: CatalogOnlyReaders["chatTemplate"]) {
-  if (watchedCatalog === catalog) return
-  unwatchChatTemplates?.()
-  watchedCatalog = catalog
-  unwatchChatTemplates = subscribeChatTemplates(() => {
-    void read()
-      .then((records) => definitionsFor("chatTemplate", records))
-      .then((definitions) => catalog.replaceSource("legacy-catalog:chatTemplate", definitions))
-      // A projection that failed to rebuild leaves the previous one standing,
-      // which is stale but readable. Throwing here would surface as an
-      // unhandled rejection from inside somebody's save.
-      .catch(() => undefined)
-  })
+const LIVE_DOMAIN_SUBSCRIBERS: Record<LiveDomain, (listener: () => void) => () => void> = {
+  chatTemplate: subscribeChatTemplates,
+  document: subscribeDocumentTemplates,
 }
 
-/** Drop the chat-template subscription. Exists so tests do not leak one. */
+let watchedCatalog: TemplateCatalog | null = null
+let unwatchLiveDomains: Array<() => void> = []
+
+function watchLiveDomains(catalog: TemplateCatalog, readers: CatalogOnlyReaders) {
+  if (watchedCatalog === catalog) return
+  stopCatalogOnlyTemplateWatches()
+  watchedCatalog = catalog
+  unwatchLiveDomains = (Object.keys(LIVE_DOMAIN_SUBSCRIBERS) as LiveDomain[]).map((domain) =>
+    LIVE_DOMAIN_SUBSCRIBERS[domain](() => {
+      void readers[domain]()
+        .then((records) => definitionsFor(domain, records))
+        .then((definitions) => catalog.replaceSource(`legacy-catalog:${domain}`, definitions))
+        // A projection that failed to rebuild leaves the previous one standing,
+        // which is stale but readable. Throwing here would surface as an
+        // unhandled rejection from inside somebody's save.
+        .catch(() => undefined)
+    })
+  )
+}
+
+/** Drop the live-domain subscriptions. Exists so tests do not leak them. */
 export function stopCatalogOnlyTemplateWatches(): void {
-  unwatchChatTemplates?.()
-  unwatchChatTemplates = null
+  for (const unwatch of unwatchLiveDomains) unwatch()
+  unwatchLiveDomains = []
   watchedCatalog = null
 }
 
@@ -257,6 +310,6 @@ export async function refreshCatalogOnlyTemplateAdapters(
     catalog.replaceSource(`legacy-catalog:${domain}`, definitions)
     count += definitions.length
   }
-  watchChatTemplates(catalog, readers.chatTemplate)
+  watchLiveDomains(catalog, readers)
   return count
 }

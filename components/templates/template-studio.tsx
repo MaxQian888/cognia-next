@@ -121,17 +121,6 @@ const FILTERABLE_DOMAINS: TemplateDomain[] = [
 ]
 
 /**
- * Domains that are declared but have nothing behind them.
- *
- * `document` is a catalog-only domain whose reader returns an empty array
- * because no store in the app owns a "document template" to project. Offering
- * it as a plain filter would mean picking it always empties the list with no
- * explanation, which reads as a broken filter rather than an absent feature.
- * Labelled inert instead. See `lib/templates/dormancy.test.ts`.
- */
-const INERT_DOMAINS = new Set<TemplateDomain>(["document"])
-
-/**
  * Where a domain's real editor lives.
  *
  * Two of these used to carry `?mode=template-authoring`, a parameter nothing
@@ -143,6 +132,8 @@ const INERT_DOMAINS = new Set<TemplateDomain>(["document"])
 const EDITOR_ROUTES: Record<string, string> = {
   agentTeam: "/settings?section=squads",
   chatTemplate: "/settings?section=chatTemplates",
+  // Document templates are made and used on the Files page (ADR-0223).
+  document: "/files",
   workflow: "/workflows",
   subagent: "/me/subagents",
   customMode: "/settings?section=agent-modes",
@@ -940,12 +931,9 @@ export function TemplateStudio() {
                           <SelectItem
                             key={item}
                             value={item}
-                            disabled={INERT_DOMAINS.has(item)}
                             data-testid={`template-domain-${item}`}
                           >
-                            {INERT_DOMAINS.has(item)
-                              ? t("filters.domainInert", { domain: t(`domains.${item}`) })
-                              : t(`domains.${item}`)}
+                            {t(`domains.${item}`)}
                           </SelectItem>
                         ))}
                       </SelectContent>

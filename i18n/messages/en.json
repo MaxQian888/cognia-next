@@ -6691,7 +6691,8 @@
       "formatRaw": "Download source",
       "formatSvg": "Download as SVG",
       "label": "Export document",
-      "renderFailed": "Couldn't render the document"
+      "renderFailed": "Couldn't render the document",
+      "saveAsTemplate": "Save as template…"
     },
     "filtered": "filtered",
     "filteredSuffix": "(filtered)",
@@ -15296,6 +15297,58 @@
       "view": "View Markdown"
     }
   },
+  "documentTemplates": {
+    "blank": {
+      "description": "Start from an empty page.",
+      "name": "Blank document"
+    },
+    "builtin": {
+      "guide": {
+        "content": "# Guide title\n\nOne sentence on what this guide helps someone do.\n\n## Before you start\n\n- What you need\n- Who this is for\n\n## Steps\n\n1. First step\n2. Second step\n3. Third step\n\n## If something goes wrong\n\n- **Problem:** what to try\n\n## Related\n\n- Further reading\n",
+        "description": "Explain how to do something, step by step.",
+        "name": "Guide"
+      },
+      "meeting-notes": {
+        "content": "# Meeting title\n\n**Date:** \n**Attendees:** \n\n## Agenda\n\n1. \n\n## Notes\n\n- \n\n## Decisions\n\n- \n\n## Action items\n\n- [ ] Owner — task — due date\n",
+        "description": "Agenda, notes, decisions and action items.",
+        "name": "Meeting notes"
+      },
+      "project-tracker": {
+        "content": "# Project name\n\n**Owner:** \n**Status:** On track\n**Target date:** \n\n## Goal\n\nWhat done looks like.\n\n## Milestones\n\n| Milestone | Owner | Due | Status |\n| --- | --- | --- | --- |\n|  |  |  | Not started |\n\n## Risks\n\n- \n\n## Decisions\n\n- \n\n## Updates\n\n### Date\n\n- \n",
+        "description": "Goal, milestones, risks and a running log of updates.",
+        "name": "Project tracker"
+      },
+      "todo": {
+        "content": "# To-do\n\n## Today\n\n- [ ] \n\n## This week\n\n- [ ] \n\n## Later\n\n- [ ] \n\n## Done\n\n- [x] \n",
+        "description": "Today, this week, later — and what is done.",
+        "name": "To-do list"
+      },
+      "weekly-update": {
+        "content": "# Weekly update\n\n**Week of:** \n\n## Highlights\n\n- \n\n## Progress\n\n- \n\n## Blockers\n\n- \n\n## Next week\n\n- \n\n## Asks\n\n- \n",
+        "description": "Highlights, progress, blockers and next steps.",
+        "name": "Weekly update"
+      }
+    },
+    "errors": {
+      "document_template_name_required": "Enter a template name.",
+      "document_template_not_found": "That template no longer exists.",
+      "unknown": "Something went wrong. Try again."
+    },
+    "saveDialog": {
+      "cancel": "Cancel",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "What is it for? (optional)",
+      "hint": "Saves the current content as a template you can start new documents from.",
+      "nameLabel": "Name",
+      "save": "Save template",
+      "title": "Save as template"
+    },
+    "toasts": {
+      "deleted": "Deleted the template “{name}”.",
+      "saved": "Saved “{name}” as a template.",
+      "updated": "Updated the template “{name}”."
+    }
+  },
   "editor": {
     "diagnostics": {
       "errors": "Errors",
@@ -17477,6 +17530,7 @@
       "removeFromFolder": "Take out of folder",
       "rename": "Rename…",
       "restore": "Restore",
+      "saveAsTemplate": "Save as template…",
       "share": "Share…",
       "shareSoon": "Coming soon",
       "trash": "Move to Trash",
@@ -17577,6 +17631,8 @@
       }
     },
     "errors": {
+      "document_template_name_required": "Enter a template name.",
+      "document_template_not_found": "That template no longer exists.",
       "files_export_empty": "None of the selected items could be exported.",
       "files_export_too_large": "The selection is larger than 512 MB. Download fewer items at a time.",
       "files_name_required": "Enter a name.",
@@ -17719,6 +17775,7 @@
     "new": {
       "canvas": "Canvas document",
       "folder": "Folder",
+      "fromTemplate": "From template",
       "label": "New",
       "upload": "Upload files",
       "uploadInputAria": "Choose files to upload"
@@ -17787,6 +17844,15 @@
       "noRecents": "Nothing opened yet",
       "showMore": "Show more"
     },
+    "templates": {
+      "collapse": "Hide templates",
+      "create": "New document from {name}",
+      "delete": "Delete template",
+      "edit": "Edit details…",
+      "expand": "Show templates",
+      "menu": "Template actions for {name}",
+      "title": "Start from a template"
+    },
     "title": "Files",
     "toasts": {
       "attached": "“{title}” is attached to your next message.",
@@ -17805,6 +17871,7 @@
       "renamed": "Renamed to “{title}”.",
       "restored": "Restored {count, plural, one {# item} other {# items}}.",
       "retiredHint": "{count, plural, one {# item stays in its conversation or on the canvas.} other {# items stay in their conversations or on the canvas.}}",
+      "templateDeleted": "Deleted the template “{name}”.",
       "trashed": "Moved “{title}” to the Trash.",
       "trashedHint": "Items stay in the Trash for 30 days.",
       "trashedMany": "Moved {count, plural, one {# item} other {# items}} to the Trash.",
@@ -55245,7 +55312,6 @@
       "allTrust": "All trust levels",
       "clear": "Clear filters",
       "domain": "Template type",
-      "domainInert": "{domain} (nothing to list yet)",
       "hiddenHere": "{count, plural, =1 {1 template is hidden in this workspace} other {# templates are hidden in this workspace}}",
       "scope": "Scope",
       "search": "Search templates",

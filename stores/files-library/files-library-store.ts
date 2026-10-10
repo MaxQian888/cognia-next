@@ -76,6 +76,8 @@ interface FilesLibraryState {
   folderDialog: FilesFolderDialog
   /** Folder id the delete-folder confirmation acts on. */
   deleteFolderTarget: string | null
+  /** Entry key the "Save as template" dialog saves. */
+  saveTemplateTarget: string | null
 
   setViewMode: (mode: FilesViewMode) => void
   setSort: (sort: FilesSort | null) => void
@@ -101,6 +103,8 @@ interface FilesLibraryState {
   closeFolderDialog: () => void
   openDeleteFolder: (folderId: string) => void
   closeDeleteFolder: () => void
+  openSaveTemplate: (key: string) => void
+  closeSaveTemplate: () => void
 }
 
 /** What a v1 persisted blob (ADR-0200) carried. */
@@ -168,6 +172,7 @@ export const useFilesLibraryStore = create<FilesLibraryState>()(
       emptyTrashOpen: false,
       folderDialog: null,
       deleteFolderTarget: null,
+      saveTemplateTarget: null,
 
       setViewMode: (viewMode) => set({ viewMode }),
       setSort: (sort) => set({ sort }),
@@ -201,6 +206,8 @@ export const useFilesLibraryStore = create<FilesLibraryState>()(
       closeFolderDialog: () => set({ folderDialog: null }),
       openDeleteFolder: (deleteFolderTarget) => set({ deleteFolderTarget }),
       closeDeleteFolder: () => set({ deleteFolderTarget: null }),
+      openSaveTemplate: (saveTemplateTarget) => set({ saveTemplateTarget }),
+      closeSaveTemplate: () => set({ saveTemplateTarget: null }),
     }),
     {
       name: "files-library-prefs",

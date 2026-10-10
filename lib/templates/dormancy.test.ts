@@ -14,20 +14,7 @@
 import { readFile } from "node:fs/promises"
 
 import { createFullDomainAdapters } from "./adapters"
-import { TemplateCatalog } from "./catalog"
-import { refreshCatalogOnlyTemplateAdapters } from "./catalog-only-adapters"
 import type { TemplateOperation } from "./service"
-
-describe("the `document` catalog-only domain", () => {
-  /** Declared, filterable, and with no store behind it to project. */
-  it("contributes nothing to the catalog", async () => {
-    const catalog = new TemplateCatalog()
-    // The other readers touch Dexie; only the `document` answer matters here,
-    // and it is the one that never reads anything at all.
-    await refreshCatalogOnlyTemplateAdapters(catalog).catch(() => undefined)
-    expect(catalog.query({ domain: "document" })).toEqual([])
-  })
-})
 
 describe("TemplateOperation kinds", () => {
   /**

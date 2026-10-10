@@ -62,7 +62,9 @@ import { FilesMoveDialog } from "./files-move-dialog"
 import { FilesNewMenu } from "./files-new-menu"
 import { FilesPreviewPane } from "./files-preview-pane"
 import { FilesRenameDialog } from "./files-rename-dialog"
+import { FilesSaveTemplateDialog } from "./files-save-template-dialog"
 import { FilesSidebar } from "./files-sidebar"
+import { FilesTemplateStrip } from "./files-template-strip"
 import { FilesToolbar } from "./files-toolbar"
 import { FilesTrashDialogs } from "./files-trash-dialogs"
 
@@ -169,6 +171,8 @@ function FilesLibraryBody() {
       section.kind === "recent" ||
       (section.kind === "group" && section.group === "images"))
   const empty = visible !== undefined && visible.length === 0 && childFolders.length === 0
+  // Templates open Suggested, where a new document is most likely to start.
+  const showTemplates = lens === "suggested" && section.kind === "all" && !view.filtered
 
   const header = (
     <FeaturePageHeader
@@ -271,6 +275,11 @@ function FilesLibraryBody() {
             onKeyDown={onKeyDown}
             data-testid="files-body"
           >
+            {showTemplates ? (
+              <div className="px-4 pt-4">
+                <FilesTemplateStrip actions={actions} />
+              </div>
+            ) : null}
             {visible === undefined ? (
               <div
                 className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4 p-4"
@@ -373,6 +382,7 @@ function FilesLibraryBody() {
       </FeaturePageShell>
       <FilesMoveDialog entries={entries ?? []} folders={folders} actions={actions} />
       <FilesRenameDialog entries={entries ?? []} actions={actions} />
+      <FilesSaveTemplateDialog entries={entries ?? []} />
       <FilesTrashDialogs entries={entries ?? []} actions={actions} onDeleted={selection.clear} />
       <FilesFolderDialog />
       <FilesDeleteFolderDialog folders={folders} />

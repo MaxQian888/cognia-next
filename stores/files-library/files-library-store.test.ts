@@ -79,6 +79,7 @@ describe("files library store", () => {
     s.setEmptyTrashOpen(true)
     s.openFolderDialog({ mode: "create", parentId: "root" })
     s.openDeleteFolder("lbf_a")
+    s.openSaveTemplate("canvas:c1")
     expect(useFilesLibraryStore.getState()).toMatchObject({
       moveTarget: ["a", "b"],
       renameTarget: "a",
@@ -86,6 +87,7 @@ describe("files library store", () => {
       emptyTrashOpen: true,
       folderDialog: { mode: "create", parentId: "root" },
       deleteFolderTarget: "lbf_a",
+      saveTemplateTarget: "canvas:c1",
     })
     s.closeMove()
     s.closeRename()
@@ -93,6 +95,7 @@ describe("files library store", () => {
     s.setEmptyTrashOpen(false)
     s.closeFolderDialog()
     s.closeDeleteFolder()
+    s.closeSaveTemplate()
     expect(useFilesLibraryStore.getState()).toMatchObject({
       moveTarget: null,
       renameTarget: null,
@@ -100,6 +103,7 @@ describe("files library store", () => {
       emptyTrashOpen: false,
       folderDialog: null,
       deleteFolderTarget: null,
+      saveTemplateTarget: null,
     })
   })
 })

@@ -176,7 +176,8 @@
     "formatRaw": "Download source",
     "formatSvg": "Download as SVG",
     "label": "Export document",
-    "renderFailed": "Couldn't render the document"
+    "renderFailed": "Couldn't render the document",
+    "saveAsTemplate": "Save as template…"
   },
   "filtered": "filtered",
   "filteredSuffix": "(filtered)",

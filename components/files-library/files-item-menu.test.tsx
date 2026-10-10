@@ -4,6 +4,11 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+let mockTemplatesEnabled = true
+jest.mock("@/lib/templates/feature-flags", () => ({
+  isUnifiedTemplatePlatformEnabled: () => mockTemplatesEnabled,
+}))
+
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
@@ -54,9 +59,15 @@ function actions(): jest.Mocked<FilesActions> {
   } as unknown as jest.Mocked<FilesActions>
 }
 
-beforeEach(() =>
-  useFilesLibraryStore.setState({ moveTarget: null, renameTarget: null, deleteForeverTarget: null })
-)
+beforeEach(() => {
+  mockTemplatesEnabled = true
+  useFilesLibraryStore.setState({
+    moveTarget: null,
+    renameTarget: null,
+    deleteForeverTarget: null,
+    saveTemplateTarget: null,
+  })
+})
 
 async function openMenu() {
   const user = userEvent.setup()
@@ -149,10 +160,36 @@ it("opens the same entries on right-click", async () => {
     "Move to folder…",
     "Rename…",
     "Duplicate",
+    "Save as template…",
     "Download",
     "Share…",
     "Move to Trash",
   ])
   await userEvent.setup().click(screen.getByRole("menuitem", { name: "Use in chat" }))
   expect(a.useInChat).toHaveBeenCalledWith(e)
+})
+
+it("saves documents as templates, only while the template platform is on", async () => {
+  const { unmount } = render(<FilesItemMenu entry={entry()} title="Parser" actions={actions()} />)
+  const user = await openMenu()
+  await user.click(screen.getByRole("menuitem", { name: "Save as template…" }))
+  expect(useFilesLibraryStore.getState().saveTemplateTarget).toBe("artifact:a")
+  unmount()
+
+  mockTemplatesEnabled = false
+  render(<FilesItemMenu entry={entry()} title="Parser" actions={actions()} />)
+  await openMenu()
+  expect(screen.queryByRole("menuitem", { name: "Save as template…" })).toBeNull()
+})
+
+it("offers no template entry for images and files", async () => {
+  render(
+    <FilesItemMenu
+      entry={entry({ key: "upload:u", kind: "upload", sourceId: "u" })}
+      title="Parser"
+      actions={actions()}
+    />
+  )
+  await openMenu()
+  expect(screen.queryByRole("menuitem", { name: "Save as template…" })).toBeNull()
 })

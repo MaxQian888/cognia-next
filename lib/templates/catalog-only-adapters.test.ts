@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import { waitFor } from "@testing-library/react"
 
 import { createChatTemplate } from "@/lib/db/chat-templates"
+import { createDocumentTemplate, updateDocumentTemplate } from "@/lib/db/document-templates"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { TemplateCatalog } from "./catalog"
 import {
@@ -127,5 +128,77 @@ describe("the chatTemplate catalog-only domain", () => {
 
     await waitFor(() => expect(second.query({ domain: "chatTemplate" })).toHaveLength(1))
     expect(first.query({ domain: "chatTemplate" })).toEqual([])
+  })
+})
+
+describe("the document catalog-only domain", () => {
+  const empty = async () => []
+  const otherDomains = {
+    a2ui: empty,
+    goal: empty,
+    scheduler: empty,
+    prompt: empty,
+    subscription: empty,
+    chatTemplate: empty,
+  }
+
+  afterEach(() => {
+    stopCatalogOnlyTemplateWatches()
+  })
+
+  it("projects the five built-ins, named in every shipped locale", async () => {
+    const catalog = new TemplateCatalog()
+    await refreshCatalogOnlyTemplateAdapters(catalog, otherDomains)
+    const builtins = catalog.query({ domain: "document" })
+    expect(builtins.map((definition) => definition.id).sort()).toEqual(
+      [
+        "catalog.document.guide",
+        "catalog.document.meeting-notes",
+        "catalog.document.project-tracker",
+        "catalog.document.todo",
+        "catalog.document.weekly-update",
+      ].sort()
+    )
+    const meeting = catalog.get("catalog.document.meeting-notes", "1.0.0")!
+    expect(meeting).toMatchObject({
+      status: "published",
+      provenance: { source: "built-in", trust: "built-in" },
+      metadata: {
+        name: "Meeting notes",
+        localized: {
+          en: { name: "Meeting notes" },
+          "zh-CN": { name: "会议纪要" },
+        },
+      },
+      payload: { language: "markdown", type: "text" },
+    })
+    expect(String((meeting.payload as { content: string }).content)).toContain("## Action items")
+  })
+
+  it("projects saved templates keyed on their revision, and follows the table", async () => {
+    const catalog = new TemplateCatalog()
+    await refreshCatalogOnlyTemplateAdapters(catalog, otherDomains)
+    expect(catalog.query({ domain: "document" })).toHaveLength(5)
+
+    const saved = await createDocumentTemplate({
+      name: "Postmortem",
+      description: "After an incident",
+      content: "# Postmortem",
+      language: "markdown",
+      type: "text",
+    })
+    await waitFor(() => expect(catalog.query({ domain: "document" })).toHaveLength(6))
+    expect(catalog.get(`catalog.document.${saved.id}`, "1.0.0")).toMatchObject({
+      provenance: { source: "user", trust: "unsigned" },
+      metadata: { name: "Postmortem", description: "After an incident" },
+      payload: { content: "# Postmortem" },
+    })
+
+    await updateDocumentTemplate(saved.id, { content: "# Postmortem v2" })
+    await waitFor(() =>
+      expect(catalog.get(`catalog.document.${saved.id}`, "2.0.0")).toMatchObject({
+        payload: { content: "# Postmortem v2" },
+      })
+    )
   })
 })

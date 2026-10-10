@@ -13,8 +13,7 @@
  * the caller supplies — this module carries no strings of its own.
  */
 
-import type { ArtifactLanguage } from "@/types/artifact/artifact"
-
+import { documentDraftOf } from "./document-draft"
 import { downloadPayloadFor } from "./download"
 import { uploadFileToLibrary } from "./upload"
 import type { FilesEntry } from "./types"
@@ -53,21 +52,7 @@ export async function duplicateFilesEntry(
   if (entry.kind === "canvas" || entry.kind === "artifact") {
     const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
     const store = useArtifactStore.getState()
-    let draft: { content: string; language: ArtifactLanguage; type: "code" | "text" } | null = null
-    if (entry.kind === "canvas") {
-      const doc = store.canvasDocuments[entry.sourceId]
-      if (doc) draft = { content: doc.content, language: doc.language, type: doc.type }
-    } else {
-      const artifact = store.artifacts[entry.sourceId]
-      if (artifact) {
-        const prose = artifact.type === "document"
-        draft = {
-          content: artifact.content,
-          language: artifact.language ?? (prose ? "markdown" : "plaintext"),
-          type: prose ? "text" : "code",
-        }
-      }
-    }
+    const draft = documentDraftOf(entry, store)
     if (!draft) throw new FilesDuplicateError("files_source_missing")
     const id = store.createCanvasDocument({
       title: copyName(name, options.suffix, false),

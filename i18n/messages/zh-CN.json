@@ -6691,7 +6691,8 @@
       "formatRaw": "下载源文件",
       "formatSvg": "下载为 SVG",
       "label": "导出文档",
-      "renderFailed": "无法渲染该文档"
+      "renderFailed": "无法渲染该文档",
+      "saveAsTemplate": "另存为模板…"
     },
     "filtered": "已过滤",
     "filteredSuffix": "（已筛选）",
@@ -15296,6 +15297,58 @@
       "view": "查看 Markdown"
     }
   },
+  "documentTemplates": {
+    "blank": {
+      "description": "从空白页面开始。",
+      "name": "空白文档"
+    },
+    "builtin": {
+      "guide": {
+        "content": "# 指南标题\n\n用一句话说明这份指南能帮人做什么。\n\n## 开始之前\n\n- 需要准备什么\n- 适合哪些人\n\n## 步骤\n\n1. 第一步\n2. 第二步\n3. 第三步\n\n## 遇到问题时\n\n- **问题：** 可以尝试的办法\n\n## 相关内容\n\n- 延伸阅读\n",
+        "description": "一步步说明如何完成某件事。",
+        "name": "指南"
+      },
+      "meeting-notes": {
+        "content": "# 会议主题\n\n**日期：** \n**参会人：** \n\n## 议程\n\n1. \n\n## 记录\n\n- \n\n## 决定\n\n- \n\n## 待办事项\n\n- [ ] 负责人 — 事项 — 截止日期\n",
+        "description": "议程、记录、决定和待办事项。",
+        "name": "会议纪要"
+      },
+      "project-tracker": {
+        "content": "# 项目名称\n\n**负责人：** \n**状态：** 正常推进\n**目标日期：** \n\n## 目标\n\n完成时是什么样子。\n\n## 里程碑\n\n| 里程碑 | 负责人 | 截止日期 | 状态 |\n| --- | --- | --- | --- |\n|  |  |  | 未开始 |\n\n## 风险\n\n- \n\n## 决定\n\n- \n\n## 进展\n\n### 日期\n\n- \n",
+        "description": "目标、里程碑、风险和持续更新的进展记录。",
+        "name": "项目跟踪"
+      },
+      "todo": {
+        "content": "# 待办\n\n## 今天\n\n- [ ] \n\n## 本周\n\n- [ ] \n\n## 以后\n\n- [ ] \n\n## 已完成\n\n- [x] \n",
+        "description": "今天、本周、以后，以及已完成的事项。",
+        "name": "待办清单"
+      },
+      "weekly-update": {
+        "content": "# 周报\n\n**周次：** \n\n## 亮点\n\n- \n\n## 进展\n\n- \n\n## 阻碍\n\n- \n\n## 下周计划\n\n- \n\n## 需要的支持\n\n- \n",
+        "description": "亮点、进展、阻碍和下一步计划。",
+        "name": "周报"
+      }
+    },
+    "errors": {
+      "document_template_name_required": "请输入模板名称。",
+      "document_template_not_found": "该模板已不存在。",
+      "unknown": "出了点问题，请重试。"
+    },
+    "saveDialog": {
+      "cancel": "取消",
+      "descriptionLabel": "描述",
+      "descriptionPlaceholder": "用途是什么？（可选）",
+      "hint": "把当前内容保存为模板，之后可以用它新建文档。",
+      "nameLabel": "名称",
+      "save": "保存模板",
+      "title": "另存为模板"
+    },
+    "toasts": {
+      "deleted": "已删除模板「{name}」。",
+      "saved": "已将「{name}」保存为模板。",
+      "updated": "已更新模板「{name}」。"
+    }
+  },
   "editor": {
     "diagnostics": {
       "errors": "错误",
@@ -17477,6 +17530,7 @@
       "removeFromFolder": "移出文件夹",
       "rename": "重命名…",
       "restore": "恢复",
+      "saveAsTemplate": "另存为模板…",
       "share": "分享…",
       "shareSoon": "即将推出",
       "trash": "移到回收站",
@@ -17577,6 +17631,8 @@
       }
     },
     "errors": {
+      "document_template_name_required": "请输入模板名称。",
+      "document_template_not_found": "该模板已不存在。",
       "files_export_empty": "所选内容都无法导出。",
       "files_export_too_large": "所选内容超过 512 MB，请分批下载。",
       "files_name_required": "请输入名称。",
@@ -17719,6 +17775,7 @@
     "new": {
       "canvas": "画布文档",
       "folder": "文件夹",
+      "fromTemplate": "从模板新建",
       "label": "新建",
       "upload": "上传文件",
       "uploadInputAria": "选择要上传的文件"
@@ -17787,6 +17844,15 @@
       "noRecents": "还没有打开过内容",
       "showMore": "显示更多"
     },
+    "templates": {
+      "collapse": "隐藏模板",
+      "create": "用「{name}」新建文档",
+      "delete": "删除模板",
+      "edit": "编辑信息…",
+      "expand": "显示模板",
+      "menu": "「{name}」的模板操作",
+      "title": "从模板开始"
+    },
     "title": "文件",
     "toasts": {
       "attached": "「{title}」已附加到下一条消息。",
@@ -17805,6 +17871,7 @@
       "renamed": "已重命名为「{title}」。",
       "restored": "已恢复 {count} 项。",
       "retiredHint": "{count} 项仍保留在所在对话或画布中。",
+      "templateDeleted": "已删除模板「{name}」。",
       "trashed": "已将「{title}」移到回收站。",
       "trashedHint": "回收站中的内容保留 30 天。",
       "trashedMany": "已将 {count} 项移到回收站。",
@@ -55245,7 +55312,6 @@
       "allTrust": "全部信任级别",
       "clear": "清除筛选",
       "domain": "模板类型",
-      "domainInert": "{domain}（暂无内容）",
       "hiddenHere": "本工作区隐藏了 {count} 个模板",
       "scope": "范围",
       "search": "搜索模板",

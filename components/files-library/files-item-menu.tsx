@@ -6,7 +6,8 @@
  *
  * - In the Trash an item offers Preview, Restore and Delete forever.
  * - Everywhere else: open, preview, use in chat; favorite, move, take out of
- *   a folder; rename, duplicate, download; share (dormant until ADR-0222's
+ *   a folder; rename, duplicate, save as template (documents, while the
+ *   template platform is on), download; share (dormant until ADR-0222's
  *   file snapshots exist — `FILES_SHARE_DORMANCY`); and Move to Trash, which
  *   replaced both "Remove from Files" and "Delete".
  */
@@ -19,6 +20,7 @@ import {
   EyeIcon,
   FolderInputIcon,
   FolderMinusIcon,
+  LayoutTemplateIcon,
   MessageSquarePlusIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -38,7 +40,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
+import { hasDocumentDraft } from "@/lib/files-library/document-draft"
 import { isFilesShareAvailable } from "@/lib/files-library/share"
+import { isUnifiedTemplatePlatformEnabled } from "@/lib/templates/feature-flags"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
@@ -49,6 +53,7 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
   const openMove = useFilesLibraryStore((s) => s.openMove)
   const openRename = useFilesLibraryStore((s) => s.openRename)
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
+  const openSaveTemplate = useFilesLibraryStore((s) => s.openSaveTemplate)
 
   if (entry.trashedAt !== undefined) {
     return [
@@ -143,6 +148,17 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
       icon: CopyIcon,
       onSelect: () => void actions.duplicate(entry),
     },
+    ...(hasDocumentDraft(entry) && isUnifiedTemplatePlatformEnabled()
+      ? [
+          {
+            type: "item",
+            id: "save-template",
+            label: t("actions.saveAsTemplate"),
+            icon: LayoutTemplateIcon,
+            onSelect: () => openSaveTemplate(entry.key),
+          } satisfies FilesMenuNode,
+        ]
+      : []),
     {
       type: "item",
       id: "download",

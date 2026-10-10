@@ -10,6 +10,7 @@
     "removeFromFolder": "Take out of folder",
     "rename": "Rename…",
     "restore": "Restore",
+    "saveAsTemplate": "Save as template…",
     "share": "Share…",
     "shareSoon": "Coming soon",
     "trash": "Move to Trash",
@@ -110,6 +111,8 @@
     }
   },
   "errors": {
+    "document_template_name_required": "Enter a template name.",
+    "document_template_not_found": "That template no longer exists.",
     "files_export_empty": "None of the selected items could be exported.",
     "files_export_too_large": "The selection is larger than 512 MB. Download fewer items at a time.",
     "files_name_required": "Enter a name.",
@@ -252,6 +255,7 @@
   "new": {
     "canvas": "Canvas document",
     "folder": "Folder",
+    "fromTemplate": "From template",
     "label": "New",
     "upload": "Upload files",
     "uploadInputAria": "Choose files to upload"
@@ -320,6 +324,15 @@
     "noRecents": "Nothing opened yet",
     "showMore": "Show more"
   },
+  "templates": {
+    "collapse": "Hide templates",
+    "create": "New document from {name}",
+    "delete": "Delete template",
+    "edit": "Edit details…",
+    "expand": "Show templates",
+    "menu": "Template actions for {name}",
+    "title": "Start from a template"
+  },
   "title": "Files",
   "toasts": {
     "attached": "“{title}” is attached to your next message.",
@@ -338,6 +351,7 @@
     "renamed": "Renamed to “{title}”.",
     "restored": "Restored {count, plural, one {# item} other {# items}}.",
     "retiredHint": "{count, plural, one {# item stays in its conversation or on the canvas.} other {# items stay in their conversations or on the canvas.}}",
+    "templateDeleted": "Deleted the template “{name}”.",
     "trashed": "Moved “{title}” to the Trash.",
     "trashedHint": "Items stay in the Trash for 30 days.",
     "trashedMany": "Moved {count, plural, one {# item} other {# items}} to the Trash.",

@@ -515,13 +515,6 @@ describe("TemplateStudio", () => {
   })
 
   /**
-   * `document` is a declared catalog-only domain whose reader returns nothing,
-   * because no store in the app owns a document template. Offered as a plain
-   * filter it would empty the list with no explanation, which reads as a broken
-   * filter rather than an absent feature. Working Rule 7: the type says so, the
-   * UI says so, and `lib/templates/dormancy.test.ts` pins the emptiness.
-   */
-  /**
    * `useTemplateRouteState` owned `tab` and `setTab` from the day the phone
    * body landed and the Studio read neither: it was `defaultValue="library"`,
    * so `/templates?tab=instances` opened the Library and the tab a user was on
@@ -639,14 +632,18 @@ describe("TemplateStudio", () => {
     })
   })
 
-  it("labels the domain with nothing behind it inert rather than just empty", async () => {
+  /**
+   * ADR-0223 gave `document` a store and built-ins; it used to be labelled
+   * inert because its reader returned nothing.
+   */
+  it("offers document templates as a plain, selectable filter", async () => {
     mockPlatform = "tauri"
     await act(async () => {
       render(<TemplateStudio />)
     })
     fireEvent.click(screen.getByLabelText("filters.domain"))
     const item = screen.getByTestId("template-domain-document")
-    expect(item).toHaveTextContent("filters.domainInert")
-    expect(item).toHaveAttribute("data-disabled")
+    expect(item).toHaveTextContent("domains.document")
+    expect(item).not.toHaveAttribute("data-disabled")
   })
 })
