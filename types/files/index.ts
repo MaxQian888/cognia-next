@@ -63,7 +63,7 @@ export interface FileAccessDecision {
   allowed: boolean
   /** `"ok"` when allowed, otherwise the machine-stable deny reason. */
   reason: FileDenyReason | "ok"
-  /** Human-readable detail, surfaced in logs and audit entries. */
+  /** Human-readable detail, surfaced in logs and error messages. */
   detail?: string
   /** The allowed root the target resolved inside, when applicable. */
   matchedRoot?: string
@@ -82,23 +82,4 @@ export interface FileStat {
   createdMs?: number
   /** True when the file is not writable (best-effort; runtime-dependent). */
   readonly?: boolean
-}
-
-/** One recorded file operation, kept in the in-memory audit ring buffer. */
-export interface FileAuditEntry {
-  /** Stable id for de-duplication in the ring buffer. */
-  id: string
-  op: FileOperation
-  path: string
-  /** Destination path for `copy` / `move`. */
-  destPath?: string
-  allowed: boolean
-  /** Bytes read or written, when the operation moves data. */
-  bytes?: number
-  /** Wall-clock duration of the underlying runtime call. */
-  durationMs?: number
-  /** Deny reason or thrown runtime error message; absent on success. */
-  error?: string
-  /** Epoch ms when the operation was recorded. */
-  ts: number
 }

@@ -7,9 +7,10 @@
  * dev server still work) and write paths reject with a clear error.
  *
  * Plugin code is expected to gate write operations behind a permission
- * check before calling here — see `lib/files/permissions.ts` and the
- * `lib/files/secure-fs.ts` façade, which wraps these primitives with a policy
- * check, structured logging, and an audit trail.
+ * check before calling here — see `lib/files/permissions.ts`. The raw
+ * absolute-path commands behind these helpers are confined in Rust to the
+ * registered roots (`crates/cognia-files/src/files.rs`), and every refusal is
+ * written to the native log under the `cognia::fs_audit` target.
  *
  * Beyond the original text helpers this module exposes binary read/write and
  * the structural operations (`removeFile`, `copyFile`, `renameFile`,

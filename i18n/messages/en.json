@@ -17590,12 +17590,6 @@
     "openLeft": "Open {name}",
     "openRight": "Open {name}"
   },
-  "fileOps": {
-    "auditCleared": "File activity log cleared.",
-    "denied": "Access denied: {detail}",
-    "deniedTitle": "File access denied",
-    "failed": "File operation failed: {message}"
-  },
   "fileViewer": {
     "error": {
       "isDirectory": "That path is a folder, not a file.",

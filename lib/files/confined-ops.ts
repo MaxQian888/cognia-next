@@ -1,18 +1,17 @@
 /**
- * Confined write/mkdir backend for the secure file-IO façade.
+ * Confined write/mkdir backend.
  *
  * Thin wrapper over the authoritative Rust `*_confined` commands (see
- * `lib/claude/ipc.ts` and `src-tauri/src/files.rs`). Kept as its own module so
- * `secure-fs.ts` stays runtime-agnostic and so tests can inject a fake backend
+ * `lib/claude/ipc.ts` and `crates/cognia-files/src/files.rs`). Kept as its own
+ * module so callers stay runtime-agnostic and tests can inject a fake backend
  * without a Tauri host. Web mode (no Rust) rejects — there is no safe confined
- * write target in the browser, and the secure layer's only production consumers
- * run inside the desktop shell.
+ * write target in the browser, and its consumers run inside the desktop shell.
  */
 
 import { isTauri } from "@/lib/tauri"
 import { ensureDirConfined, writeTextFileConfined } from "@/lib/claude/ipc"
 
-/** The on-disk-confined mutations the secure façade delegates to. */
+/** The on-disk-confined mutations a caller delegates to. */
 export interface ConfinedOps {
   writeText(path: string, content: string, allowedRoots: string[]): Promise<void>
   mkdir(path: string, allowedRoots: string[]): Promise<void>

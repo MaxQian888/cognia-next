@@ -5,7 +5,7 @@ description: "每个对话拥有一个 FileSpace：从执行根、工作区根�
 
 # ADR 0222 — 对话的文件是一个视图，分享文件是一次授权
 
-**状态：** 已接受——P0（FileSpace、链接、“对话文件”面板）、P1（附带文件的快照分享、文件分享策略、协作 `files.share`）、P2（经 WebDAV/SFTP 的实时授权、SFTPGo 提供方、网络驱动器设置）与 P3（协作成员、智能体工具、生命周期）已于 2026-10-10 交付。已在 macOS 上完成的验证：curl 与访达访问内置 WebDAV 监听器、OpenSSH `sftp` 访问内置 SFTP 监听器，以及 SFTPGo 往返（创建、暂停、恢复、轮换、撤销）。Windows WebClient、rclone、Cyberduck、WinSCP 与 cloudflared 隧道尚未用真实客户端验证。
+**状态：** 已接受——P0（FileSpace、链接、“对话文件”面板）、P1（附带文件的快照分享、文件分享策略、协作 `files.share`）、P2（经 WebDAV/SFTP 的实时授权、SFTPGo 提供方、网络驱动器设置）与 P3（协作成员、智能体工具、生命周期）已于 2026-10-10 交付。已在 macOS 上完成的验证：curl 与访达访问内置 WebDAV 监听器、OpenSSH `sftp` 访问内置 SFTP 监听器，以及 SFTPGo 往返（创建、暂停、恢复、轮换、撤销）；2026-10-11 又验证了 rclone（WebDAV 与 SFTP，含固定主机密钥）和 Cyberduck CLI（WebDAV 与 SFTP）。Windows WebClient、WinSCP 与 cloudflared 隧道尚未用真实客户端验证。
 **日期：** 2026-10-10
 **设计：** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **相关：** [ADR-0037](./0037-public-share-links)（分享链接）、
@@ -102,7 +102,7 @@ P3 的实际实现：宿主本就依据每份挂载表携带的对话状态暂�
 - 快照分享保持零知识特性，可承载的大小提升到配置的单文件与单分享上限，而不再是总计 10 MiB。
 - 宿主新增一个入站面：默认关闭、按凭证限定范围、限速、审计，并且每次操作都检查撤销。
 - 协作服务器新增三张表和一组请求路由；从不登记宿主的会话保持现有行为。
-- 已分阶段交付（P0 FileSpace 与链接，P1 快照与策略，P2 实时授权与提供方，P3 协作成员、智能体工具与生命周期）。尚未完成的客户端验证（Windows WebClient、rclone、Cyberduck、WinSCP、隧道）只影响界面推荐哪些组合，不影响设计本身。
+- 已分阶段交付（P0 FileSpace 与链接，P1 快照与策略，P2 实时授权与提供方，P3 协作成员、智能体工具与生命周期）。尚未完成的客户端验证（Windows WebClient、WinSCP、隧道）只影响界面推荐哪些组合，不影响设计本身。
 
 ## 已否决
 

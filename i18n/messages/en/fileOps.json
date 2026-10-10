@@ -1,6 +1,0 @@
-{
-  "auditCleared": "File activity log cleared.",
-  "denied": "Access denied: {detail}",
-  "deniedTitle": "File access denied",
-  "failed": "File operation failed: {message}"
-}

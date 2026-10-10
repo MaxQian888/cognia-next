@@ -14,6 +14,22 @@ description: "Closes the gap between the mature OS-level sandbox (ADR-0028) and 
 
 `TeammateConfigDialog` now exposes the existing sandbox policy editor, displays the inherited team ceiling, and persists only `clampSandboxPolicy`-narrowed overrides. This reuses the existing `SandboxResourcePolicy` schema and does not add a teammate-specific sandbox model.
 
+## Amendment: raw fs commands enforced for every origin (2026-10-11)
+
+P2's shadow phase is over. `enforce_check_path` (now in `crates/cognia-files/src/files.rs`) refuses
+every raw `read_text_file` / `write_text_file` / `ensure_dir` outside the registered roots, for the
+renderer (`Local`) as much as for a paired device (`Remote`), and writes each refusal to the native
+log under the `cognia::fs_audit` target, which the diagnostics log viewer filters by. That log is
+the persistent audit trail; the renderer's in-memory `SecureFileSystem` façade and its audit ring,
+which nothing called, were removed.
+
+The renderer callers were made to stay inside a root first: the file-picker read and the "save as"
+write in `lib/files/file-bridge.ts` register the dialog path (`fs_allow_dialog_path`) before the raw
+call, the project LSP config is read through the root-confined `fs_read_workspace_file`, and startup
+also seeds Tauri's own app data directory and the CLI home (`$COGNIA_HOME` or `~/.cognia`). A
+registry with no resolvable root still lets a local call through (seeding has not run), but refuses a
+paired device, so a headless host, which never seeds this registry, no longer serves raw paths.
+
 ## Context
 
 The repo had **two mature but disjoint** confinement systems, and agents fell through the gap between them:

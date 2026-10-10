@@ -6,20 +6,19 @@
  * stays filesystem-free and unit-testable. Returns `null` whenever the file
  * is absent, unreadable, or malformed, or when not running under Tauri (web /
  * mobile shells have no project filesystem) — the project layer is then empty.
+ *
+ * Reads through the root-confined `fs_read_workspace_file`, not the raw
+ * absolute-path read: the root can be a character's or a session's working
+ * directory that was never registered as a project root, and the raw read
+ * refuses anything outside the registered roots.
  */
 
 import { isTauri } from "@/lib/tauri"
-import { readTextFile } from "@/lib/claude/ipc"
+import { readWorkspaceFile } from "@/lib/files/workspace-fs"
 import type { LspProjectFile } from "@/types/lsp/config"
 
 /** Relative path of the project-local config under a workspace root. */
 export const PROJECT_LSP_CONFIG_RELPATH = ".cognia/lsp.json"
-
-function joinRoot(rootDir: string, rel: string): string {
-  const sep = rootDir.includes("\\") && !rootDir.includes("/") ? "\\" : "/"
-  const trimmed = rootDir.endsWith("/") || rootDir.endsWith("\\") ? rootDir.slice(0, -1) : rootDir
-  return `${trimmed}${sep}${rel.split("/").join(sep)}`
-}
 
 /**
  * Read `<rootDir>/.cognia/lsp.json`. Returns the parsed file, or `null` on any
@@ -27,12 +26,12 @@ function joinRoot(rootDir: string, rel: string): string {
  */
 export async function readProjectLspFile(
   rootDir: string,
-  read?: (filePath: string) => Promise<string>
+  read?: (rootDir: string, relPath: string) => Promise<string>
 ): Promise<LspProjectFile | null> {
   if (!read && !isTauri()) return null
   let raw: string
   try {
-    raw = await (read ?? readTextFile)(joinRoot(rootDir, PROJECT_LSP_CONFIG_RELPATH))
+    raw = await (read ?? readWorkspaceFile)(rootDir, PROJECT_LSP_CONFIG_RELPATH)
   } catch {
     return null
   }

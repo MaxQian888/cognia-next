@@ -93,7 +93,7 @@ async function saveViaTauri(opts: SaveExportOptions): Promise<SaveExportOutcome>
   if (!path) return { kind: "cancelled" }
   if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
   // Bless the dialog-chosen directory so the Rust FS allowed-roots gate treats
-  // this user-picked path as in-bounds (shadow-mode containment).
+  // this user-picked path as in-bounds.
   await registerDialogPathInRust(path)
   if (typeof opts.data === "string") {
     if (opts.shouldContinue?.() === false) return { kind: "cancelled" }

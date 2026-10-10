@@ -5,7 +5,7 @@ description: "Each conversation gets a FileSpace: a derived virtual namespace ov
 
 # ADR 0222 — A conversation's files are a view, and sharing them is a grant
 
-**Status:** Accepted — P0 (FileSpace, links, Conversation files panel), P1 (snapshot shares with files, file-sharing policy, collab `files.share`), P2 (live grants over WebDAV/SFTP, the SFTPGo provider, network-drive settings) and P3 (collaboration members, agent tools, lifecycle) shipped 2026-10-10. Spikes run on macOS: curl and Finder against the built-in WebDAV listener, OpenSSH `sftp` against the built-in SFTP listener, and the SFTPGo round trip (create, suspend, resume, rotate, revoke). Windows WebClient, rclone, Cyberduck, WinSCP and the cloudflared tunnel have not been run against a real client yet.
+**Status:** Accepted — P0 (FileSpace, links, Conversation files panel), P1 (snapshot shares with files, file-sharing policy, collab `files.share`), P2 (live grants over WebDAV/SFTP, the SFTPGo provider, network-drive settings) and P3 (collaboration members, agent tools, lifecycle) shipped 2026-10-10. Spikes run on macOS: curl and Finder against the built-in WebDAV listener, OpenSSH `sftp` against the built-in SFTP listener, and the SFTPGo round trip (create, suspend, resume, rotate, revoke); on 2026-10-11 rclone (WebDAV and SFTP, including a pinned host key) and the Cyberduck CLI (WebDAV and SFTP). Windows WebClient, WinSCP and the cloudflared tunnel have not been run against a real client yet.
 **Date:** 2026-10-10
 **Design:** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **Related:** [ADR-0037](./0037-public-share-links) (share links),
@@ -267,8 +267,8 @@ collaboration server.
   register keep today's behaviour.
 - Delivery was phased (P0 FileSpace and links, P1 snapshots and policy, P2 live
   grants and providers, P3 collaboration members, agent tools and lifecycle).
-  The client spikes that remain (Windows WebClient, rclone, Cyberduck, WinSCP,
-  the tunnel) gate only which combinations the UI recommends, not the design.
+  The client spikes that remain (Windows WebClient, WinSCP, the tunnel) gate
+  only which combinations the UI recommends, not the design.
 
 ## Rejected
 

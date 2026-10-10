@@ -11,6 +11,7 @@ import {
   writeTextFile,
   writeTextFileConfined,
 } from "@/lib/claude/ipc"
+import { registerDialogPathInRust } from "@/lib/files/allowed-roots-sync"
 import { open, save } from "@tauri-apps/plugin-dialog"
 
 export interface PickedFile {
@@ -45,6 +46,9 @@ export async function pickAndReadFiles(opts: PickFilesOptions = {}): Promise<Pic
     const out: PickedFile[] = []
     for (const path of paths) {
       try {
+        // The raw read is confined to registered roots; the pick is the
+        // gesture that lets this file's folder in.
+        await registerDialogPathInRust(path)
         const content = await readTextFile(path)
         out.push({ name: basename(path), path, content })
       } catch (err) {
@@ -113,6 +117,9 @@ export async function saveFileAs(opts: SaveFileOptions): Promise<boolean> {
       filters: opts.filters,
     })
     if (!chosen) return false
+    // The raw write is confined to registered roots; the save dialog is the
+    // gesture that lets the chosen folder in.
+    await registerDialogPathInRust(chosen)
     await writeTextFile(chosen, opts.content)
     return true
   }

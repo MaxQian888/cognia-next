@@ -11,6 +11,12 @@ description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运�
 
 `TeammateConfigDialog` 现已复用现有 sandbox policy editor，展示继承的 team ceiling，并且只持久化经 `clampSandboxPolicy` 收紧后的 teammate override。没有新增 teammate 专用 sandbox schema。
 
+## 修订：原始 fs 命令对所有来源强制执行（2026-10-11）
+
+P2 的影子阶段结束。`enforce_check_path`（现位于 `crates/cognia-files/src/files.rs`）对已登记根目录之外的原始 `read_text_file` / `write_text_file` / `ensure_dir` 一律拒绝，渲染进程（`Local`）与已配对设备（`Remote`）相同，每次拒绝都以 `cognia::fs_audit` 为 target 写入原生日志，诊断日志查看器可按 target 过滤。该日志即持久化审计记录；渲染进程中没有任何调用方的 `SecureFileSystem` 门面及其内存审计环已删除。
+
+强制前先让渲染进程的调用方都落在根目录内：`lib/files/file-bridge.ts` 中文件选择后的读取和“另存为”写入会先登记对话框路径（`fs_allow_dialog_path`）再调用原始命令；项目 LSP 配置改由按根目录限定的 `fs_read_workspace_file` 读取；启动时还会登记 Tauri 自身的应用数据目录和 CLI 主目录（`$COGNIA_HOME` 或 `~/.cognia`）。登记表中没有可解析的根目录时，本地调用仍放行（尚未完成初始登记），已配对设备则被拒绝，因此从不初始化该登记表的 headless 主机不再提供原始路径访问。
+
 ## 背景
 
 仓库有**两个成熟但不相干的**约束系统，特工从它们之间的缝隙中掉落：

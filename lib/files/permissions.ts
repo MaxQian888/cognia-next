@@ -11,10 +11,10 @@
  * boundary. `normalizeFsPath` resolves `.`/`..` lexically but does NOT touch the
  * filesystem, so it cannot see a symlink that escapes a root. The authoritative,
  * on-disk containment (canonicalize + reject writes through a symlinked final
- * component) lives in the Rust `*_confined` commands in `src-tauri/src/files.rs`,
- * which the secure-fs write path calls after this check passes. This pre-flight
- * gives a fast, i18n-able, audit-logged denial before the IPC round-trip and is
- * the only check available in web mode (no Rust host).
+ * component) lives in the Rust `*_confined` commands in
+ * `crates/cognia-files/src/files.rs`, which a write path calls after this check
+ * passes. This pre-flight gives a fast, i18n-able denial before the IPC
+ * round-trip and is the only check available in web mode (no Rust host).
  */
 
 import type {

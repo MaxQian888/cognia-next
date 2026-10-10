@@ -37,6 +37,10 @@ jest.mock("@/lib/claude/ipc", () => ({
   writeTextFileConfined: jest.fn(),
 }))
 
+jest.mock("@/lib/files/allowed-roots-sync", () => ({
+  registerDialogPathInRust: jest.fn(async () => undefined),
+}))
+
 const mockReadBinary = jest.fn()
 const mockWriteBinary = jest.fn()
 const mockFsOpen = jest.fn()
@@ -55,6 +59,7 @@ jest.mock(
 )
 
 import { isTauri } from "@/lib/tauri"
+import { registerDialogPathInRust } from "@/lib/files/allowed-roots-sync"
 import {
   defaultExportDir,
   readTextFile,
@@ -79,6 +84,7 @@ const mockedDefaultExportDir = defaultExportDir as unknown as jest.Mock
 const mockedRead = readTextFile as unknown as jest.Mock
 const mockedWrite = writeTextFile as unknown as jest.Mock
 const mockedWriteConfined = writeTextFileConfined as unknown as jest.Mock
+const mockedRegisterDialogPath = registerDialogPathInRust as unknown as jest.Mock
 
 beforeEach(() => {
   mockedIsTauri.mockReset()
@@ -86,6 +92,7 @@ beforeEach(() => {
   mockedRead.mockReset()
   mockedWrite.mockReset()
   mockedWriteConfined.mockReset()
+  mockedRegisterDialogPath.mockReset()
   mockOpen.mockReset()
   mockSave.mockReset()
   mockReadBinary.mockReset()
@@ -106,6 +113,25 @@ describe("pickAndReadFiles — Tauri branch", () => {
     mockedRead.mockResolvedValue("hello")
     const out = await pickAndReadFiles()
     expect(out).toEqual([{ name: "file.txt", path: "/abs/path/file.txt", content: "hello" }])
+  })
+
+  it("registers each picked file with the Rust allowed roots before reading it", async () => {
+    mockOpen.mockResolvedValue(["/Downloads/a.json", "/Desktop/b.json"])
+    const order: string[] = []
+    mockedRegisterDialogPath.mockImplementation(async (path: string) => {
+      order.push(`allow ${path}`)
+    })
+    mockedRead.mockImplementation(async (path: string) => {
+      order.push(`read ${path}`)
+      return "{}"
+    })
+    await pickAndReadFiles({ multiple: true })
+    expect(order).toEqual([
+      "allow /Downloads/a.json",
+      "read /Downloads/a.json",
+      "allow /Desktop/b.json",
+      "read /Desktop/b.json",
+    ])
   })
 
   it("reads multiple picked files and skips errored reads", async () => {
@@ -350,6 +376,21 @@ describe("saveFileAs — Tauri branch", () => {
     const ok = await saveFileAs({ defaultName: "x.md", content: "c" })
     expect(ok).toBe(false)
     expect(mockedWrite).not.toHaveBeenCalled()
+    expect(mockedRegisterDialogPath).not.toHaveBeenCalled()
+  })
+
+  it("registers the chosen path with the Rust allowed roots before writing", async () => {
+    mockedDefaultExportDir.mockResolvedValue("/home/me/Documents")
+    mockSave.mockResolvedValue("/home/me/Downloads/a.md")
+    const order: string[] = []
+    mockedRegisterDialogPath.mockImplementation(async (path: string) => {
+      order.push(`allow ${path}`)
+    })
+    mockedWrite.mockImplementation(async (path: string) => {
+      order.push(`write ${path}`)
+    })
+    expect(await saveFileAs({ defaultName: "a.md", content: "x" })).toBe(true)
+    expect(order).toEqual(["allow /home/me/Downloads/a.md", "write /home/me/Downloads/a.md"])
   })
 
   it("uses defaultExportDir when available", async () => {

@@ -7,7 +7,7 @@
  * after each trust change, which the trust mutators handle). No-op on web.
  *
  * Also pushes the renderer's workspace roots into the Rust FS allowed-roots
- * registry (shadow-mode containment for the raw read/write/ensure_dir commands),
+ * registry (the containment the raw read/write/ensure_dir commands enforce),
  * re-syncing whenever the set of projects changes.
  */
 

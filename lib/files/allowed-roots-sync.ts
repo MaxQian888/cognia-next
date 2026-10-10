@@ -2,11 +2,11 @@
 // registry (ADR-0028 follow-up).
 //
 // The raw `read_text_file` / `write_text_file` / `ensure_dir` commands are
-// shadow-gated in Rust against a process-global set of allowed roots
-// (`src-tauri/src/files.rs`). Rust seeds the structural dirs (appdata, home
-// config trees, documents) at startup; this module adds the user's workspace
-// roots and dialog-chosen directories so the shadow-mode containment check has
-// the full picture. No-op on web/mobile.
+// confined in Rust to a process-global set of allowed roots
+// (`crates/cognia-files/src/files.rs`) and refuse anything outside it. Rust
+// seeds the structural dirs (app data, agent config trees, Documents, the CLI
+// home) at startup; this module adds the user's workspace roots and
+// dialog-chosen directories. No-op on web/mobile.
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
@@ -43,8 +43,8 @@ export async function syncAllowedRootsToRust(): Promise<void> {
       : []
     await invoke("fs_set_allowed_roots", { paths, accountId, gitWorkspaces })
   } catch (e) {
-    // A failed sync only means the shadow check logs a few extra out-of-root
-    // accesses until the next successful sync — never break the app.
+    // A failed sync leaves the previous roots in place (registration is
+    // additive) until the next successful sync; never break the app here.
     log.warn("sync_failed", { error: String(e) })
   }
 }

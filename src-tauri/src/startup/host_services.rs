@@ -60,10 +60,20 @@ pub(crate) fn install(app: &tauri::App) {
     });
 
     // Seed the fs allowed-roots registry: app data, the agent config trees and
-    // Documents, plus Pi's config dir wherever `$PI_CODING_AGENT_DIR` puts it.
-    // Pure in-memory inserts; the renderer adds the active workspace roots
-    // once it loads.
-    crate::files::seed_default_allowed_roots(&[crate::agents::paths::vendor_roots().pi_agent_dir]);
+    // Documents, plus the directories only the app can resolve: Pi's config
+    // dir wherever `$PI_CODING_AGENT_DIR` puts it, Tauri's own app data dir
+    // (named after the bundle id, not `cognia`) and the CLI home
+    // (`$COGNIA_HOME` or `~/.cognia`, whose config the desktop pushes). The raw
+    // fs commands refuse anything outside these and the project roots the
+    // renderer adds once it loads. Pure in-memory inserts.
+    let mut extra_roots = vec![crate::agents::paths::vendor_roots().pi_agent_dir];
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        extra_roots.push(app_data_dir.to_string_lossy().into_owned());
+    }
+    if let Some(cli_home) = crate::agents::paths::cognia_home() {
+        extra_roots.push(cli_home.to_string_lossy().into_owned());
+    }
+    crate::files::seed_default_allowed_roots(&extra_roots);
 
     // Mirror the narrow static backup scope in the dynamic scope used by the
     // atomic stream helper; existing deny patterns still win.

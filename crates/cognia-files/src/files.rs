@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 // ---------------------------------------------------------------------------
-// Allowed-roots registry (ADR-0028 follow-up) + shadow-mode containment.
+// Allowed-roots registry (ADR-0028 follow-up) + enforced containment.
 //
 // The raw `read_text_file` / `write_text_file` / `ensure_dir` commands accept an
 // arbitrary absolute path and are reachable from BOTH the renderer and a paired
@@ -23,11 +23,13 @@ use std::sync::{OnceLock, RwLock};
 // documents dir (seeded at startup), the active workspace roots (pushed by the
 // renderer), and dialog-chosen directories (registered on the user gesture).
 //
-// SHADOW MODE: every raw fs op evaluates containment and LOGS a denial for any
-// path outside the registered roots, but STILL proceeds. This surfaces the
-// real-world out-of-root accesses before a later release flips the log into a
-// hard `Err`, so legitimate flows that touch an unseeded directory are observed
-// (and their root registered) rather than silently broken.
+// ENFORCED: every raw fs op outside the registered roots is refused, for the
+// renderer and for a paired device alike, and each refusal is written to the
+// native log under the `cognia::fs_audit` target (the persistent audit trail;
+// the diagnostics log viewer filters by target). The shadow phase that logged
+// and allowed these accesses ended once every renderer caller was confirmed to
+// stay inside a root: dialog flows register the chosen path, the LSP reader
+// uses the root-confined `fs_read_workspace_file`, and the CLI home is seeded.
 // ---------------------------------------------------------------------------
 
 fn allowed_roots_registry() -> &'static RwLock<HashSet<String>> {
@@ -78,8 +80,8 @@ fn normalize_root(path: &str) -> String {
 }
 
 /// Add one directory to the allowed-roots set (idempotent). Additive: seeds and
-/// previously-registered roots are never removed (shadow mode never enforces, so
-/// over-permissiveness only means fewer log lines, never a broken flow).
+/// previously-registered roots are never removed during the process, so a
+/// directory the user chose once stays reachable until the app restarts.
 pub fn add_allowed_root(path: String) {
     let key = normalize_root(&path);
     if key.is_empty() {
@@ -216,9 +218,10 @@ pub fn resolve_git_workspace_relative_path(
 /// overrides — `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` — are not seeded; that
 /// predates this and is deliberately left alone.) Empty entries are skipped.
 ///
-/// Anything missing here still *works* on desktop — `enforce_check_path` only
-/// hard-fails remote writes — but every access logs an `fs_shadow_denial`, and
-/// a paired companion device is blocked outright.
+/// Anything missing here is refused by `enforce_check_path`, for the renderer
+/// as much as for a paired device, so a structurally trusted directory that
+/// only the app can resolve (its own app data dir, the CLI home) is passed in
+/// `extra_roots`.
 pub fn seed_default_allowed_roots(extra_roots: &[String]) {
     if let Some(data) = dirs::data_dir() {
         add_allowed_root(data.join("cognia").to_string_lossy().to_string());
@@ -246,7 +249,9 @@ fn allowed_roots_snapshot() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Read-only containment check against the live registry.
+/// Read-only containment check against the live registry (tests assert
+/// registration through it; the gate itself is [`enforce_check_path`]).
+#[cfg(test)]
 fn is_path_allowed(path: &str) -> bool {
     is_path_within_roots(path, &allowed_roots_snapshot())
 }
@@ -358,13 +363,18 @@ pub fn fs_workspace_roots() -> WorkspaceRootsReport {
 /// Pure containment check: does `path` resolve inside one of `roots`? Never
 /// creates directories. Resolves the deepest EXISTING ancestor and canonicalizes
 /// it (so symlinks in the ancestry are followed — the real guard a lexical check
-/// can't provide). Empty `roots` returns `true` so shadow mode never floods logs
-/// before startup seeding runs.
+/// can't provide). Empty `roots` returns `true`: callers that must fail closed
+/// on an empty registry check that themselves (see [`enforce_check_path`]).
 fn is_path_within_roots(path: &str, roots: &[String]) -> bool {
     let canonical_roots = canonicalize_roots(roots);
     if canonical_roots.is_empty() {
         return true;
     }
+    is_within_canonical_roots(path, &canonical_roots)
+}
+
+/// [`is_path_within_roots`] over roots already canonicalized and non-empty.
+fn is_within_canonical_roots(path: &str, canonical_roots: &[PathBuf]) -> bool {
     let target = PathBuf::from(path);
     let mut probe: &Path = target.as_path();
     let canonical = loop {
@@ -376,40 +386,50 @@ fn is_path_within_roots(path: &str, roots: &[String]) -> bool {
             _ => return false,
         }
     };
-    starts_with_any_canonical_root(&canonical, &canonical_roots)
+    starts_with_any_canonical_root(&canonical, canonical_roots)
 }
 
-/// Origin of a raw fs command. `Local` = the renderer (a trusted user gesture —
-/// typically a file dialog — stands in for the fs scope). `Remote` = a paired
-/// device over the companion API, which has no such gesture and is the real
-/// exfil / backdoor-write surface.
+/// Origin of a raw fs command. `Local` = the renderer, whose paths come from a
+/// project root, a seeded directory or a file dialog it registered. `Remote` =
+/// a paired device over the companion API, which has no such gesture and is
+/// the real exfil / backdoor-write surface.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FsOrigin {
     Local,
     Remote,
 }
 
-/// Containment gate for the raw fs commands. Remote WRITES that escape the
-/// registered roots are ENFORCED (hard `Err`) — closing the documented hole
-/// where a paired device could read/write anywhere the desktop can. Local calls
-/// (backed by a user gesture) and all READS stay in shadow mode: logged, never
-/// blocked, so existing local flows are unaffected. An empty registry allows
-/// everything (never blocks before startup seeding runs).
+/// Log target of every raw fs refusal: the persistent, filterable audit trail.
+pub const FS_AUDIT_LOG_TARGET: &str = "cognia::fs_audit";
+
+/// Containment gate for the raw fs commands: reads and writes, from the
+/// renderer or a paired device, must resolve inside a registered root.
+///
+/// A registry with no resolvable root is the one difference between origins.
+/// On the desktop it can only mean seeding has not run yet, so a local call
+/// proceeds; a paired device is refused, which also keeps a headless host
+/// (which never seeds this registry) from serving raw paths at all.
 fn enforce_check_path(path: &str, op: &str, origin: FsOrigin) -> Result<(), String> {
-    if is_path_allowed(path) {
+    let roots = canonicalize_roots(&allowed_roots_snapshot());
+    if roots.is_empty() {
+        if origin == FsOrigin::Local {
+            return Ok(());
+        }
+    } else if is_within_canonical_roots(path, &roots) {
         return Ok(());
     }
-    let is_write = matches!(op, "write_text_file" | "ensure_dir");
-    if origin == FsOrigin::Remote && is_write {
-        log::warn!("fs_enforce_denial op={op} path={path} origin=remote — outside registered roots (blocked)");
-        return Err(format!(
-            "{op}: path is outside the workspace roots this device may write to: {path}"
-        ));
-    }
     log::warn!(
-        "fs_shadow_denial op={op} path={path} origin={origin:?} — outside registered roots (allowed in shadow mode)"
+        target: FS_AUDIT_LOG_TARGET,
+        "fs_enforce_denial op={op} path={path} origin={origin:?} — outside registered roots (blocked)"
     );
-    Ok(())
+    Err(match origin {
+        FsOrigin::Local => format!(
+            "{op}: {path} is outside the folders this app may use; pick it through a file dialog or add its folder to a project"
+        ),
+        FsOrigin::Remote => format!(
+            "{op}: path is outside the workspace roots this device may use: {path}"
+        ),
+    })
 }
 
 /// Register a dialog-chosen path so a subsequent confined/raw write to it is
@@ -440,9 +460,9 @@ pub fn fs_set_allowed_roots(
 }
 
 /// Read a text file at the given absolute path. The frontend uses this
-/// after letting the user pick the path via the dialog plugin — that
-/// user gesture stands in for an fs scope. Shadow-mode containment logs (but
-/// does not yet block) reads outside the registered roots.
+/// after letting the user pick the path via the dialog plugin, registering it
+/// with [`fs_allow_dialog_path`] first; a path outside every registered root
+/// is refused.
 ///
 /// `async` + `spawn_blocking`: Tauri dispatches sync commands on the main
 /// (UI) thread, so a large or slow-FS read would freeze the webview. The
@@ -461,7 +481,7 @@ pub fn read_text_file_impl(path: String, origin: FsOrigin) -> Result<String, Str
 }
 
 /// Write a text file at the given absolute path, creating parent
-/// directories as needed. Shadow-mode containment logs out-of-root writes.
+/// directories as needed. A path outside every registered root is refused.
 /// Runs off the UI thread (see [`read_text_file`]).
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
@@ -483,7 +503,7 @@ pub fn write_text_file_impl(path: String, content: String, origin: FsOrigin) -> 
 }
 
 /// Ensure a directory exists, creating it (and parents) if needed.
-/// Shadow-mode containment logs out-of-root directory creation. Runs off the
+/// A path outside every registered root is refused. Runs off the
 /// UI thread (see [`read_text_file`]).
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn ensure_dir(path: String) -> Result<(), String> {
@@ -2196,7 +2216,9 @@ mod tests {
 
     #[test]
     fn write_and_read_roundtrip() {
-        let tmp = std::env::temp_dir().join(format!("cognia-test-{}.txt", std::process::id()));
+        let root = make_sandbox("raw-roundtrip");
+        add_allowed_root(root.to_string_lossy().to_string());
+        let tmp = root.join("note.txt");
         let path = tmp.to_string_lossy().to_string();
         write_text_file_impl(path.clone(), "hello".into(), FsOrigin::Local).unwrap();
         assert_eq!(
@@ -2210,8 +2232,9 @@ mod tests {
     // sync `_impl`, so the off-UI-thread dispatch is covered end-to-end.
     #[tokio::test]
     async fn async_write_and_read_roundtrip() {
-        let tmp =
-            std::env::temp_dir().join(format!("cognia-test-async-{}.txt", std::process::id()));
+        let root = make_sandbox("raw-roundtrip-async");
+        add_allowed_root(root.to_string_lossy().to_string());
+        let tmp = root.join("note.txt");
         let path = tmp.to_string_lossy().to_string();
         write_text_file(path.clone(), "world".into()).await.unwrap();
         assert_eq!(read_text_file(path.clone()).await.unwrap(), "world");
@@ -2220,8 +2243,9 @@ mod tests {
 
     #[test]
     fn write_creates_parent_dirs() {
-        let tmp = std::env::temp_dir()
-            .join(format!("cognia-test-nested-{}", std::process::id()))
+        let root = make_sandbox("raw-nested");
+        add_allowed_root(root.to_string_lossy().to_string());
+        let tmp = root
             .join("a")
             .join("b")
             .join("file.txt");
@@ -2771,7 +2795,8 @@ mod tests {
 
     #[test]
     fn path_within_roots_empty_is_allowed() {
-        // Unseeded registry (no roots) must not flag anything — shadow safety.
+        // The pure check treats "no roots" as unconstrained; the raw-command
+        // gate decides per origin what an unseeded registry means.
         assert!(is_path_within_roots("/anywhere/at/all", &[]));
     }
 
@@ -2946,43 +2971,43 @@ mod tests {
     }
 
     #[test]
-    fn remote_writes_enforce_root_containment_local_stays_shadow() {
-        // Seed a root so the registry is non-empty (an empty registry is
-        // shadow-permissive by design and would not exercise enforcement).
-        let root = make_sandbox("remote-enforce");
+    fn raw_reads_and_writes_outside_the_roots_are_refused_for_every_origin() {
+        // Seed a root so the registry is non-empty.
+        let root = make_sandbox("raw-enforce");
         add_allowed_root(root.to_string_lossy().to_string());
 
-        // Remote write INSIDE the root → allowed.
+        // Inside the root: both origins read and write.
         let inside = root.join("ok.txt").to_string_lossy().to_string();
-        write_text_file_impl(inside.clone(), "x".into(), FsOrigin::Remote).unwrap();
-        assert!(std::path::Path::new(&inside).is_file());
+        for origin in [FsOrigin::Local, FsOrigin::Remote] {
+            write_text_file_impl(inside.clone(), "x".into(), origin).unwrap();
+            assert_eq!(read_text_file_impl(inside.clone(), origin).unwrap(), "x");
+            ensure_dir_impl(root.join("sub").to_string_lossy().to_string(), origin).unwrap();
+        }
 
-        // Remote write OUTSIDE every root → hard error, and the file is NOT created.
+        // Outside every root: refused before touching the disk, whoever asks.
         let out_dir =
-            std::env::temp_dir().join(format!("cognia-remote-out-{}", std::process::id()));
+            std::env::temp_dir().join(format!("cognia-raw-out-{}", std::process::id()));
         let outside = out_dir.join("escape.txt");
         let outside_s = outside.to_string_lossy().to_string();
-        let err =
-            write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Remote).unwrap_err();
-        assert!(err.contains("outside the workspace roots"), "got: {err}");
-        assert!(
-            !outside.exists(),
-            "a blocked remote write must not create the file"
-        );
+        for origin in [FsOrigin::Local, FsOrigin::Remote] {
+            let err = write_text_file_impl(outside_s.clone(), "x".into(), origin).unwrap_err();
+            assert!(err.contains("outside"), "{origin:?}: {err}");
+            assert!(!outside.exists(), "a refused write must not create the file");
+            assert!(ensure_dir_impl(out_dir.to_string_lossy().to_string(), origin).is_err());
+            assert!(!out_dir.exists(), "a refused ensure_dir must not create it");
+        }
+        std::fs::create_dir_all(&out_dir).unwrap();
+        std::fs::write(&outside, "secret").unwrap();
+        for origin in [FsOrigin::Local, FsOrigin::Remote] {
+            assert!(read_text_file_impl(outside_s.clone(), origin).is_err(), "{origin:?}");
+        }
 
-        // Remote ensure_dir outside every root → also blocked.
-        assert!(ensure_dir_impl(out_dir.to_string_lossy().to_string(), FsOrigin::Remote).is_err());
-
-        // A LOCAL write to the same outside path stays in shadow mode (allowed) —
-        // the enforcement flip is remote-only so existing renderer flows survive.
-        write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Local).unwrap();
-        assert!(outside.exists());
-
-        // A remote READ is never containment-blocked (only writes are enforced);
-        // it succeeds now that the local write created the file.
+        // A dialog gesture registers the chosen file's folder, which the
+        // renderer may then read.
+        fs_allow_dialog_path(outside_s.clone());
         assert_eq!(
-            read_text_file_impl(outside_s.clone(), FsOrigin::Remote).unwrap(),
-            "x"
+            read_text_file_impl(outside_s.clone(), FsOrigin::Local).unwrap(),
+            "secret"
         );
 
         let _ = std::fs::remove_dir_all(&root);
