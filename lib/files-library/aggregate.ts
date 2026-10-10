@@ -108,6 +108,11 @@ export interface FilesAggregateInput {
   sessions: ReadonlyMap<string, FilesSessionInfo>
   /** `original:<sha>` keys still held in `messageMedia` for kept uploads. */
   heldOriginals: ReadonlySet<string>
+  /**
+   * Codes of share links that are still live on this device (not revoked,
+   * not expired). Absent = no link is.
+   */
+  liveShareCodes?: ReadonlySet<string>
 }
 
 /** What Files shows about a live conversation an item belongs to. */
@@ -185,7 +190,7 @@ type EntryBase = Omit<
 function withItem(
   base: EntryBase,
   item: LibraryItemRow | undefined,
-  sessions: FilesAggregateInput["sessions"]
+  { sessions, liveShareCodes }: Pick<FilesAggregateInput, "sessions" | "liveShareCodes">
 ): FilesEntry {
   const projectIds = unique([...base.projectIds, item?.projectId])
   const originSessionId = base.originSessionId ?? item?.originSessionId
@@ -208,9 +213,20 @@ function withItem(
     ...(item?.favoritedAt !== undefined ? { favoritedAt: item.favoritedAt } : {}),
     ...(item?.folderId !== undefined ? { folderId: item.folderId } : {}),
     ...(item?.trashedAt !== undefined ? { trashedAt: item.trashedAt } : {}),
+    ...sharedLinksOf(item, liveShareCodes),
     // A removed item comes back once its source changes after the removal.
     hidden: isItemHidden(item, base.updatedAt),
   }
+}
+
+/** How many links made from Files that carry the item are still live. */
+function sharedLinksOf(
+  item: LibraryItemRow | undefined,
+  liveShareCodes: ReadonlySet<string> | undefined
+): { sharedLinks?: number } {
+  if (!item?.sharedLinkCodes?.length || !liveShareCodes) return {}
+  const live = item.sharedLinkCodes.filter((code) => liveShareCodes.has(code)).length
+  return live > 0 ? { sharedLinks: live } : {}
 }
 
 function sessionAssetKey(sessionId: string, assetId: string): string {
@@ -268,7 +284,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           searchText: haystack(artifact.title, artifact.type, artifact.language, artifact.content),
         },
         itemFor("artifact", artifact.id),
-        input.sessions
+        input
       )
     )
   }
@@ -299,7 +315,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           searchText: haystack(canvas.title, canvas.type, canvas.language, canvas.content),
         },
         itemFor("canvas", canvas.id),
-        input.sessions
+        input
       )
     )
   }
@@ -329,7 +345,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           searchText: haystack(item?.snapshot?.title, image.mediaType),
         },
         item,
-        input.sessions
+        input
       )
     )
   }
@@ -368,7 +384,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
         creator: generated ? "ai" : "user",
       },
       item,
-      input.sessions
+      input
     )
     entries.push(entry)
     libraryByHash.set(upload.contentHash, entry)
@@ -437,7 +453,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           creator: generated ? "ai" : "user",
         },
         item,
-        input.sessions
+        input
       )
     )
   }
@@ -476,7 +492,7 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           creator: snapshot?.generated ? "ai" : "user",
         },
         item,
-        input.sessions
+        input
       )
     )
   }

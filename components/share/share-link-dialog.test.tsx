@@ -457,4 +457,85 @@ describe("ShareLinkDialog", () => {
       expect(mockPolicy).toHaveBeenCalled()
     })
   })
+
+  describe("picked files (ADR-0223)", () => {
+    const file = (path: string, sensitive = false) => ({
+      path: path as FileSpacePath,
+      name: path.slice(path.lastIndexOf("/") + 1),
+      mime: "text/plain",
+      size: 1024,
+      sensitive,
+      open: jest.fn(),
+    })
+    const BUNDLE: SharePayload = {
+      kind: "file-bundle",
+      mime: "application/json",
+      data: "",
+      encoding: "utf8",
+      title: "2 files",
+    }
+
+    it("shares exactly the picked files, without a conversation, and reports what it carried", async () => {
+      const onCreated = jest.fn()
+      const picked = [file("/files/a.md"), file("/files/.env", true)]
+      mockCreate.mockResolvedValue({ code: "P", url: "https://share.test/v/P#k=K" })
+      open({ buildPayload: () => BUNDLE, picked: { files: picked }, onCreated })
+      expect(screen.getByTestId("share-picked-files")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument()
+      expect(screen.getByText("1 file · 1.0 KB")).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "Create link" }))
+      await screen.findByText("Your share link is ready")
+
+      expect(mockSelection).toHaveBeenCalledWith(null, [])
+      expect(mockAuthorize).not.toHaveBeenCalled()
+      expect(mockPolicy).toHaveBeenCalled()
+      const [input] = mockCreate.mock.calls[0]
+      expect(input).toMatchObject({ payload: BUNDLE })
+      expect(input.sessionId).toBeUndefined()
+      expect(input.files.map((f: { path: string }) => f.path)).toEqual(["/files/a.md"])
+      expect(onCreated).toHaveBeenCalledWith({ code: "P", url: "https://share.test/v/P#k=K" }, [
+        picked[0],
+      ])
+    })
+
+    it("waits for the picked files and needs at least one", () => {
+      const { rerender } = open({ buildPayload: () => BUNDLE, picked: { files: undefined } })
+      expect(screen.getByRole("button", { name: "Create link" })).toBeDisabled()
+      rerender(
+        <ShareLinkDialog
+          buildPayload={() => BUNDLE}
+          open
+          onOpenChange={() => {}}
+          picked={{ files: [], unavailable: ["Gone"] }}
+        />
+      )
+      expect(screen.getByRole("button", { name: "Create link" })).toBeDisabled()
+    })
+
+    it("limits the lifetime by policy and surfaces a refusal raised while building", async () => {
+      const user = userEvent.setup()
+      mockPolicy.mockResolvedValue({
+        policy: { ...DEFAULT_FILE_SHARING_POLICY, maxSnapshotTtlSeconds: 86_400 },
+        local: DEFAULT_FILE_SHARING_POLICY,
+      })
+      const { FileShareRefusedError } = jest.requireActual("@/lib/filespace/share-files")
+      open({
+        buildPayload: async () => {
+          throw new FileShareRefusedError("shared-session-forbidden")
+        },
+        picked: { files: [file("/files/a.md")] },
+      })
+      expect(
+        await screen.findByText("Lifetimes are limited by your file-sharing policy.")
+      ).toBeInTheDocument()
+      await user.click(screen.getAllByRole("combobox")[0])
+      expect(screen.queryByRole("option", { name: "In 7 days" })).not.toBeInTheDocument()
+      await user.keyboard("{Escape}")
+      fireEvent.click(screen.getByRole("button", { name: "Create link" }))
+      expect(
+        await screen.findByText(/You can’t share files from this shared conversation/)
+      ).toBeInTheDocument()
+      expect(mockCreate).not.toHaveBeenCalled()
+    })
+  })
 })

@@ -129,8 +129,25 @@ long-press selection and drawers, without drag and drop or shortcuts.
 
 ### 10. Sharing rides ADR-0222
 
-Sharing a file uses ADR-0222's file snapshot (a share link that carries
-encrypted file blobs). Until that lands the entry is dormant on all three axes.
+Sharing uses ADR-0222's file snapshot: a `file-bundle` share link whose files
+travel as client-encrypted, chunked blobs. "Share…" on one item, or on a
+selection from the bulk bar, publishes one link through the same share dialog
+and the same `createFileShare` gate as a conversation's files, so the
+file-sharing policy, the sensitive-file opt-in and the server's size limits
+apply unchanged.
+
+- Each file is named in the bundle by its place in Files,
+  `/files/<folder path>/<name>`, numbered like a zip export on a clash.
+- Items come from many conversations, so before anything is uploaded every
+  collaboration conversation an item belongs to is asked for `files.share`.
+  One refusal refuses the whole link. The newest org policy revision any
+  answer named is loaded before the gate reads the policy.
+- The link's code is recorded on the items it carried
+  (`libraryItems.sharedLinkCodes`). An item shows a "shared by link" marker
+  while one of those codes is live in `sharedLinks` (not revoked, not
+  expired). The link itself, its key and its owner token stay in
+  `sharedLinks` on the device that made it.
+- A trashed item cannot be shared.
 
 ## Consequences
 

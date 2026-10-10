@@ -327,7 +327,12 @@
     "hashing": "Checking file {index} of {count}…",
     "uploading": "Encrypting and uploading file {index} of {count}…",
     "progressLabel": "Sharing progress",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "picked": {
+      "reading": "Reading the chosen items…",
+      "readFailed": "The chosen items could not be read. Try again.",
+      "missing": "{name} is no longer stored on this device and won't be shared."
+    }
   },
   "policy": {
     "title": "File sharing policy",

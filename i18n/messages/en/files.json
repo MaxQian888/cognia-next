@@ -12,7 +12,6 @@
     "restore": "Restore",
     "saveAsTemplate": "Save as template…",
     "share": "Share…",
-    "shareSoon": "Coming soon",
     "trash": "Move to Trash",
     "unfavorite": "Remove from favorites",
     "useInChat": "Use in chat"
@@ -29,6 +28,7 @@
     "modified": "Modified {date}",
     "open": "Open {title}",
     "owned": "Uploaded to Files",
+    "sharedByLink": "{count, plural, =1 {Shared by link} other {Shared by # links}}",
     "sharedWithMe": "Shared with you",
     "sourceDeleted": "Conversation deleted",
     "trashed": "Deleted {date}",
@@ -318,6 +318,9 @@
   "selection": {
     "select": "Select {title}",
     "selectAll": "Select all"
+  },
+  "share": {
+    "bundleTitle": "{count, plural, =1 {1 file} other {# files}} from Files"
   },
   "sidebar": {
     "aria": "Files places",

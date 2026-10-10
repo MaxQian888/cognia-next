@@ -327,7 +327,12 @@
     "hashing": "正在校验第 {index}/{count} 个文件…",
     "uploading": "正在加密并上传第 {index}/{count} 个文件…",
     "progressLabel": "分享进度",
-    "cancel": "取消"
+    "cancel": "取消",
+    "picked": {
+      "reading": "正在读取所选项目…",
+      "readFailed": "无法读取所选项目，请重试。",
+      "missing": "{name} 已不在此设备上，不会被分享。"
+    }
   },
   "policy": {
     "title": "文件分享策略",

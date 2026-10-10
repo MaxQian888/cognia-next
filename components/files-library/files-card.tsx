@@ -10,7 +10,7 @@
 
 import { Surface } from "@/components/surface/surface"
 import { useFormatter, useTranslations } from "next-intl"
-import { StarIcon, Users2Icon } from "lucide-react"
+import { Link2Icon, StarIcon, Users2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -175,6 +175,13 @@ export function FilesCard({
               className={cn("size-4 text-muted-foreground", picture && "text-white")}
               aria-label={t("card.sharedWithMe")}
               data-testid="files-card-shared"
+            />
+          ) : null}
+          {entry.sharedLinks ? (
+            <Link2Icon
+              className={cn("size-4 text-muted-foreground", picture && "text-white")}
+              aria-label={t("card.sharedByLink", { count: entry.sharedLinks })}
+              data-testid="files-card-shared-link"
             />
           ) : null}
           {favorite ? (

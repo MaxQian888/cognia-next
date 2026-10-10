@@ -171,13 +171,20 @@ it("marks favorites, shares and deleted sources; draws pictures", () => {
       title: "photo.png",
       favoritedAt: 1,
       sharedWithMe: true,
+      sharedLinks: 2,
       originAlive: false,
     }),
   })
   expect(screen.getByLabelText("Favorite")).toBeInTheDocument()
   expect(screen.getByLabelText("Shared with you")).toBeInTheDocument()
+  expect(screen.getByLabelText("Shared by 2 links")).toBeInTheDocument()
   expect(screen.getByText("Conversation deleted")).toBeInTheDocument()
   expect(screen.getByTestId("thumb-h")).toBeInTheDocument()
+})
+
+it("shows no link marker for an item that was never shared", () => {
+  renderRow()
+  expect(screen.queryByTestId("files-row-shared-link")).toBeNull()
 })
 
 it("in the Trash dates the row by when it went in and previews instead of opening", () => {

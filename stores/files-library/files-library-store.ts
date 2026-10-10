@@ -78,6 +78,8 @@ interface FilesLibraryState {
   deleteFolderTarget: string | null
   /** Entry key the "Save as template" dialog saves. */
   saveTemplateTarget: string | null
+  /** Entry keys the share dialog shares as one link. */
+  shareTarget: string[] | null
 
   setViewMode: (mode: FilesViewMode) => void
   setSort: (sort: FilesSort | null) => void
@@ -105,6 +107,8 @@ interface FilesLibraryState {
   closeDeleteFolder: () => void
   openSaveTemplate: (key: string) => void
   closeSaveTemplate: () => void
+  openShare: (keys: string[]) => void
+  closeShare: () => void
 }
 
 /** What a v1 persisted blob (ADR-0200) carried. */
@@ -173,6 +177,7 @@ export const useFilesLibraryStore = create<FilesLibraryState>()(
       folderDialog: null,
       deleteFolderTarget: null,
       saveTemplateTarget: null,
+      shareTarget: null,
 
       setViewMode: (viewMode) => set({ viewMode }),
       setSort: (sort) => set({ sort }),
@@ -208,6 +213,8 @@ export const useFilesLibraryStore = create<FilesLibraryState>()(
       closeDeleteFolder: () => set({ deleteFolderTarget: null }),
       openSaveTemplate: (saveTemplateTarget) => set({ saveTemplateTarget }),
       closeSaveTemplate: () => set({ saveTemplateTarget: null }),
+      openShare: (keys) => set({ shareTarget: keys }),
+      closeShare: () => set({ shareTarget: null }),
     }),
     {
       name: "files-library-prefs",

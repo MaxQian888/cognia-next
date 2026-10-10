@@ -107,12 +107,13 @@ it("runs each action for a conversation item", async () => {
   expect(screen.queryByRole("menuitem", { name: "Restore" })).toBeNull()
 })
 
-it("keeps Share inert until file snapshots exist", async () => {
+it("opens the share dialog for the item", async () => {
   render(<FilesItemMenu entry={entry()} title="Parser" actions={actions()} />)
-  await openMenu()
-  const share = screen.getByRole("menuitem", { name: /^Share…/ })
-  expect(share).toHaveAttribute("aria-disabled", "true")
-  expect(share).toHaveTextContent("Coming soon")
+  const user = await openMenu()
+  const share = screen.getByRole("menuitem", { name: "Share…" })
+  expect(share).not.toHaveAttribute("aria-disabled")
+  await user.click(share)
+  expect(useFilesLibraryStore.getState().shareTarget).toEqual(["artifact:a"])
 })
 
 it("offers unfile for a filed favorite", async () => {

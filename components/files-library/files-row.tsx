@@ -11,7 +11,7 @@
  */
 
 import { useLocale, useTranslations } from "next-intl"
-import { StarIcon, Users2Icon } from "lucide-react"
+import { Link2Icon, StarIcon, Users2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -140,6 +140,13 @@ export function FilesRow({ entry, actions, previewed, selected, onSelect, now }:
               <Users2Icon
                 className="size-3.5 shrink-0 text-muted-foreground"
                 aria-label={t("card.sharedWithMe")}
+              />
+            ) : null}
+            {entry.sharedLinks ? (
+              <Link2Icon
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-label={t("card.sharedByLink", { count: entry.sharedLinks })}
+                data-testid="files-row-shared-link"
               />
             ) : null}
             {!entry.originAlive ? (

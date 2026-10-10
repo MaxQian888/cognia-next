@@ -2,7 +2,7 @@
 
 /**
  * The bar over the Files list while items are selected (ADR-0223): favorite,
- * move, export as a zip and move to Trash — or, in the Trash, restore and
+ * move, export as a zip, share as one link and move to Trash — or, in the Trash, restore and
  * delete forever. Every action takes the whole selection and lands in one
  * write. Esc or "Clear" ends the selection.
  */
@@ -12,6 +12,7 @@ import {
   DownloadIcon,
   FolderInputIcon,
   RotateCcwIcon,
+  Share2Icon,
   StarIcon,
   StarOffIcon,
   Trash2Icon,
@@ -65,6 +66,7 @@ export function FilesBulkBar({ selected, folders, trash, actions, onClear }: Fil
   const t = useTranslations("files")
   const openMove = useFilesLibraryStore((s) => s.openMove)
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
+  const openShare = useFilesLibraryStore((s) => s.openShare)
   if (selected.length === 0) return null
   const keys = selected.map((entry) => entry.key)
   const allFavorite = selected.every((entry) => entry.favoritedAt !== undefined)
@@ -118,6 +120,12 @@ export function FilesBulkBar({ selected, folders, trash, actions, onClear }: Fil
               icon={DownloadIcon}
               onClick={() => void actions.exportZip(selected, folders)}
               testId="files-bulk-export"
+            />
+            <BulkButton
+              label={t("actions.share")}
+              icon={Share2Icon}
+              onClick={() => openShare(keys)}
+              testId="files-bulk-share"
             />
             <BulkButton
               label={t("actions.trash")}

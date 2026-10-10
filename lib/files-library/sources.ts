@@ -252,6 +252,27 @@ export async function loadImages(
   return { images: await describeImages([...page, ...extra]), truncated: rows.length > limit }
 }
 
+/**
+ * Codes of the share links this device made that are still live, among the
+ * codes Files recorded on its items. Read straight from the table: the
+ * listing helpers also unseal each link's key, which the marker never needs.
+ */
+export async function loadLiveShareCodes(
+  recorded: readonly string[],
+  now = Date.now()
+): Promise<Set<string>> {
+  if (recorded.length === 0) return new Set()
+  const rows = await getDb()
+    .sharedLinks.where("code")
+    .anyOf([...new Set(recorded)])
+    .toArray()
+  return new Set(
+    rows
+      .filter((row) => !row.revoked && (row.expiresAt === undefined || row.expiresAt > now))
+      .map((row) => row.code)
+  )
+}
+
 export interface LoadedFilesSources {
   input: FilesAggregateInput
   /** More images exist beyond `imageLimit`. */
@@ -303,6 +324,9 @@ export async function loadFilesSources(options: {
       ? ((await getDb().messageMedia.where("hash").anyOf(keptUploadKeys).primaryKeys()) as string[])
       : []
   )
+  const liveShareCodes = await loadLiveShareCodes(
+    items.flatMap((item) => item.sharedLinkCodes ?? [])
+  )
   return {
     input: {
       artifacts,
@@ -314,6 +338,7 @@ export async function loadFilesSources(options: {
       items,
       sessions,
       heldOriginals,
+      ...(liveShareCodes.size > 0 ? { liveShareCodes } : {}),
     },
     imagesTruncated: truncated,
   }

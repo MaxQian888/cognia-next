@@ -17532,7 +17532,6 @@
       "restore": "恢复",
       "saveAsTemplate": "另存为模板…",
       "share": "分享…",
-      "shareSoon": "即将推出",
       "trash": "移到回收站",
       "unfavorite": "取消收藏",
       "useInChat": "在对话中使用"
@@ -17549,6 +17548,7 @@
       "modified": "修改于 {date}",
       "open": "打开「{title}」",
       "owned": "上传到文件",
+      "sharedByLink": "{count, plural, =1 {已通过链接分享} other {已通过 # 个链接分享}}",
       "sharedWithMe": "与你共享",
       "sourceDeleted": "对话已删除",
       "trashed": "删除于 {date}",
@@ -17838,6 +17838,9 @@
     "selection": {
       "select": "选择「{title}」",
       "selectAll": "全选"
+    },
+    "share": {
+      "bundleTitle": "来自文件库的 {count} 个文件"
     },
     "sidebar": {
       "aria": "文件位置",
@@ -51533,6 +51536,11 @@
       "listFailed": "无法列出此文件夹。",
       "loading": "加载中…",
       "none": "尚未选择文件。勾选本对话中的文件或文件夹，即可随链接一起分享。",
+      "picked": {
+        "missing": "{name} 已不在此设备上，不会被分享。",
+        "readFailed": "无法读取所选项目，请重试。",
+        "reading": "正在读取所选项目…"
+      },
       "policyOrgUnavailable": "无法读取所在组织的文件分享策略，在恢复之前无法分享文件。",
       "progressLabel": "分享进度",
       "refused": {

@@ -63,6 +63,7 @@ import { FilesNewMenu } from "./files-new-menu"
 import { FilesPreviewPane } from "./files-preview-pane"
 import { FilesRenameDialog } from "./files-rename-dialog"
 import { FilesSaveTemplateDialog } from "./files-save-template-dialog"
+import { FilesShareDialog } from "./files-share-dialog"
 import { FilesSidebar } from "./files-sidebar"
 import { FilesTemplateStrip } from "./files-template-strip"
 import { FilesToolbar } from "./files-toolbar"
@@ -383,6 +384,7 @@ function FilesLibraryBody() {
       <FilesMoveDialog entries={entries ?? []} folders={folders} actions={actions} />
       <FilesRenameDialog entries={entries ?? []} actions={actions} />
       <FilesSaveTemplateDialog entries={entries ?? []} />
+      <FilesShareDialog entries={entries ?? []} folders={folders} />
       <FilesTrashDialogs entries={entries ?? []} actions={actions} onDeleted={selection.clear} />
       <FilesFolderDialog />
       <FilesDeleteFolderDialog folders={folders} />

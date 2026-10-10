@@ -80,6 +80,7 @@ describe("files library store", () => {
     s.openFolderDialog({ mode: "create", parentId: "root" })
     s.openDeleteFolder("lbf_a")
     s.openSaveTemplate("canvas:c1")
+    s.openShare(["canvas:c1", "image:h"])
     expect(useFilesLibraryStore.getState()).toMatchObject({
       moveTarget: ["a", "b"],
       renameTarget: "a",
@@ -88,6 +89,7 @@ describe("files library store", () => {
       folderDialog: { mode: "create", parentId: "root" },
       deleteFolderTarget: "lbf_a",
       saveTemplateTarget: "canvas:c1",
+      shareTarget: ["canvas:c1", "image:h"],
     })
     s.closeMove()
     s.closeRename()
@@ -96,6 +98,7 @@ describe("files library store", () => {
     s.closeFolderDialog()
     s.closeDeleteFolder()
     s.closeSaveTemplate()
+    s.closeShare()
     expect(useFilesLibraryStore.getState()).toMatchObject({
       moveTarget: null,
       renameTarget: null,
@@ -104,6 +107,7 @@ describe("files library store", () => {
       folderDialog: null,
       deleteFolderTarget: null,
       saveTemplateTarget: null,
+      shareTarget: null,
     })
   })
 })

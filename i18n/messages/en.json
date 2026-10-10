@@ -17532,7 +17532,6 @@
       "restore": "Restore",
       "saveAsTemplate": "Save as template…",
       "share": "Share…",
-      "shareSoon": "Coming soon",
       "trash": "Move to Trash",
       "unfavorite": "Remove from favorites",
       "useInChat": "Use in chat"
@@ -17549,6 +17548,7 @@
       "modified": "Modified {date}",
       "open": "Open {title}",
       "owned": "Uploaded to Files",
+      "sharedByLink": "{count, plural, =1 {Shared by link} other {Shared by # links}}",
       "sharedWithMe": "Shared with you",
       "sourceDeleted": "Conversation deleted",
       "trashed": "Deleted {date}",
@@ -17838,6 +17838,9 @@
     "selection": {
       "select": "Select {title}",
       "selectAll": "Select all"
+    },
+    "share": {
+      "bundleTitle": "{count, plural, =1 {1 file} other {# files}} from Files"
     },
     "sidebar": {
       "aria": "Files places",
@@ -51533,6 +51536,11 @@
       "listFailed": "This folder could not be listed.",
       "loading": "Loading…",
       "none": "No files chosen. Tick files or folders from this conversation to carry them in the link.",
+      "picked": {
+        "missing": "{name} is no longer stored on this device and won't be shared.",
+        "readFailed": "The chosen items could not be read. Try again.",
+        "reading": "Reading the chosen items…"
+      },
       "policyOrgUnavailable": "Your organization’s file-sharing policy could not be read, so files can’t be shared until it can.",
       "progressLabel": "Sharing progress",
       "refused": {

@@ -71,7 +71,7 @@ it("renders nothing without a selection", () => {
   expect(screen.queryByRole("toolbar")).toBeNull()
 })
 
-it("favorites, moves, exports and trashes the whole selection", async () => {
+it("favorites, moves, exports, shares and trashes the whole selection", async () => {
   const a = actions()
   const onClear = jest.fn()
   const selected = two()
@@ -86,6 +86,8 @@ it("favorites, moves, exports and trashes the whole selection", async () => {
   expect(useFilesLibraryStore.getState().moveTarget).toEqual(["artifact:a", "artifact:b"])
   await user.click(screen.getByRole("button", { name: "Download as zip" }))
   expect(a.exportZip).toHaveBeenCalledWith(selected, [])
+  await user.click(screen.getByRole("button", { name: "Share…" }))
+  expect(useFilesLibraryStore.getState().shareTarget).toEqual(["artifact:a", "artifact:b"])
   await user.click(screen.getByRole("button", { name: "Move to Trash" }))
   expect(a.trash).toHaveBeenCalledWith(selected)
   expect(onClear).toHaveBeenCalledTimes(1)

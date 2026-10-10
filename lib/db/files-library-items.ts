@@ -334,6 +334,25 @@ export async function setLibraryItemDisplayName(
 }
 
 /**
+ * Remember that a share link made from Files carries these items. Codes no
+ * longer in `liveCodes` (revoked, expired or forgotten links) are dropped on
+ * the way, so the list never outgrows the links that still exist. Sharing
+ * does not keep an item: the share holds its own copy of the bytes.
+ */
+export async function recordLibraryItemsShared(
+  sources: readonly LibraryItemSource[],
+  code: string,
+  liveCodes: ReadonlySet<string>
+): Promise<LibraryItemRow[]> {
+  return mutateItems(sources, (row) => {
+    const kept = (row.sharedLinkCodes ?? []).filter(
+      (existing) => existing !== code && liveCodes.has(existing)
+    )
+    return { ...row, sharedLinkCodes: [...kept, code] }
+  })
+}
+
+/**
  * Adopt an item as uploaded straight into Files (an image ingested from the
  * Files "New → Upload" menu). Owned items are always kept and are deleted,
  * not hidden.

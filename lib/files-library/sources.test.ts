@@ -3,7 +3,8 @@ import type { Artifact, CanvasDocument } from "@/types/artifact/artifact"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { putLibraryAsset, putSessionAsset } from "@/lib/db/session-assets"
-import { setLibraryItemFavorite } from "@/lib/db/files-library-items"
+import { recordLibraryItemsShared, setLibraryItemFavorite } from "@/lib/db/files-library-items"
+import type { SharedLinkRow } from "@/lib/db/shared-links"
 import { LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
 import type { MessageMediaRow } from "@/lib/db/message-media"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
@@ -13,6 +14,7 @@ import {
   isSharedWithMe,
   loadFilesSources,
   loadImages,
+  loadLiveShareCodes,
   rawArtifacts,
   rawCanvases,
   rawGeneratedVideos,
@@ -317,5 +319,48 @@ describe("who made an item (ADR-0223)", () => {
       canvasDocuments: {},
     })
     expect(input.sessions.get("shared:org:x")).toEqual({ title: "Their chat", sharedWithMe: true })
+  })
+})
+
+describe("live share codes (ADR-0223)", () => {
+  function link(code: string, overrides: Partial<SharedLinkRow> = {}): SharedLinkRow {
+    return {
+      id: `sl_${code}`,
+      code,
+      kind: "file-bundle",
+      url: "https://share.example/share/view?c=" + code,
+      createdAt: 1,
+      burnAfterRead: false,
+      hasPassphrase: false,
+      revoked: false,
+      ...overrides,
+    }
+  }
+
+  it("keeps recorded codes that are neither revoked nor expired", async () => {
+    await getDb().sharedLinks.bulkPut([
+      link("live"),
+      link("forever"),
+      link("revoked", { revoked: true }),
+      link("expired", { expiresAt: 50 }),
+      link("unrecorded"),
+    ])
+    const live = await loadLiveShareCodes(
+      ["live", "forever", "revoked", "expired", "missing", "live"],
+      100
+    )
+    expect([...live].sort()).toEqual(["forever", "live"])
+    expect(await loadLiveShareCodes([])).toEqual(new Set())
+  })
+
+  it("hands the aggregate the live codes its items recorded", async () => {
+    await getDb().sharedLinks.put(link("c1"))
+    await recordLibraryItemsShared([{ kind: "canvas", sourceId: "c" }], "c1", new Set())
+    const { input } = await loadFilesSources({ artifacts: {}, canvasDocuments: {} })
+    expect(input.liveShareCodes).toEqual(new Set(["c1"]))
+
+    await getDb().sharedLinks.where("code").equals("c1").modify({ revoked: true })
+    const after = await loadFilesSources({ artifacts: {}, canvasDocuments: {} })
+    expect(after.input.liveShareCodes).toBeUndefined()
   })
 })

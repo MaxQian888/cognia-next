@@ -131,6 +131,8 @@ export interface FilesEntry {
   hidden: boolean
   /** In the Files Trash since this time; such an item shows only in the Trash. */
   trashedAt?: number
+  /** Live share links made from Files that carry the item (ADR-0223); absent = none. */
+  sharedLinks?: number
   /** `messageMedia` key of the bytes (images and uploads). */
   mediaHash?: string
   /** sha-256 of the original bytes (uploads). */

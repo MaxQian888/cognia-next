@@ -12,6 +12,7 @@ import {
   listKeptSourceIdsForSession,
   listLibraryItems,
   preserveGeneratedVideoRecords,
+  recordLibraryItemsShared,
   listTrashedLibraryItemsBefore,
   reconcileLibraryPins,
   restoreLibraryItems,
@@ -461,6 +462,20 @@ describe("Trash (ADR-0223)", () => {
       LibraryItemError
     )
     expect(await listLibraryItems()).toEqual([])
+  })
+
+  it("records share links on items without keeping them, dropping dead codes", async () => {
+    const [first] = await recordLibraryItemsShared([image], "c1", new Set())
+    expect(first).toMatchObject({ sharedLinkCodes: ["c1"] })
+    expect(first!.keptAt).toBeUndefined()
+    expect(await pins()).toEqual([])
+
+    const rows = await recordLibraryItemsShared([image, second], "c2", new Set(["c1"]))
+    expect(rows.map((row) => row.sharedLinkCodes)).toEqual([["c1", "c2"], ["c2"]])
+
+    // c1 went away (revoked or expired); re-sharing as c2 does not repeat it.
+    const [pruned] = await recordLibraryItemsShared([image], "c2", new Set(["c2"]))
+    expect(pruned!.sharedLinkCodes).toEqual(["c2"])
   })
 
   it("sets and clears a display name", async () => {

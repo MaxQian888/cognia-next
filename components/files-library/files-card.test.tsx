@@ -123,10 +123,14 @@ it("toggles selection from its checkbox", () => {
 
 it("marks favorites, shares, deleted sources, Files uploads and pictures", () => {
   const { rerender, a, onSelect } = renderCard({
-    entry: entry({ favoritedAt: 1, originAlive: false, sharedWithMe: true }),
+    entry: entry({ favoritedAt: 1, originAlive: false, sharedWithMe: true, sharedLinks: 1 }),
   })
   expect(screen.getByTestId("files-card-favorite")).toBeInTheDocument()
   expect(screen.getByTestId("files-card-shared")).toBeInTheDocument()
+  expect(screen.getByTestId("files-card-shared-link")).toHaveAttribute(
+    "aria-label",
+    "Shared by link"
+  )
   expect(screen.getByTestId("files-card-source-deleted")).toHaveTextContent("Conversation deleted")
   rerender(
     <FilesCard

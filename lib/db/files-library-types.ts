@@ -102,6 +102,13 @@ export interface LibraryItemRow {
    * Canvas documents and Files-owned uploads are renamed at the source instead.
    */
   displayName?: string
+  /**
+   * Codes of share links made from Files that carry this item (ADR-0223).
+   * Only the code: the link itself, its key and its owner token live in
+   * `sharedLinks` on the device that made it, and the "shared by link" marker
+   * shows while one of these codes is still live there.
+   */
+  sharedLinkCodes?: string[]
   createdAt: number
   updatedAt: number
 }

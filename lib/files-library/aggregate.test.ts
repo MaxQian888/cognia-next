@@ -509,6 +509,42 @@ describe("helpers", () => {
     expect(entry!.searchText).toContain("parser")
   })
 
+  it("counts the live share links made from Files that carry an item", () => {
+    const canvas = (id: string) => ({
+      id,
+      sessionId: "s1",
+      title: id,
+      content: "",
+      type: "text" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      creator: "user" as const,
+    })
+    const entries = aggregateFilesEntries(
+      input({
+        canvases: [canvas("a"), canvas("b"), canvas("c")],
+        items: [
+          item({ key: "canvas:a", kind: "canvas", sourceId: "a", sharedLinkCodes: ["x", "y"] }),
+          item({ key: "canvas:b", kind: "canvas", sourceId: "b", sharedLinkCodes: ["dead"] }),
+        ],
+        liveShareCodes: new Set(["x", "y"]),
+      })
+    )
+    const byKey = new Map(entries.map((entry) => [entry.key, entry]))
+    expect(byKey.get("canvas:a")!.sharedLinks).toBe(2)
+    expect(byKey.get("canvas:b")!.sharedLinks).toBeUndefined()
+    expect(byKey.get("canvas:c")!.sharedLinks).toBeUndefined()
+
+    // Without any live link nothing is marked.
+    const [none] = aggregateFilesEntries(
+      input({
+        canvases: [canvas("a")],
+        items: [item({ key: "canvas:a", kind: "canvas", sourceId: "a", sharedLinkCodes: ["x"] })],
+      })
+    )
+    expect(none!.sharedLinks).toBeUndefined()
+  })
+
   it("carries who made each item, the origin conversation's title and whether it was shared with me", () => {
     const entries = aggregateFilesEntries(
       input({

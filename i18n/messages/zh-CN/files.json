@@ -12,7 +12,6 @@
     "restore": "恢复",
     "saveAsTemplate": "另存为模板…",
     "share": "分享…",
-    "shareSoon": "即将推出",
     "trash": "移到回收站",
     "unfavorite": "取消收藏",
     "useInChat": "在对话中使用"
@@ -29,6 +28,7 @@
     "modified": "修改于 {date}",
     "open": "打开「{title}」",
     "owned": "上传到文件",
+    "sharedByLink": "{count, plural, =1 {已通过链接分享} other {已通过 # 个链接分享}}",
     "sharedWithMe": "与你共享",
     "sourceDeleted": "对话已删除",
     "trashed": "删除于 {date}",
@@ -318,6 +318,9 @@
   "selection": {
     "select": "选择「{title}」",
     "selectAll": "全选"
+  },
+  "share": {
+    "bundleTitle": "来自文件库的 {count} 个文件"
   },
   "sidebar": {
     "aria": "文件位置",

@@ -7,9 +7,9 @@
  * - In the Trash an item offers Preview, Restore and Delete forever.
  * - Everywhere else: open, preview, use in chat; favorite, move, take out of
  *   a folder; rename, duplicate, save as template (documents, while the
- *   template platform is on), download; share (dormant until ADR-0222's
- *   file snapshots exist — `FILES_SHARE_DORMANCY`); and Move to Trash, which
- *   replaced both "Remove from Files" and "Delete".
+ *   template platform is on), download; share as a link (ADR-0222's file
+ *   bundle, `files-share-dialog.tsx`); and Move to Trash, which replaced both
+ *   "Remove from Files" and "Delete".
  */
 
 import type { ReactNode } from "react"
@@ -54,6 +54,7 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
   const openRename = useFilesLibraryStore((s) => s.openRename)
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
   const openSaveTemplate = useFilesLibraryStore((s) => s.openSaveTemplate)
+  const openShare = useFilesLibraryStore((s) => s.openShare)
 
   if (entry.trashedAt !== undefined) {
     return [
@@ -84,7 +85,6 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
   }
 
   const favorite = entry.favoritedAt !== undefined
-  const shareAvailable = isFilesShareAvailable()
   const nodes: FilesMenuNode[] = [
     {
       type: "item",
@@ -171,9 +171,8 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
       id: "share",
       label: t("actions.share"),
       icon: Share2Icon,
-      disabled: !shareAvailable,
-      ...(shareAvailable ? {} : { hint: t("actions.shareSoon") }),
-      onSelect: () => undefined,
+      disabled: !isFilesShareAvailable(entry),
+      onSelect: () => openShare([entry.key]),
     },
     { type: "separator", id: "sep-trash" },
     {

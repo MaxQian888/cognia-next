@@ -9,7 +9,12 @@ import type { ShareFileSelection } from "@/hooks/share/use-share-file-selection"
 import type { ExpandedShareSelection, ShareFileCandidate } from "@/lib/share/file-selection"
 import type { FileSpacePath } from "@/types/filespace"
 
-import { ShareFilesField, type ShareFilesFieldProps } from "./share-files-field"
+import {
+  ShareFilesField,
+  SharePickedFilesField,
+  type ShareFilesFieldProps,
+  type SharePickedFilesFieldProps,
+} from "./share-files-field"
 
 const LOADED = {
   space: { sessionId: "s1", status: "available", mounts: [], hostId: "local" },
@@ -164,5 +169,63 @@ describe("ShareFilesField", () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/\/workspace\/big\.iso is larger than 512/)).toBeInTheDocument()
     expect(screen.getByText(/Together the files are larger than 2/)).toBeInTheDocument()
+  })
+})
+
+describe("SharePickedFilesField", () => {
+  function renderPicked(props: Partial<SharePickedFilesFieldProps> = {}) {
+    const all: SharePickedFilesFieldProps = {
+      picked: { files: [] },
+      confirmedSensitive: new Set(),
+      onConfirmSensitive: jest.fn(),
+      violations: [],
+      ...props,
+    }
+    return { ...render(<SharePickedFilesField {...all} />), props: all }
+  }
+
+  it("says it is reading until the files are known", () => {
+    renderPicked({ picked: { files: undefined } })
+    expect(screen.getByRole("status")).toHaveTextContent("Reading the chosen items…")
+  })
+
+  it("lists what the link carries and names items with nothing stored", () => {
+    renderPicked({
+      picked: {
+        files: [candidate("/files/plan.md", 512), candidate("/files/Specs/chart.png", 512)],
+        unavailable: ["Old photo"],
+      },
+    })
+    expect(screen.getByRole("status")).toHaveTextContent("2 files · 1.0 KB")
+    expect(screen.getByText("/files/plan.md")).toBeInTheDocument()
+    expect(screen.getByText("/files/Specs/chart.png")).toBeInTheDocument()
+    expect(
+      screen.getByText("Old photo is no longer stored on this device and won't be shared.")
+    ).toBeInTheDocument()
+  })
+
+  it("asks for each credential-like file and counts it only once ticked", async () => {
+    const user = userEvent.setup()
+    const onConfirmSensitive = jest.fn()
+    const picked = {
+      files: [candidate("/files/notes.md", 512), candidate("/files/.env", 512, true)],
+    }
+    const { rerender, props } = renderPicked({ picked, onConfirmSensitive })
+    expect(screen.getByRole("status")).toHaveTextContent("1 file · 512 B")
+    await user.click(screen.getByRole("checkbox", { name: "Include /files/.env" }))
+    expect(onConfirmSensitive).toHaveBeenCalledWith("/files/.env", true)
+    rerender(<SharePickedFilesField {...props} confirmedSensitive={new Set(["/files/.env"])} />)
+    expect(screen.getByRole("status")).toHaveTextContent("2 files · 1.0 KB")
+  })
+
+  it("reports a read failure and the server's limits", () => {
+    renderPicked({
+      picked: { files: undefined, failed: true },
+      violations: [{ kind: "too-many-files", count: 201, max: 200 }],
+    })
+    expect(screen.getByText("The chosen items could not be read. Try again.")).toBeInTheDocument()
+    expect(
+      screen.getByText("201 files chosen; one link can carry at most 200.")
+    ).toBeInTheDocument()
   })
 })

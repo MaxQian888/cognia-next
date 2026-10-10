@@ -10,7 +10,8 @@
 // checks the shared-conversation authorization, the effective file-sharing
 // policy and the sensitive-file confirmations before anything is uploaded;
 // the dialog shows the same policy up front by offering only the lifetimes it
-// allows.
+// allows. With `picked` files (the Files page, ADR-0223) the share is those
+// files and nothing else, under the same checks.
 
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -64,7 +65,14 @@ import {
 import { useShareFileSelection } from "@/hooks/share/use-share-file-selection"
 import type { FileSpacePath } from "@/types/filespace"
 import { PayloadView } from "@/components/share/payload-view"
-import { ShareFilesField } from "@/components/share/share-files-field"
+import {
+  ShareFilesField,
+  SharePickedFilesField,
+  type ShareLinkPickedFiles,
+} from "@/components/share/share-files-field"
+import type { ShareFileCandidate } from "@/lib/share/file-selection"
+
+export type { ShareLinkPickedFiles }
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("share-link")
@@ -110,6 +118,15 @@ interface Props {
   artifactSummary?: React.ReactNode
   /** Offer the conversation's files (ADR-0222). */
   files?: ShareLinkFilesSource
+  /**
+   * Share files picked before the dialog opened, as a `file-bundle` (the
+   * Files page, ADR-0223). Like a required `files` source, creating needs at
+   * least one. Authorizing the conversations they come from is the caller's,
+   * in `buildPayload`, which runs before anything is uploaded.
+   */
+  picked?: ShareLinkPickedFiles
+  /** The link was created, carrying these files. */
+  onCreated?: (share: CreatedShare, carried: readonly ShareFileCandidate[]) => void
   trigger?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -125,6 +142,8 @@ export function ShareLinkDialog({
   buildPayload,
   artifactSummary,
   files,
+  picked,
+  onCreated,
   trigger,
   open,
   onOpenChange,
@@ -156,17 +175,20 @@ export function ShareLinkDialog({
   const abortRef = useRef<AbortController | null>(null)
 
   const selection = useShareFileSelection(files?.session.id ?? null, selected)
-  const candidates = selection.expanded?.files ?? []
+  const candidates = picked ? (picked.files ?? []) : (selection.expanded?.files ?? [])
+  const filesPending = picked ? picked.files === undefined : selection.pending
+  const filesRequired = Boolean(picked) || files?.required === true
   const included = candidates.filter((file) => !file.sensitive || confirmedSensitive.has(file.path))
   const violations = checkShareSelectionLimits(included)
   const carriesFiles = included.length > 0
 
   // The effective policy decides which lifetimes a file share may ask for.
-  // Keyed by the conversation, not the `files` object, which callers build
-  // inline on every render.
+  // Keyed by the conversation (or by there being picked files), not the
+  // `files` / `picked` objects, which callers build inline on every render.
   const filesSessionId = files?.session.id
+  const offersFiles = Boolean(filesSessionId) || Boolean(picked)
   useEffect(() => {
-    if (!filesSessionId || !isOpen) return
+    if (!offersFiles || !isOpen) return
     let current = true
     void loadEffectiveFileSharingPolicy().then(
       (loaded) => {
@@ -181,7 +203,7 @@ export function ShareLinkDialog({
     return () => {
       current = false
     }
-  }, [filesSessionId, isOpen])
+  }, [offersFiles, isOpen])
 
   const ttlCeiling = carriesFiles && policy ? policy.policy.maxSnapshotTtlSeconds : Infinity
   const ttlOptions = TTL_ASCENDING.filter((option) => TTL_SECONDS[option] <= ttlCeiling)
@@ -193,11 +215,11 @@ export function ShareLinkDialog({
 
   const canCreate =
     !busy &&
-    !selection.pending &&
+    !filesPending &&
     violations.length === 0 &&
     !snapshotsForbidden &&
     effectiveTtl !== null &&
-    !(files?.required && !carriesFiles)
+    !(filesRequired && !carriesFiles)
 
   const reset = () => {
     abortRef.current?.abort()
@@ -300,6 +322,7 @@ export function ShareLinkDialog({
       })
       setCreatedFiles(included.length + build.attachments.length)
       setCreated(result)
+      onCreated?.(result, included)
     } catch (err) {
       if (controller.signal.aborted) {
         // Cancelling withdraws a half-made link like any failed upload; when
@@ -427,7 +450,14 @@ export function ShareLinkDialog({
         ) : (
           <div className="space-y-4 py-2">
             {artifactSummary}
-            {files ? (
+            {picked ? (
+              <SharePickedFilesField
+                picked={picked}
+                confirmedSensitive={confirmedSensitive}
+                onConfirmSensitive={onConfirmSensitive}
+                violations={violations}
+              />
+            ) : files ? (
               <ShareFilesField
                 selection={selection}
                 selected={selected}
@@ -547,7 +577,7 @@ export function ShareLinkDialog({
                   {t("files.cancel")}
                 </Button>
               ) : null}
-              {!preview && !files?.required && (
+              {!preview && !filesRequired && (
                 <Button variant="outline" onClick={() => void onPreview()} disabled={busy}>
                   {t("view.preview")}
                 </Button>
