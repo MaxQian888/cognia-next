@@ -74,6 +74,24 @@ describe("entries on the wire", () => {
     expect(original.excerpt).toBe("secret body text")
   })
 
+  it("keep a workspace file's ledger run on the host, which reads its bytes by key", () => {
+    const workspace = {
+      sessionId: "s1",
+      workspaceRoot: "/repo",
+      executionRoot: "/exec/run-1",
+      relPath: "plan.md",
+      change: "created" as const,
+      adoption: "pending" as const,
+      runId: "run-1",
+    }
+    const original = entry({ kind: "workspace-file", workspace })
+    const remote = entryToRemote(original)
+    expect(remote.workspace).not.toHaveProperty("runId")
+    expect(remote.workspace).toMatchObject({ adoption: "pending", relPath: "plan.md" })
+    expect(original.workspace).toBe(workspace)
+    expect(workspace.runId).toBe("run-1")
+  })
+
   it("come back searchable by title, source title and type only", () => {
     const back = entryFromRemote(entryToRemote(entry({ mediaType: "text/markdown" })))
     expect(back.searchText).toBe("plan\nplan v1\ntext/markdown")

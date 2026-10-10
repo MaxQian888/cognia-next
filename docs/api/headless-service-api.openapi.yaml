@@ -150928,6 +150928,225 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_read_resource_capture:
+    post:
+      operationId: internalRpcTaskWorkspaceReadResourceCapture
+      tags:
+        - headless-rpc
+      summary: task_workspace_read_resource_capture (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A slice of the bytes a run's change left at a path, from the ledger's capture rather than disk (ADR-0223
+                §8). Never a credential-shaped path; only a file the run created, modified or renamed to and whose
+                content was captured.
+              required:
+                - runId
+                - path
+                - offset
+                - length
+              properties:
+                runId:
+                  type: string
+                  minLength: 1
+                path:
+                  type: string
+                  minLength: 1
+                  description: Relative to the run's roots, as the resource index names it.
+                offset:
+                  type: integer
+                  minimum: 0
+                length:
+                  type: integer
+                  minimum: 0
+                  maximum: 4194304
+                  description: Bytes to read; 0 answers the size alone.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: |-
+                  One slice of the bytes a run's change left at a path, read from the
+                  ledger's capture rather than from disk: for a change not applied yet
+                  whose run root is gone (archived or removed), the capture is the only
+                  copy of what the agent wrote.
+                properties:
+                  bytesRead:
+                    description: "How many bytes were read: fewer than asked only at the end."
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                  dataBase64:
+                    description: The bytes read, base64 (standard alphabet, padded).
+                    type: string
+                  eof:
+                    description: Whether this slice reaches the end.
+                    type: boolean
+                  offset:
+                    description: Where the slice starts.
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                  size:
+                    description: The whole capture's size.
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                required:
+                  - bytesRead
+                  - dataBase64
+                  - eof
+                  - offset
+                  - size
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/task_workspace_reconcile:
     post:
       operationId: internalRpcTaskWorkspaceReconcile
@@ -171128,6 +171347,7 @@ components:
           - task_workspace_policy_get
           - task_workspace_policy_set
           - task_workspace_prune
+          - task_workspace_read_resource_capture
           - task_workspace_reconcile
           - task_workspace_record_tool_event
           - task_workspace_remote_source_ensure
@@ -171481,10 +171701,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 800
-  generatedRequestSchemaCount: 800
+  internalCommandCount: 801
+  generatedRequestSchemaCount: 801
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 800
+  contractRequestSchemaCount: 801
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 800
+  generatedResponseSchemaCount: 801
   loopbackOnly: true

@@ -69,6 +69,12 @@ export interface LibraryItemWorkspaceLocation {
    * a snapshot: it is only true of the listing it came from.
    */
   adoption?: "applied" | "pending"
+  /**
+   * The run that changed it last, from the ledger's index: names the bytes
+   * the ledger captured, which are read when a pending file's run root is
+   * gone. Like `adoption`, only true of the listing; never in a snapshot.
+   */
+  runId?: string
 }
 
 /** Display metadata copied at keep/upload time so an item outlives its source row. */

@@ -417,6 +417,21 @@ export interface TaskResourceIndexEntry {
   adoption: "applied" | "pending"
 }
 
+/**
+ * One slice of the bytes a run's change left at a path, from the ledger's
+ * capture rather than disk (`task_workspace_read_resource_capture`): the only
+ * copy of an agent's file not applied yet once the run's root is gone.
+ */
+export interface ResourceCaptureChunk {
+  /** The bytes read, base64. */
+  dataBase64: string
+  offset: number
+  bytesRead: number
+  /** The whole capture's size. */
+  size: number
+  eof: boolean
+}
+
 export type ResourceEventKind =
   "created" | "modified" | "deleted" | "renamed" | "any" | "gap" | "resync"
 

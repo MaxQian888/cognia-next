@@ -73,7 +73,7 @@ pub use resource::{
 };
 pub use resource_index::{
     fold_resource_index, ChangeAdoption, PatchOutcome, PatchPath, ResourceAdoption,
-    ResourceIndexEntry, ResourceIndexRow,
+    ResourceCaptureChunk, ResourceIndexEntry, ResourceIndexRow, RESOURCE_CAPTURE_CHUNK_MAX_BYTES,
 };
 pub use sensitive::{
     decide_access, validate_include_pattern, IncludePatternError, SensitiveAuditEntry,

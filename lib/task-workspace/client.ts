@@ -31,6 +31,7 @@ import type {
   DownloadHandle,
   PatchSelection,
   PatchSet,
+  ResourceCaptureChunk,
   ResourceChange,
   ResourceEvent,
   ResourceRead,
@@ -728,6 +729,28 @@ export async function listTaskResourceIndex(
     if (seen.has(key)) return false
     seen.add(key)
     return true
+  })
+}
+
+/** Largest slice `readTaskResourceCapture` answers (4 MiB, as a workspace file's ranged read). */
+export const TASK_RESOURCE_CAPTURE_CHUNK_MAX_BYTES = 4 * 1024 * 1024
+
+/**
+ * A slice of what `runId` left at `path`, from the ledger's capture. `length`
+ * 0 answers the size alone. Refused for a credential-shaped path and for a
+ * change whose content the ledger did not capture.
+ */
+export function readTaskResourceCapture(
+  runId: string,
+  path: string,
+  offset: number,
+  length: number
+): Promise<ResourceCaptureChunk> {
+  return transport.call<ResourceCaptureChunk>("task_workspace_read_resource_capture", {
+    runId,
+    path,
+    offset,
+    length: Math.min(length, TASK_RESOURCE_CAPTURE_CHUNK_MAX_BYTES),
   })
 }
 

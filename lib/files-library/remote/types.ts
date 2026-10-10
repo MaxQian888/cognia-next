@@ -529,7 +529,11 @@ export function entryFromRemote(remote: FilesRemoteEntry): FilesEntry {
 export function entryToRemote(entry: FilesEntry): FilesRemoteEntry {
   // Destructured out, not deleted: the aggregate's object is shared.
   const { searchText: _searchText, excerpt: _excerpt, ...remote } = entry
-  return remote
+  if (!remote.workspace?.runId) return remote
+  // The ledger run a workspace file's bytes are captured under is the host's
+  // to read with: the device asks for bytes by item key alone.
+  const { runId: _runId, ...workspace } = remote.workspace
+  return { ...remote, workspace }
 }
 
 /** Structural check on what the host answered a list page with. */

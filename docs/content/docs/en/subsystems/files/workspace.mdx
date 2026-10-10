@@ -38,9 +38,9 @@ flowchart LR
 ## The resource index
 
 The ledger stores one row per task, run and path in `task_resources`, each with its `ResourceChange`.
-`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:590`) joins
+`TaskWorkspaceStore::list_resource_index_rows` (`crates/cognia-task-workspace/src/store.rs:726`) joins
 those rows to their run and to the `task_workspaces` row that names the owning conversation
-(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:177`) replays
+(`session_id`). `fold_resource_index` (`crates/cognia-task-workspace/src/resource_index.rs:202`) replays
 them in the order they settled (the run's `settled_at`, else its `created_at`), keyed by conversation,
 workspace root and path:
 
@@ -71,13 +71,13 @@ with the database's change fingerprint (`WorkspaceStore::change_fingerprint`: th
 `total_changes()` and `PRAGMA data_version`, which moves when another connection commits), so the pages
 of one listing, and a re-read on focus while the ledger is unchanged, share one fold; a run's payload is
 parsed once for all of its rows. `task_workspace_list_resource_index`
-(`crates/cognia-task-workspace-host/src/host_surface.rs:783`) serves it in offset pages of 500
+(`crates/cognia-task-workspace-host/src/host_surface.rs:784`) serves it in offset pages of 500
 (`resource_index_page`), as a read-only `host.observe` command that runs off the main thread. `listTaskResourceIndex`
-(`lib/task-workspace/client.ts:717`) collects the pages, at most 20 000 entries, and drops duplicates.
+(`lib/task-workspace/client.ts:718`) collects the pages, at most 20 000 entries, and drops duplicates.
 
 ## Merging with code-adoption turns
 
-`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:177`) takes the index as it stands, then
+`mergeWorkspaceFiles` (`lib/files-library/workspace-files.ts:178`) takes the index as it stands, then
 adds files from `codeAdoptionTurns` **only for conversations the index holds nothing for** — an
 external agent that edited files without running through the ledger. A conversation the ledger does
 hold is never patched from turn rows: what the ledger dropped stays dropped. Turn rows fold oldest
@@ -128,8 +128,20 @@ applied file from the workspace root only (a copy left in the run's root is the 
 the file as it is now), a pending one from the run's root only (the workspace root holds the person's
 version). Without `adoption` — a turn row, or a card rebuilt from a kept item, whose snapshot never
 stores it — `locateWorkspaceFile` tries the run's root, then the workspace root. It skips a root the
-host refuses and ignores directories. A pending file whose run root was archived is gone too, as is a
-file in no root it may be under:
+host refuses and ignores directories.
+
+A pending file lives only in its run's root. Once that root is archived or removed, the ledger's
+capture of the change is the only copy of what the agent wrote, so `locateWorkspaceFile` falls back to
+it when the listing named the run (`runId`, from the index, never kept in a snapshot): it probes
+`task_workspace_read_resource_capture` with a zero-length read for the size, and returns a `ledger`
+source. That command (`TaskWorkspaceService::read_resource_capture`) is named by run and path, not by
+blob hash, so it serves only what the ledger recorded for that change: never a credential-shaped path,
+never a deleted, generated, symlinked or uncaptured one. `WorkspaceStore::read_blob_range` reads an
+uncompressed capture in place and decodes a compressed one once, keeping it for the next slice (up to
+64 MiB; a larger one is decoded streaming for each slice), and only the first slice marks the blob
+used. An applied file never falls back: a capture is not the file as it is now.
+
+A file in no root it may be under, and not in the ledger either, is gone:
 `FilesWorkspaceFileError("files_workspace_missing")`, "This file is no longer on disk." Existence is
 checked when the file is used, not when it is listed.
 
@@ -141,7 +153,7 @@ and Use in chat (capped at the draft attachment quota) all read this way.
 ## Opening
 
 `openFilesEntry` routes a workspace file whose conversation is alive to
-`openWorkspaceFileInConversation` (`lib/files-library/workspace-files-io.ts:211`):
+`openWorkspaceFileInConversation` (`lib/files-library/workspace-files-io.ts:268`):
 
 1. locate the file, or report it missing;
 2. load the conversation's FileSpace (`lib/filespace/load.ts`) and map the file's absolute path into
@@ -169,7 +181,8 @@ them with `files_library_read_chunk` (`client.read`, byte-range):
 
 - the request names the **item key**, an offset and at most 512 KiB (`FILES_REMOTE_READ_CHUNK_MAX`);
   the host resolves the key in its own aggregate, so the device never names a path and the host reads
-  only a file it lists itself;
+  only a file it lists itself — from disk, or from the ledger's capture as on the desktop (the wire
+  entry leaves the ledger `runId` behind);
 - a key that is not a workspace file is an invalid request; a file over 10 MiB is
   `files_remote_too_large`, and past it the preview says to use the desktop;
 - `FilesRemoteClient.readWorkspaceFile` (`lib/files-library/remote/client.ts:388`) loops the slices,

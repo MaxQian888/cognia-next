@@ -18,6 +18,22 @@ pub struct WorkspaceStore {
     connection: Connection,
     blob_dir: PathBuf,
     max_blob_bytes: u64,
+    /// The last compressed blob decoded for a ranged read, so reading one a
+    /// slice at a time decodes it once. Only blobs up to
+    /// [`DECODED_BLOB_CACHE_MAX_BYTES`] are kept.
+    decoded: Option<(String, Arc<Vec<u8>>)>,
+}
+
+/// Largest decoded blob a ranged read keeps between slices. A larger one is
+/// decoded again for every slice, streaming, so memory stays bounded.
+pub const DECODED_BLOB_CACHE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// One slice of a captured blob, from [`WorkspaceStore::read_blob_range`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobSlice {
+    pub bytes: Vec<u8>,
+    /// The whole blob's size.
+    pub size: u64,
 }
 
 impl WorkspaceStore {
@@ -93,6 +109,7 @@ impl WorkspaceStore {
             connection,
             blob_dir,
             max_blob_bytes,
+            decoded: None,
         };
         store.apply_registry_migration()?;
         Ok(store)
@@ -380,6 +397,125 @@ impl WorkspaceStore {
             )
             .map_err(|error| format!("insert blob {hash}: {error}"))?;
         Ok(())
+    }
+
+    /// `length` bytes of a blob from `offset`, without holding all of it
+    /// where that can be avoided: an uncompressed blob is read in place, a
+    /// compressed one is decoded once and kept for the next slice (up to
+    /// [`DECODED_BLOB_CACHE_MAX_BYTES`]) or decoded streaming past `offset`.
+    /// Reading at or past the end is an empty slice. The first slice marks the
+    /// blob used, as a whole read does, so GC keeps what is being read.
+    pub fn read_blob_range(
+        &mut self,
+        hash: &str,
+        offset: u64,
+        length: u64,
+        now: i64,
+    ) -> Result<BlobSlice, String> {
+        self.read_blob_range_cached_up_to(hash, offset, length, now, DECODED_BLOB_CACHE_MAX_BYTES)
+    }
+
+    fn read_blob_range_cached_up_to(
+        &mut self,
+        hash: &str,
+        offset: u64,
+        length: u64,
+        now: i64,
+        cache_max: u64,
+    ) -> Result<BlobSlice, String> {
+        let row: Option<(String, bool, u64)> = self
+            .connection
+            .query_row(
+                "SELECT rel_path,compressed,size FROM task_blobs WHERE hash=?1",
+                [hash],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| format!("query blob {hash}: {error}"))?;
+        let (rel_path, compressed, size) = row.ok_or_else(|| format!("missing blob {hash}"))?;
+        let take = length.min(size.saturating_sub(offset));
+        if offset == 0 {
+            self.connection
+                .execute(
+                    "UPDATE task_blobs SET last_accessed=?2 WHERE hash=?1",
+                    params![hash, now],
+                )
+                .map_err(|error| format!("touch blob {hash}: {error}"))?;
+        }
+        if take == 0 {
+            return Ok(BlobSlice {
+                bytes: Vec::new(),
+                size,
+            });
+        }
+        let path = self.blob_dir.join(rel_path);
+        let bytes = if !compressed {
+            use std::io::{Seek, SeekFrom};
+            let mut file =
+                fs::File::open(&path).map_err(|error| format!("open blob {hash}: {error}"))?;
+            file.seek(SeekFrom::Start(offset))
+                .map_err(|error| format!("seek blob {hash}: {error}"))?;
+            let mut bytes = vec![0u8; take as usize];
+            file.read_exact(&mut bytes)
+                .map_err(|error| format!("read blob {hash}: {error}"))?;
+            bytes
+        } else if size <= cache_max {
+            let decoded = match &self.decoded {
+                Some((cached, bytes)) if cached == hash => Arc::clone(bytes),
+                _ => {
+                    let file = fs::File::open(&path)
+                        .map_err(|error| format!("open blob {hash}: {error}"))?;
+                    let mut decoded = Vec::with_capacity(size as usize);
+                    GzDecoder::new(file)
+                        .read_to_end(&mut decoded)
+                        .map_err(|error| format!("decompress blob {hash}: {error}"))?;
+                    let decoded = Arc::new(decoded);
+                    self.decoded = Some((hash.to_string(), Arc::clone(&decoded)));
+                    decoded
+                }
+            };
+            let start = (offset as usize).min(decoded.len());
+            let end = start.saturating_add(take as usize).min(decoded.len());
+            decoded[start..end].to_vec()
+        } else {
+            let file =
+                fs::File::open(&path).map_err(|error| format!("open blob {hash}: {error}"))?;
+            let mut decoder = GzDecoder::new(file);
+            std::io::copy(&mut (&mut decoder).take(offset), &mut std::io::sink())
+                .map_err(|error| format!("decompress blob {hash}: {error}"))?;
+            let mut bytes = Vec::with_capacity(take as usize);
+            decoder
+                .take(take)
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("decompress blob {hash}: {error}"))?;
+            bytes
+        };
+        if bytes.len() as u64 != take {
+            return Err(format!(
+                "blob {hash} is shorter than its recorded size {size}"
+            ));
+        }
+        Ok(BlobSlice { bytes, size })
+    }
+
+    /// The ledger's record of one run's change to one path.
+    pub fn get_run_resource(
+        &self,
+        run_id: &str,
+        path: &str,
+    ) -> Result<Option<ResourceChange>, String> {
+        let payload: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT payload FROM task_resources WHERE run_id=?1 AND path=?2",
+                [run_id, path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("query run resource: {error}"))?;
+        payload
+            .map(|payload| serde_json::from_str(&payload).map_err(|error| error.to_string()))
+            .transpose()
     }
 
     pub fn get_blob(&mut self, hash: &str, now: i64) -> Result<Vec<u8>, String> {
@@ -1953,6 +2089,81 @@ mod tests {
         // A task's rows go with it.
         store.delete_task("task-1").unwrap();
         assert!(store.list_resource_index_rows().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_blob_is_read_a_range_at_a_time_however_it_is_stored() {
+        let dir = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        // Compresses: stored gzipped. Random-looking bytes do not: stored as is.
+        let text: Vec<u8> = b"agent wrote this line\n".repeat(200);
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let noise: Vec<u8> = (0..4096)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 24) as u8
+            })
+            .collect();
+        store.put_blob("text", &text, 1).unwrap();
+        store.put_blob("noise", &noise, 1).unwrap();
+        let compressed = |hash: &str| -> bool {
+            store
+                .connection
+                .query_row(
+                    "SELECT compressed FROM task_blobs WHERE hash=?1",
+                    [hash],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert!(compressed("text"));
+        assert!(!compressed("noise"));
+
+        for (hash, bytes) in [("text", &text), ("noise", &noise)] {
+            let mut read = Vec::new();
+            let mut offset = 0;
+            loop {
+                let slice = store.read_blob_range(hash, offset, 1000, 2).unwrap();
+                assert_eq!(slice.size, bytes.len() as u64);
+                if slice.bytes.is_empty() {
+                    break;
+                }
+                offset += slice.bytes.len() as u64;
+                read.extend(slice.bytes);
+            }
+            assert_eq!(&read, bytes, "{hash}");
+        }
+        // The compressed one was decoded once and kept.
+        assert_eq!(
+            store.decoded.as_ref().map(|(hash, _)| hash.as_str()),
+            Some("text")
+        );
+        // Over the cache cap, each slice decodes streaming and nothing is kept.
+        store.decoded = None;
+        let slice = store
+            .read_blob_range_cached_up_to("text", 100, 50, 3, 10)
+            .unwrap();
+        assert_eq!(slice.bytes, text[100..150]);
+        assert!(store.decoded.is_none());
+        // Past the end: empty, not an error. Unknown blob: an error.
+        assert!(store
+            .read_blob_range("text", 1 << 20, 10, 4)
+            .unwrap()
+            .bytes
+            .is_empty());
+        assert!(store.read_blob_range("absent", 0, 10, 4).is_err());
+        // The first slice marks the blob used; later slices write nothing.
+        let accessed: i64 = store
+            .connection
+            .query_row(
+                "SELECT last_accessed FROM task_blobs WHERE hash='text'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(accessed, 2);
     }
 
     #[test]

@@ -1158,6 +1158,7 @@
             "patch_set": {},
             "policy": {},
             "resource": {},
+            "resource_capture": {},
             "resource_event": {},
             "resource_index": {},
             "resource_manifest": {},

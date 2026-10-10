@@ -75,6 +75,7 @@ describe("mergeWorkspaceFiles", () => {
         createdAt: 10,
         updatedAt: 20,
         adoption: "applied",
+        runId: "run-1",
       },
     ])
     // Where the file is follows from whether it was applied.

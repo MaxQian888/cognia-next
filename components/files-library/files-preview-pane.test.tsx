@@ -466,7 +466,7 @@ it("says when a workspace file is not applied yet, and when it is", async () => 
     <FilesPreviewPane entry={e("pending")} actions={actions()} onClose={jest.fn()} />
   )
   expect(await screen.findByTestId("files-preview-workspace-adoption")).toHaveTextContent(
-    "Not applied yet: only in the agent's working copy"
+    "Not applied yet: the agent's version, not in your workspace"
   )
   rerender(<FilesPreviewPane entry={e("applied")} actions={actions()} onClose={jest.fn()} />)
   expect(screen.getByTestId("files-preview-workspace-adoption")).toHaveTextContent(

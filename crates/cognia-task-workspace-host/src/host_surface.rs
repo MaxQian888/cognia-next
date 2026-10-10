@@ -11,14 +11,15 @@ use cognia_task_workspace::{
     AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
     ConflictResolution, DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome,
-    ReconcileOutcome, RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind,
-    ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch,
-    RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
-    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
-    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
-    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
-    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+    ReconcileOutcome, RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange, ResourceEvent,
+    ResourceEventKind, ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy,
+    RevisionApplyOutcome, RevisionPatch, RunState, ServiceConfig, TaskResourceManifest,
+    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
+    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
+    WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary,
+    WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest,
+    WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision, WorktreeLifecycleEvent,
+    WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -810,6 +811,21 @@ pub fn resource_index_page(
         offset,
         more,
     ))
+}
+
+/// A slice of the bytes a run's change left at a path, from the ledger's
+/// capture (ADR-0223 §8): what Files reads for an agent's file that is not
+/// applied yet once the run's own root is gone. Off the main thread, since a
+/// compressed capture is decoded to be sliced.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn task_workspace_read_resource_capture(
+    run_id: String,
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<ResourceCaptureChunk, String> {
+    blocking(move |service| service.read_resource_capture(&run_id, &path, offset, length)).await
 }
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]

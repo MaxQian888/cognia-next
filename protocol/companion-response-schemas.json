@@ -11048,6 +11048,40 @@
       ],
       "type": "object"
     },
+    "ResourceCaptureChunk": {
+      "additionalProperties": false,
+      "description": "One slice of the bytes a run's change left at a path, read from the\nledger's capture rather than from disk: for a change not applied yet\nwhose run root is gone (archived or removed), the capture is the only\ncopy of what the agent wrote.",
+      "properties": {
+        "bytesRead": {
+          "description": "How many bytes were read: fewer than asked only at the end.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dataBase64": {
+          "description": "The bytes read, base64 (standard alphabet, padded).",
+          "type": "string"
+        },
+        "eof": {
+          "description": "Whether this slice reaches the end.",
+          "type": "boolean"
+        },
+        "offset": {
+          "description": "Where the slice starts.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "description": "The whole capture's size.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["bytesRead", "dataBase64", "eof", "offset", "size"],
+      "type": "object"
+    },
     "ResourceAdoption": {
       "description": "Whether a listed change is in the workspace yet.",
       "oneOf": [
@@ -13642,6 +13676,9 @@
     },
     "task_workspace_list_resource_index": {
       "$ref": "#/$defs/Page_of_ResourceIndexEntry"
+    },
+    "task_workspace_read_resource_capture": {
+      "$ref": "#/$defs/ResourceCaptureChunk"
     },
     "task_workspace_list_resources": {
       "items": {

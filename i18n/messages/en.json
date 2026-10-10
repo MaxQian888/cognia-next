@@ -17888,7 +17888,7 @@
       "unavailable": "The content is no longer stored on this device.",
       "workspaceAdoption": {
         "applied": "Applied to the workspace",
-        "pending": "Not applied yet: only in the agent's working copy"
+        "pending": "Not applied yet: the agent's version, not in your workspace"
       },
       "workspaceChange": {
         "created": "Created by an agent",

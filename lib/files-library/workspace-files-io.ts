@@ -2,6 +2,11 @@
  * The host side of workspace files (ADR-0223 §8): asking the ledger for its
  * resource index, finding a file on disk, reading its bytes and opening it in
  * its conversation's Files panel (ADR-0222). Files only ever reads here.
+ *
+ * A file not applied yet lives only in its run's own root. Once that root is
+ * archived or removed, the ledger's capture of the change is the only copy of
+ * what the agent wrote, so it is read from there instead
+ * (`task_workspace_read_resource_capture`), named by the run and path.
  */
 
 import { loggers } from "@cognia/logging"
@@ -18,8 +23,8 @@ import type { WorkspaceStat } from "@/lib/files/types"
 import type { LibraryItemWorkspaceLocation } from "@/lib/db/files-library-types"
 import { isTauri } from "@/lib/tauri"
 import type { FileSpacePath, OpenFileSpacePathResult } from "@/types/filespace"
-import { listTaskResourceIndex } from "@/lib/task-workspace/client"
-import type { TaskResourceIndexEntry } from "@/lib/task-workspace/types"
+import { listTaskResourceIndex, readTaskResourceCapture } from "@/lib/task-workspace/client"
+import type { ResourceCaptureChunk, TaskResourceIndexEntry } from "@/lib/task-workspace/types"
 import { goToSession, type FilesNavigator } from "./open"
 import type { FilesEntry } from "./types"
 
@@ -68,12 +73,12 @@ export async function loadWorkspaceFileIndex(
   }
 }
 
-export interface WorkspaceFileOnDisk {
-  /** The root the file was found under. */
-  root: string
-  relPath: string
-  size: number
-}
+/** Where a workspace file's bytes are read from. */
+export type WorkspaceFileSource =
+  /** On disk, under the root it was found in. */
+  | { from: "disk"; root: string; relPath: string; size: number }
+  /** The ledger's capture of `runId`'s change: its run root is gone. */
+  | { from: "ledger"; runId: string; relPath: string; size: number }
 
 export interface WorkspaceFileIoDeps {
   stat?: (root: string, relPath: string) => Promise<WorkspaceStat>
@@ -83,6 +88,12 @@ export interface WorkspaceFileIoDeps {
     offset: number,
     length: number
   ) => Promise<WorkspaceFileChunk>
+  readCapture?: (
+    runId: string,
+    relPath: string,
+    offset: number,
+    length: number
+  ) => Promise<ResourceCaptureChunk>
 }
 
 /**
@@ -99,20 +110,45 @@ export function workspaceFileRoots(location: LibraryItemWorkspaceLocation): stri
 }
 
 /**
- * Where the file is now (see `workspaceFileRoots`). Null when no root it may
- * be under holds a file at that path.
+ * Where the file is now (see `workspaceFileRoots`). A pending file in no root
+ * is read from the ledger's capture of its run's change, when the listing
+ * named that run and the ledger still holds the bytes. Null when nothing
+ * holds it.
  */
 export async function locateWorkspaceFile(
   location: LibraryItemWorkspaceLocation,
   deps: WorkspaceFileIoDeps = {}
-): Promise<WorkspaceFileOnDisk | null> {
+): Promise<WorkspaceFileSource | null> {
+  const onDisk = await locateOnDisk(location, deps)
+  if (onDisk) return onDisk
+  if (location.adoption !== "pending" || !location.runId) return null
+  try {
+    // A zero-length read answers the size, and whether the bytes are there.
+    const probe = await (deps.readCapture ?? readTaskResourceCapture)(
+      location.runId,
+      location.relPath,
+      0,
+      0
+    )
+    return { from: "ledger", runId: location.runId, relPath: location.relPath, size: probe.size }
+  } catch (error) {
+    // Pruned with its task, or never captured: there is no copy left.
+    log.info("files workspace capture unavailable", { error: String(error) })
+    return null
+  }
+}
+
+async function locateOnDisk(
+  location: LibraryItemWorkspaceLocation,
+  deps: WorkspaceFileIoDeps
+): Promise<WorkspaceFileSource | null> {
   const stat = deps.stat ?? statWorkspaceFile
   const roots = workspaceFileRoots(location)
   for (const root of roots) {
     try {
       const found = await stat(root, location.relPath)
       if (found.exists && !found.isDir) {
-        return { root, relPath: location.relPath, size: found.size }
+        return { from: "disk", root, relPath: location.relPath, size: found.size }
       }
     } catch {
       // The root is gone, or the host does not serve it: try the next one.
@@ -128,6 +164,30 @@ function decodeBase64(data: string): Uint8Array<ArrayBuffer> {
   return bytes
 }
 
+/** One slice from wherever the file is read from. */
+async function readSourceChunk(
+  source: WorkspaceFileSource,
+  offset: number,
+  length: number,
+  deps: WorkspaceFileIoDeps
+): Promise<WorkspaceFileChunk | ResourceCaptureChunk> {
+  const take = Math.min(length, WORKSPACE_CHUNK_READ_MAX_BYTES)
+  if (source.from === "disk") {
+    return (deps.readChunk ?? readWorkspaceFileChunk)(source.root, source.relPath, offset, take)
+  }
+  try {
+    return await (deps.readCapture ?? readTaskResourceCapture)(
+      source.runId,
+      source.relPath,
+      offset,
+      take
+    )
+  } catch {
+    // Pruned between the probe and this slice.
+    throw new FilesWorkspaceFileError("files_workspace_missing")
+  }
+}
+
 /**
  * A slice of the file's bytes, from where it is now. Throws
  * `files_workspace_missing` when it is gone.
@@ -140,12 +200,7 @@ export async function readWorkspaceFileSlice(
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; size: number; eof: boolean }> {
   const found = await locateWorkspaceFile(location, deps)
   if (!found) throw new FilesWorkspaceFileError("files_workspace_missing")
-  const chunk = await (deps.readChunk ?? readWorkspaceFileChunk)(
-    found.root,
-    found.relPath,
-    offset,
-    Math.min(length, WORKSPACE_CHUNK_READ_MAX_BYTES)
-  )
+  const chunk = await readSourceChunk(found, offset, length, deps)
   return { bytes: decodeBase64(chunk.dataBase64), size: chunk.size, eof: chunk.eof }
 }
 
@@ -162,11 +217,10 @@ export async function readWorkspaceFileBytes(
   const found = await locateWorkspaceFile(location, deps)
   if (!found) throw new FilesWorkspaceFileError("files_workspace_missing")
   if (found.size > maxBytes) throw new FilesWorkspaceFileError("files_workspace_too_large")
-  const readChunk = deps.readChunk ?? readWorkspaceFileChunk
   const parts: Uint8Array[] = []
   let offset = 0
   for (;;) {
-    const chunk = await readChunk(found.root, found.relPath, offset, WORKSPACE_CHUNK_READ_MAX_BYTES)
+    const chunk = await readSourceChunk(found, offset, WORKSPACE_CHUNK_READ_MAX_BYTES, deps)
     const bytes = decodeBase64(chunk.dataBase64)
     offset += bytes.byteLength
     // A file that grew while it was read past the ceiling stops here.
@@ -192,7 +246,10 @@ function joinHostPath(root: string, relPath: string): string {
 /** What opening a workspace file in its conversation came to. */
 export type OpenWorkspaceFileResult =
   | "opened"
-  /** Not inside the conversation's FileSpace (a run root it does not mount): preview it here. */
+  /**
+   * Not inside the conversation's FileSpace (a run root it does not mount),
+   * or only in the ledger now: preview it here.
+   */
   | "outside"
   | "session-changed"
 
@@ -217,6 +274,8 @@ export async function openWorkspaceFileInConversation(
   if (!location) throw new FilesWorkspaceFileError("files_workspace_missing")
   const found = await locateWorkspaceFile(location, deps)
   if (!found) throw new FilesWorkspaceFileError("files_workspace_missing")
+  // Nothing on disk for the conversation's Files panel to show.
+  if (found.from === "ledger") return "outside"
   const { space } = await (deps.loadSpace ?? loadConversationFileSpace)(location.sessionId)
   if (space.status === "deleted") return "outside"
   const path = toFileSpacePath(space, joinHostPath(found.root, found.relPath))

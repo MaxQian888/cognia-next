@@ -79,6 +79,7 @@ describe("locateWorkspaceFile", () => {
       "/repo|docs/plan.md": new Uint8Array(5),
     })
     await expect(locateWorkspaceFile(location, both)).resolves.toEqual({
+      from: "disk",
       root: "/exec/run-1",
       relPath: "docs/plan.md",
       size: 3,
@@ -116,6 +117,104 @@ describe("locateWorkspaceFile", () => {
   it("does not take a directory for the file", async () => {
     const stat = jest.fn(async () => ({ exists: true, isDir: true, size: 0, mtimeMs: 0 }))
     await expect(locateWorkspaceFile(location, { stat })).resolves.toBeNull()
+  })
+})
+
+describe("a pending file whose run root is gone", () => {
+  const pending = { ...location, adoption: "pending" as const, runId: "run-1" }
+  const capture = new Uint8Array([10, 20, 30, 40, 50, 60, 70])
+
+  /** The ledger's capture of run-1's change to docs/plan.md, a chunk of 3 at a time. */
+  function ledger(bytes: Uint8Array = capture) {
+    return jest.fn(async (runId: string, relPath: string, offset: number, length: number) => {
+      if (runId !== "run-1" || relPath !== "docs/plan.md") throw new Error("no captured change")
+      const slice = bytes.slice(offset, offset + Math.min(length, 3))
+      return {
+        dataBase64: btoa(String.fromCharCode(...slice)),
+        offset,
+        bytesRead: slice.byteLength,
+        size: bytes.byteLength,
+        eof: offset + slice.byteLength >= bytes.byteLength,
+      }
+    })
+  }
+
+  it("is read from the ledger's capture of its run's change", async () => {
+    const readCapture = ledger()
+    const deps = { ...disk({}), readCapture }
+    await expect(locateWorkspaceFile(pending, deps)).resolves.toEqual({
+      from: "ledger",
+      runId: "run-1",
+      relPath: "docs/plan.md",
+      size: 7,
+    })
+    // The probe reads nothing but the size.
+    expect(readCapture).toHaveBeenCalledWith("run-1", "docs/plan.md", 0, 0)
+    await expect(readWorkspaceFileBytes(pending, {}, deps)).resolves.toEqual(capture)
+    await expect(readWorkspaceFileSlice(pending, 6, 4, deps)).resolves.toEqual({
+      bytes: new Uint8Array([70]),
+      size: 7,
+      eof: true,
+    })
+    await expect(readWorkspaceFileBytes(pending, { maxBytes: 6 }, deps)).rejects.toMatchObject({
+      code: "files_workspace_too_large",
+    })
+  })
+
+  it("is still read from its run root while that root is there", async () => {
+    const readCapture = ledger()
+    const deps = { ...disk({ "/exec/run-1|docs/plan.md": new Uint8Array(2) }), readCapture }
+    await expect(locateWorkspaceFile(pending, deps)).resolves.toMatchObject({ from: "disk" })
+    expect(readCapture).not.toHaveBeenCalled()
+  })
+
+  it("is gone when the ledger no longer holds it, or the listing named no run", async () => {
+    const pruned = jest.fn(async () => {
+      throw new Error("missing blob")
+    })
+    await expect(
+      locateWorkspaceFile(pending, { ...disk({}), readCapture: pruned })
+    ).resolves.toBeNull()
+    const readCapture = ledger()
+    await expect(
+      locateWorkspaceFile({ ...location, adoption: "pending" }, { ...disk({}), readCapture })
+    ).resolves.toBeNull()
+    // An applied file is the workspace's: a capture is not the file as it is now.
+    await expect(
+      locateWorkspaceFile({ ...pending, adoption: "applied" }, { ...disk({}), readCapture })
+    ).resolves.toBeNull()
+    expect(readCapture).not.toHaveBeenCalled()
+  })
+
+  it("says it is gone when the ledger drops it mid-read", async () => {
+    const readCapture = ledger()
+    readCapture.mockImplementationOnce(async () => ({
+      dataBase64: "",
+      offset: 0,
+      bytesRead: 0,
+      size: 7,
+      eof: false,
+    }))
+    readCapture.mockImplementationOnce(async () => {
+      throw new Error("missing blob")
+    })
+    await expect(
+      readWorkspaceFileBytes(pending, {}, { ...disk({}), readCapture })
+    ).rejects.toMatchObject({ code: "files_workspace_missing" })
+  })
+
+  it("previews in place rather than opening a conversation with nothing on disk to show", async () => {
+    const goTo = jest.fn(async () => undefined)
+    const loadSpace = jest.fn()
+    await expect(
+      openWorkspaceFileInConversation(
+        { workspace: { ...pending, change: "created" } },
+        { push: jest.fn() },
+        { ...disk({}), readCapture: ledger(), goTo, loadSpace }
+      )
+    ).resolves.toBe("outside")
+    expect(goTo).not.toHaveBeenCalled()
+    expect(loadSpace).not.toHaveBeenCalled()
   })
 })
 

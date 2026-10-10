@@ -60,6 +60,7 @@ import {
   getTaskResourceSummary,
   listTaskResourceEvents,
   listTaskResourceIndex,
+  readTaskResourceCapture,
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
   reconcileManagedWorkspaces,
@@ -1215,6 +1216,22 @@ describe("task workspace client", () => {
     expect(call.mock.calls).toEqual([
       ["task_workspace_list_resource_index", { pageSize: 500 }],
       ["task_workspace_list_resource_index", { pageSize: 500, pageToken: "o1" }],
+    ])
+  })
+
+  it("reads a change's captured bytes by run and path, a slice at most 4 MiB", async () => {
+    call.mockResolvedValue({ dataBase64: "", offset: 0, bytesRead: 0, size: 9, eof: false })
+    await expect(readTaskResourceCapture("run-1", "a.md", 0, 0)).resolves.toMatchObject({ size: 9 })
+    await readTaskResourceCapture("run-1", "a.md", 8, 64 * 1024 * 1024)
+    expect(call.mock.calls).toEqual([
+      [
+        "task_workspace_read_resource_capture",
+        { runId: "run-1", path: "a.md", offset: 0, length: 0 },
+      ],
+      [
+        "task_workspace_read_resource_capture",
+        { runId: "run-1", path: "a.md", offset: 8, length: 4 * 1024 * 1024 },
+      ],
     ])
   })
 

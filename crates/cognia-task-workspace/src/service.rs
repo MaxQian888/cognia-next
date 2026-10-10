@@ -3301,6 +3301,54 @@ impl TaskWorkspaceService {
         Ok(entries)
     }
 
+    /// A slice of the bytes `run_id` left at `path`, from the ledger's
+    /// capture (ADR-0223 §8). Only for a file the run created, modified or
+    /// renamed to and whose content the ledger captured; never for a
+    /// credential-shaped path, which the ledger keeps out of every listing.
+    /// The run and path, not a blob hash, name the bytes, so a caller reads
+    /// only what the ledger recorded for that change.
+    pub fn read_resource_capture(
+        &self,
+        run_id: &str,
+        path: &str,
+        offset: u64,
+        length: u64,
+    ) -> Result<crate::ResourceCaptureChunk, String> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        if is_sensitive_resource(path) {
+            return Err(format!(
+                "sensitive resource is not served from the ledger: {path}"
+            ));
+        }
+        let mut store = self.store.lock();
+        let change = store
+            .get_run_resource(run_id, path)?
+            .ok_or_else(|| format!("no captured change at {path} in run {run_id}"))?;
+        if change.kind == ChangeKind::Deleted
+            || change.sensitive
+            || change.resource_kind != ResourceKind::File
+            || change.capture_class != ResourceCaptureClass::Source
+            || !change.content_captured
+        {
+            return Err(format!(
+                "the ledger holds no content for {path} in run {run_id}"
+            ));
+        }
+        let hash = change
+            .hash
+            .ok_or_else(|| format!("the ledger holds no content for {path} in run {run_id}"))?;
+        let take = length.min(crate::RESOURCE_CAPTURE_CHUNK_MAX_BYTES);
+        let slice = store.read_blob_range(&hash, offset, take, now_ms())?;
+        let bytes_read = slice.bytes.len() as u64;
+        Ok(crate::ResourceCaptureChunk {
+            data_base64: STANDARD.encode(&slice.bytes),
+            offset,
+            bytes_read,
+            size: slice.size,
+            eof: offset.saturating_add(bytes_read) >= slice.size,
+        })
+    }
+
     pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
         self.store.lock().get_patch_set(run_id)
     }
@@ -9063,5 +9111,56 @@ mod tests {
         // Undone: none of it happened.
         service.undo_patch_set("run-1").unwrap();
         assert!(service.list_resource_index().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_pending_file_is_read_from_the_ledger_once_its_run_root_is_gone() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        let root = Path::new(&run.execution_root);
+        let body = "the agent's plan\n".repeat(64);
+        fs::write(root.join("plan.md"), &body).unwrap();
+        fs::write(root.join(".env"), "TOKEN=1").unwrap();
+        fs::write(root.join("gone.md"), "x").unwrap();
+        service.settle_run("run-1").unwrap();
+        // The root goes (archived, removed); nothing was applied.
+        fs::remove_dir_all(root).unwrap();
+
+        let mut read = Vec::new();
+        let mut offset = 0;
+        loop {
+            let chunk = service
+                .read_resource_capture("run-1", "plan.md", offset, 100)
+                .unwrap();
+            assert_eq!(chunk.offset, offset);
+            assert_eq!(chunk.size, body.len() as u64);
+            read.extend(STANDARD.decode(&chunk.data_base64).unwrap());
+            offset += chunk.bytes_read;
+            if chunk.eof {
+                break;
+            }
+        }
+        assert_eq!(String::from_utf8(read).unwrap(), body);
+        // A zero-length read answers the size alone.
+        let probe = service
+            .read_resource_capture("run-1", "plan.md", 0, 0)
+            .unwrap();
+        assert_eq!((probe.bytes_read, probe.size), (0, body.len() as u64));
+
+        // Credentials are never served, nor anything the run did not leave.
+        assert!(service
+            .read_resource_capture("run-1", ".env", 0, 10)
+            .is_err());
+        assert!(service
+            .read_resource_capture("run-1", "absent.md", 0, 10)
+            .is_err());
+        assert!(service
+            .read_resource_capture("run-2", "plan.md", 0, 10)
+            .is_err());
     }
 }

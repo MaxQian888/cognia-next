@@ -64347,6 +64347,94 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_read_resource_capture",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_read_resource_capture (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "A slice of the bytes a run's change left at a path, from the ledger's capture rather than disk (ADR-0223 §8). Never a credential-shaped path; only a file the run created, modified or renamed to and whose content was captured.",
+        "required": [
+          "runId",
+          "path",
+          "offset",
+          "length"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Relative to the run's roots, as the resource index names it."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4194304,
+            "description": "Bytes to read; 0 answers the size alone."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "One slice of the bytes a run's change left at a path, read from the\nledger's capture rather than from disk: for a change not applied yet\nwhose run root is gone (archived or removed), the capture is the only\ncopy of what the agent wrote.",
+        "properties": {
+          "bytesRead": {
+            "description": "How many bytes were read: fewer than asked only at the end.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dataBase64": {
+            "description": "The bytes read, base64 (standard alphabet, padded).",
+            "type": "string"
+          },
+          "eof": {
+            "description": "Whether this slice reaches the end.",
+            "type": "boolean"
+          },
+          "offset": {
+            "description": "Where the slice starts.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "size": {
+            "description": "The whole capture's size.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytesRead",
+          "dataBase64",
+          "eof",
+          "offset",
+          "size"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_reconcile",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -73890,5 +73978,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "c0ad38dcf9e812cfc3395cccff64dd2f52091c2048825364a9f65ce2738d26a3"
+  "catalogHash": "6864eeabdceb871347f09fb4f226010a633b96c9338d89b1e1012685fceac6b7"
 }

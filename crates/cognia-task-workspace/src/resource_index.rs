@@ -135,6 +135,31 @@ pub struct ResourceIndexEntry {
     pub adoption: ResourceAdoption,
 }
 
+/// Largest slice [`crate::TaskWorkspaceService::read_resource_capture`]
+/// returns, as a workspace file's ranged read does: the bytes travel IPC and
+/// companion frames as base64, so the cap bounds both.
+pub const RESOURCE_CAPTURE_CHUNK_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// One slice of the bytes a run's change left at a path, read from the
+/// ledger's capture rather than from disk: for a change not applied yet
+/// whose run root is gone (archived or removed), the capture is the only
+/// copy of what the agent wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ResourceCaptureChunk {
+    /// The bytes read, base64 (standard alphabet, padded).
+    pub data_base64: String,
+    /// Where the slice starts.
+    pub offset: u64,
+    /// How many bytes were read: fewer than asked only at the end.
+    pub bytes_read: u64,
+    /// The whole capture's size.
+    pub size: u64,
+    /// Whether this slice reaches the end.
+    pub eof: bool,
+}
+
 /// One ledger row with the conversation and run it belongs to. The run is
 /// shared by all of its rows.
 #[derive(Debug, Clone)]

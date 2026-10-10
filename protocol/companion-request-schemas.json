@@ -14980,6 +14980,38 @@
       "properties": {},
       "additionalProperties": false
     },
+    "task_workspace_read_resource_capture": {
+      "type": "object",
+      "description": "A slice of the bytes a run's change left at a path, from the ledger's capture rather than disk (ADR-0223 §8). Never a credential-shaped path; only a file the run created, modified or renamed to and whose content was captured.",
+      "required": [
+        "runId",
+        "path",
+        "offset",
+        "length"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative to the run's roots, as the resource index names it."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304,
+          "description": "Bytes to read; 0 answers the size alone."
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_reconcile": {
       "type": "object",
       "properties": {},

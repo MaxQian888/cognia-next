@@ -89,6 +89,7 @@ function fromIndex(entry: TaskResourceIndexEntry): RawWorkspaceFile {
     createdAt: entry.firstChangedAt,
     updatedAt: entry.changedAt,
     adoption: entry.adoption,
+    runId: entry.runId,
   }
 }
 

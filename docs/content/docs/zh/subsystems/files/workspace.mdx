@@ -36,9 +36,9 @@ flowchart LR
 ## 资源索引
 
 账本在 `task_resources` 中为每个任务、运行和路径存一行，各带一个 `ResourceChange`。
-`TaskWorkspaceStore::list_resource_index_rows`（`crates/cognia-task-workspace/src/store.rs:590`）把这些行关联到它们的运行，
+`TaskWorkspaceStore::list_resource_index_rows`（`crates/cognia-task-workspace/src/store.rs:726`）把这些行关联到它们的运行，
 以及指明所属对话（`session_id`）的 `task_workspaces` 行。`fold_resource_index`
-（`crates/cognia-task-workspace/src/resource_index.rs:177`）按结算顺序（运行的 `settled_at`，没有则取 `created_at`）重放它们，
+（`crates/cognia-task-workspace/src/resource_index.rs:202`）按结算顺序（运行的 `settled_at`，没有则取 `created_at`）重放它们，
 以对话、工作区根目录和路径为键：
 
 - 只有来源为 **Agent** 的变更会加入路径；
@@ -62,12 +62,12 @@ flowchart LR
 结果按最新在前排序。`TaskWorkspaceService::list_resource_index` 会连同数据库的变更指纹保存最近一次折叠的结果
 （`WorkspaceStore::change_fingerprint`：本连接的 `total_changes()` 和 `PRAGMA data_version`，后者在另一个连接提交时变化），
 因此同一次列出的各页、以及账本未变时获得焦点后的重新读取，共用同一次折叠；一次运行的载荷只为它的所有行解析一次。
-`task_workspace_list_resource_index`（`crates/cognia-task-workspace-host/src/host_surface.rs:783`）以每页 500 条的偏移分页提供它
-（`resource_index_page`），是一个在主线程之外执行的只读 `host.observe` 命令。`listTaskResourceIndex`（`lib/task-workspace/client.ts:717`）收集各页，最多 20 000 条，并去掉重复项。
+`task_workspace_list_resource_index`（`crates/cognia-task-workspace-host/src/host_surface.rs:784`）以每页 500 条的偏移分页提供它
+（`resource_index_page`），是一个在主线程之外执行的只读 `host.observe` 命令。`listTaskResourceIndex`（`lib/task-workspace/client.ts:718`）收集各页，最多 20 000 条，并去掉重复项。
 
 ## 与代码采纳轮次合并
 
-`mergeWorkspaceFiles`（`lib/files-library/workspace-files.ts:177`）原样采用索引，然后**只为索引里没有任何记录的对话**
+`mergeWorkspaceFiles`（`lib/files-library/workspace-files.ts:178`）原样采用索引，然后**只为索引里没有任何记录的对话**
 从 `codeAdoptionTurns` 补入文件——即没有经过账本运行就编辑了文件的外部 Agent。账本已有记录的对话绝不用轮次数据修补：
 账本丢掉的就保持丢掉。轮次按从旧到新折叠，跳过被拒绝或已撤销的轮次和文件，跳过仍处于 `pending` 的应用内（`taskWorkspace`）轮次
 ——它的变更只存在于已随账本行一起消失的运行根目录中，工作区里是用户自己的版本——并排除 `isSensitiveResourcePath` 匹配的路径
@@ -110,7 +110,16 @@ flowchart LR
 路径同时相对于两个根目录，由 `adoption` 选择读哪一个（`workspaceFileRoots`）：已应用的文件只从工作区根目录读取（运行根目录里
 留下的副本是 Agent 的版本，不是文件现在的样子），待应用的文件只从运行根目录读取（工作区根目录里是用户的版本）。没有 `adoption` 时
 ——轮次数据，或从保留条目重建的卡片，其快照从不保存它——`locateWorkspaceFile` 先试运行根目录，再试工作区根目录。它跳过主机拒绝访问的根目录，
-并忽略目录。运行根目录已归档的待应用文件也算已不在，在它可能所在的任何根目录中都找不到的文件同样如此：`FilesWorkspaceFileError("files_workspace_missing")`，即“这个文件已不在磁盘上。”存在性在使用文件时检查，
+并忽略目录。
+
+待应用的文件只存在于它的运行根目录中。那个根目录被归档或删除后，账本对该变更的捕获就是 Agent 所写内容的唯一副本，所以当列表给出了运行
+（`runId`，来自索引，从不存入快照）时，`locateWorkspaceFile` 会回退到它：先用零长度读取探查 `task_workspace_read_resource_capture` 得到大小，
+然后返回一个 `ledger` 来源。该命令（`TaskWorkspaceService::read_resource_capture`）以运行和路径而不是 blob 哈希来指名字节，因此只提供账本为
+那次变更记录的内容：从不提供形似凭据的路径，也从不提供已删除、生成产物、符号链接或未捕获内容的路径。`WorkspaceStore::read_blob_range`
+直接读取未压缩的捕获；压缩的捕获只解码一次并保留给下一段读取（最多 64 MiB；更大的每段都流式解码），且只有第一段读取会把该 blob 标记为已使用。
+已应用的文件从不回退：捕获的内容不是文件现在的样子。
+
+在它可能所在的任何根目录中都找不到、账本中也没有的文件就是已不在：`FilesWorkspaceFileError("files_workspace_missing")`，即“这个文件已不在磁盘上。”存在性在使用文件时检查，
 而不是在列出时。
 
 `readWorkspaceFileBytes` 通过 `lib/files/workspace-fs.ts` 分块读取，最多 256 MiB（`FILES_WORKSPACE_READ_MAX_BYTES`），
@@ -120,7 +129,7 @@ flowchart LR
 ## 打开
 
 对话仍在的工作区文件，`openFilesEntry` 会交给 `openWorkspaceFileInConversation`
-（`lib/files-library/workspace-files-io.ts:211`）：
+（`lib/files-library/workspace-files-io.ts:268`）：
 
 1. 定位文件，找不到就报告已不在；
 2. 加载对话的 FileSpace（`lib/filespace/load.ts`），把文件的绝对路径映射进去；
@@ -141,7 +150,7 @@ flowchart LR
 所以设备用 `files_library_read_chunk`（`client.read`，字节区间）读取：
 
 - 请求只指明**条目键**、偏移量和最多 512 KiB（`FILES_REMOTE_READ_CHUNK_MAX`）；主机在自己的聚合中解析这个键，
-  因此设备从不指定路径，主机也只读取它自己列出的文件；
+  因此设备从不指定路径，主机也只读取它自己列出的文件——从磁盘读取，或像桌面端那样从账本的捕获中读取（线上传输的条目不带账本的 `runId`）；
 - 不是工作区文件的键属于无效请求；超过 10 MiB 的文件返回 `files_remote_too_large`，超过时预览提示到桌面端操作；
 - `FilesRemoteClient.readWorkspaceFile`（`lib/files-library/remote/client.ts:388`）循环读取各段，读取途中大小变化就重新读一次，
   再变化则以 `files_remote_busy` 放弃。

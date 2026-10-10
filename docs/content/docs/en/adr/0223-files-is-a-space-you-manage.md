@@ -136,8 +136,9 @@ a favorite or a folder follows it through the agent's renames.
   changes reach the workspace only when the person applies its patch set. A
   change that was undone, or left out of the selection that was applied, is
   as if it never happened. One not applied yet is listed and labelled "Not
-  applied yet", and read from the run's root; an applied one is read from the
-  workspace root. A file not where it should be is gone ("This file is no
+  applied yet", and read from the run's root, or, once that root is archived,
+  from the ledger's capture of the change, named by run and path (never a
+  credential-shaped one); an applied one is read from the workspace root. A file not where it should be is gone ("This file is no
   longer on disk."); existence is checked on open, not when listing.
 - **Open** goes to the conversation and opens the file in its Files panel
   through ADR-0222's opener when the conversation's FileSpace contains it; a

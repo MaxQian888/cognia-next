@@ -1073,6 +1073,7 @@ commands.allow = [
   "task_workspace_policy_get",
   "task_workspace_policy_set",
   "task_workspace_prune",
+  "task_workspace_read_resource_capture",
   "task_workspace_reconcile",
   "task_workspace_record_tool_event",
   "task_workspace_remote_source_ensure",

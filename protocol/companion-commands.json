@@ -19910,6 +19910,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "task_workspace_read_resource_capture",
+      "resource": "task.workspace.resource_capture",
+      "verb": "read",
+      "arm": "task_workspace_read_resource_capture",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "byte-range",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "task_workspace_list_resources",
       "resource": "task.workspace.resource",
       "verb": "list",
