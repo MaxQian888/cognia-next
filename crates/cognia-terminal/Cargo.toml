@@ -37,6 +37,9 @@ cognia-secrets = { path = "../cognia-secrets" }
 cognia-problem = { path = "../cognia-problem" }
 # perf span guards (terminal.exec).
 cognia-instrument = { path = "../cognia-instrument" }
+# The durable terminal host's login service is rendered by the same writer as
+# the always-on server host's service (ADR-0224 A1).
+cognia-host-service = { path = "../cognia-host-service" }
 tauri = { workspace = true, optional = true }
 portable-pty = "0.9"
 parking_lot.workspace = true

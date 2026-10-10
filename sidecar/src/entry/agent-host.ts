@@ -1,5 +1,5 @@
 import "../platform/net/install-fetch-interceptor.ts"
-import { pathToFileURL } from "node:url"
+import { isMainModule } from "../shared/main-module.ts"
 import { initializeTelemetry, shutdownTelemetry } from "../platform/telemetry/index.ts"
 import { createAgentHost, loadConfiguredEngines } from "../host/index.ts"
 export * from "../host/index.ts"
@@ -47,8 +47,7 @@ export async function smoke() {
   return observeHost().smoke()
 }
 export function runAgentHostEntry(url: string) {
-  const isEntry =
-    process.env.COGNIA_ROLE === "sidecar" || url === pathToFileURL(process.argv[1] ?? "").href
+  const isEntry = process.env.COGNIA_ROLE === "sidecar" || isMainModule(url)
   if (!isEntry) return
   if (process.argv.includes("--smoke")) {
     void smoke().catch((error: unknown) => {

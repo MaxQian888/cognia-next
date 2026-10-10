@@ -164,13 +164,18 @@ services:
       context: ../../
       dockerfile: Dockerfile.cognia-server
       target: runtime-full
+    # Multicast has no meaning inside a container network, and advertising the
+    # host there would only leak its presence (ADR-0224 A1).
+    command: ["serve", "--port", "27890", "--no-mdns"]
     environment:
       COGNIA_DATA_DIR: /data
-      # W5: no OS keyring in a container — the master key MUST come from env.
-      # A `:?` marker here would abort even `docker compose up` (no profile),
-      # because compose interpolates the whole file before filtering profiles;
-      # cognia-server's own strict init (init_headless) fails fast when it's
-      # missing, so an empty default is safe.
+      # W5: no OS keyring in a container. The master key comes from env, or
+      # from `/data/master.key` when env is empty: create that once with
+      # `docker compose --profile server run --rm cognia-server init`
+      # (ADR-0224 A1). A `:?` marker here would abort even `docker compose up`
+      # (no profile), because compose interpolates the whole file before
+      # filtering profiles; cognia-server's own strict init (init_headless)
+      # fails fast when no key exists, so an empty default is safe.
       COGNIA_MASTER_KEY: ${COGNIA_MASTER_KEY:-}
       # Public URL stamped into the pair payload; overridden by Caddy domain in the tls profile.
       COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:${COGNIA_SERVER_PORT:-27890}}

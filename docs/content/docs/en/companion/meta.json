@@ -1,4 +1,10 @@
 {
   "title": "Mobile companion",
-  "pages": ["cloudflare-tunnel-setup", "share-links-setup", "webrtc-verification", "turn-byo"]
+  "pages": [
+    "cloudflare-tunnel-setup",
+    "share-links-setup",
+    "webrtc-verification",
+    "turn-byo",
+    "always-on-host"
+  ]
 }

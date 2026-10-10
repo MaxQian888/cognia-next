@@ -317,10 +317,9 @@ fn set_platform_login_service(enabled: bool, binary: &Path, endpoint: &str) -> R
     }
     std::fs::create_dir_all(&directory)
         .map_err(|error| format!("terminal LaunchAgent directory failed: {error}"))?;
-    let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>com.cognia.terminal-host</string><key>ProgramArguments</key><array><string>{}</string><string>desktop-host</string><string>--endpoint</string><string>{}</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>\n",
-        xml_escape(&binary.to_string_lossy()),
-        xml_escape(endpoint),
+    let plist = cognia_host_service::render_launchd_plist(
+        &terminal_login_service_spec(binary, endpoint),
+        cognia_host_service::ServiceScope::User,
     );
     std::fs::write(&path, plist)
         .map_err(|error| format!("terminal LaunchAgent write failed: {error}"))?;
@@ -364,8 +363,9 @@ fn set_platform_login_service(enabled: bool, binary: &Path, endpoint: &str) -> R
         quote_service_arg(&binary.to_string_lossy()),
         quote_service_arg(endpoint)
     );
-    let unit_body = format!(
-        "[Unit]\nDescription=Cognia durable terminal host\n\n[Service]\nType=simple\nExecStart={exec}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
+    let unit_body = cognia_host_service::render_systemd_unit(
+        &terminal_login_service_spec(binary, endpoint),
+        cognia_host_service::ServiceScope::User,
     );
     std::fs::write(&unit, unit_body)
         .map_err(|error| format!("terminal systemd user unit write failed: {error}"))?;
@@ -430,14 +430,27 @@ fn quote_service_arg(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-#[cfg(target_os = "macos")]
-fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+/// The terminal host's login service: `cognia-server desktop-host` for the
+/// signed-in user, restarted after a failure.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn terminal_login_service_spec(binary: &Path, endpoint: &str) -> cognia_host_service::ServiceSpec {
+    cognia_host_service::ServiceSpec {
+        label: "com.cognia.terminal-host".into(),
+        unit: "cognia-terminal-host".into(),
+        description: "Cognia durable terminal host".into(),
+        program: binary.to_path_buf(),
+        args: vec![
+            "desktop-host".into(),
+            "--endpoint".into(),
+            endpoint.to_string(),
+        ],
+        env: Default::default(),
+        working_directory: None,
+        log_path: None,
+        run_as: None,
+        credentials: Vec::new(),
+        restart: cognia_host_service::RestartPolicy::OnFailure,
+    }
 }
 
 // Keep these credentials in the OS store shared with the separately launched
@@ -1328,6 +1341,26 @@ fn set_owner_only_dir(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_login_service_runs_desktop_host_and_restarts_after_a_failure() {
+        let spec = terminal_login_service_spec(
+            Path::new("/Applications/Cognia.app/Contents/MacOS/cognia-server"),
+            "/tmp/cognia & terminal.sock",
+        );
+        let plist =
+            cognia_host_service::render_launchd_plist(&spec, cognia_host_service::ServiceScope::User);
+        assert!(plist.contains("<string>com.cognia.terminal-host</string>"));
+        assert!(plist.contains("<string>desktop-host</string>"));
+        assert!(plist.contains("<string>/tmp/cognia &amp; terminal.sock</string>"));
+        assert!(!plist.contains("UserName"));
+        let unit =
+            cognia_host_service::render_systemd_unit(&spec, cognia_host_service::ServiceScope::User);
+        assert!(unit.contains("Description=Cognia durable terminal host"));
+        assert!(unit.contains("\"desktop-host\" \"--endpoint\" \"/tmp/cognia & terminal.sock\""));
+        assert!(unit.contains("Restart=on-failure"));
+        assert!(unit.contains("WantedBy=default.target"));
+    }
 
     #[test]
     fn only_credential_failures_get_the_dedicated_daemon_exit_status() {

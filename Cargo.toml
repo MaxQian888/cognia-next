@@ -73,6 +73,9 @@ members = [
   # ADR-0196. The reference-counted OS keep-awake assertion the sidecar, the
   # companion worker and the desktop screen-hold command share.
   "crates/cognia-power",
+  # ADR-0224 A1. OS service definitions (launchd, systemd) for Cognia hosts:
+  # the always-on server host and the desktop's durable terminal host.
+  "crates/cognia-host-service",
   # ADR-0196 P7. The companion core: state, listener, auth, canonical remote
   # execution, WebSocket planes, signaling, A2A and ACP.
   "crates/cognia-companion",

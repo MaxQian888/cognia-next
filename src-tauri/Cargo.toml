@@ -98,6 +98,9 @@ cognia-companion-security = { path = "../crates/cognia-companion-security" }
 cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host"] }
 # Keep-awake assertions; `power_assertion.rs` is its facade (ADR-0196).
 cognia-power = { path = "../crates/cognia-power" }
+# `cognia-server init` / `service` (ADR-0224 A1): the always-on host's master
+# key file and its launchd / systemd service.
+cognia-host-service = { path = "../crates/cognia-host-service" }
 cognia-sidecar = { path = "../crates/cognia-sidecar" }
 cognia-companion-rpc = { path = "../crates/cognia-companion-rpc", features = ["tauri-host"] }
 cognia-github-runner = { path = "../crates/cognia-github-runner" }

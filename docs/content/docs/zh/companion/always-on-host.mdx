@@ -1,0 +1,100 @@
+---
+title: 运行常驻 host
+description: 在你自己的机器上（带 Docker 的 Linux VPS 或 NAS，或家里的 Mac）持续运行 Cognia，让 bot、定时任务和连接器在笔记本合盖时照常工作。安装、经中继配对（无需公网域名）、备份主密钥。ADR-0224。
+---
+
+# 运行常驻 host
+
+常驻 host 是你自己的一台机器，全天候运行 Cognia 的 headless server 和 brain（ADR-0224）。
+它是桌面端的对等设备，而不是替代品。它运行放在它上面的一切：从手机发起的对话、定时任务、
+bot 和连接器，所以笔记本休眠时这些照常工作。
+
+有两种运行方式：
+
+| 机器                       | 方式                               |
+| -------------------------- | ---------------------------------- |
+| Linux VPS、NAS、家用服务器 | Docker Compose 的 `server` profile |
+| Mac（例如 Mac mini）       | host 安装包，安装为 LaunchDaemon   |
+
+两种方式下，手机和桌面都经 Cognia 的加密中继配对，所以机器可以待在家用路由器后面，
+不需要公网域名，也不需要开放端口。
+
+<Callout title="状态">
+  本页介绍安装、配对和保护 host 数据。把桌面上已有的 bot、定时任务和连接器迁移到 host、
+  按条目归属、每个任务一个容器以及自动更新正在构建中（ADR-0224 阶段 A）；在此之前，
+  需要全天候运行的内容请直接在 host 上创建。
+</Callout>
+
+## 用 Docker Compose 运行在 Linux 上
+
+```bash
+git clone https://github.com/MaxQian888/cognia-next.git && cd cognia-next/deploy/compose
+cp .env.example .env
+# 编辑 .env：设置 SHARE_UPLOAD_SECRET（openssl rand -hex 32）
+
+docker compose --profile server run --rm cognia-server init   # 一次性写入 /data/master.key
+docker compose --profile server up -d --wait
+docker compose exec cognia-server cognia-server pair
+```
+
+`init` 在数据卷里创建主密钥，永远不会替换已有的密钥。容器会自动重启
+（`restart: unless-stopped`），机器开机后随 Docker 一起启动。
+
+## 用 host 安装包运行在 Mac 上
+
+下载 `cognia-host-<version>-darwin-arm64.tar.gz`（或 `darwin-x64`），解压到一个固定位置，
+例如 `/opt/cognia-host`，然后：
+
+```bash
+sudo /opt/cognia-host/bin/cognia-server service install
+```
+
+这会安装一个 LaunchDaemon（`/Library/LaunchDaemons/com.cognia.server.plist`），开机即启动、
+无需任何人登录，并以**你的**账号运行，而不是 root。它会创建数据目录
+（`~/Library/Application Support/cognia-server`）和其中的主密钥，并打印配对命令。常用参数：
+
+| 参数             | 默认值             | 含义                                    |
+| ---------------- | ------------------ | --------------------------------------- |
+| `--scope user`   | `system`           | 改为登录时启动的 LaunchAgent，无需 sudo |
+| `--run-as NAME`  | 执行 `sudo` 的用户 | 守护进程运行的账号（永远不是 root）     |
+| `--data-dir DIR` | 该账号的默认目录   | host 存放数据和主密钥的位置             |
+| `--public-url`   | 无                 | 如果你有公网 HTTPS 地址                 |
+| `--no-mdns`      | 在局域网广播       | 不通过 mDNS 公布 host                   |
+
+```bash
+sudo /opt/cognia-host/bin/cognia-server service status      # 是否已安装、在运行、已就绪
+sudo /opt/cognia-host/bin/cognia-server service uninstall   # 保留数据和密钥
+```
+
+在没有 Docker 的 Linux 上，同一命令会安装 systemd unit；系统级服务会以 root 专属的 systemd
+credential 从 `/etc/cognia-server/master.key` 读取主密钥。
+
+如果希望 Mac 像服务器一样工作，还要在「系统设置 → 能源」中开启断电后自动启动，并在显示器关闭时阻止休眠。
+
+## 配对手机和桌面
+
+```bash
+COGNIA_DATA_DIR="$HOME/Library/Application Support/cognia-server" \
+  /opt/cognia-host/bin/cognia-server pair
+```
+
+`pair` 向正在运行的 server 请求邀请，打印一个带中继房间的 `cgnp4|…` 字符串。
+在设备的配对页粘贴或扫描即可，任何网络下都能用。兑换它的人会成为 host 的 owner，
+所以只交给你自己的设备。
+
+## 保护好主密钥
+
+host 加密存储的一切（设备身份、provider 和连接器凭据）都用主密钥封存，丢失密钥就无法读取。
+请备份数据目录里的 `master.key`。host 按以下顺序读取主密钥：
+
+1. `COGNIA_MASTER_KEY`（64 位十六进制）
+2. `COGNIA_MASTER_KEY_FILE`
+3. systemd credential `cognia-master-key`
+4. 设置 `COGNIA_MASTER_KEY_SOURCE=keychain` 时读取钥匙串项 `com.cognia.server`
+   （用 `cognia-server init --keychain` 创建；LaunchDaemon 无法使用）
+5. `<数据目录>/master.key`
+
+## 持久化
+
+brain 把数据存在 SQLite（`<数据目录>/serve/durability/<账号>/`）里，崩溃或断电不会丢失已提交的内容。
+运行过旧版本的 host 会在首次启动时从之前的快照存储导入，旧存储原样保留作为后备。

@@ -87,6 +87,20 @@ pub const MASTER_KEY_ENV: &str = "COGNIA_MASTER_KEY";
 /// Env var naming a file whose contents are the 64-hex master key (for
 /// Docker/K8s secret mounts).
 pub const MASTER_KEY_FILE_ENV: &str = "COGNIA_MASTER_KEY_FILE";
+/// systemd credential name (`LoadCredential=cognia-master-key:<path>`) read
+/// from `$CREDENTIALS_DIRECTORY`, so a root-only key file can feed a service
+/// that runs as an unprivileged account (ADR-0224 A1).
+pub const MASTER_KEY_CREDENTIAL: &str = "cognia-master-key";
+/// Env var selecting an explicit master key source. Only `keychain` is
+/// defined: read the always-on host's key from the macOS Keychain (or the
+/// platform credential store) instead of a file.
+pub const MASTER_KEY_SOURCE_ENV: &str = "COGNIA_MASTER_KEY_SOURCE";
+/// Keychain item holding an always-on host's master key when
+/// [`MASTER_KEY_SOURCE_ENV`] is `keychain`. Distinct from the desktop's own
+/// item so a Mac running both never shares one key between them.
+pub const SERVER_KEYCHAIN_SERVICE: &str = "com.cognia.server";
+/// Keychain account of [`SERVER_KEYCHAIN_SERVICE`].
+pub const SERVER_KEYCHAIN_ACCOUNT: &str = "master-key";
 /// Env var that sends a debug build back to the OS keychain (`1`/`true`).
 pub const DEV_KEYCHAIN_ENV: &str = "COGNIA_DEV_KEYCHAIN";
 /// Directory under `<dataDir>/cognia/` holding a debug build's key and store.
@@ -837,22 +851,100 @@ fn parse_hex_key(raw: &str) -> Result<[u8; 32], String> {
         .map_err(|_| "master key must be exactly 32 bytes (64 hex chars)".to_string())
 }
 
-/// Resolve the master key from the environment only (`COGNIA_MASTER_KEY` →
-/// `COGNIA_MASTER_KEY_FILE`). `Ok(None)` when neither is set.
+/// Resolve the master key from configuration, never generating one.
+/// `Ok(None)` when no source is configured. Precedence:
+///
+/// 1. `COGNIA_MASTER_KEY` — 64 hex chars in the environment.
+/// 2. `COGNIA_MASTER_KEY_FILE` — a file containing the 64 hex chars.
+/// 3. `$CREDENTIALS_DIRECTORY/cognia-master-key` — a systemd credential.
+/// 4. `COGNIA_MASTER_KEY_SOURCE=keychain` — the always-on host's Keychain item.
 pub fn resolve_master_key_from_env() -> Result<Option<[u8; 32]>, String> {
-    if let Ok(raw) = std::env::var(MASTER_KEY_ENV) {
-        if !raw.trim().is_empty() {
-            return parse_hex_key(&raw).map(Some);
+    resolve_master_key_with(
+        &|name| std::env::var(name).ok(),
+        &|path| std::fs::read_to_string(path).map_err(|e| e.to_string()),
+        &read_server_keychain_master_key,
+    )
+}
+
+/// [`resolve_master_key_from_env`] over injected lookups (tests).
+fn resolve_master_key_with(
+    env: &dyn Fn(&str) -> Option<String>,
+    read_file: &dyn Fn(&Path) -> Result<String, String>,
+    keychain: &dyn Fn() -> Result<Option<String>, String>,
+) -> Result<Option<[u8; 32]>, String> {
+    let set = |name: &str| env(name).filter(|value| !value.trim().is_empty());
+    if let Some(raw) = set(MASTER_KEY_ENV) {
+        return parse_hex_key(&raw).map(Some);
+    }
+    if let Some(path) = set(MASTER_KEY_FILE_ENV) {
+        let raw = read_file(Path::new(&path))
+            .map_err(|e| format!("read {MASTER_KEY_FILE_ENV} ({path}): {e}"))?;
+        return parse_hex_key(&raw).map(Some);
+    }
+    if let Some(dir) = set("CREDENTIALS_DIRECTORY") {
+        let path = Path::new(&dir).join(MASTER_KEY_CREDENTIAL);
+        // systemd sets the directory for any unit with credentials; only a unit
+        // that loads this one has the file.
+        if let Ok(raw) = read_file(&path) {
+            return parse_hex_key(&raw)
+                .map(Some)
+                .map_err(|e| format!("systemd credential {MASTER_KEY_CREDENTIAL}: {e}"));
         }
     }
-    if let Ok(path) = std::env::var(MASTER_KEY_FILE_ENV) {
-        if !path.trim().is_empty() {
-            let raw = std::fs::read_to_string(&path)
-                .map_err(|e| format!("read {MASTER_KEY_FILE_ENV} ({path}): {e}"))?;
-            return parse_hex_key(&raw).map(Some);
-        }
+    match set(MASTER_KEY_SOURCE_ENV).as_deref() {
+        None => Ok(None),
+        Some("keychain") => match keychain()? {
+            Some(raw) => parse_hex_key(&raw).map(Some),
+            None => Err(format!(
+                "{MASTER_KEY_SOURCE_ENV}=keychain but the Keychain has no \
+                 {SERVER_KEYCHAIN_SERVICE}/{SERVER_KEYCHAIN_ACCOUNT} item; run `cognia-server init --keychain` first"
+            )),
+        },
+        Some(other) => Err(format!(
+            "{MASTER_KEY_SOURCE_ENV}={other} is not a known master key source (expected `keychain`)"
+        )),
     }
-    Ok(None)
+}
+
+/// Read the always-on host's master key from the platform credential store.
+/// `Ok(None)` when the item does not exist.
+#[cfg(not(any(test, feature = "test-inmemory")))]
+pub fn read_server_keychain_master_key() -> Result<Option<String>, String> {
+    match keyring::Entry::new(SERVER_KEYCHAIN_SERVICE, SERVER_KEYCHAIN_ACCOUNT)
+        .and_then(|entry| entry.get_password())
+    {
+        Ok(raw) => Ok(Some(raw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(format!(
+            "read the {SERVER_KEYCHAIN_SERVICE} Keychain item: {error}. A LaunchDaemon has no \
+             login Keychain; use a key file (the default) for a service that starts at boot"
+        )),
+    }
+}
+
+#[cfg(any(test, feature = "test-inmemory"))]
+pub fn read_server_keychain_master_key() -> Result<Option<String>, String> {
+    Err("the platform credential store is not available in this build".to_string())
+}
+
+/// Store a new always-on host master key in the platform credential store.
+/// Refuses to replace an existing item: every secret sealed under the old key
+/// would become unreadable.
+#[cfg(not(any(test, feature = "test-inmemory")))]
+pub fn create_server_keychain_master_key() -> Result<(), String> {
+    if read_server_keychain_master_key()?.is_some() {
+        return Err(format!(
+            "the {SERVER_KEYCHAIN_SERVICE} Keychain item already exists; it was left untouched"
+        ));
+    }
+    keyring::Entry::new(SERVER_KEYCHAIN_SERVICE, SERVER_KEYCHAIN_ACCOUNT)
+        .and_then(|entry| entry.set_password(&hex::encode(random_key())))
+        .map_err(|error| format!("store the {SERVER_KEYCHAIN_SERVICE} Keychain item: {error}"))
+}
+
+#[cfg(any(test, feature = "test-inmemory"))]
+pub fn create_server_keychain_master_key() -> Result<(), String> {
+    Err("the platform credential store is not available in this build".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -874,13 +966,90 @@ fn headless_store_path(data_dir: &Path) -> PathBuf {
 /// server's data dir. Split from [`init_headless`] so the container path is
 /// unit-testable without touching the process global.
 fn build_headless_store(data_dir: &Path) -> Result<SecretStore, String> {
-    let key = resolve_master_key_from_env()?.ok_or_else(|| {
+    let key = resolve_headless_master_key(data_dir)?.ok_or_else(|| {
         format!(
-            "no master key configured: set {MASTER_KEY_ENV} (64 hex chars, e.g. `openssl rand -hex 32`) \
-             or {MASTER_KEY_FILE_ENV}; refusing to boot with an ephemeral key"
+            "no master key configured: set {MASTER_KEY_ENV} (64 hex chars, e.g. `openssl rand -hex 32`), \
+             {MASTER_KEY_FILE_ENV}, a `{MASTER_KEY_CREDENTIAL}` systemd credential, or \
+             {MASTER_KEY_SOURCE_ENV}=keychain (`cognia-server init` creates a key file); \
+             refusing to boot with an ephemeral key"
         )
     })?;
     SecretStore::open(headless_store_path(data_dir), key)
+}
+
+/// File name of the master key `cognia-server init` writes into a data dir.
+pub const DATA_DIR_MASTER_KEY_FILE: &str = "master.key";
+
+/// The data dir's own key file, the last source a headless boot reads: what
+/// `cognia-server init` and `service install` create, so a host started by hand
+/// on the same data dir needs no environment. `Ok(None)` when absent.
+fn data_dir_master_key(data_dir: &Path) -> Result<Option<[u8; 32]>, String> {
+    let path = data_dir.join(DATA_DIR_MASTER_KEY_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => parse_hex_key(&raw)
+            .map(Some)
+            .map_err(|e| format!("{}: {e}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("read {}: {error}", path.display())),
+    }
+}
+
+/// The master key a headless boot on `data_dir` uses: the configured source
+/// ([`resolve_master_key_from_env`]) first, then the data dir's own
+/// [`DATA_DIR_MASTER_KEY_FILE`]. `Ok(None)` when neither exists.
+pub fn resolve_headless_master_key(data_dir: &Path) -> Result<Option<[u8; 32]>, String> {
+    match resolve_master_key_from_env()? {
+        Some(key) => Ok(Some(key)),
+        None => data_dir_master_key(data_dir),
+    }
+}
+
+/// After [`rotate_master_key`]: replace the data dir's [`DATA_DIR_MASTER_KEY_FILE`]
+/// when it still holds `old_key`, so a boot that falls back to it opens the
+/// re-encrypted store. The file is swapped in atomically, 0600, with the old
+/// file's owner. Returns the path it rewrote, `None` when there was nothing to
+/// update.
+pub fn rotate_data_dir_master_key_file(
+    data_dir: &Path,
+    old_key: [u8; 32],
+    new_key: [u8; 32],
+) -> Result<Option<PathBuf>, String> {
+    if data_dir_master_key(data_dir)? != Some(old_key) {
+        return Ok(None);
+    }
+    let path = data_dir.join(DATA_DIR_MASTER_KEY_FILE);
+    let staged = data_dir.join(format!(
+        "{DATA_DIR_MASTER_KEY_FILE}.{}-{}.tmp",
+        std::process::id(),
+        hex::encode(random_key())
+    ));
+    let write_staged = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&staged)?;
+        file.write_all(format!("{}\n", hex::encode(new_key)).as_bytes())?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        {
+            // A service install hands the key to the service account; a
+            // rotation run by root must not take it back.
+            use std::os::unix::fs::MetadataExt;
+            let meta = std::fs::metadata(&path)?;
+            std::os::unix::fs::chown(&staged, Some(meta.uid()), Some(meta.gid()))?;
+        }
+        std::fs::rename(&staged, &path)
+    };
+    write_staged().map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        format!("replace master key {}: {error}", path.display())
+    })?;
+    Ok(Some(path))
 }
 
 /// Strict headless initialization. MUST run before any other secret access
@@ -1844,6 +2013,18 @@ mod tests {
             );
         }
 
+        // 5b. The data dir's own `master.key` is read when nothing else is set:
+        //     what `cognia-server init` writes.
+        std::env::remove_var(MASTER_KEY_FILE_ENV);
+        {
+            let store = build_headless_store(&dir).expect("data-dir key file opens the store");
+            assert_eq!(
+                store.peek("com.cognia.companion", "signing-key"),
+                Some("sekrit-1".to_string())
+            );
+        }
+        std::env::set_var(MASTER_KEY_FILE_ENV, key_file.display().to_string());
+
         // 6. Rotation: re-encrypt under a new key; values (and thus JWTs
         //    signed by the stored signing secret) survive; old key now fails.
         let old_key = [42u8; 32];
@@ -1858,6 +2039,28 @@ mod tests {
             SecretStore::open(headless_store_path(&dir), old_key).is_err(),
             "old key must no longer decrypt"
         );
+
+        // 6b. The data dir's key file follows a rotation only while it holds
+        //     the old key.
+        let key_path = dir.join(DATA_DIR_MASTER_KEY_FILE);
+        std::fs::write(&key_path, hex::encode(old_key)).unwrap();
+        assert_eq!(
+            rotate_data_dir_master_key_file(&dir, old_key, new_key).expect("rewrite"),
+            Some(key_path.clone())
+        );
+        assert_eq!(data_dir_master_key(&dir).unwrap(), Some(new_key));
+        assert_eq!(
+            rotate_data_dir_master_key_file(&dir, old_key, [44u8; 32]).expect("no-op"),
+            None
+        );
+        assert_eq!(data_dir_master_key(&dir).unwrap(), Some(new_key));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&key_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        std::fs::remove_file(&key_path).unwrap();
 
         // 7. Rotating a non-existent store errors loudly.
         let empty_dir = tmp_path().parent().unwrap().join("no-store-here");
@@ -1888,6 +2091,94 @@ mod tests {
             parse_master_key(&format!("  {}\n", hex::encode([9u8; 32]))).unwrap(),
             [9u8; 32]
         );
+    }
+
+    fn resolve_with(
+        vars: &[(&str, &str)],
+        files: &[(&str, &str)],
+        keychain: Result<Option<String>, String>,
+    ) -> Result<Option<[u8; 32]>, String> {
+        let vars: BTreeMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let files: BTreeMap<PathBuf, String> = files
+            .iter()
+            .map(|(k, v)| (PathBuf::from(k), v.to_string()))
+            .collect();
+        resolve_master_key_with(
+            &|name| vars.get(name).cloned(),
+            &|path| files.get(path).cloned().ok_or_else(|| "no such file".to_string()),
+            &|| keychain.clone(),
+        )
+    }
+
+    #[test]
+    fn master_key_sources_resolve_in_precedence_order() {
+        let one = hex::encode([1u8; 32]);
+        let two = hex::encode([2u8; 32]);
+        let three = hex::encode([3u8; 32]);
+        let four = hex::encode([4u8; 32]);
+        let credential = format!("/run/creds/{MASTER_KEY_CREDENTIAL}");
+        let all_vars = [
+            (MASTER_KEY_ENV, one.as_str()),
+            (MASTER_KEY_FILE_ENV, "/k/file"),
+            ("CREDENTIALS_DIRECTORY", "/run/creds"),
+            (MASTER_KEY_SOURCE_ENV, "keychain"),
+        ];
+        let files = [("/k/file", two.as_str()), (credential.as_str(), three.as_str())];
+        let keychain = Ok(Some(four.clone()));
+
+        assert_eq!(resolve_with(&all_vars, &files, keychain.clone()), Ok(Some([1u8; 32])));
+        assert_eq!(
+            resolve_with(&all_vars[1..], &files, keychain.clone()),
+            Ok(Some([2u8; 32]))
+        );
+        assert_eq!(
+            resolve_with(&all_vars[2..], &files, keychain.clone()),
+            Ok(Some([3u8; 32]))
+        );
+        assert_eq!(
+            resolve_with(&all_vars[3..], &files, keychain.clone()),
+            Ok(Some([4u8; 32]))
+        );
+        assert_eq!(resolve_with(&[], &files, keychain), Ok(None));
+    }
+
+    #[test]
+    fn a_credentials_directory_without_this_credential_is_not_a_source() {
+        assert_eq!(
+            resolve_with(&[("CREDENTIALS_DIRECTORY", "/run/creds")], &[], Ok(None)),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn a_keychain_source_without_its_item_or_an_unknown_source_is_an_error() {
+        let missing = resolve_with(&[(MASTER_KEY_SOURCE_ENV, "keychain")], &[], Ok(None))
+            .unwrap_err();
+        assert!(missing.contains("cognia-server init --keychain"));
+        let unknown =
+            resolve_with(&[(MASTER_KEY_SOURCE_ENV, "vault")], &[], Ok(None)).unwrap_err();
+        assert!(unknown.contains("not a known master key source"));
+        let denied = resolve_with(
+            &[(MASTER_KEY_SOURCE_ENV, "keychain")],
+            &[],
+            Err("access denied".into()),
+        )
+        .unwrap_err();
+        assert_eq!(denied, "access denied");
+    }
+
+    #[test]
+    fn a_corrupt_systemd_credential_is_named() {
+        let error = resolve_with(
+            &[("CREDENTIALS_DIRECTORY", "/run/creds")],
+            &[(&format!("/run/creds/{MASTER_KEY_CREDENTIAL}"), "zz")],
+            Ok(None),
+        )
+        .unwrap_err();
+        assert!(error.contains(MASTER_KEY_CREDENTIAL));
     }
 
     #[test]

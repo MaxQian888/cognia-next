@@ -1,0 +1,30 @@
+# ADR-0224 A1 — install a Cognia host as an OS service: render a launchd plist
+# or a systemd unit for a user or system scope, apply it through an injectable
+# IO port, and describe the always-on server host's own service. The desktop's
+# durable terminal host renders its login service through the same writer.
+[package]
+name = "cognia-host-service"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "OS service definitions (launchd, systemd) for Cognia hosts: rendering, install, uninstall and status behind an injectable IO port."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_host_service"
+path = "src/lib.rs"
+
+[dependencies]
+hex.workspace = true
+rand.workspace = true
+thiserror.workspace = true
+
+[target."cfg(unix)".dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

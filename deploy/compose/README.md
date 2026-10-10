@@ -35,12 +35,41 @@ SHARE_UPLOAD_SECRET=... node ../../scripts/smoke/compose-smoke.mjs   # tier-1 sm
 Dockerfile bases against the Rust/Node/pnpm pins, every default image against
 what `images.yml` publishes, and the multi-instance invariants below.
 
-For the `server` profile, `.env` additionally needs `COGNIA_MASTER_KEY`
-(`openssl rand -hex 32`) — there is no OS keyring inside a container, so the
-headless secret store (ADR-0059 W5) takes its master key from the environment.
-Losing it makes the store (Host signaling identities, provider credentials,
-and other encrypted secrets) unreadable. Paired device private keys remain on
-the client and five-minute access tokens are process-memory only.
+The `server` profile needs a master key. There is no OS keyring inside a
+container, so the headless secret store (ADR-0059 W5) takes it from
+`COGNIA_MASTER_KEY` in `.env` (`openssl rand -hex 32`), or, when that is empty,
+from `/data/master.key` in the data volume. Create that file once with
+`docker compose --profile server run --rm cognia-server init` (ADR-0224 A1); it
+is never replaced. Losing the key makes the store (Host signaling identities,
+provider credentials, and other encrypted secrets) unreadable, so back it up.
+Paired device private keys remain on the client and five-minute access tokens
+are process-memory only.
+
+The server runs `serve --no-mdns`: multicast has no meaning on a container
+network. Phones and desktops pair over the relay with
+`docker compose exec cognia-server cognia-server pair`, which prints a
+`cgnp4|…` invitation that works without a public domain.
+
+### Production overlay
+
+`compose.production.yaml` hardens the `server` profile for an operator-run
+deployment (read-only root, dropped capabilities, resource limits) and
+**requires** digest-pinned images, `COGNIA_PUBLIC_URL`, `COGNIA_CONFIG_REVISION`
+and S3-compatible object backup. Secrets come from files, never from `.env`:
+`COGNIA_SECRET_ROOT` is a host directory mounted read-only at
+`/run/cognia-secrets`, holding
+
+| File                             | Read as                                          |
+| -------------------------------- | ------------------------------------------------ |
+| `master-key`                     | `COGNIA_MASTER_KEY_FILE` (64 hex)                |
+| `master-keys/<v>.key`            | versioned keys for `cognia-server rotate-key`    |
+| `backup-keys/`                   | backup encryption keys (`COGNIA_BACKUP_KEY_DIR`) |
+| `s3-access-key`, `s3-secret-key` | object-store credentials                         |
+| `metrics-operator-token`         | the `/metrics` operator bearer                   |
+
+and `SHARE_UPLOAD_SECRET_FILE` names the share service's upload secret. A
+personal always-on host at home does not need this overlay: the base `server`
+profile with `init` is the BYO path (ADR-0224).
 
 The server-side WebRTC rendezvous uses `COGNIA_SIGNALING_URL`, which defaults
 to the Compose-internal `ws://signaling:7892/signaling`. Browsers and mobile

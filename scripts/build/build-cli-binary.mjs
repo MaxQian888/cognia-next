@@ -42,6 +42,8 @@ import {
 } from "./lib/mcp-host-bridge.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
 import { stageClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
+import { copyRuntimeClosure } from "./lib/copy-runtime-closure.mjs"
+import { createPreferEsmEntryPlugin } from "./lib/prefer-esm-entry-plugin.mjs"
 import {
   BUILTIN_PLUGIN_ASSET_DIR,
   stageBuiltinPluginAssets,
@@ -268,7 +270,9 @@ await esbuild.build({
   // TUI_EXTERNALS); those resolve from the adjacent node_modules at runtime.
   external: TUI_EXTERNALS,
   loader: ASSET_LOADERS,
-  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
+  // jsonc-parser's `main` is a UMD build whose internal requires cannot
+  // resolve once inlined; bundle its ESM entry instead.
+  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin, createPreferEsmEntryPlugin({ packages: ["jsonc-parser"] })],
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, cliBundle)}`)
@@ -465,16 +469,34 @@ const destNodeModules = path.join(sidecarOutDir, "node_modules")
 // Clean any stale copy (the top-level binDir wipe may have been blocked by a
 // cwd lock, leaving prior artifacts behind → cpSync would conflict).
 safeRm(destNodeModules)
-for (const dep of SIDECAR_COPIED_RUNTIME_DEPS) {
-  const src = path.join(sidecarNodeModules, dep)
-  if (!fs.existsSync(src)) {
-    // node-pty is an optionalDependency — its absence is expected on some hosts.
-    console.warn(`build-cli-binary: skipping absent sidecar dep ${dep}`)
-    continue
-  }
-  fs.cpSync(src, path.join(destNodeModules, dep), { recursive: true, dereference: true })
+const presentSidecarDeps = SIDECAR_COPIED_RUNTIME_DEPS.filter((dep) => {
+  if (fs.existsSync(path.join(sidecarNodeModules, dep))) return true
+  // node-pty is an optionalDependency — its absence is expected on some hosts.
+  console.warn(`build-cli-binary: skipping absent sidecar dep ${dep}`)
+  return false
+})
+// Each external with its dependencies and peers: the Claude Agent SDK imports
+// `@modelcontextprotocol/sdk` and `zod`, which pnpm never nests inside it.
+const sidecarClosure = copyRuntimeClosure({
+  names: presentSidecarDeps,
+  fromDir: path.join(root, "sidecar"),
+  destNodeModules,
+})
+// Webclone's Babel analyzer loads its parser through createRequire, so the
+// sidecar bundle needs webclone's pure-JS runtime closure beside it.
+const webcloneDir = path.join(root, "sidecar", "webclone")
+if (!fs.existsSync(path.join(webcloneDir, "node_modules"))) {
+  console.error("build-cli-binary: sidecar/webclone/node_modules is missing — run `pnpm sidecar:webclone:install` first.")
+  process.exit(1)
 }
-console.log(`build-cli-binary: copied sidecar externals → ${path.relative(root, destNodeModules)}`)
+const webcloneClosure = copyRuntimeClosure({
+  names: Object.keys(JSON.parse(fs.readFileSync(path.join(webcloneDir, "package.json"), "utf8")).dependencies ?? {}),
+  fromDir: webcloneDir,
+  destNodeModules,
+})
+console.log(
+  `build-cli-binary: copied sidecar externals (${sidecarClosure.size} packages) and webclone runtime (${webcloneClosure.size}) → ${path.relative(root, destNodeModules)}`
+)
 stageClaudeRuntime({ root, nodeModulesDir: destNodeModules })
 
 // 3c. Layout-only exit: assemble the plain-Node dist (no pkg binary). The

@@ -1,0 +1,110 @@
+---
+title: Run an always-on host
+description: Keep Cognia running on a machine you own (a Linux VPS or NAS with Docker, or a Mac at home) so its bots, schedules and connectors keep working while your laptop is closed. Install, pair over the relay without a public domain, back up the master key. ADR-0224.
+---
+
+# Run an always-on host
+
+An always-on host is a machine you own that runs Cognia's headless server and brain
+around the clock (ADR-0224). It is a peer of your desktop, not a replacement for it.
+It runs whatever lives on it: chats you start from your phone, scheduled tasks, bots and
+connectors, so they keep working while your laptop sleeps.
+
+There are two ways to run one:
+
+| Machine                      | How                                           |
+| ---------------------------- | --------------------------------------------- |
+| Linux VPS, NAS, home server  | Docker Compose, `server` profile              |
+| Mac (for example a Mac mini) | The host archive, installed as a LaunchDaemon |
+
+Either way, phones and desktops pair over Cognia's encrypted relay, so the machine can
+sit behind a home router with no public domain and no open port.
+
+<Callout title="Status">
+  This page covers installing, pairing and keeping the host's data safe. Moving existing bots,
+  schedules and connectors from the desktop to the host, per-item ownership, container-per-task
+  execution and automatic updates are being built (ADR-0224 phase A); until then, create what should
+  run around the clock directly on the host.
+</Callout>
+
+## Linux with Docker Compose
+
+```bash
+git clone https://github.com/MaxQian888/cognia-next.git && cd cognia-next/deploy/compose
+cp .env.example .env
+# edit .env: set SHARE_UPLOAD_SECRET (openssl rand -hex 32)
+
+docker compose --profile server run --rm cognia-server init   # writes /data/master.key once
+docker compose --profile server up -d --wait
+docker compose exec cognia-server cognia-server pair
+```
+
+`init` creates the master key inside the data volume. It never replaces an existing
+key. The container restarts on its own (`restart: unless-stopped`) and starts again
+with Docker when the machine boots.
+
+## Mac with the host archive
+
+Download `cognia-host-<version>-darwin-arm64.tar.gz` (or `darwin-x64`), unpack it
+somewhere permanent such as `/opt/cognia-host`, then:
+
+```bash
+sudo /opt/cognia-host/bin/cognia-server service install
+```
+
+This installs a LaunchDaemon (`/Library/LaunchDaemons/com.cognia.server.plist`) that
+starts at boot without anyone logging in and runs as **your** account, not root. It
+creates the data dir (`~/Library/Application Support/cognia-server`) and a master key
+in it, and prints the pairing command. Useful flags:
+
+| Flag             | Default                 | Meaning                                             |
+| ---------------- | ----------------------- | --------------------------------------------------- |
+| `--scope user`   | `system`                | A LaunchAgent that starts at login instead; no sudo |
+| `--run-as NAME`  | the user who ran `sudo` | Account the daemon runs as (never root)             |
+| `--data-dir DIR` | that account's default  | Where the host keeps its data and master key        |
+| `--public-url`   | none                    | A public HTTPS origin, if you have one              |
+| `--no-mdns`      | advertise on the LAN    | Do not announce the host over mDNS                  |
+
+```bash
+sudo /opt/cognia-host/bin/cognia-server service status      # installed, running, and ready
+sudo /opt/cognia-host/bin/cognia-server service uninstall   # keeps data and the key
+```
+
+On a Linux machine without Docker the same command installs a systemd unit; a system
+service there reads its master key as a root-only systemd credential from
+`/etc/cognia-server/master.key`.
+
+For a Mac that should behave like a server, also set System Settings → Energy to
+start up automatically after a power failure and to prevent sleep while the display
+is off.
+
+## Pair your phone and desktop
+
+```bash
+COGNIA_DATA_DIR="$HOME/Library/Application Support/cognia-server" \
+  /opt/cognia-host/bin/cognia-server pair
+```
+
+`pair` asks the running server for an invitation and prints a `cgnp4|…` string with a
+relay room. Paste or scan it on the device's pair screen; it works from any network.
+Whoever redeems it becomes an owner of the host, so hand it only to your own device.
+
+## Keep the master key safe
+
+Everything the host stores encrypted (device identities, provider and connector
+credentials) is sealed under its master key. Losing the key makes those unreadable.
+Back up `master.key` from the data dir. The host reads its key from, in order:
+
+1. `COGNIA_MASTER_KEY` (64 hex characters)
+2. `COGNIA_MASTER_KEY_FILE`
+3. the systemd credential `cognia-master-key`
+4. the Keychain item `com.cognia.server`, when `COGNIA_MASTER_KEY_SOURCE=keychain`
+   (create it with `cognia-server init --keychain`; not available to a LaunchDaemon)
+5. `<data dir>/master.key`
+
+## Durability
+
+The brain stores its data in SQLite (`<data dir>/serve/durability/<account>/`), so a
+crash or power cut loses nothing that was already committed. A host that ran an older
+build is imported from its previous snapshot store on first start; the old store is
+left untouched as a fallback.

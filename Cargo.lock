@@ -2603,6 +2603,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-host-service"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "libc",
+ "rand 0.10.3",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cognia-instrument"
 version = "0.1.0"
 dependencies = [
@@ -2769,6 +2780,7 @@ dependencies = [
  "cognia-github-runner",
  "cognia-headless-contract",
  "cognia-hooks",
+ "cognia-host-service",
  "cognia-instrument",
  "cognia-jobs",
  "cognia-local-browser",
@@ -3356,6 +3368,7 @@ dependencies = [
  "chrono",
  "cognia-companion-contract",
  "cognia-exec-sandbox",
+ "cognia-host-service",
  "cognia-instrument",
  "cognia-problem",
  "cognia-secrets",

@@ -60,8 +60,8 @@ use app_lib::companion_api::{
 use app_lib::headless::{
     backup, brain, exec_backend_from_env, generate_master_key, headless_services,
     init_secret_store, install_headless_services, kill_sidecar, parse_master_key,
-    resolve_master_key_from_env, rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices,
-    HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices, HeadlessSidecarHost,
+    SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -240,6 +240,80 @@ enum CliCommand {
     Devices {
         #[command(subcommand)]
         command: DevicesCommand,
+    },
+    /// Create this host's master key file (`<data dir>/master.key`, 0600)
+    /// unless one exists. `serve` reads it when no other key source is set
+    /// (ADR-0224 A1). An existing key is never replaced.
+    Init {
+        /// Store a new key in the platform credential store instead
+        /// (`COGNIA_MASTER_KEY_SOURCE=keychain`). Not for a LaunchDaemon,
+        /// which has no login Keychain.
+        #[arg(long, default_value_t = false)]
+        keychain: bool,
+    },
+    /// Run this host as an always-on OS service: a LaunchDaemon or LaunchAgent
+    /// on macOS, a systemd unit on Linux (ADR-0224 A1).
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ServiceScopeArg {
+    /// Starts at boot without a login; needs sudo; runs as `--run-as`.
+    System,
+    /// Starts when this user logs in.
+    User,
+}
+
+impl From<ServiceScopeArg> for cognia_host_service::ServiceScope {
+    fn from(value: ServiceScopeArg) -> Self {
+        match value {
+            ServiceScopeArg::System => cognia_host_service::ServiceScope::System,
+            ServiceScopeArg::User => cognia_host_service::ServiceScope::User,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum ServiceCommand {
+    /// Install and start the service from this host install directory.
+    Install {
+        #[arg(long, value_enum, default_value_t = ServiceScopeArg::System)]
+        scope: ServiceScopeArg,
+        /// Host install directory (`<root>/bin/cognia-server`). Defaults to
+        /// the one this binary belongs to.
+        #[arg(long)]
+        install_root: Option<PathBuf>,
+        /// Defaults to the service account's own `cognia-server` data dir.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
+        port: u16,
+        /// Written as `COGNIA_PUBLIC_URL`. Optional: devices pair over the relay.
+        #[arg(long)]
+        public_url: Option<String>,
+        /// Account a system service runs as. Defaults to the user who ran sudo.
+        #[arg(long)]
+        run_as: Option<String>,
+        /// Do not advertise the host over mDNS.
+        #[arg(long, default_value_t = false)]
+        no_mdns: bool,
+    },
+    /// Stop the service and remove its definition. Data and keys are kept.
+    Uninstall {
+        #[arg(long, value_enum, default_value_t = ServiceScopeArg::System)]
+        scope: ServiceScopeArg,
+    },
+    /// Whether the service is installed and running, and whether the server
+    /// answers ready on its loopback port.
+    Status {
+        #[arg(long, value_enum, default_value_t = ServiceScopeArg::System)]
+        scope: ServiceScopeArg,
+        /// Port the service was installed with.
+        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
+        port: u16,
     },
 }
 
@@ -555,6 +629,196 @@ async fn install_file_share(data_dir: &Path, local_account_id: &str, shared: &Sh
     service.bind_account(Some(local_account_id.to_string())).await;
 }
 
+/// `cognia-server init`: create the master key this data dir boots with.
+fn run_init(dir: &std::path::Path, keychain: bool) -> Result<(), String> {
+    if keychain {
+        cognia_secrets::secret_store::create_server_keychain_master_key()?;
+        println!(
+            "Stored a new master key in the {} Keychain item. Start the host with \
+             COGNIA_MASTER_KEY_SOURCE=keychain.",
+            cognia_secrets::secret_store::SERVER_KEYCHAIN_SERVICE
+        );
+        return Ok(());
+    }
+    let path = dir.join(cognia_host_service::server::MASTER_KEY_FILE_NAME);
+    match cognia_host_service::server::ensure_master_key_file(&path, None)? {
+        cognia_host_service::server::MasterKeyFile::Created => println!(
+            "Created {}. Back it up: without it this host's secrets cannot be read.",
+            path.display()
+        ),
+        cognia_host_service::server::MasterKeyFile::Existing => {
+            println!("{} already exists; it was left untouched.", path.display())
+        }
+    }
+    Ok(())
+}
+
+/// `cognia-server service install|uninstall|status`.
+async fn run_service_command(
+    command: &ServiceCommand,
+    local_account_id: Option<String>,
+) -> Result<(), String> {
+    use cognia_host_service::{server, InstallerContext, ServicePlatform, SystemIo};
+    let ctx = InstallerContext::current().map_err(|e| e.to_string())?;
+    let platform = ServicePlatform::current().map_err(|e| e.to_string())?;
+    match command {
+        ServiceCommand::Install {
+            scope,
+            install_root,
+            data_dir,
+            port,
+            public_url,
+            run_as,
+            no_mdns,
+        } => {
+            let exists = |path: &std::path::Path| path.exists();
+            let env = server::InstallEnvironment::current(&ctx, &exists, &server::lookup_account)
+                .map_err(|e| e.to_string())?;
+            let request = server::InstallRequest {
+                scope: (*scope).into(),
+                install_root: install_root.clone(),
+                data_dir: data_dir.clone(),
+                port: *port,
+                public_url: public_url.clone(),
+                run_as: run_as.clone(),
+                mdns: !no_mdns,
+                local_account_id: local_account_id.clone(),
+            };
+            let report =
+                server::install_server_service(&request, &env, &SystemIo).map_err(|e| e.to_string())?;
+            println!("Installed {}", report.definition_path.display());
+            println!("Data dir:   {}", report.data_dir.display());
+            println!(
+                "Master key: {}{}",
+                report.master_key.display(),
+                if report.master_key_created {
+                    " (new; back it up: without it this host's secrets cannot be read)"
+                } else {
+                    " (existing)"
+                }
+            );
+            if let Some(user) = &report.run_as {
+                println!("Runs as:    {user}");
+            }
+            for note in &report.notes {
+                println!("Note: {note}");
+            }
+            // A root-only systemd credential is piped in: the service account
+            // cannot read the key file, and `pair` opens the secret store.
+            let key_pipe = if report.master_key_root_only {
+                format!("sudo cat \"{}\" | ", report.master_key.display())
+            } else {
+                String::new()
+            };
+            let key_env = if report.master_key_root_only {
+                format!("{}=/dev/stdin ", app_lib::headless::MASTER_KEY_FILE_ENV)
+            } else {
+                String::new()
+            };
+            let prefix = report
+                .run_as
+                .as_ref()
+                .map(|user| format!("sudo -u {user} "))
+                .unwrap_or_default();
+            let account = local_account_id
+                .as_ref()
+                .map(|id| format!("COGNIA_LOCAL_ACCOUNT_ID={id} "))
+                .unwrap_or_default();
+            // `pair` asks the running server on COGNIA_PORT for a relay invitation.
+            let port_env = if *port == app_lib::companion_api::server::DEFAULT_PORT {
+                String::new()
+            } else {
+                format!("COGNIA_PORT={port} ")
+            };
+            println!(
+                "Pair a device: {key_pipe}{prefix}{key_env}{port_env}{account}COGNIA_DATA_DIR=\"{}\" \"{}\" pair",
+                report.data_dir.display(),
+                report.server_binary.display()
+            );
+            Ok(())
+        }
+        ServiceCommand::Uninstall { scope } => {
+            let plan = cognia_host_service::uninstall(
+                &server::server_service_identity(),
+                (*scope).into(),
+                platform,
+                &ctx,
+                &SystemIo,
+            )
+            .map_err(|e| e.to_string())?;
+            println!(
+                "Removed {} (data and master key were kept).",
+                plan.definition_path.display()
+            );
+            Ok(())
+        }
+        ServiceCommand::Status { scope, port } => {
+            let status = cognia_host_service::status(
+                &server::server_service_identity(),
+                (*scope).into(),
+                platform,
+                &ctx,
+                &SystemIo,
+            );
+            println!(
+                "{}: {}, {}",
+                status.definition_path.display(),
+                if status.installed { "installed" } else { "not installed" },
+                if status.running { "running" } else { "not running" }
+            );
+            println!("Readiness:  {}", probe_readyz(*port).await);
+            Ok(())
+        }
+    }
+}
+
+/// `GET /readyz` on the loopback port. The host's certificate is self-signed,
+/// so the probe skips verification; it only ever talks to 127.0.0.1.
+async fn probe_readyz(port: u16) -> String {
+    let client = match reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .no_proxy()
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => return format!("unknown (no loopback client: {error})"),
+    };
+    let url = format!("https://127.0.0.1:{port}/readyz");
+    let response = match client.get(&url).send().await {
+        Ok(response) => response,
+        Err(error) => return format!("no answer on 127.0.0.1:{port} ({error})"),
+    };
+    let http_status = response.status();
+    let body = response.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+    describe_readiness(http_status.is_success(), &body)
+}
+
+/// One line for `service status` from a `/readyz` answer: ready, or the
+/// checks that are holding it back.
+fn describe_readiness(ok: bool, body: &serde_json::Value) -> String {
+    let mut failing: Vec<&str> = body
+        .get("checks")
+        .and_then(serde_json::Value::as_object)
+        .map(|checks| {
+            checks
+                .iter()
+                .filter(|(name, value)| match name.as_str() {
+                    "draining" => value.as_bool() == Some(true),
+                    _ => value.as_bool() == Some(false),
+                })
+                .map(|(name, _)| name.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    failing.sort_unstable();
+    match (ok, failing.is_empty()) {
+        (true, true) => "ready".to_owned(),
+        (_, false) => format!("not ready ({})", failing.join(", ")),
+        (false, true) => "not ready".to_owned(),
+    }
+}
+
 fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("COGNIA_DATA_DIR") {
         return PathBuf::from(dir);
@@ -745,6 +1009,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return result.map_err(Into::into);
     }
 
+    if let CliCommand::Service { command } = &cli.command {
+        // The installed service serves the account named here, if any.
+        let local_account_id = cli
+            .local_account_id
+            .clone()
+            .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
+            .filter(|id| !id.trim().is_empty());
+        return run_service_command(command, local_account_id).await.map_err(Into::into);
+    }
+    if let CliCommand::Init { keychain } = &cli.command {
+        return run_init(&data_dir(), *keychain).map_err(Into::into);
+    }
+
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
 
@@ -898,7 +1175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::Gateway { command } => run_gateway_admin(&dir, command),
         CliCommand::Devices { command } => run_devices_admin(command).await,
-        CliCommand::DesktopHost { .. } => unreachable!("handled before headless initialization"),
+        CliCommand::DesktopHost { .. } | CliCommand::Service { .. } | CliCommand::Init { .. } => {
+            unreachable!("handled before headless initialization")
+        }
         CliCommand::RotateMasterKey { .. }
         | CliCommand::Backup { .. }
         | CliCommand::Restore { .. }
@@ -1331,8 +1610,15 @@ fn run_rotate_master_key(
     data_dir: &std::path::Path,
     new_key_hex: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let old_key = resolve_master_key_from_env()?
-        .ok_or_else(|| format!("current master key not found: set {MASTER_KEY_ENV}(_FILE)"))?;
+    let old_key =
+        cognia_secrets::secret_store::resolve_headless_master_key(data_dir)?.ok_or_else(|| {
+            format!(
+                "current master key not found: set {MASTER_KEY_ENV}(_FILE), or keep it in {}",
+                data_dir
+                    .join(cognia_secrets::secret_store::DATA_DIR_MASTER_KEY_FILE)
+                    .display()
+            )
+        })?;
     let (new_key, generated) = match new_key_hex {
         Some(raw) => (parse_master_key(raw)?, false),
         None => (generate_master_key(), true),
@@ -1343,11 +1629,21 @@ fn run_rotate_master_key(
         println!("\nNew master key (store it in your secret manager NOW):\n");
         println!("    {}\n", hex::encode(new_key));
     }
-    println!(
-        "Update {MASTER_KEY_ENV} (or the {0} file) to the new key before the next boot — \
-         the old key no longer decrypts the store.",
-        app_lib::headless::MASTER_KEY_FILE_ENV
-    );
+    let key_file =
+        cognia_secrets::secret_store::rotate_data_dir_master_key_file(data_dir, old_key, new_key)?;
+    if let Some(path) = &key_file {
+        println!("Wrote the new key to {}.", path.display());
+    }
+    let configured = [MASTER_KEY_ENV, app_lib::headless::MASTER_KEY_FILE_ENV]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+    if key_file.is_none() || configured {
+        println!(
+            "Update {MASTER_KEY_ENV} (or the {0} file) to the new key before the next boot — \
+             the old key no longer decrypts the store.",
+            app_lib::headless::MASTER_KEY_FILE_ENV
+        );
+    }
     Ok(())
 }
 
@@ -2529,6 +2825,21 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
         assert_eq!(payload["mode"], "oidc");
         assert!(payload.get("invitation").is_none());
+    }
+
+    #[test]
+    fn service_status_names_the_readiness_checks_that_fail() {
+        let ready = serde_json::json!({
+            "status": "ready",
+            "checks": { "draining": false, "storage": true, "brain": true },
+        });
+        assert_eq!(super::describe_readiness(true, &ready), "ready");
+        let held = serde_json::json!({
+            "status": "not_ready",
+            "checks": { "draining": true, "storage": true, "brain": false, "sidecar": false },
+        });
+        assert_eq!(super::describe_readiness(false, &held), "not ready (brain, draining, sidecar)");
+        assert_eq!(super::describe_readiness(false, &serde_json::Value::Null), "not ready");
     }
 
     #[test]

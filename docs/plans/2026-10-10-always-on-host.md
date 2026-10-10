@@ -14,20 +14,21 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 
 **Goal:** a user can run an always-on host on Linux (Compose) or macOS (native LaunchDaemon) from documented steps, and it stores data durably.
 
-1. **Shared service installer.** Generalise `cli/src/worker/daemon-service.ts` (`installWorkerService`, `ServiceIo` injection, launchd / systemd-user / schtasks) into a service-definition module that takes `{label, argv, scope: "user" | "system", env}`.
-   - Add the system scope: LaunchDaemon (`/Library/LaunchDaemons`) and a systemd system unit, so the service starts at boot without a login.
-   - The worker keeps using it with its existing label and argv.
-   - The Rust side mirrors this for `cognia-server`: a `service` module in a crate (not `src-tauri/src`, per ADR-0196). The terminal host's `crates/cognia-terminal/src/terminal_host_service.rs:290` is the precedent; the shared plist/unit writer moves to a crate both can use.
+1. **Shared service installer.** Done in the new foundation crate `crates/cognia-host-service`: `ServiceSpec {label, unit, program, args, env, run_as, credentials, restart}` with a `user | system` scope, rendered as a LaunchAgent / LaunchDaemon plist or a systemd user / system unit, installed through an injected `ServiceIo`.
+   - The system scope (LaunchDaemon, systemd system unit) starts the service at boot without a login and runs it as a named non-root account.
+   - The terminal host's `crates/cognia-terminal/src/terminal_host_service.rs` now renders its login service through the same crate.
+   - `server.rs` in the crate resolves a `cognia-server` install (install layout, data dir, service account, master key placement) and refuses root, unknown accounts and incomplete installs.
+   - Deferred to phase C: the TypeScript worker's `cli/src/worker/daemon-service.ts` stays user-scope until execution-only nodes need a boot-time install; it will move onto the same spec shape then.
    - Tests: plist/unit rendering per platform and scope, install/uninstall with injected IO.
 2. **`cognia-server service install|uninstall|status`** subcommands in `src-tauri/src/bin/cognia-server.rs`.
    - `install` writes the definition with `serve`, data dir, master key file and brain/sidecar paths resolved relative to the install root.
    - `status` reports loaded/running and the health of `/readyz`.
 3. **Master key provisioning.**
    - `cognia-server init` generates `<data>/master.key` (0600) when absent and refuses to overwrite.
-   - `crates/cognia-secrets/src/secret_store.rs` `resolve_master_key_from_env` gains `systemd-creds` (`$CREDENTIALS_DIRECTORY/master-key`) and the macOS Keychain as providers.
+   - `crates/cognia-secrets/src/secret_store.rs` `resolve_master_key_from_env` gains `systemd-creds` (`$CREDENTIALS_DIRECTORY/cognia-master-key`) and the macOS Keychain as providers.
    - Tests cover provider precedence and a missing key.
 4. **macOS standalone archive.** A build script assembles `cognia-server`, the brain layout (`scripts/build/build-cli-binary.mjs --layout-only`), the sidecars and a pinned Node into one archive with an install contract.
-   - Fix the entry-name disagreement: dev `cognia-agent.mjs` vs image `cli.mjs`.
+   - The entry name is `cli.mjs` in both the image and the archive; the service sets `COGNIA_BRAIN_ENTRY` explicitly, so the dev `cognia-agent.mjs` name never reaches a host.
    - Sign and notarize with the desktop's identity.
 5. **Durability default `sqlite-v5`.**
    - Make the resolved backend reach the store: `DurabilityStoreOptions.backend`, honoured by `resolveBackend` when no manifest exists (`cli/src/serve/persistence/store.ts:236`, `backend.ts:106`). This fixes the env gate that is silently ignored on fresh accounts.
@@ -40,6 +41,12 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
    - Document `COGNIA_SECRET_ROOT` and `compose.production.yaml`.
    - Fix the Dockerfile quickstart, which boots without a master key.
 7. **Docs.** A bilingual "Run an always-on host" page under `docs/content/docs/{en,zh}/` (Linux Compose, macOS native, OS settings for a Mac mini: auto-login is not needed for the daemon, restart after power failure, wake). Use the `subsystem-docs` skill; gate with `pnpm docs:build`.
+
+**A1 verification (2026-10-11).** An archive assembled from the debug server, the `--layout-only` brain and a local Node was installed with `service install --scope user` on a spare port. It reached `/readyz` ready with sqlite-v5 durability, `pair` returned a relay invitation through the running server, launchd restarted it after `kill -9`, and `service uninstall` left the data in place. The run surfaced three packaging defects, all fixed in A1 and shared with the Docker image:
+
+- The CLI bundle inlined `jsonc-parser`'s UMD `main`, whose internal `require("./impl/format")` cannot resolve inside a bundle, so the brain died on start. `scripts/build/lib/prefer-esm-entry-plugin.mjs` now bundles its ESM entry.
+- The sidecar's copied externals lacked their dependencies and peers (`@modelcontextprotocol/sdk`, `zod`, `@anthropic-ai/sdk` for the Claude Agent SDK), so the sidecar could not import. `scripts/build/lib/copy-runtime-closure.mjs` copies the runtime closure, and the layout now carries webclone's runtime closure too (the image's separate overlay is gone).
+- Sidecar launchers compared `import.meta.url` with `process.argv[1]`, which differ when the install path crosses a symlink (macOS `/tmp`), so the sidecar silently did nothing. `sidecar/src/shared/main-module.ts` compares the real path.
 
 ### A2 — Relay-first pairing
 
