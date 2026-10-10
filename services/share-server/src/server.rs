@@ -28,6 +28,8 @@ use crate::store::Store;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 /// Default hard lifetime cap for every share — 30 days, matching the Worker.
 pub const DEFAULT_MAX_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
+/// Public non-consuming metadata endpoint suffix.
+pub const PUBLIC_METADATA_SUFFIX: &str = "metadata";
 
 /// Resolved runtime configuration. Built from the environment in production
 /// ([`Config::from_env`]) or explicitly in tests ([`Config::for_test`]).
@@ -259,6 +261,12 @@ pub fn router(state: AppState) -> Router {
                 .options(handlers::options)
                 .fallback(handlers::method_not_allowed),
         )
+        .route(
+            &format!("/v1/share/{{code}}/{PUBLIC_METADATA_SUFFIX}"),
+            get(handlers::metadata)
+                .options(handlers::options)
+                .fallback(handlers::method_not_allowed),
+        )
         // ADR-0149 §8 — the org-scoped plane. Grant-only: these are the two
         // things the legacy bearer must never be able to do, because it says
         // nothing about which org is asking.
@@ -416,6 +424,33 @@ mod tests {
         let status = res.status();
         let bytes = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
         (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn metadata_route_is_public_and_method_gated() {
+        let (state, _dir) = test_state();
+        let app = router(state);
+        for (method, expected) in [
+            (axum::http::Method::GET, StatusCode::NOT_FOUND),
+            (axum::http::Method::PATCH, StatusCode::METHOD_NOT_ALLOWED),
+            (axum::http::Method::OPTIONS, StatusCode::NO_CONTENT),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri("/v1/share/unknown/metadata")
+                        .extension(axum::extract::ConnectInfo(
+                            "127.0.0.1:1234".parse::<SocketAddr>().unwrap(),
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+        }
     }
 
     #[tokio::test]

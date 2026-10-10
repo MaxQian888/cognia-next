@@ -42,6 +42,8 @@ interface ShareMeta {
   expiresAt?: number
   maxViews?: number
   burnAfterRead: boolean
+  /** Non-secret protection hint; absent for legacy rows. */
+  passphrase?: boolean
   viewCount: number
   revoked: boolean
   /**
@@ -75,6 +77,13 @@ export const KV_MIN_TTL_SECONDS = 60
  * KV even when the creator omits a TTL — bounds storage growth on a shared
  * deployment. 30 days. Overridable via the `MAX_TTL_SECONDS` env var. */
 export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
+export const PUBLIC_METADATA_SUFFIX = "metadata"
+export const PUBLIC_METADATA_FIELDS = [
+  "passphrase",
+  "burnAfterRead",
+  "maxViews",
+  "expiresAt",
+] as const
 export const CODE_LENGTH = 12
 export const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 const OWNER_TOKEN_BYTES = 32
@@ -376,6 +385,7 @@ async function handleCreate(request: Request, env: LifecycleEnv, code: string): 
     expiresAt,
     maxViews,
     burnAfterRead,
+    passphrase: (body.envelope as Record<string, unknown>).pp != null,
     viewCount: 0,
     revoked: false,
     ownerToken,
@@ -438,6 +448,27 @@ async function handleRead(env: LifecycleEnv, code: string): Promise<Response> {
   })
 }
 
+/** Public hints never serve ciphertext or spend a view, including legacy links. */
+async function handleMetadata(env: LifecycleEnv, code: string): Promise<Response> {
+  const meta = await readMeta(env, code)
+  if (!meta || unavailable(meta)) return json({ error: "not found" }, 404)
+  let passphrase = meta.passphrase
+  if (passphrase === undefined) {
+    const object = await env.SHARE_BUCKET.get(`share/${code}`)
+    if (!object) return json({ error: "not found" }, 404)
+    const envelope = await object.json<Record<string, unknown>>()
+    passphrase = envelope.pp != null
+  }
+  // Legacy R2 I/O may cross expiry. The DO serializes against reads/revocation.
+  if (unavailable(meta)) return json({ error: "not found" }, 404)
+  return json({
+    passphrase,
+    burnAfterRead: meta.burnAfterRead,
+    maxViews: meta.maxViews,
+    expiresAt: meta.expiresAt,
+  })
+}
+
 async function handleStats(request: Request, env: LifecycleEnv, code: string): Promise<Response> {
   const meta = await readMeta(env, code)
   // Ownership is checked against the share's own token, so a missing share is
@@ -457,7 +488,7 @@ async function handleStats(request: Request, env: LifecycleEnv, code: string): P
 }
 
 /**
- * Extend a share's lifetime (owner-only). Sets a fresh window of `ttlSeconds`
+ * Extend a share's lifetime (owner-only). Keeps the later of its current expiry and `ttlSeconds`
  * from now, clamped to the hard `maxTtl` ceiling, and re-arms its durable
  * expiry alarm and org discovery index. Owner-token gated —
  * possessing the global upload secret never renews another tenant's share.
@@ -488,7 +519,8 @@ async function handleRenew(request: Request, env: LifecycleEnv, code: string): P
   if (!requested) return json({ error: "ttlSeconds required" }, 400)
 
   const ttl = Math.min(requested, maxTtlSeconds(env))
-  const expiresAt = Date.now() + ttl * 1000
+  const expiresAt =
+    meta.expiresAt === undefined ? undefined : Math.max(meta.expiresAt, Date.now() + ttl * 1000)
   const updated: ShareMeta = { ...meta, expiresAt }
   if (unavailable(meta)) {
     await deleteShare(env, code, meta.orgId)
@@ -615,6 +647,7 @@ export class ShareLifecycle extends DurableObject<Env> {
       meta.viewCount < 0 ||
       typeof meta.revoked !== "boolean" ||
       typeof meta.burnAfterRead !== "boolean" ||
+      (meta.passphrase !== undefined && typeof meta.passphrase !== "boolean") ||
       (meta.expiresAt !== undefined && !Number.isFinite(meta.expiresAt)) ||
       (meta.maxViews !== undefined &&
         (!Number.isSafeInteger(meta.maxViews) || meta.maxViews < 0)) ||
@@ -640,6 +673,7 @@ export class ShareLifecycle extends DurableObject<Env> {
         return handleCreate(request, env, code)
       }
       if (action === "read") return handleRead(env, code)
+      if (action === PUBLIC_METADATA_SUFFIX) return handleMetadata(env, code)
       if (action === "stats") return handleStats(request, env, code)
       if (action === "renew") return handleRenew(request, env, code)
       if (action === "delete") return handleDelete(request, env, code)
@@ -707,12 +741,14 @@ export default {
       return json({ error: "method not allowed" }, 405)
     }
 
-    const match = pathname.match(/^\/v1\/share\/([^/]+)(\/stats)?$/)
+    const match = pathname.match(
+      new RegExp(`^/v1/share/([^/]+)(/(?:stats|${PUBLIC_METADATA_SUFFIX}))?$`)
+    )
     if (match) {
       const code = decodeURIComponent(match[1])
-      const isStats = Boolean(match[2])
-      if (isStats) {
-        if (request.method === "GET") return lifecycleRequest(request, env, code, "stats")
+      const suffix = match[2]?.slice(1)
+      if (suffix) {
+        if (request.method === "GET") return lifecycleRequest(request, env, code, suffix)
       } else if (request.method === "GET") {
         return lifecycleRequest(request, env, code, "read")
       } else if (request.method === "PATCH") {

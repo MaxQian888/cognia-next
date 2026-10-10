@@ -61,8 +61,24 @@ async function encryptedFixture(passphrase?: string): Promise<{
  * is another origin, so the reply carries the same `*` CORS header the real
  * Worker does.
  */
-async function serveEnvelopeReads(page: Page, envelope: ShareEnvelopeV1): Promise<string[]> {
+async function serveEnvelopeReads(
+  page: Page,
+  envelope: ShareEnvelopeV1,
+  burnAfterRead = false
+): Promise<string[]> {
   const requestedUrls: string[] = []
+  await page.route(`**/v1/share/${SHARE_CODE}/metadata`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({
+        passphrase: Boolean(envelope.pp),
+        burnAfterRead,
+        ...(burnAfterRead ? { maxViews: 1 } : {}),
+      }),
+    })
+  })
   await page.route(`**/v1/share/${SHARE_CODE}`, async (route) => {
     requestedUrls.push(route.request().url())
     await route.fulfill({
@@ -115,28 +131,31 @@ test.describe("public share viewer", () => {
   }) => {
     const passphrase = "correct horse battery staple"
     const { envelope, encodedKey } = await encryptedFixture(passphrase)
-    await serveEnvelope(page, envelope)
+    const requestedUrls = await serveEnvelopeReads(page, envelope, true)
 
     await page.goto(`/share/view?c=${SHARE_CODE}#k=${encodedKey}`, {
       waitUntil: "domcontentloaded",
     })
 
-    const input = page.getByRole("textbox", { name: "Passphrase" })
+    const input = page.getByLabel("Passphrase", { exact: true })
     await expect(input).toBeVisible({ timeout: 20_000 })
+    expect(requestedUrls).toHaveLength(0)
     await input.fill("wrong passphrase")
     await page.getByRole("button", { name: "Unlock" }).click()
     await expect(page.getByText(/passphrase didn.t work/i)).toBeVisible({ timeout: 20_000 })
 
+    expect(requestedUrls).toHaveLength(1)
     await input.fill(passphrase)
     await page.getByRole("button", { name: "Unlock" }).click()
     await expect(page.getByText(SHARE_TEXT)).toBeVisible({ timeout: 20_000 })
+    expect(requestedUrls).toHaveLength(1)
   })
 
   test("shows the unavailable state when the share was expired, burned, or revoked", async ({
     page,
   }) => {
     const { encodedKey } = await encryptedFixture()
-    await page.route(`**/v1/share/${SHARE_CODE}`, async (route) => {
+    await page.route(`**/v1/share/${SHARE_CODE}/metadata`, async (route) => {
       await route.fulfill({ status: 404, contentType: "application/json", body: "{}" })
     })
 

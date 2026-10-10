@@ -18,7 +18,7 @@
  * "The anonymous visitor").
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
@@ -26,6 +26,7 @@ import { defaultShareBaseUrl, resolveShareEndpoint } from "@/lib/share/config"
 import {
   loadShare,
   decryptEnvelope,
+  openShare,
   type ShareLoadState,
   type ShareLoadErrorReason,
 } from "@/lib/share/load"
@@ -61,13 +62,27 @@ export function ShareView() {
    */
   const [canImport, setCanImport] = useState(false)
 
+  // Strict Mode replays effects. Keep one load per guest/account context so
+  // that an automatic read cannot spend two views on the same mount.
+  const initialLoad = useRef<{ guest: boolean; promise: Promise<ShareLoadState> } | null>(null)
   useEffect(() => {
     let active = true
-    void (async () => {
-      const baseUrl = guest ? defaultShareBaseUrl() : (await resolveShareEndpoint()).baseUrl
-      const next = await loadShare(baseUrl, window.location.search, window.location.hash)
+    if (!initialLoad.current || initialLoad.current.guest !== guest) {
+      initialLoad.current = {
+        guest,
+        promise: (async () => {
+          try {
+            const baseUrl = guest ? defaultShareBaseUrl() : (await resolveShareEndpoint()).baseUrl
+            return await loadShare(baseUrl, window.location.search, window.location.hash)
+          } catch {
+            return { status: "error", reason: "network" } as const
+          }
+        })(),
+      }
+    }
+    void initialLoad.current.promise.then((next) => {
       if (active) setState(next)
-    })()
+    })
     return () => {
       active = false
     }
@@ -156,6 +171,33 @@ function Body({
           <p className="text-sm text-muted-foreground">{t(ERROR_KEY[state.reason])}</p>
         </Centered>
       )
+    case "confirm":
+      return (
+        <Centered>
+          <h1 className="text-xl font-semibold">{t("confirmTitle")}</h1>
+          <p className="text-sm text-muted-foreground">{t("confirmBody")}</p>
+          <button
+            type="button"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={async () => {
+              onState({ status: "loading" })
+              onState(await openShare(state.request))
+            }}
+          >
+            {t("confirmSubmit")}
+          </button>
+        </Centered>
+      )
+    case "passphrase-pending":
+      return (
+        <PassphraseGate
+          burnAfterRead={state.burnAfterRead}
+          onSubmit={async (pass) => {
+            onState({ status: "loading" })
+            onState(await openShare(state.request, pass))
+          }}
+        />
+      )
     case "passphrase":
       return (
         <PassphraseGate
@@ -177,9 +219,11 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 function PassphraseGate({
   wrong,
+  burnAfterRead,
   onSubmit,
 }: {
   wrong?: boolean
+  burnAfterRead?: boolean
   onSubmit: (passphrase: string) => void
 }) {
   const t = useTranslations("share.view")
@@ -188,6 +232,9 @@ function PassphraseGate({
     <div className="flex max-w-md flex-col items-center gap-3 text-center">
       <h1 className="text-xl font-semibold">{t("passphraseTitle")}</h1>
       <p className="text-sm text-muted-foreground">{t("passphraseBody")}</p>
+      {burnAfterRead ? (
+        <p className="text-sm text-muted-foreground">{t("passphraseBurnWarning")}</p>
+      ) : null}
       <form
         className="flex w-full flex-col gap-2"
         onSubmit={(e) => {

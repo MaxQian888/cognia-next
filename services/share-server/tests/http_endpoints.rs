@@ -462,3 +462,132 @@ async fn renewal_cannot_restore_deleted_burned_or_expired_shares() {
         );
     }
 }
+
+#[tokio::test]
+async fn public_metadata_is_safe_and_does_not_consume_a_protected_burn_share() {
+    let (base, _dir) = start().await;
+    let client = Client::new();
+    let mut envelope = valid_envelope();
+    envelope["pp"] = json!({"salt":"salt", "iterations":100000});
+    let created: Value = client
+        .post(format!("{base}/v1/share"))
+        .bearer_auth(SECRET)
+        .json(&json!({"envelope":envelope,"burnAfterRead":true,"passphrase":false}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = created["code"].as_str().unwrap();
+    for _ in 0..3 {
+        let response = client
+            .get(format!("{base}/v1/share/{code}/metadata"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let metadata: Value = response.json().await.unwrap();
+        assert_eq!(
+            metadata,
+            json!({"passphrase":true,"burnAfterRead":true,"maxViews":1,"expiresAt":created["expiresAt"]})
+        );
+    }
+    let response = client
+        .get(format!("{base}/v1/share/{code}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["envelope"],
+        envelope
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/v1/share/{code}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/v1/share/{code}/metadata"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn renew_reports_current_expiry_when_requested_window_is_shorter() {
+    let (base, _dir) = start().await;
+    let client = Client::new();
+    let created: Value = client
+        .post(format!("{base}/v1/share"))
+        .bearer_auth(SECRET)
+        .json(&json!({"envelope":valid_envelope(),"ttlSeconds":2592000}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = created["code"].as_str().unwrap();
+    let response = client
+        .patch(format!("{base}/v1/share/{code}"))
+        .header("X-Owner-Token", created["ownerToken"].as_str().unwrap())
+        .json(&json!({"ttlSeconds":604800}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({"expiresAt":created["expiresAt"]})
+    );
+}
+
+#[tokio::test]
+async fn legacy_protected_metadata_remains_non_consuming_after_migration() {
+    let (base, dir) = start().await;
+    let envelope = json!({"pp":{"salt":"salt"},"ciphertext":"opaque"});
+    let conn = rusqlite::Connection::open(dir.path().join("shares.sqlite")).unwrap();
+    conn.execute("INSERT INTO shares (code,envelope,created_at,max_views,burn_after_read,view_count,revoked) VALUES ('legacy',?1,1000,1,1,0,0)", [envelope.to_string()]).unwrap();
+    let client = Client::new();
+    for _ in 0..2 {
+        let response = client
+            .get(format!("{base}/v1/share/legacy/metadata"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({"passphrase":true,"burnAfterRead":true,"maxViews":1})
+        );
+    }
+    assert_eq!(
+        client
+            .get(format!("{base}/v1/share/legacy"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/v1/share/legacy"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}

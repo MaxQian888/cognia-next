@@ -63,15 +63,18 @@ export function MySharesPanel() {
     }
   }
 
-  // Extend a link's lifetime to a week from now (the worker clamps to its
-  // hard ceiling). A fresh window is simpler than "add N days" and matches the
-  // worker's set-from-now semantics.
+  // Request at least a week from now. The server preserves a later expiry
+  // and clamps the requested window to its configured ceiling.
   const RENEW_SECONDS = 7 * 24 * 60 * 60
   const onRenew = async (code: string) => {
     setRenewing(code)
     try {
       const expiresAt = await extendShareLink(code, RENEW_SECONDS)
-      toast.success(t("renewed", { date: new Date(expiresAt).toLocaleDateString() }))
+      toast.success(
+        expiresAt !== undefined
+          ? t("renewed", { date: new Date(expiresAt).toLocaleString() })
+          : t("renewedUnknown")
+      )
     } catch (err) {
       log.error("renew-failed", { error: err instanceof Error ? err.message : String(err) })
       toast.error(t("renewError"))
@@ -124,7 +127,7 @@ export function MySharesPanel() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {t("created")}: {new Date(row.createdAt).toLocaleString()} · {t("expires")}:{" "}
-                {row.expiresAt ? new Date(row.expiresAt).toLocaleString() : t("never")}
+                {row.expiresAt ? new Date(row.expiresAt).toLocaleString() : t("expiryUnavailable")}
               </p>
             </div>
             {views[row.code] !== undefined ? (

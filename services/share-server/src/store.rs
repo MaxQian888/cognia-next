@@ -37,6 +37,27 @@ pub struct OrgShare {
     pub creator_user_id: Option<String>,
 }
 
+/// Public lifecycle hints, with no envelope or owner/tenant information.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicMetadata {
+    pub passphrase: bool,
+    pub burn_after_read: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_views: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+}
+
+/// Wire field names pinned against the Worker and canonical contract fixture.
+pub const PUBLIC_METADATA_FIELDS: [&str; 4] =
+    ["passphrase", "burnAfterRead", "maxViews", "expiresAt"];
+
+fn envelope_has_passphrase(envelope: &str) -> anyhow::Result<bool> {
+    let value: serde_json::Value = serde_json::from_str(envelope)?;
+    Ok(value.get("pp").is_some_and(|pp| !pp.is_null()))
+}
+
 /// Result of a read attempt that has already applied the lifecycle decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadOutcome {
@@ -86,6 +107,8 @@ impl Store {
             .context("create schema")?;
             ensure_owner_token_column(&conn).context("migrate owner token column")?;
             ensure_tenancy_columns(&conn).context("migrate tenancy columns")?;
+            // Nullable so legacy rows can recover the hint from their envelope.
+            add_column_if_missing(&conn, "passphrase").context("migrate passphrase column")?;
         }
         Ok(Self { pool })
     }
@@ -96,8 +119,8 @@ impl Store {
         conn.execute(
             "INSERT INTO shares
                 (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count,
-                 revoked, owner_token, org_id, creator_user_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 revoked, owner_token, org_id, creator_user_id, passphrase)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 code,
                 envelope,
@@ -110,6 +133,11 @@ impl Store {
                 meta.owner_token.as_deref(),
                 meta.org_id.as_deref(),
                 meta.creator_user_id.as_deref(),
+                if envelope_has_passphrase(envelope)? {
+                    "1"
+                } else {
+                    "0"
+                },
             ],
         )?;
         Ok(())
@@ -171,6 +199,55 @@ impl Store {
         Ok(outcome)
     }
 
+    /// Inspect public lifecycle hints without incrementing views or burning a share.
+    pub fn public_metadata(
+        &self,
+        code: &str,
+        now_ms: i64,
+    ) -> anyhow::Result<Option<PublicMetadata>> {
+        let conn = self.pool.get()?;
+        let row = conn
+            .query_row(
+                "SELECT envelope, passphrase, created_at, expires_at, max_views, burn_after_read,
+                    view_count, revoked FROM shares WHERE code = ?1",
+                [code],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        ShareMeta {
+                            created_at: r.get(2)?,
+                            expires_at: r.get(3)?,
+                            max_views: r.get::<_, Option<i64>>(4)?.map(|value| value as u64),
+                            burn_after_read: r.get::<_, i64>(5)? != 0,
+                            view_count: r.get::<_, i64>(6)? as u64,
+                            revoked: r.get::<_, i64>(7)? != 0,
+                            owner_token: None,
+                            org_id: None,
+                            creator_user_id: None,
+                        },
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((envelope, passphrase, meta)) = row else {
+            return Ok(None);
+        };
+        if evaluate_read(&meta, now_ms) == ReadDecision::NotFound {
+            return Ok(None);
+        }
+        let passphrase = match passphrase {
+            Some(flag) => flag == "1",
+            None => envelope_has_passphrase(&envelope)?,
+        };
+        Ok(Some(PublicMetadata {
+            passphrase,
+            burn_after_read: meta.burn_after_read,
+            max_views: meta.max_views,
+            expires_at: meta.expires_at,
+        }))
+    }
+
     /// Owner-only metadata lookup. Returns `None` when absent or already past
     /// `expires_at` (lazily deleting the expired row), mirroring the Worker's
     /// KV-TTL-gated stats read.
@@ -215,7 +292,7 @@ impl Store {
         Ok(Some(meta))
     }
 
-    /// Replace only the lifetime of a still-readable share. The lifecycle
+    /// Extend only the lifetime of a still-readable share, never shortening it. The lifecycle
     /// predicates run in the same SQLite write as the update, so a concurrent
     /// read, revocation, or expiry cannot be undone by a stale owner lookup.
     pub fn renew(
@@ -223,21 +300,31 @@ impl Store {
         code: &str,
         ttl_ms: i64,
         now: impl FnOnce() -> i64,
-    ) -> anyhow::Result<Option<i64>> {
+    ) -> anyhow::Result<Option<Option<i64>>> {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Sample time only after waiting for the connection and the write lock.
         let now_ms = now();
         let expires_at = now_ms.saturating_add(ttl_ms);
         let updated = tx.execute(
-            "UPDATE shares SET expires_at = ?3
+            "UPDATE shares SET expires_at = CASE
+                 WHEN expires_at IS NULL THEN NULL ELSE MAX(expires_at, ?3) END
              WHERE code = ?1 AND revoked = 0
                AND (expires_at IS NULL OR expires_at > ?2)
                AND (max_views IS NULL OR view_count < max_views)",
             params![code, now_ms, expires_at],
         )?;
+        let actual = if updated > 0 {
+            Some(tx.query_row(
+                "SELECT expires_at FROM shares WHERE code = ?1",
+                [code],
+                |r| r.get(0),
+            )?)
+        } else {
+            None
+        };
         tx.commit()?;
-        Ok((updated > 0).then_some(expires_at))
+        Ok(actual)
     }
 
     /// Hard-delete a share (owner revoke). Idempotent — deleting an absent code
@@ -491,6 +578,93 @@ mod tests {
     }
 
     #[test]
+    fn metadata_does_not_spend_a_view_and_hides_gated_shares() {
+        let (store, _dir) = temp_store();
+        let envelope = r#"{"pp":{"salt":"salt"},"ciphertext":"opaque"}"#;
+        store
+            .create("burn", envelope, &meta(Some(10_000), Some(1)))
+            .unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                store.public_metadata("burn", 2_000).unwrap(),
+                Some(PublicMetadata {
+                    passphrase: true,
+                    burn_after_read: true,
+                    max_views: Some(1),
+                    expires_at: Some(10_000),
+                })
+            );
+            assert_eq!(store.stats("burn", 2_000).unwrap().unwrap().view_count, 0);
+        }
+        assert!(matches!(
+            store.read_and_advance("burn", 2_000).unwrap(),
+            ReadOutcome::Served { .. }
+        ));
+        assert_eq!(store.public_metadata("burn", 2_000).unwrap(), None);
+        for (code, mut row) in [
+            ("expired", meta(Some(2_000), None)),
+            ("revoked", meta(None, None)),
+            ("exhausted", meta(None, Some(2))),
+        ] {
+            row.revoked = code == "revoked";
+            row.view_count = if code == "exhausted" { 2 } else { 0 };
+            store.create(code, "{}", &row).unwrap();
+            assert_eq!(store.public_metadata(code, 2_000).unwrap(), None, "{code}");
+        }
+    }
+
+    #[test]
+    fn legacy_metadata_derives_passphrase_without_consuming_envelope() {
+        let (store, _dir) = temp_store();
+        store
+            .create("legacy", r#"{"pp":{"salt":"salt"}}"#, &meta(None, Some(1)))
+            .unwrap();
+        store
+            .pool
+            .get()
+            .unwrap()
+            .execute(
+                "UPDATE shares SET passphrase = NULL WHERE code = 'legacy'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            store
+                .public_metadata("legacy", 0)
+                .unwrap()
+                .unwrap()
+                .passphrase
+        );
+        assert_eq!(store.stats("legacy", 0).unwrap().unwrap().view_count, 0);
+        assert!(matches!(
+            store.read_and_advance("legacy", 0).unwrap(),
+            ReadOutcome::Served { .. }
+        ));
+    }
+
+    #[test]
+    fn renewal_never_shortens_finite_or_legacy_unlimited_expiry() {
+        let (store, _dir) = temp_store();
+        store
+            .create("long", "{}", &meta(Some(30_000), None))
+            .unwrap();
+        assert_eq!(
+            store.renew("long", 7_000, || 1_000).unwrap(),
+            Some(Some(30_000))
+        );
+        assert_eq!(
+            store.renew("long", 40_000, || 1_000).unwrap(),
+            Some(Some(41_000))
+        );
+        store.create("never", "{}", &meta(None, None)).unwrap();
+        assert_eq!(store.renew("never", 7_000, || 1_000).unwrap(), Some(None));
+        assert_eq!(
+            store.stats("never", 1_000).unwrap().unwrap().expires_at,
+            None
+        );
+    }
+
+    #[test]
     fn renewal_updates_only_expiry_and_preserves_concurrent_reads() {
         let (store, _dir) = temp_store();
         let mut original = meta(Some(10_000), Some(100));
@@ -503,7 +677,7 @@ mod tests {
                 scope.spawn(move || {
                     assert_eq!(
                         store.renew("renew", 18_000, || 2_000).unwrap(),
-                        Some(20_000)
+                        Some(Some(20_000))
                     );
                     assert!(matches!(
                         store.read_and_advance("renew", 2_000).unwrap(),

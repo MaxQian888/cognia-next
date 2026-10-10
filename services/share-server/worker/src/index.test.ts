@@ -129,6 +129,87 @@ describe("max-views / burn-after-read", () => {
   })
 })
 
+describe("public metadata", () => {
+  it("exposes only lifecycle hints and never spends a protected burn share", async () => {
+    const protectedEnvelope = { ...ENVELOPE, pp: { salt: "salt", iterations: 100000 } }
+    const { code, ownerToken } = await create({
+      envelope: protectedEnvelope,
+      burnAfterRead: true,
+      passphrase: false,
+    })
+    for (let i = 0; i < 3; i++) {
+      const response = await run(req(`/v1/share/${code}/metadata`))
+      expect(response.status).toBe(200)
+      expect(response.headers.get("Cache-Control")).toBe("no-store")
+      const metadata = await response.json<Record<string, unknown>>()
+      expect(metadata).toMatchObject({ passphrase: true, burnAfterRead: true, maxViews: 1 })
+      expect(Object.keys(metadata).sort()).toEqual(
+        ["passphrase", "burnAfterRead", "maxViews", "expiresAt"].sort()
+      )
+    }
+    const stats = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    expect(await stats.json()).toMatchObject({ viewCount: 0 })
+    const read = await run(req(`/v1/share/${code}`))
+    expect(read.status).toBe(200)
+    expect(await read.json()).toEqual({ envelope: protectedEnvelope })
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+    expect((await run(req(`/v1/share/${code}/metadata`))).status).toBe(404)
+  })
+
+  it("derives protection for legacy metadata without consuming the R2 envelope", async () => {
+    const code = `legacy-protected-${crypto.randomUUID()}`
+    await (env as Env).SHARE_KV.put(
+      `meta:${code}`,
+      JSON.stringify({
+        createdAt: Date.now(),
+        maxViews: 1,
+        burnAfterRead: true,
+        viewCount: 0,
+        revoked: false,
+      })
+    )
+    await (env as Env).SHARE_BUCKET.put(
+      `share/${code}`,
+      JSON.stringify({ ...ENVELOPE, pp: { salt: "salt" } })
+    )
+    for (let i = 0; i < 2; i++) {
+      const response = await run(req(`/v1/share/${code}/metadata`))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ passphrase: true, burnAfterRead: true, maxViews: 1 })
+    }
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+  })
+
+  it.each(["expired", "revoked", "exhausted"])("hides %s shares", async (reason) => {
+    const { code } = await create({})
+    const stub = (env as Env).SHARE_LIFECYCLE.get((env as Env).SHARE_LIFECYCLE.idFromName(code))
+    await runInDurableObject(stub, async (_instance, state) => {
+      const meta = await state.storage.get<Record<string, unknown>>("meta")
+      await state.storage.put("meta", {
+        ...meta,
+        ...(reason === "expired" ? { expiresAt: Date.now() - 1 } : {}),
+        ...(reason === "revoked" ? { revoked: true } : {}),
+        ...(reason === "exhausted" ? { maxViews: 1, viewCount: 1 } : {}),
+      })
+    })
+    expect((await run(req(`/v1/share/${code}/metadata`))).status).toBe(404)
+  })
+
+  it("does not trust a caller's passphrase hint", async () => {
+    const { code } = await create({ passphrase: true })
+    expect(await (await run(req(`/v1/share/${code}/metadata`))).json()).toMatchObject({
+      passphrase: false,
+    })
+  })
+
+  it("accepts only GET and OPTIONS", async () => {
+    const { code } = await create({})
+    expect((await run(req(`/v1/share/${code}/metadata`, { method: "PATCH" }))).status).toBe(405)
+    expect((await run(req(`/v1/share/${code}/metadata`, { method: "OPTIONS" }))).status).toBe(204)
+  })
+})
+
 describe("stats", () => {
   it("reports view count for the owner token and 401 without it", async () => {
     const { code, ownerToken } = await create({ maxViews: 5 })
@@ -219,6 +300,37 @@ describe("renew", () => {
 
     const after = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
     expect((await after.json<{ expiresAt: number }>()).expiresAt).toBe(expiresAt)
+  })
+
+  it("preserves the longer current expiry for a shorter renewal window", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 2592000 })
+    const before = await (
+      await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    ).json<{ expiresAt: number }>()
+    const response = await run(req(`/v1/share/${code}`, patch({ ttlSeconds: 604800 }, ownerToken)))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ expiresAt: before.expiresAt })
+  })
+
+  it("preserves legacy links with no expiry", async () => {
+    const code = `legacy-unlimited-${crypto.randomUUID()}`
+    await (env as Env).SHARE_KV.put(
+      `meta:${code}`,
+      JSON.stringify({
+        createdAt: Date.now(),
+        burnAfterRead: false,
+        viewCount: 0,
+        revoked: false,
+      })
+    )
+    await (env as Env).SHARE_BUCKET.put(`share/${code}`, JSON.stringify(ENVELOPE))
+    const response = await run(req(`/v1/share/${code}`, authed("PATCH", { ttlSeconds: 604800 })))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({})
+    expect(await (await run(req(`/v1/share/${code}/metadata`))).json()).toEqual({
+      passphrase: false,
+      burnAfterRead: false,
+    })
   })
 
   it("rejects renew without the owner token", async () => {

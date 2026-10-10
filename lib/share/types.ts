@@ -75,7 +75,8 @@ export interface ShareEnvelopeV1 {
 
 /** Lifecycle controls chosen at creation time. All optional / additive. */
 export interface ShareLifecycle {
-  /** Seconds until auto-expiry. Omitted ⇒ never expires. */
+  /** Seconds until auto-expiry. Omitted ⇒ server maximum (30 days by default).
+   * The server clamps requests to its configured maximum; its response is authoritative. */
   ttlSeconds?: number
   /** Max successful views before the link self-destructs. Omitted ⇒ unlimited. */
   maxViews?: number
@@ -86,6 +87,8 @@ export interface ShareLifecycle {
 /** Wire body for `POST /v1/share`. */
 export interface CreateShareRequest extends ShareLifecycle {
   envelope: ShareEnvelopeV1
+  /** Non-secret hint; servers derive the authoritative flag from envelope.pp. */
+  passphrase?: boolean
 }
 
 /** Wire body for the create response. */
@@ -111,4 +114,12 @@ export interface ShareStats {
   expiresAt?: number
   revoked: boolean
   maxViews?: number
+}
+
+/** Public, non-consuming GET /v1/share/:code/metadata. Contains no content or secrets. */
+export interface SharePublicMetadata {
+  passphrase: boolean
+  burnAfterRead: boolean
+  maxViews?: number
+  expiresAt?: number
 }

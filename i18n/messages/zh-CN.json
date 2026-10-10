@@ -51180,6 +51180,7 @@
     "copied": "已复制",
     "copy": "复制",
     "createButton": "创建链接",
+    "createdExpiry": "过期时间：{date}",
     "createdHelp": "拥有此链接的人都能查看内容。解密密钥在链接“#”之后。",
     "createdTitle": "分享链接已就绪",
     "creating": "创建中…",
@@ -51188,6 +51189,7 @@
     "done": "完成",
     "errorGeneric": "创建分享链接失败。",
     "errorTooLarge": "分享内容过大，请移除部分图片或导出到本地。",
+    "expiryUnavailable": "过期时间未知",
     "limit": {
       "burn": "阅后即焚",
       "count": "限制次数",
@@ -51213,6 +51215,7 @@
       "description": "你创建过的链接。撤销会立即从服务器删除。",
       "empty": "你还没有创建任何分享链接。",
       "expires": "过期",
+      "expiryUnavailable": "过期时间未知",
       "kind": {
         "a2ui": "应用",
         "backup": "备份包",
@@ -51226,14 +51229,15 @@
         "discover-item": "发现条目",
         "template-definition": "模板发布版本",
         "usage-card": "使用量卡片",
-        "workflow-png": "工作流图片"
+        "workflow-png": "工作流图片",
+        "workflow-result": "工作流结果"
       },
-      "never": "永久",
       "open": "打开",
       "passphraseBadge": "口令保护",
       "renew": "延长有效期",
       "renewError": "无法延长链接有效期。",
-      "renewed": "已延长——现于 {date} 过期。",
+      "renewed": "有效期已更新：{date}。",
+      "renewedUnknown": "有效期已更新，服务器未返回过期时间。",
       "revoke": "撤销",
       "statsError": "无法加载查看统计。",
       "title": "我的分享链接",
@@ -51298,11 +51302,12 @@
       "wallpaperBadge": "含壁纸"
     },
     "ttl": {
+      "d30": "最长 30 天",
       "d7": "7 天后",
       "h1": "1 小时后",
-      "h24": "24 小时后",
-      "never": "永久"
+      "h24": "24 小时后"
     },
+    "ttlHelp": "服务器可能设置更短的上限，创建后会显示链接的实际过期时间。",
     "ttlLabel": "有效期",
     "view": {
       "a2uiReadonly": "只读预览",
@@ -51323,6 +51328,9 @@
         "required": "必填",
         "setupNote": "模板建议的会话配置在分享前已被降级：它只能收紧一次对话，不能放宽。"
       },
+      "confirmBody": "打开此链接将消耗一次剩余查看次数。",
+      "confirmSubmit": "打开分享",
+      "confirmTitle": "打开分享内容？",
       "conversationTitle": "分享的对话",
       "copyImage": "复制图片",
       "copyImageDone": "已复制",
@@ -51359,6 +51367,7 @@
       "footer": "通过 cognia 分享 · 端到端加密 · 服务器永远看不到内容",
       "loading": "正在解密…",
       "passphraseBody": "此分享受额外口令保护。",
+      "passphraseBurnWarning": "解锁将消耗此链接唯一的查看次数。如果口令不正确，请保持此页面打开以重试。",
       "passphraseLabel": "口令",
       "passphrasePlaceholder": "口令",
       "passphraseSubmit": "解锁",
@@ -51387,7 +51396,22 @@
       },
       "unavailableBody": "它可能已过期、达到最大查看次数，或已被撤销。",
       "unavailableTitle": "该链接已不可用",
-      "workflowAlt": "分享的工作流"
+      "unsupportedKind": "当前版本的 Cognia 暂不支持查看此分享类型。",
+      "workflowAlt": "分享的工作流",
+      "workflowResult": {
+        "app": "应用",
+        "completed": "结束时间",
+        "error": "错误",
+        "errorCode": "错误代码",
+        "errorNode": "步骤",
+        "invalid": "无法加载此分享的工作流结果。",
+        "noOutput": "此运行没有输出。",
+        "output": "输出",
+        "release": "发布版本",
+        "run": "运行",
+        "started": "开始时间",
+        "title": "分享的工作流结果"
+      }
     }
   },
   "shortcuts": {

@@ -146,6 +146,20 @@ describe("MySharesPanel", () => {
     expect(meta?.textContent).not.toContain("Never")
   })
 
+  it("does not promise Never when a legacy row has no expiry timestamp", async () => {
+    await seed()
+    render(<MySharesPanel />)
+    const name = await screen.findByText("My chat")
+    expect(name.closest("li")).toHaveTextContent("Expiry unavailable")
+    expect(name.closest("li")).not.toHaveTextContent("Never")
+  })
+
+  it("labels workflow result links", async () => {
+    await seed({ title: undefined, kind: "workflow-result" })
+    render(<MySharesPanel />)
+    expect(await screen.findAllByText("Workflow result")).not.toHaveLength(0)
+  })
+
   it("labels a titleless link by its kind", async () => {
     await seed({ title: undefined, kind: "usage-card" })
     render(<MySharesPanel />)
@@ -175,14 +189,31 @@ describe("MySharesPanel", () => {
     expect(screen.getByText("My chat")).toBeInTheDocument()
   })
 
-  it("extends a link's expiry by a week", async () => {
+  it("requests at least a week remaining and reports the returned expiry", async () => {
     extendShareLink.mockResolvedValueOnce(1_900_000_000_000)
     await seed()
     render(<MySharesPanel />)
     await screen.findByText("My chat")
     fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
     await waitFor(() => expect(extendShareLink).toHaveBeenCalledWith("AbC", 7 * 24 * 60 * 60))
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        `Expiry updated: ${new Date(1_900_000_000_000).toLocaleString()}.`
+      )
+    )
+  })
+
+  it("does not invent an expiry when a legacy unbounded link is renewed", async () => {
+    extendShareLink.mockResolvedValueOnce(undefined)
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Expiry updated; the server did not return an expiry timestamp."
+      )
+    )
   })
 
   it("toasts an error when extending fails", async () => {

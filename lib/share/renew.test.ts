@@ -96,3 +96,9 @@ describe("extendShareLink", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+it("preserves a legacy share without expiry when the server returns no expiry", async () => {
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
+  await expect(extendShareLink("abc", 3600)).resolves.toBeUndefined()
+  expect(updateSharedLinkExpiryMock).not.toHaveBeenCalled()
+})

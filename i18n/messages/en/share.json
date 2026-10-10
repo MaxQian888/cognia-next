@@ -48,19 +48,21 @@
       "discover-item": "Discover item",
       "template-definition": "Template release",
       "usage-card": "Usage card",
-      "workflow-png": "Workflow image"
+      "workflow-png": "Workflow image",
+      "workflow-result": "Workflow result"
     },
-    "never": "Never",
     "open": "Open",
     "passphraseBadge": "Passphrase",
     "renew": "Extend expiry",
     "renewError": "Could not extend the link.",
-    "renewed": "Link extended — now expires {date}.",
+    "renewed": "Expiry updated: {date}.",
     "revoke": "Revoke",
     "statsError": "Could not load view stats.",
     "title": "My shared links",
     "views": "{count} views",
-    "viewsAction": "Check views"
+    "viewsAction": "Check views",
+    "expiryUnavailable": "Expiry unavailable",
+    "renewedUnknown": "Expiry updated; the server did not return an expiry timestamp."
   },
   "notConfiguredBody": "Set your share worker URL and upload secret first.",
   "notConfiguredCta": "Open settings",
@@ -123,7 +125,7 @@
     "d7": "In 7 days",
     "h1": "In 1 hour",
     "h24": "In 24 hours",
-    "never": "Never"
+    "d30": "Up to 30 days"
   },
   "ttlLabel": "Expires",
   "view": {
@@ -209,6 +211,28 @@
     },
     "unavailableBody": "It may have expired, been viewed the maximum number of times, or been revoked.",
     "unavailableTitle": "This link is no longer available",
-    "workflowAlt": "Shared workflow"
-  }
+    "workflowAlt": "Shared workflow",
+    "unsupportedKind": "This type of shared content is not supported by this version of Cognia.",
+    "workflowResult": {
+      "title": "Shared workflow result",
+      "invalid": "This shared workflow result could not be loaded.",
+      "app": "App",
+      "release": "Release",
+      "run": "Run",
+      "started": "Started",
+      "completed": "Completed",
+      "output": "Output",
+      "noOutput": "This run has no output.",
+      "error": "Error",
+      "errorCode": "Error code",
+      "errorNode": "Step"
+    },
+    "confirmTitle": "Open shared content?",
+    "confirmBody": "Opening this link uses one of its remaining views.",
+    "confirmSubmit": "Open share",
+    "passphraseBurnWarning": "Unlocking uses the link’s single view. Keep this page open to retry if the passphrase is incorrect."
+  },
+  "createdExpiry": "Expires: {date}",
+  "expiryUnavailable": "Expiry unavailable",
+  "ttlHelp": "The server may enforce a shorter limit. The created link shows its actual expiry."
 }

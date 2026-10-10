@@ -170,6 +170,7 @@ export async function createShareLink(
 
   const body: CreateShareRequest = {
     envelope,
+    passphrase: Boolean(envelope.pp),
     ttlSeconds: input.ttlSeconds,
     maxViews: input.burnAfterRead ? 1 : input.maxViews,
     burnAfterRead: input.burnAfterRead,

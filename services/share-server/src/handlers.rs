@@ -398,6 +398,35 @@ pub async fn read(
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/share/:code/metadata  (public, non-consuming)
+// ---------------------------------------------------------------------------
+
+pub async fn metadata(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    let store = state.store.clone();
+    let result =
+        tokio::task::spawn_blocking(move || store.public_metadata(&code, now_ms_i64())).await;
+    match result {
+        Ok(Ok(Some(meta))) => json_response(
+            StatusCode::OK,
+            serde_json::to_value(meta).expect("metadata serialization"),
+        ),
+        Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "not found"),
+        other => {
+            tracing::error!(target: "share", ?other, "store.public_metadata failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GET /v1/share/:code/stats  (owner)
 // ---------------------------------------------------------------------------
 
@@ -487,9 +516,13 @@ pub async fn renew(
     let store = state.store.clone();
     let result = tokio::task::spawn_blocking(move || store.renew(&code, ttl_ms, now_ms_i64)).await;
     match result {
-        Ok(Ok(Some(expires_at))) => {
-            json_response(StatusCode::OK, json!({ "expiresAt": expires_at }))
-        }
+        Ok(Ok(Some(expires_at))) => json_response(
+            StatusCode::OK,
+            match expires_at {
+                Some(expires_at) => json!({ "expiresAt": expires_at }),
+                None => json!({}),
+            },
+        ),
         Ok(Ok(None)) => {
             state.metrics.rejected(RejectReason::NotFound);
             err(StatusCode::NOT_FOUND, "not found")
@@ -626,6 +659,55 @@ mod tests {
         let mut config = crate::server::Config::for_test(path.to_str().expect("utf8 path"));
         config.upload_secret = "global".to_string();
         (crate::server::build_state(&config).expect("state"), dir)
+    }
+
+    #[tokio::test]
+    async fn public_metadata_handler_does_not_require_owner_credentials() {
+        let (state, _dir) = test_state();
+        state
+            .store
+            .create(
+                "protected",
+                r#"{"pp":{"salt":"salt"}}"#,
+                &ShareMeta {
+                    created_at: now_ms_i64(),
+                    expires_at: None,
+                    max_views: Some(1),
+                    burn_after_read: true,
+                    view_count: 0,
+                    revoked: false,
+                    owner_token: Some("owner-secret".into()),
+                    org_id: Some("org-secret".into()),
+                    creator_user_id: Some("user-secret".into()),
+                },
+            )
+            .unwrap();
+        let response = metadata(
+            State(state.clone()),
+            ConnectInfo("127.0.0.1:1234".parse().unwrap()),
+            HeaderMap::new(),
+            Path("protected".into()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({
+                "passphrase":true,"burnAfterRead":true,"maxViews":1,
+            })
+        );
+        assert_eq!(
+            state
+                .store
+                .stats("protected", now_ms_i64())
+                .unwrap()
+                .unwrap()
+                .view_count,
+            0
+        );
     }
 
     /// A grant signed with the test config's key, expiring well in the future.

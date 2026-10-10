@@ -16,14 +16,22 @@ import {
   SharePassphraseRequiredError,
   ShareIntegrityError,
 } from "./crypto"
-import type { SharePayload, ShareEnvelopeV1, ReadShareResponse } from "./types"
+import type { SharePayload, ShareEnvelopeV1, ReadShareResponse, SharePublicMetadata } from "./types"
 
 /** Stable, translatable failure reasons for a `{ status: "error" }` state. */
 export type ShareLoadErrorReason = "not-a-link" | "network" | "invalid-key" | "integrity"
 
+export interface ShareReadRequest {
+  baseUrl: string
+  code: string
+  key: string
+}
+
 export type ShareLoadState =
   | { status: "loading" }
   | { status: "unavailable" }
+  | { status: "passphrase-pending"; request: ShareReadRequest; burnAfterRead: boolean }
+  | { status: "confirm"; request: ShareReadRequest }
   | { status: "passphrase"; envelope: ShareEnvelopeV1; key: string; wrong?: boolean }
   | { status: "error"; reason: ShareLoadErrorReason }
   | { status: "ready"; payload: SharePayload }
@@ -78,7 +86,50 @@ export async function decryptEnvelope(
   }
 }
 
-/** Full flow: parse → fetch → decrypt. The UI handles the passphrase round-trip. */
+/** Non-consuming lifecycle lookup. Never falls back to the consuming GET. */
+export async function fetchShareMetadata(
+  baseUrl: string,
+  code: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<SharePublicMetadata | null> {
+  const res = await fetchImpl(`${baseUrl}/v1/share/${encodeURIComponent(code)}/metadata`, {
+    cache: "no-store",
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const body: unknown = await res.json()
+  if (!body || typeof body !== "object") throw new Error("Invalid share metadata")
+  const metadata = body as SharePublicMetadata
+  if (
+    typeof metadata.passphrase !== "boolean" ||
+    typeof metadata.burnAfterRead !== "boolean" ||
+    (metadata.maxViews !== undefined &&
+      (!Number.isInteger(metadata.maxViews) || metadata.maxViews < 1))
+  ) {
+    throw new Error("Invalid share metadata")
+  }
+  return metadata
+}
+
+/** Consume a view only after the recipient has supplied any required passphrase. */
+export async function openShare(
+  request: ShareReadRequest,
+  passphrase?: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<ShareLoadState> {
+  let envelope: ShareEnvelopeV1 | null
+  try {
+    envelope = await fetchEnvelope(request.baseUrl, request.code, fetchImpl)
+  } catch {
+    return { status: "error", reason: "network" }
+  }
+  if (!envelope) return { status: "unavailable" }
+  // A wrong passphrase retains the envelope in the returned state. Retrying
+  // decrypts it locally instead of spending another view on the server.
+  return decryptEnvelope(envelope, request.key, passphrase)
+}
+
+/** Parse → inspect lifecycle → gate protected/limited views → fetch and decrypt. */
 export async function loadShare(
   baseUrl: string,
   search: string,
@@ -87,14 +138,24 @@ export async function loadShare(
 ): Promise<ShareLoadState> {
   const loc = parseShareLocation(search, hash)
   if (!loc) return { status: "error", reason: "not-a-link" }
-
-  let envelope: ShareEnvelopeV1 | null
   try {
-    envelope = await fetchEnvelope(baseUrl, loc.code, fetchImpl)
+    decodeShareKey(loc.key)
+  } catch {
+    return { status: "error", reason: "invalid-key" }
+  }
+  let metadata: SharePublicMetadata | null
+  try {
+    metadata = await fetchShareMetadata(baseUrl, loc.code, fetchImpl)
   } catch {
     return { status: "error", reason: "network" }
   }
-  if (!envelope) return { status: "unavailable" }
-
-  return decryptEnvelope(envelope, loc.key)
+  if (!metadata) return { status: "unavailable" }
+  const request = { baseUrl, ...loc }
+  if (metadata.passphrase) {
+    return { status: "passphrase-pending", request, burnAfterRead: metadata.burnAfterRead }
+  }
+  if (metadata.burnAfterRead || metadata.maxViews !== undefined) {
+    return { status: "confirm", request }
+  }
+  return openShare(request, undefined, fetchImpl)
 }

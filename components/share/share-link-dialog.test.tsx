@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ShareLinkDialog } from "./share-link-dialog"
 import type { SharePayload } from "@/lib/share/types"
 
@@ -44,7 +45,10 @@ const buildPayload = () => PAYLOAD
 
 beforeEach(() => {
   jest.clearAllMocks()
-  Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: jest.fn().mockResolvedValue(undefined) },
+  })
 })
 
 function open(props: Partial<React.ComponentProps<typeof ShareLinkDialog>> = {}) {
@@ -86,6 +90,20 @@ describe("ShareLinkDialog", () => {
       })
     )
     expect(screen.getByDisplayValue("https://share.test/v/AbC#k=KEY")).toBeInTheDocument()
+  })
+
+  it("offers the maximum of 30 days and displays the server's actual expiry", async () => {
+    const user = userEvent.setup()
+    const expiresAt = 1_900_000_000_000
+    mockCreate.mockResolvedValue({ code: "M", url: "https://share.test/v/M#k=K", expiresAt })
+    open()
+    await user.click(screen.getAllByRole("combobox")[0])
+    expect(screen.queryByRole("option", { name: "Never" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "Up to 30 days" }))
+    await user.click(screen.getByRole("button", { name: "Create link" }))
+    await screen.findByText("Your share link is ready")
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ ttlSeconds: 2_592_000 }))
+    expect(screen.getByText(`Expires: ${new Date(expiresAt).toLocaleString()}`)).toBeInTheDocument()
   })
 
   it("copies the link", async () => {

@@ -21,15 +21,16 @@ async function readError(res: Response): Promise<string> {
 }
 
 /**
- * Extend a share's lifetime to `ttlSeconds` from now (the worker clamps to its
+ * Extend a share's lifetime to at least `ttlSeconds` from now (the worker clamps to its
  * hard ceiling), then mirror the new expiry into the local `sharedLinks` row.
- * Returns the new `expiresAt` (epoch ms).
+ * Never shortens the current expiry. Returns `expiresAt` (epoch ms), or
+ * undefined for a legacy share without expiry.
  */
 export async function extendShareLink(
   code: string,
   ttlSeconds: number,
   endpoint?: ShareEndpoint
-): Promise<number> {
+): Promise<number | undefined> {
   const { baseUrl, headers } = await resolveShareOwnerRequest(code, endpoint)
   const res = await proxyFetch(`${baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "PATCH",
@@ -37,7 +38,7 @@ export async function extendShareLink(
     body: JSON.stringify({ ttlSeconds }),
   })
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))
-  const { expiresAt } = (await res.json()) as { expiresAt: number }
-  await updateSharedLinkExpiry(code, expiresAt)
+  const { expiresAt } = (await res.json()) as { expiresAt?: number }
+  if (expiresAt !== undefined) await updateSharedLinkExpiry(code, expiresAt)
   return expiresAt
 }

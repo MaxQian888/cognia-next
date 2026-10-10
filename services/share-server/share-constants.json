@@ -4,5 +4,7 @@
   "codeAlphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
   "defaultMaxBodyBytes": 10485760,
   "defaultMaxTtlSeconds": 2592000,
-  "kvMinTtlSeconds": 60
+  "kvMinTtlSeconds": 60,
+  "publicMetadataSuffix": "metadata",
+  "publicMetadataFields": ["passphrase", "burnAfterRead", "maxViews", "expiresAt"]
 }

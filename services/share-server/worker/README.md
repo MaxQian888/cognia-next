@@ -12,14 +12,24 @@ of the app's pnpm workspace — install with `pnpm install`.
 
 ## API
 
-| Method   | Path                    | Auth   | Purpose                                                                       |
-| -------- | ----------------------- | ------ | ----------------------------------------------------------------------------- |
-| `POST`   | `/v1/share`             | Bearer | Store an envelope, return `{ code, ownerToken, expiresAt }`                   |
-| `GET`    | `/v1/share/:code`       | public | Return `{ envelope }`; enforces TTL / max-views / burn                        |
-| `GET`    | `/v1/share/:code/stats` | Owner  | Owner view counts via `X-Owner-Token`; legacy rows fall back to Bearer        |
-| `PATCH`  | `/v1/share/:code`       | Owner  | Renew with `{ ttlSeconds }`, return `{ expiresAt }`; capped by configured TTL |
-| `DELETE` | `/v1/share/:code`       | Owner  | Revoke via `X-Owner-Token`; unknown codes return `204`                        |
-| `*`      | (anything else)         | public | `404` — the viewer is the app's own `/share/view` route on Cloudflare Pages   |
+| Method   | Path                       | Auth   | Purpose                                                                               |
+| -------- | -------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| `POST`   | `/v1/share`                | Bearer | Store an envelope, return `{ code, ownerToken, expiresAt }`                           |
+| `GET`    | `/v1/share/:code`          | public | Return `{ envelope }`; enforces TTL / max-views / burn                                |
+| `GET`    | `/v1/share/:code/metadata` | public | Return `{ passphrase, burnAfterRead, maxViews?, expiresAt? }` without spending a view |
+| `GET`    | `/v1/share/:code/stats`    | Owner  | Owner view counts via `X-Owner-Token`; legacy rows fall back to Bearer                |
+| `PATCH`  | `/v1/share/:code`          | Owner  | Renew with `{ ttlSeconds }`, return `{ expiresAt? }`; never shorten existing expiry   |
+| `DELETE` | `/v1/share/:code`          | Owner  | Revoke via `X-Owner-Token`; unknown codes return `204`                                |
+| `*`      | (anything else)            | public | `404` — the viewer is the app's own `/share/view` route on Cloudflare Pages           |
+
+Omitted create TTL uses the configured maximum (30 days by default). Renewal
+keeps the later of the current expiry and the capped requested window from now;
+legacy unlimited links remain unlimited (`{}` renewal response). The public
+metadata projection contains no envelope, owner token, or org/user information.
+Its passphrase flag is derived from the envelope's non-secret `pp` header at
+creation, or from R2 for legacy metadata without the flag. Metadata requests
+serialize with reads and revocation through the same lifecycle Durable Object,
+enforce expiry/revocation/view limits, and never consume a view.
 
 Creates accept `Authorization: Bearer <SHARE_UPLOAD_SECRET>` or a verified
 collaboration-plane grant. New shares return a per-share `ownerToken`;

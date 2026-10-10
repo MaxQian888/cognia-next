@@ -48,19 +48,21 @@
       "discover-item": "发现条目",
       "template-definition": "模板发布版本",
       "usage-card": "使用量卡片",
-      "workflow-png": "工作流图片"
+      "workflow-png": "工作流图片",
+      "workflow-result": "工作流结果"
     },
-    "never": "永久",
     "open": "打开",
     "passphraseBadge": "口令保护",
     "renew": "延长有效期",
     "renewError": "无法延长链接有效期。",
-    "renewed": "已延长——现于 {date} 过期。",
+    "renewed": "有效期已更新：{date}。",
     "revoke": "撤销",
     "statsError": "无法加载查看统计。",
     "title": "我的分享链接",
     "views": "{count} 次查看",
-    "viewsAction": "查看次数"
+    "viewsAction": "查看次数",
+    "expiryUnavailable": "过期时间未知",
+    "renewedUnknown": "有效期已更新，服务器未返回过期时间。"
   },
   "notConfiguredBody": "请先设置分享 worker 地址和上传密钥。",
   "notConfiguredCta": "打开设置",
@@ -123,7 +125,7 @@
     "d7": "7 天后",
     "h1": "1 小时后",
     "h24": "24 小时后",
-    "never": "永久"
+    "d30": "最长 30 天"
   },
   "ttlLabel": "有效期",
   "view": {
@@ -209,6 +211,28 @@
     },
     "unavailableBody": "它可能已过期、达到最大查看次数，或已被撤销。",
     "unavailableTitle": "该链接已不可用",
-    "workflowAlt": "分享的工作流"
-  }
+    "workflowAlt": "分享的工作流",
+    "unsupportedKind": "当前版本的 Cognia 暂不支持查看此分享类型。",
+    "workflowResult": {
+      "title": "分享的工作流结果",
+      "invalid": "无法加载此分享的工作流结果。",
+      "app": "应用",
+      "release": "发布版本",
+      "run": "运行",
+      "started": "开始时间",
+      "completed": "结束时间",
+      "output": "输出",
+      "noOutput": "此运行没有输出。",
+      "error": "错误",
+      "errorCode": "错误代码",
+      "errorNode": "步骤"
+    },
+    "confirmTitle": "打开分享内容？",
+    "confirmBody": "打开此链接将消耗一次剩余查看次数。",
+    "confirmSubmit": "打开分享",
+    "passphraseBurnWarning": "解锁将消耗此链接唯一的查看次数。如果口令不正确，请保持此页面打开以重试。"
+  },
+  "createdExpiry": "过期时间：{date}",
+  "expiryUnavailable": "过期时间未知",
+  "ttlHelp": "服务器可能设置更短的上限，创建后会显示链接的实际过期时间。"
 }

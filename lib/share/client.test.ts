@@ -75,6 +75,7 @@ describe("createShareLink", () => {
 
     const created = await createShareLink({ payload: PAYLOAD, ttlSeconds: 3600 }, ENDPOINT)
 
+    expect(created.expiresAt).toBe(999)
     expect(created.code).toBe("AbC123")
     expect(created.url).toMatch(/^https:\/\/share\.test\/share\/view\?c=AbC123#k=/)
 
@@ -286,4 +287,17 @@ describe("plugin share hooks", () => {
     expect(spy).toHaveBeenCalledWith("RevHook")
     spy.mockRestore()
   })
+})
+
+it("posts only the non-secret passphrase flag alongside a protected burn envelope", async () => {
+  mockFetchOnce(200, { code: "PROTECTED" })
+  await createShareLink(
+    { payload: PAYLOAD, passphrase: "private phrase", burnAfterRead: true },
+    ENDPOINT
+  )
+  const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+  expect(body.passphrase).toBe(true)
+  expect(body.burnAfterRead).toBe(true)
+  expect(body.envelope.pp).toBeDefined()
+  expect(JSON.stringify(body)).not.toContain("private phrase")
 })

@@ -10,9 +10,15 @@ import {
   DEFAULT_MAX_BODY_BYTES,
   DEFAULT_MAX_TTL_SECONDS,
   KV_MIN_TTL_SECONDS,
+  PUBLIC_METADATA_SUFFIX,
+  PUBLIC_METADATA_FIELDS,
 } from "./index"
 
 describe("share constants parity (share-constants.json)", () => {
+  it("public metadata endpoint and fields match the fixture", () => {
+    expect(PUBLIC_METADATA_SUFFIX).toBe(fixture.publicMetadataSuffix)
+    expect(PUBLIC_METADATA_FIELDS).toEqual(fixture.publicMetadataFields)
+  })
   it("code length matches the fixture", () => {
     expect(CODE_LENGTH).toBe(fixture.codeLength)
   })

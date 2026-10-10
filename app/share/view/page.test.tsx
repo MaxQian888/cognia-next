@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import ShareViewPage from "./page"
 import { ShareGuestShell } from "@/components/share/share-guest-shell"
 import { resolveShareEndpoint } from "@/lib/share/config"
-import { loadShare, decryptEnvelope } from "@/lib/share/load"
+import { loadShare, decryptEnvelope, openShare } from "@/lib/share/load"
 import type { SharePayload } from "@/lib/share/types"
 
 jest.mock("@/lib/share/config", () => ({
@@ -14,6 +14,7 @@ jest.mock("@/lib/share/config", () => ({
 jest.mock("@/lib/share/load", () => ({
   loadShare: jest.fn(),
   decryptEnvelope: jest.fn(),
+  openShare: jest.fn(),
 }))
 
 jest.mock("@/components/share/payload-view", () => ({
@@ -35,6 +36,7 @@ const mockRunsInApp = resolveShareViewerRunsInApp as jest.MockedFunction<
 >
 const mockResolveEndpoint = resolveShareEndpoint as jest.MockedFunction<typeof resolveShareEndpoint>
 const mockLoadShare = loadShare as jest.MockedFunction<typeof loadShare>
+const mockOpen = openShare as jest.MockedFunction<typeof openShare>
 const mockDecrypt = decryptEnvelope as jest.MockedFunction<typeof decryptEnvelope>
 
 const PAYLOAD: SharePayload = {
@@ -165,5 +167,37 @@ describe("ShareViewPage", () => {
       await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
       expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2")
     })
+  })
+})
+
+describe("non-consuming gates", () => {
+  it("waits for passphrase submission before fetching a protected single-view share", async () => {
+    const request = { baseUrl: "https://x", code: "burn", key: "key" }
+    mockLoadShare.mockResolvedValue({ status: "passphrase-pending", request, burnAfterRead: true })
+    mockOpen.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    render(
+      <React.StrictMode>
+        <ShareViewPage />
+      </React.StrictMode>
+    )
+    await screen.findByRole("heading", { name: "Passphrase required" })
+    expect(mockOpen).not.toHaveBeenCalled()
+    expect(mockLoadShare).toHaveBeenCalledTimes(1)
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "secret" } })
+    fireEvent.click(screen.getByRole("button", { name: "Unlock" }))
+    await waitFor(() => expect(mockOpen).toHaveBeenCalledWith(request, "secret"))
+    expect(mockOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens a limited-view share only on explicit confirmation", async () => {
+    const request = { baseUrl: "https://x", code: "burn", key: "key" }
+    mockLoadShare.mockResolvedValue({ status: "confirm", request })
+    mockOpen.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    render(<ShareViewPage />)
+    await screen.findByRole("button", { name: "Open share" })
+    expect(mockOpen).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Open share" }))
+    await waitFor(() => expect(mockOpen).toHaveBeenCalledWith(request))
+    expect(mockOpen).toHaveBeenCalledTimes(1)
   })
 })

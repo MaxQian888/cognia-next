@@ -51180,6 +51180,7 @@
     "copied": "Copied",
     "copy": "Copy",
     "createButton": "Create link",
+    "createdExpiry": "Expires: {date}",
     "createdHelp": "Anyone with this link can view the content. The decryption key is in the link after “#”.",
     "createdTitle": "Your share link is ready",
     "creating": "Creating…",
@@ -51188,6 +51189,7 @@
     "done": "Done",
     "errorGeneric": "Could not create the share link.",
     "errorTooLarge": "This share is too large. Remove some images or export it locally.",
+    "expiryUnavailable": "Expiry unavailable",
     "limit": {
       "burn": "Burn after reading",
       "count": "Limit views",
@@ -51213,6 +51215,7 @@
       "description": "Links you have created. Revoking removes them from the server immediately.",
       "empty": "You haven’t created any share links yet.",
       "expires": "Expires",
+      "expiryUnavailable": "Expiry unavailable",
       "kind": {
         "a2ui": "App",
         "backup": "Backup package",
@@ -51226,14 +51229,15 @@
         "discover-item": "Discover item",
         "template-definition": "Template release",
         "usage-card": "Usage card",
-        "workflow-png": "Workflow image"
+        "workflow-png": "Workflow image",
+        "workflow-result": "Workflow result"
       },
-      "never": "Never",
       "open": "Open",
       "passphraseBadge": "Passphrase",
       "renew": "Extend expiry",
       "renewError": "Could not extend the link.",
-      "renewed": "Link extended — now expires {date}.",
+      "renewed": "Expiry updated: {date}.",
+      "renewedUnknown": "Expiry updated; the server did not return an expiry timestamp.",
       "revoke": "Revoke",
       "statsError": "Could not load view stats.",
       "title": "My shared links",
@@ -51298,11 +51302,12 @@
       "wallpaperBadge": "Includes wallpaper"
     },
     "ttl": {
+      "d30": "Up to 30 days",
       "d7": "In 7 days",
       "h1": "In 1 hour",
-      "h24": "In 24 hours",
-      "never": "Never"
+      "h24": "In 24 hours"
     },
+    "ttlHelp": "The server may enforce a shorter limit. The created link shows its actual expiry.",
     "ttlLabel": "Expires",
     "view": {
       "a2uiReadonly": "Read-only preview",
@@ -51323,6 +51328,9 @@
         "required": "Required",
         "setupNote": "The setup this template suggests was demoted before sharing: it can narrow a conversation, never widen one."
       },
+      "confirmBody": "Opening this link uses one of its remaining views.",
+      "confirmSubmit": "Open share",
+      "confirmTitle": "Open shared content?",
       "conversationTitle": "Shared conversation",
       "copyImage": "Copy image",
       "copyImageDone": "Copied",
@@ -51359,6 +51367,7 @@
       "footer": "Shared via cognia · end-to-end encrypted · the server never sees the contents",
       "loading": "Decrypting…",
       "passphraseBody": "This share is protected with an extra passphrase.",
+      "passphraseBurnWarning": "Unlocking uses the link’s single view. Keep this page open to retry if the passphrase is incorrect.",
       "passphraseLabel": "Passphrase",
       "passphrasePlaceholder": "Passphrase",
       "passphraseSubmit": "Unlock",
@@ -51387,7 +51396,22 @@
       },
       "unavailableBody": "It may have expired, been viewed the maximum number of times, or been revoked.",
       "unavailableTitle": "This link is no longer available",
-      "workflowAlt": "Shared workflow"
+      "unsupportedKind": "This type of shared content is not supported by this version of Cognia.",
+      "workflowAlt": "Shared workflow",
+      "workflowResult": {
+        "app": "App",
+        "completed": "Completed",
+        "error": "Error",
+        "errorCode": "Error code",
+        "errorNode": "Step",
+        "invalid": "This shared workflow result could not be loaded.",
+        "noOutput": "This run has no output.",
+        "output": "Output",
+        "release": "Release",
+        "run": "Run",
+        "started": "Started",
+        "title": "Shared workflow result"
+      }
     }
   },
   "shortcuts": {

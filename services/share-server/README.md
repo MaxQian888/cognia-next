@@ -21,15 +21,26 @@ revoke). It never sees the key or the plaintext.
 
 API surface (all under `/v1`):
 
-| Method    | Path                    | Auth   | Success                                           | Notes                                               |
-| --------- | ----------------------- | ------ | ------------------------------------------------- | --------------------------------------------------- |
-| `POST`    | `/v1/share`             | Bearer | `201 {code, ownerToken, expiresAt}`               | `413` over body cap, `400` bad json/envelope, `401` |
-| `GET`     | `/v1/share/:code`       | public | `200 {envelope}`                                  | `404` if missing/expired/burned/revoked             |
-| `GET`     | `/v1/share/:code/stats` | Owner  | `200 {viewCount, expiresAt?, revoked, maxViews?}` | `X-Owner-Token`; legacy rows fall back to Bearer    |
-| `DELETE`  | `/v1/share/:code`       | Owner  | `204`                                             | hard delete; unknown codes return `204`             |
-| `OPTIONS` | any                     | —      | `204` + CORS                                      | preflight                                           |
-| `GET`     | `/healthz`              | —      | `200` JSON                                        | liveness probe                                      |
-| `GET`     | `/metrics`              | —      | `200` Prometheus text                             | scrape endpoint                                     |
+| Method    | Path                       | Auth   | Success                                                  | Notes                                                       |
+| --------- | -------------------------- | ------ | -------------------------------------------------------- | ----------------------------------------------------------- |
+| `POST`    | `/v1/share`                | Bearer | `201 {code, ownerToken, expiresAt}`                      | `413` over body cap, `400` bad json/envelope, `401`         |
+| `GET`     | `/v1/share/:code`          | public | `200 {envelope}`                                         | `404` if missing/expired/burned/revoked                     |
+| `GET`     | `/v1/share/:code/metadata` | public | `200 {passphrase, burnAfterRead, maxViews?, expiresAt?}` | no envelope or owner data; does not spend a view            |
+| `PATCH`   | `/v1/share/:code`          | Owner  | `200 {expiresAt?}`                                       | extends with `{ttlSeconds}`; never shortens existing expiry |
+| `GET`     | `/v1/share/:code/stats`    | Owner  | `200 {viewCount, expiresAt?, revoked, maxViews?}`        | `X-Owner-Token`; legacy rows fall back to Bearer            |
+| `DELETE`  | `/v1/share/:code`          | Owner  | `204`                                                    | hard delete; unknown codes return `204`                     |
+| `OPTIONS` | any                        | —      | `204` + CORS                                             | preflight                                                   |
+| `GET`     | `/healthz`                 | —      | `200` JSON                                               | liveness probe                                              |
+| `GET`     | `/metrics`                 | —      | `200` Prometheus text                                    | scrape endpoint                                             |
+
+Creating a share without `ttlSeconds` uses the configured maximum lifetime
+(30 days by default); larger requests are clamped. Renewal keeps the later of
+the current expiry and the requested window from now, capped by the configured
+maximum. Legacy links with no expiry keep that unlimited lifetime and return
+`{}` from renewal. Public metadata is lifecycle-gated like an envelope read,
+but never increments the counter. Its passphrase flag comes from the envelope's
+non-secret `pp` header, including legacy shares, so the viewer can ask for a
+passphrase before spending a limited view.
 
 The viewer (`/share/view?c=…#k=…`) is the app's own route — this server is a
 pure JSON API scoped to `/v1/*`, exactly like the Worker.

@@ -122,6 +122,146 @@ describe("PayloadView", () => {
     expect(img.getAttribute("src")).toBe("data:image/png;base64,AAA")
   })
 
+  it("renders a workflow result with status, metadata and structured output", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "workflow-result",
+          title: "Review app",
+          data: JSON.stringify({
+            schemaVersion: 1,
+            app: { slug: "review", kind: "workflow" },
+            releaseId: "release-1",
+            run: {
+              runId: "run-1",
+              workflowId: "workflow-1",
+              status: "succeeded",
+              startedAt: 1_700_000_000_000,
+              completedAt: 1_700_000_001_000,
+              output: { accepted: true },
+            },
+          }),
+        })}
+      />
+    )
+    expect(screen.getByRole("heading", { name: "Review app" })).toBeInTheDocument()
+    expect(screen.getByText("Succeeded")).toBeInTheDocument()
+    expect(screen.getByText("run-1")).toBeInTheDocument()
+    expect(screen.getByText("release-1")).toBeInTheDocument()
+    expect(screen.getByText(/"accepted": true/)).toBeInTheDocument()
+  })
+
+  it("renders workflow text output as Markdown and shows run errors", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "workflow-result",
+          data: JSON.stringify({
+            schemaVersion: 1,
+            app: { slug: "review", kind: "workflow" },
+            releaseId: "release-1",
+            run: {
+              runId: "run-1",
+              workflowId: "workflow-1",
+              status: "failed",
+              startedAt: 1_700_000_000_000,
+              output: "# Partial result",
+              error: { message: "Input unavailable", code: "missing_input", nodeId: "step-1" },
+            },
+          }),
+        })}
+      />
+    )
+    expect(screen.getByRole("heading", { name: "Partial result" })).toBeInTheDocument()
+    expect(screen.getByText("Failed")).toBeInTheDocument()
+    expect(screen.getByText("Input unavailable")).toBeInTheDocument()
+    expect(screen.getByText("missing_input")).toBeInTheDocument()
+    expect(screen.getByText("step-1")).toBeInTheDocument()
+  })
+
+  it.each([
+    "not json",
+    "{}",
+    JSON.stringify({
+      schemaVersion: 1,
+      app: { slug: "x", kind: "workflow" },
+      releaseId: "r",
+      run: { runId: "r", workflowId: "w", startedAt: 1, status: "future-status" },
+    }),
+  ])("handles malformed workflow results safely", (data) => {
+    render(<PayloadView payload={payload({ kind: "workflow-result", data })} />)
+    expect(screen.getByText("This shared workflow result could not be loaded.")).toBeInTheDocument()
+  })
+
+  it.each([null, false, 0, ["first", "second"]])(
+    "preserves non-text workflow outputs: %j",
+    (output) => {
+      render(
+        <PayloadView
+          payload={payload({
+            kind: "workflow-result",
+            data: JSON.stringify({
+              schemaVersion: 1,
+              app: { slug: "review", kind: "workflow" },
+              releaseId: "release-1",
+              run: {
+                runId: "run-1",
+                workflowId: "workflow-1",
+                status: "succeeded",
+                startedAt: 1,
+                output,
+              },
+            }),
+          })}
+        />
+      )
+      expect(document.querySelector("pre")).toHaveTextContent(
+        JSON.stringify(output, null, 2).replace(/\s+/g, " ")
+      )
+      expect(screen.queryByText("This run has no output.")).not.toBeInTheDocument()
+    }
+  )
+
+  it("shows an empty-output message for an unfinished run and tolerates additive fields", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "workflow-result",
+          data: JSON.stringify({
+            schemaVersion: 1,
+            app: { slug: "review", kind: "workflow", extra: "future" },
+            releaseId: "release-1",
+            files: [],
+            run: {
+              runId: "run-1",
+              workflowId: "workflow-1",
+              status: "running",
+              startedAt: 1,
+              extra: "future",
+            },
+          }),
+        })}
+      />
+    )
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getByText("This run has no output.")).toBeInTheDocument()
+  })
+
+  it("shows a safe message for a kind introduced by a newer app", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "future-kind" as SharePayload["kind"],
+          data: "<script>unsafe()</script>",
+        })}
+      />
+    )
+    expect(
+      screen.getByText("This type of shared content is not supported by this version of Cognia.")
+    ).toBeInTheDocument()
+    expect(document.querySelector("script")).toBeNull()
+  })
+
   it("renders chat-quote in the same script-free sandbox", () => {
     render(
       <PayloadView payload={payload({ kind: "chat-quote", data: '<div class="qcard"></div>' })} />

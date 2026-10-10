@@ -110,7 +110,10 @@ editor's overflow menu, the A2UI workspace toolbar, and the backup export card.
 
 When you create a link you can set:
 
-- **Expiry** — never / 1 hour / 24 hours / 7 days (enforced by Worker + KV TTL).
+- **Expiry** — 1 hour / 24 hours / 7 days / up to 30 days. Both server
+  implementations enforce a maximum of 30 days by default; an operator can set
+  a shorter limit. Omitting the TTL requests the server maximum, not permanent
+  storage. After creation, the dialog shows the actual expiry returned by the server.
 - **View limit / burn-after-reading** — the link self-destructs after N views.
 - **Extra passphrase** — derives the key from `urlKey ‖ passphrase`, so even
   someone with the full link can't open it without the passphrase (share it
@@ -118,11 +121,27 @@ When you create a link you can set:
 
 Manage and revoke existing links under the same settings panel
 (**My shared links**). Revoking deletes the object from the server immediately.
+**Extend expiry** requests at least seven days from now (subject to the server
+limit), preserves any later existing expiry, and reports the returned expiry.
+It never shortens a link’s lifetime.
+
+The viewer first reads `GET /v1/share/:code/metadata`, which does not consume a
+view. This metadata exposes only lifecycle controls and whether an extra
+passphrase is required; the passphrase itself remains secret. A protected link
+waits for a passphrase before fetching its encrypted content. A link with a
+view limit asks the recipient to open it before spending a view. For a protected
+burn-after-reading link, unlocking spends the single view; the viewer keeps the
+envelope in memory so an incorrect passphrase can be retried while the page
+stays open.
+
+Upgrade the deployed Rust server or Cloudflare Worker together with the viewer
+to enable the metadata endpoint. The viewer does not fall back to a consuming
+content request when an older server lacks this endpoint.
 
 ## Security notes
 
-- The worker is **untrusted by design** — it stores ciphertext and counters
-  only. Losing the link means losing the content (there is no recovery).
+- The worker is **untrusted by design** — it stores ciphertext, lifecycle counters and a
+  non-secret passphrase-required flag. Losing the link means losing the content (there is no recovery).
 - Sharing a backup that includes API keys puts those (encrypted) on a public
   URL — only do so when you trust the link's distribution and ideally add a
   passphrase.

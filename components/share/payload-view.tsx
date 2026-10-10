@@ -19,6 +19,7 @@
 
 import { useEffect, useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { z } from "zod"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
@@ -41,6 +42,8 @@ import { listParamTokens } from "@/lib/chat/template/param-segments"
 import { Surface } from "@/components/surface/surface"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
+import { DataJsonView } from "@/components/workflow/editor/inspector/data/data-json-view"
 
 export function PayloadView({
   payload,
@@ -88,6 +91,7 @@ function PayloadBody({
   className?: string
   canImport: boolean
 }) {
+  const t = useTranslations("share.view")
   switch (payload.kind) {
     case "chat-html":
     // Usage cards and message quote cards are self-contained static HTML —
@@ -102,6 +106,8 @@ function PayloadBody({
     case "chat-json":
     case "chat-text":
       return <PreText text={payload.data} title={payload.title} className={className} />
+    case "workflow-result":
+      return <WorkflowResultView payload={payload} className={className} />
     case "workflow-png":
       return (
         <ImageView
@@ -123,7 +129,95 @@ function PayloadBody({
       )
     case "chat-template":
       return <ChatTemplateView payload={payload} className={className} canImport={canImport} />
+    default:
+      return (
+        <p className={cn("text-sm text-muted-foreground", className)}>{t("unsupportedKind")}</p>
+      )
   }
+}
+
+// Validate the versioned public snapshot, not local run records: the viewer
+// works without an account and must never fetch workflow data from Dexie.
+const workflowResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  app: z.object({ slug: z.string(), kind: z.string() }),
+  releaseId: z.string(),
+  run: z.object({
+    runId: z.string(),
+    workflowId: z.string(),
+    status: z.enum(["pending", "running", "waiting", "paused", "succeeded", "failed", "cancelled"]),
+    startedAt: z.number().finite(),
+    completedAt: z.number().finite().optional(),
+    output: z.unknown().optional(),
+    error: z
+      .object({ message: z.string(), code: z.string().optional(), nodeId: z.string().optional() })
+      .optional(),
+  }),
+})
+
+function WorkflowResultView({ payload, className }: { payload: SharePayload; className?: string }) {
+  const t = useTranslations("share.view.workflowResult")
+  const result = useMemo(() => {
+    try {
+      return workflowResultSchema.safeParse(JSON.parse(payload.data))
+    } catch {
+      return null
+    }
+  }, [payload.data])
+  if (!result?.success) {
+    return <p className={cn("text-sm text-muted-foreground", className)}>{t("invalid")}</p>
+  }
+  const { app, releaseId, run } = result.data
+  return (
+    <article className={cn("mx-auto w-full max-w-3xl space-y-4", className)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-xl font-semibold">{payload.title || t("title")}</h2>
+        <RunStatusPill status={run.status} />
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">{t("app")}</dt>
+        <dd>{app.slug}</dd>
+        <dt className="text-muted-foreground">{t("release")}</dt>
+        <dd className="break-all">{releaseId}</dd>
+        <dt className="text-muted-foreground">{t("run")}</dt>
+        <dd className="break-all">{run.runId}</dd>
+        <dt className="text-muted-foreground">{t("started")}</dt>
+        <dd>{new Date(run.startedAt).toLocaleString()}</dd>
+        {run.completedAt !== undefined ? (
+          <>
+            <dt className="text-muted-foreground">{t("completed")}</dt>
+            <dd>{new Date(run.completedAt).toLocaleString()}</dd>
+          </>
+        ) : null}
+      </dl>
+      {run.error ? (
+        <section className="space-y-2 rounded-md border border-destructive/40 p-3">
+          <h3 className="font-medium">{t("error")}</h3>
+          <p className="whitespace-pre-wrap break-words text-sm">{run.error.message}</p>
+          {run.error.code ? (
+            <p className="text-sm">
+              {t("errorCode")}: <code>{run.error.code}</code>
+            </p>
+          ) : null}
+          {run.error.nodeId ? (
+            <p className="text-sm">
+              {t("errorNode")}: <code>{run.error.nodeId}</code>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+      <section className="space-y-2">
+        <h3 className="font-medium">{t("output")}</h3>
+        {run.output === undefined ? (
+          <p className="text-sm text-muted-foreground">{t("noOutput")}</p>
+        ) : typeof run.output === "string" ? (
+          <MarkdownText text={run.output} />
+        ) : (
+          <DataJsonView item={run.output} />
+        )}
+      </section>
+    </article>
+  )
 }
 
 /**

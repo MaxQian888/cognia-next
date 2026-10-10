@@ -9,7 +9,10 @@
 //! equivalent — asserted only by the Worker test.
 
 use cognia_share_server::codegen::{CODE_ALPHABET, CODE_LENGTH};
-use cognia_share_server::server::{DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TTL_SECONDS};
+use cognia_share_server::server::{
+    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TTL_SECONDS, PUBLIC_METADATA_SUFFIX,
+};
+use cognia_share_server::store::PUBLIC_METADATA_FIELDS;
 use serde_json::Value;
 
 const FIXTURE: &str = include_str!("../share-constants.json");
@@ -72,6 +75,8 @@ fn fixture_has_no_unknown_numeric_drift_fields() {
         "defaultMaxBodyBytes",
         "defaultMaxTtlSeconds",
         "kvMinTtlSeconds",
+        "publicMetadataSuffix",
+        "publicMetadataFields",
     ];
     for key in object.keys() {
         assert!(known.contains(&key.as_str()), "unknown fixture key: {key}");
@@ -79,4 +84,13 @@ fn fixture_has_no_unknown_numeric_drift_fields() {
     for key in &known {
         assert!(object.contains_key(*key), "fixture missing key: {key}");
     }
+}
+
+#[test]
+fn public_metadata_contract_matches_fixture() {
+    assert_eq!(fixture()["publicMetadataSuffix"], PUBLIC_METADATA_SUFFIX);
+    assert_eq!(
+        fixture()["publicMetadataFields"],
+        serde_json::json!(PUBLIC_METADATA_FIELDS)
+    );
 }

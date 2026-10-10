@@ -43,9 +43,9 @@ import { createLogger } from "@cognia/logging"
 
 const log = createLogger("share-link")
 
-type TtlOption = "never" | "1h" | "24h" | "7d"
-const TTL_SECONDS: Record<TtlOption, number | undefined> = {
-  never: undefined,
+type TtlOption = "30d" | "1h" | "24h" | "7d"
+const TTL_SECONDS: Record<TtlOption, number> = {
+  "30d": 2_592_000,
   "1h": 3600,
   "24h": 86_400,
   "7d": 604_800,
@@ -211,6 +211,11 @@ export function ShareLinkDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">{t("createdHelp")}</p>
+            <p className="text-xs text-muted-foreground">
+              {created.expiresAt !== undefined
+                ? t("createdExpiry", { date: new Date(created.expiresAt).toLocaleString() })
+                : t("expiryUnavailable")}
+            </p>
             <div className="flex flex-col items-center gap-1">
               <QRCodeSVG value={created.url} size={160} level="M" aria-label={t("scanHint")} />
               <span className="text-xs text-muted-foreground">{t("scanHint")}</span>
@@ -239,12 +244,13 @@ export function ShareLinkDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="never">{t("ttl.never")}</SelectItem>
+                  <SelectItem value="30d">{t("ttl.d30")}</SelectItem>
                   <SelectItem value="1h">{t("ttl.h1")}</SelectItem>
                   <SelectItem value="24h">{t("ttl.h24")}</SelectItem>
                   <SelectItem value="7d">{t("ttl.d7")}</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">{t("ttlHelp")}</p>
             </div>
 
             <div className="space-y-1">
