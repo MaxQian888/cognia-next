@@ -1,0 +1,74 @@
+---
+title: Templates
+description: "The document template domain: five localized built-ins in code, templates saved from Files or the canvas in documentTemplates, the template-platform projection, and where Files offers them."
+---
+
+# Document templates
+
+The template platform (ADR-0100) declared a `document` domain long before anything stored one.
+ADR-0223 gives it a store and a surface: picking a template creates a canvas document with its content.
+
+## Built-ins and saved templates
+
+| | Built-in | Saved |
+| --- | --- | --- |
+| Where | code, `lib/document-templates/builtin.ts` | Dexie `documentTemplates`, `lib/db/document-templates.ts` |
+| Ids | `guide`, `todo`, `project-tracker`, `weekly-update`, `meeting-notes` | `dtpl_…` |
+| Text | localized, in `i18n/messages/{en,zh-CN}/documentTemplates.json` | as saved |
+| Format | Markdown text | the source document's language and type |
+| Order in lists | first, in the order above | after the built-ins, most recently edited first |
+
+The built-ins' Markdown is read with `t.raw()` so it is not parsed as ICU, and the catalog projection,
+which runs outside React, imports the same message files directly (an unknown locale falls back to
+English). A saved row holds `name`, an optional `description`, `content`, `language`, `type`,
+`revision`, `createdAt` and `updatedAt`; it belongs to the account, not to a workspace.
+
+`revision` moves only when the content changes. A rename keeps it but still moves `updatedAt`, which
+reorders the list.
+
+## Using one
+
+`createDocumentFromTemplate` (`lib/document-templates/service.ts`) creates a canvas document titled
+with the template's name, with its content, language and type, and `createdBy: "user"`. The document
+keeps no link to the template. Files then opens it on the canvas.
+
+## Saving one
+
+"Save as template…" appears in two places, both opening the shared `SaveDocumentTemplateDialog`
+(name up to 120 characters, description up to 300):
+
+- the canvas export menu (`components/canvas/canvas-export-menu.tsx`), with the document's title;
+- a Files item's menu, for items with document text — a canvas document, or an artifact
+  (`documentDraftOf`, `lib/files-library/document-draft.ts`: an artifact of type `document` becomes
+  Markdown text, any other artifact keeps its code language).
+
+Saving copies the text as it is; later edits to the document are not followed. Saved templates have
+their own menu on the template strip: Edit (name and description) and Delete. Delete is immediate with
+an Undo on the toast, which saves the template again under a new id.
+
+## The catalog projection
+
+`lib/templates/catalog-only-adapters.ts` projects both kinds into the template catalog as the
+`legacy-catalog:document` source, so the Template Studio lists them:
+
+- ids `catalog.document.<id>` (for example `catalog.document.guide`);
+- built-ins are `built-in` trust with every locale's name and description under `metadata.localized`;
+  saved templates are `unsigned`, version `<revision>.0.0`;
+- `subscribeDocumentTemplates` re-projects the domain on every save, edit and delete
+  (`watchLiveDomains`), because templates are saved one click away from the surfaces that list them.
+
+The Template Studio sends `document` templates to `/files`; the domain is no longer marked inert.
+
+## Where Files offers them
+
+- **The strip** (`files-template-strip.tsx`): a "Start from a template" row above the list, shown on
+  the Suggested lens in All with no search or filter active. It starts with a blank document, scrolls
+  sideways, and folds away (remembered per device).
+- **New → From template**: a submenu with the same templates.
+
+## The flag
+
+Everything above is hidden while the unified template platform is off
+(`NEXT_PUBLIC_UNIFIED_TEMPLATE_PLATFORM` set to `0` or `false`; it is on by default): the hook returns
+no templates, the strip and both "Save as template" entries render nothing, and the platform does not
+boot, so nothing is projected.

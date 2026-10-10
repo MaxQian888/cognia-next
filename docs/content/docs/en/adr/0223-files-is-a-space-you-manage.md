@@ -5,7 +5,7 @@ description: "The Files page becomes a managed space: a sidebar of places (all, 
 
 # ADR 0223 — Files is a space you manage
 
-**Status:** Proposed
+**Status:** Accepted. Implemented: §1–§7 and §10. Pending: §8 (workspace files) and §9 (the phone), which need host-side Rust work; until they ship, the Workspace files group is absent and the phone keeps ADR-0200's dormant shell.
 **Date:** 2026-10-10
 **Related:** [ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep) (Files, partly superseded),
 [ADR-0222](./0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant) (FileSpace and file sharing),
@@ -138,10 +138,13 @@ apply unchanged.
 
 - Each file is named in the bundle by its place in Files,
   `/files/<folder path>/<name>`, numbered like a zip export on a clash.
-- Items come from many conversations, so before anything is uploaded every
-  collaboration conversation an item belongs to is asked for `files.share`.
-  One refusal refuses the whole link. The newest org policy revision any
-  answer named is loaded before the gate reads the policy.
+- Items come from many conversations, so before anything is uploaded — in the
+  dialog's `buildPayload`, ahead of the gate, which is handed no conversation —
+  every collaboration conversation an item belongs to is asked for
+  `files.share`. One refusal refuses the whole link, and so does a shared
+  conversation an item names that is no longer stored on this device, since it
+  cannot be asked. The newest org policy revision any answer named is loaded
+  before the gate reads the policy. The link is recorded without a `sessionId`.
 - The link's code is recorded on the items it carried
   (`libraryItems.sharedLinkCodes`). An item shows a "shared by link" marker
   while one of those codes is live in `sharedLinks` (not revoked, not

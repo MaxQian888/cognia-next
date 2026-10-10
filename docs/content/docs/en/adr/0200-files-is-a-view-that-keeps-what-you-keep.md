@@ -5,7 +5,7 @@ description: "Artifacts, canvas documents, chat images and uploaded files used f
 
 # ADR 0200 — Files is a view that keeps what you keep
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part by [ADR-0223](./0223-files-is-a-space-you-manage)
 **Date:** 2026-09-27
 **Related:** [ADR-0158](./0158-artifacts-and-canvas) (artifacts are Dexie-authoritative), [ADR-0129](./0129-unified-global-search) (⌘K and its Library scope), [ADR-0157](./0157-references-and-result-reuse) (entity mentions), [ADR-0001](./0001-backup-schema-v3) (portable backup)
 
@@ -27,6 +27,15 @@ canvas documents. A design spec someone wanted to keep went with the chat it
 was attached to.
 
 ## Decision
+
+> **Superseded in part by ADR-0223.** The aggregate, the keep-by-reference
+> rule, uploads that belong to no conversation, use in chat, search and backup
+> stand. What changed: the header tabs became places × lenses; "Remove from
+> Files" and deleting a Files upload became the Trash (`trashedAt`, kept 30
+> days, then one purge rule); items can be renamed, duplicated, shared and
+> managed in bulk; ⌘K leaves out trashed items and lists renamed ones by their
+> Files name. "Where Files runs" below still describes the phone until
+> ADR-0223 §9 ships.
 
 ### An aggregated view, not a copy
 

@@ -1,0 +1,65 @@
+---
+title: 模板
+description: "文档模板域：代码中五个本地化的内置模板、从文件库或画布保存到 documentTemplates 的模板、模板平台的投影，以及文件库提供它们的位置。"
+---
+
+# 文档模板
+
+模板平台（ADR-0100）很早就声明了 `document` 域，但一直没有任何地方存储它。ADR-0223 为它提供了存储和入口：
+选择一个模板，就会用它的内容创建一个画布文档。
+
+## 内置模板与保存的模板
+
+| | 内置 | 保存的 |
+| --- | --- | --- |
+| 位置 | 代码，`lib/document-templates/builtin.ts` | Dexie `documentTemplates`，`lib/db/document-templates.ts` |
+| Id | `guide`、`todo`、`project-tracker`、`weekly-update`、`meeting-notes` | `dtpl_…` |
+| 文本 | 本地化，位于 `i18n/messages/{en,zh-CN}/documentTemplates.json` | 保存时的内容 |
+| 格式 | Markdown 文本 | 来源文档的语言和类型 |
+| 列表顺序 | 在前，按上面的顺序 | 在内置模板之后，最近编辑的在前 |
+
+内置模板的 Markdown 用 `t.raw()` 读取，避免被当作 ICU 解析；在 React 之外运行的目录投影直接导入同一批消息文件
+（未知语言回退到英文）。保存的行包含 `name`、可选的 `description`、`content`、`language`、`type`、`revision`、
+`createdAt` 和 `updatedAt`；它属于账户，而不是某个工作区。
+
+`revision` 只在内容变化时增加。重命名不改变它，但仍会更新 `updatedAt`，从而改变列表顺序。
+
+## 使用模板
+
+`createDocumentFromTemplate`（`lib/document-templates/service.ts`）创建一个以模板名称为标题的画布文档，带有它的内容、
+语言和类型，以及 `createdBy: "user"`。文档不保留指向模板的链接。之后文件库会在画布上打开它。
+
+## 保存模板
+
+“另存为模板…”出现在两个地方，都会打开共享的 `SaveDocumentTemplateDialog`（名称最多 120 个字符，描述最多 300 个字符）：
+
+- 画布的导出菜单（`components/canvas/canvas-export-menu.tsx`），预填文档标题；
+- 文件库中带文档文本的条目菜单——画布文档或产物（`documentDraftOf`，`lib/files-library/document-draft.ts`：
+  类型为 `document` 的产物变为 Markdown 文本，其他产物保留代码语言）。
+
+保存时复制当时的文本；之后对文档的修改不会同步。保存的模板在模板条上有自己的菜单：编辑（名称和描述）和删除。
+删除立即生效，提示中可撤销，撤销会以新的 id 重新保存该模板。
+
+## 目录投影
+
+`lib/templates/catalog-only-adapters.ts` 把两类模板作为 `legacy-catalog:document` 来源投影到模板目录中，
+因此模板工作室会列出它们：
+
+- id 为 `catalog.document.<id>`（例如 `catalog.document.guide`）；
+- 内置模板的信任级别为 `built-in`，所有语言的名称和描述放在 `metadata.localized` 下；保存的模板为 `unsigned`，
+  版本为 `<revision>.0.0`；
+- `subscribeDocumentTemplates` 在每次保存、编辑和删除时重新投影该域（`watchLiveDomains`），因为模板是在离列出它们的
+  界面一步之遥的地方保存的。
+
+模板工作室把 `document` 模板指向 `/files`；该域不再被标记为停用。
+
+## 文件库中的入口
+
+- **模板条**（`files-template-strip.tsx`）：列表上方的“从模板开始”一行，在“全部”位置的“推荐”视角下、且没有搜索
+  和筛选时显示。它以空白文档开头，可以横向滚动，可以折叠（按设备记住）。
+- **新建 → 从模板**：包含同样模板的子菜单。
+
+## 开关
+
+统一模板平台关闭时（`NEXT_PUBLIC_UNIFIED_TEMPLATE_PLATFORM` 设为 `0` 或 `false`；默认开启），以上内容全部隐藏：
+hook 不返回模板，模板条和两个“另存为模板”入口都不渲染，平台也不会启动，因此不会投影任何内容。

@@ -1,0 +1,136 @@
+---
+title: Data
+description: "Files' two tables, how a kept item holds its bytes, the aggregate that builds one card per item, the Trash and its 30-day purge, the Suggested score and the ⌘K providers."
+---
+
+# Data
+
+Files owns no content. It reads the stores that already hold artifacts, canvas documents, chat images
+and uploads, and keeps its own state in two Dexie tables (schema v237, `lib/db/schema.ts`).
+
+## Tables
+
+| Table | Indexes | Holds |
+| --- | --- | --- |
+| `libraryItems` | `&key, kind, originSessionId, folderId, favoritedAt, lastOpenedAt, hiddenAt, trashedAt, projectId` | one row per item the person touched from Files |
+| `libraryFolders` | `&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt` | the folder tree |
+| `documentTemplates` | `&id, name, updatedAt, createdAt` | saved document templates ([Templates](/docs/subsystems/files/templates)) |
+
+An item row (`LibraryItemRow`, `lib/db/files-library-types.ts`) is keyed `kind:sourceId` and carries:
+
+| Field | Meaning |
+| --- | --- |
+| `favoritedAt` | favorite, as a timestamp (IndexedDB cannot index booleans) |
+| `folderId` | a folder id, or `root` for the top of Folders |
+| `ownedByFiles` | uploaded straight into Files: deleting it deletes the file |
+| `mediaHash` | the `messageMedia` key the keep pin holds (images and uploads) |
+| `snapshot` | title, media type, size, hash and extracted text copied at keep time, so a kept item still has a name after its source is gone |
+| `lastOpenedAt` | opened or previewed from Files (drives Recents for media) |
+| `hiddenAt` | "removed from Files": now only written when the purge retires a trashed item |
+| `trashedAt` | in the Trash since this time |
+| `displayName` | the name Files shows instead of the source's title |
+| `sharedLinkCodes` | codes of share links made from Files that carry the item |
+
+Folders carry an optional color (9 names) and icon (10 glyphs) from fixed sets, validated on write.
+They are named sets, not CSS, so a tint chosen on one theme still reads on another.
+
+## Keeping holds bytes
+
+An item is **kept** when it is favorited, filed in a folder, owned by Files or in the Trash
+(`isLibraryItemKept`). A kept image or upload holds one reference row in `messageMediaRefs` under the
+owner `library:<key>` with the sentinel session id `library:files`. Session deletion and media GC only
+count reference rows, so that row keeps the bytes alive after every conversation that showed them is
+gone.
+
+Every write goes through `mutateItems` (`lib/db/files-library-items.ts`): one read-write transaction
+over `libraryItems`, `messageMediaRefs` and `messageMedia` for the whole selection, so a bulk action
+lands on every item or on none. Inside it `syncPin` makes the pin match the keep state — adds it when
+the item became kept (refusing with `library_item_source_missing` if the bytes are already gone), drops
+it when it stopped being kept — and the hashes it released are collected after the transaction commits.
+
+## The aggregate
+
+`loadFilesSources` (`lib/files-library/sources.ts`) reads the session assets, library assets, item
+rows and succeeded video jobs in parallel, then the newest 500 images (`FILES_IMAGE_PAGE_SIZE`, more on
+demand) plus every kept image older than that page, the live sessions they reference, and the codes of
+share links that are still live. Only metadata and Blob handles are read.
+
+`aggregateFilesEntries` (`lib/files-library/aggregate.ts`) is pure. It folds the sources into one
+`FilesEntry` per item and decorates each with its row:
+
+- `title` is the `displayName` when set, else the source's title; `sourceTitle` keeps the latter, and
+  search matches both.
+- `originAlive` is whether anything outside Files still holds the item: the artifact's or canvas
+  document's conversation exists (a standalone document always counts), an image is shown by a live
+  conversation, an upload is attached to one. Files-owned uploads are always alive.
+- `sharedWithMe` is true when any of the item's conversations is a joined collaboration projection
+  (a `shared:` id with a `collaboration` binding).
+- `creator` is `user` or `ai`: canvas documents record `createdBy`; artifacts read as AI-made unless
+  standalone or derived from the person's own canvas; an image reads as the role of the first message
+  that shows it (remembered for the life of the page); uploads are the person's.
+- `sharedLinks` counts the item's link codes that are still live.
+- `hidden` follows ADR-0200's rule (`isItemHidden`): removed, and the source has not changed since.
+  A trashed item is never hidden — the Trash is its own place.
+
+## The Trash
+
+`trashLibraryItems` sets `trashedAt` and leaves favorite and folder as they were, so a restore puts the
+item back where it was. A trashed item is kept, so its bytes stay pinned and a conversation's deletion
+spares it. `restoreLibraryItems` clears `trashedAt`; an item nothing outside Files holds any more is
+filed at the root of Folders on the way out, where it stays kept.
+
+**Delete forever** and the purge end an item by one rule (`trashPurgeAction`, `lib/files-library/trash.ts`):
+
+| Item | Ends as |
+| --- | --- |
+| Files-owned | deleted, with its bytes unless a conversation still references them |
+| source alive | retired: leaves the Trash as "removed from Files" (`hiddenAt`), favorite and folder cleared, source untouched |
+| source gone | row and pin dropped so media GC takes unreferenced bytes; an orphaned artifact or canvas document is deleted |
+
+The purge is a scheduler maintenance task (`lib/files-library/trash-purge-schedule.ts`):
+
+| | |
+| --- | --- |
+| Task type | `files-trash-purge` |
+| Interval | 6 hours, missed runs caught up once on startup within 24 hours |
+| Cutoff | trashed at or before now minus `FILES_TRASH_RETENTION_MS` (30 days), read through the `trashedAt` index |
+| Paired client | skipped as `host-owned`: the host's purge owns the data |
+| Notifications | on error only |
+
+It is installed at scheduler boot (`lib/scheduler/index.ts`) and its executor is registered lazily in
+`lib/scheduler/executor-owners.ts`.
+
+## Places, lenses and filters
+
+`filterFilesEntries` (`lib/files-library/filter.ts`) applies, in order:
+
+1. the place (`FilesSection`: `all`, a type group, a folder, `recent`, `trash`). Every place but the
+   Trash leaves out trashed and hidden items; the Trash shows only trashed ones;
+2. the lens, except in the Trash;
+3. the filters: format, modified within a day, week, month or year (by `updatedAt`), size band
+   (under 1 MB, 1–10 MB, 10–100 MB, 100 MB and up; an unknown size matches only "any"), and workspace
+   scope (an item in no workspace matches every workspace);
+4. search: every whitespace-separated term must appear in the item's search text (title, media type
+   and up to 20 000 characters of body).
+
+Ties in every order break on the item key, so the list never reshuffles between renders.
+
+## Suggested
+
+`suggestionScore` (`lib/files-library/suggest.ts`) is a local score — no model call:
+
+```text
+score = exp(-ageDays / 14)               // ageDays from the later of last opened and last changed
+      + 0.35 × log2(1 + conversations)   // how many conversations show the item
+      + 0.5  if favorited
+      + 0.25 if opened in the last 7 days
+```
+
+The 14 days are a time constant, not a half-life (the half-life is about 9.7 days).
+
+## ⌘K
+
+`lib/global-search/providers/files.ts` registers three providers (`builtin.files.artifacts`,
+`builtin.files.canvas`, `builtin.files.items`). Each leaves out trashed and removed items and lists a
+renamed item under its Files name. Results open the item's preview at `/files?item=<key>`. On a phone
+the providers return nothing, as the page does not run there yet.

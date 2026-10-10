@@ -1,0 +1,123 @@
+---
+title: 数据
+description: "文件库的两张表、保留的条目如何持有字节、为每个条目生成一张卡片的聚合、回收站及其 30 天清理、推荐分和 ⌘K 提供者。"
+---
+
+# 数据
+
+文件库不拥有任何内容。它读取已经保存产物、画布文档、聊天图片和上传文件的存储，并把自己的状态放在两张 Dexie 表中
+（schema v237，`lib/db/schema.ts`）。
+
+## 表
+
+| 表 | 索引 | 保存 |
+| --- | --- | --- |
+| `libraryItems` | `&key, kind, originSessionId, folderId, favoritedAt, lastOpenedAt, hiddenAt, trashedAt, projectId` | 用户在文件库中操作过的每个条目一行 |
+| `libraryFolders` | `&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt` | 文件夹树 |
+| `documentTemplates` | `&id, name, updatedAt, createdAt` | 保存的文档模板（[模板](/docs/subsystems/files/templates)） |
+
+条目行（`LibraryItemRow`，`lib/db/files-library-types.ts`）以 `kind:sourceId` 为键，包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `favoritedAt` | 收藏，以时间戳表示（IndexedDB 不能索引布尔值） |
+| `folderId` | 文件夹 id，或表示文件夹顶层的 `root` |
+| `ownedByFiles` | 直接上传到文件库：删除它会删除文件本身 |
+| `mediaHash` | 保留引用所持有的 `messageMedia` 键（图片和上传） |
+| `snapshot` | 保留时复制的标题、媒体类型、大小、哈希和提取文本，使来源消失后条目仍有名称 |
+| `lastOpenedAt` | 从文件库打开或预览过（决定媒体的“最近”） |
+| `hiddenAt` | “从文件中移除”：现在只在清理任务让回收站条目退役时写入 |
+| `trashedAt` | 进入回收站的时间 |
+| `displayName` | 文件库显示的名称，替代来源的标题 |
+| `sharedLinkCodes` | 从文件库创建、携带该条目的分享链接短码 |
+
+文件夹可以带一个颜色（9 种）和一个图标（10 种），取自固定集合，写入时校验。它们是命名集合而不是 CSS，
+所以在一个主题下选的颜色换到另一个主题仍然清晰可辨。
+
+## 保留即持有字节
+
+条目被收藏、放入文件夹、归文件库所有或在回收站中时即为**保留**（`isLibraryItemKept`）。保留的图片或上传在
+`messageMediaRefs` 中持有一行引用，所有者为 `library:<key>`，会话 id 是哨兵值 `library:files`。
+会话删除和媒体 GC 只统计引用行，所以即使显示过它的所有对话都已删除，这行引用也能让字节继续存活。
+
+每次写入都经过 `mutateItems`（`lib/db/files-library-items.ts`）：对整个选择开一个覆盖 `libraryItems`、
+`messageMediaRefs` 和 `messageMedia` 的读写事务，所以批量操作要么作用于所有条目，要么一个都不作用。
+事务内部，`syncPin` 让固定引用与保留状态保持一致——条目变为保留时添加引用（如果字节已经不在，则以
+`library_item_source_missing` 拒绝），不再保留时删除引用——被释放的哈希在事务提交后统一回收。
+
+## 聚合
+
+`loadFilesSources`（`lib/files-library/sources.ts`）并行读取会话资源、文件库资源、条目行和成功的视频任务，
+然后读取最新的 500 张图片（`FILES_IMAGE_PAGE_SIZE`，需要时加载更多）以及比这一页更早的所有保留图片、
+它们引用的存活会话，以及仍然有效的分享链接短码。只读取元数据和 Blob 句柄。
+
+`aggregateFilesEntries`（`lib/files-library/aggregate.ts`）是纯函数。它把各个来源折叠为每个条目一个
+`FilesEntry`，并用条目行补充信息：
+
+- `title` 在设置了 `displayName` 时取它，否则取来源的标题；`sourceTitle` 保留后者，搜索两者都能匹配。
+- `originAlive` 表示文件库之外是否还有东西持有该条目：产物或画布文档所属的对话仍存在（独立文档始终算存活），
+  图片仍被某个存活对话显示，上传仍附加在某个对话上。归文件库所有的上传始终存活。
+- `sharedWithMe` 在条目所属的任一对话是已加入的协作投影（带 `collaboration` 绑定的 `shared:` id）时为真。
+- `creator` 是 `user` 或 `ai`：画布文档记录 `createdBy`；产物视为 AI 生成，除非是独立的或派生自本人的画布；
+  图片取第一条显示它的消息的角色（在页面生命周期内缓存）；上传属于本人。
+- `sharedLinks` 统计条目仍然有效的链接短码数量。
+- `hidden` 遵循 ADR-0200 的规则（`isItemHidden`）：已移除，且来源此后没有变化。回收站中的条目永远不算隐藏——
+  回收站本身就是它所在的位置。
+
+## 回收站
+
+`trashLibraryItems` 设置 `trashedAt`，并保留收藏和文件夹不变，所以恢复后条目回到原来的位置。回收站中的条目
+属于保留，因此字节保持固定，删除对话时也会放过它。`restoreLibraryItems` 清除 `trashedAt`；如果文件库之外
+已经没有东西持有该条目，恢复时会把它放到文件夹的顶层，在那里继续保留。
+
+**永久删除**和清理按同一条规则结束条目（`trashPurgeAction`，`lib/files-library/trash.ts`）：
+
+| 条目 | 结果 |
+| --- | --- |
+| 归文件库所有 | 删除，连同字节，除非仍有对话引用它们 |
+| 来源仍存活 | 退役：以“从文件中移除”（`hiddenAt`）离开回收站，清除收藏和文件夹，来源不受影响 |
+| 来源已消失 | 删除条目行和固定引用，媒体 GC 回收无人引用的字节；孤立的产物或画布文档被删除 |
+
+清理是一个调度器维护任务（`lib/files-library/trash-purge-schedule.ts`）：
+
+| | |
+| --- | --- |
+| 任务类型 | `files-trash-purge` |
+| 间隔 | 6 小时，启动时补跑 24 小时内错过的一次 |
+| 截止时间 | 进入回收站的时间不晚于当前时间减去 `FILES_TRASH_RETENTION_MS`（30 天），通过 `trashedAt` 索引读取 |
+| 已配对的客户端 | 以 `host-owned` 跳过：数据由主机的清理任务负责 |
+| 通知 | 仅在出错时 |
+
+它在调度器启动时安装（`lib/scheduler/index.ts`），执行器在 `lib/scheduler/executor-owners.ts` 中惰性注册。
+
+## 位置、视角与筛选
+
+`filterFilesEntries`（`lib/files-library/filter.ts`）依次应用：
+
+1. 位置（`FilesSection`：`all`、类型分组、文件夹、`recent`、`trash`）。除回收站外的所有位置都排除回收站中
+   和已隐藏的条目；回收站只显示回收站中的条目；
+2. 视角，回收站除外；
+3. 筛选：格式；按 `updatedAt` 在一天、一周、一个月或一年内修改；大小区间（小于 1 MB、1–10 MB、10–100 MB、
+   100 MB 及以上；大小未知的条目只匹配“任意”）；工作区范围（不属于任何工作区的条目匹配所有工作区）；
+4. 搜索：每个以空白分隔的词都必须出现在条目的搜索文本中（标题、媒体类型和最多 20 000 个字符的正文）。
+
+所有排序在相同时都按条目键决胜，所以列表在两次渲染之间不会乱序。
+
+## 推荐
+
+`suggestionScore`（`lib/files-library/suggest.ts`）是本地计算的分数，不调用模型：
+
+```text
+score = exp(-ageDays / 14)               // ageDays 取最后打开和最后修改中较晚的时间
+      + 0.35 × log2(1 + conversations)   // 显示该条目的对话数
+      + 0.5  如果已收藏
+      + 0.25 如果最近 7 天内打开过
+```
+
+这里的 14 天是时间常数，不是半衰期（半衰期约为 9.7 天）。
+
+## ⌘K
+
+`lib/global-search/providers/files.ts` 注册三个提供者（`builtin.files.artifacts`、`builtin.files.canvas`、
+`builtin.files.items`）。它们都排除回收站中和已移除的条目，并以文件库中的名称列出重命名过的条目。
+结果在 `/files?item=<key>` 打开条目的预览。在手机上提供者不返回结果，因为页面尚不在手机上运行。
