@@ -4,14 +4,13 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { useFilesLibraryStore } from "@/stores/files-library"
+import { DEFAULT_FILES_VIEW_FILTERS, useFilesLibraryStore } from "@/stores/files-library"
 import { FilesToolbar } from "./files-toolbar"
 
 beforeEach(() =>
   useFilesLibraryStore.setState({
     search: "",
-    type: "all",
-    sort: "recent",
+    filters: DEFAULT_FILES_VIEW_FILTERS,
     projectScope: "current",
     viewMode: "grid",
   })
@@ -27,10 +26,7 @@ it("writes search text and layout to the store", async () => {
   expect(useFilesLibraryStore.getState().viewMode).toBe("list")
 })
 
-it("shows the current type, sort and workspace scope", () => {
-  useFilesLibraryStore.setState({ type: "image", sort: "size", projectScope: "all" })
+it("carries the filter button", () => {
   render(<FilesToolbar />)
-  expect(screen.getByRole("combobox", { name: "Type" })).toHaveTextContent("Images")
-  expect(screen.getByRole("combobox", { name: "Sort" })).toHaveTextContent("Size")
-  expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveTextContent("All workspaces")
+  expect(screen.getByTestId("files-filter")).toBeInTheDocument()
 })

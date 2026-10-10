@@ -19,14 +19,15 @@ import {
   LibraryFolderError,
   renameLibraryFolder,
 } from "@/lib/db/files-library-folders"
+import { ROOT_LIBRARY_FOLDER_ID } from "@/lib/db/files-library-types"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
-/** Create a folder under the current one, or rename one. */
+/** Create a folder (at the top level or inside another), or rename one. */
 export function FilesFolderDialog() {
   const t = useTranslations("files")
   const dialog = useFilesLibraryStore((s) => s.folderDialog)
   const close = useFilesLibraryStore((s) => s.closeFolderDialog)
-  const enterFolder = useFilesLibraryStore((s) => s.enterFolder)
+  const setFolderExpanded = useFilesLibraryStore((s) => s.setFolderExpanded)
   const dialogKey = dialog
     ? dialog.mode === "create"
       ? `c:${dialog.parentId}`
@@ -41,8 +42,9 @@ export function FilesFolderDialog() {
     setBusy(true)
     try {
       if (dialog.mode === "create") {
-        const folder = await createLibraryFolder({ name, parentFolderId: dialog.parentId })
-        enterFolder(folder.id)
+        await createLibraryFolder({ name, parentFolderId: dialog.parentId })
+        // The new folder shows under its parent in the sidebar tree.
+        if (dialog.parentId !== ROOT_LIBRARY_FOLDER_ID) setFolderExpanded(dialog.parentId, true)
       } else {
         await renameLibraryFolder(dialog.folderId, name)
       }

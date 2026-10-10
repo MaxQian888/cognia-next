@@ -1,31 +1,176 @@
 "use client"
 
+/**
+ * A Files item's actions (ADR-0223), as one model rendered twice: the "⋯"
+ * dropdown on a card or row, and the right-click menu around it.
+ *
+ * - In the Trash an item offers Preview, Restore and Delete forever.
+ * - Everywhere else: open, preview, use in chat; favorite, move, take out of
+ *   a folder; rename, duplicate, download; share (dormant until ADR-0222's
+ *   file snapshots exist — `FILES_SHARE_DORMANCY`); and Move to Trash, which
+ *   replaced both "Remove from Files" and "Delete".
+ */
+
+import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
+  CopyIcon,
   DownloadIcon,
   EyeIcon,
   FolderInputIcon,
   FolderMinusIcon,
   MessageSquarePlusIcon,
   MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  Share2Icon,
   SquareArrowOutUpRightIcon,
   StarIcon,
   StarOffIcon,
   Trash2Icon,
-  XCircleIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
+import { isFilesShareAvailable } from "@/lib/files-library/share"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
+
+import { FilesMenuNodes, type FilesMenuNode } from "./files-menu"
+
+export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): FilesMenuNode[] {
+  const t = useTranslations("files")
+  const openMove = useFilesLibraryStore((s) => s.openMove)
+  const openRename = useFilesLibraryStore((s) => s.openRename)
+  const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
+
+  if (entry.trashedAt !== undefined) {
+    return [
+      {
+        type: "item",
+        id: "preview",
+        label: t("actions.preview"),
+        icon: EyeIcon,
+        onSelect: () => actions.preview(entry),
+      },
+      {
+        type: "item",
+        id: "restore",
+        label: t("actions.restore"),
+        icon: RotateCcwIcon,
+        onSelect: () => void actions.restore([entry]),
+      },
+      { type: "separator", id: "sep-delete" },
+      {
+        type: "item",
+        id: "delete-forever",
+        label: t("actions.deleteForever"),
+        icon: Trash2Icon,
+        destructive: true,
+        onSelect: () => openDeleteForever([entry.key]),
+      },
+    ]
+  }
+
+  const favorite = entry.favoritedAt !== undefined
+  const shareAvailable = isFilesShareAvailable()
+  const nodes: FilesMenuNode[] = [
+    {
+      type: "item",
+      id: "open",
+      label: t("actions.open"),
+      icon: SquareArrowOutUpRightIcon,
+      onSelect: () => void actions.open(entry),
+    },
+    {
+      type: "item",
+      id: "preview",
+      label: t("actions.preview"),
+      icon: EyeIcon,
+      onSelect: () => actions.preview(entry),
+    },
+    {
+      type: "item",
+      id: "use-in-chat",
+      label: t("actions.useInChat"),
+      icon: MessageSquarePlusIcon,
+      onSelect: () => void actions.useInChat(entry),
+    },
+    { type: "separator", id: "sep-organize" },
+    {
+      type: "item",
+      id: "favorite",
+      label: favorite ? t("actions.unfavorite") : t("actions.favorite"),
+      icon: favorite ? StarOffIcon : StarIcon,
+      onSelect: () => void actions.toggleFavorite(entry),
+    },
+    {
+      type: "item",
+      id: "move",
+      label: t("actions.moveToFolder"),
+      icon: FolderInputIcon,
+      onSelect: () => openMove([entry.key]),
+    },
+  ]
+  if (entry.folderId !== undefined) {
+    nodes.push({
+      type: "item",
+      id: "unfile",
+      label: t("actions.removeFromFolder"),
+      icon: FolderMinusIcon,
+      onSelect: () => void actions.moveToFolder([entry], null),
+    })
+  }
+  nodes.push(
+    {
+      type: "item",
+      id: "rename",
+      label: t("actions.rename"),
+      icon: PencilIcon,
+      hint: "F2",
+      onSelect: () => openRename(entry.key),
+    },
+    {
+      type: "item",
+      id: "duplicate",
+      label: t("actions.duplicate"),
+      icon: CopyIcon,
+      onSelect: () => void actions.duplicate(entry),
+    },
+    {
+      type: "item",
+      id: "download",
+      label: t("actions.download"),
+      icon: DownloadIcon,
+      onSelect: () => void actions.download(entry),
+    },
+    {
+      type: "item",
+      id: "share",
+      label: t("actions.share"),
+      icon: Share2Icon,
+      disabled: !shareAvailable,
+      ...(shareAvailable ? {} : { hint: t("actions.shareSoon") }),
+      onSelect: () => undefined,
+    },
+    { type: "separator", id: "sep-trash" },
+    {
+      type: "item",
+      id: "trash",
+      label: t("actions.trash"),
+      icon: Trash2Icon,
+      destructive: true,
+      onSelect: () => void actions.trash([entry]),
+    }
+  )
+  return nodes
+}
 
 export interface FilesItemMenuProps {
   entry: FilesEntry
@@ -34,12 +179,10 @@ export interface FilesItemMenuProps {
   className?: string
 }
 
+/** The "⋯" button on a card or row. */
 export function FilesItemMenu({ entry, title, actions, className }: FilesItemMenuProps) {
   const t = useTranslations("files")
-  const openMove = useFilesLibraryStore((s) => s.openMove)
-  const openDelete = useFilesLibraryStore((s) => s.openDelete)
-  const favorite = entry.favoritedAt !== undefined
-
+  const nodes = useFilesItemMenu(entry, actions)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -56,72 +199,29 @@ export function FilesItemMenu({ entry, title, actions, className }: FilesItemMen
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
-        <DropdownMenuItem onSelect={() => void actions.open(entry)} data-testid="files-action-open">
-          <SquareArrowOutUpRightIcon aria-hidden />
-          {t("actions.open")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => actions.preview(entry)}
-          data-testid="files-action-preview"
-        >
-          <EyeIcon aria-hidden />
-          {t("actions.preview")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => void actions.useInChat(entry)}
-          data-testid="files-action-use-in-chat"
-        >
-          <MessageSquarePlusIcon aria-hidden />
-          {t("actions.useInChat")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => void actions.toggleFavorite(entry)}
-          data-testid="files-action-favorite"
-        >
-          {favorite ? <StarOffIcon aria-hidden /> : <StarIcon aria-hidden />}
-          {favorite ? t("actions.unfavorite") : t("actions.favorite")}
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => openMove([entry.key])} data-testid="files-action-move">
-          <FolderInputIcon aria-hidden />
-          {t("actions.moveToFolder")}
-        </DropdownMenuItem>
-        {entry.folderId !== undefined ? (
-          <DropdownMenuItem
-            onSelect={() => void actions.moveToFolder([entry], null)}
-            data-testid="files-action-unfile"
-          >
-            <FolderMinusIcon aria-hidden />
-            {t("actions.removeFromFolder")}
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem
-          onSelect={() => void actions.download(entry)}
-          data-testid="files-action-download"
-        >
-          <DownloadIcon aria-hidden />
-          {t("actions.download")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {entry.ownedByFiles ? (
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={() => openDelete(entry.key)}
-            data-testid="files-action-delete"
-          >
-            <Trash2Icon aria-hidden />
-            {t("actions.delete")}
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem
-            onSelect={() => void actions.remove(entry)}
-            data-testid="files-action-remove"
-          >
-            <XCircleIcon aria-hidden />
-            {t("actions.remove")}
-          </DropdownMenuItem>
-        )}
+        <FilesMenuNodes nodes={nodes} kind="dropdown" testIdPrefix="files-action" />
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** Right-click on a card or row opens the same entries. */
+export function FilesItemContextMenu({
+  entry,
+  actions,
+  children,
+}: {
+  entry: FilesEntry
+  actions: FilesActions
+  children: ReactNode
+}) {
+  const nodes = useFilesItemMenu(entry, actions)
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent onClick={(event) => event.stopPropagation()}>
+        <FilesMenuNodes nodes={nodes} kind="context" testIdPrefix="files-context" />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

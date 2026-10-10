@@ -67,7 +67,7 @@ describe("Files ⌘K providers", () => {
     expect(out.items[0]).toMatchObject({
       kind: "artifact",
       subtitle: "code · typescript",
-      action: { type: "navigate", href: "/files?tab=all&item=artifact%3Aa1" },
+      action: { type: "navigate", href: "/files?item=artifact%3Aa1" },
     })
     expect(referenceCandidateFor(out.items[0]!)).toMatchObject({ entityKind: "artifact", id: "a1" })
   })
@@ -92,7 +92,7 @@ describe("Files ⌘K providers", () => {
     expect(out.items[0]).toMatchObject({
       id: "library-file:upload:u1",
       kind: "library-file",
-      action: { type: "navigate", href: "/files?tab=all&item=upload%3Au1" },
+      action: { type: "navigate", href: "/files?item=upload%3Au1" },
     })
     expect(referenceCandidateFor(out.items[0]!)).toBeNull()
     const phone = makeTestContext({ platform: "mobile" })

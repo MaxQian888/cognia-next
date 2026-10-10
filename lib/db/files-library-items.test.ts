@@ -7,7 +7,6 @@ import {
   deleteLibraryItemsForProject,
   deleteOwnedLibraryItem,
   getLibraryItem,
-  hideLibraryItem,
   LibraryItemError,
   libraryPinOwner,
   listKeptSourceIdsForSession,
@@ -106,8 +105,8 @@ describe("keep state and pins", () => {
     expect(await getLibraryItem("image:gone")).toBeUndefined()
   })
 
-  it("files into a folder and back out, bringing a hidden item back", async () => {
-    await hideLibraryItem(image)
+  it("files into a folder and back out, bringing a removed item back", async () => {
+    await retireTrashedLibraryItems([image])
     expect((await getLibraryItem("image:h1"))?.hiddenAt).toEqual(expect.any(Number))
     const folder = await createLibraryFolder({ name: "Specs" })
     const filed = await setLibraryItemFolder(image, folder.id)
@@ -127,19 +126,10 @@ describe("keep state and pins", () => {
       folderId: ROOT_LIBRARY_FOLDER_ID,
     })
   })
-
-  it("hide drops the favorite and the pin but leaves the source", async () => {
-    await setLibraryItemFavorite(image, true)
-    const hidden = await hideLibraryItem(image)
-    expect(hidden.favoritedAt).toBeUndefined()
-    expect(hidden.hiddenAt).toEqual(expect.any(Number))
-    expect(await pins()).toEqual([])
-    expect(await getDb().messageMedia.get("h1")).toBeDefined()
-  })
 })
 
 describe("Files-owned items", () => {
-  it("refuses to hide a Files-owned upload and deletes it with its bytes", async () => {
+  it("deletes a Files-owned upload with its bytes", async () => {
     await putLibraryAsset({
       assetId: "u1",
       blob: new Blob(["spec body"], { type: "text/markdown" }),
@@ -149,9 +139,6 @@ describe("Files-owned items", () => {
     })
     const row = await getLibraryItem("upload:u1")
     expect(row).toMatchObject({ ownedByFiles: true, projectId: "p1", kind: "upload" })
-    await expect(hideLibraryItem({ kind: "upload", sourceId: "u1" })).rejects.toMatchObject({
-      code: "library_item_owned",
-    })
     await deleteOwnedLibraryItem("upload:u1")
     expect(await getLibraryItem("upload:u1")).toBeUndefined()
     expect(await getDb().messageMedia.count()).toBe(0)

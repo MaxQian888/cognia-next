@@ -348,22 +348,6 @@ export async function markLibraryItemOwned(source: LibraryItemSource): Promise<L
 }
 
 /**
- * "Remove from Files" for an item that lives in a conversation: drop the
- * favorite and the folder (so the pin goes), and hide it. The source itself is
- * untouched. A Files-owned item is deleted instead — see `deleteOwnedLibraryItem`.
- */
-export async function hideLibraryItem(source: LibraryItemSource): Promise<LibraryItemRow> {
-  const existing = await getLibraryItem(libraryItemKey(source.kind, source.sourceId))
-  if (existing?.ownedByFiles) throw new LibraryItemError("library_item_owned")
-  return mutateItem(source, (row, now) => ({
-    ...row,
-    favoritedAt: undefined,
-    folderId: undefined,
-    hiddenAt: now,
-  }))
-}
-
-/**
  * Delete an item uploaded straight into Files, bytes included (unless another
  * owner — a conversation that used it — still references them).
  */

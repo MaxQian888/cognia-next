@@ -53,6 +53,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useBreakpoint } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
 import { centerPaneSize, paneSize } from "./pane-size"
+import { useSettledPaneSize } from "./settled-pane-size"
 
 export interface FeaturePaneConfig {
   /** Pane content. */
@@ -84,6 +85,12 @@ export interface FeaturePaneConfig {
    */
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /**
+   * The pane's width in pixels after a resize settles (desktop only; called
+   * once per drag, not per frame). A route that remembers its rail width
+   * stores this and hands it back as a pixel `defaultSize`.
+   */
+  onSizeChange?: (px: number) => void
 }
 
 export interface FeaturePageShellProps {
@@ -143,6 +150,7 @@ export function FeaturePageShell({
   const leftPanelRef = useRef<PanelImperativeHandle | null>(null)
   const previousCollapsedRef = useRef(false)
   const expandedWidthRef = useRef<number | null>(null)
+  const leftSize = useSettledPaneSize(leftPane?.onSizeChange)
   const leftDefault = paneSize(leftPane?.defaultSize, DEFAULT_LEFT_SIZE)
 
   useIsomorphicLayoutEffect(() => {
@@ -223,6 +231,7 @@ export function FeaturePageShell({
             if (event.propertyName === "flex-grow") setAnimateToggle(false)
           }}
           onLayoutChanged={(layout) => {
+            leftSize.flush()
             if (!collapsibleLeftPane) return
             const collapsed = layout[`pane-${storageId}-left`] === 0
             // A drag can collapse the list as well as the header button.
@@ -241,6 +250,7 @@ export function FeaturePageShell({
                 style={collapsibleLeftPane ? { overflow: "hidden" } : undefined}
                 minSize={paneSize(leftPane.minSize, DEFAULT_LEFT_MIN)}
                 maxSize={paneSize(leftPane.maxSize, DEFAULT_LEFT_MAX)}
+                onResize={leftPane.onSizeChange ? leftSize.onResize : undefined}
               >
                 <aside
                   aria-label={leftPane.label}

@@ -35,10 +35,10 @@ beforeEach(() => {
   rename.mockClear()
 })
 
-it("creates a folder under the requested parent and opens it", async () => {
+it("creates a folder under the requested parent and opens the parent in the tree", async () => {
   useFilesLibraryStore.setState({
     folderDialog: { mode: "create", parentId: "lbf_p" },
-    folderId: "lbf_p",
+    expandedFolderIds: [],
   })
   const user = userEvent.setup()
   render(<FilesFolderDialog />)
@@ -47,7 +47,7 @@ it("creates a folder under the requested parent and opens it", async () => {
   await user.click(screen.getByRole("button", { name: "Create" }))
   await waitFor(() => expect(useFilesLibraryStore.getState().folderDialog).toBeNull())
   expect(create).toHaveBeenCalledWith({ name: "Specs", parentFolderId: "lbf_p" })
-  expect(useFilesLibraryStore.getState().folderId).toBe("lbf_new")
+  expect(useFilesLibraryStore.getState().expandedFolderIds).toEqual(["lbf_p"])
 })
 
 it("renames, prefilled with the current name", async () => {

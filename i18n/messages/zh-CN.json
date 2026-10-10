@@ -17467,16 +17467,27 @@
   },
   "files": {
     "actions": {
-      "delete": "删除",
+      "deleteForever": "永久删除",
       "download": "下载",
+      "duplicate": "创建副本",
       "favorite": "加入收藏",
       "moveToFolder": "移到文件夹…",
       "open": "打开",
       "preview": "预览",
-      "remove": "从文件中移除",
       "removeFromFolder": "移出文件夹",
+      "rename": "重命名…",
+      "restore": "恢复",
+      "share": "分享…",
+      "shareSoon": "即将推出",
+      "trash": "移到回收站",
       "unfavorite": "取消收藏",
       "useInChat": "在对话中使用"
+    },
+    "bulk": {
+      "aria": "已选内容",
+      "clear": "取消选择",
+      "export": "打包下载",
+      "selected": "已选 {count} 项"
     },
     "card": {
       "favorite": "收藏",
@@ -17484,15 +17495,25 @@
       "modified": "修改于 {date}",
       "open": "打开「{title}」",
       "owned": "上传到文件",
+      "sharedWithMe": "与你共享",
       "sourceDeleted": "对话已删除",
+      "trashed": "删除于 {date}",
       "usedIn": "在 {count} 个对话中"
     },
-    "deleteDialog": {
-      "cancel": "取消",
-      "confirm": "删除",
-      "description": "此文件是上传到文件的，将从本设备删除。已经使用它的对话会保留各自的副本。",
-      "title": "删除「{title}」？"
+    "columns": {
+      "actions": "操作",
+      "activity": "最后活动",
+      "deleted": "删除时间",
+      "name": "名称",
+      "noSource": "无对话",
+      "openSource": "打开对话「{title}」",
+      "size": "大小",
+      "sortBy": "按{column}排序",
+      "source": "来源",
+      "type": "类型",
+      "uploaded": "上传"
     },
+    "copySuffix": "副本",
     "deleteFolderDialog": {
       "cancel": "取消",
       "cascade": "同时删除子文件夹，并将其中内容移出文件夹",
@@ -17500,44 +17521,76 @@
       "description": "其中的内容和子文件夹会上移一级，不会删除任何内容。",
       "title": "删除「{name}」？"
     },
-    "description": "所有对话中的产物、画布文档、图片和文件，集中在这里。",
+    "description": "所有对话中的产物、画布文档、图片和文件，集中在一个由你整理的空间里。",
+    "dnd": {
+      "cancelled": "已取消拖动。",
+      "dropped": "已放下。",
+      "folder": "文件夹「{name}」",
+      "instructions": "不用鼠标移动内容时，请使用条目菜单中的「移到文件夹」或「移到回收站」。",
+      "items": "{count} 项",
+      "pickedUp": "已拿起 {what}。"
+    },
+    "dropZone": {
+      "hint": "松开即可上传文件"
+    },
     "empty": {
+      "ai": {
+        "description": "助手为你生成的产物、文档和图片会显示在这里。",
+        "title": "还没有 AI 生成的内容"
+      },
       "all": {
         "description": "上传文件或开始一个对话来填充这里。",
         "title": "这里还没有内容"
       },
-      "clear": "清除搜索和筛选",
+      "clear": "清除筛选",
       "favorites": {
         "description": "收藏后可以随时找到。即使所在对话被删除，收藏的内容也会保留。",
         "title": "还没有收藏"
       },
-      "folders": {
-        "description": "可以从条目的菜单中移到这里。文件夹中的内容在所在对话被删除后仍会保留。",
+      "folder": {
+        "description": "把内容拖到这里，或使用条目菜单中的「移到文件夹」。文件夹中的内容在所在对话被删除后仍会保留。",
         "title": "此文件夹为空"
       },
-      "images": {
-        "description": "在对话中上传或生成的图片会显示在这里。",
-        "title": "还没有图片"
+      "group": {
+        "description": "对话和上传中这一类的内容会显示在这里。",
+        "title": "还没有这一类内容"
+      },
+      "mine": {
+        "description": "你上传的文件和撰写的文档会显示在这里。",
+        "title": "还没有你的内容"
       },
       "recent": {
-        "description": "对话中的产物、画布文档、图片和文件会显示在这里。",
-        "title": "这里还没有内容"
+        "description": "你最近打开或修改的内容会显示在这里。",
+        "title": "没有最近内容"
       },
       "search": {
         "description": "没有符合搜索和筛选条件的内容。",
         "title": "没有匹配项"
+      },
+      "shared": {
+        "description": "别人分享给你的协作对话中的内容会显示在这里。",
+        "title": "还没有与你共享的内容"
+      },
+      "trash": {
+        "description": "移到回收站的内容会保留 30 天，之后永久删除。",
+        "title": "回收站是空的"
       }
     },
     "errors": {
+      "files_export_empty": "所选内容都无法导出。",
+      "files_export_too_large": "所选内容超过 512 MB，请分批下载。",
+      "files_name_required": "请输入名称。",
       "files_not_attachable": "此项无法在对话中使用。",
       "files_source_empty": "此项没有可用的内容。",
       "files_source_missing": "此项内容已不在本设备上。",
       "library_folder_cycle": "文件夹不能移到自身之中。",
       "library_folder_name_required": "请输入文件夹名称。",
+      "library_folder_not_found": "该文件夹已不存在。",
       "library_folder_parent_missing": "上级文件夹已不存在。",
+      "library_folder_style_invalid": "该颜色或图标不可用。",
       "library_item_not_found": "该文件夹已不存在。",
       "library_item_not_owned": "只有上传到文件的内容才能在这里删除。",
-      "library_item_owned": "上传到文件的内容只能删除，不能移除。",
+      "library_item_owned": "此文件属于文件，请从回收站中删除。",
       "library_item_source_missing": "此项内容已不在本设备上。",
       "session_asset_identity_conflict": "已存在标识相同但内容不同的文件。",
       "session_asset_invalid_extraction": "文件的提取文本与文件不一致。",
@@ -17548,6 +17601,30 @@
       "session_asset_session_missing": "该对话已不存在。",
       "session_asset_too_large": "文件超过 500 MB。",
       "unknown": "出了点问题，请重试。"
+    },
+    "exportFilename": "文件.zip",
+    "filter": {
+      "button": "筛选",
+      "format": "类型",
+      "label": "筛选",
+      "labelActive": "筛选，已启用 {count} 项",
+      "modified": "修改时间",
+      "modifiedWithin": {
+        "any": "不限",
+        "day": "过去一天",
+        "month": "过去一个月",
+        "week": "过去一周",
+        "year": "过去一年"
+      },
+      "reset": "重置",
+      "size": "大小",
+      "sizes": {
+        "any": "不限",
+        "huge": "100 MB 及以上",
+        "large": "10–100 MB",
+        "medium": "1–10 MB",
+        "small": "小于 1 MB"
+      }
     },
     "folderDialog": {
       "cancel": "取消",
@@ -17560,13 +17637,55 @@
     },
     "folders": {
       "breadcrumbAria": "文件夹路径",
+      "collapse": "收起「{name}」",
+      "color": "颜色",
+      "colors": {
+        "amber": "琥珀",
+        "blue": "蓝色",
+        "default": "默认",
+        "gray": "灰色",
+        "green": "绿色",
+        "orange": "橙色",
+        "pink": "粉色",
+        "red": "红色",
+        "teal": "青色",
+        "violet": "紫色"
+      },
       "delete": "删除文件夹",
+      "expand": "展开「{name}」",
+      "icon": "图标",
+      "icons": {
+        "archive": "归档",
+        "book": "书本",
+        "briefcase": "公文包",
+        "code": "代码",
+        "flag": "旗帜",
+        "folder": "文件夹",
+        "heart": "爱心",
+        "image": "图片",
+        "music": "音乐",
+        "star": "星标"
+      },
+      "itemCount": "{count} 项",
       "menu": "文件夹「{name}」的操作",
       "newFolder": "新建文件夹",
+      "newSubfolder": "新建子文件夹",
       "open": "打开文件夹「{name}」",
       "rename": "重命名文件夹",
-      "root": "文件夹",
+      "root": "全部文件夹",
       "subfolders": "子文件夹"
+    },
+    "formats": {
+      "archive": "压缩包",
+      "audio": "音频",
+      "code": "代码",
+      "data": "数据",
+      "diagram": "图表",
+      "document": "文档",
+      "folder": "文件夹",
+      "image": "图片",
+      "other": "其他",
+      "video": "视频"
     },
     "itemCount": "{count} 项",
     "kinds": {
@@ -17577,6 +17696,14 @@
       "upload": "文件",
       "video": "视频"
     },
+    "lenses": {
+      "ai": "AI 生成",
+      "aria": "文件视角",
+      "favorites": "收藏",
+      "mine": "我的",
+      "shared": "与我共享",
+      "suggested": "推荐"
+    },
     "loadMore": "显示更多",
     "loadOlderImages": "加载更早的图片",
     "loading": "正在加载文件",
@@ -17584,9 +17711,9 @@
       "cancel": "取消",
       "confirm": "移动",
       "description": "{count} 项。文件夹中的内容在所在对话被删除后仍会保留。",
-      "empty": "还没有文件夹。可以在“文件夹”标签页中新建。",
+      "empty": "还没有文件夹。可在侧栏中新建。",
       "none": "移出文件夹",
-      "root": "文件夹（顶层）",
+      "root": "全部文件夹（顶层）",
       "title": "移到文件夹"
     },
     "new": {
@@ -17597,6 +17724,19 @@
       "uploadInputAria": "选择要上传的文件"
     },
     "newChatTitle": "关于 {title}",
+    "places": {
+      "all": "全部",
+      "folders": "文件夹",
+      "groups": {
+        "artifacts": "产物",
+        "documents": "文档",
+        "images": "图片",
+        "uploads": "上传",
+        "videos": "视频"
+      },
+      "recents": "最近",
+      "trash": "回收站"
+    },
     "preview": {
       "close": "关闭预览",
       "conversations": "所在对话",
@@ -17618,7 +17758,16 @@
       "loading": "正在加载预览",
       "openConversation": "打开对话",
       "sourceDeleted": "所在对话已删除。因为它已收藏或在文件夹中，所以仍保留在这里。",
+      "trashedNotice": "于 {date} 移到回收站，将在 {purge} 永久删除。",
       "unavailable": "内容已不在本设备上。"
+    },
+    "renameDialog": {
+      "cancel": "取消",
+      "displayNameHint": "新名称只在文件中显示，条目在所在对话中保留原名。",
+      "nameLabel": "名称",
+      "save": "保存",
+      "sourceHint": "条目本身会被重命名。",
+      "title": "重命名"
     },
     "scope": {
       "all": "全部工作区",
@@ -17629,46 +17778,55 @@
       "aria": "按名称或内容搜索文件",
       "placeholder": "搜索文件"
     },
-    "sort": {
-      "created": "添加时间",
-      "label": "排序",
-      "name": "名称",
-      "recent": "最近使用",
-      "size": "大小",
-      "updated": "最近修改"
+    "selection": {
+      "select": "选择「{title}」",
+      "selectAll": "全选"
     },
-    "tabs": {
-      "all": "全部",
-      "favorites": "收藏",
-      "folders": "文件夹",
-      "images": "图片",
-      "recent": "最近"
+    "sidebar": {
+      "aria": "文件位置",
+      "noRecents": "还没有打开过内容",
+      "showMore": "显示更多"
     },
-    "tabsAria": "文件视图",
     "title": "文件",
     "toasts": {
       "attached": "「{title}」已附加到下一条消息。",
       "bound": "「{title}」太大，无法放入输入框，已作为对话文件添加。Agent 可以用附件工具读取它。",
-      "deleted": "已删除「{title}」。",
+      "deletedForever": "已永久删除 {count} 项。",
+      "dropTruncated": "只上传了拖入文件夹中的前 {count} 个文件。",
+      "duplicated": "已为「{title}」创建副本。",
+      "exportMissing": "有 {count} 项未导出：内容已不在本设备上。",
+      "exported": "已将 {count} 项打包下载。",
+      "exporting": "正在准备 {count} 项…",
       "favorited": "已收藏「{title}」。",
+      "favoritedMany": "已将 {count} 项加入收藏。",
+      "folderMoved": "已移动文件夹。",
       "moved": "已移动 {count} 项。",
       "referenced": "「{title}」已作为引用加入下一条消息。",
-      "removed": "已从文件中移除「{title}」。",
-      "removedHint": "它仍在原对话中；内容有变化时会重新出现在这里。",
+      "renamed": "已重命名为「{title}」。",
+      "restored": "已恢复 {count} 项。",
+      "retiredHint": "{count} 项仍保留在所在对话或画布中。",
+      "trashed": "已将「{title}」移到回收站。",
+      "trashedHint": "回收站中的内容保留 30 天。",
+      "trashedMany": "已将 {count} 项移到回收站。",
+      "undo": "撤销",
       "unfavorited": "已取消收藏「{title}」。",
+      "unfavoritedMany": "已将 {count} 项移出收藏。",
       "unfiled": "已将 {count} 项移出文件夹。",
       "uploadFailed": "无法上传「{name}」：{reason}",
       "uploaded": "已上传 {count} 个文件。",
       "uploading": "正在上传 {count} 个文件…"
     },
-    "type": {
-      "all": "全部类型",
-      "artifact": "产物",
-      "canvas": "画布文档",
-      "file": "文件",
-      "image": "图片",
-      "label": "类型",
-      "video": "视频"
+    "trash": {
+      "empty": "清空回收站"
+    },
+    "trashDialog": {
+      "cancel": "取消",
+      "deleteConfirm": "永久删除",
+      "deleteManyTitle": "永久删除 {count} 项？",
+      "deleteOneTitle": "永久删除「{title}」？",
+      "description": "上传到文件的内容会从本设备删除；来自对话或画布的内容只会离开文件，原处保留不变。",
+      "emptyConfirm": "清空回收站",
+      "emptyTitle": "永久删除回收站中的 {count} 项？"
     },
     "unsupported": {
       "description": "请在桌面应用或已登录此账户的浏览器中打开“文件”。",

@@ -8,6 +8,13 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   extractAttachment: (...args: unknown[]) => extractAttachmentMock(...args),
 }))
 
+const setLibraryItemsFolderMock = jest.fn()
+jest.mock("@/lib/db/files-library-items", () => ({
+  ...jest.requireActual("@/lib/db/files-library-items"),
+  setLibraryItemsFolder: (...args: unknown[]) => setLibraryItemsFolderMock(...args),
+}))
+
+import { createLibraryFolder } from "@/lib/db/files-library-folders"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { hashSessionAssetSource, listLibraryAssets } from "@/lib/db/session-assets"
@@ -21,6 +28,12 @@ beforeEach(async () => {
   await fixture.restore()
   ingestImageMock.mockReset()
   extractAttachmentMock.mockReset()
+  setLibraryItemsFolderMock.mockReset()
+  // Delegate to the real write so the Dexie row can be asserted too.
+  const actual = jest.requireActual<typeof import("@/lib/db/files-library-items")>(
+    "@/lib/db/files-library-items"
+  )
+  setLibraryItemsFolderMock.mockImplementation(actual.setLibraryItemsFolder)
 })
 afterAll(fixture.dispose)
 
@@ -125,5 +138,85 @@ describe("uploadFileToLibrary", () => {
       uploadFileToLibrary(big).catch((error: Error) => error.message)
     ).resolves.toBeDefined()
     expect(extractAttachmentMock).not.toHaveBeenCalled()
+  })
+
+  describe("folderId", () => {
+    function mockImageIngest() {
+      ingestImageMock.mockImplementation(async () => {
+        await getDb().messageMedia.put({
+          hash: "imghash",
+          mediaType: "image/webp",
+          width: 1,
+          height: 1,
+          blob: new Blob(["x"]),
+          byteSize: 1,
+          createdAt: 1,
+          lastUsedAt: 1,
+        })
+        return {
+          ref: "cognia-media:imghash",
+          mediaType: "image/webp",
+          width: 1,
+          height: 1,
+          byteSize: 1,
+        }
+      })
+    }
+
+    it("files a new image in the folder in view", async () => {
+      const folder = await createLibraryFolder({ name: "Shots" })
+      mockImageIngest()
+      const file = new File(["png-bytes"], "shot.png", { type: "image/png" })
+      await uploadFileToLibrary(file, { folderId: folder.id })
+      expect(setLibraryItemsFolderMock).toHaveBeenCalledWith(
+        [{ kind: "image", sourceId: "imghash", mediaHash: "imghash" }],
+        folder.id
+      )
+      expect(await getDb().libraryItems.get("image:imghash")).toMatchObject({
+        folderId: folder.id,
+        ownedByFiles: true,
+      })
+    })
+
+    it("files a new document in the folder in view", async () => {
+      const folder = await createLibraryFolder({ name: "Docs" })
+      extractAttachmentMock.mockResolvedValue({ kind: "document", block: null, tokens: 0 })
+      const result = await uploadFileToLibrary(
+        new File(["# x"], "x.md", { type: "text/markdown" }),
+        { folderId: folder.id }
+      )
+      const assetId = result.key.slice("upload:".length)
+      expect(setLibraryItemsFolderMock).toHaveBeenCalledWith(
+        [{ kind: "upload", sourceId: assetId }],
+        folder.id
+      )
+      expect(await getDb().libraryItems.get(result.key)).toMatchObject({ folderId: folder.id })
+    })
+
+    it("leaves the item unfiled for no folder or the root", async () => {
+      extractAttachmentMock.mockResolvedValue({ kind: "document", block: null, tokens: 0 })
+      const unfiled = await uploadFileToLibrary(new File(["a"], "a.txt", { type: "text/plain" }))
+      const atRoot = await uploadFileToLibrary(new File(["b"], "b.txt", { type: "text/plain" }), {
+        folderId: "root",
+      })
+      mockImageIngest()
+      await uploadFileToLibrary(new File(["png"], "shot.png", { type: "image/png" }), {
+        folderId: "root",
+      })
+      expect(setLibraryItemsFolderMock).not.toHaveBeenCalled()
+      for (const key of [unfiled.key, atRoot.key, "image:imghash"]) {
+        expect((await getDb().libraryItems.get(key))?.folderId).toBeUndefined()
+      }
+    })
+
+    it("keeps the upload at the top level when its folder vanished meanwhile", async () => {
+      extractAttachmentMock.mockResolvedValue({ kind: "document", block: null, tokens: 0 })
+      const result = await uploadFileToLibrary(new File(["a"], "a.txt", { type: "text/plain" }), {
+        folderId: "lbf_missing",
+      })
+      expect(setLibraryItemsFolderMock).toHaveBeenCalledWith(expect.any(Array), "lbf_missing")
+      expect(result.kind).toBe("upload")
+      expect((await getDb().libraryItems.get(result.key))?.folderId).toBeUndefined()
+    })
   })
 })

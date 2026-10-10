@@ -2,7 +2,8 @@
 
 /**
  * The Files inspector: a live preview of the selected entry, its details, the
- * conversations it appears in, and its primary actions.
+ * conversations it appears in, and its primary actions — or, for an item in
+ * the Trash (ADR-0223), when it goes for good with Restore and Delete forever.
  */
 
 import { useEffect, useState } from "react"
@@ -11,8 +12,10 @@ import { loggers } from "@cognia/logging"
 import {
   DownloadIcon,
   MessageSquarePlusIcon,
+  RotateCcwIcon,
   SquareArrowOutUpRightIcon,
   StarIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 
@@ -21,6 +24,7 @@ import { FilePartPreview } from "@/components/chat/message-parts/file-part-previ
 import { Button } from "@/components/ui/button"
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files-actions"
+import { FILES_TRASH_RETENTION_MS } from "@/lib/db/files-library-types"
 import { getSessionsByIds } from "@/lib/db/sessions"
 import { downloadPayloadFor } from "@/lib/files-library/download"
 import { goToSession } from "@/lib/files-library/open"
@@ -28,7 +32,9 @@ import { getProviderDisplayName } from "@/lib/ai/icons"
 import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useFilesLibraryStore } from "@/stores/files-library"
 import { useRouter } from "next/navigation"
+import { thumbnailHash } from "@/lib/files-library/thumbnail"
 import { FilesImageThumb } from "./files-image-thumb"
 
 export interface FilesPreviewPaneProps {
@@ -135,46 +141,93 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
         ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2 border-t p-3">
-        <Button size="sm" onClick={() => void actions.open(entry)} data-testid="files-preview-open">
-          <SquareArrowOutUpRightIcon aria-hidden />
-          {t("actions.open")}
+      {entry.trashedAt !== undefined ? (
+        <TrashFooter entry={entry} actions={actions} />
+      ) : (
+        <div className="flex flex-wrap gap-2 border-t p-3">
+          <Button
+            size="sm"
+            onClick={() => void actions.open(entry)}
+            data-testid="files-preview-open"
+          >
+            <SquareArrowOutUpRightIcon aria-hidden />
+            {t("actions.open")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void actions.useInChat(entry)}
+            data-testid="files-preview-use"
+          >
+            <MessageSquarePlusIcon aria-hidden />
+            {t("actions.useInChat")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void actions.download(entry)}
+            data-testid="files-preview-download"
+          >
+            <DownloadIcon aria-hidden />
+            {t("actions.download")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void actions.toggleFavorite(entry)}
+            aria-pressed={entry.favoritedAt !== undefined}
+            data-testid="files-preview-favorite"
+          >
+            <StarIcon
+              className={
+                entry.favoritedAt !== undefined ? "fill-amber-400 text-amber-400" : undefined
+              }
+              aria-hidden
+            />
+            {entry.favoritedAt !== undefined ? t("actions.unfavorite") : t("actions.favorite")}
+          </Button>
+        </div>
+      )}
+    </aside>
+  )
+}
+
+/** In the Trash an item can only come back or go for good. */
+function TrashFooter({ entry, actions }: { entry: FilesEntry; actions: FilesActions }) {
+  const t = useTranslations("files")
+  const format = useFormatter()
+  const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
+  return (
+    <div className="flex flex-col gap-2 border-t p-3" data-testid="files-preview-trash">
+      <p className="text-xs text-muted-foreground">
+        {t("preview.trashedNotice", {
+          date: format.dateTime(entry.trashedAt!, { dateStyle: "medium" }),
+          purge: format.dateTime(entry.trashedAt! + FILES_TRASH_RETENTION_MS, {
+            dateStyle: "medium",
+          }),
+        })}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onClick={() => void actions.restore([entry])}
+          data-testid="files-preview-restore"
+        >
+          <RotateCcwIcon aria-hidden />
+          {t("actions.restore")}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          onClick={() => void actions.useInChat(entry)}
-          data-testid="files-preview-use"
+          className="text-destructive hover:text-destructive"
+          onClick={() => openDeleteForever([entry.key])}
+          data-testid="files-preview-delete-forever"
         >
-          <MessageSquarePlusIcon aria-hidden />
-          {t("actions.useInChat")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void actions.download(entry)}
-          data-testid="files-preview-download"
-        >
-          <DownloadIcon aria-hidden />
-          {t("actions.download")}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => void actions.toggleFavorite(entry)}
-          aria-pressed={entry.favoritedAt !== undefined}
-          data-testid="files-preview-favorite"
-        >
-          <StarIcon
-            className={
-              entry.favoritedAt !== undefined ? "fill-amber-400 text-amber-400" : undefined
-            }
-            aria-hidden
-          />
-          {entry.favoritedAt !== undefined ? t("actions.unfavorite") : t("actions.favorite")}
+          <Trash2Icon aria-hidden />
+          {t("actions.deleteForever")}
         </Button>
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -222,7 +275,7 @@ function PreviewBody({ entry, title }: { entry: FilesEntry; title: string }) {
   if (entry.kind === "image") {
     return (
       <FilesImageThumb
-        hash={entry.sourceId}
+        hash={thumbnailHash(entry)}
         alt={title}
         full
         className="max-h-[60vh] w-full rounded-md object-contain"

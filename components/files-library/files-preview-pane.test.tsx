@@ -262,3 +262,33 @@ it("allows long metadata to wrap within a narrow details column", () => {
   expect(screen.getByText(language).closest("dl")).toHaveClass("grid-cols-[auto_minmax(0,1fr)]")
   expect(screen.getByText(language)).toHaveClass("[overflow-wrap:anywhere]")
 })
+
+it("offers only Restore and Delete forever for an item in the Trash", async () => {
+  payload.mockResolvedValue({ blob: new Blob(["x"], { type: "text/markdown" }), filename: "n.md" })
+  const { useFilesLibraryStore } = await import("@/stores/files-library")
+  useFilesLibraryStore.setState({ deleteForeverTarget: null })
+  const restore = jest.fn(async () => {})
+  const a = { ...actions(), restore } as unknown as jest.Mocked<FilesActions>
+  const trashedAt = Date.UTC(2026, 8, 1)
+  render(<FilesPreviewPane entry={entry({ trashedAt })} actions={a} onClose={jest.fn()} />)
+  const footer = screen.getByTestId("files-preview-trash")
+  expect(footer).toHaveTextContent("Moved to the Trash on 2026-09-01")
+  expect(footer).toHaveTextContent("deleted for good on 2026-10-01")
+  expect(screen.queryByTestId("files-preview-open")).toBeNull()
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("button", { name: "Restore" }))
+  expect(restore).toHaveBeenCalledWith([expect.objectContaining({ key: "upload:u1" })])
+  await user.click(screen.getByRole("button", { name: "Delete forever" }))
+  expect(useFilesLibraryStore.getState().deleteForeverTarget).toEqual(["upload:u1"])
+})
+
+it("draws an image upload's picture from its bytes", () => {
+  render(
+    <FilesPreviewPane
+      entry={entry({ kind: "image", key: "image:h", sourceId: "h", mediaType: "image/png" })}
+      actions={actions()}
+      onClose={jest.fn()}
+    />
+  )
+  expect(screen.getByTestId("thumb-h-full")).toBeInTheDocument()
+})

@@ -13,8 +13,13 @@
 
 import { extractAttachment } from "@/lib/chat/attachments/dispatch"
 import { ingestImage, MAX_IMAGE_INPUT_BYTES } from "@/lib/chat/media/ingest-media"
-import { markLibraryItemOwned } from "@/lib/db/files-library-items"
-import { libraryItemKey } from "@/lib/db/files-library-types"
+import {
+  LibraryItemError,
+  markLibraryItemOwned,
+  setLibraryItemsFolder,
+  type LibraryItemSource,
+} from "@/lib/db/files-library-items"
+import { libraryItemKey, ROOT_LIBRARY_FOLDER_ID } from "@/lib/db/files-library-types"
 import { parseMediaRef } from "@/lib/db/message-media"
 import { putLibraryAsset } from "@/lib/db/session-assets"
 import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
@@ -41,12 +46,39 @@ function newAssetId(): string {
   return `asset-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
 }
 
+export interface FilesUploadOptions {
+  projectId?: string
+  /**
+   * Store the bytes as a Files-owned file even when they are an image. A
+   * duplicate needs this: an image card is one per content hash, so running a
+   * copy through `ingestImage` would land on the very card it was copied from.
+   */
+  asFile?: boolean
+  /** File the new item in this folder (an upload made while a folder is in view). */
+  folderId?: string
+}
+
+/**
+ * File the stored upload. The bytes are already kept, so a folder deleted
+ * while the upload ran leaves the file at the top level rather than failing
+ * an upload that succeeded.
+ */
+async function fileInto(source: LibraryItemSource, folderId: string | undefined): Promise<void> {
+  if (folderId === undefined || folderId === ROOT_LIBRARY_FOLDER_ID) return
+  try {
+    await setLibraryItemsFolder([source], folderId)
+  } catch (error) {
+    if (!(error instanceof LibraryItemError && error.code === "library_item_not_found")) throw error
+    loggers.store.warn("files upload folder vanished", { folderId })
+  }
+}
+
 export async function uploadFileToLibrary(
   file: File,
-  options: { projectId?: string } = {}
+  options: FilesUploadOptions = {}
 ): Promise<FilesUploadResult> {
   const mediaType = file.type || "application/octet-stream"
-  if (isIngestibleImage(file)) {
+  if (!options.asFile && isIngestibleImage(file)) {
     const ingested = await ingestImage({
       bytes: new Uint8Array(await readBlobAsArrayBuffer(file)),
       mediaType,
@@ -60,6 +92,7 @@ export async function uploadFileToLibrary(
       ...(options.projectId ? { projectId: options.projectId } : {}),
       snapshot: { title: file.name, mediaType: ingested.mediaType, byteSize: ingested.byteSize },
     })
+    await fileInto({ kind: "image", sourceId: hash, mediaHash: hash }, options.folderId)
     return { key: libraryItemKey("image", hash), kind: "image", extracted: false }
   }
 
@@ -89,6 +122,7 @@ export async function uploadFileToLibrary(
     ...(extractedContent ? { extractedContent } : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
   })
+  await fileInto({ kind: "upload", sourceId: assetId }, options.folderId)
   return {
     key: libraryItemKey("upload", assetId),
     kind: "upload",

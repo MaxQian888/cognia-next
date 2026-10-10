@@ -27,6 +27,8 @@ import { flattenLibraryFolders } from "@/lib/files-library/folder-tree"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
+import { FilesFolderGlyph } from "./files-folder-glyph"
+
 const NONE = "__none__"
 
 export interface FilesMoveDialogProps {
@@ -75,6 +77,7 @@ export function FilesMoveDialog({ entries, folders, actions }: FilesMoveDialogPr
               label={folder.name}
               depth={depth + 1}
               icon="folder"
+              folder={folder}
             />
           ))}
           {flat.length === 0 ? (
@@ -107,11 +110,14 @@ function FolderOption({
   label,
   depth,
   icon,
+  folder,
 }: {
   id: string
   label: string
   depth: number
   icon: "root" | "folder" | "none"
+  /** Drawn in its own color and glyph. */
+  folder?: LibraryFolder
 }) {
   const Icon = icon === "root" ? HomeIcon : icon === "none" ? FolderMinusIcon : FolderIcon
   const inputId = `files-move-${id}`
@@ -125,7 +131,11 @@ function FolderOption({
         htmlFor={inputId}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-normal"
       >
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        {folder ? (
+          <FilesFolderGlyph folder={folder} className="size-4 shrink-0" />
+        ) : (
+          <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        )}
         <span className="truncate">{label}</span>
       </Label>
     </div>

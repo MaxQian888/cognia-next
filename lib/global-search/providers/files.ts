@@ -26,6 +26,7 @@ import {
 } from "@/lib/db/files-library-types"
 import { listAllSessionAssets, listLibraryAssets } from "@/lib/db/session-assets"
 import { isImageMediaType, isItemHidden } from "@/lib/files-library/aggregate"
+import { filesLocationHref } from "@/lib/files-library/deep-link"
 import { byProjectId } from "../workspace-scope"
 import { createListProvider } from "./list-provider"
 import type { GlobalSearchContext } from "../types"
@@ -40,7 +41,7 @@ function toMillis(value: Date | string | number): number {
 }
 
 function filesHref(key: string): string {
-  return `/files?tab=all&item=${encodeURIComponent(key)}`
+  return filesLocationHref({ item: key })
 }
 
 export interface FilesProviderDeps {

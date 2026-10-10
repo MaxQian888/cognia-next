@@ -16,27 +16,51 @@ import { FilesDeleteFolderDialog } from "./files-delete-folder-dialog"
 const remove = deleteLibraryFolder as jest.Mock
 const folders: LibraryFolder[] = [
   { id: "lbf_a", name: "Specs", parentFolderId: "lbf_p", createdAt: 1, updatedAt: 1 },
+  { id: "lbf_c", name: "Drafts", parentFolderId: "lbf_a", createdAt: 1, updatedAt: 1 },
 ]
 
 beforeEach(() => remove.mockClear())
 
 it("moves contents up by default and returns to the parent", async () => {
-  useFilesLibraryStore.setState({ deleteFolderTarget: "lbf_a", folderId: "lbf_a" })
+  useFilesLibraryStore.setState({
+    deleteFolderTarget: "lbf_a",
+    section: { kind: "folder", folderId: "lbf_a" },
+  })
   render(<FilesDeleteFolderDialog folders={folders} />)
   expect(screen.getByRole("alertdialog")).toHaveTextContent("Delete “Specs”?")
   await userEvent.setup().click(screen.getByRole("button", { name: "Delete folder" }))
   expect(remove).toHaveBeenCalledWith("lbf_a", "reparent")
-  await waitFor(() => expect(useFilesLibraryStore.getState().folderId).toBe("lbf_p"))
+  await waitFor(() =>
+    expect(useFilesLibraryStore.getState().section).toEqual({ kind: "folder", folderId: "lbf_p" })
+  )
   expect(useFilesLibraryStore.getState().deleteFolderTarget).toBeNull()
 })
 
-it("cascades when asked", async () => {
-  useFilesLibraryStore.setState({ deleteFolderTarget: "lbf_a" })
+it("cascades when asked, leaving a deleted subfolder in view", async () => {
+  useFilesLibraryStore.setState({
+    deleteFolderTarget: "lbf_a",
+    section: { kind: "folder", folderId: "lbf_c" },
+  })
   const user = userEvent.setup()
   render(<FilesDeleteFolderDialog folders={folders} />)
   await user.click(screen.getByRole("checkbox"))
   await user.click(screen.getByRole("button", { name: "Delete folder" }))
   expect(remove).toHaveBeenCalledWith("lbf_a", "cascade")
+  await waitFor(() =>
+    expect(useFilesLibraryStore.getState().section).toEqual({ kind: "folder", folderId: "lbf_p" })
+  )
+})
+
+it("keeps a surviving subfolder in view when contents move up", async () => {
+  useFilesLibraryStore.setState({
+    deleteFolderTarget: "lbf_a",
+    section: { kind: "folder", folderId: "lbf_c" },
+  })
+  render(<FilesDeleteFolderDialog folders={folders} />)
+  await userEvent.setup().click(screen.getByRole("button", { name: "Delete folder" }))
+  await waitFor(() => expect(remove).toHaveBeenCalledWith("lbf_a", "reparent"))
+  await Promise.resolve()
+  expect(useFilesLibraryStore.getState().section).toEqual({ kind: "folder", folderId: "lbf_c" })
 })
 
 it("wraps long folder names inside a viewport-bounded confirmation", () => {

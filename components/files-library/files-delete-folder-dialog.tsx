@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { deleteLibraryFolder } from "@/lib/db/files-library-folders"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
+import { folderDescendants } from "@/lib/files-library/dnd"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
 /**
@@ -29,7 +30,7 @@ export function FilesDeleteFolderDialog({ folders }: { folders: readonly Library
   const t = useTranslations("files")
   const target = useFilesLibraryStore((s) => s.deleteFolderTarget)
   const close = useFilesLibraryStore((s) => s.closeDeleteFolder)
-  const enterFolder = useFilesLibraryStore((s) => s.enterFolder)
+  const setSection = useFilesLibraryStore((s) => s.setSection)
   const folder = folders.find((candidate) => candidate.id === target)
   const [cascade, setCascade] = useState(false)
 
@@ -72,8 +73,16 @@ export function FilesDeleteFolderDialog({ folders }: { folders: readonly Library
             onClick={() => {
               if (!folder) return
               const parent = folder.parentFolderId
+              // A cascade also deletes every folder under this one.
+              const gone = cascade ? folderDescendants(folders, folder.id) : new Set<string>()
+              gone.add(folder.id)
               void deleteLibraryFolder(folder.id, cascade ? "cascade" : "reparent")
-                .then(() => enterFolder(parent))
+                .then(() => {
+                  const section = useFilesLibraryStore.getState().section
+                  if (section.kind === "folder" && gone.has(section.folderId)) {
+                    setSection({ kind: "folder", folderId: parent })
+                  }
+                })
                 .catch(() => toast.error(t("errors.unknown")))
               close()
               setCascade(false)

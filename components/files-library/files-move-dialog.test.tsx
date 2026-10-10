@@ -53,7 +53,7 @@ it("starts on a single entry's own folder and can take it out of Folders", async
   useFilesLibraryStore.setState({ moveTarget: ["b"] })
   const user = userEvent.setup()
   render(<FilesMoveDialog entries={entries} folders={[]} actions={{ moveToFolder }} />)
-  expect(screen.getByText("No folders yet. Create one from the Folders tab.")).toBeInTheDocument()
+  expect(screen.getByText("No folders yet. Create one from the sidebar.")).toBeInTheDocument()
   await user.click(screen.getByLabelText("Take out of Folders"))
   await user.click(screen.getByRole("button", { name: "Move" }))
   expect(moveToFolder).toHaveBeenCalledWith(entries, null)

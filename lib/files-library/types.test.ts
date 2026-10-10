@@ -1,18 +1,22 @@
 import {
   entryKindLabelKey,
   entrySource,
-  FILES_SORTS,
-  FILES_TABS,
-  FILES_TYPE_FILTERS,
+  FILES_LENSES,
+  FILES_MODIFIED_WITHIN,
+  FILES_SIZE_BANDS,
+  FILES_SORT_KEYS,
+  FILES_TYPE_GROUPS,
   isVideoEntry,
   type FilesEntry,
 } from "./types"
 
 describe("files-library types", () => {
-  it("lists the tabs, type filters and sorts in display order", () => {
-    expect(FILES_TABS).toEqual(["recent", "favorites", "folders", "images", "all"])
-    expect(FILES_TYPE_FILTERS).toEqual(["all", "artifact", "canvas", "image", "video", "file"])
-    expect(FILES_SORTS).toEqual(["recent", "updated", "created", "name", "size"])
+  it("lists the type groups, lenses, sort columns and filter options in display order", () => {
+    expect(FILES_TYPE_GROUPS).toEqual(["documents", "artifacts", "images", "videos", "uploads"])
+    expect(FILES_LENSES).toEqual(["suggested", "favorites", "mine", "ai", "shared"])
+    expect(FILES_SORT_KEYS).toEqual(["name", "source", "activity", "size", "type"])
+    expect(FILES_MODIFIED_WITHIN).toEqual(["any", "day", "week", "month", "year"])
+    expect(FILES_SIZE_BANDS).toEqual(["any", "small", "medium", "large", "huge"])
   })
 
   it("builds the write source from an entry, snapshot included", () => {
@@ -70,6 +74,8 @@ describe("files-library types", () => {
       snapshot: { title: "SPEC.md" },
     })
     // A generated video's record goes into the snapshot, so it outlives its job row.
+    // The snapshot keeps the source's own title, never the name Files shows.
+    expect(entrySource({ ...entry, title: "Renamed in Files" }).snapshot?.title).toBe("SPEC.md")
     const generated = { jobId: "vjob_1", prompt: "waves", providerId: "google", modelId: "veo" }
     expect(entrySource({ ...entry, generated }).snapshot?.generated).toEqual(generated)
   })
@@ -84,5 +90,7 @@ describe("files-library types", () => {
       "session-upload"
     )
     expect(entryKindLabelKey({ kind: "canvas" })).toBe("canvas")
+    expect(entryKindLabelKey({ kind: "image", mediaType: "video/mp4" })).toBe("image")
+    expect(isVideoEntry({ kind: "upload" })).toBe(false)
   })
 })

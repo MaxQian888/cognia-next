@@ -1,13 +1,13 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
-import { FilesItemMenu } from "./files-item-menu"
+import { FilesItemContextMenu, FilesItemMenu } from "./files-item-menu"
 
 function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
   return {
@@ -16,11 +16,12 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     sourceId: "a",
     title: "Parser",
     sourceTitle: "Parser",
+    subtype: "code",
     projectIds: [],
-    sessionIds: [],
+    sessionIds: ["s1"],
     originAlive: true,
     createdAt: 1,
-    updatedAt: 1,
+    updatedAt: Date.UTC(2026, 8, 21),
     ownedByFiles: false,
     hidden: false,
     sharedWithMe: false,
@@ -32,20 +33,30 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
 
 function actions(): jest.Mocked<FilesActions> {
   return {
-    open: jest.fn(async (_entry: FilesEntry) => {}),
-    preview: jest.fn((_entry: FilesEntry) => {}),
-    toggleFavorite: jest.fn(async (_entry: FilesEntry) => {}),
-    moveToFolder: jest.fn(async (_entries: readonly FilesEntry[], _folderId: string | null) => {}),
-    remove: jest.fn(async (_entry: FilesEntry) => {}),
-    deleteOwned: jest.fn(async (_entry: FilesEntry) => {}),
-    download: jest.fn(async (_entry: FilesEntry) => {}),
-    useInChat: jest.fn(async (_entry: FilesEntry) => {}),
-    upload: jest.fn(async (_files: readonly File[]) => {}),
-    newCanvasDocument: jest.fn(() => {}),
-  }
+    open: jest.fn(async () => {}),
+    preview: jest.fn(),
+    toggleFavorite: jest.fn(async () => {}),
+    setFavorite: jest.fn(async () => {}),
+    moveToFolder: jest.fn(async () => {}),
+    trash: jest.fn(async () => {}),
+    restore: jest.fn(async () => {}),
+    deleteForever: jest.fn(async () => {}),
+    rename: jest.fn(async () => true),
+    duplicate: jest.fn(async () => {}),
+    download: jest.fn(async () => {}),
+    exportZip: jest.fn(async () => {}),
+    useInChat: jest.fn(async () => {}),
+    goToConversation: jest.fn(async () => {}),
+    upload: jest.fn(async () => {}),
+    newCanvasDocument: jest.fn(),
+    moveFolder: jest.fn(async () => {}),
+    setFolderStyle: jest.fn(async () => {}),
+  } as unknown as jest.Mocked<FilesActions>
 }
 
-beforeEach(() => useFilesLibraryStore.setState({ moveTarget: null, deleteTarget: null }))
+beforeEach(() =>
+  useFilesLibraryStore.setState({ moveTarget: null, renameTarget: null, deleteForeverTarget: null })
+)
 
 async function openMenu() {
   const user = userEvent.setup()
@@ -64,37 +75,84 @@ it("runs each action for a conversation item", async () => {
     ["Preview", a.preview],
     ["Use in chat", a.useInChat],
     ["Add to favorites", a.toggleFavorite],
+    ["Duplicate", a.duplicate],
     ["Download", a.download],
-    ["Remove from Files", a.remove],
   ] as const) {
     user = await openMenu()
     await user.click(screen.getByRole("menuitem", { name }))
     expect(fn).toHaveBeenCalledWith(e)
   }
   user = await openMenu()
+  await user.click(screen.getByRole("menuitem", { name: "Move to Trash" }))
+  expect(a.trash).toHaveBeenCalledWith([e])
+  user = await openMenu()
   await user.click(screen.getByRole("menuitem", { name: "Move to folder…" }))
   expect(useFilesLibraryStore.getState().moveTarget).toEqual(["artifact:a"])
   user = await openMenu()
-  expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull()
+  await user.click(screen.getByRole("menuitem", { name: /^Rename…/ }))
+  expect(useFilesLibraryStore.getState().renameTarget).toBe("artifact:a")
+  await openMenu()
   expect(screen.queryByRole("menuitem", { name: "Take out of folder" })).toBeNull()
+  expect(screen.queryByRole("menuitem", { name: "Restore" })).toBeNull()
 })
 
-it("offers delete for a Files upload and unfile for a filed favorite", async () => {
+it("keeps Share inert until file snapshots exist", async () => {
+  render(<FilesItemMenu entry={entry()} title="Parser" actions={actions()} />)
+  await openMenu()
+  const share = screen.getByRole("menuitem", { name: /^Share…/ })
+  expect(share).toHaveAttribute("aria-disabled", "true")
+  expect(share).toHaveTextContent("Coming soon")
+})
+
+it("offers unfile for a filed favorite", async () => {
   const a = actions()
-  const e = entry({
-    key: "upload:u",
-    kind: "upload",
-    ownedByFiles: true,
-    folderId: "root",
-    favoritedAt: 1,
-  })
+  const e = entry({ folderId: "root", favoritedAt: 1 })
   render(<FilesItemMenu entry={e} title="Parser" actions={a} />)
-  let user = await openMenu()
+  const user = await openMenu()
   expect(screen.getByRole("menuitem", { name: "Remove from favorites" })).toBeInTheDocument()
-  expect(screen.queryByRole("menuitem", { name: "Remove from Files" })).toBeNull()
-  await user.click(screen.getByRole("menuitem", { name: "Delete" }))
-  expect(useFilesLibraryStore.getState().deleteTarget).toBe("upload:u")
-  user = await openMenu()
   await user.click(screen.getByRole("menuitem", { name: "Take out of folder" }))
   expect(a.moveToFolder).toHaveBeenCalledWith([e], null)
+})
+
+it("offers only preview, restore and delete forever in the Trash", async () => {
+  const a = actions()
+  const e = entry({ trashedAt: 5 })
+  render(<FilesItemMenu entry={e} title="Parser" actions={a} />)
+  let user = await openMenu()
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Preview",
+    "Restore",
+    "Delete forever",
+  ])
+  await user.click(screen.getByRole("menuitem", { name: "Restore" }))
+  expect(a.restore).toHaveBeenCalledWith([e])
+  user = await openMenu()
+  await user.click(screen.getByRole("menuitem", { name: "Delete forever" }))
+  expect(useFilesLibraryStore.getState().deleteForeverTarget).toEqual(["artifact:a"])
+})
+
+it("opens the same entries on right-click", async () => {
+  const a = actions()
+  const e = entry()
+  render(
+    <FilesItemContextMenu entry={e} actions={a}>
+      <div data-testid="target">Parser</div>
+    </FilesItemContextMenu>
+  )
+  fireEvent.contextMenu(screen.getByTestId("target"))
+  const items = await screen.findAllByRole("menuitem")
+  expect(items.map((item) => item.textContent?.replace(/F2|Coming soon/, ""))).toEqual([
+    "Open",
+    "Preview",
+    "Use in chat",
+    "Add to favorites",
+    "Move to folder…",
+    "Rename…",
+    "Duplicate",
+    "Download",
+    "Share…",
+    "Move to Trash",
+  ])
+  await userEvent.setup().click(screen.getByRole("menuitem", { name: "Use in chat" }))
+  expect(a.useInChat).toHaveBeenCalledWith(e)
 })

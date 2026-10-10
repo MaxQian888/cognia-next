@@ -11,28 +11,70 @@ import type {
 } from "@/lib/db/files-library-types"
 import type { LibraryItemSource } from "@/lib/db/files-library-items"
 
-export type FilesTab = "recent" | "favorites" | "folders" | "images" | "all"
-
-export const FILES_TABS: readonly FilesTab[] = ["recent", "favorites", "folders", "images", "all"]
-
 /**
- * Type filter. `video` and `file` split the uploads (conversation and
- * Files-owned alike) by media type, so each upload answers exactly one.
+ * Where to look (ADR-0223): the sidebar's places. A place combines with any
+ * lens; the Trash ignores lenses.
  */
-export type FilesTypeFilter = "all" | "artifact" | "canvas" | "image" | "video" | "file"
+export type FilesSection =
+  | { kind: "all" }
+  | { kind: "group"; group: FilesTypeGroup }
+  | { kind: "folder"; folderId: string }
+  | { kind: "recent" }
+  | { kind: "trash" }
 
-export const FILES_TYPE_FILTERS: readonly FilesTypeFilter[] = [
-  "all",
-  "artifact",
-  "canvas",
-  "image",
-  "video",
-  "file",
+/** The sidebar's type groups, by what an item is rather than its file format. */
+export type FilesTypeGroup = "documents" | "artifacts" | "images" | "videos" | "uploads"
+
+export const FILES_TYPE_GROUPS: readonly FilesTypeGroup[] = [
+  "documents",
+  "artifacts",
+  "images",
+  "videos",
+  "uploads",
 ]
 
-export type FilesSort = "recent" | "updated" | "created" | "name" | "size"
+/** How to look (ADR-0223): the row of lenses above the main area. */
+export type FilesLens = "suggested" | "favorites" | "mine" | "ai" | "shared"
 
-export const FILES_SORTS: readonly FilesSort[] = ["recent", "updated", "created", "name", "size"]
+export const FILES_LENSES: readonly FilesLens[] = ["suggested", "favorites", "mine", "ai", "shared"]
+
+/** Columns a list header sorts by. */
+export type FilesSortKey = "name" | "source" | "activity" | "size" | "type"
+
+export const FILES_SORT_KEYS: readonly FilesSortKey[] = [
+  "name",
+  "source",
+  "activity",
+  "size",
+  "type",
+]
+
+export interface FilesSort {
+  key: FilesSortKey
+  dir: "asc" | "desc"
+}
+
+/** "Modified" filter: within the last day / week / month / year. */
+export type FilesModifiedWithin = "any" | "day" | "week" | "month" | "year"
+
+export const FILES_MODIFIED_WITHIN: readonly FilesModifiedWithin[] = [
+  "any",
+  "day",
+  "week",
+  "month",
+  "year",
+]
+
+/** "Size" filter bands: < 1 MB, 1–10 MB, 10–100 MB, ≥ 100 MB. */
+export type FilesSizeBand = "any" | "small" | "medium" | "large" | "huge"
+
+export const FILES_SIZE_BANDS: readonly FilesSizeBand[] = [
+  "any",
+  "small",
+  "medium",
+  "large",
+  "huge",
+]
 
 /** `current` = the active workspace (rows without a workspace are shared); `all` = everywhere. */
 export type FilesProjectScope = "current" | "all"
