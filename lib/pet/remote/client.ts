@@ -6,12 +6,13 @@
 // balance that no longer exist. A call that cannot reach the host fails, and
 // the UI says so.
 //
-// Each write mints ONE idempotency key per user intent and sends it both in
-// the body (the host's `pet_*` ledger, keyed by the authenticated device) and
-// as the transport option (the companion server's own header ledger), so a
+// Each write mints ONE idempotency key per user intent and sends it in
+// the body (where accepted, for the host's device-scoped `pet_*` ledger) and
+// as a UUID transport option (the companion server's own header ledger), so a
 // retry after a lost reply, over any channel, folds onto the first answer.
 
 import type { Transport } from "@/lib/tauri/transport-types"
+import { sha256Hex } from "@/lib/share/hash"
 import { PET_REMOTE_COMMANDS } from "./commands"
 import type {
   PetActResult,
@@ -31,12 +32,14 @@ import type { PetInteractionKind } from "@/lib/pet/access/limits"
 /** A fresh key for one user intent. Reuse it only to retry that same intent. */
 export function newPetIntentKey(): string {
   const cryptoApi = globalThis.crypto
-  if (cryptoApi && typeof cryptoApi.randomUUID === "function")
-    return `pet:${cryptoApi.randomUUID()}`
-  // Older WebViews without `randomUUID`: 128 random bits from the CSPRNG.
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID()
+  // Older WebViews without `randomUUID`: a UUID v4 from the CSPRNG.
   if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
     const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
-    return `pet:${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
   }
   throw new Error("no secure random source for a pet intent key")
 }
@@ -81,10 +84,20 @@ export function createPetRemoteClient(
   deps: { newKey?: () => string } = {}
 ): PetRemoteClient {
   const newKey = deps.newKey ?? newPetIntentKey
-  const write = <T>(command: string, args: Record<string, unknown>, key?: string): Promise<T> =>
-    key === undefined
-      ? transport.call<T>(command, args)
-      : transport.call<T>(command, args, { idempotencyKey: key })
+  const write = async <T>(
+    command: string,
+    args: Record<string, unknown>,
+    key: string
+  ): Promise<T> => {
+    let transportKey = key
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
+      // Caller-held body keys may be arbitrary. A stable UUID v8 keeps retries
+      // on the same companion ledger entry without changing the host's key.
+      const hex = await sha256Hex(`cognia:pet-intent:${key}`)
+      transportKey = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+    }
+    return transport.call<T>(command, args, { idempotencyKey: transportKey })
+  }
 
   return {
     async getSnapshot() {
