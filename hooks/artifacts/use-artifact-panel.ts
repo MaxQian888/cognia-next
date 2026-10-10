@@ -240,6 +240,7 @@ export function useArtifactPanelState() {
         sourceArtifactId: activeArtifact.id,
         returnContext,
         authoringOrigin: "artifact-panel",
+        createdBy: "user",
       })
       setActiveCanvas(docId)
       openPanel("canvas")

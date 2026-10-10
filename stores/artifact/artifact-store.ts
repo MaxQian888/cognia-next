@@ -65,6 +65,7 @@ import type {
   SettledArtifactRuntimeHealth,
   ArtifactMetadata,
   ArtifactAuthoringOrigin,
+  CanvasDocumentCreator,
   ArtifactWorkspaceScope,
   ArtifactWorkspaceState,
   ArtifactWorkspaceReturnContext,
@@ -870,6 +871,8 @@ interface ArtifactActions {
     sourceArtifactId?: string
     returnContext?: ArtifactWorkspaceReturnContext | null
     authoringOrigin?: ArtifactAuthoringOrigin
+    /** Who is making the document (ADR-0223); every caller says. */
+    createdBy: CanvasDocumentCreator
   }) => string
   updateCanvasDocument: (id: string, updates: Partial<CanvasDocument>) => void
   deleteCanvasDocument: (id: string) => void
@@ -1829,6 +1832,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         sourceArtifactId,
         returnContext,
         authoringOrigin,
+        createdBy,
       }) => {
         const createdAt = new Date()
         const documentId = nanoid()
@@ -1845,6 +1849,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           sourceArtifactId,
           returnContext: returnContext || null,
           authoringOrigin,
+          createdBy,
           editorContext: {
             saveState: "saved",
           },

@@ -34,6 +34,7 @@ const SHAPES: Record<
   teams: "rows",
   promptPresets: "rows",
   chatTemplates: "rows",
+  documentTemplates: "rows",
   libraryItems: "rows",
   libraryFolders: "rows",
   libraryAssets: "rows",

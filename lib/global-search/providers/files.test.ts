@@ -106,6 +106,65 @@ describe("Files ⌘K providers", () => {
   })
 })
 
+describe("Files metadata in the palette (ADR-0223)", () => {
+  it("leaves out removed and trashed items and lists renamed ones by their Files name", async () => {
+    const items = new Map([
+      [
+        "artifact:a1",
+        {
+          key: "artifact:a1",
+          kind: "artifact" as const,
+          sourceId: "a1",
+          createdAt: 1,
+          updatedAt: 1,
+          trashedAt: 9,
+        },
+      ],
+      [
+        "canvas:c1",
+        {
+          key: "canvas:c1",
+          kind: "canvas" as const,
+          sourceId: "c1",
+          createdAt: 1,
+          updatedAt: 1,
+          displayName: "Grammar spec",
+        },
+      ],
+    ])
+    const artifactsOut = await createFilesArtifactsProvider({
+      artifacts: async () => artifacts,
+      libraryItems: async () => items,
+    }).search(makeProviderInput("parser"))
+    expect(artifactsOut.items).toEqual([])
+    const canvasOut = await createFilesCanvasProvider({
+      canvasDocuments: async () => canvas,
+      libraryItems: async () => items,
+    }).search(makeProviderInput("grammar"))
+    expect(canvasOut.items[0]).toMatchObject({ id: "canvas:c1", title: "Grammar spec" })
+    // The store's own document keeps its title.
+    expect(canvas.c1!.title).toBe("Parser design")
+    const hidden = new Map([
+      [
+        "canvas:c1",
+        {
+          key: "canvas:c1",
+          kind: "canvas" as const,
+          sourceId: "c1",
+          createdAt: 1,
+          updatedAt: 1,
+          hiddenAt: 5,
+        },
+      ],
+    ])
+    const hiddenOut = await createFilesCanvasProvider({
+      canvasDocuments: async () => canvas,
+      libraryItems: async () => hidden,
+    }).search(makeProviderInput("parser"))
+    expect(hiddenOut.items).toEqual([])
+  })
+})
+
 describe("loadFileSearchRows", () => {
   it("lists uploads once per file with their conversation's workspace, plus named images", async () => {
     const db = getDb()
@@ -175,5 +234,25 @@ describe("loadFileSearchRows", () => {
       projectId: "p1",
       mediaType: "image/png",
     })
+  })
+
+  it("drops trashed files and renames ones renamed in Files", async () => {
+    await putLibraryAsset({
+      assetId: "u1",
+      blob: new Blob(["mine"]),
+      filename: "mine.txt",
+      mediaType: "text/plain",
+    })
+    await putLibraryAsset({
+      assetId: "u2",
+      blob: new Blob(["gone"]),
+      filename: "gone.txt",
+      mediaType: "text/plain",
+    })
+    const db = getDb()
+    await db.libraryItems.update("upload:u1", { displayName: "Renamed.txt" })
+    await db.libraryItems.update("upload:u2", { trashedAt: 5 })
+    const rows = await loadFileSearchRows()
+    expect(rows.map((row) => row.title)).toEqual(["Renamed.txt"])
   })
 })

@@ -21,6 +21,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { DocumentTemplateRow } from "@/lib/db/document-templates"
 import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import { remapVideoJobSession } from "@/lib/db/media-generation-jobs"
@@ -273,6 +274,7 @@ export async function applyBackupPackage(
       db.retrievalEncryptedContent,
       db.retrievalTombstones,
       db.chatTemplates,
+      db.documentTemplates,
       db.scheduledTasks,
       db.petProfile,
       db.petAchievements,
@@ -361,6 +363,17 @@ export async function applyBackupPackage(
         opts,
         summary,
         idPrefix: "tpl",
+        respectBuiltIn: false,
+      })
+      // Same reasoning as chat templates: always something the user saved, so
+      // "duplicate" mints a fresh id and keeps both copies.
+      await applyCollection<DocumentTemplateRow>({
+        rows: env.documentTemplates,
+        table: db.documentTemplates,
+        kind: "documentTemplates",
+        opts,
+        summary,
+        idPrefix: "dtpl",
         respectBuiltIn: false,
       })
       // --- the desktop pet (singleton + what it earned) -------------------

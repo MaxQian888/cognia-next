@@ -1561,6 +1561,28 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v237 indexes the Files Trash and adds saved document templates", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(237)
+    expect(db.libraryItems.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["trashedAt", "hiddenAt"])
+    )
+    expect(db.documentTemplates.schema.primKey.name).toBe("id")
+    expect(db.documentTemplates.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["name", "updatedAt", "createdAt"])
+    )
+    await db.libraryItems.bulkPut([
+      { key: "image:a", kind: "image", sourceId: "a", trashedAt: 5, createdAt: 1, updatedAt: 1 },
+      { key: "image:b", kind: "image", sourceId: "b", createdAt: 1, updatedAt: 1 },
+    ])
+    // An untrashed row carries no key, so the purge's range read never sees it.
+    expect(await db.libraryItems.where("trashedAt").belowOrEqual(10).primaryKeys()).toEqual([
+      "image:a",
+    ])
+  })
+
   it("v236 adds account sync's outbox, field clocks, state and inbox", async () => {
     const db = getDb()
     await db.open()

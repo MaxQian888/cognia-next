@@ -32,6 +32,18 @@ jest.mock("@/lib/chat/auto-archive-schedule", () => ({
   }),
 }))
 
+const mockFilesTrashPurgeExecutor = jest.fn(async () => ({
+  success: true,
+  output: { expired: 0, deleted: 0, retired: 0 },
+}))
+
+jest.mock("@/lib/files-library/trash-purge-schedule", () => ({
+  registerFilesTrashPurgeExecutor: jest.fn(() => {
+    const { registerTaskExecutor } = jest.requireActual("@/lib/scheduler/task-scheduler")
+    registerTaskExecutor("files-trash-purge", mockFilesTrashPurgeExecutor)
+  }),
+}))
+
 const mockBuiltInExecutor = jest.fn(async (task: ScheduledTask) => ({
   success: true,
   output: { ran: task.type },
@@ -217,6 +229,7 @@ async function startWithoutSchedulerSystem() {
 function unregisterEverythingTheOwnersRegister() {
   unregisterTaskExecutor("provider-diagnostics-refresh")
   unregisterTaskExecutor("conversation-auto-archive")
+  unregisterTaskExecutor("files-trash-purge")
   for (const type of BUILT_IN_EXECUTOR_TASK_TYPES) unregisterTaskExecutor(type)
 }
 
@@ -409,13 +422,14 @@ describe("a scheduler started without initSchedulerSystem", () => {
 })
 
 describe("TASK_EXECUTOR_OWNERS", () => {
-  it("declares the built-ins, provider diagnostics, conversation auto-archive and issue wakeups, and no connector or deprecated type", () => {
+  it("declares the built-ins, provider diagnostics, conversation auto-archive, the Files Trash purge and issue wakeups, and no connector or deprecated type", () => {
     const owned = Object.keys(TASK_EXECUTOR_OWNERS)
     expect([...owned].sort()).toEqual(
       [
         ...BUILT_IN_EXECUTOR_TASK_TYPES,
         "provider-diagnostics-refresh",
         "conversation-auto-archive",
+        "files-trash-purge",
         "issue-wakeup",
       ].sort()
     )
@@ -431,6 +445,7 @@ describe("TASK_EXECUTOR_OWNERS", () => {
     expect(hasTaskExecutorOwner("provider-diagnostics-refresh")).toBe(true)
     expect(hasTaskExecutorOwner("issue-wakeup")).toBe(true)
     expect(hasTaskExecutorOwner("conversation-auto-archive")).toBe(true)
+    expect(hasTaskExecutorOwner("files-trash-purge")).toBe(true)
     expect(hasTaskExecutorOwner("chat")).toBe(true)
     expect(hasTaskExecutorOwner("plugin")).toBe(true)
     expect(hasTaskExecutorOwner("connection:presence:refresh")).toBe(false)
@@ -442,6 +457,12 @@ describe("TASK_EXECUTOR_OWNERS", () => {
   it("loads a declared owner, which registers the executor", async () => {
     await expect(loadTaskExecutorOwner("provider-diagnostics-refresh")).resolves.toBe(true)
     expect(hasTaskExecutor("provider-diagnostics-refresh")).toBe(true)
+    expect(registerBuiltInExecutors).not.toHaveBeenCalled()
+  })
+
+  it("loads the Files Trash purge from its own module", async () => {
+    await expect(loadTaskExecutorOwner("files-trash-purge")).resolves.toBe(true)
+    expect(hasTaskExecutor("files-trash-purge")).toBe(true)
     expect(registerBuiltInExecutors).not.toHaveBeenCalled()
   })
 

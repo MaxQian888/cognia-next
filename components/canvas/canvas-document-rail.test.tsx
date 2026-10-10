@@ -46,6 +46,7 @@ describe("CanvasDocumentRail", () => {
   it("does not nest an interactive element inside another interactive element", () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Hello",
         content: "",
         language: "markdown",
@@ -70,6 +71,7 @@ describe("CanvasDocumentRail", () => {
   it("uses the translated aria-label on the delete control", () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Bye",
         content: "",
         language: "markdown",
@@ -85,6 +87,7 @@ describe("CanvasDocumentRail", () => {
   it("keeps the row delete control reachable without a hover", () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Reach",
         content: "",
         language: "markdown",
@@ -114,6 +117,7 @@ describe("CanvasDocumentRail", () => {
     let docId = ""
     act(() => {
       docId = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Alpha",
         content: "",
         language: "markdown",
@@ -133,6 +137,7 @@ describe("CanvasDocumentRail", () => {
   it("removes the document when the delete control is clicked", async () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Doomed",
         content: "",
         language: "markdown",
@@ -152,12 +157,14 @@ describe("CanvasDocumentRail", () => {
     act(() => {
       const store = useArtifactStore.getState()
       store.createCanvasDocument({
+        createdBy: "user",
         title: "alpha",
         content: "",
         language: "markdown",
         type: "text",
       })
       store.createCanvasDocument({
+        createdBy: "user",
         title: "beta",
         content: "",
         language: "markdown",
@@ -189,6 +196,7 @@ describe("CanvasDocumentRail", () => {
   it("renders the language Badge on each row", () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Tagged",
         content: "",
         language: "typescript",
@@ -204,6 +212,7 @@ describe("CanvasDocumentRail", () => {
   it("switches to a flat file-list view showing name.ext when the Files toggle is clicked", async () => {
     act(() => {
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Report",
         content: "",
         language: "python",
@@ -237,6 +246,7 @@ describe("CanvasDocumentRail", () => {
     it("emits SidebarMenu and SidebarMenuItem data attributes for each time-bucket", () => {
       act(() => {
         useArtifactStore.getState().createCanvasDocument({
+          createdBy: "user",
           title: "Today doc",
           content: "",
           language: "markdown",
@@ -255,6 +265,7 @@ describe("CanvasDocumentRail", () => {
     it("renders the SidebarGroupLabel for the time bucket containing recent docs", () => {
       act(() => {
         useArtifactStore.getState().createCanvasDocument({
+          createdBy: "user",
           title: "Recently",
           content: "",
           language: "markdown",
@@ -273,6 +284,7 @@ describe("CanvasDocumentRail", () => {
       try {
         act(() => {
           useArtifactStore.getState().createCanvasDocument({
+            createdBy: "user",
             title: "ProviderFree",
             content: "",
             language: "markdown",
@@ -310,6 +322,7 @@ describe("CanvasDocumentRail — workspace isolation", () => {
     act(() => {
       useProjectStore.setState({ activeProjectId: projectId })
       useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title,
         content: title,
         language: "markdown",
@@ -360,6 +373,7 @@ describe("CanvasDocumentRail — delete is confirmed, close is not delete", () =
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title,
         content: title,
         language: "markdown",

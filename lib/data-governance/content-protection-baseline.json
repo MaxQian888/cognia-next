@@ -100,6 +100,7 @@
   "conversationLabels": "metadata-only",
   "conversationOverrides": "metadata-only",
   "deploymentProfiles": "metadata-only",
+  "documentTemplates": "encrypted-content",
   "evalAdjudications": "metadata-only",
   "evalAssets": "metadata-only",
   "evalCases": "metadata-only",

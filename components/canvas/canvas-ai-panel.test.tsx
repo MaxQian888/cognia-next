@@ -29,6 +29,7 @@ function seedDoc() {
   let id = ""
   act(() => {
     id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "body",
       language: "markdown",

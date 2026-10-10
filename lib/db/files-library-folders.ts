@@ -12,9 +12,13 @@
 import { collectUnreferencedMessageMedia } from "./message-media-refs"
 import { getDb } from "./schema"
 import {
+  isLibraryFolderColor,
+  isLibraryFolderIcon,
   isLibraryItemKept,
   ROOT_LIBRARY_FOLDER_ID,
   type LibraryFolder,
+  type LibraryFolderColor,
+  type LibraryFolderIcon,
   type LibraryFolderPatch,
 } from "./files-library-types"
 import { libraryPinOwner } from "./files-library-items"
@@ -42,14 +46,18 @@ export interface LibraryFolderDraft {
   /** Already trimmed and non-empty; the caller supplies the localized fallback. */
   name: string
   parentFolderId?: string
-  color?: string
-  icon?: string
+  color?: LibraryFolderColor
+  icon?: LibraryFolderIcon
 }
 
 export class LibraryFolderError extends Error {
   constructor(
     readonly code:
-      "library_folder_name_required" | "library_folder_parent_missing" | "library_folder_cycle"
+      | "library_folder_name_required"
+      | "library_folder_parent_missing"
+      | "library_folder_cycle"
+      | "library_folder_not_found"
+      | "library_folder_style_invalid"
   ) {
     super(code)
     this.name = "LibraryFolderError"
@@ -68,6 +76,7 @@ export async function createLibraryFolder(draft: LibraryFolderDraft): Promise<Li
   if (!name) throw new LibraryFolderError("library_folder_name_required")
   const parentFolderId = draft.parentFolderId ?? ROOT_LIBRARY_FOLDER_ID
   await assertParent(parentFolderId)
+  assertStyle(draft)
   const now = Date.now()
   const folder: LibraryFolder = {
     id: newFolderId(),
@@ -88,8 +97,40 @@ export async function renameLibraryFolder(id: string, name: string): Promise<voi
   await getDb().libraryFolders.update(id, { name: trimmed, updatedAt: Date.now() })
 }
 
+function assertStyle(style: { color?: unknown; icon?: unknown }): void {
+  if (style.color !== undefined && !isLibraryFolderColor(style.color)) {
+    throw new LibraryFolderError("library_folder_style_invalid")
+  }
+  if (style.icon !== undefined && !isLibraryFolderIcon(style.icon)) {
+    throw new LibraryFolderError("library_folder_style_invalid")
+  }
+}
+
 export async function updateLibraryFolder(id: string, patch: LibraryFolderPatch): Promise<void> {
+  assertStyle(patch)
   await getDb().libraryFolders.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+/**
+ * Set or clear a folder's tint and glyph. `null` clears a field back to the
+ * default; `undefined` leaves it as it is.
+ */
+export async function setLibraryFolderStyle(
+  id: string,
+  style: { color?: LibraryFolderColor | null; icon?: LibraryFolderIcon | null }
+): Promise<void> {
+  assertStyle({ color: style.color ?? undefined, icon: style.icon ?? undefined })
+  const db = getDb()
+  await db.transaction("rw", db.libraryFolders, async () => {
+    const folder = await db.libraryFolders.get(id)
+    if (!folder) throw new LibraryFolderError("library_folder_not_found")
+    const next: LibraryFolder = { ...folder, updatedAt: Date.now() }
+    if (style.color === null) delete next.color
+    else if (style.color !== undefined) next.color = style.color
+    if (style.icon === null) delete next.icon
+    else if (style.icon !== undefined) next.icon = style.icon
+    await db.libraryFolders.put(next)
+  })
 }
 
 /** Re-parent a folder; refuses a move into itself or its own subtree. */

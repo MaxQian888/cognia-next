@@ -7,6 +7,10 @@
  * Files page itself, where the aggregate is already loaded; a provider runs on
  * every keystroke and must not read every artifact's content per needle.
  *
+ * Items the person removed from Files or moved to its Trash are left out, and
+ * an item renamed in Files is listed under that name (ADR-0223) — the palette
+ * offers what the Files page shows, by the same rule (`isItemHidden`).
+ *
  * Empty on the phone shell: Files is not built there yet
  * (`filesRequiresDesktopOrWeb`), so the palette must not offer a way in.
  */
@@ -15,9 +19,13 @@ import { FileIcon, PenLineIcon, ShapesIcon } from "lucide-react"
 
 import type { Artifact, CanvasDocument } from "@/types/artifact/artifact"
 import { listLibraryItems } from "@/lib/db/files-library-items"
-import { isLibraryItemKept, libraryItemKey } from "@/lib/db/files-library-types"
+import {
+  isLibraryItemKept,
+  libraryItemKey,
+  type LibraryItemRow,
+} from "@/lib/db/files-library-types"
 import { listAllSessionAssets, listLibraryAssets } from "@/lib/db/session-assets"
-import { isImageMediaType } from "@/lib/files-library/aggregate"
+import { isImageMediaType, isItemHidden } from "@/lib/files-library/aggregate"
 import { byProjectId } from "../workspace-scope"
 import { createListProvider } from "./list-provider"
 import type { GlobalSearchContext } from "../types"
@@ -38,7 +46,37 @@ function filesHref(key: string): string {
 export interface FilesProviderDeps {
   artifacts: () => Promise<Record<string, Artifact>>
   canvasDocuments: () => Promise<Record<string, CanvasDocument>>
+  /** Files metadata by item key: what was removed, trashed or renamed. */
+  libraryItems: () => Promise<ReadonlyMap<string, LibraryItemRow>>
   loadItems: (ctx: GlobalSearchContext) => Promise<FileSearchRow[]>
+}
+
+async function libraryItemsByKey(): Promise<Map<string, LibraryItemRow>> {
+  return new Map((await listLibraryItems()).map((item) => [item.key, item]))
+}
+
+/** Out of the palette: removed from Files (until its source changes) or trashed. */
+function leftOut(item: LibraryItemRow | undefined, sourceUpdatedAt: number): boolean {
+  return item?.trashedAt !== undefined || isItemHidden(item, sourceUpdatedAt)
+}
+
+/**
+ * The rows Files still shows, each under the name Files gives it. Copies, so
+ * the store's own objects are never renamed.
+ */
+function asFilesShows<T extends { title: string; updatedAt: Date | string | number }>(
+  rows: readonly T[],
+  keyOf: (row: T) => string,
+  items: ReadonlyMap<string, LibraryItemRow>
+): T[] {
+  const out: T[] = []
+  for (const row of rows) {
+    const item = items.get(keyOf(row))
+    if (leftOut(item, toMillis(row.updatedAt))) continue
+    const displayName = item?.displayName?.trim()
+    out.push(displayName ? { ...row, title: displayName } : row)
+  }
+  return out
 }
 
 async function artifactState() {
@@ -99,13 +137,16 @@ export async function loadFileSearchRows(
     const existing = rows.get(item.key)
     if (existing) {
       if (item.projectId) existing.projectId = item.projectId
+      if (leftOut(item, existing.timestamp)) rows.delete(item.key)
+      else if (item.displayName?.trim()) existing.title = item.displayName.trim()
       continue
     }
+    if (leftOut(item, item.updatedAt)) continue
     if (item.kind !== "image" || !item.snapshot?.title) continue
     if (!item.ownedByFiles && !isLibraryItemKept(item)) continue
     rows.set(item.key, {
       key: item.key,
-      title: item.snapshot.title,
+      title: item.displayName?.trim() || item.snapshot.title,
       ...(item.snapshot.mediaType ? { mediaType: item.snapshot.mediaType } : {}),
       ...(item.projectId ? { projectId: item.projectId } : {}),
       timestamp: item.updatedAt,
@@ -117,18 +158,27 @@ export async function loadFileSearchRows(
 const defaultDeps: FilesProviderDeps = {
   artifacts: async () => (await artifactState()).artifacts,
   canvasDocuments: async () => (await artifactState()).canvasDocuments,
+  libraryItems: libraryItemsByKey,
   loadItems: (ctx) => loadFileSearchRows(ctx.sessions),
 }
 
 const offPhone = (ctx: GlobalSearchContext) => ctx.platform !== "mobile"
 
 export function createFilesArtifactsProvider(
-  deps: Pick<FilesProviderDeps, "artifacts"> = defaultDeps
+  deps: Pick<FilesProviderDeps, "artifacts"> &
+    Partial<Pick<FilesProviderDeps, "libraryItems">> = defaultDeps
 ) {
   return createListProvider<Artifact>({
     id: FILES_ARTIFACTS_PROVIDER_ID,
     kind: "artifact",
-    load: async (ctx) => (offPhone(ctx) ? Object.values(await deps.artifacts()) : []),
+    load: async (ctx) => {
+      if (!offPhone(ctx)) return []
+      const [artifacts, items] = await Promise.all([
+        deps.artifacts(),
+        (deps.libraryItems ?? libraryItemsByKey)(),
+      ])
+      return asFilesShows(Object.values(artifacts), (a) => libraryItemKey("artifact", a.id), items)
+    },
     getTitle: (a) => a.title,
     getSecondary: (a) => (a.language ? `${a.type} · ${a.language}` : a.type),
     getTimestamp: (a) => toMillis(a.updatedAt),
@@ -148,12 +198,20 @@ export function createFilesArtifactsProvider(
 }
 
 export function createFilesCanvasProvider(
-  deps: Pick<FilesProviderDeps, "canvasDocuments"> = defaultDeps
+  deps: Pick<FilesProviderDeps, "canvasDocuments"> &
+    Partial<Pick<FilesProviderDeps, "libraryItems">> = defaultDeps
 ) {
   return createListProvider<CanvasDocument>({
     id: FILES_CANVAS_PROVIDER_ID,
     kind: "canvas-document",
-    load: async (ctx) => (offPhone(ctx) ? Object.values(await deps.canvasDocuments()) : []),
+    load: async (ctx) => {
+      if (!offPhone(ctx)) return []
+      const [documents, items] = await Promise.all([
+        deps.canvasDocuments(),
+        (deps.libraryItems ?? libraryItemsByKey)(),
+      ])
+      return asFilesShows(Object.values(documents), (d) => libraryItemKey("canvas", d.id), items)
+    },
     getTitle: (d) => d.title,
     getSecondary: (d) => d.language,
     getTimestamp: (d) => toMillis(d.updatedAt),

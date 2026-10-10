@@ -15,6 +15,7 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     kind: "artifact",
     sourceId: "a",
     title: "Parser",
+    sourceTitle: "Parser",
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -22,6 +23,8 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...overrides,
   }

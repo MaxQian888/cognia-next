@@ -40,6 +40,7 @@ function entry(overrides: Partial<FilesEntry>): FilesEntry {
     kind: "upload",
     sourceId: "u1",
     title: "notes.md",
+    sourceTitle: "notes.md",
     mediaType: "text/markdown",
     byteSize: 12,
     projectIds: [],
@@ -49,6 +50,8 @@ function entry(overrides: Partial<FilesEntry>): FilesEntry {
     updatedAt: 2,
     ownedByFiles: true,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...overrides,
   }

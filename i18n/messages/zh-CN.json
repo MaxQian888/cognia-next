@@ -38124,6 +38124,7 @@
       "conversation-auto-archive": "对话自动归档",
       "custom": "自定义",
       "external-agent": "外部代理 (ACP)",
+      "files-trash-purge": "文件回收站清理",
       "github-issue-sync": "GitHub Issue 同步",
       "goal": "目标",
       "im-push": "IM 推送",
@@ -45420,6 +45421,12 @@
           "importBody": "恢复你的自定义主题列表。",
           "importTitle": "导入自定义主题",
           "title": "自定义主题"
+        },
+        "documentTemplates": {
+          "body": "从文件页或画布文档保存的文档模板。",
+          "importBody": "添加或替换已保存的文档模板，内置模板不受影响。",
+          "importTitle": "导入文档模板",
+          "title": "文档模板"
         },
         "exportRow": "导出",
         "externalAgents": {

@@ -518,6 +518,7 @@ export async function runArtifactBuiltinTool(
           content: typeof args.content === "string" ? args.content : "",
           language,
           type: args.type === "text" ? "text" : "code",
+          createdBy: "agent",
         })
         const doc = store.canvasDocuments[documentId]
         return {

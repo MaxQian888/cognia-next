@@ -278,6 +278,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
         content: options.content,
         language: options.language,
         type: options.type,
+        createdBy: "agent",
       })
       logger.info(`Created canvas document: ${id}`)
       return id

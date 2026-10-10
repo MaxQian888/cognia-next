@@ -13,6 +13,7 @@ const entry: FilesEntry = {
   kind: "upload",
   sourceId: "u1",
   title: "notes.md",
+  sourceTitle: "notes.md",
   projectIds: [],
   sessionIds: [],
   originAlive: true,
@@ -20,6 +21,8 @@ const entry: FilesEntry = {
   updatedAt: 1,
   ownedByFiles: true,
   hidden: false,
+  sharedWithMe: false,
+  creator: "user",
   searchText: "",
 }
 

@@ -100,48 +100,77 @@ async function syncPin(db: Db, row: LibraryItemRow): Promise<string[]> {
   return released
 }
 
-async function mutateItem(
+/** One item's read-modify-write inside the caller's transaction. */
+async function mutateRow(
+  db: Db,
   source: LibraryItemSource,
+  mutate: (row: LibraryItemRow, now: number) => LibraryItemRow,
+  now: number
+): Promise<{ stored: LibraryItemRow; released: string[] }> {
+  const key = libraryItemKey(source.kind, source.sourceId)
+  const existing = await db.libraryItems.get(key)
+  const base: LibraryItemRow = existing ?? {
+    key,
+    kind: source.kind,
+    sourceId: source.sourceId,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const merged: LibraryItemRow = {
+    ...base,
+    originSessionId: source.originSessionId ?? base.originSessionId,
+    projectId: source.projectId ?? base.projectId,
+    mediaHash: source.mediaHash ?? base.mediaHash,
+    snapshot: source.snapshot ?? base.snapshot,
+  }
+  const wasKept = existing ? isLibraryItemKept(existing) : false
+  const next = mutate(merged, now)
+  next.updatedAt = now
+  if (isLibraryItemKept(next)) next.keptAt = wasKept ? (next.keptAt ?? now) : now
+  else next.keptAt = undefined
+  const released = await syncPin(db, next)
+  const stored = compact(next)
+  await db.libraryItems.put(stored)
+  return { stored, released }
+}
+
+/**
+ * Apply one mutation to many items in ONE transaction, so a bulk action
+ * either lands on every selected item or on none of them.
+ */
+async function mutateItems(
+  sources: readonly LibraryItemSource[],
   mutate: (row: LibraryItemRow, now: number) => LibraryItemRow
-): Promise<LibraryItemRow> {
+): Promise<LibraryItemRow[]> {
+  if (sources.length === 0) return []
   const db = getDb()
-  let released: string[] = []
+  const released: string[] = []
   const result = await db.transaction(
     "rw",
     db.libraryItems,
     db.messageMediaRefs,
     db.messageMedia,
     async () => {
-      const key = libraryItemKey(source.kind, source.sourceId)
       const now = Date.now()
-      const existing = await db.libraryItems.get(key)
-      const base: LibraryItemRow = existing ?? {
-        key,
-        kind: source.kind,
-        sourceId: source.sourceId,
-        createdAt: now,
-        updatedAt: now,
+      const rows: LibraryItemRow[] = []
+      for (const source of sources) {
+        const outcome = await mutateRow(db, source, mutate, now)
+        rows.push(outcome.stored)
+        released.push(...outcome.released)
       }
-      const merged: LibraryItemRow = {
-        ...base,
-        originSessionId: source.originSessionId ?? base.originSessionId,
-        projectId: source.projectId ?? base.projectId,
-        mediaHash: source.mediaHash ?? base.mediaHash,
-        snapshot: source.snapshot ?? base.snapshot,
-      }
-      const wasKept = existing ? isLibraryItemKept(existing) : false
-      const next = mutate(merged, now)
-      next.updatedAt = now
-      if (isLibraryItemKept(next)) next.keptAt = wasKept ? (next.keptAt ?? now) : now
-      else next.keptAt = undefined
-      released = await syncPin(db, next)
-      const stored = compact(next)
-      await db.libraryItems.put(stored)
-      return stored
+      return rows
     }
   )
   if (released.length > 0) await collectUnreferencedMessageMedia(released)
   return result
+}
+
+async function mutateItem(
+  source: LibraryItemSource,
+  mutate: (row: LibraryItemRow, now: number) => LibraryItemRow
+): Promise<LibraryItemRow> {
+  const [row] = await mutateItems([source], mutate)
+  return row!
 }
 
 export async function getLibraryItem(key: string): Promise<LibraryItemRow | undefined> {
@@ -158,12 +187,21 @@ export async function touchLibraryItemOpened(source: LibraryItemSource): Promise
   return mutateItem(source, (row, now) => ({ ...row, lastOpenedAt: now }))
 }
 
-/** Favoriting also brings a removed item back. */
+/** Favoriting also brings a removed item back. A trashed item stays in the Trash. */
 export async function setLibraryItemFavorite(
   source: LibraryItemSource,
   favorite: boolean
 ): Promise<LibraryItemRow> {
-  return mutateItem(source, (row, now) => ({
+  const [row] = await setLibraryItemsFavorite([source], favorite)
+  return row!
+}
+
+/** `setLibraryItemFavorite` over a selection, in one transaction. */
+export async function setLibraryItemsFavorite(
+  sources: readonly LibraryItemSource[],
+  favorite: boolean
+): Promise<LibraryItemRow[]> {
+  return mutateItems(sources, (row, now) => ({
     ...row,
     favoritedAt: favorite ? (row.favoritedAt ?? now) : undefined,
     hiddenAt: favorite ? undefined : row.hiddenAt,
@@ -175,16 +213,124 @@ export async function setLibraryItemFolder(
   source: LibraryItemSource,
   folderId: string | null
 ): Promise<LibraryItemRow> {
+  const [row] = await setLibraryItemsFolder([source], folderId)
+  return row!
+}
+
+/** `setLibraryItemFolder` over a selection, in one transaction. */
+export async function setLibraryItemsFolder(
+  sources: readonly LibraryItemSource[],
+  folderId: string | null
+): Promise<LibraryItemRow[]> {
   if (folderId !== null && folderId !== ROOT_LIBRARY_FOLDER_ID) {
     if (!(await getDb().libraryFolders.get(folderId))) {
       throw new LibraryItemError("library_item_not_found")
     }
   }
-  return mutateItem(source, (row) => ({
+  return mutateItems(sources, (row) => ({
     ...row,
     folderId: folderId ?? undefined,
     hiddenAt: folderId === null ? row.hiddenAt : undefined,
   }))
+}
+
+/**
+ * Move items to the Files Trash (ADR-0223). Favorite and folder are kept so a
+ * restore puts each item back where it was, and the item stays kept — its
+ * bytes stay pinned — until it is restored or purged.
+ */
+export async function trashLibraryItems(
+  sources: readonly LibraryItemSource[]
+): Promise<LibraryItemRow[]> {
+  return mutateItems(sources, (row, now) => ({
+    ...row,
+    trashedAt: row.trashedAt ?? now,
+    hiddenAt: undefined,
+  }))
+}
+
+/** A trashed item to restore, with whether its source conversation still exists. */
+export interface LibraryItemRestoreSource extends LibraryItemSource {
+  /**
+   * False when nothing outside Files holds the item any more. Such an item
+   * would vanish (and lose its bytes) the moment the Trash let go of it, so it
+   * is filed at the root of Folders instead, where it stays kept.
+   */
+  originAlive: boolean
+}
+
+/** Take items out of the Trash, back to their favorite and folder. */
+export async function restoreLibraryItems(
+  sources: readonly LibraryItemRestoreSource[]
+): Promise<LibraryItemRow[]> {
+  const alive = new Map(
+    sources.map((source) => [libraryItemKey(source.kind, source.sourceId), source.originAlive])
+  )
+  return mutateItems(sources, (row) => {
+    const next: LibraryItemRow = { ...row, trashedAt: undefined }
+    if (!alive.get(row.key) && !isLibraryItemKept(next)) next.folderId = ROOT_LIBRARY_FOLDER_ID
+    return next
+  })
+}
+
+/**
+ * End a trashed item whose source still lives in a conversation: it leaves
+ * the Trash as "removed from Files" (`hiddenAt`), its favorite and folder go,
+ * and the source itself is untouched. The purge's answer for every kind Files
+ * does not own while that source is alive.
+ */
+export async function retireTrashedLibraryItems(
+  sources: readonly LibraryItemSource[]
+): Promise<LibraryItemRow[]> {
+  return mutateItems(sources, (row, now) => ({
+    ...row,
+    trashedAt: undefined,
+    favoritedAt: undefined,
+    folderId: undefined,
+    hiddenAt: now,
+  }))
+}
+
+/**
+ * Drop item rows and their pins outright. For a trashed item nothing else
+ * holds any more: once the pin goes, media GC takes bytes nobody references.
+ * Never used on a Files-owned upload — `deleteOwnedLibraryItem` is its delete.
+ */
+export async function deleteLibraryItemRows(keys: readonly string[]): Promise<void> {
+  if (keys.length === 0) return
+  const db = getDb()
+  const released = await db.transaction("rw", db.libraryItems, db.messageMediaRefs, async () => {
+    const rows = (await db.libraryItems.bulkGet([...keys])).filter(
+      (row): row is LibraryItemRow => row !== undefined
+    )
+    if (rows.some((row) => row.ownedByFiles)) throw new LibraryItemError("library_item_owned")
+    const owners = rows.map((row) => libraryPinOwner(row.key))
+    const refs = owners.length
+      ? await db.messageMediaRefs.where("messageId").anyOf(owners).toArray()
+      : []
+    for (const ref of refs) await db.messageMediaRefs.delete([ref.messageId, ref.hash])
+    await db.libraryItems.bulkDelete(rows.map((row) => row.key))
+    return refs.map((ref) => ref.hash)
+  })
+  if (released.length > 0) await collectUnreferencedMessageMedia(released, { graceMs: 0 })
+}
+
+/** Trashed rows whose `trashedAt` is at or before `cutoff`, via the index. */
+export async function listTrashedLibraryItemsBefore(cutoff: number): Promise<LibraryItemRow[]> {
+  return getDb().libraryItems.where("trashedAt").belowOrEqual(cutoff).toArray()
+}
+
+/**
+ * Show `name` in Files instead of the source's title; `null` (or a blank
+ * name) goes back to the source's title. For kinds Files must not rename at
+ * the source — see `LibraryItemRow.displayName`.
+ */
+export async function setLibraryItemDisplayName(
+  source: LibraryItemSource,
+  name: string | null
+): Promise<LibraryItemRow> {
+  const trimmed = name?.trim()
+  return mutateItem(source, (row) => ({ ...row, displayName: trimmed || undefined }))
 }
 
 /**

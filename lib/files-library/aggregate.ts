@@ -15,6 +15,13 @@
  *     (prompt, provider, model), not a card of its own. It is kept, moved and
  *     deleted as that upload. Once the job row is gone (it goes with its
  *     conversation), the record comes from the copy on the item's snapshot.
+ *
+ * Files metadata folded onto every card (ADR-0223):
+ *   - A trashed item (`trashedAt`) is never "hidden" and never revives; only
+ *     the Trash section shows it.
+ *   - A `displayName` replaces the source's title; `sourceTitle` keeps it.
+ *   - `creator` splits "Mine" from "AI-generated"; `sharedWithMe` marks items
+ *     whose conversation is a collaboration session someone else shared.
  */
 
 import {
@@ -23,7 +30,7 @@ import {
   type LibraryItemKind,
   type LibraryItemRow,
 } from "@/lib/db/files-library-types"
-import type { FilesEntry, FilesGeneratedVideo } from "./types"
+import type { FilesCreator, FilesEntry, FilesGeneratedVideo } from "./types"
 
 /** Characters of body text kept for search and for a kept item's snapshot. */
 export const FILES_BODY_EXCERPT_CHARS = 20_000
@@ -42,6 +49,7 @@ export interface RawArtifact {
   createdAt: number
   updatedAt: number
   lastAccessedAt?: number
+  creator: FilesCreator
 }
 
 export interface RawCanvas {
@@ -54,6 +62,7 @@ export interface RawCanvas {
   type: string
   createdAt: number
   updatedAt: number
+  creator: FilesCreator
 }
 
 export interface RawImage {
@@ -63,6 +72,8 @@ export interface RawImage {
   createdAt: number
   /** Real conversations whose messages reference the hash. */
   sessionIds: string[]
+  /** Who posted the earliest message that shows the image. */
+  creator: FilesCreator
 }
 
 export interface RawUpload {
@@ -93,10 +104,18 @@ export interface FilesAggregateInput {
   libraryUploads: RawUpload[]
   generatedVideos: RawGeneratedVideo[]
   items: LibraryItemRow[]
-  /** Live conversations referenced by any source, with their workspace. */
-  sessions: ReadonlyMap<string, { projectId?: string }>
+  /** Live conversations referenced by any source. */
+  sessions: ReadonlyMap<string, FilesSessionInfo>
   /** `original:<sha>` keys still held in `messageMedia` for kept uploads. */
   heldOriginals: ReadonlySet<string>
+}
+
+/** What Files shows about a live conversation an item belongs to. */
+export interface FilesSessionInfo {
+  projectId?: string
+  title?: string
+  /** A collaboration session somebody else shared with this account. */
+  sharedWithMe?: boolean
 }
 
 export function originalMediaKey(contentHash: string): string {
@@ -105,6 +124,22 @@ export function originalMediaKey(contentHash: string): string {
 
 export function isImageMediaType(mediaType: string | undefined): boolean {
   return typeof mediaType === "string" && mediaType.toLowerCase().startsWith("image/")
+}
+
+/**
+ * "Removed from Files": hidden until the source changes after the removal.
+ * A trashed item is not hidden — it is in the Trash, which is its own place.
+ * The one rule Files and ⌘K both apply.
+ */
+export function isItemHidden(
+  item: Pick<LibraryItemRow, "hiddenAt" | "trashedAt"> | undefined,
+  sourceUpdatedAt: number
+): boolean {
+  return (
+    item?.trashedAt === undefined &&
+    item?.hiddenAt !== undefined &&
+    item.hiddenAt >= sourceUpdatedAt
+  )
 }
 
 /** Newest of "last opened" and "last changed" — the Recent ordering. */
@@ -134,24 +169,47 @@ function maxDefined(...values: Array<number | undefined>): number | undefined {
   return defined.length > 0 ? Math.max(...defined) : undefined
 }
 
+type EntryBase = Omit<
+  FilesEntry,
+  | "favoritedAt"
+  | "folderId"
+  | "hidden"
+  | "ownedByFiles"
+  | "lastAccessedAt"
+  | "sourceTitle"
+  | "trashedAt"
+  | "sharedWithMe"
+  | "originSessionTitle"
+> & { lastAccessedAt?: number; ownedByFiles?: boolean }
+
 function withItem(
-  base: Omit<
-    FilesEntry,
-    "favoritedAt" | "folderId" | "hidden" | "ownedByFiles" | "lastAccessedAt"
-  > & { lastAccessedAt?: number; ownedByFiles?: boolean },
-  item: LibraryItemRow | undefined
+  base: EntryBase,
+  item: LibraryItemRow | undefined,
+  sessions: FilesAggregateInput["sessions"]
 ): FilesEntry {
   const projectIds = unique([...base.projectIds, item?.projectId])
+  const originSessionId = base.originSessionId ?? item?.originSessionId
+  const originSession = originSessionId ? sessions.get(originSessionId) : undefined
+  const displayName = item?.displayName?.trim()
   return {
     ...base,
+    title: displayName || base.title,
+    sourceTitle: base.title,
+    // A renamed item is found by its new name as well as its old one.
+    searchText: displayName ? `${displayName.toLowerCase()}\n${base.searchText}` : base.searchText,
     projectIds,
-    originSessionId: base.originSessionId ?? item?.originSessionId,
+    originSessionId,
+    ...(originSession?.title ? { originSessionTitle: originSession.title } : {}),
+    sharedWithMe: [originSessionId, ...base.sessionIds].some(
+      (id) => id !== undefined && sessions.get(id)?.sharedWithMe === true
+    ),
     ownedByFiles: base.ownedByFiles ?? item?.ownedByFiles === true,
     lastAccessedAt: maxDefined(base.lastAccessedAt, item?.lastOpenedAt),
     ...(item?.favoritedAt !== undefined ? { favoritedAt: item.favoritedAt } : {}),
     ...(item?.folderId !== undefined ? { folderId: item.folderId } : {}),
+    ...(item?.trashedAt !== undefined ? { trashedAt: item.trashedAt } : {}),
     // A removed item comes back once its source changes after the removal.
-    hidden: item?.hiddenAt !== undefined && item.hiddenAt >= base.updatedAt,
+    hidden: isItemHidden(item, base.updatedAt),
   }
 }
 
@@ -206,9 +264,11 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           ...(artifact.lastAccessedAt !== undefined
             ? { lastAccessedAt: artifact.lastAccessedAt }
             : {}),
+          creator: artifact.creator,
           searchText: haystack(artifact.title, artifact.type, artifact.language, artifact.content),
         },
-        itemFor("artifact", artifact.id)
+        itemFor("artifact", artifact.id),
+        input.sessions
       )
     )
   }
@@ -235,9 +295,11 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           originAlive: alive,
           createdAt: canvas.createdAt,
           updatedAt: canvas.updatedAt,
+          creator: canvas.creator,
           searchText: haystack(canvas.title, canvas.type, canvas.language, canvas.content),
         },
-        itemFor("canvas", canvas.id)
+        itemFor("canvas", canvas.id),
+        input.sessions
       )
     )
   }
@@ -263,9 +325,11 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           createdAt: image.createdAt,
           updatedAt: image.createdAt,
           mediaHash: image.hash,
+          creator: image.creator,
           searchText: haystack(item?.snapshot?.title, image.mediaType),
         },
-        item
+        item,
+        input.sessions
       )
     )
   }
@@ -301,8 +365,10 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
           generated?.modelId,
           upload.extractedText
         ),
+        creator: generated ? "ai" : "user",
       },
-      item
+      item,
+      input.sessions
     )
     entries.push(entry)
     libraryByHash.set(upload.contentHash, entry)
@@ -368,8 +434,10 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
             generated?.modelId,
             newest.extractedText
           ),
+          creator: generated ? "ai" : "user",
         },
-        item
+        item,
+        input.sessions
       )
     )
   }
@@ -405,8 +473,10 @@ export function aggregateFilesEntries(input: FilesAggregateInput): FilesEntry[] 
             snapshot?.generated?.modelId,
             snapshot?.extractedText
           ),
+          creator: snapshot?.generated ? "ai" : "user",
         },
-        item
+        item,
+        input.sessions
       )
     )
   }

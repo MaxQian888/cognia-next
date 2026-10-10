@@ -81,6 +81,7 @@ function seedDocument(id: string) {
     const create = useArtifactStore.getState().createCanvasDocument
     const setActive = useArtifactStore.getState().setActiveCanvas
     const docId = create({
+      createdBy: "user",
       title: "Doc",
       content: "",
       language: "markdown",

@@ -30,7 +30,9 @@ import {
   type RawGeneratedVideo,
   type RawImage,
   type RawUpload,
+  type FilesSessionInfo,
 } from "./aggregate"
+import type { FilesCreator } from "./types"
 
 /** Images read per load; the page asks for more as the user scrolls. */
 export const FILES_IMAGE_PAGE_SIZE = 500
@@ -39,6 +41,41 @@ function toMillis(value: Date | string | number | undefined): number | undefined
   if (value === undefined) return undefined
   const ms = value instanceof Date ? value.getTime() : new Date(value).getTime()
   return Number.isFinite(ms) ? ms : undefined
+}
+
+/**
+ * Who made an artifact. Every artifact is cut from a conversation's output —
+ * a tool call, an auto-detected block, or a block the person promoted with
+ * "Create artifact" — so it reads as AI-made, unless it never came from a
+ * conversation (a standalone one) or the person derived it from their own
+ * canvas document.
+ */
+export function artifactCreator(artifact: Pick<Artifact, "sessionId" | "metadata">): FilesCreator {
+  if (artifact.sessionId === STANDALONE_CANVAS_SESSION_ID) return "user"
+  return artifact.metadata?.derivedFromCanvasDocumentId ? "user" : "ai"
+}
+
+/**
+ * Who made a canvas document. `createdBy` when recorded; a document from
+ * before that field existed reads as the person's when it was made outside a
+ * conversation or from an editor (`authoringOrigin`), and as an agent's
+ * otherwise — the only other way a document got made was the canvas tool.
+ */
+export function canvasCreator(
+  doc: Pick<CanvasDocument, "sessionId" | "createdBy" | "authoringOrigin">
+): FilesCreator {
+  if (doc.createdBy) return doc.createdBy === "user" ? "user" : "ai"
+  if (doc.sessionId === STANDALONE_CANVAS_SESSION_ID || doc.authoringOrigin) return "user"
+  return "ai"
+}
+
+/**
+ * A conversation somebody else shared into this account: the projection
+ * `lib/collab/shared-chat-sync.ts` writes under a `shared:` id. A session the
+ * account itself converted to shared keeps its own id, so it stays "mine".
+ */
+export function isSharedWithMe(session: { id: string; collaboration?: unknown }): boolean {
+  return session.collaboration !== undefined && session.id.startsWith("shared:")
 }
 
 export function rawArtifacts(artifacts: Record<string, Artifact>): RawArtifact[] {
@@ -55,6 +92,7 @@ export function rawArtifacts(artifacts: Record<string, Artifact>): RawArtifact[]
     ...(artifact.metadata?.lastAccessedAt
       ? { lastAccessedAt: toMillis(artifact.metadata.lastAccessedAt) }
       : {}),
+    creator: artifactCreator(artifact),
   }))
 }
 
@@ -69,6 +107,7 @@ export function rawCanvases(documents: Record<string, CanvasDocument>): RawCanva
     type: doc.type,
     createdAt: toMillis(doc.createdAt) ?? 0,
     updatedAt: toMillis(doc.updatedAt) ?? 0,
+    creator: canvasCreator(doc),
   }))
 }
 
@@ -120,6 +159,43 @@ function rawUpload(asset: ListedSessionAsset): RawUpload {
   }
 }
 
+/**
+ * Who posted each image, by content hash. The answer cannot change once known
+ * (it is the role of a message that already exists), so it is remembered for
+ * the life of the page instead of re-reading messages on every live refresh.
+ */
+const imageCreatorCache = new Map<string, FilesCreator>()
+
+/** Test seam: forget remembered image creators. */
+export function resetImageCreatorCache(): void {
+  imageCreatorCache.clear()
+}
+
+/**
+ * The role of one message that shows each hash: `user` for an image the person
+ * attached, `ai` for one an assistant or tool produced. A hash shown only by
+ * messages that are gone (or never shown by one) reads as the person's — the
+ * only way such an image exists is an upload straight into Files.
+ */
+async function imageCreators(
+  db: ReturnType<typeof getDb>,
+  firstMessageByHash: ReadonlyMap<string, string>
+): Promise<Map<string, FilesCreator>> {
+  const unknown = [...firstMessageByHash].filter(([hash]) => !imageCreatorCache.has(hash))
+  if (unknown.length > 0) {
+    const messages = await db.messages.bulkGet(unknown.map(([, messageId]) => messageId))
+    unknown.forEach(([hash], index) => {
+      const role = messages[index]?.role
+      if (role !== undefined) imageCreatorCache.set(hash, role === "user" ? "user" : "ai")
+    })
+  }
+  const out = new Map<string, FilesCreator>()
+  for (const hash of firstMessageByHash.keys()) {
+    out.set(hash, imageCreatorCache.get(hash) ?? "user")
+  }
+  return out
+}
+
 async function describeImages(
   rows: Array<{ hash: string; mediaType: string; byteSize: number; createdAt: number }>
 ): Promise<RawImage[]> {
@@ -127,18 +203,24 @@ async function describeImages(
   const hashes = rows.map((row) => row.hash)
   const refs = hashes.length ? await db.messageMediaRefs.where("hash").anyOf(hashes).toArray() : []
   const sessionsByHash = new Map<string, Set<string>>()
+  const firstMessageByHash = new Map<string, string>()
   for (const ref of refs) {
     if (ref.sessionId === LIBRARY_REF_SESSION_ID) continue
     const set = sessionsByHash.get(ref.hash) ?? new Set<string>()
     set.add(ref.sessionId)
     sessionsByHash.set(ref.hash, set)
+    if (ref.sessionAsset === undefined && !firstMessageByHash.has(ref.hash)) {
+      firstMessageByHash.set(ref.hash, ref.messageId)
+    }
   }
+  const creators = await imageCreators(db, firstMessageByHash)
   return rows.map((row) => ({
     hash: row.hash,
     mediaType: row.mediaType,
     byteSize: row.byteSize,
     createdAt: row.createdAt,
     sessionIds: [...(sessionsByHash.get(row.hash) ?? [])],
+    creator: creators.get(row.hash) ?? "user",
   }))
 }
 
@@ -203,10 +285,14 @@ export async function loadFilesSources(options: {
   }
   for (const image of images) for (const id of image.sessionIds) sessionIds.add(id)
   for (const asset of sessionAssets) sessionIds.add(asset.sessionId)
-  const sessions = new Map(
+  const sessions = new Map<string, FilesSessionInfo>(
     (await getSessionsByIds([...sessionIds])).map((session) => [
       session.id,
-      session.projectId ? { projectId: session.projectId } : {},
+      {
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+        ...(session.title ? { title: session.title } : {}),
+        ...(isSharedWithMe(session) ? { sharedWithMe: true } : {}),
+      },
     ])
   )
   const keptUploadKeys = items

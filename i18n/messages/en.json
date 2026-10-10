@@ -38124,6 +38124,7 @@
       "conversation-auto-archive": "Conversation Auto-archive",
       "custom": "Custom",
       "external-agent": "External Agent (ACP)",
+      "files-trash-purge": "Files Trash Purge",
       "github-issue-sync": "GitHub Issue Sync",
       "goal": "Goal",
       "im-push": "IM Push",
@@ -45420,6 +45421,12 @@
           "importBody": "Restore your custom theme list.",
           "importTitle": "Import custom themes",
           "title": "Custom themes"
+        },
+        "documentTemplates": {
+          "body": "Document templates you saved from Files or a canvas document.",
+          "importBody": "Add or replace your saved document templates. Built-in templates are not affected.",
+          "importTitle": "Import document templates",
+          "title": "Document templates"
         },
         "exportRow": "Export",
         "externalAgents": {

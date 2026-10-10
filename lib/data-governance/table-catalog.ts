@@ -157,6 +157,7 @@ export const CORE_TABLE_NAMES = [
   "conversationLabels",
   "conversationOverrides",
   "deploymentProfiles",
+  "documentTemplates",
   "evalAdjudications",
   "evalAssets",
   "evalCases",
@@ -494,6 +495,9 @@ export const PORTABLE_BACKUP_BINDINGS = {
   // user did by hand; the pinned bytes travel with them in the media section.
   libraryItems: "libraryItems",
   libraryFolders: "libraryFolders",
+  // Document templates the person saved (ADR-0223): authored prose under a
+  // name, portable for the same reason as `chatTemplates`.
+  documentTemplates: "documentTemplates",
   // Settled video-generation jobs (ADR-0205): the record of what was asked
   // for and where the video landed, which the Files page lists. In-flight
   // jobs are filtered out at export (`isPortableVideoJob`).
@@ -1081,6 +1085,8 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   // its source conversation. Content, not counters.
   "libraryItems",
   "libraryFolders",
+  // A saved document template is a document body the person wrote (ADR-0223).
+  "documentTemplates",
   // A video job keeps the prompt the user (or an agent for them) wrote.
   "mediaGenerationJobs",
   "canvasComments",
@@ -1254,6 +1260,7 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   messageMediaRefs: "chat",
   libraryItems: "artifact",
   libraryFolders: "artifact",
+  documentTemplates: "artifact",
   // Job rows are small; the videos themselves are session assets in `chat`.
   mediaGenerationJobs: "chat",
   chatTranscriptIndexState: "chat",

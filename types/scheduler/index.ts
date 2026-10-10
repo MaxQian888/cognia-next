@@ -102,6 +102,11 @@ export type ScheduledTaskType =
   // scheduler init and executed by `lib/chat/auto-archive-schedule.ts`; a
   // paired client whose Host owns the sessions skips it.
   | "conversation-auto-archive"
+  // Ends Files Trash items older than the retention window (ADR-0223).
+  // Installed at scheduler init and executed by
+  // `lib/files-library/trash-purge-schedule.ts`; a paired client whose Host
+  // owns the data skips it.
+  | "files-trash-purge"
 
 // Task execution status
 export type TaskExecutionStatus =

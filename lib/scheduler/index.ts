@@ -143,6 +143,9 @@ export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promi
   const { installConversationAutoArchiveSchedule } =
     await import("@/lib/chat/auto-archive-schedule")
   await installConversationAutoArchiveSchedule()
+  const { installFilesTrashPurgeSchedule } =
+    await import("@/lib/files-library/trash-purge-schedule")
+  await installFilesTrashPurgeSchedule()
   log.info("[Scheduler] Scheduler system initialized")
 }
 

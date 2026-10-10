@@ -10,8 +10,10 @@ import {
   listLibraryFolders,
   moveLibraryFolder,
   renameLibraryFolder,
+  setLibraryFolderStyle,
   updateLibraryFolder,
 } from "./files-library-folders"
+import type { LibraryFolderColor } from "./files-library-types"
 import {
   getLibraryItem,
   libraryPinOwner,
@@ -75,6 +77,26 @@ describe("folder CRUD", () => {
     })
     await updateLibraryFolder(child.id, { icon: "star" })
     expect((await getLibraryFolder(child.id))?.icon).toBe("star")
+  })
+
+  it("sets, keeps and clears a folder's color and icon, refusing unknown values", async () => {
+    const folder = await createLibraryFolder({ name: "Tinted", color: "blue", icon: "book" })
+    expect(folder).toMatchObject({ color: "blue", icon: "book" })
+    await setLibraryFolderStyle(folder.id, { color: "green" })
+    expect(await getLibraryFolder(folder.id)).toMatchObject({ color: "green", icon: "book" })
+    await setLibraryFolderStyle(folder.id, { icon: null })
+    const cleared = await getLibraryFolder(folder.id)
+    expect(cleared).toMatchObject({ color: "green" })
+    expect(cleared?.icon).toBeUndefined()
+    await expect(
+      setLibraryFolderStyle(folder.id, { color: "#123456" as LibraryFolderColor })
+    ).rejects.toMatchObject({ code: "library_folder_style_invalid" })
+    await expect(
+      createLibraryFolder({ name: "Bad", color: "neon" as LibraryFolderColor })
+    ).rejects.toMatchObject({ code: "library_folder_style_invalid" })
+    await expect(setLibraryFolderStyle("lbf_missing", { color: "red" })).rejects.toMatchObject({
+      code: "library_folder_not_found",
+    })
   })
 
   it("moves with cycle guards and walks paths", async () => {

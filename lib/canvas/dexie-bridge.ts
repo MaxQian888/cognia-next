@@ -115,6 +115,7 @@ function docToRow(doc: CanvasDocument, pendingReview?: CanvasPendingReview): Can
     sourceArtifactId: doc.sourceArtifactId,
     returnContext: doc.returnContext,
     authoringOrigin: doc.authoringOrigin,
+    ...(doc.createdBy ? { createdBy: doc.createdBy } : {}),
     aiWorkbench: doc.aiWorkbench,
     ...(pendingReview ? { pendingReview } : {}),
   }
@@ -316,6 +317,7 @@ async function hydrateFromDexie(): Promise<void> {
       sourceArtifactId: row.sourceArtifactId,
       returnContext: row.returnContext,
       authoringOrigin: row.authoringOrigin,
+      ...(row.createdBy ? { createdBy: row.createdBy } : {}),
       aiWorkbench: row.aiWorkbench,
       versions: (versionsByDoc.get(row.id) ?? []).sort(
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime()

@@ -3,6 +3,7 @@ import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import {
   clearLibraryData,
+  deleteLibraryItemRows,
   deleteLibraryItemsForProject,
   deleteOwnedLibraryItem,
   getLibraryItem,
@@ -12,10 +13,17 @@ import {
   listKeptSourceIdsForSession,
   listLibraryItems,
   preserveGeneratedVideoRecords,
+  listTrashedLibraryItemsBefore,
   reconcileLibraryPins,
+  restoreLibraryItems,
+  retireTrashedLibraryItems,
+  setLibraryItemDisplayName,
   setLibraryItemFavorite,
   setLibraryItemFolder,
+  setLibraryItemsFavorite,
+  setLibraryItemsFolder,
   touchLibraryItemOpened,
+  trashLibraryItems,
 } from "./files-library-items"
 import { createLibraryFolder } from "./files-library-folders"
 import { ROOT_LIBRARY_FOLDER_ID } from "./files-library-types"
@@ -357,5 +365,121 @@ describe("project cascade and full clear", () => {
     expect(await getDb().libraryItems.count()).toBe(0)
     expect(await getDb().libraryFolders.count()).toBe(0)
     expect(await pins()).toEqual([])
+  })
+})
+
+describe("Trash (ADR-0223)", () => {
+  const second = { kind: "image" as const, sourceId: "h2", originSessionId: "s2", mediaHash: "h2" }
+
+  beforeEach(async () => {
+    await getDb().messageMedia.bulkPut([media("h1"), media("h2")])
+    await getDb().messageMediaRefs.bulkPut([
+      { messageId: "m1", sessionId: "s1", hash: "h1" },
+      { messageId: "m2", sessionId: "s2", hash: "h2" },
+    ])
+  })
+
+  it("trashes keeping favorite and folder, and holds the bytes through a conversation purge", async () => {
+    const folder = await createLibraryFolder({ name: "Specs" })
+    await setLibraryItemFolder(image, folder.id)
+    await setLibraryItemFavorite(image, true)
+    const [trashed] = await trashLibraryItems([image])
+    expect(trashed).toMatchObject({ folderId: folder.id, trashedAt: expect.any(Number) })
+    expect(trashed!.favoritedAt).toEqual(expect.any(Number))
+    expect(trashed!.hiddenAt).toBeUndefined()
+
+    await bulkDeleteSessions(["s1"])
+    expect(await getDb().messageMedia.get("h1")).toBeDefined()
+
+    const [restored] = await restoreLibraryItems([{ ...image, originAlive: false }])
+    expect(restored!.trashedAt).toBeUndefined()
+    expect(restored).toMatchObject({ folderId: folder.id })
+  })
+
+  it("keeps an item that is kept only by the Trash, then files it at the root on restore", async () => {
+    await trashLibraryItems([image])
+    expect(await pins()).toHaveLength(1)
+    await bulkDeleteSessions(["s1"])
+    expect(await getDb().messageMedia.get("h1")).toBeDefined()
+
+    const [restored] = await restoreLibraryItems([{ ...image, originAlive: false }])
+    expect(restored).toMatchObject({ folderId: ROOT_LIBRARY_FOLDER_ID })
+    expect(await pins()).toHaveLength(1)
+  })
+
+  it("restores an item whose conversation is alive without filing it anywhere", async () => {
+    await trashLibraryItems([image])
+    const [restored] = await restoreLibraryItems([{ ...image, originAlive: true }])
+    expect(restored!.folderId).toBeUndefined()
+    expect(restored!.keptAt).toBeUndefined()
+    expect(await pins()).toEqual([])
+  })
+
+  it("retires a trashed item as removed from Files and lets the pin go", async () => {
+    await setLibraryItemFavorite(image, true)
+    await trashLibraryItems([image])
+    const [retired] = await retireTrashedLibraryItems([image])
+    expect(retired).toMatchObject({ hiddenAt: expect.any(Number) })
+    expect(retired!.trashedAt).toBeUndefined()
+    expect(retired!.favoritedAt).toBeUndefined()
+    expect(await pins()).toEqual([])
+    // The conversation still shows it, so the bytes stay.
+    expect(await getDb().messageMedia.get("h1")).toBeDefined()
+  })
+
+  it("drops an orphaned row and its pin, and media GC takes the bytes", async () => {
+    await trashLibraryItems([image])
+    await bulkDeleteSessions(["s1"])
+    await deleteLibraryItemRows(["image:h1"])
+    expect(await getLibraryItem("image:h1")).toBeUndefined()
+    expect(await pins()).toEqual([])
+    expect(await getDb().messageMedia.get("h1")).toBeUndefined()
+  })
+
+  it("refuses to drop a Files-owned row (it has its own delete)", async () => {
+    const asset = await putLibraryAsset({
+      assetId: "own",
+      blob: new Blob(["x"], { type: "text/plain" }),
+      filename: "x.txt",
+      mediaType: "text/plain",
+    })
+    await expect(deleteLibraryItemRows([`upload:${asset.assetId}`])).rejects.toMatchObject({
+      code: "library_item_owned",
+    })
+  })
+
+  it("lists trashed rows at or before a cutoff through the index", async () => {
+    await trashLibraryItems([image])
+    const [row] = await listLibraryItems()
+    expect(await listTrashedLibraryItemsBefore(row!.trashedAt! - 1)).toEqual([])
+    expect((await listTrashedLibraryItemsBefore(row!.trashedAt!)).map((r) => r.key)).toEqual([
+      "image:h1",
+    ])
+  })
+
+  it("favorites and files a selection in one write", async () => {
+    const favorites = await setLibraryItemsFavorite([image, second], true)
+    expect(favorites.map((row) => row.favoritedAt)).toEqual([
+      expect.any(Number),
+      expect.any(Number),
+    ])
+    const folder = await createLibraryFolder({ name: "Both" })
+    const filed = await setLibraryItemsFolder([image, second], folder.id)
+    expect(filed.map((row) => row.folderId)).toEqual([folder.id, folder.id])
+    expect(await pins()).toHaveLength(2)
+  })
+
+  it("rejects a bulk move into a missing folder without writing anything", async () => {
+    await expect(setLibraryItemsFolder([image, second], "lbf_missing")).rejects.toBeInstanceOf(
+      LibraryItemError
+    )
+    expect(await listLibraryItems()).toEqual([])
+  })
+
+  it("sets and clears a display name", async () => {
+    const named = await setLibraryItemDisplayName(image, "  Diagram  ")
+    expect(named.displayName).toBe("Diagram")
+    const cleared = await setLibraryItemDisplayName(image, "   ")
+    expect(cleared.displayName).toBeUndefined()
   })
 })

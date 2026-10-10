@@ -58,6 +58,9 @@ export function matchesSearch(entry: FilesEntry, search: string): boolean {
 }
 
 function matchesTab(entry: FilesEntry, tab: FilesTab, folderId: string): boolean {
+  // A trashed item keeps its favorite and folder for a restore, but it is in
+  // the Trash, not in any of these.
+  if (entry.trashedAt !== undefined) return false
   switch (tab) {
     case "recent":
     case "all":

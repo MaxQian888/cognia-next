@@ -13,6 +13,7 @@ function seed(title: string, content = "x") {
   let id = ""
   act(() => {
     id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title,
       content,
       language: "markdown",

@@ -3,6 +3,7 @@ import {
   aggregateFilesEntries,
   entryRecency,
   isImageMediaType,
+  isItemHidden,
   originalMediaKey,
   STANDALONE_CANVAS_SESSION_ID,
   type FilesAggregateInput,
@@ -65,6 +66,7 @@ describe("aggregateFilesEntries", () => {
             createdAt: 1,
             updatedAt: 5,
             lastAccessedAt: 9,
+            creator: "ai",
           },
         ],
         items: [
@@ -105,6 +107,7 @@ describe("aggregateFilesEntries", () => {
             type: "text",
             createdAt: 1,
             updatedAt: 1,
+            creator: "user",
           },
           {
             id: "c2",
@@ -114,6 +117,7 @@ describe("aggregateFilesEntries", () => {
             type: "text",
             createdAt: 1,
             updatedAt: 1,
+            creator: "user",
           },
         ],
       })
@@ -133,9 +137,24 @@ describe("aggregateFilesEntries", () => {
             byteSize: 3,
             createdAt: 4,
             sessionIds: ["s1", "s2", "dead"],
+            creator: "user",
           },
-          { hash: "h2", mediaType: "image/png", byteSize: 3, createdAt: 4, sessionIds: [] },
-          { hash: "h3", mediaType: "image/png", byteSize: 3, createdAt: 4, sessionIds: [] },
+          {
+            hash: "h2",
+            mediaType: "image/png",
+            byteSize: 3,
+            createdAt: 4,
+            sessionIds: [],
+            creator: "ai",
+          },
+          {
+            hash: "h3",
+            mediaType: "image/png",
+            byteSize: 3,
+            createdAt: 4,
+            sessionIds: [],
+            creator: "ai",
+          },
         ],
         items: [
           item({
@@ -241,6 +260,7 @@ describe("aggregateFilesEntries", () => {
       content: "",
       createdAt: 1,
       updatedAt: 5,
+      creator: "ai" as const,
     }
     const hiddenNow = aggregateFilesEntries(
       input({
@@ -440,5 +460,109 @@ describe("helpers", () => {
     expect(isImageMediaType("IMAGE/PNG")).toBe(true)
     expect(isImageMediaType("text/plain")).toBe(false)
     expect(isImageMediaType(undefined)).toBe(false)
+  })
+
+  it("keeps a trashed item in the Trash only: never hidden, never revived", () => {
+    const artifact = {
+      id: "a",
+      sessionId: "s1",
+      type: "code",
+      title: "t",
+      content: "",
+      createdAt: 1,
+      updatedAt: 9,
+      creator: "ai" as const,
+    }
+    const [entry] = aggregateFilesEntries(
+      input({
+        artifacts: [artifact],
+        items: [
+          item({ key: "artifact:a", kind: "artifact", sourceId: "a", hiddenAt: 6, trashedAt: 7 }),
+        ],
+      })
+    )
+    expect(entry).toMatchObject({ trashedAt: 7, hidden: false })
+  })
+
+  it("shows a display name, keeps the source's title, and finds the item by either", () => {
+    const [entry] = aggregateFilesEntries(
+      input({
+        artifacts: [
+          {
+            id: "a",
+            sessionId: "s1",
+            type: "code",
+            title: "Parser",
+            content: "",
+            createdAt: 1,
+            updatedAt: 1,
+            creator: "ai",
+          },
+        ],
+        items: [
+          item({ key: "artifact:a", kind: "artifact", sourceId: "a", displayName: " Lexer " }),
+        ],
+      })
+    )
+    expect(entry).toMatchObject({ title: "Lexer", sourceTitle: "Parser" })
+    expect(entry!.searchText).toContain("lexer")
+    expect(entry!.searchText).toContain("parser")
+  })
+
+  it("carries who made each item, the origin conversation's title and whether it was shared with me", () => {
+    const entries = aggregateFilesEntries(
+      input({
+        sessions: new Map([
+          ["s1", { projectId: "p1", title: "Planning" }],
+          ["shared:x", { title: "Their chat", sharedWithMe: true }],
+        ]),
+        artifacts: [
+          {
+            id: "a",
+            sessionId: "shared:x",
+            type: "code",
+            title: "From them",
+            content: "",
+            createdAt: 1,
+            updatedAt: 1,
+            creator: "ai",
+          },
+        ],
+        canvases: [
+          {
+            id: "c",
+            sessionId: "s1",
+            title: "Mine",
+            content: "",
+            type: "text",
+            createdAt: 1,
+            updatedAt: 1,
+            creator: "user",
+          },
+        ],
+        sessionUploads: [upload({ sessionId: "s1" })],
+      })
+    )
+    const byKey = new Map(entries.map((entry) => [entry.key, entry]))
+    expect(byKey.get("artifact:a")).toMatchObject({
+      creator: "ai",
+      sharedWithMe: true,
+      originSessionTitle: "Their chat",
+    })
+    expect(byKey.get("canvas:c")).toMatchObject({
+      creator: "user",
+      sharedWithMe: false,
+      originSessionTitle: "Planning",
+    })
+    expect(byKey.get("session-upload:c1")).toMatchObject({ creator: "user" })
+  })
+})
+
+describe("isItemHidden", () => {
+  it("hides until the source changes, and never hides a trashed item", () => {
+    expect(isItemHidden(undefined, 5)).toBe(false)
+    expect(isItemHidden({ hiddenAt: 6 }, 5)).toBe(true)
+    expect(isItemHidden({ hiddenAt: 6 }, 7)).toBe(false)
+    expect(isItemHidden({ hiddenAt: 6, trashedAt: 6 }, 5)).toBe(false)
   })
 })

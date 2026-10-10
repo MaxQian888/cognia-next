@@ -312,6 +312,12 @@
       "importTitle": "导入自定义主题",
       "title": "自定义主题"
     },
+    "documentTemplates": {
+      "body": "从文件页或画布文档保存的文档模板。",
+      "importBody": "添加或替换已保存的文档模板，内置模板不受影响。",
+      "importTitle": "导入文档模板",
+      "title": "文档模板"
+    },
     "exportRow": "导出",
     "externalAgents": {
       "body": "ClaudeCode、Cursor、Codex、Gemini 等已注册 Agent——连接状态、委派规则、最近一次运行快照。",

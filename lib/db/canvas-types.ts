@@ -11,6 +11,7 @@ import type {
   ArtifactLanguage,
   ArtifactWorkspaceReturnContext,
   CanvasAIWorkbenchState,
+  CanvasDocumentCreator,
   CanvasPendingReview,
   CanvasEditorContext,
   CanvasSuggestion,
@@ -42,6 +43,8 @@ export interface CanvasDocumentRow {
   sourceArtifactId?: string
   returnContext?: ArtifactWorkspaceReturnContext | null
   authoringOrigin?: ArtifactAuthoringOrigin
+  /** Who made the document (ADR-0223). Not indexed: Files reads it from the store. */
+  createdBy?: CanvasDocumentCreator
   /**
    * Prompt draft, staged attachments, the open revision proposal and the action
    * log. Stored verbatim, `Date` fields included — IndexedDB clones them, and

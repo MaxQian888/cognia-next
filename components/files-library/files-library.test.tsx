@@ -58,6 +58,7 @@ function entry(key: string, overrides: Partial<FilesEntry> = {}): FilesEntry {
     kind: "artifact",
     sourceId: key,
     title: key,
+    sourceTitle: key,
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -65,6 +66,8 @@ function entry(key: string, overrides: Partial<FilesEntry> = {}): FilesEntry {
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: key.toLowerCase(),
     ...overrides,
   }

@@ -17,6 +17,7 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     kind: "upload",
     sourceId: "u",
     title: "SPEC.md",
+    sourceTitle: "SPEC.md",
     byteSize: 2048,
     projectIds: [],
     sessionIds: [],
@@ -25,6 +26,8 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     updatedAt: 1,
     ownedByFiles: true,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...overrides,
   }

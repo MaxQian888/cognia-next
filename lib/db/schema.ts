@@ -368,6 +368,7 @@ import {
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import type { ChatTemplateRow } from "./chat-templates"
 import type { LibraryFolder, LibraryItemRow } from "./files-library-types"
+import type { DocumentTemplateRow } from "./document-templates"
 import type {
   ExternalAgentConfigHeadRow,
   ExternalAgentConfigRevisionRow,
@@ -427,7 +428,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 236
+export const CURRENT_SCHEMA_VERSION = 237
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -1019,9 +1020,15 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   // v231 — Files page (ADR-0200). Favorites / folder membership / "removed
   // from Files" over artifacts, canvas documents, images and uploads, plus the
   // folder tree. See `lib/db/files-library-types.ts`.
+  // v237 — Files Trash (ADR-0223): `trashedAt` is indexed so the purge reads
+  // only expired rows.
   libraryItems:
-    "&key, kind, originSessionId, folderId, favoritedAt, lastOpenedAt, hiddenAt, projectId",
+    "&key, kind, originSessionId, folderId, favoritedAt, lastOpenedAt, hiddenAt, trashedAt, projectId",
   libraryFolders: "&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt",
+  // v237 — document templates the person saved from Files or a canvas
+  // (ADR-0223). The built-in ones are code, not rows. See
+  // `lib/db/document-templates.ts`.
+  documentTemplates: "&id, name, updatedAt, createdAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1660,6 +1667,7 @@ export class CogniaDB extends Dexie {
   // v231 — Files page metadata. See `lib/db/files-library-types.ts`.
   libraryItems!: Table<LibraryItemRow, string>
   libraryFolders!: Table<LibraryFolder, string>
+  documentTemplates!: Table<DocumentTemplateRow, string>
   // v194 — ADR-0149 identity projection. See `lib/db/identity.ts`.
   users!: Table<User, string>
   orgs!: Table<Org, string>

@@ -32,6 +32,7 @@ function seedDoc(content: string, language: ArtifactLanguage) {
   let id = ""
   act(() => {
     id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "Doc",
       content,

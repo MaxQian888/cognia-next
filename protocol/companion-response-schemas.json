@@ -4876,7 +4876,8 @@
         "issue-wakeup",
         "radar-report",
         "provider-diagnostics-refresh",
-        "conversation-auto-archive"
+        "conversation-auto-archive",
+        "files-trash-purge"
       ]
     },
     "SchedulerNotificationChannel": {

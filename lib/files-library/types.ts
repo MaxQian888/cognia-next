@@ -37,13 +37,25 @@ export const FILES_SORTS: readonly FilesSort[] = ["recent", "updated", "created"
 /** `current` = the active workspace (rows without a workspace are shared); `all` = everywhere. */
 export type FilesProjectScope = "current" | "all"
 
+/**
+ * Who made an item (ADR-0223): `user` for what the person uploaded, wrote or
+ * created from a menu; `ai` for what an assistant or agent produced.
+ */
+export type FilesCreator = "user" | "ai"
+
 export interface FilesEntry {
   /** `libraryItemKey(kind, sourceId)`. */
   key: string
   kind: LibraryItemKind
   sourceId: string
-  /** Empty for an image with no known name; the UI renders a localized label. */
+  /**
+   * The name Files shows: the item's `displayName` when it was renamed in
+   * Files, else the source's title. Empty for an image with no known name;
+   * the UI renders a localized label.
+   */
   title: string
+  /** The source's own title, whatever Files calls the item. */
+  sourceTitle: string
   mediaType?: string
   /** Artifact type (`code`, `document`, …) or canvas type (`code` / `text`). */
   subtype?: string
@@ -55,6 +67,11 @@ export interface FilesEntry {
   sessionIds: string[]
   /** Conversation the item was created in (artifact / canvas / kept upload). */
   originSessionId?: string
+  /** Title of `originSessionId` while that conversation exists. */
+  originSessionTitle?: string
+  /** The item's conversation is a collaboration session someone else shared. */
+  sharedWithMe: boolean
+  creator: FilesCreator
   /**
    * False when the item came from conversations that no longer exist — it is
    * still here only because Files keeps it. Always true for Files-owned items
@@ -68,7 +85,10 @@ export interface FilesEntry {
   favoritedAt?: number
   folderId?: string
   ownedByFiles: boolean
+  /** "Removed from Files" (see `isItemHidden`). Never true for a trashed item. */
   hidden: boolean
+  /** In the Files Trash since this time; such an item shows only in the Trash. */
+  trashedAt?: number
   /** `messageMedia` key of the bytes (images and uploads). */
   mediaHash?: string
   /** sha-256 of the original bytes (uploads). */
@@ -114,7 +134,7 @@ export function entrySource(entry: FilesEntry): LibraryItemSource {
     ...(entry.projectIds[0] ? { projectId: entry.projectIds[0] } : {}),
     ...(entry.mediaHash ? { mediaHash: entry.mediaHash } : {}),
     snapshot: {
-      title: entry.title,
+      title: entry.sourceTitle,
       ...(entry.mediaType ? { mediaType: entry.mediaType } : {}),
       ...(entry.byteSize !== undefined ? { byteSize: entry.byteSize } : {}),
       ...(entry.contentHash ? { contentHash: entry.contentHash } : {}),

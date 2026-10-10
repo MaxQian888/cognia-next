@@ -84,6 +84,7 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   teams: "library",
   promptPresets: "library",
   chatTemplates: "library",
+  documentTemplates: "library",
   templateDefinitions: "library",
   templatePackages: "library",
   templateInstances: "library",

@@ -56,6 +56,7 @@ describe("DOMAIN_TRANSFERS", () => {
         "canvasSettings",
         "customModes",
         "customThemes",
+        "documentTemplates",
         "externalAgents",
         "schedulerPrefs",
       ].sort()

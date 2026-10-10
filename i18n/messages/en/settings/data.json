@@ -312,6 +312,12 @@
       "importTitle": "Import custom themes",
       "title": "Custom themes"
     },
+    "documentTemplates": {
+      "body": "Document templates you saved from Files or a canvas document.",
+      "importBody": "Add or replace your saved document templates. Built-in templates are not affected.",
+      "importTitle": "Import document templates",
+      "title": "Document templates"
+    },
     "exportRow": "Export",
     "externalAgents": {
       "body": "ClaudeCode, Cursor, Codex, Gemini, and other registered agents — connection state, delegation rules, last-run snapshots.",

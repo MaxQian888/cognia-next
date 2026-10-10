@@ -641,12 +641,21 @@ export interface CanvasDocument {
   sourceArtifactId?: string
   returnContext?: ArtifactWorkspaceReturnContext | null
   authoringOrigin?: ArtifactAuthoringOrigin
+  /**
+   * Who made the document (ADR-0223): the person, from a menu or the editor,
+   * or an agent through a tool / plugin. Files splits "Mine" from
+   * "AI-generated" on it. Absent on documents created before it existed — see
+   * `canvasCreator` for how those are read.
+   */
+  createdBy?: CanvasDocumentCreator
   editorContext?: CanvasEditorContext
   aiWorkbench?: CanvasAIWorkbenchState
   aiSuggestions?: CanvasSuggestion[]
   versions?: CanvasDocumentVersion[]
   currentVersionId?: string
 }
+
+export type CanvasDocumentCreator = "user" | "agent"
 
 export interface CanvasDocumentVersion {
   id: string

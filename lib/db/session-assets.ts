@@ -839,6 +839,45 @@ export async function putLibraryAsset(input: PutLibraryAssetInput): Promise<Sess
   })
 }
 
+/**
+ * Rename a file uploaded straight into Files (ADR-0223). Files owns it, so the
+ * new name is the source's own filename — what a download is called — and the
+ * Files item's snapshot follows it. One transaction over both rows.
+ */
+export async function renameLibraryAsset(
+  assetId: string,
+  filename: string,
+  now = Date.now()
+): Promise<SessionAsset> {
+  const trimmed = filename.trim()
+  if (!trimmed) throw new SessionAssetError("session_asset_invalid_original")
+  const db = getDb()
+  const key = libraryAssetOwnerKey(assetId)
+  return db.transaction("rw", db.messageMediaRefs, db.libraryItems, async () => {
+    const [ref] = await db.messageMediaRefs.where("messageId").equals(key).toArray()
+    if (!ref?.sessionAsset || ref.sessionAsset.deletedAt) {
+      throw new SessionAssetError("session_asset_not_found")
+    }
+    const asset: SessionAsset = {
+      ...ref.sessionAsset,
+      filename: trimmed,
+      updatedAt: now,
+      revision: ref.sessionAsset.revision + 1,
+    }
+    await db.messageMediaRefs.put({ ...ref, sessionAsset: asset })
+    const itemKey = libraryItemKey("upload", assetId)
+    const item = await db.libraryItems.get(itemKey)
+    if (item) {
+      await db.libraryItems.put({
+        ...item,
+        snapshot: { ...(item.snapshot ?? { title: trimmed }), title: trimmed },
+        updatedAt: now,
+      })
+    }
+    return structuredClone(asset)
+  })
+}
+
 /** Files-owned uploads, newest first; metadata only. */
 export async function listLibraryAssets(): Promise<ListedSessionAsset[]> {
   const db = getDb()

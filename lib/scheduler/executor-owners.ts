@@ -94,6 +94,11 @@ export const TASK_EXECUTOR_OWNERS: Readonly<Partial<Record<ScheduledTaskType, Ta
         await import("@/lib/chat/auto-archive-schedule")
       registerConversationAutoArchiveExecutor()
     },
+    "files-trash-purge": async () => {
+      const { registerFilesTrashPurgeExecutor } =
+        await import("@/lib/files-library/trash-purge-schedule")
+      registerFilesTrashPurgeExecutor()
+    },
     // The issue tracker boot registers it, but a wakeup can come due (or an
     // event can reach its fire gate) in a context that never booted the
     // tracker. The same call registers the gate.

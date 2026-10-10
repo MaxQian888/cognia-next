@@ -15,6 +15,7 @@ function entry(key: string, folderId?: string): FilesEntry {
     kind: "artifact",
     sourceId: key,
     title: key,
+    sourceTitle: key,
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -22,6 +23,8 @@ function entry(key: string, folderId?: string): FilesEntry {
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...(folderId ? { folderId } : {}),
   }

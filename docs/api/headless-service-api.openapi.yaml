@@ -111427,6 +111427,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     status:
                       type: string
                       enum:
@@ -112079,6 +112080,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     trigger:
                       oneOf:
                         - type: object
@@ -112370,6 +112372,7 @@ paths:
                       - radar-report
                       - provider-diagnostics-refresh
                       - conversation-auto-archive
+                      - files-trash-purge
                   trigger:
                     type: object
                     x-cognia-wire-source: types/scheduler TaskTrigger
@@ -113159,6 +113162,7 @@ paths:
                             - radar-report
                             - provider-diagnostics-refresh
                             - conversation-auto-archive
+                            - files-trash-purge
                         trigger:
                           type: object
                           x-cognia-wire-source: types/scheduler TaskTrigger
@@ -113590,6 +113594,7 @@ paths:
                           - radar-report
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
+                          - files-trash-purge
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger
@@ -114003,6 +114008,7 @@ paths:
                               - radar-report
                               - provider-diagnostics-refresh
                               - conversation-auto-archive
+                              - files-trash-purge
                           trigger:
                             oneOf:
                               - type: object
@@ -114514,6 +114520,7 @@ paths:
                           - radar-report
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
+                          - files-trash-purge
                     statuses:
                       type: array
                       items:
@@ -114609,6 +114616,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -115386,6 +115394,7 @@ paths:
                           - radar-report
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
+                          - files-trash-purge
                       status:
                         type: string
                         enum:
@@ -115692,6 +115701,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     status:
                       type: string
                       enum:
@@ -116188,6 +116198,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -116836,6 +116847,7 @@ paths:
                           - radar-report
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
+                          - files-trash-purge
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger

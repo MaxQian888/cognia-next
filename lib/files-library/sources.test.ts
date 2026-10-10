@@ -8,11 +8,15 @@ import { LIBRARY_REF_SESSION_ID } from "@/lib/db/message-media-refs"
 import type { MessageMediaRow } from "@/lib/db/message-media"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import {
+  artifactCreator,
+  canvasCreator,
+  isSharedWithMe,
   loadFilesSources,
   loadImages,
   rawArtifacts,
   rawCanvases,
   rawGeneratedVideos,
+  resetImageCreatorCache,
 } from "./sources"
 
 jest.setTimeout(30_000)
@@ -20,6 +24,7 @@ const fixture = createDbTestFixture()
 beforeAll(fixture.initialize)
 beforeEach(async () => {
   await fixture.restore()
+  resetImageCreatorCache()
   await getDb().sessions.bulkPut([
     { id: "s1", title: "s1", createdAt: 1, updatedAt: 1, projectId: "p1" } as ChatSession,
     { id: "s2", title: "s2", createdAt: 1, updatedAt: 1 } as ChatSession,
@@ -238,9 +243,79 @@ describe("loadFilesSources", () => {
       [`session-upload:${asset!.sessionAsset!.contentHash}`, "upload:u1"].sort()
     )
     expect([...input.sessions.entries()].sort()).toEqual([
-      ["s1", { projectId: "p1" }],
-      ["s2", {}],
+      ["s1", { projectId: "p1", title: "s1" }],
+      ["s2", { title: "s2" }],
     ])
     expect([...input.heldOriginals]).toEqual([asset!.hash])
+  })
+})
+
+describe("who made an item (ADR-0223)", () => {
+  it("reads artifacts as AI-made unless standalone or derived from the person's canvas", () => {
+    expect(artifactCreator({ sessionId: "s1" })).toBe("ai")
+    expect(artifactCreator({ sessionId: "standalone" })).toBe("user")
+    expect(
+      artifactCreator({ sessionId: "s1", metadata: { derivedFromCanvasDocumentId: "c1" } })
+    ).toBe("user")
+  })
+
+  it("reads canvas documents by createdBy, falling back for older documents", () => {
+    expect(canvasCreator({ sessionId: "s1", createdBy: "agent" })).toBe("ai")
+    expect(canvasCreator({ sessionId: "s1", createdBy: "user" })).toBe("user")
+    expect(canvasCreator({ sessionId: "standalone" })).toBe("user")
+    expect(canvasCreator({ sessionId: "s1", authoringOrigin: "artifact-panel" })).toBe("user")
+    expect(canvasCreator({ sessionId: "s1" })).toBe("ai")
+  })
+
+  it("marks only a joined shared projection as shared with me", () => {
+    expect(isSharedWithMe({ id: "shared:org:x", collaboration: {} })).toBe(true)
+    expect(isSharedWithMe({ id: "s1", collaboration: {} })).toBe(false)
+    expect(isSharedWithMe({ id: "shared:org:x" })).toBe(false)
+  })
+
+  it("reads an image's creator from the role of a message that shows it", async () => {
+    const db = getDb()
+    await db.messageMedia.bulkPut([media("mine", 3), media("theirs", 2), media("orphan", 1)])
+    await db.messages.bulkPut([
+      { id: "m-user", sessionId: "s1", role: "user", content: "", createdAt: new Date(1) },
+      { id: "m-ai", sessionId: "s1", role: "assistant", content: "", createdAt: new Date(1) },
+    ] as never)
+    await db.messageMediaRefs.bulkPut([
+      { messageId: "m-user", sessionId: "s1", hash: "mine" },
+      { messageId: "m-ai", sessionId: "s1", hash: "theirs" },
+    ])
+    const { images } = await loadImages(10)
+    expect(Object.fromEntries(images.map((image) => [image.hash, image.creator]))).toEqual({
+      mine: "user",
+      theirs: "ai",
+      orphan: "user",
+    })
+  })
+
+  it("carries the conversation's title and whether it was shared with me", async () => {
+    await getDb().sessions.put({
+      id: "shared:org:x",
+      title: "Their chat",
+      createdAt: 1,
+      updatedAt: 1,
+      collaboration: { orgId: "org", workspaceId: "w", sessionId: "x" },
+    } as unknown as ChatSession)
+    const { input } = await loadFilesSources({
+      artifacts: {
+        a: {
+          id: "a",
+          sessionId: "shared:org:x",
+          messageId: "m",
+          type: "code",
+          title: "t",
+          content: "",
+          version: 1,
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+        } as Artifact,
+      },
+      canvasDocuments: {},
+    })
+    expect(input.sessions.get("shared:org:x")).toEqual({ title: "Their chat", sharedWithMe: true })
   })
 })

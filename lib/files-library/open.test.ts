@@ -27,6 +27,7 @@ function entry(overrides: Partial<FilesEntry> & Pick<FilesEntry, "kind" | "sourc
   return {
     key: `${overrides.kind}:${overrides.sourceId}`,
     title: "",
+    sourceTitle: "",
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -34,6 +35,8 @@ function entry(overrides: Partial<FilesEntry> & Pick<FilesEntry, "kind" | "sourc
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...overrides,
   }

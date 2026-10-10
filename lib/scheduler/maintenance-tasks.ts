@@ -12,6 +12,7 @@
  * The rule is stated once so every notification producer agrees:
  * - `provider-diagnostics-refresh`
  * - `conversation-auto-archive`
+ * - `files-trash-purge`
  * - every connector-owned `connection:housekeeping:*` type
  * - `connection:presence:refresh`
  * - any task tagged `system:<owner>` (housekeeping, provider diagnostics, bot
@@ -27,6 +28,7 @@ import type { ScheduledTask } from "@/types/scheduler"
 export const MAINTENANCE_TASK_TYPES: readonly string[] = Object.freeze([
   "provider-diagnostics-refresh",
   "conversation-auto-archive",
+  "files-trash-purge",
   "connection:presence:refresh",
 ])
 

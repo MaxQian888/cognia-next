@@ -83,6 +83,9 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   // Installed at scheduler init (`lib/chat/auto-archive-schedule.ts`) and
   // driven by the Settings → Conversation control, never from the task form.
   "conversation-auto-archive",
+  // Installed at scheduler init (`lib/files-library/trash-purge-schedule.ts`);
+  // its only input is the Files Trash, never a form.
+  "files-trash-purge",
   "connection:scheduled:digest",
   "connection:outbound:send",
   "connection:housekeeping:clock",

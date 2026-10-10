@@ -12,6 +12,7 @@ import type {
   Team,
 } from "@cognia/agent-config-types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { DocumentTemplateRow } from "@/lib/db/document-templates"
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import {
   COGSET_STATE_ID,
@@ -42,6 +43,7 @@ export type DomainKey =
   | "mcpServers"
   | "promptPresets"
   | "chatTemplates"
+  | "documentTemplates"
   | "scheduledTasks"
   | "characters"
   | "teams"
@@ -169,6 +171,13 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     // usage counters travel with the row because they are what orders the `/`
     // menu on the far side.
     return { chatTemplates: (await db.chatTemplates.toArray()) as ChatTemplateRow[] }
+  }),
+  makeSpec("documentTemplates", "documentTemplates", async () => {
+    const db = getDb()
+    // Everything: the built-in document templates are code, never rows.
+    return {
+      documentTemplates: (await db.documentTemplates.toArray()) as DocumentTemplateRow[],
+    }
   }),
   makeSpec("scheduledTasks", "scheduledTasks", async () => {
     const db = getDb()

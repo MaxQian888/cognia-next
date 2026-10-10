@@ -1009,6 +1009,7 @@
     "conversation-auto-archive": "对话自动归档",
     "custom": "自定义",
     "external-agent": "外部代理 (ACP)",
+    "files-trash-purge": "文件回收站清理",
     "github-issue-sync": "GitHub Issue 同步",
     "goal": "目标",
     "im-push": "IM 推送",

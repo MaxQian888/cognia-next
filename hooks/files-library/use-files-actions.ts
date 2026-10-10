@@ -227,6 +227,7 @@ export function useFilesActions(): FilesActions {
       content: "",
       language: "markdown",
       type: "text",
+      createdBy: "user",
     })
     useArtifactStore.getState().setActiveCanvas(id)
     useUIStore.getState().setSelectedGuild({ kind: "canvas" })

@@ -87372,6 +87372,7 @@ paths:
                         - radar-report
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
+                        - files-trash-purge
                     trigger:
                       oneOf:
                         - type: object
@@ -88573,6 +88574,7 @@ paths:
                               - radar-report
                               - provider-diagnostics-refresh
                               - conversation-auto-archive
+                              - files-trash-purge
                           trigger:
                             oneOf:
                               - type: object
@@ -89087,6 +89089,7 @@ paths:
                           - radar-report
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
+                          - files-trash-purge
                     statuses:
                       type: array
                       items:

@@ -89,6 +89,19 @@ export interface LibraryItemRow {
   lastOpenedAt?: number
   /** "Remove from Files"; the item reappears once its source changes after this. */
   hiddenAt?: number
+  /**
+   * In the Files Trash since this time (ADR-0223). Unlike `hiddenAt` a trashed
+   * item never comes back on its own when its source changes; only a restore
+   * or the purge (after `FILES_TRASH_RETENTION_MS`) ends it. Favorite and
+   * folder are left as they were, so a restore puts the item back where it was.
+   */
+  trashedAt?: number
+  /**
+   * Name shown in Files instead of the source's title, for kinds whose source
+   * Files must not rename (an artifact, a conversation's image or upload).
+   * Canvas documents and Files-owned uploads are renamed at the source instead.
+   */
+  displayName?: string
   createdAt: number
   updatedAt: number
 }
@@ -101,8 +114,50 @@ export interface LibraryFolder {
   parentFolderId: string
   createdAt: number
   updatedAt: number
-  color?: string
-  icon?: string
+  /** One of `LIBRARY_FOLDER_COLORS`; absent = the default folder tint. */
+  color?: LibraryFolderColor
+  /** One of `LIBRARY_FOLDER_ICONS`; absent = the plain folder glyph. */
+  icon?: LibraryFolderIcon
+}
+
+/**
+ * Tints a folder can carry (ADR-0223). Names, not CSS: the sidebar maps each
+ * to theme tokens, so a folder colored on one theme still reads on another.
+ */
+export const LIBRARY_FOLDER_COLORS = [
+  "gray",
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "pink",
+] as const
+export type LibraryFolderColor = (typeof LIBRARY_FOLDER_COLORS)[number]
+
+/** Glyphs a folder can carry instead of the plain folder icon. */
+export const LIBRARY_FOLDER_ICONS = [
+  "folder",
+  "star",
+  "briefcase",
+  "book",
+  "code",
+  "image",
+  "music",
+  "archive",
+  "heart",
+  "flag",
+] as const
+export type LibraryFolderIcon = (typeof LIBRARY_FOLDER_ICONS)[number]
+
+export function isLibraryFolderColor(value: unknown): value is LibraryFolderColor {
+  return typeof value === "string" && (LIBRARY_FOLDER_COLORS as readonly string[]).includes(value)
+}
+
+export function isLibraryFolderIcon(value: unknown): value is LibraryFolderIcon {
+  return typeof value === "string" && (LIBRARY_FOLDER_ICONS as readonly string[]).includes(value)
 }
 
 export type LibraryFolderPatch = Partial<Omit<LibraryFolder, "id" | "createdAt">>
@@ -111,9 +166,21 @@ export function libraryItemKey(kind: LibraryItemKind, sourceId: string): string 
   return `${kind}:${sourceId}`
 }
 
-/** A kept item survives deletion of its source conversation. */
+/** How long an item stays in the Files Trash before the purge takes it (ADR-0223). */
+export const FILES_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * A kept item survives deletion of its source conversation. A trashed item is
+ * kept too: its bytes stay pinned until the purge, so a restore within the
+ * retention window always finds them.
+ */
 export function isLibraryItemKept(
-  row: Pick<LibraryItemRow, "favoritedAt" | "folderId" | "ownedByFiles">
+  row: Pick<LibraryItemRow, "favoritedAt" | "folderId" | "ownedByFiles" | "trashedAt">
 ): boolean {
-  return row.favoritedAt !== undefined || row.folderId !== undefined || row.ownedByFiles === true
+  return (
+    row.favoritedAt !== undefined ||
+    row.folderId !== undefined ||
+    row.ownedByFiles === true ||
+    row.trashedAt !== undefined
+  )
 }

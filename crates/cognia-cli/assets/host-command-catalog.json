@@ -41351,7 +41351,8 @@
                 "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh",
-                "conversation-auto-archive"
+                "conversation-auto-archive",
+                "files-trash-purge"
               ]
             },
             "status": {
@@ -41636,7 +41637,8 @@
                   "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh",
-                  "conversation-auto-archive"
+                  "conversation-auto-archive",
+                  "files-trash-purge"
                 ]
               },
               "trigger": {
@@ -42022,7 +42024,8 @@
               "issue-wakeup",
               "radar-report",
               "provider-diagnostics-refresh",
-              "conversation-auto-archive"
+              "conversation-auto-archive",
+              "files-trash-purge"
             ]
           },
           "trigger": {
@@ -42493,7 +42496,8 @@
                     "issue-wakeup",
                     "radar-report",
                     "provider-diagnostics-refresh",
-                    "conversation-auto-archive"
+                    "conversation-auto-archive",
+                    "files-trash-purge"
                   ]
                 },
                 "trigger": {
@@ -42878,7 +42882,8 @@
                   "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh",
-                  "conversation-auto-archive"
+                  "conversation-auto-archive",
+                  "files-trash-purge"
                 ]
               },
               "trigger": {
@@ -43243,7 +43248,8 @@
                         "issue-wakeup",
                         "radar-report",
                         "provider-diagnostics-refresh",
-                        "conversation-auto-archive"
+                        "conversation-auto-archive",
+                        "files-trash-purge"
                       ]
                     },
                     "trigger": {
@@ -43739,7 +43745,8 @@
                     "issue-wakeup",
                     "radar-report",
                     "provider-diagnostics-refresh",
-                    "conversation-auto-archive"
+                    "conversation-auto-archive",
+                    "files-trash-purge"
                   ]
                 }
               },
@@ -43848,7 +43855,8 @@
                 "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh",
-                "conversation-auto-archive"
+                "conversation-auto-archive",
+                "files-trash-purge"
               ]
             },
             "trigger": {
@@ -44303,7 +44311,8 @@
                   "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh",
-                  "conversation-auto-archive"
+                  "conversation-auto-archive",
+                  "files-trash-purge"
                 ]
               },
               "status": {
@@ -44508,7 +44517,8 @@
                 "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh",
-                "conversation-auto-archive"
+                "conversation-auto-archive",
+                "files-trash-purge"
               ]
             },
             "status": {
@@ -44769,7 +44779,8 @@
                 "issue-wakeup",
                 "radar-report",
                 "provider-diagnostics-refresh",
-                "conversation-auto-archive"
+                "conversation-auto-archive",
+                "files-trash-purge"
               ]
             },
             "trigger": {
@@ -45455,7 +45466,8 @@
                   "issue-wakeup",
                   "radar-report",
                   "provider-diagnostics-refresh",
-                  "conversation-auto-archive"
+                  "conversation-auto-archive",
+                  "files-trash-purge"
                 ]
               },
               "trigger": {
@@ -67546,5 +67558,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "23cef106b495d653b041dcd867b6d974ed4c5b46e7b561beeae83ec55ed04dc1"
+  "catalogHash": "da3f79b04e4daf55310e9c2a36383d5bfea634af0177371bb7140b999cdb5536"
 }

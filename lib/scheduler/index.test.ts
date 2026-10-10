@@ -11,6 +11,7 @@ const initTaskSchedulerMock = jest.fn(async (_driver?: unknown) => undefined)
 const stopTaskSchedulerMock = jest.fn()
 const installProviderDiagnosticsRefreshScheduleMock = jest.fn(async () => undefined)
 const installConversationAutoArchiveScheduleMock = jest.fn(async () => undefined)
+const installFilesTrashPurgeScheduleMock = jest.fn(async () => undefined)
 
 jest.mock("@/lib/provider-diagnostics/refresh", () => ({
   installProviderDiagnosticsRefreshSchedule: () => installProviderDiagnosticsRefreshScheduleMock(),
@@ -18,6 +19,10 @@ jest.mock("@/lib/provider-diagnostics/refresh", () => ({
 
 jest.mock("@/lib/chat/auto-archive-schedule", () => ({
   installConversationAutoArchiveSchedule: () => installConversationAutoArchiveScheduleMock(),
+}))
+
+jest.mock("@/lib/files-library/trash-purge-schedule", () => ({
+  installFilesTrashPurgeSchedule: () => installFilesTrashPurgeScheduleMock(),
 }))
 
 jest.mock("./executors", () => ({
@@ -71,6 +76,7 @@ beforeEach(() => {
   stopTaskSchedulerMock.mockClear()
   installProviderDiagnosticsRefreshScheduleMock.mockClear()
   installConversationAutoArchiveScheduleMock.mockClear()
+  installFilesTrashPurgeScheduleMock.mockClear()
 })
 
 describe("scheduler barrel re-exports", () => {
@@ -156,6 +162,7 @@ describe("initSchedulerSystem", () => {
     expect(initTaskSchedulerMock).toHaveBeenCalled()
     expect(installProviderDiagnosticsRefreshScheduleMock).toHaveBeenCalled()
     expect(installConversationAutoArchiveScheduleMock).toHaveBeenCalled()
+    expect(installFilesTrashPurgeScheduleMock).toHaveBeenCalled()
   })
 
   it("forwards an injected timing driver to the scheduler singleton", async () => {

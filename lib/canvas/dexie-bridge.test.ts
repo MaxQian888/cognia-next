@@ -589,6 +589,7 @@ describe("startCanvasDexieBridge", () => {
           updatedAt: new Date(2),
           sourceArtifactId: "art_1",
           authoringOrigin: "artifact-panel",
+          createdBy: "user",
           returnContext: {
             scope: "session",
             searchQuery: "",
@@ -612,6 +613,8 @@ describe("startCanvasDexieBridge", () => {
     expect(row).toMatchObject({
       sourceArtifactId: "art_1",
       authoringOrigin: "artifact-panel",
+      // Who made it (ADR-0223) — Files reads "Mine" vs "AI-generated" from it.
+      createdBy: "user",
       returnContext: expect.objectContaining({ scope: "session" }),
       aiWorkbench: expect.objectContaining({ promptDraft: "tighten the intro" }),
     })

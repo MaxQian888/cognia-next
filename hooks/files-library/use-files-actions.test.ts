@@ -79,6 +79,7 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     kind: "artifact",
     sourceId: "a",
     title: "Parser",
+    sourceTitle: "Parser",
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -86,6 +87,8 @@ function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: "",
     ...overrides,
   }
@@ -229,6 +232,7 @@ it("starts a standalone canvas document and opens Canvas", () => {
     .mockImplementation(() => {})
   hook().newCanvasDocument()
   expect(create).toHaveBeenCalledWith({
+    createdBy: "user",
     title: "Untitled document",
     content: "",
     language: "markdown",

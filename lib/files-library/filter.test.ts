@@ -12,6 +12,7 @@ function entry(overrides: Partial<FilesEntry> & Pick<FilesEntry, "key">): FilesE
     kind: "artifact",
     sourceId: overrides.key,
     title: overrides.key,
+    sourceTitle: overrides.key,
     projectIds: [],
     sessionIds: [],
     originAlive: true,
@@ -19,6 +20,8 @@ function entry(overrides: Partial<FilesEntry> & Pick<FilesEntry, "key">): FilesE
     updatedAt: 1,
     ownedByFiles: false,
     hidden: false,
+    sharedWithMe: false,
+    creator: "user",
     searchText: overrides.key.toLowerCase(),
     ...overrides,
   }
@@ -33,6 +36,8 @@ describe("filterFilesEntries", () => {
     entry({ key: "i", kind: "image", folderId: "lbf_1" }),
     entry({ key: "u", kind: "upload", ownedByFiles: true }),
     entry({ key: "s", kind: "session-upload", hidden: true }),
+    // Favorited and filed, but in the Trash: none of the tabs show it.
+    entry({ key: "t", kind: "artifact", favoritedAt: 2, folderId: "root", trashedAt: 3 }),
   ]
 
   it("applies each tab", () => {

@@ -772,6 +772,7 @@ describe("artifact version history", () => {
 describe("canvas documents", () => {
   it("createCanvasDocument opens the canvas panel", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "console.log(1)",
       language: "javascript",
@@ -785,6 +786,7 @@ describe("canvas documents", () => {
 
   it("updateCanvasDocument bumps updatedAt for content changes", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -804,9 +806,13 @@ describe("canvas documents", () => {
   })
 
   it("setActiveCanvas drives the canvas surface on its own", () => {
-    const id = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "d", content: "x", language: "javascript", type: "code" })
+    const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "d",
+      content: "x",
+      language: "javascript",
+      type: "code",
+    })
     useArtifactStore.getState().setActiveCanvas(null)
     expect(useArtifactStore.getState().activeCanvasId).toBeNull()
     useArtifactStore.getState().setActiveCanvas(id)
@@ -815,9 +821,13 @@ describe("canvas documents", () => {
   })
 
   it("deleteCanvasDocument clears active when needed", () => {
-    const id = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "d", content: "x", language: "javascript", type: "code" })
+    const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "d",
+      content: "x",
+      language: "javascript",
+      type: "code",
+    })
     useArtifactStore.getState().deleteCanvasDocument(id)
     expect(useArtifactStore.getState().canvasDocuments).toEqual({})
     expect(useArtifactStore.getState().activeCanvasId).toBeNull()
@@ -825,6 +835,7 @@ describe("canvas documents", () => {
 
   it("canvas suggestions add / update / apply / clear", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "a\nb\nc",
       language: "javascript",
@@ -863,9 +874,13 @@ describe("canvas documents", () => {
   })
 
   it("saveCanvasVersion + restoreCanvasVersion + delete + getCanvasVersions + compareVersions", () => {
-    const id = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "d", content: "v1", language: "javascript", type: "code" })
+    const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "d",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
     const v1 = useArtifactStore.getState().saveCanvasVersion(id, "first")
     expect(v1).not.toBeNull()
     useArtifactStore.getState().updateCanvasDocument(id, { content: "v2" })
@@ -883,9 +898,13 @@ describe("canvas documents", () => {
   })
 
   it("restoreCanvasVersion uses provided localized auto-save description", () => {
-    const id = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "d", content: "v1", language: "javascript", type: "code" })
+    const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "d",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
     const v1 = useArtifactStore.getState().saveCanvasVersion(id, "first")
     useArtifactStore.getState().updateCanvasDocument(id, { content: "v2" })
     useArtifactStore.getState().restoreCanvasVersion(id, v1!.id, "恢复前自动保存")
@@ -909,6 +928,7 @@ describe("canvas documents", () => {
 describe("applyCanvasReview refuses a stale proposal", () => {
   function seedWithProposal() {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "one\ntwo\nthree",
       language: "markdown",
@@ -977,6 +997,7 @@ describe("applyCanvasReview refuses a stale proposal", () => {
 describe("canvas AI workbench state", () => {
   function seed() {
     return useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "body",
       language: "markdown",
@@ -1066,6 +1087,7 @@ describe("canvas AI workbench state", () => {
 describe("deleteCanvasDocument cascade", () => {
   it("lets go of the layout references that would otherwise outlive the document", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Linked",
       content: "x",
       language: "markdown",
@@ -1085,6 +1107,7 @@ describe("deleteCanvasDocument cascade", () => {
     const disposer = jest.fn()
     registerCanvasDocumentDisposer("test-owner", disposer)
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Owned",
       content: "x",
       language: "markdown",
@@ -1099,12 +1122,14 @@ describe("deleteCanvasDocument cascade", () => {
 
   it("moves focus to the neighbouring tab instead of the empty state", () => {
     const first = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "First",
       content: "a",
       language: "markdown",
       type: "text",
     })
     const second = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Second",
       content: "b",
       language: "markdown",
@@ -1121,12 +1146,14 @@ describe("deleteCanvasDocument cascade", () => {
 
   it("does not announce a focus change when a background document is deleted", () => {
     const active = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Active",
       content: "a",
       language: "markdown",
       type: "text",
     })
     const background = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Background",
       content: "b",
       language: "markdown",
@@ -1148,6 +1175,7 @@ describe("getCanvasDocumentsForWorkspace (Canvas workspace isolation)", () => {
   function seedIn(projectId: string | null, title: string) {
     mockActiveProjectId = projectId
     return useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title,
       content: title,
       language: "markdown",
@@ -1199,6 +1227,7 @@ describe("getCanvasDocumentsForWorkspace (Canvas workspace isolation)", () => {
   it("narrows by sessionId on top of the workspace scope", () => {
     mockActiveProjectId = "proj-A"
     useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "InSession",
       content: "a",
@@ -1206,6 +1235,7 @@ describe("getCanvasDocumentsForWorkspace (Canvas workspace isolation)", () => {
       type: "text",
     })
     useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s2",
       title: "OtherSession",
       content: "b",
@@ -1661,6 +1691,7 @@ describe("deleteArtifacts batch returnContext handling", () => {
 describe("updateCanvasDocument editor-context only updates", () => {
   it("does not bump updatedAt when only editorContext changes", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "x",
       language: "javascript",
@@ -1675,6 +1706,7 @@ describe("updateCanvasDocument editor-context only updates", () => {
 
   it("merges nested editor-context fields (selection / visibleRange / location)", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "x",
       language: "javascript",
@@ -1695,6 +1727,7 @@ describe("updateCanvasDocument editor-context only updates", () => {
 
   it("merges with existing nested editor-context fields", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "x",
       language: "javascript",
@@ -1723,6 +1756,7 @@ describe("updateCanvasDocument editor-context only updates", () => {
 
   it("clears nested fields when explicitly passed undefined / null", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "x",
       language: "javascript",
@@ -1750,6 +1784,7 @@ describe("updateCanvasDocument editor-context only updates", () => {
 
   it("creates a saved editorContext scaffold when an undefined update is applied", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "d",
       content: "x",
       language: "javascript",
@@ -1789,6 +1824,7 @@ describe("clearSessionData additional branches", () => {
 
   it("preserves the activeCanvasId for canvases that survive the purge", () => {
     const surviving = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "keep",
       title: "k",
       content: "x",
@@ -1796,6 +1832,7 @@ describe("clearSessionData additional branches", () => {
       type: "code",
     })
     useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "purge",
       title: "p",
       content: "y",
@@ -1809,6 +1846,7 @@ describe("clearSessionData additional branches", () => {
 
   it("nulls activeCanvasId when its document is purged", () => {
     const purged = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "purge",
       title: "p",
       content: "y",
@@ -1828,6 +1866,7 @@ describe("clearSessionData additional branches", () => {
       .getState()
       .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "g", content: "y" })
     const keptCanvas = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "kc",
       content: "x",
@@ -1835,6 +1874,7 @@ describe("clearSessionData additional branches", () => {
       type: "text",
     })
     const goneCanvas = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "gc",
       content: "y",
@@ -2237,6 +2277,7 @@ describe("canvas version retention (Settings → Canvas → Versions)", () => {
   // retention used a hard-coded 30-auto-save cap.
   function seed(count: number, opts: { named?: boolean } = {}) {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "doc",
       content: "v0",
       language: "javascript",
@@ -2315,6 +2356,7 @@ describe("canvas version retention (Settings → Canvas → Versions)", () => {
 describe("canvas plugin hook dispatches", () => {
   it("createCanvasDocument fires onCanvasCreate + onCanvasSwitch", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2328,6 +2370,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("createCanvasDocument plugin payload defaults missing language to markdown", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       type: "code",
@@ -2340,6 +2383,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("updateCanvasDocument fires onCanvasUpdate (always) and onCanvasContentChange (only on content change)", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2362,6 +2406,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("updateCanvasDocument ignores undefined optional plugin payload fields", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2388,6 +2433,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("updateCanvasDocument with editorContext.selection fires onCanvasSelection (with offsets)", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "abc\ndef",
       language: "javascript",
@@ -2414,6 +2460,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("selection dispatch handles reversed and out-of-range line positions", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "abc\ndef",
       language: "javascript",
@@ -2440,6 +2487,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("selection dispatch ignores malformed editor selection coordinates", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "abc",
       language: "javascript",
@@ -2456,6 +2504,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("deleteCanvasDocument fires onCanvasDelete; onCanvasSwitch(null) fires when active", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2475,6 +2524,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("setActiveCanvas fires onCanvasSwitch only when the active id changes", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2491,6 +2541,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("saveCanvasVersion fires onCanvasVersionSave with the new version id", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2503,6 +2554,7 @@ describe("canvas plugin hook dispatches", () => {
 
   it("restoreCanvasVersion fires onCanvasVersionRestore on success and stays silent on failure", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       title: "Doc",
       content: "v1",
       language: "javascript",
@@ -2529,6 +2581,7 @@ describe("canvas plugin hook dispatches", () => {
     Date.now = () => frozen
     try {
       const id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Doc",
         content: "v0",
         language: "javascript",
@@ -2556,9 +2609,13 @@ describe("workspace (project) isolation", () => {
     const a = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "a", content: "x" })
-    const docId = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "d", content: "y", language: "javascript", type: "code" })
+    const docId = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "d",
+      content: "y",
+      language: "javascript",
+      type: "code",
+    })
     expect(a.projectId).toBe("proj-A")
     expect(useArtifactStore.getState().canvasDocuments[docId].projectId).toBe("proj-A")
   })
@@ -2594,9 +2651,13 @@ describe("workspace (project) isolation", () => {
     const a = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "a", content: "x" })
-    const docAId = useArtifactStore
-      .getState()
-      .createCanvasDocument({ title: "da", content: "y", language: "javascript", type: "code" })
+    const docAId = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
+      title: "da",
+      content: "y",
+      language: "javascript",
+      type: "code",
+    })
     mockActiveProjectId = "proj-B"
     const b = useArtifactStore
       .getState()
@@ -3059,6 +3120,7 @@ describe("AI-revision review (pending reviews)", () => {
 describe("canvas AI-revision review", () => {
   const makeCanvasDoc = (content: string) =>
     useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "Doc",
       content,

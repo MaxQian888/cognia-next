@@ -23,6 +23,7 @@ import {
   getLibraryAsset,
   getHeldSessionAssetSource,
   bindHeldSessionAsset,
+  renameLibraryAsset,
 } from "./session-assets"
 import { LIBRARY_REF_SESSION_ID } from "./message-media-refs"
 import type { UIMessage } from "ai"
@@ -384,6 +385,29 @@ describe("Files library assets", () => {
       putLibraryAsset({ assetId: "u1", blob, filename: "again.txt", mediaType: "text/plain" })
     ).rejects.toMatchObject({ code: "session_asset_identity_conflict" })
     expect(await getLibraryAsset("missing")).toBeUndefined()
+  })
+
+  it("renames a Files-owned upload at its source and in its Files snapshot", async () => {
+    await putLibraryAsset({
+      assetId: "u1",
+      blob: new Blob(["body"], { type: "text/plain" }),
+      filename: "draft.txt",
+      mediaType: "text/plain",
+      now: 5,
+    })
+    const renamed = await renameLibraryAsset("u1", "  final.txt ", 9)
+    expect(renamed).toMatchObject({ filename: "final.txt", updatedAt: 9, revision: 2 })
+    expect((await listLibraryAssets())[0]?.filename).toBe("final.txt")
+    expect(await getDb().libraryItems.get("upload:u1")).toMatchObject({
+      snapshot: { title: "final.txt" },
+      updatedAt: 9,
+    })
+    await expect(renameLibraryAsset("u1", "  ")).rejects.toMatchObject({
+      code: "session_asset_invalid_original",
+    })
+    await expect(renameLibraryAsset("missing", "x.txt")).rejects.toMatchObject({
+      code: "session_asset_not_found",
+    })
   })
 
   it("survives deletion of every session and still counts toward the quota", async () => {

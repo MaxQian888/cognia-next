@@ -29,11 +29,14 @@ function resetStore() {
 }
 
 function seedDoc(
-  overrides: Parameters<ReturnType<typeof useArtifactStore.getState>["createCanvasDocument"]>[0]
+  overrides: Omit<
+    Parameters<ReturnType<typeof useArtifactStore.getState>["createCanvasDocument"]>[0],
+    "createdBy"
+  >
 ) {
   let id = ""
   act(() => {
-    id = useArtifactStore.getState().createCanvasDocument(overrides)
+    id = useArtifactStore.getState().createCanvasDocument({ createdBy: "user", ...overrides })
   })
   return id
 }

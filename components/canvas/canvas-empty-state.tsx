@@ -43,7 +43,7 @@ export function CanvasEmptyState() {
       <CanvasNewDocumentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onCreate={(request) => setActive(create(request))}
+        onCreate={(request) => setActive(create({ ...request, createdBy: "user" }))}
       />
     </Empty>
   )

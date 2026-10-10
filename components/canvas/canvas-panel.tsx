@@ -883,6 +883,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
             content: src.content,
             language: src.language,
             type: src.type,
+            createdBy: "user",
           })
           setActive(dupId)
         }}
@@ -948,7 +949,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       <CanvasNewDocumentDialog
         open={newDialogOpen}
         onOpenChange={setNewDialogOpen}
-        onCreate={(request) => setActive(create(request))}
+        onCreate={(request) => setActive(create({ ...request, createdBy: "user" }))}
       />
       <CanvasDeleteDocumentDialog
         open={deleteCandidateId !== null}

@@ -84,6 +84,7 @@ function seedReview(content = "a\nb\nc\nd", proposed = "A\nb\nc\nD") {
   let id = ""
   act(() => {
     id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s1",
       title: "Doc",
       content,

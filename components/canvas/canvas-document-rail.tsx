@@ -296,6 +296,7 @@ export function CanvasDocumentRail() {
                   content: doc.content,
                   language: doc.language,
                   type: doc.type,
+                  createdBy: "user",
                 })
                 setActive(dupId)
               }}
@@ -543,7 +544,7 @@ export function CanvasDocumentRail() {
       <CanvasNewDocumentDialog
         open={newDialogOpen}
         onOpenChange={setNewDialogOpen}
-        onCreate={(request) => setActive(create(request))}
+        onCreate={(request) => setActive(create({ ...request, createdBy: "user" }))}
       />
       <CanvasDeleteDocumentDialog
         open={deleteCandidateId !== null}

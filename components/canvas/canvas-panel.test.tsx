@@ -245,6 +245,7 @@ describe("CanvasPanel", () => {
   function seedActiveDoc() {
     act(() => {
       const id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Doc",
         content: "x",
         language: "javascript",
@@ -274,6 +275,7 @@ describe("CanvasPanel", () => {
   it("renders the Monaco editor mock when an active document exists", () => {
     act(() => {
       const id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Active",
         content: "console.log(1)",
         language: "javascript",
@@ -290,6 +292,7 @@ describe("CanvasPanel", () => {
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Mobile",
         content: "hello",
         language: "markdown",
@@ -331,6 +334,7 @@ describe("CanvasPanel", () => {
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Flush",
         content: "hello",
         language: "markdown",
@@ -364,6 +368,7 @@ describe("CanvasPanel", () => {
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Bind",
         content: "hello",
         language: "markdown",
@@ -404,6 +409,7 @@ describe("CanvasPanel", () => {
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Burst",
         content: "",
         language: "markdown",
@@ -444,6 +450,7 @@ describe("CanvasPanel", () => {
     let first = ""
     act(() => {
       first = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "First",
         content: "a",
         language: "markdown",
@@ -477,6 +484,7 @@ describe("CanvasPanel", () => {
     let id = ""
     act(() => {
       id = useArtifactStore.getState().createCanvasDocument({
+        createdBy: "user",
         title: "Race",
         content: "original",
         language: "markdown",
@@ -535,6 +543,7 @@ describe("CanvasPanel", () => {
       let id = ""
       act(() => {
         id = useArtifactStore.getState().createCanvasDocument({
+          createdBy: "user",
           title: "Doc",
           content,
           language,
@@ -584,12 +593,14 @@ describe("CanvasPanel", () => {
         let idB = ""
         act(() => {
           idA = useArtifactStore.getState().createCanvasDocument({
+            createdBy: "user",
             title: "Alpha",
             content: "a",
             language: "markdown",
             type: "text",
           })
           idB = useArtifactStore.getState().createCanvasDocument({
+            createdBy: "user",
             title: "Beta",
             content: "b",
             language: "markdown",
@@ -819,6 +830,7 @@ describe("CanvasPanel", () => {
     async function seedDocAndRender() {
       act(() => {
         const id = useArtifactStore.getState().createCanvasDocument({
+          createdBy: "user",
           title: "Resize",
           content: "x",
           language: "javascript",
@@ -886,6 +898,7 @@ describe("CanvasPanel", () => {
       let id = ""
       act(() => {
         id = useArtifactStore.getState().createCanvasDocument({
+          createdBy: "user",
           title: "Big",
           content: "x",
           language: "javascript",

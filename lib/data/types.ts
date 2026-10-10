@@ -42,6 +42,7 @@ import type { PetModelRow } from "@/lib/db/pet-models"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { DocumentTemplateRow } from "@/lib/db/document-templates"
 import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types"
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
@@ -145,6 +146,8 @@ export interface BackupPayloadV3 {
    * answer than one carrying a number nobody reads directly.
    */
   chatTemplates?: ChatTemplateRow[]
+  /** Document templates saved from Files or a canvas (ADR-0223). */
+  documentTemplates?: DocumentTemplateRow[]
   /**
    * Files page (ADR-0200, schema v231): favorites, folder membership and
    * "removed from Files" over artifacts, canvas documents, images and uploads,

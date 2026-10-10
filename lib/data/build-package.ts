@@ -120,6 +120,7 @@ export async function buildBackupPackage(
     pluginCogsetState,
     cogpackInstalls,
     chatTemplates,
+    documentTemplates,
     scheduledTasks,
     petProfile,
     petAchievements,
@@ -183,6 +184,7 @@ export async function buildBackupPackage(
     db.pluginCogsetState.get(COGSET_STATE_ID),
     readTable(db.cogpackInstalls),
     readTable(db.chatTemplates),
+    readTable(db.documentTemplates),
     readTable(db.scheduledTasks),
     db.petProfile.get("global"),
     readTable(db.petAchievements),
@@ -303,6 +305,9 @@ export async function buildBackupPackage(
     // No built-in concept, so `includeBuiltIns` is a no-op here: every row is
     // something the user typed.
     chatTemplates,
+    // Same shape of thing as a chat template: every row is something the user
+    // saved. The built-in document templates are code and never travel.
+    documentTemplates,
     // Configuration only. Run history stays on the machine that ran it.
     scheduledTasks,
     // The desktop pet. The profile is the singleton nothing can rebuild; the
@@ -396,6 +401,7 @@ export async function buildBackupPackage(
       "memoryAuditEvents",
       "retrievalProfileDeks",
       "chatTemplates",
+      "documentTemplates",
       "scheduledTasks",
       "petProfile",
       "petAchievements",

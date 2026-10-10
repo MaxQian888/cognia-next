@@ -113,6 +113,7 @@ describe("revealCanvasDocument", () => {
 
   it("activates the document and switches the shell to the Canvas guild", () => {
     const id = useArtifactStore.getState().createCanvasDocument({
+      createdBy: "user",
       sessionId: "s",
       title: "Draft",
       content: "hello",
