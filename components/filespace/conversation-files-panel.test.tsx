@@ -16,6 +16,10 @@ jest.mock("@/hooks/filespace/use-conversation-filespace", () => ({
 jest.mock("@/lib/filespace/open", () => ({ openFileSpacePath: jest.fn(async () => "opened") }))
 jest.mock("@/lib/db/session-assets", () => ({ getSessionAsset: jest.fn() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
+// The shared conversation's counterpart is a live query; each test says what it answers.
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: jest.fn((_query: unknown, _deps: unknown, initial: unknown) => initial),
+}))
 // The dialog has its own suite; this one pins what the panel hands it.
 const mockShareDialog = jest.fn()
 jest.mock("@/components/share/share-link-dialog", () => ({
@@ -39,6 +43,7 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/tauri/clipboard", () => ({ writeClipboardText: jest.fn(async () => undefined) }))
 
 import { toast } from "sonner"
+import { useClientLiveQuery } from "@/hooks/data"
 import { useConversationFileSpace } from "@/hooks/filespace/use-conversation-filespace"
 import { useLiveFileShare } from "@/hooks/filespace/use-live-file-share"
 import { getSessionAsset } from "@/lib/db/session-assets"
@@ -138,6 +143,9 @@ beforeEach(() => {
   jest.clearAllMocks()
   useFileSpacePanelStore.setState({ focus: null })
   ;(useLiveFileShare as jest.Mock).mockReturnValue(UNSUPPORTED)
+  ;(useClientLiveQuery as jest.Mock).mockImplementation(
+    (_query: unknown, _deps: unknown, initial: unknown) => initial
+  )
 })
 
 describe("ConversationFilesPanel", () => {
@@ -407,6 +415,53 @@ describe("ConversationFilesPanel", () => {
       act(() => lastSection().onCloseRequest())
       expect(lastSection().request).toBeNull()
       expect(lastSection().space.sessionId).toBe("s1")
+    })
+
+    it("offers a shared conversation's members as an audience, even with network-drive credentials off", async () => {
+      ;(useLiveFileShare as jest.Mock).mockReturnValue({
+        ...OFFERED,
+        status: {
+          active: true,
+          policy: { allowLiveGrants: true, allowProtocolCredentials: false },
+        },
+      })
+      let query: (() => Promise<unknown>) | null = null
+      ;(useClientLiveQuery as jest.Mock).mockImplementation((q: () => Promise<unknown>) => {
+        query = q
+        return { orgId: "org_1", sessionId: "ses_1" }
+      })
+      useSpace.mockReturnValue(loaded())
+      render(<ConversationFilesPanel sessionId="s1" />, { wrapper })
+      expect(mockLiveSection).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sharedScope: { orgId: "org_1", sessionId: "ses_1" } })
+      )
+      expect(liveButton("filespace-mount-workspace")).toBeEnabled()
+
+      // The query reads the conversation's collaboration binding.
+      ;(getSession as jest.Mock).mockResolvedValue({
+        id: "s1",
+        collaboration: { orgId: "org_1", sessionId: "ses_1", endpoint: "https://collab.test" },
+      })
+      await expect(query!()).resolves.toEqual({ orgId: "org_1", sessionId: "ses_1" })
+      expect(getSession).toHaveBeenCalledWith("s1")
+      ;(getSession as jest.Mock).mockResolvedValue({ id: "s1" })
+      await expect(query!()).resolves.toBeNull()
+    })
+
+    it("has no members audience for a conversation that is not shared", () => {
+      ;(useLiveFileShare as jest.Mock).mockReturnValue({
+        ...OFFERED,
+        status: {
+          active: true,
+          policy: { allowLiveGrants: true, allowProtocolCredentials: false },
+        },
+      })
+      useSpace.mockReturnValue(loaded())
+      render(<ConversationFilesPanel sessionId="s1" />, { wrapper })
+      expect(mockLiveSection).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sharedScope: null })
+      )
+      expect(liveButton("filespace-mount-workspace")).toBeNull()
     })
   })
 })

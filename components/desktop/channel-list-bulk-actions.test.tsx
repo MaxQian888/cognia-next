@@ -46,6 +46,14 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/components/share/revoke-share-links-option", () => ({
+  // Pinned in its own suite; here it only records which conversations it covers.
+  RevokeShareLinksOption: (props: { sessionIds: readonly string[] }) => (
+    <span data-testid="revoke-links-option" data-session-ids={props.sessionIds.join(",")} />
+  ),
+  useRevokeShareLinksAfterDelete: () => jest.fn(),
+}))
+
 import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 
 function session(id: string, title: string): ChatSession {
@@ -361,6 +369,24 @@ it("hands the delete confirm the selection's titles in list order, placeholders 
     "Alpha",
     "untitled",
   ])
+})
+
+it("offers to revoke the share links of every selected conversation", async () => {
+  const user = userEvent.setup()
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["b", "a"])}
+      orderedIds={["a", "b"]}
+      sessions={[session("b", "Beta"), session("a", "Alpha")]}
+      archived={false}
+      onDelete={jest.fn()}
+      onClear={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "delete" }))
+  const option = await screen.findByTestId("revoke-links-option")
+  expect(option.getAttribute("data-session-ids")?.split(",").sort()).toEqual(["a", "b"])
 })
 
 it("routes each verb to the rows it applies to in a mixed selection", async () => {
