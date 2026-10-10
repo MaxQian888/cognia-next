@@ -200,6 +200,28 @@ describe("buildAttachmentBlocks — documents", () => {
     expect(text).not.toContain("alice@example.com")
   })
 
+  it.each([false, true])(
+    "extracts a multi-MB plain-text upload with PII=%s without freezing",
+    async (withPii) => {
+      const content = "x".repeat(2_500_000) + (withPii ? " alice@example.com" : "")
+      processMock.mockResolvedValue({ embeddableContent: content, content })
+      const file = { url: dataUrl("text/plain", content), filename: "large.txt" }
+      const start = performance.now()
+      const result = await extractAttachment(file)
+      const elapsed = performance.now() - start
+
+      expect(result.kind).toBe("document")
+      expect(result.extractedContent?.status).toBe("ready")
+      expect(result.text).toContain("x".repeat(2_500_000))
+      expect(result.tokens).toBeGreaterThan(0)
+      if (withPii) {
+        expect(result.text).toContain("<EMAIL_001>")
+        expect(result.text).not.toContain("alice@example.com")
+      }
+      expect(elapsed).toBeLessThan(500)
+    }
+  )
+
   it("passes a real ArrayBuffer to the processor for binary documents", async () => {
     await buildAttachmentBlocks([
       {

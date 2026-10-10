@@ -135,8 +135,8 @@ const BANK_CARD_CANDIDATE_RE = /\b\d(?:[ -]?\d){12,18}\b/g
 const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g
 // PEM private-key blocks (RSA/EC/OPENSSH/generic). Non-greedy body so two
 // adjacent blocks don't merge into one match.
-const PEM_BLOCK_RE =
-  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g
+const PEM_BEGIN_RE = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/g
+const PEM_END_RE = /-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g
 // Credentials embedded in a URL: `scheme://user:password@host`. We redact the
 // password (capture group 2); the scheme + user are kept so the URL still reads.
 const URL_CRED_RE = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+):([^\s:/@]+)@/gi
@@ -153,7 +153,9 @@ const IPV6_RE = /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g
 // `::1`) is structurally indistinguishable from such code, so we skip it; those
 // forms are link-local / loopback anyway (non-PII), mirroring the private-IPv4
 // exclusions above.
-const IPV6_COMPRESSED_RE = /\b(?:[0-9a-fA-F]{1,4}:){2,}:(?:[0-9a-fA-F]{1,4}:?)*[0-9a-fA-F]{1,4}\b/g
+// The compressed form is scanned around `::` below. The previous optional
+// colon / repeated hex-group regex both retried each leading group and could
+// exponentially backtrack while partitioning a long trailing hex run.
 // Known API key prefixes — covers OpenAI, Anthropic, Stripe, GitHub, Slack,
 // Google, AWS, Meta, Telegram and a few others that ship recognisable
 // prefixes. Shapes ported from ai-memory's sanitizer, tightened where the
@@ -264,16 +266,131 @@ function isRedactableEnvValue(value: string): boolean {
 function stateless(re: RegExp): RegExp {
   return new RegExp(re.source, re.flags.replace("g", ""))
 }
-const EMAIL_DETECT = stateless(EMAIL_RE)
 const CN_ID_DETECT = stateless(CN_ID_RE)
 const API_KEY_DETECT = stateless(API_KEY_PREFIX_RE)
 const API_KEY_HINT_DETECT = stateless(API_KEY_HINT_RE)
 const IPV6_DETECT = stateless(IPV6_RE)
-const IPV6_COMPRESSED_DETECT = stateless(IPV6_COMPRESSED_RE)
 const PASSPORT_DETECT = stateless(PASSPORT_RE)
-const JWT_DETECT = stateless(JWT_RE)
-const PEM_DETECT = stateless(PEM_BLOCK_RE)
-const URL_CRED_DETECT = stateless(URL_CRED_RE)
+
+/**
+ * Try only the first eligible prefix in each maximal run. URL schemes and
+ * JWT headers can start after `-` (a word boundary), so adding a stronger
+ * lookbehind would lose existing matches. Later starts in the same run reach
+ * the same delimiters with a shorter prefix and cannot rescue a failed match.
+ */
+function* matchesFromRuns(
+  text: string,
+  runs: RegExp,
+  prefix: RegExp | null,
+  pattern: RegExp
+): Generator<RegExpExecArray> {
+  const runScanner = new RegExp(runs.source, runs.flags)
+  const matcher = new RegExp(pattern.source, pattern.flags.replace("g", "y"))
+  let run: RegExpExecArray | null
+  while ((run = runScanner.exec(text))) {
+    // Include the preceding character so `\b` keeps its original meaning
+    // even when a run follows an underscore or another word character.
+    matcher.lastIndex = run.index
+    if (prefix) {
+      const contextStart = Math.max(0, run.index - 1)
+      const candidate = prefix.exec(text.slice(contextStart, runScanner.lastIndex))
+      if (!candidate) continue
+      matcher.lastIndex = contextStart + candidate.index
+    }
+    const match = matcher.exec(text)
+    if (!match) continue
+    yield match
+    runScanner.lastIndex = matcher.lastIndex
+  }
+}
+
+function emailMatches(text: string): Generator<RegExpExecArray> {
+  // Resume at a successful match's end, even inside the same local-part run:
+  // `a@b.co-c@d.io` contains two adjacent matches under the original pattern.
+  return matchesFromRuns(text, /[a-zA-Z0-9._%+-]+/g, null, EMAIL_RE)
+}
+
+function urlCredentialMatches(text: string): Generator<RegExpExecArray> {
+  return matchesFromRuns(text, /[a-z0-9+.-]+/gi, /\b[a-z]/i, URL_CRED_RE)
+}
+
+function jwtMatches(text: string): Generator<RegExpExecArray> {
+  return matchesFromRuns(text, /[A-Za-z0-9_-]+/g, /\beyJ(?=[A-Za-z0-9_-])/, JWT_RE)
+}
+
+function* pemMatches(text: string): Generator<RegExpExecArray> {
+  const begins = new RegExp(PEM_BEGIN_RE.source, "g")
+  const ends = new RegExp(PEM_END_RE.source, "g")
+  let begin: RegExpExecArray | null
+  while ((begin = begins.exec(text))) {
+    ends.lastIndex = begins.lastIndex
+    const end = ends.exec(text)
+    // No later BEGIN can have an END either; don't rescan the remaining body.
+    if (!end) return
+    begin[0] = text.slice(begin.index, ends.lastIndex)
+    yield begin
+    begins.lastIndex = ends.lastIndex
+  }
+}
+
+interface TextMatch {
+  0: string
+  index: number
+}
+
+function* compressedIpv6Matches(text: string): Generator<TextMatch> {
+  const hex = /[0-9a-f]/i
+  const word = /\w/
+  let consumed = 0
+  let separator = text.indexOf("::")
+  while (separator !== -1) {
+    let start = separator
+    let cursor = separator
+    let groups = 0
+    while (cursor > consumed) {
+      const end = cursor
+      while (cursor > consumed && end - cursor < 5 && hex.test(text[cursor - 1])) cursor--
+      if (end === cursor || end - cursor > 4 || word.test(text[cursor - 1] ?? "")) break
+      start = cursor
+      groups++
+      if (text[cursor - 1] !== ":") break
+      cursor--
+    }
+    if (groups >= 2) {
+      cursor = separator + 2
+      let end = cursor
+      // The old optional-colon groups allowed arbitrarily long contiguous hex
+      // segments. Preserve that language and its last word-boundary endpoint.
+      while (hex.test(text[cursor] ?? "")) {
+        while (hex.test(text[cursor] ?? "")) cursor++
+        if (!word.test(text[cursor] ?? "")) end = cursor
+        if (text[cursor] !== ":") break
+        cursor++
+      }
+      if (end > separator + 2) {
+        yield { 0: text.slice(start, end), index: start }
+        consumed = end
+      }
+    }
+    separator = text.indexOf("::", Math.max(separator + 2, consumed))
+  }
+}
+
+function replaceMatches<T extends TextMatch>(
+  text: string,
+  matches: Iterable<T>,
+  replace: (match: T) => string
+): string {
+  const parts: string[] = []
+  let cursor = 0
+  for (const match of matches) {
+    parts.push(text.slice(cursor, match.index), replace(match))
+    cursor = match.index + match[0].length
+  }
+  if (parts.length === 0) return text
+  parts.push(text.slice(cursor))
+  return parts.join("")
+}
 
 function luhn(digits: string): boolean {
   let sum = 0
@@ -356,19 +473,19 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
 
   // PEM blocks first: the base64 body would otherwise feed the card / key
   // passes a stream of false candidates. Redact the whole block as one token.
-  let out = text.replace(PEM_BLOCK_RE, (m) => tokenize(state, "PEM_KEY", m))
+  let out = replaceMatches(text, pemMatches(text), (m) => tokenize(state, "PEM_KEY", m[0]))
   // URL-embedded credentials before EMAIL, so the `password@host` tail can't be
   // mistaken for an email address. Only the password (group 2) is redacted.
-  out = out.replace(URL_CRED_RE, (full, prefix: string, password: string) =>
-    full.replace(`:${password}@`, `:${tokenize(state, "API_KEY", password)}@`)
+  out = replaceMatches(out, urlCredentialMatches(out), (match) =>
+    match[0].replace(`:${match[2]}@`, `:${tokenize(state, "API_KEY", match[2])}@`)
   )
-  out = out.replace(EMAIL_RE, (m) => tokenize(state, "EMAIL", m))
+  out = replaceMatches(out, emailMatches(out), (m) => tokenize(state, "EMAIL", m[0]))
   // API keys come *before* anything else digit-heavy so a key like
   // `sk-proj-abc...123` doesn't get half-eaten by the bank-card regex.
   out = out.replace(API_KEY_PREFIX_RE, (m) => tokenize(state, "API_KEY", m))
   // JWTs before the hinted-secret pass so a `token: eyJ…` is claimed as a JWT
   // (and the short placeholder no longer trips the ≥20-char hint matcher).
-  out = out.replace(JWT_RE, (m) => tokenize(state, "JWT", m))
+  out = replaceMatches(out, jwtMatches(out), (m) => tokenize(state, "JWT", m[0]))
   // Bearer and env-style values after JWT (so `Bearer eyJ…` is a JWT) and
   // after the prefix pass (so `OPENAI_API_KEY=sk-…` is already a placeholder
   // and the env pass skips it). Only the token / value is replaced; the
@@ -407,7 +524,8 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   // for a phone number first.
   out = out.replace(IPV4_RE, (m) => (isLikelyPublicIPv4(m) ? tokenize(state, "IP_ADDR", m) : m))
   out = out.replace(IPV6_RE, (m) => tokenize(state, "IP_ADDR", m))
-  out = out.replace(IPV6_COMPRESSED_RE, (m) => {
+  out = replaceMatches(out, compressedIpv6Matches(out), (match) => {
+    const m = match[0]
     // Skip anything already swapped for a placeholder this pass.
     if (/^\s*<[A-Z_]+_\d{3,}>\s*$/.test(m)) return m
     return tokenize(state, "IP_ADDR", m)
@@ -586,7 +704,7 @@ function scanIsClean(text: string): boolean {
   // IPv4 / bank-card passes need every match (to apply a predicate), so they
   // use `matchAll`, which clones the regex internally and never mutates the
   // shared global's `lastIndex`.
-  if (EMAIL_DETECT.test(text)) return false
+  if (!emailMatches(text).next().done) return false
   if (CN_ID_DETECT.test(text)) return false
   for (const match of text.matchAll(SSN_RE)) {
     if (isValidUsSsn(match[0])) return false
@@ -599,12 +717,12 @@ function scanIsClean(text: string): boolean {
   for (const match of text.matchAll(ENV_SECRET_RE)) {
     if (isRedactableEnvValue(match[2] ?? "")) return false
   }
-  if (JWT_DETECT.test(text)) return false
-  if (PEM_DETECT.test(text)) return false
-  if (URL_CRED_DETECT.test(text)) return false
+  if (!jwtMatches(text).next().done) return false
+  if (!pemMatches(text).next().done) return false
+  if (!urlCredentialMatches(text).next().done) return false
   if (PASSPORT_DETECT.test(text)) return false
   if (IPV6_DETECT.test(text)) return false
-  if (IPV6_COMPRESSED_DETECT.test(text)) return false
+  if (!compressedIpv6Matches(text).next().done) return false
   // IPv4 — restrict to public addresses so log/example lines don't leak.
   for (const match of text.matchAll(IPV4_RE)) {
     if (isLikelyPublicIPv4(match[0])) return false

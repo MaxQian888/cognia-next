@@ -18,6 +18,54 @@ import {
   translateOffsetsThroughRedaction,
 } from "./index"
 
+describe("PII scan run boundaries", () => {
+  it.each([
+    ["a@b.co-c@d.io", "EMAIL", ["a@b.co", "-c@d.io"]],
+    ["___alice+tag@example.com", "EMAIL", ["___alice+tag@example.com"]],
+    ["prefix-https://user:password@host", "API_KEY", ["password"]],
+    ["1-a://user:password@host", "API_KEY", ["password"]],
+    ["_https-a://user:password@host", "API_KEY", ["password"]],
+    ["foo-eyJabc.def.ghi", "JWT", ["eyJabc.def.ghi"]],
+    ["a.eyJabc.def.ghi", "JWT", ["eyJabc.def.ghi"]],
+    ["eyJx.a.b.eyJy.c.d", "JWT", ["eyJx.a.b", "eyJy.c.d"]],
+    ["aa:bb::cc:dd_", "IP_ADDR", ["aa:bb::cc"]],
+    ["gaa:bb:cc::1234567", "IP_ADDR", ["bb:cc::1234567"]],
+    ["aa:bb::123456789abcdef", "IP_ADDR", ["aa:bb::123456789abcdef"]],
+  ] as const)("preserves the original matches in %s", (text, kind, originals) => {
+    const result = redactText(text)
+    expect(Object.values(result.map).map((record) => record.original)).toEqual(originals)
+    expect(Object.values(result.map).every((record) => record.kind === kind)).toBe(true)
+    expect(unredactText(result.redacted, result.map)).toBe(text)
+    expect(hasNoLeakingPii(text)).toBe(false)
+    // URL passwords still match the gate when replaced by a placeholder; keep
+    // that pre-existing decision as well as the original redaction span.
+    expect(hasNoLeakingPii(result.redacted)).toBe(kind !== "API_KEY")
+  })
+
+  it.each([
+    "_https://user:password@host",
+    "_eyJabc.def.ghi",
+    "aa:bb::abcdefg",
+    "aa:bb::abcdef_",
+    "-----BEGIN PRIVATE KEY-----unfinished",
+  ])("preserves clean boundary cases in %s", (text) => {
+    expect(hasNoLeakingPii(text)).toBe(true)
+    expect(redactText(text)).toEqual({ redacted: text, map: {} })
+  })
+
+  it("keeps separate PEM blocks and accepts the existing mismatched header kinds", () => {
+    const first = "-----BEGIN RSA PRIVATE KEY-----one-----END EC PRIVATE KEY-----"
+    const second = "-----BEGIN PRIVATE KEY-----two-----END PRIVATE KEY-----"
+    const text = `${first}\n${second}\n-----BEGIN PRIVATE KEY-----unfinished`
+    const result = redactText(text)
+    expect(result.redacted).toBe(
+      "<PEM_KEY_001>\n<PEM_KEY_002>\n-----BEGIN PRIVATE KEY-----unfinished"
+    )
+    expect(Object.values(result.map).map((record) => record.original)).toEqual([first, second])
+    expect(unredactText(result.redacted, result.map)).toBe(text)
+  })
+})
+
 describe("restoreOffsetsThroughRedaction", () => {
   it("round-trips canonical page boundaries across multiple length changes and Unicode", () => {
     const pages = ["第一😀 alice.long.name@example.com", "Bob C++ tail"]
