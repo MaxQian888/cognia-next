@@ -45,6 +45,9 @@ pub const SPAWN_CHANNEL: &str = "external-agent://spawn";
 /// Where a spawn that carried a runtime environment placement runs (ADR-0182).
 /// Additive, like `stdout-raw`: only spawns with a placement produce it.
 pub const PLACEMENT_CHANNEL: &str = "external-agent://placement";
+/// What a remote sandbox pushed back when an agent session ended (ADR-0221).
+/// Additive, like `placement`: only spawns with a remote workspace produce it.
+pub const WORKSPACE_PUBLISH_CHANNEL: &str = "external-agent://workspace-publish";
 
 pub fn stdout_payload(agent_id: &str, line: &str) -> Value {
     json!({ "agentId": agent_id, "data": line })
@@ -78,6 +81,11 @@ pub fn spawn_payload(agent_id: &str) -> Value {
 /// `placement` is `{kind: "sandbox", …}` or `{kind: "fallback", code, message}`.
 pub fn placement_payload(agent_id: &str, placement: &Value) -> Value {
     json!({ "agentId": agent_id, "placement": placement })
+}
+
+/// `publish` is `{branch, pushed, commit?, code?, message?}` (ADR-0221).
+pub fn workspace_publish_payload(agent_id: &str, publish: &Value) -> Value {
+    json!({ "agentId": agent_id, "publish": publish })
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +151,13 @@ impl ExternalAgentEventSink for EmitterEventSink {
         self.emitter.emit(
             EXIT_CHANNEL,
             exit_payload(agent_id, code, signal.as_deref()),
+        );
+    }
+
+    fn workspace_published(&self, agent_id: &str, publish: &Value) {
+        self.emitter.emit(
+            WORKSPACE_PUBLISH_CHANNEL,
+            workspace_publish_payload(agent_id, publish),
         );
     }
 
@@ -304,7 +319,16 @@ pub async fn spawn_with_events(
     {
         return Err("Isolated Devin MCP configuration requires a local process backend".into());
     }
-    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) && !runs_locally {
+    // A managed gateway task reaches the gateway either as a local process or
+    // through a sandbox driver's exec-channel bridge (ADR-0182, ADR-0221). A
+    // placement on a backend that routes sandboxes is the second case; the
+    // router itself refuses to fall such a spawn back onto a path that is not
+    // a local process.
+    let bridged_by_sandbox = config.sandbox.is_some() && backend.routes_sandboxes();
+    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV)
+        && !runs_locally
+        && !bridged_by_sandbox
+    {
         return Err("Cognia gateway tasks require a local process backend; remote gateway transport is not configured".into());
     }
     let id = config.id.clone();
@@ -512,6 +536,26 @@ mod tests {
         );
     }
 
+    /// The brain reads `{agentId, publish}` on the workspace-publish channel;
+    /// `publish` is the driver's own report, passed through untouched.
+    #[test]
+    fn the_workspace_publish_payload_shape() {
+        let publish = json!({ "branch": "cognia/task-1", "pushed": true, "commit": "a".repeat(40) });
+        assert_eq!(
+            workspace_publish_payload("a1", &publish),
+            json!({ "agentId": "a1", "publish": publish })
+        );
+        let emitter = test_support::RecordingAgentEmitter::new();
+        EmitterEventSink::new(emitter.clone()).workspace_published("a1", &publish);
+        assert_eq!(
+            emitter.events(),
+            vec![(
+                WORKSPACE_PUBLISH_CHANNEL.to_string(),
+                json!({ "agentId": "a1", "publish": publish })
+            )]
+        );
+    }
+
     fn placed(id: &str, command: &str, isolation_mandatory: bool) -> ExternalAgentSpawnConfig {
         ExternalAgentSpawnConfig {
             id: id.into(),
@@ -523,6 +567,8 @@ mod tests {
             sandbox: Some(
                 crate::sandbox_routing_backend::SandboxPlacement::Container {
                     hosted_tool_host_lease_ids: Vec::new(),
+                    provider: None,
+                    workspace: None,
                     spec: json!({}),
                     isolation_mandatory,
                 },

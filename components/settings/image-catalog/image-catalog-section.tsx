@@ -11,8 +11,9 @@
  * bundle.
  *
  * Reachable only where the `sandbox-pool` capability is (a server-backed
- * host); even there a deployment that never turned the pool on says so and
- * offers nothing (Q39).
+ * host, or a desktop, ADR-0221); even there a deployment that never turned
+ * the pool on says so and offers nothing (Q39). A desktop's pool is on once
+ * it has a remote sandbox provider, so there the notice links to them.
  *
  * # Labeled as not yet real (Working Rule 7)
  *
@@ -30,6 +31,7 @@
  */
 
 import { useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -55,6 +57,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ConsoleSection } from "@/components/surface/console-section"
+import { detectHostProfile } from "@/lib/platform/capabilities"
+import { settingsHref } from "@/lib/settings/deep-link"
 import { CatalogProblemText } from "@/components/settings/image-catalog/catalog-problem-text"
 import { ImageCatalogEntryEditor } from "@/components/settings/image-catalog/image-catalog-entry-editor"
 import {
@@ -138,7 +142,20 @@ export function ImageCatalogView({
       {status === "pool-off" ? (
         <Alert data-testid="image-catalog-pool-off">
           <AlertTitle>{t("poolOff.title")}</AlertTitle>
-          <AlertDescription>{t("poolOff.body")}</AlertDescription>
+          {/* A desktop turns the pool on itself, by adding a remote sandbox
+              provider (ADR-0221); a server's operator does it with a switch. */}
+          {detectHostProfile() === "desktop" ? (
+            <AlertDescription className="space-y-2">
+              <p>{t("poolOff.desktopBody")}</p>
+              <Button asChild variant="outline" size="sm">
+                <Link href={settingsHref("remote-sandboxes")}>
+                  {t("poolOff.openRemoteSandboxes")}
+                </Link>
+              </Button>
+            </AlertDescription>
+          ) : (
+            <AlertDescription>{t("poolOff.body")}</AlertDescription>
+          )}
         </Alert>
       ) : null}
       {status === "failed" ? (

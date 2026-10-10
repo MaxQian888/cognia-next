@@ -102,7 +102,9 @@
   "loading": "Reading the image catalog…",
   "poolOff": {
     "body": "This deployment has not enabled runtime environments, so every project runs on the standard execution path. An operator turns them on with COGNIA_SANDBOX_POOL_ENABLED.",
-    "title": "Runtime environments are off"
+    "title": "Runtime environments are off",
+    "desktopBody": "No remote sandbox provider is set up on this desktop yet, so every project runs on the standard execution path. Add one under Settings → Remote sandboxes, then restart Cognia.",
+    "openRemoteSandboxes": "Open Remote sandboxes"
   },
   "rejected": {
     "description": "These entries are stored but not offered, because the deployment's baseline does not allow them.",

@@ -16862,6 +16862,8 @@
       "pendingTooltip": "This run asked for a runtime environment; the host has not reported where it started yet.",
       "refused": "Environment refused",
       "sandboxed": "Sandbox · {tier}",
+      "sandboxedOn": "Sandbox on {provider} · {tier}",
+      "sandboxedOnUntiered": "Sandbox on {provider}",
       "sandboxedUntiered": "Sandbox",
       "tooltip": {
         "bundle": "Agent bundle: {tag} ({libc})",
@@ -16870,9 +16872,17 @@
         "egressNotEnforced": "Network: {tier}, recorded but not enforced",
         "image": "Image: {image}",
         "notReported": "not reported",
+        "nothingToPublish": "No changes to push to {branch}",
+        "provider": "Remote provider: {provider}",
+        "publishFailed": "The work was not pushed ({code}): {message}",
+        "publishPending": "The work is pushed when the session ends",
+        "pushRefused": "The remote refused the push to {branch}: {message}",
+        "pushed": "Pushed {commit} to {branch}",
         "tier": "Isolation: {tier}",
         "user": "Runs as {user}",
-        "userRemapped": "Runs as {user}, remapped onto the workspace owner"
+        "userRemapped": "Runs as {user}, remapped onto the workspace owner",
+        "workspace": "Cloned {remote} at {base} onto {branch}",
+        "workspaceUnreported": "Cloned the repository onto {branch}"
       },
       "unknown": "Placement not recognized"
     },
@@ -33940,7 +33950,8 @@
       "fallback": {
         "bundleUnavailable": "No agent bundle is available, so this run is using the standard execution path.",
         "catalogUnreadable": "The image catalog could not be read, so this run is using the standard execution path.",
-        "poolDisabled": "Runtime environments are not enabled on this deployment, so this run is using the standard execution path."
+        "poolDisabled": "Runtime environments are not enabled on this deployment, so this run is using the standard execution path.",
+        "providerUnavailable": "No sandbox provider on this host can run this project right now, so this run is using the standard execution path."
       },
       "hostFallback": {
         "bundleStageFailed": "The host could not stage the agent bundle into the container, so the run continued outside the sandbox.",
@@ -33948,10 +33959,17 @@
         "containerStartFailed": "The container failed to start, so the run continued outside the sandbox.",
         "daemonUnreachable": "The container daemon was unreachable, so the run continued outside the sandbox.",
         "driverUnavailable": "No sandbox driver was available on the host, so the run continued outside the sandbox.",
+        "persistentRuntimeFailed": "The persistent sandbox could not be resumed, so the run continued outside the sandbox.",
         "poolDisabled": "The host has the sandbox pool switched off, so the run continued outside the sandbox.",
+        "providerCapacity": "The sandbox provider is at its limit of concurrent sandboxes, so the run continued outside the sandbox.",
+        "providerRejected": "The sandbox provider refused to start the sandbox, so the run continued outside the sandbox.",
+        "providerUnreachable": "The sandbox provider could not be reached, so the run continued outside the sandbox.",
+        "serviceUnavailable": "The sandbox could not reach a host service it needs, so the run continued outside the sandbox.",
         "storeUnavailable": "The host could not read its sandbox records, so the run continued outside the sandbox.",
+        "templateBuildTimeout": "Preparing the remote sandbox image took too long, so the run continued outside the sandbox.",
         "unknown": "The host could not sandbox this run ({code}), so it continued outside the sandbox.",
-        "volumeUnavailable": "The sandbox volume was unavailable, so the run continued outside the sandbox."
+        "volumeUnavailable": "The sandbox volume was unavailable, so the run continued outside the sandbox.",
+        "workspaceCloneFailed": "The remote sandbox could not clone the repository, so the run continued outside the sandbox."
       },
       "notice": {
         "approvalPending": "This repository declares a runtime environment that nobody has approved yet, so the deployment default is being used.",
@@ -33975,10 +33993,13 @@
         "gpuNotSupported": "GPU sandboxes are not available yet.",
         "imageDigestNotPinned": "The selected image is not pinned to a digest, so what would run is not fixed.",
         "localContainerUnavailable": "This device cannot run a local container yet.",
+        "providerUnavailable": "No sandbox provider on this host can run this project at the {tier} tier right now, and this project requires a sandbox.",
+        "providerUnknown": "This project runs on the sandbox provider \"{providerId}\", which this host does not have. Choose another target.",
         "runtimeSelectionInvalid": "The runtime-environment settings for this project are not valid.",
         "sandboxPoolDisabled": "Runtime environments are not enabled on this deployment, and this project requires a sandbox.",
         "sizeClassNotOffered": "The selected size is not offered for this image.",
-        "sizeClassUnknown": "This deployment does not define the selected size."
+        "sizeClassUnknown": "This deployment does not define the selected size.",
+        "workspaceRemoteRequired": "A remote sandbox clones the repository from its remote, and this checkout has none it can clone over HTTPS ({reason, select, no_checkout {no checkout} no_remote {no remote} remote_not_https {the remote is not HTTPS or SSH} no_base_branch {no branch on the remote to start from} other {{reason}}})."
       }
     },
     "plainWarning": "Do not place secrets in plain variables. Store only an OS-keyring reference below.",
@@ -34159,6 +34180,7 @@
       "optIn": "Run this project's external agents in a runtime environment",
       "optInHint": "Off: external agents run on the standard execution path, exactly as before.",
       "poolOff": "Runtime environments are not enabled on this deployment, so runs use the standard execution path.",
+      "poolOffDesktop": "No sandbox is configured on this desktop, so runs use the standard execution path. Add a provider under Settings → Remote sandboxes.",
       "poolOffKept": "This project's selection is kept and takes effect once an operator enables them.",
       "ports": {
         "close": "Close connection",
@@ -34189,6 +34211,19 @@
       "source": "Image",
       "sourceAuto": "Automatic — the repository's approved declaration, else the deployment default",
       "sourceDefault": "{label} (deployment default)",
+      "target": {
+        "auto": "Automatic",
+        "hintAuto": "This host's own sandbox when it offers the isolation the project needs, otherwise the default remote provider.",
+        "hintLocal": "Always this host's own sandbox. Refused on a host without one.",
+        "hintRemote": "A remote sandbox clones the repository from its remote and pushes its work to a cognia/ branch there. Uncommitted and unpushed local changes are not included.",
+        "label": "Runs on",
+        "local": "This host's own sandbox",
+        "missing": "{id} (not on this host)",
+        "provider": "{label}",
+        "providerStatus": "{label}: {instances} running, {sessions, plural, =1 {# session} other {# sessions}}",
+        "providerStatusUnreachable": "{label}: unreachable ({code})",
+        "providerUnreachable": "{label} (unreachable)"
+      },
       "tier": {
         "container": "Container",
         "gvisor": "gVisor",
@@ -46687,6 +46722,7 @@
       "providers": "AI provider API keys, models, and connection settings.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
       "remoteHosts": "Drive a remote Cognia host — its terminal, files, and git — from this desktop.",
+      "remoteSandboxes": "Cloud sandboxes (E2B, Kubernetes) project agents can run in",
       "sandbox": "OS / microVM sandbox health and tool execution policy",
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
@@ -48264,6 +48300,8 @@
       "loading": "Reading the image catalog…",
       "poolOff": {
         "body": "This deployment has not enabled runtime environments, so every project runs on the standard execution path. An operator turns them on with COGNIA_SANDBOX_POOL_ENABLED.",
+        "desktopBody": "No remote sandbox provider is set up on this desktop yet, so every project runs on the standard execution path. Add one under Settings → Remote sandboxes, then restart Cognia.",
+        "openRemoteSandboxes": "Open Remote sandboxes",
         "title": "Runtime environments are off"
       },
       "rejected": {
@@ -49858,6 +49896,169 @@
       },
       "title": "Remote hosts"
     },
+    "remoteSandboxes": {
+      "availability": {
+        "active": "Remote sandboxes are on. Runs that ask for a runtime environment can be placed on the providers below.",
+        "bundle": "Agent bundle {tag}",
+        "bundleUnpinned": "This build ships no pinned agent bundle, so it cannot put an agent into a remote sandbox. Providers saved here are kept, and nothing runs remotely until a build that ships one.",
+        "bundleUnpinnedTitle": "Not available in this build",
+        "noProviders": "No provider is configured, so every run stays on this desktop."
+      },
+      "description": "Cloud sandboxes this desktop can run project agents in, created when a run needs one: E2B, or a Kubernetes cluster you connect.",
+      "editor": {
+        "cancel": "Cancel",
+        "createTitle": "Add a remote sandbox provider",
+        "credential": {
+          "e2b": "API key",
+          "keep": "A credential is stored. Leave this empty to keep it.",
+          "keepSource": "The credential is read from {source}. Type one to store it here instead.",
+          "kubeconfig": "Kubeconfig",
+          "kubeconfigPlaceholder": "Paste the kubeconfig YAML",
+          "required": "Required."
+        },
+        "description": "Saved to this desktop. Credentials go to the system's secret store and are never shown again.",
+        "e2b": {
+          "apiUrl": "API endpoint",
+          "delegatedRegistries": "Registries E2B may pull from with your credentials",
+          "delegatedRegistriesHint": "One registry host per line. E2B builds templates on its own servers, so a private image's pull credential is handed to it only for the registries listed here; any other private image is refused.",
+          "domain": "Sandbox domain",
+          "templateBuildTimeout": "Template build timeout (seconds)",
+          "templatePrefix": "Template prefix"
+        },
+        "editTitle": "Edit {label}",
+        "id": "ID",
+        "idHint": "Lowercase letters, digits and dashes, up to 32. Projects name the provider by it.",
+        "idleTimeout": "Idle timeout (minutes)",
+        "idleTimeoutHint": "A persistent sandbox with no session is destroyed after this.",
+        "kind": "Provider",
+        "kubernetes": {
+          "connection": "Connection",
+          "connectionInCluster": "In-cluster service account",
+          "connectionInClusterHint": "Only when Cognia itself runs as a Pod in that cluster.",
+          "connectionKubeconfig": "Kubeconfig",
+          "context": "Context",
+          "contextPlaceholder": "The kubeconfig's current context",
+          "egress": "Network enforcement",
+          "egressCilium": "Cilium",
+          "egressHint": {
+            "cilium": "No-network runs and allowlists are both enforced.",
+            "network-policy": "No-network runs are enforced. An allowlist is recorded but not enforced: NetworkPolicy cannot match host names.",
+            "none": "Nothing restricts egress: every network setting is recorded, not enforced."
+          },
+          "egressNetworkPolicy": "NetworkPolicy",
+          "egressNone": "None",
+          "namespace": "Namespace",
+          "nodeSelector": "Node selector",
+          "nodeSelectorPlaceholder": "key=value, one per line",
+          "podReadyTimeout": "Ready timeout (seconds)",
+          "runtimeClasses": "RuntimeClass per isolation tier",
+          "runtimeClassesHint": "gVisor and VM tiers are offered only when mapped and present in the cluster.",
+          "serviceAccount": "Service account"
+        },
+        "label": "Name",
+        "labelPlaceholder": "Shown instead of the ID",
+        "limits": "Limits",
+        "maxConcurrent": "Sandboxes at once",
+        "maxLifetime": "Lifetime (minutes)",
+        "maxLifetimeHint": "Every sandbox is destroyed at this age, whatever it is doing.",
+        "problem": {
+          "credential_required": "Enter a credential.",
+          "domain_invalid": "Enter a DNS name, such as e2b.app.",
+          "id_invalid": "Use 1–32 lowercase letters, digits or dashes, starting with a letter or digit, and not “local”.",
+          "id_taken": "Another provider already uses this ID.",
+          "label_invalid": "Keep the name to 64 characters.",
+          "name_invalid": "Use a DNS name: lowercase letters, digits, dashes and dots.",
+          "namespace_invalid": "Use a DNS label: lowercase letters, digits and dashes, up to 63.",
+          "node_selector_invalid": "“{entry}” is not a key=value label.",
+          "out_of_range": "Enter a whole number from {min} to {max}.",
+          "registry_invalid": "“{entry}” is not a registry host.",
+          "template_prefix_invalid": "Use 1–32 lowercase letters, digits, dashes or underscores, starting with a letter or digit.",
+          "url_invalid": "Use an https URL with no credentials, query or fragment (http only on localhost)."
+        },
+        "save": "Save provider"
+      },
+      "errors": {
+        "remote_sandboxes_invalid": "The settings were refused: {message}",
+        "remote_sandboxes_registry_invalid": "The registry allowlist was refused: {message}",
+        "remote_sandboxes_secret_empty": "A credential cannot be empty.",
+        "remote_sandboxes_secret_id_invalid": "A credential id was refused: {message}",
+        "remote_sandboxes_secret_unreferenced": "A credential no provider uses was refused: {message}",
+        "remote_sandboxes_secret_unwritable": "The credential could not be stored: {message}",
+        "remote_sandboxes_unreadable": "The settings could not be read: {message}",
+        "remote_sandboxes_unwritable": "The settings could not be written: {message}",
+        "remote_sandboxes_version_unsupported": "These settings were written by a newer Cognia: {message}",
+        "unknown": "Something went wrong: {message}"
+      },
+      "failed": "The remote sandbox settings could not be read.",
+      "installError": {
+        "body": "The settings saved before this start were refused: {error}",
+        "title": "Remote sandboxes did not start"
+      },
+      "loading": "Reading the remote sandbox settings…",
+      "providers": {
+        "add": "Add provider",
+        "clearDefault": "Clear default",
+        "credential": {
+          "env": "Credential from {name}",
+          "file": "Credential from {path}",
+          "missing": "Credential missing",
+          "none": "No credential needed",
+          "stored": "Credential stored"
+        },
+        "default": "Default",
+        "defaultHint": "Runs set to “auto” use this desktop's own sandbox when it can, else the default provider.",
+        "edit": "Edit",
+        "empty": "No providers yet.",
+        "kind": {
+          "e2b": "E2B",
+          "kubernetes": "Kubernetes"
+        },
+        "limits": "Up to {concurrent} at once · {lifetime} min lifetime · idle after {idle} min",
+        "live": {
+          "notRunning": "Not running in this session; it starts with the app next time.",
+          "reachable": "Running: reachable, {instances, plural, =1 {# sandbox} other {# sandboxes}} and {sessions, plural, =1 {# session} other {# sessions}} in use",
+          "unreachable": "Running: unreachable ({code})",
+          "unreadable": "The running pool's status could not be read."
+        },
+        "makeDefault": "Make default",
+        "onlyDefault": "Default (only provider)",
+        "remove": "Remove",
+        "title": "Providers"
+      },
+      "registries": {
+        "add": "Add registry",
+        "description": "Projects may only run images from these registries. A prefix narrows a registry to the repositories under it.",
+        "empty": "No registries are allowed, so only the built-in images can run.",
+        "insecure": "Plain HTTP",
+        "prefix": "Repository prefix",
+        "prefixPlaceholder": "acme (optional)",
+        "problem": {
+          "duplicate": "This registry and prefix are listed twice.",
+          "prefix_invalid": "Use lowercase repository path components.",
+          "registry_invalid": "Enter a registry host such as ghcr.io or localhost:5000."
+        },
+        "registry": "Registry",
+        "registryPlaceholder": "ghcr.io",
+        "removeRow": "Remove {registry}",
+        "save": "Save registries",
+        "saved": "Registries saved",
+        "title": "Allowed image registries"
+      },
+      "reload": "Reload",
+      "removeDialog": {
+        "body": "Its stored credential is deleted too. Projects that name this provider are refused until they pick another. Sandboxes already running are not stopped.",
+        "cancel": "Cancel",
+        "confirm": "Remove",
+        "title": "Remove {label}?"
+      },
+      "removed": "{label} removed. Restart Cognia to apply.",
+      "restart": {
+        "body": "Saved changes take effect the next time the app starts. Sandboxes already running keep the settings they started with.",
+        "title": "Restart Cognia to apply"
+      },
+      "saved": "Saved. Restart Cognia to apply.",
+      "title": "Remote sandboxes"
+    },
     "sandbox": {
       "backend": {
         "label": "Backend"
@@ -50890,6 +51091,7 @@
       "providers": "Providers",
       "remoteControl": "Remote Control",
       "remoteHosts": "Remote hosts",
+      "remoteSandboxes": "Remote Sandboxes",
       "sandbox": "Sandbox",
       "scheduledTasks": "Scheduled Tasks",
       "search": "Web search",

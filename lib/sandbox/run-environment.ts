@@ -41,6 +41,7 @@ import {
   type EnvironmentBuildRecord,
   type ApprovalRecord,
   type DeclarationReadResult,
+  type DriverStatus,
 } from "@/lib/project-environment/environment-client"
 import { readEnvironmentDeclaration } from "@/lib/project-environment/read-environment-declaration"
 import type { EnvironmentDeclarationVerdict } from "@/lib/project-environment/read-environment-declaration"
@@ -64,8 +65,11 @@ import {
   type PlacementProjectInput,
   type SandboxPlacementOutcome,
 } from "./environment-placement"
+import type { RemoteWorkspaceResult } from "./remote-workspace"
+import { chooseSandboxTarget } from "./sandbox-target"
 import {
   clearSpawnPlacement,
+  placementIdentity,
   registerSpawnPlacement,
   spawnedPlacementDigest,
 } from "./spawn-placement-registry"
@@ -115,6 +119,16 @@ export interface RunEnvironmentSources {
   buildRecord?: (projectId: string, buildKey: string) => Promise<EnvironmentBuildRecord | undefined>
   /** The device approval (ADR-0147) recorded against the workspace's primary root. */
   deviceApproval: (approvalKey: string) => Promise<ApprovedEnvironmentDeclaration | undefined>
+  /**
+   * The Host's driver status, for its provider set (ADR-0221). Absent: the
+   * Host's only driver places every run, as before remote providers.
+   */
+  driverStatus?: () => Promise<DriverStatus>
+  /** The clone a remote provider runs (ADR-0221 D6). Required to place remotely. */
+  remoteWorkspace?: (request: {
+    root: string | null | undefined
+    agentId: string
+  }) => Promise<RemoteWorkspaceResult>
 }
 
 /** A catalog that admits nothing, for a Host that could not be read. */
@@ -269,7 +283,88 @@ export async function prepareRunEnvironment(
       : {}),
   })
 
-  return sandboxPlacementFrom(resolution, project)
+  return placeOnTarget(sandboxPlacementFrom(resolution, project), project, request, sources)
+}
+
+/**
+ * Send a placed spawn to the driver its project's `target` picks (ADR-0221
+ * D9), and give a remote one its workspace.
+ *
+ * A Host whose driver status cannot be read keeps the placement as it was
+ * for `auto`: that is every Host before remote providers, and its router
+ * decides. A target that names a driver is not guessed at: `local` stays
+ * local, and a named provider is sent there and refused by the Host if it
+ * has no such provider.
+ */
+export async function placeOnTarget(
+  outcome: SandboxPlacementOutcome,
+  project: PlacementProjectInput,
+  request: Pick<RunEnvironmentRequest, "agentId" | "executionRoot">,
+  sources: Pick<RunEnvironmentSources, "driverStatus" | "remoteWorkspace">
+): Promise<SandboxPlacementOutcome> {
+  if (outcome.kind !== "placed") return outcome
+  const target = project.runtime?.target
+  const minimum = outcome.placement.spec.isolation.minimum
+  let providers: DriverStatus["providers"]
+  if (sources.driverStatus) {
+    try {
+      providers = (await sources.driverStatus()).providers ?? []
+    } catch {
+      providers = undefined
+    }
+  }
+
+  const choice =
+    providers !== undefined
+      ? chooseSandboxTarget({ target, providers, minimum })
+      : target?.kind === "provider"
+        ? ({ kind: "remote", providerId: target.providerId, reason: "requested" } as const)
+        : ({
+            kind: "local",
+            reason: target?.kind === "local" ? "requested" : "only-driver",
+          } as const)
+
+  switch (choice.kind) {
+    case "local":
+      return providers && providers.length > 0
+        ? { ...outcome, target: { kind: "local", reason: choice.reason } }
+        : outcome
+    case "unavailable":
+      if (choice.code === "sandbox_provider_unavailable" && !isolationMandatory(project)) {
+        return {
+          kind: "fallback",
+          code: "sandbox_fallback_provider_unavailable",
+          notices: outcome.notices,
+        }
+      }
+      return { kind: "refused", code: choice.code, detail: choice.detail, notices: outcome.notices }
+    case "remote": {
+      const workspace = sources.remoteWorkspace
+        ? await sources.remoteWorkspace({ root: request.executionRoot, agentId: request.agentId })
+        : ({
+            ok: false,
+            code: "sandbox_workspace_remote_required",
+            detail: { reason: "no_checkout" },
+          } as const)
+      if (!workspace.ok) {
+        return {
+          kind: "refused",
+          code: workspace.code,
+          detail: workspace.detail,
+          notices: outcome.notices,
+        }
+      }
+      return {
+        ...outcome,
+        placement: {
+          ...outcome.placement,
+          provider: choice.providerId,
+          workspace: workspace.source,
+        },
+        target: { kind: "remote", providerId: choice.providerId, reason: choice.reason },
+      }
+    }
+  }
 }
 
 /**
@@ -416,6 +511,22 @@ export function defaultRunEnvironmentSources(): RunEnvironmentSources {
       const { getTrustedWorkspace } = await import("@/lib/db/trusted-workspaces")
       return (await getTrustedWorkspace(approvalKey))?.approvedEnvironment
     },
+    driverStatus: async () => {
+      const { environmentDriverStatus } =
+        await import("@/lib/project-environment/environment-client")
+      return environmentDriverStatus()
+    },
+    remoteWorkspace: async (request) => {
+      const [{ remoteWorkspaceSource }, git] = await Promise.all([
+        import("./remote-workspace"),
+        import("@/lib/git/commands"),
+      ])
+      return remoteWorkspaceSource(request, {
+        remotes: git.gitRemotes,
+        status: git.gitStatus,
+        defaultBranch: git.gitDefaultBranch,
+      })
+    },
   }
 }
 
@@ -426,7 +537,7 @@ export function defaultRunEnvironmentSources(): RunEnvironmentSources {
  * reported as the host too because nothing that is running can match it.
  */
 export function placementDigestOf(outcome: SandboxPlacementOutcome): string | null {
-  return outcome.kind === "placed" ? outcome.placement.spec.specDigest : null
+  return outcome.kind === "placed" ? placementIdentity(outcome.placement) : null
 }
 
 /**

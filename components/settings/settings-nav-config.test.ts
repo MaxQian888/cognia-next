@@ -176,6 +176,8 @@ describe("settings-nav-config", () => {
       "mcp-runtime",
       "push-display",
       "browser",
+      // ADR-0221: a desktop runs the sandbox pool for its remote providers.
+      "sandbox-pool",
     ]
     // What a companion client reaches: its own webview plus the server-backed set.
     const COMPANION_CAPS: readonly CapabilityId[] = [
@@ -246,28 +248,39 @@ describe("settings-nav-config", () => {
       }
     })
 
-    it("the desktop reaches every section but the server-run image catalog", () => {
+    it("the desktop reaches every section", () => {
       const reachable = reachableSettingsSections(desktop)
-      // ADR-0182: only a server-backed host runs the sandbox pool, so its
-      // catalog is administered there. Local containers are dormant.
+      // ADR-0221: the desktop runs the sandbox pool for its remote providers,
+      // so the image catalog is administered here too.
       expect(SETTINGS_NAV.filter((item) => !reachable.has(item.id)).map((item) => item.id)).toEqual(
-        ["image-catalog"]
+        []
       )
     })
 
+    it("keeps remote sandbox providers on the desktop that owns them", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "remote-sandboxes")
+      expect(item).toMatchObject({ group: "privacy", profiles: ["desktop"] })
+      expect(settingsSectionBlockReason(item!, desktop)).toBeNull()
+      // A server's providers are its operator's file, not a client's page.
+      expect(settingsSectionBlockReason(item!, cloudCompanion)).toBe("profile")
+      expect(settingsSectionBlockReason(item!, webStandalone)).toBe("profile")
+    })
+
+    // ADR-0221: the desktop runs the sandbox pool too (remote providers), so
+    // no section is left that only a server deployment can open.
     it("names the sections only a server deployment can open", () => {
       const serverOnly = SETTINGS_NAV.filter(settingsSectionNeedsServer).map((item) => item.id)
-      expect(serverOnly).toEqual(["image-catalog"])
+      expect(serverOnly).toEqual([])
       expect(settingsSectionNeedsServer({})).toBe(false)
-      expect(settingsSectionNeedsServer({ requires: ["shell"] })).toBe(false)
-      expect(settingsSectionNeedsServer({ requires: ["shell", "sandbox-pool"] })).toBe(true)
+      expect(settingsSectionNeedsServer({ requires: ["shell", "sandbox-pool"] })).toBe(false)
+      expect(settingsSectionNeedsServer({ requires: ["shell", "headless"] })).toBe(true)
     })
 
     it("the image catalog follows the sandbox pool, not the host", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "image-catalog")
       expect(item).toMatchObject({ group: "privacy", requires: ["sandbox-pool"] })
       expect(item?.profiles).toBeUndefined()
-      expect(settingsSectionBlockReason(item!, desktop)).toBe("capability")
+      expect(settingsSectionBlockReason(item!, desktop)).toBeNull()
       expect(reachableSettingsSections(cloudCompanion).has("image-catalog")).toBe(true)
       expect(reachableSettingsSections(webStandalone).has("image-catalog")).toBe(false)
     })

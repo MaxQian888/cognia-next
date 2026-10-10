@@ -38,21 +38,35 @@ impl Default for ReqwestTransport {
     }
 }
 
+async fn system_resolve(domain: String, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+    tokio::net::lookup_host((domain, port))
+        .await
+        .map(|addresses| addresses.collect())
+}
+
 impl RegistryTransport for ReqwestTransport {
     fn send(
         &self,
         request: RegistryRequest,
     ) -> impl Future<Output = Result<RegistryResponse, RegistryError>> + Send {
         let settings = *self;
-        async move {
-            settings
-                .exchange(request, |domain, port| async move {
-                    tokio::net::lookup_host((domain, port))
-                        .await
-                        .map(|addresses| addresses.collect())
-                })
-                .await
-        }
+        async move { settings.exchange(request, system_resolve).await }
+    }
+
+    /// Streams a 2xx body to `sink`. A blob may take far longer than
+    /// [`ReqwestTransport::timeout`] to arrive, so here that value bounds
+    /// resolution, the response head and every single read — a stalled
+    /// transfer fails, a slow one does not.
+    fn send_streaming<'s>(
+        &'s self,
+        request: RegistryRequest,
+        sink: &'s mut (dyn std::io::Write + Send),
+    ) -> impl Future<Output = Result<RegistryResponse, RegistryError>> + Send + 's
+    where
+        Self: Sync,
+    {
+        let settings = *self;
+        async move { settings.stream(request, sink, system_resolve).await }
     }
 }
 
@@ -86,6 +100,125 @@ impl ReqwestTransport {
         F: FnOnce(String, u16) -> R,
         R: Future<Output = std::io::Result<Vec<SocketAddr>>>,
     {
+        let registry = authority(&request.url).unwrap_or_default();
+        let unreachable = |message: String| RegistryError::Unreachable {
+            registry: registry.clone(),
+            message,
+        };
+        let builder = reqwest::Client::builder().timeout(self.timeout);
+        let call = self.prepare(&request, builder, resolve).await?;
+        let mut response = call
+            .send()
+            .await
+            .map_err(|error| unreachable(error.to_string()))?;
+        let limit = request.max_body_bytes;
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err(RegistryError::ResponseTooLarge { limit });
+        }
+        let status = response.status().as_u16();
+        let headers = response_headers(&response);
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| unreachable(format!("reading the body: {error}")))?
+        {
+            if body.len() + chunk.len() > limit {
+                return Err(RegistryError::ResponseTooLarge { limit });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(RegistryResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    /// [`RegistryTransport::send_streaming`] over reqwest.
+    async fn stream<F, R>(
+        self,
+        request: RegistryRequest,
+        sink: &mut (dyn std::io::Write + Send),
+        resolve: F,
+    ) -> Result<RegistryResponse, RegistryError>
+    where
+        F: FnOnce(String, u16) -> R,
+        R: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+    {
+        let registry = authority(&request.url).unwrap_or_default();
+        let unreachable = |message: String| RegistryError::Unreachable {
+            registry: registry.clone(),
+            message,
+        };
+        let timed_out = |stage: &str| unreachable(format!("registry {stage} timed out"));
+        let builder = reqwest::Client::builder().read_timeout(self.timeout);
+        let call = tokio::time::timeout(self.timeout, self.prepare(&request, builder, resolve))
+            .await
+            .map_err(|_| timed_out("exchange"))??;
+        let mut response = tokio::time::timeout(self.timeout, call.send())
+            .await
+            .map_err(|_| timed_out("response"))?
+            .map_err(|error| unreachable(error.to_string()))?;
+        let limit = request.max_body_bytes;
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err(RegistryError::ResponseTooLarge { limit });
+        }
+        let status = response.status().as_u16();
+        let headers = response_headers(&response);
+        let success = (200..300).contains(&status);
+        let mut body = Vec::new();
+        let mut streamed = 0usize;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| unreachable(format!("reading the body: {error}")))?
+        {
+            let total = if success { streamed } else { body.len() };
+            if total + chunk.len() > limit {
+                return Err(RegistryError::ResponseTooLarge { limit });
+            }
+            if success {
+                sink.write_all(&chunk)
+                    .map_err(|error| RegistryError::SinkFailed {
+                        message: error.to_string(),
+                    })?;
+                streamed += chunk.len();
+            } else {
+                body.extend_from_slice(&chunk);
+            }
+        }
+        if success {
+            sink.flush().map_err(|error| RegistryError::SinkFailed {
+                message: error.to_string(),
+            })?;
+        }
+        Ok(RegistryResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    /// The policy-bound client for one request, with the name resolved and
+    /// every address checked on a direct route. `builder` carries the
+    /// caller's timeouts.
+    async fn prepare<F, R>(
+        self,
+        request: &RegistryRequest,
+        builder: reqwest::ClientBuilder,
+        resolve: F,
+    ) -> Result<reqwest::RequestBuilder, RegistryError>
+    where
+        F: FnOnce(String, u16) -> R,
+        R: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+    {
         let url = request.url.clone();
         let registry = authority(&url).unwrap_or_default();
         let unreachable = |message: String| RegistryError::Unreachable {
@@ -100,11 +233,10 @@ impl ReqwestTransport {
             })?;
 
         cognia_net::proxy_config::ensure_crypto_provider();
-        let builder = reqwest::Client::builder()
+        let builder = builder
             .user_agent(USER_AGENT)
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(self.connect_timeout)
-            .timeout(self.timeout);
+            .connect_timeout(self.connect_timeout);
         let (mut builder, route) = apply_reqwest_policy(builder, url.as_str())
             .map_err(|error| unreachable(format!("network policy: {error}")))?;
 
@@ -144,49 +276,27 @@ impl ReqwestTransport {
         for (name, value) in &request.headers {
             call = call.header(name.as_str(), value.as_str());
         }
-        if let Some((content_type, bytes)) = request.body {
-            call = call.header("content-type", content_type).body(bytes);
+        if let Some((content_type, bytes)) = &request.body {
+            call = call
+                .header("content-type", content_type.as_str())
+                .body(bytes.clone());
         }
-
-        let mut response = call
-            .send()
-            .await
-            .map_err(|error| unreachable(error.to_string()))?;
-        let limit = request.max_body_bytes;
-        if response
-            .content_length()
-            .is_some_and(|length| length > limit as u64)
-        {
-            return Err(RegistryError::ResponseTooLarge { limit });
-        }
-        let status = response.status().as_u16();
-        let headers = response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .to_str()
-                    .ok()
-                    .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
-            })
-            .collect();
-        let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|error| unreachable(format!("reading the body: {error}")))?
-        {
-            if body.len() + chunk.len() > limit {
-                return Err(RegistryError::ResponseTooLarge { limit });
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(RegistryResponse {
-            status,
-            headers,
-            body,
-        })
+        Ok(call)
     }
+}
+
+/// Lowercase names; values that are not visible ASCII are dropped.
+fn response_headers(response: &reqwest::Response) -> Vec<(String, String)> {
+    response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -434,5 +544,121 @@ mod tests {
             .to_ascii_lowercase()
             .contains("content-type: application/x-www-form-urlencoded"));
         assert!(sent.ends_with("grant_type=refresh_token"), "{sent}");
+    }
+
+    #[tokio::test]
+    async fn streaming_writes_a_successful_body_to_the_sink() {
+        init_policy();
+        let (port, server) = serve_once(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nlaye\r\n6\r\nr byte\r\n1\r\ns\r\n0\r\n\r\n",
+        )
+        .await;
+        let mut sink = Vec::new();
+        let response = ReqwestTransport::default()
+            .send_streaming(
+                request(&format!("http://127.0.0.1:{port}/v2/b/blobs/x"), true, 11),
+                &mut sink,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert!(response.body.is_empty(), "the body went to the sink");
+        assert_eq!(sink, b"layer bytes");
+        let sent = server.await.unwrap();
+        assert!(sent.starts_with("GET /v2/b/blobs/x"), "{sent}");
+    }
+
+    #[tokio::test]
+    async fn streaming_returns_other_answers_buffered_and_writes_nothing() {
+        init_policy();
+        let (port, _server) = serve_once(
+            b"HTTP/1.1 307 Temporary Redirect\r\nLocation: https://cdn.example.com/b\r\nContent-Length: 5\r\n\r\nmoved",
+        )
+        .await;
+        let mut sink = Vec::new();
+        let response = ReqwestTransport::default()
+            .send_streaming(
+                request(&format!("http://127.0.0.1:{port}/"), true, 1024),
+                &mut sink,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status, 307);
+        assert_eq!(response.body, b"moved");
+        assert!(sink.is_empty());
+    }
+
+    #[tokio::test]
+    async fn streaming_refuses_bodies_past_the_limit_and_loopback_it_was_not_allowed() {
+        init_policy();
+        let (port, _server) = serve_once(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n012345\r\n0\r\n\r\n",
+        )
+        .await;
+        let error = ReqwestTransport::default()
+            .send_streaming(
+                request(&format!("http://127.0.0.1:{port}/"), true, 4),
+                &mut Vec::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "registry_response_too_large");
+
+        let error = ReqwestTransport::default()
+            .send_streaming(request("http://127.0.0.1:9/", false, 4), &mut Vec::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "registry_endpoint_refused");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_transfer_fails_but_a_long_one_does_not() {
+        init_policy();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            // Two connections: one that keeps trickling for longer than the
+            // timeout in total, one that stops sending.
+            for stall in [false, true] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0u8; 1024];
+                let _ = socket.read(&mut request).await.unwrap();
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n")
+                    .await
+                    .unwrap();
+                for byte in b"abcdef" {
+                    if stall && *byte == b'd' {
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                    socket.write_all(&[*byte]).await.unwrap();
+                }
+            }
+        });
+        let transport = ReqwestTransport {
+            timeout: Duration::from_millis(150),
+            ..ReqwestTransport::default()
+        };
+        let mut sink = Vec::new();
+        transport
+            .send_streaming(
+                request(&format!("http://127.0.0.1:{port}/"), true, 6),
+                &mut sink,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sink, b"abcdef", "240ms in total, never 150ms idle");
+
+        let error = transport
+            .send_streaming(
+                request(&format!("http://127.0.0.1:{port}/"), true, 6),
+                &mut Vec::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "registry_unreachable");
+        server.abort();
     }
 }

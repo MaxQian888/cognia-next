@@ -56,8 +56,63 @@ pub enum SandboxPlacement {
         /// Opaque, live Host-side tool leases; never part of the sealed spec.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         hosted_tool_host_lease_ids: Vec<String>,
+        /// Which member of the Host's provider set runs this sandbox
+        /// (ADR-0221). Absent: the Host's local driver, exactly as before
+        /// providers existed. A Host that predates providers rejects the
+        /// field (`deny_unknown_fields`), so a remote request can never run
+        /// locally by accident.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        /// Where a remote sandbox gets its workspace (ADR-0221). A local
+        /// driver mounts the Host's checkout and refuses this field; a remote
+        /// provider requires it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<RemoteWorkspaceSource>,
     },
 }
+
+/// The repository a remote sandbox clones and pushes its branch back to
+/// (ADR-0221). The sandbox never sees `credential`: the Host's git proxy adds
+/// it to upstream requests, and only for this one repository.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteWorkspaceSource {
+    /// `https://` clone URL of the upstream repository, credential-free.
+    pub remote_url: String,
+    /// The ref the workspace starts from (a branch or tag name).
+    pub base_ref: String,
+    /// The only branch the sandbox may push (`refs/heads/<branch>`).
+    pub branch: String,
+    /// Upstream credential (a token), resolved by the dispatching client.
+    /// Never serialized back out, never in audit lines or events.
+    #[serde(default, skip_serializing)]
+    pub credential: Option<String>,
+}
+
+impl std::fmt::Debug for RemoteWorkspaceSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteWorkspaceSource")
+            .field("remote_url", &self.remote_url)
+            .field("base_ref", &self.base_ref)
+            .field("branch", &self.branch)
+            .field("credential", &self.credential.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+/// `[a-z0-9][a-z0-9-]{0,31}`: what a provider id may look like.
+pub fn is_provider_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+}
+
+/// The provider id a placement without one means.
+pub const LOCAL_PROVIDER_ID: &str = "local";
 
 impl SandboxPlacement {
     pub fn hosted_tool_host_lease_ids(&self) -> &[String] {
@@ -66,6 +121,22 @@ impl SandboxPlacement {
                 hosted_tool_host_lease_ids,
                 ..
             } => hosted_tool_host_lease_ids,
+        }
+    }
+
+    /// The provider this placement names, or [`LOCAL_PROVIDER_ID`].
+    pub fn provider(&self) -> &str {
+        match self {
+            Self::Container { provider, .. } => {
+                provider.as_deref().unwrap_or(LOCAL_PROVIDER_ID)
+            }
+        }
+    }
+
+    /// The remote workspace source, when the placement carries one.
+    pub fn workspace(&self) -> Option<&RemoteWorkspaceSource> {
+        match self {
+            Self::Container { workspace, .. } => workspace.as_ref(),
         }
     }
     pub fn spec(&self) -> &Value {
@@ -102,14 +173,29 @@ impl SandboxPlacement {
                 .and_then(Value::as_str)
                 .filter(|value| valid(value))
         };
-        json!({
+        let mut fields = json!({
             "kind": "container",
             "spec_digest": claimed("/specDigest", is_spec_digest),
             "project_id": claimed("/projectId", is_spec_id),
             "image_digest": claimed("/image/digest", is_image_digest),
             "catalog_entry_id": claimed("/image/catalogEntryId", is_catalog_id),
             "isolation_mandatory": self.isolation_mandatory(),
-        })
+        });
+        // Only a placement that names a provider or a remote workspace adds
+        // these, so a local placement's audit line keeps its exact shape.
+        let Self::Container {
+            provider,
+            workspace,
+            ..
+        } = self;
+        if let Some(provider) = provider {
+            fields["provider"] = json!(Some(provider.as_str()).filter(|id| is_provider_id(id)));
+        }
+        if let Some(workspace) = workspace {
+            fields["workspace_branch"] =
+                json!(Some(workspace.branch.as_str()).filter(|branch| is_spec_id(branch)));
+        }
+        fields
     }
 }
 
@@ -225,10 +311,20 @@ enum Owner {
     Sandbox,
 }
 
+/// How a Host whose existing path confines what it runs re-confines a spawn
+/// that falls back onto it. The desktop rewrites a launch into its OS
+/// sandbox launcher before it reaches the process table; a placement spawn
+/// skips that (the container is the stronger confinement), so a fallback
+/// has to be wrapped here, after the sandbox refused it, or it would run
+/// unconfined.
+pub type FallbackConfinement =
+    Arc<dyn Fn(ExternalAgentSpawnConfig) -> Result<ExternalAgentSpawnConfig, String> + Send + Sync>;
+
 /// Routes each spawn to a sandbox or to the host's existing path.
 pub struct SandboxRoutingBackend {
     existing: Arc<dyn ExecBackend>,
     sandbox: Arc<dyn SandboxExecBackend>,
+    confine_fallback: Option<FallbackConfinement>,
     owners: Mutex<HashMap<String, Owner>>,
     pending: Arc<Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
 }
@@ -249,9 +345,21 @@ impl Drop for RoutingReservation {
 
 impl SandboxRoutingBackend {
     pub fn new(existing: Arc<dyn ExecBackend>, sandbox: Arc<dyn SandboxExecBackend>) -> Arc<Self> {
+        Self::with_fallback_confinement(existing, sandbox, None)
+    }
+
+    /// A router whose fallbacks pass through `confine` before they reach the
+    /// existing path (see [`FallbackConfinement`]). A confinement that fails
+    /// fails the spawn: running unconfined is not a fallback.
+    pub fn with_fallback_confinement(
+        existing: Arc<dyn ExecBackend>,
+        sandbox: Arc<dyn SandboxExecBackend>,
+        confine_fallback: Option<FallbackConfinement>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             existing,
             sandbox,
+            confine_fallback,
             owners: Mutex::new(HashMap::new()),
             pending: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -471,6 +579,19 @@ impl ExecBackend for SandboxRoutingBackend {
 }
 
 impl SandboxRoutingBackend {
+    /// Local-only payloads (a managed gateway task, an isolated Devin MCP
+    /// configuration) reach their agent either through a sandbox bridge or as
+    /// a local process. A fault on a Host whose existing path is anything
+    /// else cannot fall back without handing the payload to a path that
+    /// cannot honour it, so such a spawn fails with the fault instead.
+    fn fallback_can_carry(&self, config: &ExternalAgentSpawnConfig) -> bool {
+        let local_only = config.env.contains_key(crate::gateway_task::PAYLOAD_ENV)
+            || config
+                .env
+                .contains_key(crate::devin_mcp_config::PAYLOAD_ENV);
+        !local_only || self.existing.kind() == "local-process"
+    }
+
     async fn spawn_routed(
         &self,
         config: ExternalAgentSpawnConfig,
@@ -492,11 +613,11 @@ impl SandboxRoutingBackend {
             return Ok(spawned);
         };
 
-        match self
-            .sandbox
-            .spawn_sandboxed(config.clone(), Arc::clone(&sink))
-            .await
-        {
+        // A private state root names a path on this Host, which no sandbox
+        // can reach; the key stays on `config` for a fallback that runs here.
+        let mut boxed = config.clone();
+        crate::state_isolation::strip_state_key(&mut boxed);
+        match self.sandbox.spawn_sandboxed(boxed, Arc::clone(&sink)).await {
             Ok(spawned) => {
                 self.owners.lock().insert(spawned.clone(), Owner::Sandbox);
                 Ok(spawned)
@@ -504,7 +625,8 @@ impl SandboxRoutingBackend {
             Err(error)
                 if error.kind == SandboxErrorKind::Fault
                     && !placement.isolation_mandatory()
-                    && !self.sandbox.multi_tenant() =>
+                    && !self.sandbox.multi_tenant()
+                    && self.fallback_can_carry(&config) =>
             {
                 log::warn!("sandbox for agent {id} fell back to the existing path: {error}");
                 sink.sandbox_placement(
@@ -513,6 +635,9 @@ impl SandboxRoutingBackend {
                 );
                 let mut existing = config;
                 existing.sandbox = None;
+                if let Some(confine) = self.confine_fallback.as_ref() {
+                    existing = confine(existing)?;
+                }
                 let spawned = self.existing.spawn(existing, sink).await?;
                 self.owners.lock().insert(spawned.clone(), Owner::Existing);
                 Ok(spawned)
@@ -646,6 +771,8 @@ mod tests {
     fn placement(isolation_mandatory: bool) -> SandboxPlacement {
         SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({ "specDigest": "a".repeat(64) }),
             isolation_mandatory,
         }
@@ -700,6 +827,8 @@ mod tests {
         let image_digest = format!("sha256:{}", "c".repeat(64));
         let placement = SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({
                 "specDigest": "b".repeat(64),
                 "projectId": "proj-1",
@@ -727,6 +856,8 @@ mod tests {
     fn audit_fields_drop_values_no_valid_spec_could_hold() {
         let placement = SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({
                 "specDigest": "B".repeat(64),
                 "projectId": "x".repeat(257),
@@ -748,6 +879,8 @@ mod tests {
 
         let empty = SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({ "projectId": "   ", "image": "not an object" }),
             isolation_mandatory: false,
         };
@@ -758,6 +891,8 @@ mod tests {
         // A catalog id is a slug, not any id: a valid project id is not one.
         let not_a_slug = SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({ "image": { "catalogEntryId": "Node 22" } }),
             isolation_mandatory: false,
         };
@@ -771,6 +906,8 @@ mod tests {
         let upper = format!("sha256:{}", "AB".repeat(32));
         let placement = SandboxPlacement::Container {
             hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
             spec: json!({
                 "projectId": "x".repeat(256),
                 "image": { "digest": upper, "catalogEntryId": format!("9{}", "._-".repeat(21)) },
@@ -845,6 +982,74 @@ mod tests {
         assert_eq!(router.get_info("boxed").await.unwrap()["kind"], "sandbox");
         router.kill("boxed").await.unwrap();
         assert!(sandbox.running.lock().is_empty());
+    }
+
+    /// The desktop's fallback runs under its OS sandbox launcher: the hook
+    /// sees the fallback (and only the fallback), and a hook that cannot
+    /// confine fails the spawn instead of running it bare.
+    #[tokio::test]
+    async fn a_fallback_is_confined_before_it_reaches_the_existing_path() {
+        let sandbox = Recording::new("sandbox");
+        *sandbox.sandbox_result.lock() = Some(SandboxSpawnError::fault(
+            "sandbox_provider_unreachable",
+            "the provider did not answer",
+        ));
+        let existing = Recording::new("local-process");
+        let confined = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = confined.clone();
+        let router = SandboxRoutingBackend::with_fallback_confinement(
+            existing.clone(),
+            sandbox.clone(),
+            Some(Arc::new(move |mut config: ExternalAgentSpawnConfig| {
+                if config.id == "unconfinable" {
+                    return Err("the sandbox launcher is unavailable".into());
+                }
+                seen.lock().push(config.id.clone());
+                config.command = "/opt/launcher".into();
+                Ok(config)
+            })),
+        );
+        let sink = EmitterEventSink::new(RecordingAgentEmitter::new());
+
+        router.spawn(config("plain", None), sink.clone()).await.unwrap();
+        router
+            .spawn(config("soft", Some(placement(false))), sink.clone())
+            .await
+            .unwrap();
+        assert_eq!(*confined.lock(), vec!["soft".to_string()]);
+        let spawned = existing.spawned.lock().clone();
+        assert_ne!(spawned[0].command, "/opt/launcher", "a plain spawn is not re-wrapped");
+        assert_eq!(spawned[1].command, "/opt/launcher");
+
+        let error = router
+            .spawn(config("unconfinable", Some(placement(false))), sink)
+            .await
+            .expect_err("an unconfinable fallback does not run");
+        assert!(error.contains("launcher is unavailable"), "{error}");
+        assert_eq!(existing.spawned.lock().len(), 2);
+    }
+
+    /// A private state root is a Host path: the sandbox never sees its key,
+    /// and a fallback onto this Host still carries it.
+    #[tokio::test]
+    async fn the_state_key_reaches_a_fallback_but_never_a_sandbox() {
+        let key = crate::state_isolation::AGENT_STATE_KEY_ENV;
+        let sandbox = Recording::new("sandbox");
+        let (existing, router, emitter) = router(sandbox.clone());
+        let sink = EmitterEventSink::new(emitter);
+        let mut boxed = config("boxed", Some(placement(false)));
+        boxed.env.insert(key.into(), "work".into());
+        router.spawn(boxed, sink.clone()).await.unwrap();
+        assert!(!sandbox.spawned.lock()[0].env.contains_key(key));
+
+        *sandbox.sandbox_result.lock() = Some(SandboxSpawnError::fault(
+            "sandbox_driver_unavailable",
+            "docker info failed",
+        ));
+        let mut soft = config("soft", Some(placement(false)));
+        soft.env.insert(key.into(), "work".into());
+        router.spawn(soft, sink).await.unwrap();
+        assert_eq!(existing.spawned.lock()[0].env[key], "work");
     }
 
     #[tokio::test]
@@ -1108,5 +1313,121 @@ mod tests {
         router.spawn(config("same", None), sink).await.unwrap();
         assert_eq!(existing.spawned.lock().len(), 1);
         assert_eq!(router.list().await, vec!["same".to_string()]);
+    }
+
+    #[test]
+    fn a_placement_names_its_provider_and_remote_workspace() {
+        let parsed: SandboxPlacement = serde_json::from_value(json!({
+            "kind": "container",
+            "spec": { "specDigest": "b".repeat(64) },
+            "isolationMandatory": false,
+            "provider": "e2b",
+            "workspace": {
+                "remoteUrl": "https://github.com/acme/app.git",
+                "baseRef": "main",
+                "branch": "cognia/task-1",
+                "credential": "ghs_secret"
+            }
+        }))
+        .unwrap();
+        assert_eq!(parsed.provider(), "e2b");
+        let workspace = parsed.workspace().expect("a remote workspace");
+        assert_eq!(workspace.branch, "cognia/task-1");
+        assert_eq!(workspace.credential.as_deref(), Some("ghs_secret"));
+
+        // The credential never leaves again: not serialized, not in Debug,
+        // not in the audit line.
+        let echoed = serde_json::to_value(&parsed).unwrap();
+        assert!(echoed["workspace"].get("credential").is_none());
+        assert!(!format!("{parsed:?}").contains("ghs_secret"));
+        let audit = parsed.audit_fields();
+        assert_eq!(audit["provider"], "e2b");
+        assert_eq!(audit["workspace_branch"], "cognia/task-1");
+        assert!(!audit.to_string().contains("ghs_secret"));
+
+        // No provider means the Host's local driver, exactly as before.
+        assert_eq!(placement(false).provider(), LOCAL_PROVIDER_ID);
+        assert!(placement(false).workspace().is_none());
+        assert!(serde_json::to_value(placement(false))
+            .unwrap()
+            .get("provider")
+            .is_none());
+
+        // The workspace source is closed like the placement around it.
+        assert!(serde_json::from_value::<SandboxPlacement>(json!({
+            "kind": "container",
+            "spec": {},
+            "isolationMandatory": false,
+            "workspace": { "remoteUrl": "u", "baseRef": "b", "branch": "c", "path": "/x" }
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn provider_ids_are_short_lowercase_slugs() {
+        for valid in ["local", "e2b", "k8s-prod", "0"] {
+            assert!(is_provider_id(valid), "{valid}");
+        }
+        for invalid in ["", "E2B", "-k8s", "k8s_prod", "a/b", &"x".repeat(33)] {
+            assert!(!is_provider_id(invalid), "{invalid}");
+        }
+        let forged = SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
+            provider: Some("Not A Slug".into()),
+            workspace: None,
+            spec: json!({}),
+            isolation_mandatory: false,
+        };
+        assert_eq!(forged.audit_fields()["provider"], Value::Null);
+    }
+
+    /// A managed gateway task reaches a sandbox through the driver's bridge,
+    /// so a routed placement carries it (ADR-0221).
+    #[tokio::test]
+    async fn a_routed_placement_carries_a_managed_gateway_task() {
+        let sandbox = Recording::new("sandbox");
+        let (_, router, emitter) = router(sandbox.clone());
+        let mut placed = config("gateway", Some(placement(true)));
+        placed
+            .env
+            .insert(crate::gateway_task::PAYLOAD_ENV.into(), "{}".into());
+        crate::exec_backend::spawn_with_events(router.as_ref(), emitter, placed)
+            .await
+            .unwrap();
+        assert_eq!(sandbox.spawned.lock().len(), 1);
+    }
+
+    /// A fault may not hand a local-only payload to a path that is not a
+    /// local process: the spawn fails with the fault instead of falling back.
+    #[tokio::test]
+    async fn a_local_only_payload_never_falls_back_onto_a_non_local_path() {
+        let sandbox = Recording::new("sandbox");
+        *sandbox.sandbox_result.lock() = Some(SandboxSpawnError::fault(
+            "sandbox_provider_unreachable",
+            "the provider did not answer",
+        ));
+        let existing = Recording::new("container");
+        let router = SandboxRoutingBackend::new(existing.clone(), sandbox);
+        let sink = EmitterEventSink::new(RecordingAgentEmitter::new());
+        for payload in [
+            crate::gateway_task::PAYLOAD_ENV,
+            crate::devin_mcp_config::PAYLOAD_ENV,
+        ] {
+            let mut placed = config(payload, Some(placement(false)));
+            placed.env.insert(payload.into(), "{}".into());
+            let error = router.spawn(placed, sink.clone()).await.unwrap_err();
+            assert!(
+                error.starts_with("sandbox_provider_unreachable:"),
+                "{payload}: {error}"
+            );
+        }
+        assert!(existing.spawned.lock().is_empty());
+
+        // Without such a payload the same fault falls back as before.
+        router
+            .spawn(config("plain", Some(placement(false))), sink)
+            .await
+            .unwrap();
+        assert_eq!(existing.spawned.lock().len(), 1);
     }
 }

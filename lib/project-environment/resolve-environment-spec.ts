@@ -101,6 +101,14 @@ export type SandboxFallbackCode =
    * code lives here so there is one fallback table to localize.
    */
   | "sandbox_fallback_catalog_unreadable"
+  /**
+   * Nothing on the Host's provider set can run this spec right now — the
+   * local driver does not attest its tier and the default remote provider is
+   * unreachable or does not either (ADR-0221 D9). Decided by
+   * `lib/sandbox/run-environment.ts`; an infrastructure answer, so it falls
+   * back unless isolation is mandatory.
+   */
+  | "sandbox_fallback_provider_unavailable"
 
 export type EnvironmentRefusalCode =
   | "runtime_selection_invalid"
@@ -134,6 +142,19 @@ export type EnvironmentRefusalCode =
    * `sandbox_fallback_catalog_unreadable` and the same reason for living here.
    */
   | "environment_catalog_unreadable"
+  /**
+   * The project names a sandbox provider this Host does not have (or `local`
+   * on a Host with no local driver). A configuration answer, so it refuses
+   * rather than run somewhere the project did not name (ADR-0221 D9).
+   */
+  | "sandbox_provider_unknown"
+  /** The fault-rule refusal of `sandbox_fallback_provider_unavailable`. */
+  | "sandbox_provider_unavailable"
+  /**
+   * A remote provider was chosen and this checkout has no remote a Host can
+   * clone over https (ADR-0221 D6), so there is nothing to run remotely.
+   */
+  | "sandbox_workspace_remote_required"
 
 /** Something the person should see about how their environment was chosen. */
 export interface ResolutionNotice {

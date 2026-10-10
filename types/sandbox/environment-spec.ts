@@ -226,6 +226,38 @@ export const SANDBOX_WORKSPACE_FOLDER = "/workspace"
 export const SANDBOX_PLACEMENT_CHANNEL = "external-agent://placement"
 
 /**
+ * The event channel a remote sandbox reports its workspace publish on, when
+ * its session ends (ADR-0221 D6). Payload: {@link WorkspacePublishEvent}.
+ */
+export const WORKSPACE_PUBLISH_CHANNEL = "external-agent://workspace-publish"
+
+/** The id of the Host's local driver in its provider set (ADR-0221). */
+export const LOCAL_SANDBOX_PROVIDER_ID = "local"
+
+/**
+ * Where a remote sandbox gets its workspace (ADR-0221 D6): a clone of
+ * `remoteUrl` at `baseRef`, worked on as `branch`, which is what the Host
+ * publishes when the session ends. The sandbox never holds a credential; the
+ * Host's git proxy adds it, and pushes only to `refs/heads/<branch>`.
+ *
+ * Mirrors `RemoteWorkspaceSource` in `sandbox_routing_backend.rs`.
+ */
+export interface RemoteWorkspaceSource {
+  /** `https://`, with no credential, query or fragment. */
+  remoteUrl: string
+  /** The branch or tag the clone starts from. */
+  baseRef: string
+  /** The branch the sandbox works on and the Host publishes. */
+  branch: string
+  /**
+   * A token for the upstream, used by the Host's git proxy only. Absent: the
+   * Host resolves one from its own git credential helpers. Never echoed in
+   * an event, a placement report or a log.
+   */
+  credential?: string
+}
+
+/**
  * What one spawn carries to run in a runtime environment (ADR-0182).
  *
  * Mirrors `SandboxPlacement` in
@@ -252,6 +284,14 @@ export interface SandboxPlacement {
    * this — the Host adds its own half from a multi-tenant baseline.
    */
   isolationMandatory: boolean
+  /**
+   * The Host's sandbox provider that runs this spawn (ADR-0221). Absent: the
+   * local driver. An older Host refuses the field (`deny_unknown_fields`),
+   * which fails closed rather than running a remote request locally.
+   */
+  provider?: string
+  /** A remote provider's workspace; required for one, refused by the local driver. */
+  workspace?: RemoteWorkspaceSource
 }
 
 /**
@@ -302,5 +342,28 @@ export type SandboxPlacementPayload =
        * the spawn env. Ambient provider keys never reach the container.
        */
       credentials?: { mode?: string }
+      /** The provider that ran it (ADR-0221); absent from a local driver. */
+      provider?: string
+      /** A remote workspace, as the Host cloned it. Never carries a credential. */
+      workspace?: { remoteUrl?: string; baseRef?: string; branch?: string }
     }
   | { kind: "fallback"; code?: string; message?: string }
+
+/**
+ * What a remote sandbox did with its workspace when the session ended
+ * (ADR-0221 D6): `pushed` with the commit, or a code saying why not —
+ * `nothing_to_publish` when the agent changed nothing. Every field optional,
+ * for the same reason as {@link SandboxPlacementPayload}.
+ */
+export interface WorkspacePublishReport {
+  branch?: string
+  pushed?: boolean
+  commit?: string
+  code?: string
+  message?: string
+}
+
+export interface WorkspacePublishEvent {
+  agentId: string
+  publish: WorkspacePublishReport
+}

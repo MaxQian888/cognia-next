@@ -4,6 +4,7 @@ import {
   assertRuntimeSelection,
   isValidCatalogEntryId,
   isValidEnvironmentSlug,
+  isValidSandboxProviderId,
   runtimeSelectionProblems,
 } from "./runtime-selection"
 
@@ -84,6 +85,22 @@ describe("runtimeSelectionProblems", () => {
   it("caps the preset count at the spec limit", () => {
     const ids = Array.from({ length: 65 }, (_, index) => `p${index}`)
     expect(fields({ ...full, egressPresetIds: ids })).toEqual(["egressPresetIds"])
+  })
+
+  it("keeps the sandbox target union closed (ADR-0221)", () => {
+    const base = { source: { kind: "auto" }, updatedAt: 1 }
+    expect(fields({ ...base, target: { kind: "auto" } })).toEqual([])
+    expect(fields({ ...base, target: { kind: "local" } })).toEqual([])
+    expect(fields({ ...base, target: { kind: "provider", providerId: "e2b-prod" } })).toEqual([])
+    expect(fields({ ...base, target: { kind: "provider", providerId: "local" } })).toEqual([
+      "target.providerId",
+    ])
+    expect(fields({ ...base, target: { kind: "local", providerId: "x" } })).toEqual(["target"])
+    expect(fields({ ...base, target: { kind: "cloud" } })).toEqual(["target.kind"])
+    expect(fields({ ...base, target: "auto" })).toEqual(["target"])
+    expect(isValidSandboxProviderId("k8s-1")).toBe(true)
+    expect(isValidSandboxProviderId("K8s")).toBe(false)
+    expect(isValidSandboxProviderId("a".repeat(33))).toBe(false)
   })
 
   it("refuses a non-object selection", () => {

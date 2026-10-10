@@ -218,6 +218,20 @@ describe("ProjectEnvironmentRuntime", () => {
     expect(screen.getByTestId("runtime-pool-off")).toHaveTextContent(en.runtime.poolOffKept)
   })
 
+  // ADR-0221: on a desktop the pool is off until a remote provider is set up,
+  // which is the user's to do, not an operator's.
+  it("points a desktop at its remote sandbox settings when the pool is off", () => {
+    const marker = "__TAURI_INTERNALS__"
+    ;(window as unknown as Record<string, unknown>)[marker] = {}
+    try {
+      hookState = state({ poolEnabled: false, catalog: undefined, driver: undefined })
+      renderPanel()
+      expect(screen.getByTestId("runtime-pool-off")).toHaveTextContent(en.runtime.poolOffDesktop)
+    } finally {
+      delete (window as unknown as Record<string, unknown>)[marker]
+    }
+  })
+
   it("names the driver and the tiers it can provide", () => {
     renderPanel()
     expect(screen.getByTestId("runtime-driver")).toHaveTextContent("Sandbox driver: docker")
@@ -254,6 +268,109 @@ describe("ProjectEnvironmentRuntime", () => {
     expect(screen.queryByTestId("runtime-selection")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("switch", { name: en.runtime.optIn }))
     expect(setDraft).toHaveBeenLastCalledWith(expect.objectContaining({ source: { kind: "auto" } }))
+  })
+
+  // ADR-0221: where the sandbox runs, chosen among the Host's drivers.
+  describe("runs on", () => {
+    const withProviders = (
+      providers: NonNullable<ProjectRuntimeEnvironmentState["driver"]>["providers"]
+    ) => state({ driver: { ...state().driver!, providers } })
+    const local = {
+      id: "local",
+      driver: "docker",
+      remote: false,
+      isDefault: false,
+      reachable: true,
+      availableTiers: ["container" as const],
+    }
+    const e2b = {
+      id: "e2b",
+      driver: "e2b",
+      label: "E2B cloud",
+      remote: true,
+      isDefault: true,
+      reachable: true,
+      availableTiers: ["vm" as const],
+      usage: { instances: 2, sessions: 3 },
+    }
+    const open = () =>
+      fireEvent.keyDown(screen.getByRole("combobox", { name: en.runtime.target.label }), {
+        key: "Enter",
+      })
+
+    it("offers only automatic and the local driver on a Host with no providers", async () => {
+      renderPanel()
+      open()
+      expect(
+        await screen.findByRole("option", { name: en.runtime.target.auto })
+      ).toBeInTheDocument()
+      expect(screen.getByRole("option", { name: en.runtime.target.local })).toBeInTheDocument()
+      expect(screen.getAllByRole("option")).toHaveLength(2)
+    })
+
+    it("lists remote providers with their state, and no local driver when the Host has none", async () => {
+      hookState = withProviders([
+        e2b,
+        {
+          ...e2b,
+          id: "k8s",
+          label: undefined,
+          reachable: false,
+          unavailableCode: "sandbox_provider_unreachable",
+        },
+      ])
+      renderPanel()
+      expect(screen.getByTestId("runtime-provider-e2b")).toHaveTextContent(
+        "E2B cloud: 2 running, 3 sessions"
+      )
+      expect(screen.getByTestId("runtime-provider-k8s")).toHaveTextContent(
+        "k8s: unreachable (sandbox_provider_unreachable)"
+      )
+      open()
+      expect(await screen.findByRole("option", { name: "E2B cloud" })).toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "k8s (unreachable)" })).toBeInTheDocument()
+      expect(
+        screen.queryByRole("option", { name: en.runtime.target.local })
+      ).not.toBeInTheDocument()
+    })
+
+    it("stores a chosen provider, and automatic as no target", async () => {
+      hookState = withProviders([local, e2b])
+      renderPanel()
+      open()
+      fireEvent.click(await screen.findByRole("option", { name: "E2B cloud" }))
+      expect(setDraft).toHaveBeenLastCalledWith(
+        expect.objectContaining({ target: { kind: "provider", providerId: "e2b" } })
+      )
+    })
+
+    it("says what a remote run takes with it", () => {
+      hookState = state({
+        ...withProviders([local, e2b]),
+        draft: {
+          source: { kind: "auto" },
+          target: { kind: "provider", providerId: "e2b" },
+          updatedAt: 1,
+        },
+      })
+      renderPanel()
+      expect(screen.getByText(en.runtime.target.hintRemote)).toBeInTheDocument()
+    })
+
+    it("keeps a saved provider the Host no longer has visible", () => {
+      hookState = state({
+        ...withProviders([local]),
+        draft: {
+          source: { kind: "auto" },
+          target: { kind: "provider", providerId: "gone" },
+          updatedAt: 1,
+        },
+      })
+      renderPanel()
+      expect(screen.getByRole("combobox", { name: en.runtime.target.label })).toHaveTextContent(
+        "gone (not on this host)"
+      )
+    })
   })
 
   describe("labels what is not real yet (Rule 7)", () => {

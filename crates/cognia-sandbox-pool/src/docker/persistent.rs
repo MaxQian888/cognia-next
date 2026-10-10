@@ -8,8 +8,8 @@ use cognia_external_agent::container_backend::{
 use sha2::{Digest, Sha256};
 
 pub(super) const SOCKET: &str = "/tmp/cognia-sandboxd/control.sock";
-const RUNTIME_KEY_LABEL: &str = "cognia.runtime-key";
-const PROJECT_LABEL: &str = "cognia.project-id";
+pub(super) const RUNTIME_KEY_LABEL: &str = "cognia.runtime-key";
+pub(super) const PROJECT_LABEL: &str = "cognia.project-id";
 
 fn fault(message: impl Into<String>) -> SandboxSpawnError {
     SandboxSpawnError::fault("sandbox_persistent_runtime_failed", message.into())
@@ -33,11 +33,11 @@ fn runtime_key(spec: &RunnerSpec, environment: &EnvironmentSpec) -> String {
 /// Lowercase hex SHA-256. Persistent runtimes are matched by the keys this
 /// produces, so the format must never drift: a changed spelling would orphan
 /// every runtime created under the old one.
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-fn exec_spec(container_id: &str, args: &[&str]) -> RunnerExecSpec {
+pub(super) fn exec_spec(container_id: &str, args: &[&str]) -> RunnerExecSpec {
     RunnerExecSpec {
         container_id: container_id.into(),
         command: std::iter::once(format!("{INJECTION_ROOT}/bin/cognia-sandboxd"))
@@ -77,7 +77,7 @@ pub(super) async fn control(
 
 /// The registry's cleanup capability is scoped to an unguessable session id.
 /// An old collector cannot kill a later session or delete its shared rootfs.
-struct SessionApi {
+pub(super) struct SessionApi {
     daemon: Arc<dyn SandboxDockerApi>,
     container_id: String,
     session: String,
@@ -85,7 +85,11 @@ struct SessionApi {
 }
 
 impl SessionApi {
-    fn new(daemon: Arc<dyn SandboxDockerApi>, container_id: String, session: String) -> Self {
+    pub(super) fn new(
+        daemon: Arc<dyn SandboxDockerApi>,
+        container_id: String,
+        session: String,
+    ) -> Self {
         let lease_daemon = daemon.clone();
         let lease_container = container_id.clone();
         let lease_session = session.clone();
@@ -395,7 +399,7 @@ impl DockerSandboxBackend {
     }
 }
 
-fn runtime_ready(state: &Value, expected_key: &str) -> bool {
+pub(super) fn runtime_ready(state: &Value, expected_key: &str) -> bool {
     state["ready"] == true && state["runtimeKey"].as_str() == Some(expected_key)
 }
 

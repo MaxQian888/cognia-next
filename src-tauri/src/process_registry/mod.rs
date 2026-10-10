@@ -383,7 +383,11 @@ fn file_share_rows(status: &cognia_file_share::listener::ListenerStatus) -> Vec<
 pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
     let mut out = Vec::new();
 
-    // External agents (Codex / Claude Code / OpenCode CLIs).
+    // External agents (Codex / Claude Code / OpenCode CLIs) running as this
+    // host's own processes. An agent the sandbox router placed in a container
+    // or a remote sandbox (ADR-0182, ADR-0221) has no process here to sample
+    // or signal, so it is read from the local manager, not the router; its
+    // placement badge is where it shows.
     if let Some(st) = app.try_state::<ExternalAgentState>() {
         let mgr = st.inner().0.clone();
         for id in mgr.list().await {
@@ -654,7 +658,9 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
     match subsystem {
         ManagedSubsystem::ExternalAgent => {
             if let Some(st) = app.try_state::<ExternalAgentState>() {
-                let _ = st.inner().0.clone().kill_all().await;
+                // Through the router when one is installed, so agents in
+                // remote sandboxes stop too (ADR-0221).
+                let _ = st.inner().exec().kill_all().await;
             }
         }
         ManagedSubsystem::AcpTerminal => {

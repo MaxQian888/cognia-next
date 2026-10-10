@@ -87,8 +87,11 @@ use crate::status::SandboxDriverStatus;
 
 mod persistent;
 mod ports;
+mod remote_prep;
 mod retained_tasks;
 mod services;
+
+pub use remote_prep::{EXPIRES_AT_LABEL, PROVIDER_LABEL};
 
 /// Label carrying the bundle digest a staged volume holds, so a sweep can tell
 /// a volume for a retired bundle from one still in use.
@@ -136,6 +139,26 @@ pub struct DockerSandboxConfig {
 }
 
 impl DockerSandboxConfig {
+    /// The configuration of a driver over a remote provider (ADR-0221). A
+    /// remote instance mounts nothing from this Host and its bounds come
+    /// from the size class, so the runner settings are inert placeholders:
+    /// no workspace root, no Host network, the default PID bound.
+    pub fn remote(deployment_id: &str) -> Result<Self, String> {
+        Ok(Self {
+            deployment_id: deployment_id_from_env(deployment_id)?,
+            instance_id: default_instance_id(),
+            host: RunnerHostSettings {
+                workspaces_dir: std::path::PathBuf::from(WORKSPACE_TARGET),
+                workspaces_volume: None,
+                seccomp_json: None,
+                memory_bytes: 0,
+                nano_cpus: 0,
+                pids_limit: 512,
+                network_mode: "none".to_string(),
+            },
+        })
+    }
+
     pub fn from_env(default_deployment_id: &str) -> Result<Self, String> {
         Ok(Self {
             deployment_id: deployment_id_from_env(default_deployment_id)?,
@@ -240,6 +263,9 @@ pub struct DockerSandboxBackend {
     /// idempotent (it records the manifest digest in a marker), so this only
     /// saves a container start.
     staged: Mutex<BTreeSet<String>>,
+    /// Present when the container surface is a remote provider (ADR-0221):
+    /// preparation provisions instances instead of staging volumes.
+    remote: Option<remote_prep::RemoteParts>,
 }
 
 impl DockerSandboxBackend {
@@ -247,6 +273,15 @@ impl DockerSandboxBackend {
         api: Arc<dyn SandboxDockerApi>,
         admission: Arc<dyn SandboxAdmission>,
         config: DockerSandboxConfig,
+    ) -> Arc<Self> {
+        Self::build(api, admission, config, None)
+    }
+
+    fn build(
+        api: Arc<dyn SandboxDockerApi>,
+        admission: Arc<dyn SandboxAdmission>,
+        config: DockerSandboxConfig,
+        remote: Option<remote_prep::RemoteParts>,
     ) -> Arc<Self> {
         let container: Arc<dyn ContainerApi> = api.clone();
         Arc::new_cyclic(|own| Self {
@@ -264,6 +299,7 @@ impl DockerSandboxBackend {
             service_bridges: Mutex::new(HashMap::new()),
             retained_tasks: Mutex::new(retained_tasks::RetainedTasks::default()),
             pending_tool_hosts: Mutex::new(HashMap::new()),
+            remote,
         })
     }
 
@@ -271,6 +307,9 @@ impl DockerSandboxBackend {
     /// `runsc` is registered, which is how a single-host deployment offers the
     /// stronger tier without being configured for it (ADR-0182).
     pub async fn available_tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
+        if let Some(remote) = self.remote.as_ref() {
+            return remote.provisioner.tiers().await;
+        }
         let runtimes = self.api.runtimes().await.map_err(|error| {
             SandboxSpawnError::fault(
                 "sandbox_daemon_unreachable",
@@ -577,37 +616,7 @@ impl DockerSandboxBackend {
                 ),
             })?;
 
-        let report: Option<ProbeReport> = serde_json::from_slice(&completed.stdout).ok();
-        let report = match (report, completed.code) {
-            (Some(report), code)
-                if report.version == PROBE_REPORT_VERSION
-                    && (code == Some(0) || !report.problems.is_empty()) =>
-            {
-                report
-            }
-            // The exit code is the contract even when the report is not
-            // readable (an image whose shell is the wrong architecture cannot
-            // run the probe at all, and the daemon reports 126).
-            (_, Some(code)) => {
-                let code = ProbeCode::from_exit_code(code as i32);
-                return Err(SandboxSpawnError::refused(
-                    code.map(probe_code_name)
-                        .unwrap_or("sandbox_probe_failed")
-                        .to_string(),
-                    format!(
-                        "{} cannot host the agent: {}",
-                        image,
-                        completed.stderr_tail()
-                    ),
-                ));
-            }
-            (_, None) => {
-                return Err(SandboxSpawnError::refused(
-                    "sandbox_probe_failed",
-                    format!("probing {} produced no result", image),
-                ))
-            }
-        };
+        let report = interpret_probe(&completed, &image)?;
 
         // A workspace problem belongs to this workspace, not to the image, so
         // it is never what a later spawn reads back.
@@ -917,6 +926,39 @@ fn digest12(digest: &str) -> String {
 }
 
 /// The stable code a probe problem is reported under.
+/// Read a probe's output: the report when it is one this driver understands,
+/// otherwise the refusal its exit code names. The exit code is the contract
+/// even when the report is unreadable (an image whose shell is the wrong
+/// architecture cannot run the probe at all, and the runtime reports 126).
+fn interpret_probe(completed: &Completed, image: &str) -> Result<ProbeReport, SandboxSpawnError> {
+    let report: Option<ProbeReport> = serde_json::from_slice(&completed.stdout).ok();
+    match (report, completed.code) {
+        (Some(report), code)
+            if report.version == PROBE_REPORT_VERSION
+                && (code == Some(0) || !report.problems.is_empty()) =>
+        {
+            Ok(report)
+        }
+        (_, Some(code)) => {
+            let code = ProbeCode::from_exit_code(code as i32);
+            Err(SandboxSpawnError::refused(
+                code.map(probe_code_name)
+                    .unwrap_or("sandbox_probe_failed")
+                    .to_string(),
+                format!(
+                    "{} cannot host the agent: {}",
+                    image,
+                    completed.stderr_tail()
+                ),
+            ))
+        }
+        (_, None) => Err(SandboxSpawnError::refused(
+            "sandbox_probe_failed",
+            format!("probing {} produced no result", image),
+        )),
+    }
+}
+
 fn probe_code_name(code: ProbeCode) -> &'static str {
     match code {
         ProbeCode::ArchMismatch => "bundle_arch_mismatch",
@@ -1101,12 +1143,14 @@ fn sandbox_placement(
     libc: Libc,
     invocation: &BundledInvocation,
     config: &ExternalAgentSpawnConfig,
+    driver: &str,
+    egress_enforced: bool,
 ) -> Value {
     let spec = &admitted.spec;
     let bundle = &admitted.admission.bundle;
     json!({
         "kind": "sandbox",
-        "driver": "docker",
+        "driver": driver,
         "specDigest": spec.spec_digest,
         "image": spec.image.identity(),
         "sizeClassId": admitted.admission.size_class.id,
@@ -1129,7 +1173,7 @@ fn sandbox_placement(
         // Both labeled transitional in Step ①; see the module docs.
         "egress": {
             "tier": spec.egress.tier,
-            "enforced": egress_enforced(spec.egress.tier),
+            "enforced": egress_enforced,
         },
         "credentials": { "mode": credentials_mode(config) },
     })
@@ -1138,6 +1182,9 @@ fn sandbox_placement(
 #[async_trait]
 impl SandboxDriverStatus for DockerSandboxBackend {
     fn driver(&self) -> &'static str {
+        if let Some(remote) = self.remote.as_ref() {
+            return remote.provisioner.kind();
+        }
         DRIVER_NAME
     }
 
@@ -1151,6 +1198,16 @@ impl SandboxDriverStatus for DockerSandboxBackend {
 
     async fn available_tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
         DockerSandboxBackend::available_tiers(self).await
+    }
+
+    fn remote_usage(&self) -> Option<crate::status::RemoteUsage> {
+        self.remote.as_ref().map(|remote| {
+            let (instances, sessions) = remote.snapshot();
+            crate::status::RemoteUsage {
+                instances,
+                sessions,
+            }
+        })
     }
 }
 
@@ -1232,6 +1289,17 @@ impl DockerSandboxBackend {
             ));
         };
         let SandboxPlacement::Container { .. } = placement;
+        if self.remote.is_some() {
+            return self
+                .prepare_remote(config, sink, leases, gateway, tool_hosts, nonce)
+                .await;
+        }
+        if placement.workspace().is_some() {
+            return Err(SandboxSpawnError::refused(
+                "sandbox_workspace_source_unsupported",
+                "a local sandbox mounts this Host's checkout; a remote workspace needs a remote provider",
+            ));
+        }
         let cwd = config.cwd.clone().ok_or_else(|| {
             SandboxSpawnError::refused(
                 "sandbox_workspace_required",
@@ -1384,7 +1452,15 @@ impl DockerSandboxBackend {
             .map(|image| self.admission.registry_auth(&image.registry))
             .transpose()?
             .flatten();
-        let placement = sandbox_placement(&admitted, &report, libc, &invocation, &config);
+        let placement = sandbox_placement(
+            &admitted,
+            &report,
+            libc,
+            &invocation,
+            &config,
+            DRIVER_NAME,
+            egress_enforced(admitted.spec.egress.tier),
+        );
         if admitted.spec.lifecycle == SandboxLifecycleKind::Persistent {
             let (running, cleanup) = self
                 .start_persistent(spec, auth, &admitted.spec, &config, leases)
@@ -1745,6 +1821,7 @@ impl ExecBackend for DockerSandboxBackend {
         )
         .await?;
         reaped.extend(self.sweep_bundle_volumes().await);
+        reaped.extend(self.adopt_remote_instances().await);
         Ok(reaped)
     }
 
@@ -1786,18 +1863,21 @@ mod tests {
         pub(super) outcome: Mutex<Result<AdmittedSandbox, SandboxSpawnError>>,
         probes: Mutex<HashMap<(String, String), Value>>,
         offered: Mutex<Vec<String>>,
-        tiers_seen: Mutex<Vec<Vec<IsolationTier>>>,
-        multi_tenant: bool,
+        pub(super) tiers_seen: Mutex<Vec<Vec<IsolationTier>>>,
+        pub(super) multi_tenant: bool,
+        /// What `registry_auth` answers for every registry.
+        pub(super) auth: Mutex<Option<RegistryAuth>>,
     }
 
     impl FakeAdmission {
-        fn admitting(admitted: AdmittedSandbox) -> Arc<Self> {
+        pub(super) fn admitting(admitted: AdmittedSandbox) -> Arc<Self> {
             Arc::new(Self {
                 outcome: Mutex::new(Ok(admitted)),
                 probes: Mutex::new(HashMap::new()),
                 offered: Mutex::new(vec![BUNDLE_DIGEST.to_string()]),
                 tiers_seen: Mutex::new(Vec::new()),
                 multi_tenant: false,
+                auth: Mutex::new(None),
             })
         }
     }
@@ -1829,7 +1909,7 @@ mod tests {
             &self,
             _registry: &str,
         ) -> Result<Option<RegistryAuth>, SandboxSpawnError> {
-            Ok(None)
+            Ok(self.auth.lock().clone())
         }
 
         fn cached_probe(&self, user_image_digest: &str, bundle_digest: &str) -> Option<Value> {
@@ -1863,7 +1943,7 @@ mod tests {
         }
     }
 
-    fn config() -> DockerSandboxConfig {
+    pub(super) fn config() -> DockerSandboxConfig {
         DockerSandboxConfig {
             deployment_id: "dep1".to_string(),
             instance_id: "inst1".to_string(),
@@ -2041,6 +2121,8 @@ mod tests {
             framing: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
                 hosted_tool_host_lease_ids: Vec::new(),
+                provider: None,
+                workspace: None,
                 spec: serde_json::to_value(spec).expect("a spec serializes"),
                 isolation_mandatory: false,
             }),
@@ -3355,6 +3437,37 @@ mod tests {
             .specs()
             .iter()
             .all(|spec| spec.cmd.first().map(String::as_str) != Some("init-agent")));
+    }
+
+    /// A remote workspace is cloned inside a remote instance; the local
+    /// driver mounts this Host's checkout and cannot honour one, so it says
+    /// so instead of mounting something else.
+    #[tokio::test]
+    async fn the_local_driver_refuses_a_remote_workspace() {
+        let spec = spec(EgressTier::Allowlist, None);
+        let harness = Harness::new(
+            admitted(spec.clone(), IsolationTier::Container),
+            report(vec![command("codex-acp", None)], Vec::new()),
+            0,
+        );
+        let mut config = spawn_config("agent-1", "codex-acp", &[], &spec);
+        if let Some(SandboxPlacement::Container { workspace, .. }) = config.sandbox.as_mut() {
+            *workspace = Some(
+                serde_json::from_value(serde_json::json!({
+                    "remoteUrl": "https://github.com/acme/app.git",
+                    "baseRef": "main",
+                    "branch": "cognia/task-1"
+                }))
+                .expect("a workspace source"),
+            );
+        }
+        let error = harness
+            .spawn(config)
+            .await
+            .expect_err("a local driver has no remote workspace");
+        assert_eq!(error.code, "sandbox_workspace_source_unsupported");
+        assert_eq!(error.kind, SandboxErrorKind::Refused);
+        assert!(harness.specs().is_empty(), "nothing was started");
     }
 
     #[tokio::test]

@@ -30,6 +30,7 @@
   "goals": "目标",
   "hooks": "钩子",
   "imageCatalog": "镜像目录",
+  "remoteSandboxes": "远程沙箱",
   "logs": "日志",
   "lsp": "语言服务器",
   "mcp": "MCP",

@@ -355,6 +355,8 @@
     "refused": "运行环境被拒绝",
     "sandboxed": "沙箱 · {tier}",
     "sandboxedUntiered": "沙箱",
+    "sandboxedOn": "沙箱位于 {provider} · {tier}",
+    "sandboxedOnUntiered": "沙箱位于 {provider}",
     "tooltip": {
       "bundle": "Agent 运行时包：{tag}（{libc}）",
       "credentials": "凭据：{mode} —— 宿主 provider 凭据在容器启动前即被剥离",
@@ -364,7 +366,15 @@
       "notReported": "未报告",
       "tier": "隔离级别：{tier}",
       "user": "以 {user} 身份运行",
-      "userRemapped": "以 {user} 身份运行（已映射为工作区所有者）"
+      "userRemapped": "以 {user} 身份运行（已映射为工作区所有者）",
+      "provider": "远程提供方：{provider}",
+      "workspace": "已从 {remote} 的 {base} 克隆到 {branch}",
+      "workspaceUnreported": "已把仓库克隆到 {branch}",
+      "pushed": "已把 {commit} 推送到 {branch}",
+      "nothingToPublish": "没有需要推送到 {branch} 的更改",
+      "pushRefused": "远端拒绝了推送到 {branch}：{message}",
+      "publishFailed": "工作未能推送（{code}）：{message}",
+      "publishPending": "会话结束时推送工作"
     },
     "unknown": "无法识别的放置结果"
   },

@@ -138,6 +138,61 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = state;
+    dispatch_arm(name, args, host, device_id, tenant_id, scope).await
+}
+
+/// The audit subject of a call the desktop's own UI made.
+const LOCAL_DEVICE: &str = "local";
+
+/// The desktop's own environment plane (ADR-0221 G7).
+///
+/// A desktop with remote sandboxes installs the same pool a server does, and
+/// its brain reads the catalog, the driver status and the declarations
+/// through the same `environment_*` names. Locally those are this one
+/// command, answering through the same arms a paired client reaches, so the
+/// two can never disagree; the person at the desktop is its host owner.
+#[tauri::command]
+pub async fn environment_local_call(
+    app: tauri::AppHandle,
+    name: String,
+    args: Option<Value>,
+) -> Result<Value, RpcError> {
+    if !COMMANDS.contains(&name.as_str()) {
+        return Err(RpcError::new(
+            "environment_command_unknown",
+            format!("{name} is not an environment command"),
+        ));
+    }
+    // The arms read the pool's SQLite store and the workspace's declaration
+    // files inline. A paired call reaches them on the companion server's own
+    // runtime; this one is desktop IPC, where blocking an async worker stalls
+    // every other command (5f6760382). So the whole call runs on the blocking
+    // pool, driving its async parts (registry, driver) from there.
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let host = super::super::dispatch_host::DispatchHost::Tauri(app);
+        runtime.block_on(dispatch_arm(
+            &name,
+            args.unwrap_or_else(|| Value::Object(Default::default())),
+            &host,
+            LOCAL_DEVICE,
+            None,
+            None,
+        ))
+    })
+    .await
+    .map_err(|error| RpcError::new("environment_command_failed", error.to_string()))?
+    .map_err(|(_, Json(error))| error)
+}
+
+async fn dispatch_arm(
+    name: &str,
+    args: Value,
+    host: &super::super::dispatch_host::DispatchHost,
+    device_id: &str,
+    tenant_id: Option<&str>,
+    scope: Option<&str>,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let services = services(name)?;
 
     match name {

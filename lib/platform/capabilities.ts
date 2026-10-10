@@ -47,12 +47,13 @@ import { detectPlatform, type Platform } from "./detect"
  *                         desktop and headless hosts, while `codeserver_supported()`
  *                         still answers the per-OS/arch question at call time.
  * - `sandbox-pool`      — the host can run the runtime-environment sandbox pool
- *                         (ADR-0182): only the headless cognia-server installs
- *                         one. Coarse in the same way: whether an operator
- *                         turned the pool ON is the deployment switch, which
- *                         the environment commands answer at call time with
- *                         `sandbox_pool_disabled`. The desktop does not list
- *                         it — local containers are dormant in Step ①.
+ *                         (ADR-0182): the headless cognia-server, and the
+ *                         desktop with remote sandbox providers (ADR-0221).
+ *                         Coarse in the same way: whether the pool is ON (an
+ *                         operator's switch on a server, a configured provider
+ *                         and a pinned bundle on a desktop) is answered at
+ *                         call time with `sandbox_pool_disabled`. The
+ *                         desktop's LOCAL containers remain dormant.
  */
 export const CORE_CAPABILITY_IDS = [
   "shell",
@@ -138,6 +139,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "pro-ide",
     "thread-handoff-v1",
     "media",
+    "sandbox-pool",
   ] as const),
   mobile: Object.freeze([
     "webview",

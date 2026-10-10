@@ -555,7 +555,7 @@ impl DispatchHost {
             Self::Tauri(app) => {
                 use tauri::Manager;
                 app.state::<crate::external_agent::commands::ExternalAgentState>()
-                    .backend()
+                    .exec()
             }
             Self::Headless(services) => Arc::clone(&services.exec),
         }
@@ -740,7 +740,10 @@ impl DispatchHost {
     /// sandbox driver would refuse `sandbox_command_unavailable` — a spawn
     /// that looks like a bundle problem and is really a double-wrap. The
     /// container is the stronger confinement of the two, so it wins and the
-    /// desktop wrapper stands down.
+    /// desktop wrapper stands down — but only when this desktop's sandbox
+    /// router (ADR-0221) will place it. With no router the placement falls
+    /// back to this host, so it is wrapped like any other spawn; with one,
+    /// the router wraps a fallback itself.
     ///
     /// # Per-configuration state roots (ADR-0216)
     ///
@@ -750,22 +753,22 @@ impl DispatchHost {
     /// anywhere else (a runtime-environment container, a container or
     /// Kubernetes exec backend) cannot see the host's login roots and could
     /// not reach a host path in its env, so the key is dropped there.
+    ///
+    /// `backend` is the one the spawn will go to, fetched once by the caller:
+    /// the desktop's router is installed after startup, and a config hardened
+    /// for one backend must not be spawned on another.
     pub fn harden_spawn_config(
         &self,
         mut config: crate::external_agent::process::ExternalAgentSpawnConfig,
+        backend: &dyn crate::external_agent::exec_backend::ExecBackend,
     ) -> Result<crate::external_agent::process::ExternalAgentSpawnConfig, String> {
         match self {
-            Self::Tauri(_) if !desktop_wrapper_applies(&config) => {
-                cognia_external_agent::state_isolation::strip_state_key(&mut config);
-                Ok(config)
-            }
-            Self::Tauri(_) => crate::external_agent::sandbox::wrap_with_sandbox(
+            Self::Tauri(_) => crate::external_agent::sandbox::harden_desktop_spawn(
                 config,
-                &crate::external_agent::sandbox::DesktopSandboxHost,
-            )
-            .map_err(|error| error.to_string()),
+                backend.routes_sandboxes(),
+            ),
             Self::Headless(_) => {
-                if !state_key_reaches_host_process_table(&config, self.exec_backend().kind()) {
+                if !state_key_reaches_host_process_table(&config, backend.kind()) {
                     cognia_external_agent::state_isolation::strip_state_key(&mut config);
                 }
                 Ok(config)
@@ -781,18 +784,6 @@ fn state_key_reaches_host_process_table(
     backend_kind: &str,
 ) -> bool {
     config.sandbox.is_none() && backend_kind == "local-process"
-}
-
-/// Whether the desktop's OS sandbox wrapper applies to `config`.
-///
-/// Extracted from [`DispatchHost::harden_spawn_config`] so the rule is
-/// testable without an `AppHandle`: a `DispatchHost::Tauri` needs a live Tauri
-/// app, and the part worth pinning is not the wrapping, it is that the two
-/// confinements never both apply.
-fn desktop_wrapper_applies(
-    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
-) -> bool {
-    config.sandbox.is_none()
 }
 
 #[cfg(test)]
@@ -825,6 +816,8 @@ mod tests {
             framing: Default::default(),
             sandbox: placed.then(|| SandboxPlacement::Container {
                 hosted_tool_host_lease_ids: Vec::new(),
+                provider: None,
+                workspace: None,
                 spec: serde_json::json!({ "projectId": "prj1" }),
                 isolation_mandatory: false,
             }),
@@ -834,11 +827,15 @@ mod tests {
     /// ADR-0182. The desktop sandbox host rewrites `command`/`args` to its own
     /// launcher, which the agent bundle has no entry for — so wrapping a
     /// placed spawn would refuse `sandbox_command_unavailable` and look like a
-    /// bundle problem. The container is the stronger confinement and wins.
+    /// bundle problem. The container is the stronger confinement and wins
+    /// where a router will place it (ADR-0221); with no router the placement
+    /// runs on this host and is wrapped.
     #[test]
     fn the_desktop_wrapper_stands_down_for_a_spawn_that_runs_in_a_container() {
-        assert!(!desktop_wrapper_applies(&spawn_config(true)));
-        assert!(desktop_wrapper_applies(&spawn_config(false)));
+        use crate::external_agent::sandbox::desktop_wrapper_applies;
+        assert!(!desktop_wrapper_applies(&spawn_config(true), true));
+        assert!(desktop_wrapper_applies(&spawn_config(true), false));
+        assert!(desktop_wrapper_applies(&spawn_config(false), true));
     }
 
     /// ADR-0216. A state key only means something where this host's process
@@ -869,7 +866,9 @@ mod tests {
             cognia_external_agent::state_isolation::AGENT_STATE_KEY_ENV.into(),
             "cfg".into(),
         );
-        let hardened = host.harden_spawn_config(config).expect("nothing to wrap");
+        let hardened = host
+            .harden_spawn_config(config, host.exec_backend().as_ref())
+            .expect("nothing to wrap");
         assert!(!hardened
             .env
             .contains_key(cognia_external_agent::state_isolation::AGENT_STATE_KEY_ENV));
@@ -882,7 +881,7 @@ mod tests {
         let host = headless_host();
         let config = spawn_config(true);
         let hardened = host
-            .harden_spawn_config(config.clone())
+            .harden_spawn_config(config.clone(), host.exec_backend().as_ref())
             .expect("nothing to wrap");
         assert_eq!(hardened.command, config.command);
         assert_eq!(hardened.args, config.args);

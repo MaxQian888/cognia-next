@@ -232,15 +232,18 @@ pub(super) async fn dispatch(
                     // Confinement is the host's business: the desktop wraps the
                     // child in its sandbox host exactly as the local Tauri
                     // command does; the container relies on its ExecBackend.
+                    // One backend for both steps: the desktop's sandbox router
+                    // can be installed between two reads (ADR-0221).
+                    let backend = host.exec_backend();
                     let hardened = host
-                        .harden_spawn_config(validated.config)
+                        .harden_spawn_config(validated.config, backend.as_ref())
                         .map_err(RpcError::internal)?;
                     cognia_external_agent::spawn_authority::with_remote_origin(
                         device_id,
                         cognia_external_agent::spawn_authority::with_gateway(
                             gateway_authority,
                             crate::external_agent::exec_backend::spawn_with_events(
-                                host.exec_backend().as_ref(),
+                                backend.as_ref(),
                                 host.agent_event_emitter(),
                                 hardened,
                             ),

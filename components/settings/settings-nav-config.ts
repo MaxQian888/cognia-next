@@ -52,6 +52,7 @@ import {
   BracesIcon,
   BoxIcon,
   ContainerIcon,
+  CloudIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
   KeyboardIcon,
@@ -145,6 +146,7 @@ export type SettingsSectionId =
   | "pro-ide"
   | "sandbox"
   | "image-catalog"
+  | "remote-sandboxes"
   | "security"
   | "about"
   | "updates"
@@ -730,10 +732,21 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "imageCatalog",
     group: "privacy",
     icon: ContainerIcon,
-    // ADR-0182: the runtime-environment catalog lives on a server-backed host
-    // that runs the sandbox pool. The desktop runs none (local containers are
-    // dormant in Step ①), so the section follows the pool, not the host.
+    // ADR-0182: the runtime-environment catalog lives on a host that runs the
+    // sandbox pool — a server, or a desktop with remote sandbox providers
+    // (ADR-0221) — so the section follows the pool, not the host.
     requires: ["sandbox-pool"],
+  },
+  {
+    id: "remote-sandboxes",
+    labelKey: "remoteSandboxes",
+    descriptionKey: "remoteSandboxes",
+    group: "privacy",
+    icon: CloudIcon,
+    // ADR-0221: the desktop's own remote sandbox providers, edited through
+    // two local commands. A server names its providers in a file the
+    // operator owns, so no other host has this page.
+    profiles: ["desktop"],
   },
   // === System ===
   {
@@ -1784,6 +1797,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "镜像仓库",
     "运行环境",
     "规格",
+  ],
+  "remote-sandboxes": [
+    "remote sandbox",
+    "cloud sandbox",
+    "e2b",
+    "kubernetes",
+    "k8s",
+    "provider",
+    "registry",
+    "远程沙箱",
+    "云沙箱",
+    "提供方",
+    "镜像仓库",
   ],
   sandbox: [
     "sandbox",

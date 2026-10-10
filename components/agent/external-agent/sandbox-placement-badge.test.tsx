@@ -194,4 +194,69 @@ describe("SandboxPlacementBadge", () => {
     const { container } = renderBadge("a1")
     expect(container).toBeEmptyDOMElement()
   })
+
+  // ADR-0221: a remote sandbox names where it ran and what became of the work.
+  describe("remote sandboxes", () => {
+    const remote = {
+      agentId: "a1",
+      kind: "sandbox" as const,
+      tier: "vm" as const,
+      provider: "e2b",
+      workspace: {
+        remoteUrl: "https://github.com/acme/app.git",
+        baseRef: "main",
+        branch: "cognia/a1",
+      },
+    }
+
+    it("names the provider, the clone, and that the push comes at the end", async () => {
+      renderBadge()
+      act(() => recordPlacementReport(remote))
+      const badge = screen.getByTestId("sandbox-placement-sandboxed")
+      expect(badge).toHaveTextContent("Sandbox on e2b · Virtual machine")
+      const text = await tooltipText("sandbox-placement-sandboxed")
+      expect(text).toContain("Remote provider: e2b")
+      expect(text).toContain("Cloned https://github.com/acme/app.git at main onto cognia/a1")
+      expect(text).toContain(en.placement.tooltip.publishPending)
+    })
+
+    it("says the work was pushed, with the commit", async () => {
+      renderBadge()
+      act(() =>
+        recordPlacementReport({
+          ...remote,
+          publish: { branch: "cognia/a1", pushed: true, commit: "b".repeat(40) },
+        })
+      )
+      expect(await tooltipText("sandbox-placement-sandboxed")).toContain(
+        `Pushed ${"b".repeat(12)} to cognia/a1`
+      )
+    })
+
+    it.each([
+      [{ pushed: false, code: "nothing_to_publish" }, "No changes to push to cognia/a1"],
+      [
+        { pushed: false, code: "sandbox_workspace_push_refused", message: "non-fast-forward" },
+        "The remote refused the push to cognia/a1: non-fast-forward",
+      ],
+      [
+        { pushed: false, code: "sandbox_workspace_publish_failed", message: "commit failed" },
+        "The work was not pushed (sandbox_workspace_publish_failed): commit failed",
+      ],
+    ])("says what happened when nothing was pushed (%o)", async (publish, line) => {
+      renderBadge()
+      act(() => recordPlacementReport({ ...remote, publish: { branch: "cognia/a1", ...publish } }))
+      expect(await tooltipText("sandbox-placement-sandboxed")).toContain(line)
+    })
+
+    it("adds nothing remote to a local sandbox", async () => {
+      renderBadge()
+      act(() => recordPlacementReport({ agentId: "a1", kind: "sandbox", tier: "container" }))
+      expect(screen.getByTestId("sandbox-placement-sandboxed")).toHaveTextContent(
+        "Sandbox · Container"
+      )
+      const text = await tooltipText("sandbox-placement-sandboxed")
+      expect(text).not.toContain("Remote provider")
+    })
+  })
 })

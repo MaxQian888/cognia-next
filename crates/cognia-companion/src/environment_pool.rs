@@ -44,6 +44,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 pub use cognia_sandbox_pool::boot::PoolServices;
+pub use cognia_sandbox_pool::providers::ProviderView;
 
 use cognia_sandbox_pool::build::{BuildConfig, BuildService};
 pub use cognia_sandbox_pool::build::{BuildPhase, BuildRequest, BuildStatus};
@@ -433,6 +434,11 @@ pub struct DriverStatus {
     pub reachable: bool,
     pub unreachable_reason: Option<String>,
     pub bundles: Vec<OfferedBundleView>,
+    /// Every driver a spawn can be placed on (ADR-0221), the local one
+    /// included. Empty when the local driver is the only one, which is every
+    /// Host that configured no remote provider.
+    #[serde(default)]
+    pub providers: Vec<ProviderView>,
 }
 
 /// The merged catalog and the tenant policy it was merged under.
@@ -707,6 +713,10 @@ pub async fn driver_status(services: &PoolServices) -> DriverStatus {
         reachable,
         unreachable_reason,
         bundles,
+        providers: match services.providers.as_ref() {
+            Some(set) => set.views().await,
+            None => Vec::new(),
+        },
     }
 }
 
@@ -919,6 +929,7 @@ mod tests {
                 false,
             )),
             status: Arc::new(FakeDriver { tiers }),
+            providers: None,
         }
     }
 
@@ -1206,6 +1217,18 @@ mod tests {
         );
         assert_eq!(status.driver, "docker");
         assert_eq!(status.deployment_id, "dep1");
+    }
+
+    /// A Host with no remote provider lists none, and an older Host's status
+    /// (no `providers` key) still reads as "the local driver only".
+    #[tokio::test]
+    async fn a_host_without_remote_providers_lists_none() {
+        let status = driver_status(&pool(Some(vec![IsolationTier::Container]))).await;
+        assert!(status.providers.is_empty());
+        let mut wire = serde_json::to_value(&status).expect("a status serializes");
+        wire.as_object_mut().expect("an object").remove("providers");
+        let read: DriverStatus = serde_json::from_value(wire).expect("an older status reads");
+        assert_eq!(read, status);
     }
 
     /// The offered bundles are what a console shows to let a project pin one,

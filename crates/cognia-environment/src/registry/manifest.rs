@@ -314,6 +314,78 @@ pub fn parse_image_config(body: &[u8]) -> Result<ImageConfig, RegistryError> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct RawLayers {
+    #[serde(default)]
+    layers: Option<Vec<Descriptor>>,
+}
+
+/// The layer descriptors of an image manifest, lowest first. `content_type`
+/// is the response header, as for [`parse_manifest`]; an index is refused.
+pub fn parse_image_layers(
+    content_type: Option<&str>,
+    body: &[u8],
+) -> Result<Vec<Descriptor>, RegistryError> {
+    if !matches!(
+        parse_manifest(content_type, body)?,
+        ParsedManifest::Image { .. }
+    ) {
+        return Err(RegistryError::ResponseInvalid {
+            message: "an image index has no layers of its own".into(),
+        });
+    }
+    let raw: RawLayers =
+        serde_json::from_slice(body).map_err(|error| RegistryError::ResponseInvalid {
+            message: format!("manifest is not JSON: {error}"),
+        })?;
+    let layers = raw.layers.ok_or_else(|| RegistryError::ResponseInvalid {
+        message: "image manifest has no layers".into(),
+    })?;
+    for descriptor in &layers {
+        validate_descriptor(descriptor)?;
+    }
+    Ok(layers)
+}
+
+/// Passes bytes through to `inner` while hashing and counting them, so a
+/// streamed blob is verified without a second read.
+pub(crate) struct HashingWriter<'a> {
+    inner: &'a mut (dyn std::io::Write + Send),
+    hasher: Sha256,
+    written: u64,
+}
+
+impl<'a> HashingWriter<'a> {
+    pub(crate) fn new(inner: &'a mut (dyn std::io::Write + Send)) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            written: 0,
+        }
+    }
+
+    /// `(sha256:<hex>, byte count)` of everything written.
+    pub(crate) fn finish(self) -> (String, u64) {
+        (
+            format!("{DIGEST_PREFIX}{}", hex::encode(self.hasher.finalize())),
+            self.written,
+        )
+    }
+}
+
+impl std::io::Write for HashingWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        self.written += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// `sha256:<hex>` of `bytes`.
 pub fn sha256_digest(bytes: &[u8]) -> String {
     format!("{DIGEST_PREFIX}{}", hex::encode(Sha256::digest(bytes)))
@@ -571,5 +643,58 @@ pub(crate) mod tests {
             include_str!("manifest.rs"),
         );
         assert!(violations.is_empty(), "{violations:#?}");
+    }
+
+    #[test]
+    fn image_layers_are_read_in_order_and_validated() {
+        let config = config_body("amd64", None);
+        let body = serde_json::to_vec(&json!({
+            "schemaVersion": 2,
+            "mediaType": OCI_MANIFEST,
+            "config": { "mediaType": OCI_CONFIG, "digest": sha256_digest(&config), "size": config.len() },
+            "layers": [
+                { "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": sha256_digest(b"a"), "size": 1 },
+                { "mediaType": "application/vnd.oci.image.layer.v1.tar", "digest": sha256_digest(b"bb"), "size": 2 },
+            ],
+        }))
+        .unwrap();
+        let layers = parse_image_layers(None, &body).unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].digest, sha256_digest(b"a"));
+        assert_eq!(
+            layers[1].media_type.as_deref(),
+            Some("application/vnd.oci.image.layer.v1.tar")
+        );
+
+        let index = index_body(&[("amd64", None, body.as_slice())]);
+        assert!(matches!(
+            parse_image_layers(None, &index),
+            Err(RegistryError::ResponseInvalid { .. })
+        ));
+
+        let missing = image_manifest_body(&config);
+        let mut value: serde_json::Value = serde_json::from_slice(&missing).unwrap();
+        value.as_object_mut().unwrap().remove("layers");
+        let error = parse_image_layers(None, &serde_json::to_vec(&value).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("no layers"), "{error}");
+
+        value["layers"] = json!([{ "digest": "sha256:short", "size": 1 }]);
+        assert!(parse_image_layers(None, &serde_json::to_vec(&value).unwrap()).is_err());
+        value["layers"] = json!([{ "digest": sha256_digest(b"x"), "size": -1 }]);
+        assert!(parse_image_layers(None, &serde_json::to_vec(&value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn the_hashing_writer_passes_bytes_through_and_counts_them() {
+        use std::io::Write as _;
+        let mut inner = Vec::new();
+        let mut writer = HashingWriter::new(&mut inner);
+        writer.write_all(b"hello ").unwrap();
+        writer.write_all(b"world").unwrap();
+        writer.flush().unwrap();
+        let (digest, written) = writer.finish();
+        assert_eq!(digest, sha256_digest(b"hello world"));
+        assert_eq!(written, 11);
+        assert_eq!(inner, b"hello world");
     }
 }

@@ -1,0 +1,163 @@
+{
+  "title": "远程沙箱",
+  "description": "本机可以把项目智能体放进去运行的云端沙箱，在运行需要时按需创建：E2B，或你接入的 Kubernetes 集群。",
+  "reload": "重新加载",
+  "loading": "正在读取远程沙箱设置…",
+  "failed": "无法读取远程沙箱设置。",
+  "availability": {
+    "active": "远程沙箱已启用。需要运行环境的运行可以放到下面的提供方上。",
+    "noProviders": "尚未配置提供方，所有运行都留在本机。",
+    "bundleUnpinnedTitle": "此版本不可用",
+    "bundleUnpinned": "此版本未内置固定摘要的智能体包，无法把智能体放进远程沙箱。这里保存的提供方会保留，在内置智能体包的版本发布前不会有任何远程运行。",
+    "bundle": "智能体包 {tag}"
+  },
+  "restart": {
+    "title": "重启 Cognia 后生效",
+    "body": "保存的更改在应用下次启动时生效。已在运行的沙箱沿用它们启动时的设置。"
+  },
+  "installError": {
+    "title": "远程沙箱未能启动",
+    "body": "本次启动前保存的设置被拒绝：{error}"
+  },
+  "providers": {
+    "title": "提供方",
+    "add": "添加提供方",
+    "empty": "还没有提供方。",
+    "kind": {
+      "e2b": "E2B",
+      "kubernetes": "Kubernetes"
+    },
+    "default": "默认",
+    "onlyDefault": "默认（唯一提供方）",
+    "makeDefault": "设为默认",
+    "clearDefault": "取消默认",
+    "edit": "编辑",
+    "remove": "移除",
+    "limits": "最多同时 {concurrent} 个 · 寿命 {lifetime} 分钟 · 空闲 {idle} 分钟后回收",
+    "credential": {
+      "stored": "凭据已保存",
+      "missing": "缺少凭据",
+      "env": "凭据来自 {name}",
+      "file": "凭据来自 {path}",
+      "none": "无需凭据"
+    },
+    "defaultHint": "设为“自动”的运行会尽量使用本机自己的沙箱，否则使用默认提供方。",
+    "live": {
+      "reachable": "运行中：可连接，占用 {instances} 个沙箱、{sessions} 个会话",
+      "unreachable": "运行中：无法连接（{code}）",
+      "notRunning": "本次运行未启用；下次启动应用时生效。",
+      "unreadable": "无法读取运行中沙箱池的状态。"
+    }
+  },
+  "removeDialog": {
+    "title": "移除 {label}？",
+    "body": "其已保存的凭据也会一并删除。指定了该提供方的项目在改选其他提供方前会被拒绝。已在运行的沙箱不会被停止。",
+    "cancel": "取消",
+    "confirm": "移除"
+  },
+  "editor": {
+    "createTitle": "添加远程沙箱提供方",
+    "editTitle": "编辑 {label}",
+    "description": "保存在本机。凭据存入系统的密钥存储，之后不会再显示。",
+    "kind": "提供方",
+    "id": "ID",
+    "idHint": "小写字母、数字和短横线，最多 32 个。项目通过它指定提供方。",
+    "label": "名称",
+    "labelPlaceholder": "代替 ID 显示",
+    "credential": {
+      "e2b": "API 密钥",
+      "kubeconfig": "Kubeconfig",
+      "kubeconfigPlaceholder": "粘贴 kubeconfig YAML",
+      "keep": "已保存凭据。留空即保留。",
+      "keepSource": "凭据读取自 {source}。在此输入可改为保存到本机。",
+      "required": "必填。"
+    },
+    "limits": "限制",
+    "maxConcurrent": "同时运行的沙箱数",
+    "maxLifetime": "寿命（分钟）",
+    "maxLifetimeHint": "每个沙箱到达此时长即被销毁，无论它在做什么。",
+    "idleTimeout": "空闲超时（分钟）",
+    "idleTimeoutHint": "没有会话的常驻沙箱在此时长后被销毁。",
+    "e2b": {
+      "apiUrl": "API 端点",
+      "domain": "沙箱域名",
+      "templatePrefix": "模板前缀",
+      "templateBuildTimeout": "模板构建超时（秒）",
+      "delegatedRegistries": "允许 E2B 使用你的凭据拉取的镜像仓库",
+      "delegatedRegistriesHint": "每行一个镜像仓库主机。E2B 在自己的服务器上构建模板，因此私有镜像的拉取凭据只会交给这里列出的仓库；其他私有镜像会被拒绝。"
+    },
+    "kubernetes": {
+      "connection": "连接方式",
+      "connectionKubeconfig": "Kubeconfig",
+      "connectionInCluster": "集群内服务账号",
+      "connectionInClusterHint": "仅当 Cognia 本身作为 Pod 运行在该集群中时使用。",
+      "context": "上下文",
+      "contextPlaceholder": "kubeconfig 的当前上下文",
+      "namespace": "命名空间",
+      "runtimeClasses": "各隔离档的 RuntimeClass",
+      "runtimeClassesHint": "只有已映射且集群中存在时，才提供 gVisor 和 VM 档。",
+      "egress": "网络管控",
+      "egressNone": "无",
+      "egressNetworkPolicy": "NetworkPolicy",
+      "egressCilium": "Cilium",
+      "egressHint": {
+        "none": "不限制出站流量：所有网络设置只记录、不强制。",
+        "network-policy": "禁网运行会被强制。允许列表只记录、不强制：NetworkPolicy 无法按主机名匹配。",
+        "cilium": "禁网运行和允许列表都会被强制。"
+      },
+      "nodeSelector": "节点选择器",
+      "nodeSelectorPlaceholder": "key=value，每行一个",
+      "serviceAccount": "服务账号",
+      "podReadyTimeout": "就绪超时（秒）"
+    },
+    "problem": {
+      "id_invalid": "使用 1–32 个小写字母、数字或短横线，以字母或数字开头，且不能为“local”。",
+      "id_taken": "已有其他提供方使用此 ID。",
+      "label_invalid": "名称不超过 64 个字符。",
+      "credential_required": "请输入凭据。",
+      "out_of_range": "请输入 {min} 到 {max} 之间的整数。",
+      "url_invalid": "请使用不含凭据、查询或片段的 https 地址（仅 localhost 可用 http）。",
+      "domain_invalid": "请输入域名，例如 e2b.app。",
+      "template_prefix_invalid": "使用 1–32 个小写字母、数字、短横线或下划线，以字母或数字开头。",
+      "registry_invalid": "“{entry}”不是镜像仓库主机。",
+      "namespace_invalid": "请使用 DNS 标签：小写字母、数字和短横线，最多 63 个。",
+      "name_invalid": "请使用 DNS 名称：小写字母、数字、短横线和点。",
+      "node_selector_invalid": "“{entry}”不是 key=value 形式的标签。"
+    },
+    "cancel": "取消",
+    "save": "保存提供方"
+  },
+  "registries": {
+    "title": "允许的镜像仓库",
+    "description": "项目只能运行来自这些镜像仓库的镜像。前缀可把仓库限定到其下的镜像。",
+    "empty": "未允许任何镜像仓库，只能运行内置镜像。",
+    "registry": "镜像仓库",
+    "registryPlaceholder": "ghcr.io",
+    "prefix": "仓库前缀",
+    "prefixPlaceholder": "acme（可选）",
+    "insecure": "明文 HTTP",
+    "add": "添加镜像仓库",
+    "removeRow": "移除 {registry}",
+    "save": "保存镜像仓库",
+    "saved": "镜像仓库已保存",
+    "problem": {
+      "registry_invalid": "请输入镜像仓库主机，例如 ghcr.io 或 localhost:5000。",
+      "prefix_invalid": "请使用小写的仓库路径。",
+      "duplicate": "此镜像仓库和前缀重复。"
+    }
+  },
+  "saved": "已保存。重启 Cognia 后生效。",
+  "removed": "已移除 {label}。重启 Cognia 后生效。",
+  "errors": {
+    "remote_sandboxes_invalid": "设置被拒绝：{message}",
+    "remote_sandboxes_registry_invalid": "镜像仓库允许列表被拒绝：{message}",
+    "remote_sandboxes_unwritable": "无法写入设置：{message}",
+    "remote_sandboxes_unreadable": "无法读取设置：{message}",
+    "remote_sandboxes_version_unsupported": "这些设置由更新版本的 Cognia 写入：{message}",
+    "remote_sandboxes_secret_unwritable": "无法保存凭据：{message}",
+    "remote_sandboxes_secret_id_invalid": "凭据 ID 被拒绝：{message}",
+    "remote_sandboxes_secret_unreferenced": "没有提供方使用的凭据被拒绝：{message}",
+    "remote_sandboxes_secret_empty": "凭据不能为空。",
+    "unknown": "出错了：{message}"
+  }
+}

@@ -21,6 +21,7 @@ import {
   forgetRunEnvironmentOutcome,
   onRunEnvironmentOutcome,
   placeAgentRun,
+  placeOnTarget,
   prepareRunEnvironment,
   readRepositoryCoordinates,
   recordRunEnvironmentOutcome,
@@ -41,6 +42,9 @@ import type { WorkspaceRepositoryConfigV1 } from "@/lib/project-environment/work
 import type { WorkspaceConfigVerdict } from "@/lib/project-environment/workspace-config-trust"
 import type { EnvironmentCatalogView } from "@/types/sandbox/environment-catalog"
 import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+import type { SandboxProviderView } from "@/types/sandbox/remote-sandboxes"
+import type { DriverStatus } from "@/lib/project-environment/environment-client"
+import type { SandboxTarget } from "@/types/project-environment"
 import { transport } from "@/lib/tauri/transport-instance"
 import { listProjectEnvironments } from "@/lib/db/project-environments"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -368,6 +372,186 @@ describe("resolution", () => {
 
     expect(await placed("approved")).toBe("c".repeat(64))
     expect(await placed("unapproved")).toBeUndefined()
+  })
+})
+
+describe("sandbox targets (ADR-0221)", () => {
+  const WORKSPACE = {
+    remoteUrl: "https://github.com/acme/app.git",
+    baseRef: "main",
+    branch: "cognia/agent-1",
+  }
+
+  function view(id: string, over: Partial<SandboxProviderView> = {}): SandboxProviderView {
+    return {
+      id,
+      driver: id === "local" ? "docker" : "e2b",
+      remote: id !== "local",
+      isDefault: false,
+      reachable: true,
+      availableTiers: ["container", "vm"],
+      ...over,
+    }
+  }
+
+  function status(providers: SandboxProviderView[]): () => Promise<DriverStatus> {
+    return async () =>
+      ({
+        driver: "docker",
+        deploymentId: "d",
+        instanceId: "i",
+        multiTenant: false,
+        isolationFloor: "container",
+        availableTiers: ["container"],
+        reachable: true,
+        bundles: [],
+        providers,
+      }) satisfies DriverStatus
+  }
+
+  function targeted(
+    target: SandboxTarget | undefined,
+    over: Partial<RunEnvironmentSources> = {},
+    isolationMinimum?: "vm"
+  ) {
+    return sources({
+      selection: async () => ({
+        runtime: {
+          source: { kind: "auto" },
+          updatedAt: 0,
+          ...(target ? { target } : {}),
+          ...(isolationMinimum ? { isolationMinimum } : {}),
+        },
+        policy: undefined,
+      }),
+      remoteWorkspace: async () => ({ ok: true, source: WORKSPACE }),
+      ...over,
+    })
+  }
+
+  it("leaves a Host with one driver exactly as before", async () => {
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(undefined, { driverStatus: status([]) })
+    )
+    expect(outcome.kind).toBe("placed")
+    if (outcome.kind !== "placed") throw new Error("unreachable")
+    expect(outcome.placement).not.toHaveProperty("provider")
+    expect(outcome.placement).not.toHaveProperty("workspace")
+    expect(outcome).not.toHaveProperty("target")
+  })
+
+  it("sends auto to the default remote provider on a remote-only Host, with its workspace", async () => {
+    const remoteWorkspace = jest.fn(async () => ({ ok: true as const, source: WORKSPACE }))
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(undefined, {
+        driverStatus: status([view("cloud", { isDefault: true })]),
+        remoteWorkspace,
+      })
+    )
+    expect(outcome).toMatchObject({
+      kind: "placed",
+      placement: { provider: "cloud", workspace: WORKSPACE },
+      target: { kind: "remote", providerId: "cloud", reason: "default-provider" },
+    })
+    expect(remoteWorkspace).toHaveBeenCalledWith({ root: "/repo", agentId: "agent-1" })
+  })
+
+  it("keeps auto local where the local driver attests the tier", async () => {
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(undefined, {
+        driverStatus: status([view("local"), view("cloud", { isDefault: true })]),
+      })
+    )
+    expect(outcome).toMatchObject({
+      kind: "placed",
+      target: { kind: "local", reason: "attests-tier" },
+    })
+    if (outcome.kind !== "placed") throw new Error("unreachable")
+    expect(outcome.placement.provider).toBeUndefined()
+  })
+
+  it("refuses a provider the Host does not have rather than run elsewhere", async () => {
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(
+        { kind: "provider", providerId: "gone" },
+        { driverStatus: status([view("local"), view("cloud", { isDefault: true })]) }
+      )
+    )
+    expect(outcome).toEqual({
+      kind: "refused",
+      code: "sandbox_provider_unknown",
+      detail: { providerId: "gone" },
+      notices: [],
+    })
+  })
+
+  it("falls back, or refuses when mandatory, when no provider can run the tier", async () => {
+    const down = status([view("cloud", { isDefault: true, reachable: false, availableTiers: [] })])
+    await expect(
+      prepareRunEnvironment(request(), targeted(undefined, { driverStatus: down }))
+    ).resolves.toEqual({
+      kind: "fallback",
+      code: "sandbox_fallback_provider_unavailable",
+      notices: [],
+    })
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(undefined, { driverStatus: down }, "vm")
+    )
+    expect(outcome).toMatchObject({ kind: "refused", code: "sandbox_provider_unavailable" })
+  })
+
+  it("refuses a remote run of a checkout with no clonable remote", async () => {
+    const outcome = await prepareRunEnvironment(
+      request(),
+      targeted(
+        { kind: "provider", providerId: "cloud" },
+        {
+          driverStatus: status([view("cloud", { isDefault: true })]),
+          remoteWorkspace: async () => ({
+            ok: false,
+            code: "sandbox_workspace_remote_required",
+            detail: { reason: "no_remote" },
+          }),
+        }
+      )
+    )
+    expect(outcome).toEqual({
+      kind: "refused",
+      code: "sandbox_workspace_remote_required",
+      detail: { reason: "no_remote" },
+      notices: [],
+    })
+  })
+
+  it("does not guess when the driver status cannot be read", async () => {
+    const unreadable = async () => {
+      throw new Error("offline")
+    }
+    const auto = await prepareRunEnvironment(
+      request(),
+      targeted(undefined, { driverStatus: unreadable })
+    )
+    expect(auto.kind === "placed" && auto.placement.provider).toBe(undefined)
+    const named = await prepareRunEnvironment(
+      request(),
+      targeted({ kind: "provider", providerId: "cloud" }, { driverStatus: unreadable })
+    )
+    expect(named).toMatchObject({
+      kind: "placed",
+      placement: { provider: "cloud", workspace: WORKSPACE },
+    })
+  })
+
+  it("passes every unplaced outcome through untouched", async () => {
+    const off = { kind: "off" } as const
+    await expect(
+      placeOnTarget(off, { runtime: undefined, policy: undefined }, request(), {})
+    ).resolves.toBe(off)
   })
 })
 
@@ -847,6 +1031,19 @@ describe("agentNeedsRespawn", () => {
     registerSpawnPlacement("agent-1", placed("d1").placement)
     withSpawnPlacement({ config: { id: "agent-1" } })
     expect(agentNeedsRespawn("agent-1", placed("d2"))).toBe(true)
+  })
+
+  // Same spec, another driver (ADR-0221): the project moved to a provider.
+  it("restarts a process placed on another sandbox provider", () => {
+    registerSpawnPlacement("agent-1", placed("d1").placement)
+    withSpawnPlacement({ config: { id: "agent-1" } })
+    const remote = placed("d1")
+    expect(
+      agentNeedsRespawn("agent-1", {
+        ...remote,
+        placement: { ...remote.placement, provider: "cloud" },
+      })
+    ).toBe(true)
   })
 
   // The project turned the environment on while its agent ran on the host.

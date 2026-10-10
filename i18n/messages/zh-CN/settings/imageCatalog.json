@@ -102,7 +102,9 @@
   "loading": "正在读取镜像目录…",
   "poolOff": {
     "body": "本部署尚未启用运行环境，所有项目都走标准执行路径。运维人员可通过 COGNIA_SANDBOX_POOL_ENABLED 开启。",
-    "title": "运行环境未启用"
+    "title": "运行环境未启用",
+    "desktopBody": "本机尚未设置远程沙箱提供方，所有项目都走标准执行路径。请在“设置 → 远程沙箱”中添加，然后重启 Cognia。",
+    "openRemoteSandboxes": "打开远程沙箱"
   },
   "rejected": {
     "description": "这些条目已保存但不会提供使用，因为部署基线不允许它们。",

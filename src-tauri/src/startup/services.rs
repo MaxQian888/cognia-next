@@ -202,6 +202,51 @@ pub(crate) fn agent_session_store(app: &App) {
     }
 }
 
+/// Remote sandboxes (ADR-0221 G7): the desktop's sandbox router, when its
+/// "Remote sandboxes" settings name a provider and this build pins an agent
+/// bundle. Off the main thread — it reads the secret store and writes the
+/// synthesized baseline — so a spawn in the first moments after launch runs
+/// as though the pool were off (a placement falls back or is refused, by the
+/// ordinary rule) rather than waiting on it.
+pub(crate) fn remote_sandboxes(app: &App) {
+    let Ok(app_data_dir) = app.path().app_data_dir() else {
+        log::warn!("remote sandboxes: no app data dir; leaving them off");
+        return;
+    };
+    let app = app.handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = cognia_data_dir(&app_data_dir);
+        let deployment_id = match crate::headless::deployment_id::resolve(&dir) {
+            Ok(id) => id,
+            Err(error) => {
+                log::warn!("remote sandboxes: deployment id: {error}");
+                return;
+            }
+        };
+        let state = app.state::<crate::external_agent::commands::ExternalAgentState>();
+        let installed = cognia_companion::remote_sandboxes::install(
+            state.backend(),
+            &dir,
+            &deployment_id,
+            Some(crate::external_agent::sandbox::desktop_fallback_confinement()),
+        );
+        match installed {
+            Ok(Some(pool)) => {
+                if let Err(error) = state.install_router(pool.backend) {
+                    log::warn!("remote sandboxes: {error}");
+                    return;
+                }
+                if let Some(services) = pool.services {
+                    crate::companion_api::environment_pool::install(services);
+                }
+                log::info!("remote sandboxes: on");
+            }
+            Ok(None) => {}
+            Err(error) => log::warn!("remote sandboxes: not installed: {error}"),
+        }
+    });
+}
+
 /// Inbound LLM gateway auto-start (ADR-0043 M3). Mirrors the remote-control
 /// gate: only starts when `enabled` is persisted true AND the keyring still
 /// has a token (`GatewayState::new()` clears `enabled` when the token is

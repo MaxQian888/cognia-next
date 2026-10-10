@@ -22,7 +22,8 @@
     "fallback": {
       "bundleUnavailable": "No agent bundle is available, so this run is using the standard execution path.",
       "catalogUnreadable": "The image catalog could not be read, so this run is using the standard execution path.",
-      "poolDisabled": "Runtime environments are not enabled on this deployment, so this run is using the standard execution path."
+      "poolDisabled": "Runtime environments are not enabled on this deployment, so this run is using the standard execution path.",
+      "providerUnavailable": "No sandbox provider on this host can run this project right now, so this run is using the standard execution path."
     },
     "hostFallback": {
       "bundleStageFailed": "The host could not stage the agent bundle into the container, so the run continued outside the sandbox.",
@@ -33,7 +34,14 @@
       "poolDisabled": "The host has the sandbox pool switched off, so the run continued outside the sandbox.",
       "storeUnavailable": "The host could not read its sandbox records, so the run continued outside the sandbox.",
       "unknown": "The host could not sandbox this run ({code}), so it continued outside the sandbox.",
-      "volumeUnavailable": "The sandbox volume was unavailable, so the run continued outside the sandbox."
+      "volumeUnavailable": "The sandbox volume was unavailable, so the run continued outside the sandbox.",
+      "providerUnreachable": "The sandbox provider could not be reached, so the run continued outside the sandbox.",
+      "providerCapacity": "The sandbox provider is at its limit of concurrent sandboxes, so the run continued outside the sandbox.",
+      "providerRejected": "The sandbox provider refused to start the sandbox, so the run continued outside the sandbox.",
+      "workspaceCloneFailed": "The remote sandbox could not clone the repository, so the run continued outside the sandbox.",
+      "serviceUnavailable": "The sandbox could not reach a host service it needs, so the run continued outside the sandbox.",
+      "persistentRuntimeFailed": "The persistent sandbox could not be resumed, so the run continued outside the sandbox.",
+      "templateBuildTimeout": "Preparing the remote sandbox image took too long, so the run continued outside the sandbox."
     },
     "notice": {
       "approvalPending": "This repository declares a runtime environment that nobody has approved yet, so the deployment default is being used.",
@@ -60,7 +68,10 @@
       "runtimeSelectionInvalid": "The runtime-environment settings for this project are not valid.",
       "sandboxPoolDisabled": "Runtime environments are not enabled on this deployment, and this project requires a sandbox.",
       "sizeClassNotOffered": "The selected size is not offered for this image.",
-      "sizeClassUnknown": "This deployment does not define the selected size."
+      "sizeClassUnknown": "This deployment does not define the selected size.",
+      "providerUnknown": "This project runs on the sandbox provider \"{providerId}\", which this host does not have. Choose another target.",
+      "providerUnavailable": "No sandbox provider on this host can run this project at the {tier} tier right now, and this project requires a sandbox.",
+      "workspaceRemoteRequired": "A remote sandbox clones the repository from its remote, and this checkout has none it can clone over HTTPS ({reason, select, no_checkout {no checkout} no_remote {no remote} remote_not_https {the remote is not HTTPS or SSH} no_base_branch {no branch on the remote to start from} other {{reason}}})."
     }
   },
   "plainWarning": "Do not place secrets in plain variables. Store only an OS-keyring reference below.",
@@ -238,6 +249,7 @@
     "optIn": "Run this project's external agents in a runtime environment",
     "optInHint": "Off: external agents run on the standard execution path, exactly as before.",
     "poolOff": "Runtime environments are not enabled on this deployment, so runs use the standard execution path.",
+    "poolOffDesktop": "No sandbox is configured on this desktop, so runs use the standard execution path. Add a provider under Settings → Remote sandboxes.",
     "poolOffKept": "This project's selection is kept and takes effect once an operator enables them.",
     "preview": {
       "actualNote": "The isolation and user a run actually gets can be stronger than requested, and are shown on the run itself.",
@@ -300,7 +312,20 @@
       "open": "Open",
       "close": "Close connection"
     },
-    "savedSeparately": "Saved separately"
+    "savedSeparately": "Saved separately",
+    "target": {
+      "label": "Runs on",
+      "auto": "Automatic",
+      "local": "This host's own sandbox",
+      "provider": "{label}",
+      "providerUnreachable": "{label} (unreachable)",
+      "missing": "{id} (not on this host)",
+      "hintAuto": "This host's own sandbox when it offers the isolation the project needs, otherwise the default remote provider.",
+      "hintLocal": "Always this host's own sandbox. Refused on a host without one.",
+      "hintRemote": "A remote sandbox clones the repository from its remote and pushes its work to a cognia/ branch there. Uncommitted and unpushed local changes are not included.",
+      "providerStatus": "{label}: {instances} running, {sessions, plural, =1 {# session} other {# sessions}}",
+      "providerStatusUnreachable": "{label}: unreachable ({code})"
+    }
   },
   "save": "Save environment",
   "saved": "Environment saved.",

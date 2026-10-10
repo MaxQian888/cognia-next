@@ -174,7 +174,10 @@ cognia-external-agent = { path = "../crates/cognia-external-agent", features = [
 # boot seam decides in every build: a deployment that enabled the pool must
 # never boot into a binary that silently ignores the switch. The Docker driver
 # itself needs the `docker` feature, forwarded from `container-exec` below.
-cognia-sandbox-pool = { path = "../crates/cognia-sandbox-pool" }
+# ADR-0221: both remote providers, on the desktop and the server alike — the
+# desktop's "Remote sandboxes" settings and a server's providers file reach
+# them through the same pool.
+cognia-sandbox-pool = { path = "../crates/cognia-sandbox-pool", features = ["e2b", "kubernetes"] }
 # The companion API serves the tenant catalog, the approvals and the probe
 # cache out of the same store admission uses (ADR-0182).
 # `registry`: `environment_image_inspect` reads image metadata here, on the Host,

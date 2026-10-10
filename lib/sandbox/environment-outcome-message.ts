@@ -49,12 +49,16 @@ export const REFUSAL_KEYS: Record<EnvironmentRefusalCode, string> = {
   egress_domain_limit: "refused.egressDomainLimit",
   local_container_unavailable: "refused.localContainerUnavailable",
   environment_catalog_unreadable: "refused.catalogUnreadable",
+  sandbox_provider_unknown: "refused.providerUnknown",
+  sandbox_provider_unavailable: "refused.providerUnavailable",
+  sandbox_workspace_remote_required: "refused.workspaceRemoteRequired",
 }
 
 export const FALLBACK_KEYS: Record<SandboxFallbackCode, string> = {
   sandbox_fallback_pool_disabled: "fallback.poolDisabled",
   sandbox_fallback_bundle_unavailable: "fallback.bundleUnavailable",
   sandbox_fallback_catalog_unreadable: "fallback.catalogUnreadable",
+  sandbox_fallback_provider_unavailable: "fallback.providerUnavailable",
 }
 
 export const NOTICE_KEYS: Record<ResolutionNotice["code"], string> = {
@@ -81,6 +85,14 @@ export const HOST_FALLBACK_KEYS: Record<string, string> = {
   sandbox_fallback_container_start_failed: "hostFallback.containerStartFailed",
   sandbox_fallback_store_unavailable: "hostFallback.storeUnavailable",
   sandbox_fallback_volume_unavailable: "hostFallback.volumeUnavailable",
+  // Remote providers (ADR-0221).
+  sandbox_fallback_provider_unreachable: "hostFallback.providerUnreachable",
+  sandbox_fallback_provider_capacity: "hostFallback.providerCapacity",
+  sandbox_fallback_provider_rejected: "hostFallback.providerRejected",
+  sandbox_fallback_workspace_clone_failed: "hostFallback.workspaceCloneFailed",
+  sandbox_fallback_service_unavailable: "hostFallback.serviceUnavailable",
+  sandbox_fallback_persistent_runtime_failed: "hostFallback.persistentRuntimeFailed",
+  sandbox_fallback_template_build_timeout: "hostFallback.templateBuildTimeout",
 }
 
 /** The message key for one outcome, or `undefined` for `off` and `placed`. */

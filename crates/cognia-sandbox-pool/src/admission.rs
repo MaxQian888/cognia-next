@@ -107,6 +107,17 @@ pub trait SandboxAdmission: Send + Sync + 'static {
     /// Digests of every bundle this deployment still offers. Staged bundle
     /// volumes for anything else are garbage.
     fn offered_bundle_digests(&self) -> Vec<String>;
+
+    /// The hostnames an `allowlist` egress tier permits for an admitted spec:
+    /// the domains of its baseline presets plus its approved domains, sorted
+    /// and deduplicated. A remote provider enforces exactly this list
+    /// (ADR-0221). The default knows no presets, only the approved domains.
+    fn egress_allowlist(&self, spec: &EnvironmentSpec) -> Vec<String> {
+        let mut domains = spec.egress.approved_domains.clone();
+        domains.sort();
+        domains.dedup();
+        domains
+    }
 }
 
 /// Admission against the operator baseline and the tenant store.
@@ -275,6 +286,20 @@ fn store_fault(error: impl std::fmt::Display) -> SandboxSpawnError {
 }
 
 impl SandboxAdmission for EnvironmentSandboxAdmission {
+    fn egress_allowlist(&self, spec: &EnvironmentSpec) -> Vec<String> {
+        let mut domains: Vec<String> = self
+            .baseline
+            .egress_presets
+            .iter()
+            .filter(|preset| spec.egress.preset_ids.contains(&preset.id))
+            .flat_map(|preset| preset.domains.iter().cloned())
+            .chain(spec.egress.approved_domains.iter().cloned())
+            .collect();
+        domains.sort();
+        domains.dedup();
+        domains
+    }
+
     fn stored_spec(&self, digest: &str) -> Option<Value> {
         let admitted = self.store.lock().get_admitted_spec(digest).ok()??;
         serde_json::to_value(admitted.spec).ok()

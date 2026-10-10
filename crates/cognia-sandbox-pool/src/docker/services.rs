@@ -370,7 +370,7 @@ impl DockerSandboxBackend {
             .clone()
             .try_acquire_owned()
             .map_err(|_| fault("Sandbox bridge limit reached"))?;
-        let mut running = tokio::time::timeout(
+        let running = tokio::time::timeout(
             Duration::from_secs(10),
             self.api.exec_runtime(RunnerExecSpec {
                 container_id: scope.container_id.clone(),
@@ -396,7 +396,7 @@ impl DockerSandboxBackend {
         .map_err(fault)?;
         let scopes = Arc::new(Mutex::new(vec![scope.clone()]));
         let bridge_id = uuid::Uuid::new_v4().to_string();
-        let (stop, mut stopped) = tokio::sync::watch::channel(false);
+        let (stop, stopped) = tokio::sync::watch::channel(false);
         self.service_bridges.lock().insert(
             bridge_id.clone(),
             ServiceLease {
@@ -412,73 +412,27 @@ impl DockerSandboxBackend {
         let backend = self.own.upgrade().expect("active backend");
         let id = bridge_id.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let renews_host_deadline = gateway_nonce.is_some() || fixed_port;
+        let guard = Arc::new(ServiceBridgeGuard {
+            backend: backend.clone(),
+            id: id.clone(),
+            scopes,
+            authority,
+            renews_host_deadline,
+        });
         tokio::spawn(async move {
-            let _permit = permit;
-            let mut ready = Some(ready_tx);
-            let mut incoming = Vec::new();
-            let mut last_connection_id = 0;
-            let mut connections: HashMap<u32, Connection> = HashMap::new();
-            let (output, mut frames) = tokio::sync::mpsc::channel::<Frame>(64);
-            let mut tick = tokio::time::interval(Duration::from_secs(2));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let work = async {
-                loop {
-                    tokio::select! {
-                        _=stopped.changed() => break,
-                        _=tick.tick() => {
-                            let live=backend.service_bridges.lock().get(&id).is_some_and(|lease| lease.deadline>tokio::time::Instant::now());
-                            if !live || !authority() || !backend.service_scopes_admitted(&scopes).await || !authority() { break; }
-                            if gateway_nonce.is_some() || fixed_port {
-                                if let Some(lease)=backend.service_bridges.lock().get_mut(&id) { lease.deadline=tokio::time::Instant::now()+Duration::from_secs(60); }
-                            }
-                            send(&running.stdin,Frame {kind:wire::RENEW,id:0,bytes:vec![]}).await?;
-                        },
-                        Some(frame)=frames.recv() => {
-                            if frame.kind==wire::CLOSE { connections.remove(&frame.id); }
-                            send(&running.stdin,frame).await?;
-                        },
-                        event=running.events.recv() => match event {
-                            Some(RunnerEvent::Stdout(bytes)) => {
-                                // Docker frame chunks are not protocol frames. Consume incrementally
-                                // so even an oversized daemon chunk cannot grow the decoder unbounded.
-                                for chunk in bytes.chunks(wire::MAX_DATA) {
-                                    incoming.extend_from_slice(chunk);
-                                    while let Some(frame)=wire::decode(&mut incoming).map_err(|_| ())? {
-                                        match frame.kind {
-                                            wire::READY => {
-                                                let Some(sender)=ready.take() else { return Err(()); };
-                                                let port=u16::from_be_bytes(frame.bytes.as_slice().try_into().map_err(|_| ())?);
-                                                if port==0 || (fixed_port && port!=service.port) { return Err(()); }
-                                                sender.send(port).map_err(|_| ())?;
-                                            },
-                                            wire::OPEN if ready.is_none() => {
-                                                if connections.len()>=wire::MAX_CONNECTIONS || frame.id <= last_connection_id || !authority() || !backend.service_scopes_admitted(&scopes).await || !authority() { return Err(()); }
-                                                last_connection_id = frame.id;
-                                                connections.insert(frame.id,connection(frame.id,service.port,output.clone()));
-                                            },
-                                            wire::DATA | wire::HALF_CLOSE => {
-                                                if let Some(conn)=connections.get(&frame.id) {
-                                                    if !matches!(tokio::time::timeout(Duration::from_secs(2),conn.input.send(Frame {kind:frame.kind,id:frame.id,bytes:frame.bytes})).await,Ok(Ok(()))) {
-                                                        connections.remove(&frame.id);
-                                                        send(&running.stdin,Frame {kind:wire::CLOSE,id:frame.id,bytes:vec![]}).await?;
-                                                    }
-                                                }
-                                            },
-                                            wire::CLOSE => { connections.remove(&frame.id); },
-                                            _ => return Err(()),
-                                        }
-                                    }
-                                }
-                            },
-                            Some(RunnerEvent::Stderr(_)) => {},
-                            _ => break,
-                        }
-                    }
-                }
-                Ok::<_, ()>(())
-            };
-            let _ = work.await;
-            connections.clear();
+            pump_bridge(
+                running,
+                BridgeTarget {
+                    port: service.port,
+                    listen_port: fixed_port.then_some(service.port),
+                },
+                stopped,
+                ready_tx,
+                guard,
+                permit,
+            )
+            .await;
             backend.service_bridges.lock().remove(&id);
             // Dropping stdin revokes the helper; its own 60s deadline also
             // covers daemon implementations that retain the exec pipe.
@@ -493,6 +447,144 @@ impl DockerSandboxBackend {
             }
         }
     }
+}
+
+/// What keeps one bridge open. Asked every tick, and again for every
+/// connection the sandbox opens, so a revoked lease or admission closes a
+/// bridge without waiting for its 60 s helper deadline.
+pub(super) trait BridgeGuard: Send + Sync + 'static {
+    /// Every 2 s: may the bridge stay open? May extend Host-side deadlines.
+    fn tick(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>>;
+    /// On every `OPEN` the sandbox sends.
+    fn admit(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>>;
+}
+
+/// The service a bridge reaches on the Host, and the in-sandbox port its
+/// listener must report (`None`: whatever the helper chose).
+#[derive(Clone, Copy)]
+pub(super) struct BridgeTarget {
+    pub port: u16,
+    pub listen_port: Option<u16>,
+}
+
+/// A tool-host or gateway bridge: alive while its lease, its authority and
+/// the admission of at least one attached agent scope all hold.
+struct ServiceBridgeGuard {
+    backend: Arc<DockerSandboxBackend>,
+    id: String,
+    scopes: Arc<Mutex<Vec<AgentServiceScope>>>,
+    authority: Arc<dyn Fn() -> bool + Send + Sync>,
+    renews_host_deadline: bool,
+}
+
+impl BridgeGuard for ServiceBridgeGuard {
+    fn tick(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+        Box::pin(async move {
+            let live = self
+                .backend
+                .service_bridges
+                .lock()
+                .get(&self.id)
+                .is_some_and(|lease| lease.deadline > tokio::time::Instant::now());
+            if !live
+                || !(self.authority)()
+                || !self.backend.service_scopes_admitted(&self.scopes).await
+                || !(self.authority)()
+            {
+                return false;
+            }
+            if self.renews_host_deadline {
+                if let Some(lease) = self.backend.service_bridges.lock().get_mut(&self.id) {
+                    lease.deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+                }
+            }
+            true
+        })
+    }
+
+    fn admit(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+        Box::pin(async move {
+            (self.authority)()
+                && self.backend.service_scopes_admitted(&self.scopes).await
+                && (self.authority)()
+        })
+    }
+}
+
+/// Run one `bridge-service` helper's frame protocol until the guard, the
+/// helper or `stopped` ends it. Reports the in-sandbox port on `ready` once
+/// the helper's `READY` arrives; every connection it opens dials `target` on
+/// the Host's loopback, so the sandbox never chooses a destination.
+pub(super) async fn pump_bridge(
+    mut running: RunningRunner,
+    target: BridgeTarget,
+    mut stopped: tokio::sync::watch::Receiver<bool>,
+    ready_tx: tokio::sync::oneshot::Sender<u16>,
+    guard: Arc<dyn BridgeGuard>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) {
+    let _permit = permit;
+    let mut ready = Some(ready_tx);
+    let mut incoming = Vec::new();
+    let mut last_connection_id = 0;
+    let mut connections: HashMap<u32, Connection> = HashMap::new();
+    let (output, mut frames) = tokio::sync::mpsc::channel::<Frame>(64);
+    let mut tick = tokio::time::interval(Duration::from_secs(2));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let work = async {
+        loop {
+            tokio::select! {
+                _=stopped.changed() => break,
+                _=tick.tick() => {
+                    if !guard.tick().await { break; }
+                    send(&running.stdin,Frame {kind:wire::RENEW,id:0,bytes:vec![]}).await?;
+                },
+                Some(frame)=frames.recv() => {
+                    if frame.kind==wire::CLOSE { connections.remove(&frame.id); }
+                    send(&running.stdin,frame).await?;
+                },
+                event=running.events.recv() => match event {
+                    Some(RunnerEvent::Stdout(bytes)) => {
+                        // Docker frame chunks are not protocol frames. Consume incrementally
+                        // so even an oversized daemon chunk cannot grow the decoder unbounded.
+                        for chunk in bytes.chunks(wire::MAX_DATA) {
+                            incoming.extend_from_slice(chunk);
+                            while let Some(frame)=wire::decode(&mut incoming).map_err(|_| ())? {
+                                match frame.kind {
+                                    wire::READY => {
+                                        let Some(sender)=ready.take() else { return Err(()); };
+                                        let port=u16::from_be_bytes(frame.bytes.as_slice().try_into().map_err(|_| ())?);
+                                        if port==0 || target.listen_port.is_some_and(|expected| port!=expected) { return Err(()); }
+                                        sender.send(port).map_err(|_| ())?;
+                                    },
+                                    wire::OPEN if ready.is_none() => {
+                                        if connections.len()>=wire::MAX_CONNECTIONS || frame.id <= last_connection_id || !guard.admit().await { return Err(()); }
+                                        last_connection_id = frame.id;
+                                        connections.insert(frame.id,connection(frame.id,target.port,output.clone()));
+                                    },
+                                    wire::DATA | wire::HALF_CLOSE => {
+                                        if let Some(conn)=connections.get(&frame.id) {
+                                            if !matches!(tokio::time::timeout(Duration::from_secs(2),conn.input.send(Frame {kind:frame.kind,id:frame.id,bytes:frame.bytes})).await,Ok(Ok(()))) {
+                                                connections.remove(&frame.id);
+                                                send(&running.stdin,Frame {kind:wire::CLOSE,id:frame.id,bytes:vec![]}).await?;
+                                            }
+                                        }
+                                    },
+                                    wire::CLOSE => { connections.remove(&frame.id); },
+                                    _ => return Err(()),
+                                }
+                            }
+                        }
+                    },
+                    Some(RunnerEvent::Stderr(_)) => {},
+                    _ => break,
+                }
+            }
+        }
+        Ok::<_, ()>(())
+    };
+    let _ = work.await;
+    connections.clear();
 }
 
 async fn send(

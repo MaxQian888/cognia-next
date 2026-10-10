@@ -26,6 +26,17 @@ describe("TauriTransport", () => {
       expect(mockedInvoke).toHaveBeenCalledWith("ping", undefined)
     })
 
+    it("sends a runtime-environment command through the local dispatcher", async () => {
+      mockedInvoke.mockResolvedValueOnce({ driver: "e2b" })
+      await expect(transport.call("environment_driver_status", {})).resolves.toEqual({
+        driver: "e2b",
+      })
+      expect(mockedInvoke).toHaveBeenCalledWith("environment_local_call", {
+        name: "environment_driver_status",
+        args: {},
+      })
+    })
+
     it("propagates invoke rejection", async () => {
       mockedInvoke.mockRejectedValueOnce(new Error("rust said no"))
       await expect(transport.call("boom")).rejects.toThrow("rust said no")

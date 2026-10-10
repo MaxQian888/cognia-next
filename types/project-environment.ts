@@ -221,8 +221,22 @@ export interface ProjectRuntimeSelection {
    * containers keep the user's own credentials (ADR-0182 desktop exception).
    */
   localContainer?: boolean
+  /** Which of the Host's sandbox drivers runs this project (ADR-0221). Absent: `auto`. */
+  target?: SandboxTarget
   updatedAt: number
 }
+
+/**
+ * Where a project's sandboxes run (ADR-0221 D9).
+ *
+ * - `auto`: the Host's local driver when it has one that attests the tier the
+ *   spec needs, else its default remote provider.
+ * - `local`: the Host's local driver only.
+ * - `provider`: exactly this remote provider; refused when the Host has none
+ *   of that id rather than run somewhere else.
+ */
+export type SandboxTarget =
+  { kind: "auto" } | { kind: "local" } | { kind: "provider"; providerId: string }
 
 /** Immutable snapshot selected by a durable AgentTeam run. */
 export interface ProjectEnvironmentVersion {

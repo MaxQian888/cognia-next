@@ -30,6 +30,7 @@
   "goals": "持久化的聊天目标。用 /goal 设定目标后，智能体会自动续跑，直到判定模型确认达成，或触发预算 / 超时退出。",
   "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
   "imageCatalog": "项目可用于运行智能体的容器镜像",
+  "remoteSandboxes": "项目智能体可运行的云端沙箱（E2B、Kubernetes）",
   "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
   "lsp": "配置由智能体运行时与编辑器共享的 LSP 语言服务器",
   "mcp": "Model Context Protocol 服务器（stdio / SSE / HTTP）。",

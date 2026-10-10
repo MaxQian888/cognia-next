@@ -355,6 +355,8 @@
     "refused": "Environment refused",
     "sandboxed": "Sandbox · {tier}",
     "sandboxedUntiered": "Sandbox",
+    "sandboxedOn": "Sandbox on {provider} · {tier}",
+    "sandboxedOnUntiered": "Sandbox on {provider}",
     "tooltip": {
       "bundle": "Agent bundle: {tag} ({libc})",
       "credentials": "Credentials: {mode} — host provider keys are stripped before the container starts",
@@ -364,7 +366,15 @@
       "notReported": "not reported",
       "tier": "Isolation: {tier}",
       "user": "Runs as {user}",
-      "userRemapped": "Runs as {user}, remapped onto the workspace owner"
+      "userRemapped": "Runs as {user}, remapped onto the workspace owner",
+      "provider": "Remote provider: {provider}",
+      "workspace": "Cloned {remote} at {base} onto {branch}",
+      "workspaceUnreported": "Cloned the repository onto {branch}",
+      "pushed": "Pushed {commit} to {branch}",
+      "nothingToPublish": "No changes to push to {branch}",
+      "pushRefused": "The remote refused the push to {branch}: {message}",
+      "publishFailed": "The work was not pushed ({code}): {message}",
+      "publishPending": "The work is pushed when the session ends"
     },
     "unknown": "Placement not recognized"
   },

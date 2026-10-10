@@ -30,8 +30,15 @@
  * a field a Host did not send is `undefined` rather than a guess.
  */
 
-import type { EgressTier, IsolationTier } from "@/types/sandbox/environment-spec"
-import { SANDBOX_PLACEMENT_CHANNEL } from "@/types/sandbox/environment-spec"
+import type {
+  EgressTier,
+  IsolationTier,
+  WorkspacePublishReport,
+} from "@/types/sandbox/environment-spec"
+import {
+  SANDBOX_PLACEMENT_CHANNEL,
+  WORKSPACE_PUBLISH_CHANNEL,
+} from "@/types/sandbox/environment-spec"
 
 const ISOLATION_TIERS: readonly IsolationTier[] = ["container", "gvisor", "vm"]
 const EGRESS_TIERS: readonly EgressTier[] = ["off", "allowlist", "on"]
@@ -77,6 +84,15 @@ export interface SandboxPlacementReport {
    * Per-sandbox gateway tickets for ordinary spawns are ADR-0185.
    */
   credentialsMode?: string
+  /** The remote provider that ran it (ADR-0221); absent for the local driver. */
+  provider?: string
+  /** A remote workspace: the repository it cloned, from where, onto which branch. */
+  workspace?: { remoteUrl?: string; baseRef?: string; branch?: string }
+  /**
+   * What the Host did with a remote workspace when the session ended, from
+   * `external-agent://workspace-publish`. Absent until it reports.
+   */
+  publish?: WorkspacePublishReport
 }
 
 const text = (value: unknown): string | undefined =>
@@ -151,7 +167,46 @@ export function readPlacementEvent(payload: unknown): SandboxPlacementReport | n
   set("egressEnforced", typeof egress.enforced === "boolean" ? egress.enforced : undefined)
 
   set("credentialsMode", text(object(placement.credentials).mode))
+
+  set("provider", text(placement.provider))
+  const workspace = object(placement.workspace)
+  const remoteWorkspace = {
+    ...(text(workspace.remoteUrl) ? { remoteUrl: text(workspace.remoteUrl) } : {}),
+    ...(text(workspace.baseRef) ? { baseRef: text(workspace.baseRef) } : {}),
+    ...(text(workspace.branch) ? { branch: text(workspace.branch) } : {}),
+  }
+  set("workspace", Object.keys(remoteWorkspace).length > 0 ? remoteWorkspace : undefined)
   return report
+}
+
+/**
+ * Read a workspace-publish event (ADR-0221 D6). `null` for one that names no
+ * agent; every other field is kept only when it has the expected type.
+ */
+export function readWorkspacePublishEvent(
+  payload: unknown
+): { agentId: string; publish: WorkspacePublishReport } | null {
+  const event = object(payload)
+  const agentId = text(event.agentId)
+  if (!agentId) return null
+  const raw = object(event.publish)
+  const publish: WorkspacePublishReport = {}
+  if (text(raw.branch)) publish.branch = text(raw.branch)
+  if (typeof raw.pushed === "boolean") publish.pushed = raw.pushed
+  if (text(raw.commit)) publish.commit = text(raw.commit)
+  if (text(raw.code)) publish.code = text(raw.code)
+  if (text(raw.message)) publish.message = text(raw.message)
+  return { agentId, publish }
+}
+
+/**
+ * Attach a publish to the agent's report. A publish for an agent with no
+ * report yet (this client subscribed after the spawn) still records one, so
+ * the outcome of the session is not lost.
+ */
+export function recordWorkspacePublish(agentId: string, publish: WorkspacePublishReport): void {
+  const current = reports.get(agentId) ?? { agentId, kind: "sandbox" as const }
+  recordPlacementReport({ ...current, publish })
 }
 
 /**
@@ -200,8 +255,22 @@ export function __resetPlacementReportsForTests(): void {
 export async function subscribeSandboxPlacements(
   listen: (channel: string, handler: (payload: unknown) => void) => Promise<() => void>
 ): Promise<() => void> {
-  return listen(SANDBOX_PLACEMENT_CHANNEL, (payload) => {
+  const placements = await listen(SANDBOX_PLACEMENT_CHANNEL, (payload) => {
     const report = readPlacementEvent(payload)
     if (report) recordPlacementReport(report)
   })
+  let publishes: () => void
+  try {
+    publishes = await listen(WORKSPACE_PUBLISH_CHANNEL, (payload) => {
+      const event = readWorkspacePublishEvent(payload)
+      if (event) recordWorkspacePublish(event.agentId, event.publish)
+    })
+  } catch (error) {
+    placements()
+    throw error
+  }
+  return () => {
+    placements()
+    publishes()
+  }
 }

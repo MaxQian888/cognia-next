@@ -217,19 +217,25 @@ describe("SettingsShell host-reachability backstop", () => {
     expect(screen.getByText("hostUnavailableSectionBody")).toBeInTheDocument()
   })
 
-  // ADR-0182: the image catalog is administered on the server-backed host
-  // that runs the sandbox pool. A desktop runs none, and pairing one is the
-  // way in, so this is the capability explanation, not the desktop-only one.
-  it("keeps the image catalog closed on a desktop, which runs no sandbox pool", () => {
+  // ADR-0221: a desktop runs the sandbox pool for its remote providers, so
+  // the image catalog and the providers page both open there.
+  it("opens the image catalog and remote sandboxes on a desktop", () => {
     setDesktop(true)
-    mockSection = "image-catalog"
+    for (const section of ["image-catalog", "remote-sandboxes"]) {
+      mockSection = section
+      const { unmount } = render(<SettingsShell />)
+      expect(screen.getByTestId("section-body")).toBeInTheDocument()
+      unmount()
+    }
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it("keeps remote sandboxes on the desktop, which owns them", () => {
+    setDesktop(false)
+    mockSection = "remote-sandboxes"
     render(<SettingsShell />)
     expect(screen.queryByTestId("section-body")).not.toBeInTheDocument()
-    expect(screen.getByText("hostUnavailableSectionTitle")).toBeInTheDocument()
-    // Not "open the desktop app": the desktop cannot open it either.
-    expect(screen.getByText("serverOnlySectionBody")).toBeInTheDocument()
-    expect(screen.queryByText("hostUnavailableSectionBody")).not.toBeInTheDocument()
-    expect(replace).not.toHaveBeenCalled()
+    expect(screen.getByText("desktopOnlySectionTitle")).toBeInTheDocument()
   })
 
   it("keeps the general capability copy for a section a desktop could open", () => {

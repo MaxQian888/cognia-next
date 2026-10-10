@@ -22,7 +22,8 @@
     "fallback": {
       "bundleUnavailable": "没有可用的 Agent 运行时包，本次运行改用标准执行路径。",
       "catalogUnreadable": "无法读取镜像目录，本次运行改用标准执行路径。",
-      "poolDisabled": "该部署未启用运行环境，本次运行改用标准执行路径。"
+      "poolDisabled": "该部署未启用运行环境，本次运行改用标准执行路径。",
+      "providerUnavailable": "此主机目前没有沙箱提供方能运行该项目，因此本次运行使用标准执行路径。"
     },
     "hostFallback": {
       "bundleStageFailed": "主机无法将 Agent 运行时包注入容器，本次运行已在沙箱外继续。",
@@ -33,7 +34,14 @@
       "poolDisabled": "主机已关闭沙箱池，本次运行已在沙箱外继续。",
       "storeUnavailable": "主机无法读取沙箱记录，本次运行已在沙箱外继续。",
       "unknown": "主机无法为本次运行创建沙箱（{code}），已在沙箱外继续。",
-      "volumeUnavailable": "沙箱数据卷不可用，本次运行已在沙箱外继续。"
+      "volumeUnavailable": "沙箱数据卷不可用，本次运行已在沙箱外继续。",
+      "providerUnreachable": "无法连接沙箱提供方，因此本次运行在沙箱外继续。",
+      "providerCapacity": "沙箱提供方已达到并发沙箱上限，因此本次运行在沙箱外继续。",
+      "providerRejected": "沙箱提供方拒绝启动沙箱，因此本次运行在沙箱外继续。",
+      "workspaceCloneFailed": "远程沙箱无法克隆仓库，因此本次运行在沙箱外继续。",
+      "serviceUnavailable": "沙箱无法访问所需的主机服务，因此本次运行在沙箱外继续。",
+      "persistentRuntimeFailed": "无法恢复持久沙箱，因此本次运行在沙箱外继续。",
+      "templateBuildTimeout": "准备远程沙箱镜像耗时过长，因此本次运行在沙箱外继续。"
     },
     "notice": {
       "approvalPending": "该仓库声明了运行环境，但尚无人批准，因此使用部署默认镜像。",
@@ -60,7 +68,10 @@
       "runtimeSelectionInvalid": "该项目的运行环境设置无效。",
       "sandboxPoolDisabled": "该部署未启用运行环境，而该项目要求使用沙箱。",
       "sizeClassNotOffered": "该镜像不提供所选规格。",
-      "sizeClassUnknown": "该部署未定义所选规格。"
+      "sizeClassUnknown": "该部署未定义所选规格。",
+      "providerUnknown": "该项目指定在沙箱提供方“{providerId}”上运行，但此主机没有这个提供方。请选择其他运行位置。",
+      "providerUnavailable": "此主机目前没有沙箱提供方能以 {tier} 隔离级别运行该项目，而该项目要求必须在沙箱中运行。",
+      "workspaceRemoteRequired": "远程沙箱会从仓库的远端克隆代码，但当前检出没有可通过 HTTPS 克隆的远端（{reason, select, no_checkout {没有检出} no_remote {没有远端} remote_not_https {远端既不是 HTTPS 也不是 SSH} no_base_branch {远端上没有可作为起点的分支} other {{reason}}}）。"
     }
   },
   "plainWarning": "请勿将密钥写入明文变量；下方只保存系统钥匙串引用。",
@@ -238,6 +249,7 @@
     "optIn": "让该项目的外部 Agent 在运行环境中运行",
     "optInHint": "关闭时：外部 Agent 按原有的标准执行路径运行，与之前完全一致。",
     "poolOff": "该部署未启用运行环境，运行将使用标准执行路径。",
+    "poolOffDesktop": "本机尚未配置沙箱，所有运行都走标准执行路径。可在“设置 → 远程沙箱”中添加提供方。",
     "poolOffKept": "该项目的选择会被保留，待运维人员启用后生效。",
     "preview": {
       "actualNote": "实际获得的隔离级别和用户可能比请求的更严格，会在每次运行中单独显示。",
@@ -300,7 +312,20 @@
       "open": "打开",
       "close": "关闭连接"
     },
-    "savedSeparately": "单独保存"
+    "savedSeparately": "单独保存",
+    "target": {
+      "label": "运行位置",
+      "auto": "自动",
+      "local": "本主机自己的沙箱",
+      "provider": "{label}",
+      "providerUnreachable": "{label}（无法连接）",
+      "missing": "{id}（本主机没有）",
+      "hintAuto": "本主机自己的沙箱能提供项目所需的隔离档时使用它，否则使用默认远程提供方。",
+      "hintLocal": "始终使用本主机自己的沙箱。没有本地沙箱的主机会拒绝运行。",
+      "hintRemote": "远程沙箱从仓库的远端克隆代码，并把工作推送到远端的 cognia/ 分支。未提交和未推送的本地更改不会带过去。",
+      "providerStatus": "{label}：运行中 {instances} 个，会话 {sessions} 个",
+      "providerStatusUnreachable": "{label}：无法连接（{code}）"
+    }
   },
   "save": "保存环境",
   "saved": "环境已保存。",

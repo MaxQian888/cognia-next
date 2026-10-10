@@ -16862,6 +16862,8 @@
       "pendingTooltip": "本次运行请求了运行环境，主机尚未报告实际启动位置。",
       "refused": "运行环境被拒绝",
       "sandboxed": "沙箱 · {tier}",
+      "sandboxedOn": "沙箱位于 {provider} · {tier}",
+      "sandboxedOnUntiered": "沙箱位于 {provider}",
       "sandboxedUntiered": "沙箱",
       "tooltip": {
         "bundle": "Agent 运行时包：{tag}（{libc}）",
@@ -16870,9 +16872,17 @@
         "egressNotEnforced": "网络：{tier}，仅记录、未强制执行",
         "image": "镜像：{image}",
         "notReported": "未报告",
+        "nothingToPublish": "没有需要推送到 {branch} 的更改",
+        "provider": "远程提供方：{provider}",
+        "publishFailed": "工作未能推送（{code}）：{message}",
+        "publishPending": "会话结束时推送工作",
+        "pushRefused": "远端拒绝了推送到 {branch}：{message}",
+        "pushed": "已把 {commit} 推送到 {branch}",
         "tier": "隔离级别：{tier}",
         "user": "以 {user} 身份运行",
-        "userRemapped": "以 {user} 身份运行（已映射为工作区所有者）"
+        "userRemapped": "以 {user} 身份运行（已映射为工作区所有者）",
+        "workspace": "已从 {remote} 的 {base} 克隆到 {branch}",
+        "workspaceUnreported": "已把仓库克隆到 {branch}"
       },
       "unknown": "无法识别的放置结果"
     },
@@ -33940,7 +33950,8 @@
       "fallback": {
         "bundleUnavailable": "没有可用的 Agent 运行时包，本次运行改用标准执行路径。",
         "catalogUnreadable": "无法读取镜像目录，本次运行改用标准执行路径。",
-        "poolDisabled": "该部署未启用运行环境，本次运行改用标准执行路径。"
+        "poolDisabled": "该部署未启用运行环境，本次运行改用标准执行路径。",
+        "providerUnavailable": "此主机目前没有沙箱提供方能运行该项目，因此本次运行使用标准执行路径。"
       },
       "hostFallback": {
         "bundleStageFailed": "主机无法将 Agent 运行时包注入容器，本次运行已在沙箱外继续。",
@@ -33948,10 +33959,17 @@
         "containerStartFailed": "容器启动失败，本次运行已在沙箱外继续。",
         "daemonUnreachable": "无法连接容器守护进程，本次运行已在沙箱外继续。",
         "driverUnavailable": "主机上没有可用的沙箱驱动，本次运行已在沙箱外继续。",
+        "persistentRuntimeFailed": "无法恢复持久沙箱，因此本次运行在沙箱外继续。",
         "poolDisabled": "主机已关闭沙箱池，本次运行已在沙箱外继续。",
+        "providerCapacity": "沙箱提供方已达到并发沙箱上限，因此本次运行在沙箱外继续。",
+        "providerRejected": "沙箱提供方拒绝启动沙箱，因此本次运行在沙箱外继续。",
+        "providerUnreachable": "无法连接沙箱提供方，因此本次运行在沙箱外继续。",
+        "serviceUnavailable": "沙箱无法访问所需的主机服务，因此本次运行在沙箱外继续。",
         "storeUnavailable": "主机无法读取沙箱记录，本次运行已在沙箱外继续。",
+        "templateBuildTimeout": "准备远程沙箱镜像耗时过长，因此本次运行在沙箱外继续。",
         "unknown": "主机无法为本次运行创建沙箱（{code}），已在沙箱外继续。",
-        "volumeUnavailable": "沙箱数据卷不可用，本次运行已在沙箱外继续。"
+        "volumeUnavailable": "沙箱数据卷不可用，本次运行已在沙箱外继续。",
+        "workspaceCloneFailed": "远程沙箱无法克隆仓库，因此本次运行在沙箱外继续。"
       },
       "notice": {
         "approvalPending": "该仓库声明了运行环境，但尚无人批准，因此使用部署默认镜像。",
@@ -33975,10 +33993,13 @@
         "gpuNotSupported": "尚不支持 GPU 沙箱。",
         "imageDigestNotPinned": "所选镜像未固定到摘要，实际运行的内容无法确定。",
         "localContainerUnavailable": "该设备暂时无法运行本地容器。",
+        "providerUnavailable": "此主机目前没有沙箱提供方能以 {tier} 隔离级别运行该项目，而该项目要求必须在沙箱中运行。",
+        "providerUnknown": "该项目指定在沙箱提供方“{providerId}”上运行，但此主机没有这个提供方。请选择其他运行位置。",
         "runtimeSelectionInvalid": "该项目的运行环境设置无效。",
         "sandboxPoolDisabled": "该部署未启用运行环境，而该项目要求使用沙箱。",
         "sizeClassNotOffered": "该镜像不提供所选规格。",
-        "sizeClassUnknown": "该部署未定义所选规格。"
+        "sizeClassUnknown": "该部署未定义所选规格。",
+        "workspaceRemoteRequired": "远程沙箱会从仓库的远端克隆代码，但当前检出没有可通过 HTTPS 克隆的远端（{reason, select, no_checkout {没有检出} no_remote {没有远端} remote_not_https {远端既不是 HTTPS 也不是 SSH} no_base_branch {远端上没有可作为起点的分支} other {{reason}}}）。"
       }
     },
     "plainWarning": "请勿将密钥写入明文变量；下方只保存系统钥匙串引用。",
@@ -34159,6 +34180,7 @@
       "optIn": "让该项目的外部 Agent 在运行环境中运行",
       "optInHint": "关闭时：外部 Agent 按原有的标准执行路径运行，与之前完全一致。",
       "poolOff": "该部署未启用运行环境，运行将使用标准执行路径。",
+      "poolOffDesktop": "本机尚未配置沙箱，所有运行都走标准执行路径。可在“设置 → 远程沙箱”中添加提供方。",
       "poolOffKept": "该项目的选择会被保留，待运维人员启用后生效。",
       "ports": {
         "close": "关闭连接",
@@ -34189,6 +34211,19 @@
       "source": "镜像",
       "sourceAuto": "自动 — 优先使用仓库中已批准的声明，否则使用部署默认镜像",
       "sourceDefault": "{label}（部署默认）",
+      "target": {
+        "auto": "自动",
+        "hintAuto": "本主机自己的沙箱能提供项目所需的隔离档时使用它，否则使用默认远程提供方。",
+        "hintLocal": "始终使用本主机自己的沙箱。没有本地沙箱的主机会拒绝运行。",
+        "hintRemote": "远程沙箱从仓库的远端克隆代码，并把工作推送到远端的 cognia/ 分支。未提交和未推送的本地更改不会带过去。",
+        "label": "运行位置",
+        "local": "本主机自己的沙箱",
+        "missing": "{id}（本主机没有）",
+        "provider": "{label}",
+        "providerStatus": "{label}：运行中 {instances} 个，会话 {sessions} 个",
+        "providerStatusUnreachable": "{label}：无法连接（{code}）",
+        "providerUnreachable": "{label}（无法连接）"
+      },
       "tier": {
         "container": "容器",
         "gvisor": "gVisor",
@@ -46687,6 +46722,7 @@
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "remoteHosts": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。",
+      "remoteSandboxes": "项目智能体可运行的云端沙箱（E2B、Kubernetes）",
       "sandbox": "操作系统 / 微虚拟机沙箱的健康状态与工具执行策略",
       "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
@@ -48264,6 +48300,8 @@
       "loading": "正在读取镜像目录…",
       "poolOff": {
         "body": "本部署尚未启用运行环境，所有项目都走标准执行路径。运维人员可通过 COGNIA_SANDBOX_POOL_ENABLED 开启。",
+        "desktopBody": "本机尚未设置远程沙箱提供方，所有项目都走标准执行路径。请在“设置 → 远程沙箱”中添加，然后重启 Cognia。",
+        "openRemoteSandboxes": "打开远程沙箱",
         "title": "运行环境未启用"
       },
       "rejected": {
@@ -49858,6 +49896,169 @@
       },
       "title": "远程主机"
     },
+    "remoteSandboxes": {
+      "availability": {
+        "active": "远程沙箱已启用。需要运行环境的运行可以放到下面的提供方上。",
+        "bundle": "智能体包 {tag}",
+        "bundleUnpinned": "此版本未内置固定摘要的智能体包，无法把智能体放进远程沙箱。这里保存的提供方会保留，在内置智能体包的版本发布前不会有任何远程运行。",
+        "bundleUnpinnedTitle": "此版本不可用",
+        "noProviders": "尚未配置提供方，所有运行都留在本机。"
+      },
+      "description": "本机可以把项目智能体放进去运行的云端沙箱，在运行需要时按需创建：E2B，或你接入的 Kubernetes 集群。",
+      "editor": {
+        "cancel": "取消",
+        "createTitle": "添加远程沙箱提供方",
+        "credential": {
+          "e2b": "API 密钥",
+          "keep": "已保存凭据。留空即保留。",
+          "keepSource": "凭据读取自 {source}。在此输入可改为保存到本机。",
+          "kubeconfig": "Kubeconfig",
+          "kubeconfigPlaceholder": "粘贴 kubeconfig YAML",
+          "required": "必填。"
+        },
+        "description": "保存在本机。凭据存入系统的密钥存储，之后不会再显示。",
+        "e2b": {
+          "apiUrl": "API 端点",
+          "delegatedRegistries": "允许 E2B 使用你的凭据拉取的镜像仓库",
+          "delegatedRegistriesHint": "每行一个镜像仓库主机。E2B 在自己的服务器上构建模板，因此私有镜像的拉取凭据只会交给这里列出的仓库；其他私有镜像会被拒绝。",
+          "domain": "沙箱域名",
+          "templateBuildTimeout": "模板构建超时（秒）",
+          "templatePrefix": "模板前缀"
+        },
+        "editTitle": "编辑 {label}",
+        "id": "ID",
+        "idHint": "小写字母、数字和短横线，最多 32 个。项目通过它指定提供方。",
+        "idleTimeout": "空闲超时（分钟）",
+        "idleTimeoutHint": "没有会话的常驻沙箱在此时长后被销毁。",
+        "kind": "提供方",
+        "kubernetes": {
+          "connection": "连接方式",
+          "connectionInCluster": "集群内服务账号",
+          "connectionInClusterHint": "仅当 Cognia 本身作为 Pod 运行在该集群中时使用。",
+          "connectionKubeconfig": "Kubeconfig",
+          "context": "上下文",
+          "contextPlaceholder": "kubeconfig 的当前上下文",
+          "egress": "网络管控",
+          "egressCilium": "Cilium",
+          "egressHint": {
+            "cilium": "禁网运行和允许列表都会被强制。",
+            "network-policy": "禁网运行会被强制。允许列表只记录、不强制：NetworkPolicy 无法按主机名匹配。",
+            "none": "不限制出站流量：所有网络设置只记录、不强制。"
+          },
+          "egressNetworkPolicy": "NetworkPolicy",
+          "egressNone": "无",
+          "namespace": "命名空间",
+          "nodeSelector": "节点选择器",
+          "nodeSelectorPlaceholder": "key=value，每行一个",
+          "podReadyTimeout": "就绪超时（秒）",
+          "runtimeClasses": "各隔离档的 RuntimeClass",
+          "runtimeClassesHint": "只有已映射且集群中存在时，才提供 gVisor 和 VM 档。",
+          "serviceAccount": "服务账号"
+        },
+        "label": "名称",
+        "labelPlaceholder": "代替 ID 显示",
+        "limits": "限制",
+        "maxConcurrent": "同时运行的沙箱数",
+        "maxLifetime": "寿命（分钟）",
+        "maxLifetimeHint": "每个沙箱到达此时长即被销毁，无论它在做什么。",
+        "problem": {
+          "credential_required": "请输入凭据。",
+          "domain_invalid": "请输入域名，例如 e2b.app。",
+          "id_invalid": "使用 1–32 个小写字母、数字或短横线，以字母或数字开头，且不能为“local”。",
+          "id_taken": "已有其他提供方使用此 ID。",
+          "label_invalid": "名称不超过 64 个字符。",
+          "name_invalid": "请使用 DNS 名称：小写字母、数字、短横线和点。",
+          "namespace_invalid": "请使用 DNS 标签：小写字母、数字和短横线，最多 63 个。",
+          "node_selector_invalid": "“{entry}”不是 key=value 形式的标签。",
+          "out_of_range": "请输入 {min} 到 {max} 之间的整数。",
+          "registry_invalid": "“{entry}”不是镜像仓库主机。",
+          "template_prefix_invalid": "使用 1–32 个小写字母、数字、短横线或下划线，以字母或数字开头。",
+          "url_invalid": "请使用不含凭据、查询或片段的 https 地址（仅 localhost 可用 http）。"
+        },
+        "save": "保存提供方"
+      },
+      "errors": {
+        "remote_sandboxes_invalid": "设置被拒绝：{message}",
+        "remote_sandboxes_registry_invalid": "镜像仓库允许列表被拒绝：{message}",
+        "remote_sandboxes_secret_empty": "凭据不能为空。",
+        "remote_sandboxes_secret_id_invalid": "凭据 ID 被拒绝：{message}",
+        "remote_sandboxes_secret_unreferenced": "没有提供方使用的凭据被拒绝：{message}",
+        "remote_sandboxes_secret_unwritable": "无法保存凭据：{message}",
+        "remote_sandboxes_unreadable": "无法读取设置：{message}",
+        "remote_sandboxes_unwritable": "无法写入设置：{message}",
+        "remote_sandboxes_version_unsupported": "这些设置由更新版本的 Cognia 写入：{message}",
+        "unknown": "出错了：{message}"
+      },
+      "failed": "无法读取远程沙箱设置。",
+      "installError": {
+        "body": "本次启动前保存的设置被拒绝：{error}",
+        "title": "远程沙箱未能启动"
+      },
+      "loading": "正在读取远程沙箱设置…",
+      "providers": {
+        "add": "添加提供方",
+        "clearDefault": "取消默认",
+        "credential": {
+          "env": "凭据来自 {name}",
+          "file": "凭据来自 {path}",
+          "missing": "缺少凭据",
+          "none": "无需凭据",
+          "stored": "凭据已保存"
+        },
+        "default": "默认",
+        "defaultHint": "设为“自动”的运行会尽量使用本机自己的沙箱，否则使用默认提供方。",
+        "edit": "编辑",
+        "empty": "还没有提供方。",
+        "kind": {
+          "e2b": "E2B",
+          "kubernetes": "Kubernetes"
+        },
+        "limits": "最多同时 {concurrent} 个 · 寿命 {lifetime} 分钟 · 空闲 {idle} 分钟后回收",
+        "live": {
+          "notRunning": "本次运行未启用；下次启动应用时生效。",
+          "reachable": "运行中：可连接，占用 {instances} 个沙箱、{sessions} 个会话",
+          "unreachable": "运行中：无法连接（{code}）",
+          "unreadable": "无法读取运行中沙箱池的状态。"
+        },
+        "makeDefault": "设为默认",
+        "onlyDefault": "默认（唯一提供方）",
+        "remove": "移除",
+        "title": "提供方"
+      },
+      "registries": {
+        "add": "添加镜像仓库",
+        "description": "项目只能运行来自这些镜像仓库的镜像。前缀可把仓库限定到其下的镜像。",
+        "empty": "未允许任何镜像仓库，只能运行内置镜像。",
+        "insecure": "明文 HTTP",
+        "prefix": "仓库前缀",
+        "prefixPlaceholder": "acme（可选）",
+        "problem": {
+          "duplicate": "此镜像仓库和前缀重复。",
+          "prefix_invalid": "请使用小写的仓库路径。",
+          "registry_invalid": "请输入镜像仓库主机，例如 ghcr.io 或 localhost:5000。"
+        },
+        "registry": "镜像仓库",
+        "registryPlaceholder": "ghcr.io",
+        "removeRow": "移除 {registry}",
+        "save": "保存镜像仓库",
+        "saved": "镜像仓库已保存",
+        "title": "允许的镜像仓库"
+      },
+      "reload": "重新加载",
+      "removeDialog": {
+        "body": "其已保存的凭据也会一并删除。指定了该提供方的项目在改选其他提供方前会被拒绝。已在运行的沙箱不会被停止。",
+        "cancel": "取消",
+        "confirm": "移除",
+        "title": "移除 {label}？"
+      },
+      "removed": "已移除 {label}。重启 Cognia 后生效。",
+      "restart": {
+        "body": "保存的更改在应用下次启动时生效。已在运行的沙箱沿用它们启动时的设置。",
+        "title": "重启 Cognia 后生效"
+      },
+      "saved": "已保存。重启 Cognia 后生效。",
+      "title": "远程沙箱"
+    },
     "sandbox": {
       "backend": {
         "label": "后端"
@@ -50890,6 +51091,7 @@
       "providers": "提供商",
       "remoteControl": "远程控制",
       "remoteHosts": "远程主机",
+      "remoteSandboxes": "远程沙箱",
       "sandbox": "沙箱",
       "scheduledTasks": "定时任务",
       "search": "联网搜索",

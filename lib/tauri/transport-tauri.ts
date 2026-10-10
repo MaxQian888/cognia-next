@@ -4,13 +4,16 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { createDiagnostic } from "@cognia/diagnostics"
 import type { Transport, TransportCallOptions } from "./transport-types"
+import { localInvocation } from "./local-environment-commands"
 import { safeUnlisten } from "./safe-unlisten"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 
 /**
  * Production transport for desktop Tauri mode.
  *
- * `call()` is a thin pass-through to `@tauri-apps/api/core` `invoke`.
+ * `call()` is a thin pass-through to `@tauri-apps/api/core` `invoke`, except
+ * for the runtime-environment commands, which a desktop answers through one
+ * local dispatcher (see `./local-environment-commands`).
  *
  * `subscribe()` bridges Tauri's async-listen API into the synchronous
  * unsubscribe contract our `Transport` interface promises. The listen Promise
@@ -32,7 +35,8 @@ export class TauriTransport implements Transport {
     args?: Record<string, unknown>,
     _options?: TransportCallOptions
   ): Promise<T> {
-    return invoke<T>(name, args)
+    const local = localInvocation(name, args)
+    return invoke<T>(local.command, local.args)
   }
 
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {

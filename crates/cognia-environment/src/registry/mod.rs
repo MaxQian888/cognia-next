@@ -88,6 +88,9 @@ pub enum RegistryError {
     CredentialHelperUnsupported { registry: String },
     #[error("registry auth file: {message}")]
     AuthFile { message: String },
+    /// The caller's sink refused a streamed blob ([`ImageLayers::fetch_blob`]).
+    #[error("writing the blob failed: {message}")]
+    SinkFailed { message: String },
 }
 
 impl RegistryError {
@@ -106,6 +109,7 @@ impl RegistryError {
             Self::PlatformUnavailable { .. } => "registry_platform_unavailable",
             Self::CredentialHelperUnsupported { .. } => "registry_credential_helper_unsupported",
             Self::AuthFile { .. } => "registry_auth_file_invalid",
+            Self::SinkFailed { .. } => "registry_sink_failed",
         }
     }
 
@@ -258,6 +262,38 @@ pub trait RegistryTransport {
         &self,
         request: RegistryRequest,
     ) -> impl Future<Output = Result<RegistryResponse, RegistryError>> + Send;
+
+    /// One exchange whose successful body goes to `sink` instead of memory,
+    /// for blobs too large to buffer (an image layer).
+    ///
+    /// On a 2xx answer the body — at most `max_body_bytes` — is written to
+    /// `sink` as it arrives and the returned response carries an empty body.
+    /// Any other answer (a redirect, a challenge, an error) is returned
+    /// buffered exactly as [`RegistryTransport::send`] returns it, and nothing
+    /// is written. Bytes written before a failure are not retracted: the
+    /// caller discards the sink when this returns an error.
+    ///
+    /// The default buffers through `send`; the HTTP transport streams.
+    fn send_streaming<'s>(
+        &'s self,
+        request: RegistryRequest,
+        sink: &'s mut (dyn std::io::Write + Send),
+    ) -> impl Future<Output = Result<RegistryResponse, RegistryError>> + Send + 's
+    where
+        Self: Sync,
+    {
+        async move {
+            let mut response = self.send(request).await?;
+            if (200..300).contains(&response.status) {
+                sink.write_all(&response.body)
+                    .map_err(|error| RegistryError::SinkFailed {
+                        message: error.to_string(),
+                    })?;
+                response.body = Vec::new();
+            }
+            Ok(response)
+        }
+    }
 }
 
 /// Everything read about one image; cached per digest (`probe_cache`) and
@@ -341,23 +377,7 @@ impl<T: RegistryTransport + Sync> RegistryClient<T> {
         reference: &ImageReference,
         wanted: &[Platform],
     ) -> Result<ImageMetadata, RegistryError> {
-        let credential = self.credentials.credential_for(&endpoint.registry)?;
-        let base = endpoint.api_base()?;
-        let registry_on_loopback = match base.host() {
-            Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-            Some(Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(Host::Ipv6(ip)) => ip.is_loopback(),
-            None => false,
-        };
-        let mut session = Session {
-            transport: &self.transport,
-            endpoint,
-            base,
-            repository: &reference.repository,
-            credential,
-            authorization: None,
-            registry_on_loopback,
-        };
+        let mut session = self.open_session(endpoint, &reference.repository)?;
 
         let target = reference
             .digest
@@ -426,6 +446,173 @@ impl<T: RegistryTransport + Sync> RegistryClient<T> {
             media_type,
             platforms,
         })
+    }
+}
+
+impl<T: RegistryTransport + Sync> RegistryClient<T> {
+    fn open_session<'a>(
+        &'a self,
+        endpoint: &'a RegistryEndpoint,
+        repository: &'a str,
+    ) -> Result<Session<'a, T>, RegistryError> {
+        let credential = self.credentials.credential_for(&endpoint.registry)?;
+        let base = endpoint.api_base()?;
+        let registry_on_loopback = match base.host() {
+            Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+            Some(Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        Ok(Session {
+            transport: &self.transport,
+            endpoint,
+            base,
+            repository,
+            credential,
+            authorization: None,
+            registry_on_loopback,
+        })
+    }
+
+    /// Resolves `reference` to the image manifest of `platform` and returns
+    /// its layers, ready to be fetched one by one with
+    /// [`ImageLayers::fetch_blob`] — for a caller that copies an image's
+    /// filesystem somewhere a daemon cannot pull it (an E2B template build,
+    /// ADR-0221).
+    ///
+    /// A digest reference is verified against the bytes served, and so is
+    /// the platform manifest an index names. A single-platform image is
+    /// accepted only when its config declares a platform `platform` accepts.
+    pub async fn open_layers<'a>(
+        &'a self,
+        endpoint: &'a RegistryEndpoint,
+        reference: &'a ImageReference,
+        platform: &Platform,
+    ) -> Result<ImageLayers<'a, T>, RegistryError> {
+        let mut session = self.open_session(endpoint, &reference.repository)?;
+        let target = reference
+            .digest
+            .clone()
+            .or_else(|| reference.tag.clone())
+            .unwrap_or_else(|| "latest".into());
+        let top = session.get_manifest(&target).await?;
+        if let Some(expected) = &reference.digest {
+            manifest::verify_content(expected, None, &top.body)?;
+        }
+        let top_digest = manifest::sha256_digest(&top.body);
+        let unavailable = || RegistryError::PlatformUnavailable {
+            reference: format!(
+                "{}/{}@{top_digest}",
+                endpoint.registry, reference.repository
+            ),
+        };
+
+        let (manifest_digest, image) =
+            match manifest::parse_manifest(top.content_type.as_deref(), &top.body)? {
+                ParsedManifest::Index { manifests, .. } => {
+                    let descriptor = manifests
+                        .iter()
+                        .find(|descriptor| {
+                            descriptor
+                                .platform
+                                .as_ref()
+                                .is_some_and(|offered| platform.accepts(&Platform::from(offered)))
+                        })
+                        .ok_or_else(unavailable)?;
+                    let child = session.get_manifest(&descriptor.digest).await?;
+                    manifest::verify_content(
+                        &descriptor.digest,
+                        Some(descriptor.size),
+                        &child.body,
+                    )?;
+                    if !matches!(
+                        manifest::parse_manifest(child.content_type.as_deref(), &child.body)?,
+                        ParsedManifest::Image { .. }
+                    ) {
+                        return Err(RegistryError::ResponseInvalid {
+                            message: format!("{} is an index inside an index", descriptor.digest),
+                        });
+                    }
+                    (descriptor.digest.to_ascii_lowercase(), child)
+                }
+                ParsedManifest::Image { config, .. } => {
+                    let image = session.read_config(&top_digest, &config).await?;
+                    if !platform.accepts(&image.platform) {
+                        return Err(unavailable());
+                    }
+                    (top_digest.clone(), top)
+                }
+            };
+        let layers = manifest::parse_image_layers(image.content_type.as_deref(), &image.body)?;
+        Ok(ImageLayers {
+            session,
+            manifest_digest,
+            layers,
+        })
+    }
+}
+
+/// The layers of one platform's image manifest ([`RegistryClient::open_layers`]).
+/// Holds the authenticated session, so every blob after the first costs no
+/// second challenge.
+pub struct ImageLayers<'a, T> {
+    session: Session<'a, T>,
+    manifest_digest: String,
+    layers: Vec<manifest::Descriptor>,
+}
+
+impl<T: RegistryTransport + Sync> ImageLayers<'_, T> {
+    /// The digest of the platform's image manifest.
+    pub fn manifest_digest(&self) -> &str {
+        &self.manifest_digest
+    }
+
+    /// In application order, lowest layer first.
+    pub fn layers(&self) -> &[manifest::Descriptor] {
+        &self.layers
+    }
+
+    /// Streams the blob `descriptor` names into `sink` and verifies it: the
+    /// bytes must hash to the descriptor's digest and number exactly its
+    /// size. On an error the sink may hold a partial or unverified blob and
+    /// must be discarded.
+    pub async fn fetch_blob(
+        &mut self,
+        descriptor: &manifest::Descriptor,
+        sink: &mut (dyn std::io::Write + Send),
+    ) -> Result<(), RegistryError> {
+        crate::image::validate_digest(&descriptor.digest).map_err(|error| {
+            RegistryError::ResponseInvalid {
+                message: format!("blob digest: {error}"),
+            }
+        })?;
+        let size =
+            usize::try_from(descriptor.size).map_err(|_| RegistryError::ResponseInvalid {
+                message: format!("blob {} has an invalid size", descriptor.digest),
+            })?;
+        let url = self
+            .session
+            .api_url(&format!("blobs/{}", descriptor.digest))?;
+        let mut hashing = manifest::HashingWriter::new(sink);
+        self.session
+            .get_authorized_streaming(url, size, &mut hashing)
+            .await?;
+        let (actual, written) = hashing.finish();
+        if !actual.eq_ignore_ascii_case(&descriptor.digest) {
+            return Err(RegistryError::DigestMismatch {
+                expected: descriptor.digest.to_ascii_lowercase(),
+                actual,
+            });
+        }
+        if written != descriptor.size as u64 {
+            return Err(RegistryError::ResponseInvalid {
+                message: format!(
+                    "{} is {written} bytes, the descriptor says {}",
+                    descriptor.digest, descriptor.size
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -523,6 +710,44 @@ impl<T: RegistryTransport + Sync> Session<'_, T> {
                 .await?;
             match response.status {
                 200 => return Ok(response),
+                401 if !answered => {
+                    let header = response
+                        .header("www-authenticate")
+                        .unwrap_or_default()
+                        .to_string();
+                    self.answer_challenge(&header).await?;
+                    answered = true;
+                }
+                status => return Err(self.status_error(status, &response, &url)),
+            }
+        }
+    }
+
+    /// [`Session::get_authorized`] with the successful body streamed to `sink`.
+    async fn get_authorized_streaming(
+        &mut self,
+        url: Url,
+        limit: usize,
+        sink: &mut (dyn std::io::Write + Send),
+    ) -> Result<(), RegistryError> {
+        let mut answered = false;
+        loop {
+            let mut headers = Vec::new();
+            if let Some(authorization) = &self.authorization {
+                headers.push(("authorization".into(), authorization.clone()));
+            }
+            let response = self
+                .follow_inner(
+                    HttpMethod::Get,
+                    url.clone(),
+                    headers,
+                    None,
+                    limit,
+                    Some(&mut *sink),
+                )
+                .await?;
+            match response.status {
+                200 => return Ok(()),
                 401 if !answered => {
                     let header = response
                         .header("www-authenticate")
@@ -678,6 +903,21 @@ impl<T: RegistryTransport + Sync> Session<'_, T> {
         body: Option<(String, Vec<u8>)>,
         limit: usize,
     ) -> Result<RegistryResponse, RegistryError> {
+        self.follow_inner(method, url, headers, body, limit, None)
+            .await
+    }
+
+    /// [`Session::follow`], streaming the final 2xx body to `sink` when one
+    /// is given ([`RegistryTransport::send_streaming`]).
+    async fn follow_inner(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        headers: Vec<(String, String)>,
+        body: Option<(String, Vec<u8>)>,
+        limit: usize,
+        mut sink: Option<&mut (dyn std::io::Write + Send)>,
+    ) -> Result<RegistryResponse, RegistryError> {
         let mut request = RegistryRequest {
             method,
             url,
@@ -690,7 +930,10 @@ impl<T: RegistryTransport + Sync> Session<'_, T> {
             self.check_hop(&request.url)?;
             request.allow_loopback = self.registry_on_loopback
                 && authority(&request.url) == Some(self.endpoint.api_authority());
-            let response = self.transport.send(request.clone()).await?;
+            let response = match sink.as_deref_mut() {
+                Some(sink) => self.transport.send_streaming(request.clone(), sink).await?,
+                None => self.transport.send(request.clone()).await?,
+            };
             if response.body.len() > limit {
                 return Err(RegistryError::ResponseTooLarge { limit });
             }
@@ -1407,5 +1650,319 @@ mod tests {
             include_str!("mod.rs"),
         );
         assert!(violations.is_empty(), "{violations:#?}");
+    }
+
+    /// An image manifest whose layers are `layers`, in order.
+    fn layered_manifest(config: &[u8], layers: &[&[u8]]) -> Vec<u8> {
+        let layers: Vec<_> = layers
+            .iter()
+            .map(|layer| {
+                serde_json::json!({
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                    "digest": sha256_digest(layer),
+                    "size": layer.len(),
+                })
+            })
+            .collect();
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": OCI_MANIFEST,
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": sha256_digest(config),
+                "size": config.len(),
+            },
+            "layers": layers,
+        }))
+        .unwrap()
+    }
+
+    /// A private bearer registry serving a two-platform bundle whose amd64
+    /// manifest has two layers, with blobs behind a CDN redirect. `tamper`
+    /// replaces the second layer's served bytes.
+    fn bundle_registry(tamper: Option<&'static [u8]>) -> (FakeTransport, Vec<u8>, Vec<u8>) {
+        let amd_config = config_body("amd64", None);
+        let arm_config = config_body("arm64", None);
+        let layer_one: &[u8] = b"layer one bytes";
+        let layer_two: &[u8] = b"layer two, somewhat longer bytes";
+        let amd = layered_manifest(&amd_config, &[layer_one, layer_two]);
+        let arm = layered_manifest(&arm_config, &[b"arm layer"]);
+        let index = index_body(&[
+            ("arm64", None, arm.as_slice()),
+            ("amd64", None, amd.as_slice()),
+        ]);
+        let mut blobs: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        blobs.insert(sha256_digest(layer_one), layer_one.to_vec());
+        blobs.insert(
+            sha256_digest(layer_two),
+            tamper.unwrap_or(layer_two).to_vec(),
+        );
+        let manifests: BTreeMap<String, (String, Vec<u8>)> = [
+            (
+                sha256_digest(&index),
+                (OCI_INDEX.to_string(), index.clone()),
+            ),
+            (sha256_digest(&amd), (OCI_MANIFEST.to_string(), amd.clone())),
+            (sha256_digest(&arm), (OCI_MANIFEST.to_string(), arm.clone())),
+        ]
+        .into();
+        let transport = FakeTransport::new(move |request| {
+            let url = request.url.as_str();
+            if url.starts_with("https://auth.example.com/token?") {
+                assert_eq!(
+                    request.header("authorization"),
+                    Some(RegistryCredential::basic_header("bot", "s3cret").as_str())
+                );
+                return ok("application/json", br#"{"token":"pull-token"}"#);
+            }
+            if let Some(digest) = url.strip_prefix("https://cdn.example.com/") {
+                assert_eq!(request.header("authorization"), None);
+                return match blobs.get(digest) {
+                    Some(body) => ok("application/octet-stream", body),
+                    None => status(404, &[]),
+                };
+            }
+            let path = url
+                .strip_prefix("https://cr.example.com/v2/cognia/bundle/")
+                .unwrap_or_else(|| panic!("unexpected request to {url}"));
+            if request.header("authorization") != Some("Bearer pull-token") {
+                return status(
+                    401,
+                    &[(
+                        "www-authenticate",
+                        r#"Bearer realm="https://auth.example.com/token",service="cr.example.com""#,
+                    )],
+                );
+            }
+            if let Some(reference) = path.strip_prefix("manifests/") {
+                return match manifests.get(reference) {
+                    Some((content_type, body)) => ok(content_type, body),
+                    None => status(404, &[]),
+                };
+            }
+            let digest = path.strip_prefix("blobs/").unwrap();
+            status(
+                307,
+                &[("location", &format!("https://cdn.example.com/{digest}"))],
+            )
+        });
+        (transport, index, amd)
+    }
+
+    fn bundle_credentials() -> RegistryCredentials {
+        RegistryCredentials::empty().with_credential(
+            "cr.example.com",
+            RegistryCredential::Basic {
+                username: "bot".into(),
+                password: "s3cret".into(),
+            },
+        )
+    }
+
+    #[test]
+    fn layers_of_one_platform_are_resolved_and_streamed_verified() {
+        let (transport, index, amd) = bundle_registry(None);
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let endpoint = endpoint("cr.example.com");
+        let pinned = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(&index)
+        ));
+        let blobs = run(async {
+            let mut layers = client
+                .open_layers(&endpoint, &pinned, &Platform::linux("amd64"))
+                .await
+                .unwrap();
+            assert_eq!(layers.manifest_digest(), sha256_digest(&amd));
+            assert_eq!(layers.layers().len(), 2);
+            let descriptors = layers.layers().to_vec();
+            let mut blobs = Vec::new();
+            for descriptor in &descriptors {
+                let mut sink = Vec::new();
+                layers.fetch_blob(descriptor, &mut sink).await.unwrap();
+                blobs.push(sink);
+            }
+            blobs
+        });
+        assert_eq!(blobs[0], b"layer one bytes");
+        assert_eq!(blobs[1], b"layer two, somewhat longer bytes");
+
+        let requests = client.transport.requests();
+        let tokens = requests
+            .iter()
+            .filter(|request| request.url.host_str() == Some("auth.example.com"))
+            .count();
+        assert_eq!(tokens, 1, "the session's token serves every blob");
+        assert!(requests
+            .iter()
+            .any(|request| request.url.host_str() == Some("cdn.example.com")));
+    }
+
+    #[test]
+    fn a_tampered_blob_is_a_digest_mismatch() {
+        let (transport, index, _) = bundle_registry(Some(b"layer two, tampered bytes!!!!!!!"));
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let endpoint = endpoint("cr.example.com");
+        let pinned = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(&index)
+        ));
+        let error = run(async {
+            let mut layers = client
+                .open_layers(&endpoint, &pinned, &Platform::linux("amd64"))
+                .await
+                .unwrap();
+            let second = layers.layers()[1].clone();
+            layers
+                .fetch_blob(&second, &mut Vec::new())
+                .await
+                .unwrap_err()
+        });
+        assert_eq!(error.code(), "registry_digest_mismatch");
+        assert!(!error.is_transient());
+    }
+
+    #[test]
+    fn a_blob_of_the_wrong_size_is_refused_even_when_its_hash_matches() {
+        let (transport, index, _) = bundle_registry(None);
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let endpoint = endpoint("cr.example.com");
+        let pinned = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(&index)
+        ));
+        let error = run(async {
+            let mut layers = client
+                .open_layers(&endpoint, &pinned, &Platform::linux("amd64"))
+                .await
+                .unwrap();
+            let mut first = layers.layers()[0].clone();
+            first.size += 1;
+            layers
+                .fetch_blob(&first, &mut Vec::new())
+                .await
+                .unwrap_err()
+        });
+        assert_eq!(error.code(), "registry_response_invalid");
+    }
+
+    #[test]
+    fn a_platform_the_image_lacks_is_unavailable() {
+        let (transport, index, _) = bundle_registry(None);
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let endpoint = endpoint("cr.example.com");
+        let pinned = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(&index)
+        ));
+        let error = run(client.open_layers(&endpoint, &pinned, &Platform::linux("s390x")))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "registry_platform_unavailable");
+
+        let (transport, ..) = bundle_registry(None);
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let wrong = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(b"another index")
+        ));
+        let error = run(client.open_layers(&endpoint, &wrong, &Platform::linux("amd64")))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "registry_not_found");
+    }
+
+    #[test]
+    fn a_single_platform_image_is_checked_against_its_config() {
+        let config = config_body("arm64", None);
+        let manifest = layered_manifest(&config, &[b"only layer"]);
+        let digest = sha256_digest(&manifest);
+        let transport = FakeTransport::new(move |request| {
+            if request.url.path().contains("/blobs/") {
+                ok("application/octet-stream", &config)
+            } else {
+                ok(OCI_MANIFEST, &manifest)
+            }
+        });
+        let client = RegistryClient::new(transport, RegistryCredentials::empty());
+        let endpoint = endpoint("ghcr.io");
+        let pinned = reference(&format!("ghcr.io/acme/bundle@{digest}"));
+        let layers = run(client.open_layers(&endpoint, &pinned, &Platform::linux("arm64")))
+            .ok()
+            .unwrap();
+        assert_eq!(layers.manifest_digest(), digest);
+        assert_eq!(layers.layers().len(), 1);
+        let error = run(client.open_layers(&endpoint, &pinned, &Platform::linux("amd64")))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "registry_platform_unavailable");
+    }
+
+    /// A sink that refuses every write.
+    struct BrokenSink;
+
+    impl std::io::Write for BrokenSink {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("disk full"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_default_streaming_send_writes_only_successful_bodies() {
+        let transport = FakeTransport::new(|request| {
+            if request.url.path() == "/ok" {
+                ok("application/octet-stream", b"payload")
+            } else {
+                status(404, &[])
+            }
+        });
+        let request = |path: &str| RegistryRequest {
+            method: HttpMethod::Get,
+            url: Url::parse(&format!("https://cr.example.com{path}")).unwrap(),
+            headers: Vec::new(),
+            body: None,
+            max_body_bytes: 1024,
+            allow_loopback: false,
+        };
+        let mut sink = Vec::new();
+        let response = run(transport.send_streaming(request("/ok"), &mut sink)).unwrap();
+        assert_eq!(response.status, 200);
+        assert!(response.body.is_empty());
+        assert_eq!(sink, b"payload");
+
+        let mut sink = Vec::new();
+        let response = run(transport.send_streaming(request("/missing"), &mut sink)).unwrap();
+        assert_eq!(response.status, 404);
+        assert!(sink.is_empty());
+
+        let error = run(transport.send_streaming(request("/ok"), &mut BrokenSink)).unwrap_err();
+        assert_eq!(error.code(), "registry_sink_failed");
+        assert!(!error.is_transient());
+    }
+
+    /// The registry futures are awaited from `Send` contexts (the E2B
+    /// provider's provisioning task).
+    #[test]
+    fn opening_layers_and_fetching_blobs_are_send_futures() {
+        fn assert_send<T: Send>(_: &T) {}
+        let (transport, index, _) = bundle_registry(None);
+        let client = RegistryClient::new(transport, bundle_credentials());
+        let endpoint = endpoint("cr.example.com");
+        let pinned = reference(&format!(
+            "cr.example.com/cognia/bundle@{}",
+            sha256_digest(&index)
+        ));
+        let platform = Platform::linux("amd64");
+        let future = client.open_layers(&endpoint, &pinned, &platform);
+        assert_send(&future);
+        let mut layers = run(future).ok().unwrap();
+        let first = layers.layers()[0].clone();
+        let mut sink = Vec::new();
+        let fetch = layers.fetch_blob(&first, &mut sink);
+        assert_send(&fetch);
+        drop(fetch);
     }
 }

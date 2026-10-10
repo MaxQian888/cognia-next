@@ -19,9 +19,35 @@ use tauri::{AppHandle, Emitter, State};
 /// inner `RwLock` + per-process `Mutex`), so it is shared through a plain `Arc`
 /// — wrapping it in an outer `Mutex` would needlessly serialize every
 /// external-agent operation (spawn, send, kill, status) against each other.
-pub struct ExternalAgentState(pub Arc<ExternalAgentProcessManager>);
+///
+/// The second field is the sandbox router (ADR-0221), installed at most once
+/// at startup when the desktop's remote sandboxes are on. Every command and
+/// companion RPC arm drives [`ExternalAgentState::exec`], so with the router
+/// installed a spawn carrying a placement reaches its provider and every
+/// other spawn still lands on this process manager.
+pub struct ExternalAgentState(
+    pub Arc<ExternalAgentProcessManager>,
+    std::sync::OnceLock<Arc<dyn ExecBackend>>,
+);
 
 impl ExternalAgentState {
+    /// The backend every command drives: the sandbox router once installed,
+    /// else the local process backend.
+    pub fn exec(&self) -> Arc<dyn ExecBackend> {
+        match self.1.get() {
+            Some(router) => Arc::clone(router),
+            None => self.backend(),
+        }
+    }
+
+    /// Install the sandbox router in front of this process manager. Once:
+    /// agents already routed by one router cannot be handed to another.
+    pub fn install_router(&self, router: Arc<dyn ExecBackend>) -> Result<(), String> {
+        self.1
+            .set(router)
+            .map_err(|_| "the external agent sandbox router is already installed".to_string())
+    }
+
     /// The desktop's exec backend view over the managed process manager
     /// (ADR-0059 R10) — one code path with the headless RPC arms.
     ///
@@ -36,7 +62,10 @@ impl ExternalAgentState {
 
 impl Default for ExternalAgentState {
     fn default() -> Self {
-        Self(Arc::new(ExternalAgentProcessManager::new()))
+        Self(
+            Arc::new(ExternalAgentProcessManager::new()),
+            std::sync::OnceLock::new(),
+        )
     }
 }
 
@@ -74,10 +103,12 @@ impl Default for AcpTerminalState {
 /// 1. [`SpawnPolicy::validate_desktop`] — command allowlist + default-deny env
 ///    filter. Not the workspaces-root cwd confinement, which is a headless
 ///    trust boundary (a remote client picks that cwd; here the local user does).
-/// 2. [`sandbox::wrap_with_sandbox`] — rewrites the launch into
-///    `cognia-external-agent-launcher … -- <command>`. Order matters: the
-///    allowlist demands a bare binary name, and the wrap replaces `command`
-///    with the launcher's absolute path.
+/// 2. [`sandbox::harden_desktop_spawn`] — rewrites the launch into
+///    `cognia-external-agent-launcher … -- <command>`, unless the spawn
+///    carries a placement the sandbox router (ADR-0221) will run in a
+///    container; the router confines a fallback the same way. Order matters:
+///    the allowlist demands a bare binary name, and the wrap replaces
+///    `command` with the launcher's absolute path.
 ///
 /// Both fail closed. Before this existed the desktop ran external agents with
 /// no policy, no sandbox and an inherited environment, while ADR-0077/0119
@@ -91,11 +122,11 @@ pub async fn spawn_external_agent(
     let validated = SpawnPolicy::from_env(&data_root)
         .validate_desktop(config)
         .map_err(|violation| violation.to_string())?;
-    let sandboxed = sandbox::wrap_with_sandbox(validated.config, &sandbox::DesktopSandboxHost)
-        .map_err(|error| error.to_string())?;
+    let backend = state.exec();
+    let sandboxed = sandbox::harden_desktop_spawn(validated.config, backend.routes_sandboxes())?;
 
     let emitter: Arc<dyn AgentEventEmitter> = Arc::new(TauriAgentEmitter { app });
-    exec_backend::spawn_with_events(state.backend().as_ref(), emitter, sandboxed).await
+    exec_backend::spawn_with_events(backend.as_ref(), emitter, sandboxed).await
 }
 
 /// Where an isolated configuration's private state root lives on this host,
@@ -133,7 +164,7 @@ pub async fn send_to_external_agent(
     message: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    state.backend().send(&agent_id, &message).await
+    state.exec().send(&agent_id, &message).await
 }
 
 /// Kill an external agent process. The exit event is emitted by the process
@@ -143,7 +174,7 @@ pub async fn kill_external_agent(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    state.backend().kill(&agent_id).await
+    state.exec().kill(&agent_id).await
 }
 
 /// Delete retained nonsecret conversation state only after every task process stopped.
@@ -152,7 +183,7 @@ pub async fn external_agent_delete_gateway_task(
     task_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<(), String> {
-    delete_gateway_task_for_backend(&task_id, state.backend().as_ref()).await
+    delete_gateway_task_for_backend(&task_id, state.exec().as_ref()).await
 }
 
 pub async fn delete_gateway_task_for_backend(
@@ -194,7 +225,7 @@ pub async fn get_external_agent_status(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<String, String> {
-    match state.backend().status(&agent_id).await {
+    match state.exec().status(&agent_id).await {
         Some(status) => Ok(format!("{:?}", status)),
         None => Err(format!("Agent {} not found", agent_id)),
     }
@@ -205,7 +236,7 @@ pub async fn get_external_agent_status(
 pub async fn list_external_agents(
     state: State<'_, ExternalAgentState>,
 ) -> Result<Vec<String>, String> {
-    Ok(state.backend().list().await)
+    Ok(state.exec().list().await)
 }
 
 /// Check if an external agent process is running
@@ -214,7 +245,7 @@ pub async fn is_external_agent_running(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<bool, String> {
-    state.backend().is_running(&agent_id).await
+    state.exec().is_running(&agent_id).await
 }
 
 /// Get detailed info about an external agent process
@@ -223,7 +254,7 @@ pub async fn get_external_agent_info(
     agent_id: String,
     state: State<'_, ExternalAgentState>,
 ) -> Result<serde_json::Value, String> {
-    state.backend().get_info(&agent_id).await
+    state.exec().get_info(&agent_id).await
 }
 
 /// Set external agent state to Running
@@ -233,7 +264,7 @@ pub async fn set_external_agent_running(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let result = state.backend().set_running(&agent_id).await;
+    let result = state.exec().set_running(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
@@ -252,7 +283,7 @@ pub async fn set_external_agent_failed(
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let result = state.backend().set_failed(&agent_id).await;
+    let result = state.exec().set_failed(&agent_id).await;
 
     if result.is_ok() {
         let _ = app.emit(
@@ -267,7 +298,7 @@ pub async fn set_external_agent_failed(
 /// Kill all external agent processes
 #[tauri::command]
 pub async fn kill_all_external_agents(state: State<'_, ExternalAgentState>) -> Result<(), String> {
-    state.backend().kill_all().await
+    state.exec().kill_all().await
 }
 
 // ============================================================================

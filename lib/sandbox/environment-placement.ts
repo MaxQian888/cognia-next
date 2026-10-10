@@ -37,8 +37,16 @@ import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 export type SandboxPlacementOutcome =
   /** No runtime environment. Spawn exactly as before, with no `sandbox`. */
   | { kind: "off" }
-  /** Spawn with this placement. */
-  | { kind: "placed"; placement: SandboxPlacement; notices: ResolutionNotice[] }
+  /**
+   * Spawn with this placement. `target` says which of the Host's drivers it
+   * goes to and why (ADR-0221); absent where the Host has only one.
+   */
+  | {
+      kind: "placed"
+      placement: SandboxPlacement
+      notices: ResolutionNotice[]
+      target?: PlacedTarget
+    }
   /**
    * The project opted in, the deployment cannot sandbox right now, and nothing
    * makes isolation mandatory. Spawn as before and show the reason.
@@ -51,6 +59,11 @@ export type SandboxPlacementOutcome =
       detail?: Record<string, string | number | boolean>
       notices: ResolutionNotice[]
     }
+
+/** Where a placed spawn runs, for the trace and the runtime panel. */
+export type PlacedTarget =
+  | { kind: "local"; reason: "only-driver" | "requested" | "attests-tier" }
+  | { kind: "remote"; providerId: string; reason: "requested" | "default-provider" }
 
 export interface PlacementProjectInput {
   runtime: ProjectRuntimeSelection | undefined

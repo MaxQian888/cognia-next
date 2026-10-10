@@ -628,6 +628,7 @@
       "workspace-trust": "workspace-trust",
       "sandbox": "sandbox",
       "image-catalog": "image-catalog",
+      "remote-sandboxes": "image-catalog",
       "connectivity": "network",
       "network": "network",
       "desktop": "computer-use",

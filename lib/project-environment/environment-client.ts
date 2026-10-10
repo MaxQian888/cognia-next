@@ -31,6 +31,7 @@ import { parseInvokeError } from "@/lib/tauri/command-error"
 import { collectPages, type Page, type PageRequest } from "@/lib/tauri/companion-paging"
 import { transport } from "@/lib/tauri/transport-instance"
 import type { EgressTier, IsolationTier, PinnedImage } from "@/types/sandbox/environment-spec"
+import type { SandboxProviderView } from "@/types/sandbox/remote-sandboxes"
 import type {
   CatalogEntrySource,
   CatalogImageView,
@@ -306,6 +307,11 @@ export interface DriverStatus {
   reachable: boolean
   unreachableReason?: string
   bundles: OfferedBundleView[]
+  /**
+   * Every driver a spawn can be placed on (ADR-0221), the local one included
+   * as `local`. Empty or absent on a Host whose local driver is its only one.
+   */
+  providers?: SandboxProviderView[]
 }
 
 /** The refusal every command answers when the deployment never enabled the pool. */

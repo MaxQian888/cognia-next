@@ -155,6 +155,25 @@ describe("ImageCatalogSection", () => {
     expect(screen.queryByRole("button", { name: en.entries.add })).not.toBeInTheDocument()
   })
 
+  // ADR-0221: a desktop turns its pool on by adding a remote provider.
+  it("sends a desktop with the pool off to its remote sandbox settings", () => {
+    const marker = "__TAURI_INTERNALS__"
+    ;(window as unknown as Record<string, unknown>)[marker] = {}
+    try {
+      hookState = { status: "pool-off", rows: [], rejected: [], busy: false }
+      render(<ImageCatalogSection />)
+      const notice = screen.getByTestId("image-catalog-pool-off")
+      expect(notice).toHaveTextContent(en.poolOff.desktopBody)
+      expect(notice).not.toHaveTextContent(en.poolOff.body)
+      expect(screen.getByRole("link", { name: en.poolOff.openRemoteSandboxes })).toHaveAttribute(
+        "href",
+        "/settings?section=remote-sandboxes"
+      )
+    } finally {
+      delete (window as unknown as Record<string, unknown>)[marker]
+    }
+  })
+
   it("shows why the catalog could not be read", () => {
     hookState = {
       status: "failed",

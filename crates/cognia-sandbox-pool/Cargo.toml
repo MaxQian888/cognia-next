@@ -30,6 +30,15 @@ path = "src/lib.rs"
 # turn it on. With it off, a deployment that enables the pool is refused at
 # boot rather than downgraded (see `boot`).
 docker = ["cognia-external-agent/container-exec"]
+# ADR-0221 remote providers. Each is a client for one provider's API; the
+# driver, admission and the Host-side git proxy they share are always built.
+# A deployment whose providers file names a kind this binary was built without
+# is refused at boot, as the `docker` switch is.
+kubernetes = ["dep:kube", "dep:k8s-openapi"]
+# E2B also fetches the agent bundle from its registry itself (the template
+# build copies its filesystem), so it links the registry transport, and the
+# Host's proxy policy for every call it makes.
+e2b = ["dep:flate2", "cognia-environment/registry"]
 
 [dependencies]
 # `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
@@ -51,6 +60,25 @@ tar.workspace = true
 url.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "io-util", "process", "fs", "macros", "rt", "net"] }
+# The Host-side git proxy (ADR-0221): one loopback smart-HTTP endpoint per
+# remote workspace, forwarding to one upstream with the credential added here.
+axum.workspace = true
+reqwest = { workspace = true, features = ["stream", "json", "rustls-no-provider"] }
+# Not referenced in code: enables rustls' `ring` provider so the reqwest above
+# (built `rustls-no-provider`) has a process-default crypto provider in a
+# binary that never installs one, as `cognia-environment` does.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+futures-util = { workspace = true, features = ["std"] }
+bytes.workspace = true
+base64.workspace = true
+cognia-git-mirror = { path = "../cognia-git-mirror" }
+# The Host's network proxy policy, applied to every upstream client here (the
+# git proxy, the provider APIs). `cognia-environment` links it already.
+cognia-net = { path = "../cognia-net" }
+# Remote providers, each behind its own feature.
+kube = { version = "4", default-features = false, features = ["client", "ws", "runtime", "rustls-tls"], optional = true }
+k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }
+flate2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }

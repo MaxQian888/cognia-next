@@ -3,11 +3,16 @@ import {
   forgetPlacementReport,
   onSandboxPlacementReport,
   readPlacementEvent,
+  readWorkspacePublishEvent,
   recordPlacementReport,
+  recordWorkspacePublish,
   sandboxPlacementReport,
   subscribeSandboxPlacements,
 } from "./placement-report"
-import { SANDBOX_PLACEMENT_CHANNEL } from "@/types/sandbox/environment-spec"
+import {
+  SANDBOX_PLACEMENT_CHANNEL,
+  WORKSPACE_PUBLISH_CHANNEL,
+} from "@/types/sandbox/environment-spec"
 
 const IMAGE_DIGEST = `sha256:${"a".repeat(64)}`
 const BUNDLE_DIGEST = `sha256:${"b".repeat(64)}`
@@ -150,6 +155,63 @@ describe("readPlacementEvent", () => {
   })
 })
 
+describe("remote placements (ADR-0221)", () => {
+  it("reads the provider and the workspace a remote driver reports", () => {
+    expect(
+      readPlacementEvent(
+        sandboxEvent({
+          driver: "e2b",
+          provider: "cloud",
+          workspace: {
+            remoteUrl: "https://github.com/acme/app.git",
+            baseRef: "main",
+            branch: "cognia/a1",
+          },
+        })
+      )
+    ).toMatchObject({
+      driver: "e2b",
+      provider: "cloud",
+      workspace: {
+        remoteUrl: "https://github.com/acme/app.git",
+        baseRef: "main",
+        branch: "cognia/a1",
+      },
+    })
+    const local = readPlacementEvent(sandboxEvent())
+    expect(local).not.toHaveProperty("provider")
+    expect(local).not.toHaveProperty("workspace")
+  })
+
+  it("reads a publish as the Host emits it, and keeps it on the agent's report", () => {
+    // `workspace_publish_payload` in exec_backend.rs.
+    const event = readWorkspacePublishEvent({
+      agentId: "a1",
+      publish: { branch: "cognia/a1", pushed: true, commit: "f".repeat(40), extra: 1 },
+    })
+    expect(event).toEqual({
+      agentId: "a1",
+      publish: { branch: "cognia/a1", pushed: true, commit: "f".repeat(40) },
+    })
+    expect(readWorkspacePublishEvent({ publish: {} })).toBeNull()
+    expect(readWorkspacePublishEvent({ agentId: "a1", publish: { pushed: "yes" } })).toEqual({
+      agentId: "a1",
+      publish: {},
+    })
+
+    recordPlacementReport({ agentId: "a1", kind: "sandbox", provider: "cloud" })
+    recordWorkspacePublish("a1", { pushed: false, code: "nothing_to_publish" })
+    expect(sandboxPlacementReport("a1")).toEqual({
+      agentId: "a1",
+      kind: "sandbox",
+      provider: "cloud",
+      publish: { pushed: false, code: "nothing_to_publish" },
+    })
+    recordWorkspacePublish("late", { pushed: true })
+    expect(sandboxPlacementReport("late")?.publish).toEqual({ pushed: true })
+  })
+})
+
 describe("the per-agent record", () => {
   it("keeps the newest report for an agent", () => {
     recordPlacementReport({ agentId: "a1", kind: "fallback", code: "x" })
@@ -181,8 +243,8 @@ describe("subscribeSandboxPlacements", () => {
   it("records what arrives on the placement channel and ignores what cannot be read", async () => {
     let handler: ((payload: unknown) => void) | undefined
     const stop = jest.fn()
-    const listen = jest.fn(async (_channel: string, next: (payload: unknown) => void) => {
-      handler = next
+    const listen = jest.fn(async (channel: string, next: (payload: unknown) => void) => {
+      if (channel === SANDBOX_PLACEMENT_CHANNEL) handler = next
       return stop
     })
 
@@ -194,6 +256,31 @@ describe("subscribeSandboxPlacements", () => {
     expect(sandboxPlacementReport("a1")?.tier).toBe("container")
 
     unsubscribe()
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it("records publishes from the workspace-publish channel too", async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    const stops = { placement: jest.fn(), publish: jest.fn() }
+    const listen = jest.fn(async (channel: string, next: (payload: unknown) => void) => {
+      handlers.set(channel, next)
+      return channel === WORKSPACE_PUBLISH_CHANNEL ? stops.publish : stops.placement
+    })
+    const unsubscribe = await subscribeSandboxPlacements(listen)
+    handlers.get(WORKSPACE_PUBLISH_CHANNEL)?.({ agentId: "a1", publish: { pushed: true } })
+    expect(sandboxPlacementReport("a1")?.publish).toEqual({ pushed: true })
+    unsubscribe()
+    expect(stops.placement).toHaveBeenCalled()
+    expect(stops.publish).toHaveBeenCalled()
+  })
+
+  it("releases the placement listener when the publish channel cannot be opened", async () => {
+    const stop = jest.fn()
+    const listen = jest.fn(async (channel: string) => {
+      if (channel === WORKSPACE_PUBLISH_CHANNEL) throw new Error("no channel")
+      return stop
+    })
+    await expect(subscribeSandboxPlacements(listen)).rejects.toThrow("no channel")
     expect(stop).toHaveBeenCalled()
   })
 })

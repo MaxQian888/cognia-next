@@ -30,6 +30,7 @@
   "goals": "Goals",
   "hooks": "Hooks",
   "imageCatalog": "Image Catalog",
+  "remoteSandboxes": "Remote Sandboxes",
   "logs": "Logs",
   "lsp": "Language Servers",
   "mcp": "MCP",

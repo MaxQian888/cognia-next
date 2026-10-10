@@ -290,6 +290,10 @@ const ImageCatalogSection = dynamic(
   () => import("./image-catalog/image-catalog-section").then((m) => m.ImageCatalogSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const RemoteSandboxesSection = dynamic(
+  () => import("./remote-sandboxes/remote-sandboxes-section").then((m) => m.RemoteSandboxesSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const SecuritySection = dynamic(
   () => import("./security/security-section").then((m) => m.SecuritySection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -719,6 +723,8 @@ function SectionContent({
       return <SandboxSection />
     case "image-catalog":
       return <ImageCatalogSection />
+    case "remote-sandboxes":
+      return <RemoteSandboxesSection />
     case "security":
       return <SecuritySection />
     case "connectivity":

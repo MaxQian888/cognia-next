@@ -31,4 +31,20 @@ pub trait SandboxDriverStatus: Send + Sync {
     /// infrastructure being unreachable, not an answer about isolation, so
     /// callers report it as such rather than showing an empty tier list.
     async fn available_tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError>;
+
+    /// Remote instances this process tracks and the agent sessions in them
+    /// (ADR-0221). `None` for a driver that provisions nothing remotely.
+    fn remote_usage(&self) -> Option<RemoteUsage> {
+        None
+    }
+}
+
+/// What a remote provider is running for this Host right now.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteUsage {
+    pub instances: usize,
+    pub sessions: usize,
 }

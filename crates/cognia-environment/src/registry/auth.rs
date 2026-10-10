@@ -131,6 +131,16 @@ impl RegistryCredentials {
         })
     }
 
+    /// These credentials plus `credential` for `registry`, replacing any
+    /// entry for that host — for a caller handed the credential of one pull
+    /// (the driver's per-spawn `RegistryAuth`) rather than the auth file.
+    pub fn with_credential(mut self, registry: &str, credential: RegistryCredential) -> Self {
+        let host = normalize_host_key(registry);
+        self.helper_hosts.remove(&host);
+        self.by_host.insert(host, credential);
+        self
+    }
+
     pub fn load_file(path: &Path) -> Result<Self, RegistryError> {
         let unreadable = |error: std::io::Error| RegistryError::AuthFile {
             message: format!("cannot read {}: {error}", path.display()),
@@ -509,6 +519,39 @@ mod tests {
         assert_eq!(
             RegistryCredential::basic_header("Aladdin", "open sesame"),
             "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+        );
+    }
+
+    #[test]
+    fn a_single_handed_credential_answers_for_its_host_only() {
+        let helpers = RegistryCredentials::parse_docker_config(
+            br#"{ "credHelpers": { "ghcr.io": "gh-helper" } }"#,
+        )
+        .unwrap();
+        assert!(helpers.credential_for("ghcr.io").is_err());
+
+        let credentials = helpers.with_credential(
+            "https://GHCR.io/v2/",
+            RegistryCredential::Basic {
+                username: "bot".into(),
+                password: "pw".into(),
+            },
+        );
+        assert_eq!(
+            credentials.credential_for("ghcr.io").unwrap(),
+            Some(RegistryCredential::Basic {
+                username: "bot".into(),
+                password: "pw".into(),
+            }),
+            "a handed credential replaces the helper entry for its host"
+        );
+        assert_eq!(credentials.credential_for("quay.io").unwrap(), None);
+
+        let hub = RegistryCredentials::empty()
+            .with_credential("docker.io", RegistryCredential::RegistryToken("t".into()));
+        assert_eq!(
+            hub.credential_for("index.docker.io").unwrap(),
+            Some(RegistryCredential::RegistryToken("t".into()))
         );
     }
 }

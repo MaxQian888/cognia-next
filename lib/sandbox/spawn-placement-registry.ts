@@ -130,7 +130,19 @@ export function acquireSpawnToolHostLeases(
 }
 
 /**
- * The spec digest the process `processId` was last spawned with.
+ * What makes two placements the same run: the sealed spec, and the provider
+ * that runs it (ADR-0221). The bare spec digest for a local placement, so an
+ * identity recorded before remote providers still matches.
+ */
+export function placementIdentity(placement: SandboxPlacement): string {
+  return placement.provider
+    ? `${placement.spec.specDigest}@${placement.provider}`
+    : placement.spec.specDigest
+}
+
+/**
+ * The placement identity ({@link placementIdentity}) the process `processId`
+ * was last spawned with.
  *
  * `null`: it was spawned on the host. `undefined`: no spawn of it has passed
  * through since the feature was first used here — which, for a process that is
@@ -196,7 +208,7 @@ export function withSpawnPlacement(args: Record<string, unknown>): Record<string
   const id = (config as { id?: unknown }).id
   if (typeof id !== "string" || id === "") return args
   const placement = current.get(id) ?? sessionPlacement(id)
-  spawned.set(id, placement?.spec.specDigest ?? null)
+  spawned.set(id, placement ? placementIdentity(placement) : null)
   if (!placement) return args
   return { ...args, config: { ...(config as Record<string, unknown>), sandbox: placement } }
 }

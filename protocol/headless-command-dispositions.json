@@ -43,6 +43,9 @@
         "companion_list_device_grants",
         "companion_list_workers",
         "companion_set_worker",
+        "environment_local_call",
+        "remote_sandboxes_get",
+        "remote_sandboxes_set",
         "scheduler_arm_task",
         "scheduler_cancel_confirmation",
         "scheduler_confirm_task",
@@ -118,7 +121,10 @@
         "companion_create_worker_enrollment": "Covered by the `fleet_worker_enrollment_create` RPC arm (companion_api/rpc/diagnostics.rs:110), which mints the same enrollment through security_store::create_worker_enrollment with the same 10-minute TTL. The Tauri variant additionally derives baseUrl and TLS fingerprint from local tunnel/LAN state; a remote caller already knows how it reached the host and supplies those itself.",
         "companion_list_workers": "Covered by `fleet_worker_list` (companion_api/rpc/diagnostics.rs:138) — the same list_worker_devices + worker_device_summaries pair, plus an owner check the Tauri arm does not perform. The renderer already treats them as one capability with two bindings (lib/fleet/execution-workers.ts:47).",
         "companion_set_worker": "Covered by `fleet_worker_set` (companion_api/rpc/diagnostics.rs:153) and by PUT /api/devices/{device_id}/capabilities (companion_api/api.rs:309); all three funnel into replace_device_capabilities with the identical agent.worker retain/push sequence.",
-        "companion_list_device_grants": "Covered by GET /api/devices (companion_api/api.rs:287), which returns the same list_devices() rows this command projects — it differs only by folding each device's capability set into a control/agent_control/terminal boolean triple and by reading the hardcoded local tenant instead of the authenticated one. Same relationship as companion_list_workers to fleet_worker_list."
+        "companion_list_device_grants": "Covered by GET /api/devices (companion_api/api.rs:287), which returns the same list_devices() rows this command projects — it differs only by folding each device's capability set into a control/agent_control/terminal boolean triple and by reading the hardcoded local tenant instead of the authenticated one. Same relationship as companion_list_workers to fleet_worker_list.",
+        "environment_local_call": "The desktop's own entry to its environment plane (ADR-0221): it dispatches to the same arms a paired client reaches through the companion `environment_*` commands, which are the Headless surface. A Headless host serves those commands directly.",
+        "remote_sandboxes_get": "Reads the desktop's remote sandbox settings (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE and reads their live state through environment_driver_status.",
+        "remote_sandboxes_set": "Writes the desktop's remote sandbox settings and credentials (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE, with credentials from its environment or files; no client edits a server's providers."
       }
     },
     {

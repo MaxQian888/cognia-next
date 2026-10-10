@@ -32,6 +32,15 @@ export function isValidEnvironmentSlug(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,62}$/.test(value)
 }
 
+/**
+ * `[a-z0-9][a-z0-9-]{0,31}`, never `local` — `is_provider_id` in
+ * `sandbox_routing_backend.rs`. `local` is the Host's own driver, which a
+ * project names with `target: { kind: "local" }`.
+ */
+export function isValidSandboxProviderId(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(value) && value !== "local"
+}
+
 export interface RuntimeSelectionProblem {
   /** Dotted path under `runtime`. */
   field: string
@@ -56,6 +65,7 @@ export function runtimeSelectionProblems(selection: unknown): RuntimeSelectionPr
     "egressPresetIds",
     "browserSidecar",
     "localContainer",
+    "target",
     "updatedAt",
   ])
   for (const key of Object.keys(selection)) {
@@ -129,6 +139,22 @@ export function runtimeSelectionProblems(selection: unknown): RuntimeSelectionPr
           seen.add(id)
         }
       })
+    }
+  }
+
+  if (selection.target !== undefined) {
+    const target = selection.target
+    if (!isRecord(target)) {
+      add("target", "must be an object")
+    } else if (target.kind === "auto" || target.kind === "local") {
+      if (Object.keys(target).length !== 1) add("target", `${target.kind} takes no other fields`)
+    } else if (target.kind === "provider") {
+      if (typeof target.providerId !== "string" || !isValidSandboxProviderId(target.providerId))
+        add("target.providerId", "must be a provider id")
+      if (Object.keys(target).some((key) => key !== "kind" && key !== "providerId"))
+        add("target", "provider takes only providerId")
+    } else {
+      add("target.kind", "must be auto, local or provider")
     }
   }
 

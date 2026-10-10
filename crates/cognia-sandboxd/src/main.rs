@@ -2,7 +2,10 @@
 //!
 //! Exit codes: `probe` exits with its report's code (0, 64-68, 126);
 //! `init-agent` exits with the agent's status, or 125 when it could not start
-//! the agent at all; everything else exits 1 on failure and 2 on bad usage.
+//! the agent at all; `exec-env` and `await-start` become their command, and
+//! exit 125 for a bad frame or a refused marker or timeout (`exec-env` also
+//! 126 / 127 for a command that cannot be executed / does not exist);
+//! everything else exits 1 on failure and 2 on bad usage.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -138,6 +141,32 @@ enum Mode {
         /// Direct loopback tunnel for a Host-authorized ephemeral container.
         #[arg(long)]
         direct: bool,
+    },
+    #[cfg(unix)]
+    /// Wait for the start marker, then become the supervisor (ADR-0221).
+    AwaitStart {
+        #[arg(long)]
+        marker: PathBuf,
+        #[arg(long, default_value = "3600", value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_secs: u64,
+        /// A root-owned shared directory to give mode 1777 first (an emptyDir
+        /// `/tmp` is 0777 without the sticky bit).
+        #[arg(long)]
+        sticky: Vec<PathBuf>,
+        #[arg(last = true, required = true)]
+        argv: Vec<OsString>,
+    },
+    #[cfg(unix)]
+    /// Create the start marker `await-start` waits for; idempotent.
+    ReleaseStart {
+        #[arg(long)]
+        marker: PathBuf,
+    },
+    #[cfg(unix)]
+    /// Read an environment frame from stdin, then become the command.
+    ExecEnv {
+        #[arg(last = true, required = true)]
+        argv: Vec<OsString>,
     },
     /// Stage bundle trees into the injection volume.
     Install {
@@ -364,6 +393,36 @@ fn main() -> ExitCode {
                 Err(error) => fail(error, EXIT_INIT_FAILED),
             }
         }
+        #[cfg(unix)]
+        Mode::AwaitStart {
+            marker,
+            timeout_secs,
+            sticky,
+            argv,
+        } => {
+            let error = cognia_sandboxd::start_gate::await_then_exec(
+                &marker,
+                std::time::Duration::from_secs(timeout_secs),
+                &sticky,
+                &argv,
+            );
+            fail(error, EXIT_INIT_FAILED)
+        }
+        #[cfg(unix)]
+        Mode::ReleaseStart { marker } => {
+            match cognia_sandboxd::start_gate::release_marker(&marker) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(error) => fail(error, 1),
+            }
+        }
+        #[cfg(unix)]
+        Mode::ExecEnv { argv } => match cognia_sandboxd::exec_env::read_stdin_frame() {
+            Ok(env) => {
+                let (error, status) = cognia_sandboxd::exec_env::exec(&argv, &env);
+                fail(error, status)
+            }
+            Err(error) => fail(error, cognia_sandboxd::exec_env::EXIT_BAD_FRAME),
+        },
         Mode::Install {
             stage,
             libc,

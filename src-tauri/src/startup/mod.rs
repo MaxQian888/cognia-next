@@ -115,6 +115,10 @@ pub(crate) const STEPS: &[Step] = &[
         run: services::agent_session_store,
     },
     Step {
+        name: "remote_sandboxes",
+        run: services::remote_sandboxes,
+    },
+    Step {
         name: "gateway_autostart",
         run: services::gateway_autostart,
     },
@@ -197,6 +201,13 @@ mod tests {
     /// A record written before `logging::bootstrap` is dropped, so host
     /// services install after it, and before the gateway auto-start, which
     /// needs the brain bridge they install.
+    /// The sandbox router reaches the process manager after the logger (its
+    /// failure is a warning someone has to be able to read).
+    #[test]
+    fn remote_sandboxes_install_after_logging() {
+        assert!(position("native_logging") < position("remote_sandboxes"));
+    }
+
     #[test]
     fn host_services_install_between_logging_and_the_gateway_autostart() {
         assert!(position("native_logging") < position("host_services"));
@@ -234,6 +245,7 @@ mod tests {
                 "a2ui_bridge",
                 "jobs_supervisor",
                 "agent_session_store",
+                "remote_sandboxes",
                 "gateway_autostart",
                 "cli_bridge",
                 "shutdown_signal",

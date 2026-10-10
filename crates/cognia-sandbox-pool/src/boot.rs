@@ -14,6 +14,15 @@
 //! a switch on in a binary built without a driver. Every one of those is an
 //! operator asking for sandboxes and not getting them, which is worth a loud
 //! failure rather than a silent downgrade.
+//!
+//! # Remote providers join the same sandbox arm (ADR-0221)
+//!
+//! A providers file (`COGNIA_SANDBOX_PROVIDERS_FILE` on a server, the
+//! "Remote sandboxes" settings on a desktop) adds remote members beside the
+//! local Docker driver; the router then holds one [`ProviderSet`] instead of
+//! the driver alone. A deployment with no providers installs exactly what it
+//! did before. A providers file with the pool off is refused for the same
+//! reason as everything above: it is an operator asking for sandboxes.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -21,9 +30,14 @@ use std::sync::Arc;
 use cognia_environment::baseline::{load_baseline_from, BaselineInputs};
 use cognia_environment::store::EnvironmentStore;
 use cognia_external_agent::exec_backend::ExecBackend;
-use cognia_external_agent::sandbox_routing_backend::{SandboxExecBackend, SandboxRoutingBackend};
+use cognia_external_agent::sandbox_routing_backend::{
+    FallbackConfinement, SandboxExecBackend, SandboxRoutingBackend, LOCAL_PROVIDER_ID,
+};
 
-use crate::admission::EnvironmentSandboxAdmission;
+use crate::admission::{EnvironmentSandboxAdmission, SandboxAdmission};
+use crate::providers::{
+    remote_member, CredentialLookups, ProviderMember, ProviderSet, SandboxProvidersFile,
+};
 use crate::runtime::SandboxRuntimeControl;
 use crate::status::SandboxDriverStatus;
 
@@ -54,18 +68,67 @@ pub struct PoolServices {
     /// The driver, narrowed to what a status read may ask.
     pub status: Arc<dyn SandboxDriverStatus>,
     pub runtime: Option<Arc<dyn SandboxRuntimeControl>>,
+    /// Every driver the router can place on, when remote providers are
+    /// configured (ADR-0221); `None` when the local driver is the only one.
+    pub providers: Option<Arc<ProviderSet>>,
+}
+
+/// Which local driver a Host installs beside its remote providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalDriver {
+    /// The Docker driver, when this binary was built with it. A binary built
+    /// without it runs a remote-only pool when providers are configured, and
+    /// refuses boot when none are (there would be no driver at all).
+    IfBuilt,
+    /// No local driver: a remote-only pool (the desktop, ADR-0221 G7, whose
+    /// local containers are a separate, still-dormant switch).
+    None,
+}
+
+/// Everything [`install_with_inputs`] decides from.
+pub struct PoolInputs<'a> {
+    pub baseline: BaselineInputs,
+    /// The remote providers, when the Host configured any.
+    pub providers: Option<SandboxProvidersFile>,
+    /// Where provider credentials are read from.
+    pub lookups: CredentialLookups<'a>,
+    pub local: LocalDriver,
+    /// A desktop admits repository declarations against the brain's own
+    /// trust row rather than a server-side approval record.
+    pub device_approvals: bool,
+    /// How a spawn that falls back onto `existing` is confined first (the
+    /// desktop's OS sandbox launcher); `None` on a Host whose existing path
+    /// needs nothing added.
+    pub fallback_confinement: Option<FallbackConfinement>,
 }
 
 /// Install the pool: wrap `existing` in the sandbox router when this
 /// deployment enabled it, or hand it straight back when it did not.
+///
+/// A server names its remote providers in `COGNIA_SANDBOX_PROVIDERS_FILE`;
+/// their credentials come from its environment or files.
 pub fn install(
     existing: Arc<dyn ExecBackend>,
     data_dir: &Path,
     default_deployment_id: &str,
 ) -> Result<InstalledPool, String> {
-    install_with(
+    let env = |name: &str| std::env::var(name).ok();
+    let no_secrets = |_: &str| None;
+    let providers = SandboxProvidersFile::from_env_lookup(env)
+        .map_err(|error| format!("sandbox providers: {error}"))?;
+    install_with_inputs(
         existing,
-        &BaselineInputs::from_process_env(),
+        PoolInputs {
+            baseline: BaselineInputs::from_process_env(),
+            providers,
+            lookups: CredentialLookups {
+                env: &env,
+                secrets: &no_secrets,
+            },
+            local: LocalDriver::IfBuilt,
+            device_approvals: false,
+            fallback_confinement: None,
+        },
         data_dir,
         default_deployment_id,
     )
@@ -97,20 +160,61 @@ pub fn wrap_exec_backend_with(
     install_with(existing, inputs, data_dir, default_deployment_id).map(|pool| pool.backend)
 }
 
-/// [`install`] against captured inputs, so the decision is testable without
-/// touching the process environment.
+/// [`install`] against captured baseline inputs and no remote providers, so
+/// the decision is testable without touching the process environment.
 pub fn install_with(
     existing: Arc<dyn ExecBackend>,
     inputs: &BaselineInputs,
     data_dir: &Path,
     default_deployment_id: &str,
 ) -> Result<InstalledPool, String> {
-    let loaded =
-        load_baseline_from(inputs).map_err(|error| format!("{}: {error}", error.code()))?;
+    let none = |_: &str| None;
+    install_with_inputs(
+        existing,
+        PoolInputs {
+            baseline: inputs.clone(),
+            providers: None,
+            lookups: CredentialLookups {
+                env: &none,
+                secrets: &none,
+            },
+            local: LocalDriver::IfBuilt,
+            device_approvals: false,
+            fallback_confinement: None,
+        },
+        data_dir,
+        default_deployment_id,
+    )
+}
+
+/// The whole decision: the baseline, the local driver and the remote
+/// providers, from captured inputs.
+pub fn install_with_inputs(
+    existing: Arc<dyn ExecBackend>,
+    inputs: PoolInputs<'_>,
+    data_dir: &Path,
+    default_deployment_id: &str,
+) -> Result<InstalledPool, String> {
+    let loaded = load_baseline_from(&inputs.baseline)
+        .map_err(|error| format!("{}: {error}", error.code()))?;
     for note in &loaded.notes {
         log::warn!("environment baseline: {}", note.message);
     }
+    let providers = inputs
+        .providers
+        .filter(|file| !file.providers.is_empty());
+    if let Some(file) = providers.as_ref() {
+        file.validate()
+            .map_err(|error| format!("sandbox providers: {error}"))?;
+    }
     if !loaded.baseline.sandbox_pool.enabled {
+        if providers.is_some() {
+            return Err(
+                "sandbox_providers_without_pool: remote sandbox providers are configured but \
+                 the sandbox pool is off"
+                    .into(),
+            );
+        }
         log::info!(
             "runtime environment sandboxes: off (baseline {})",
             loaded.origin.as_str()
@@ -123,28 +227,89 @@ pub fn install_with(
 
     let store = EnvironmentStore::open(&data_dir.join(STORE_FILE))
         .map_err(|error| format!("environment store: {error}"))?;
-    // A shared Host approves repository declarations server-side; the
-    // desktop's per-device approvals are the brain's own trust row, and that
-    // path arrives with ADR-0147's device approval reference in ①.11.
     let admission = Arc::new(EnvironmentSandboxAdmission::new_with_registry_lookup(
         loaded.baseline,
         store,
         |name| std::env::var(name).ok(),
-        false,
+        inputs.device_approvals,
     )?);
     let multi_tenant = admission.baseline().multi_tenant;
-    let (sandbox, status, runtime) =
-        docker_driver(Arc::clone(&admission), default_deployment_id, data_dir)?;
+
+    let local = match inputs.local {
+        LocalDriver::IfBuilt if cfg!(feature = "docker") || providers.is_none() => Some(
+            docker_driver(Arc::clone(&admission), default_deployment_id, data_dir)?,
+        ),
+        LocalDriver::IfBuilt | LocalDriver::None => None,
+    };
+
+    let Some(file) = providers else {
+        let Some((sandbox, status, runtime)) = local else {
+            return Err(
+                "sandbox_pool_without_driver: the sandbox pool is enabled but this Host has \
+                 neither a local driver nor a remote provider"
+                    .into(),
+            );
+        };
+        log::info!(
+            "runtime environment sandboxes: on (docker driver, baseline {}, multi-tenant {multi_tenant})",
+            loaded.origin.as_str()
+        );
+        return Ok(InstalledPool {
+            backend: SandboxRoutingBackend::with_fallback_confinement(
+                existing,
+                sandbox,
+                inputs.fallback_confinement,
+            ),
+            services: Some(PoolServices {
+                admission,
+                status,
+                runtime: Some(runtime),
+                providers: None,
+            }),
+        });
+    };
+
+    let mut members = Vec::with_capacity(file.providers.len() + 1);
+    if let Some((exec, status, runtime)) = local {
+        members.push(ProviderMember {
+            id: LOCAL_PROVIDER_ID.to_string(),
+            label: None,
+            exec,
+            status,
+            runtime: Some(runtime),
+            limits: None,
+        });
+    }
+    for provider in &file.providers {
+        members.push(remote_member(
+            provider,
+            Arc::clone(&admission) as Arc<dyn SandboxAdmission>,
+            crate::docker::DockerSandboxConfig::remote(default_deployment_id)?,
+            &inputs.lookups,
+        )?);
+    }
+    // A Host with exactly one remote provider places `auto` there without
+    // the operator having to name it.
+    let default_remote = file.default_provider_id.clone().or_else(|| {
+        (file.providers.len() == 1).then(|| file.providers[0].id.clone())
+    });
+    let set = ProviderSet::new(members, default_remote)?;
     log::info!(
-        "runtime environment sandboxes: on (docker driver, baseline {}, multi-tenant {multi_tenant})",
+        "runtime environment sandboxes: on (providers {}, baseline {}, multi-tenant {multi_tenant})",
+        set.member_ids().collect::<Vec<_>>().join(", "),
         loaded.origin.as_str()
     );
     Ok(InstalledPool {
-        backend: SandboxRoutingBackend::new(existing, sandbox),
+        backend: SandboxRoutingBackend::with_fallback_confinement(
+            existing,
+            Arc::clone(&set) as Arc<dyn SandboxExecBackend>,
+            inputs.fallback_confinement,
+        ),
         services: Some(PoolServices {
             admission,
-            status,
-            runtime: Some(runtime),
+            status: Arc::clone(&set) as Arc<dyn SandboxDriverStatus>,
+            runtime: Some(Arc::clone(&set) as Arc<dyn SandboxRuntimeControl>),
+            providers: Some(set),
         }),
     })
 }
@@ -312,5 +477,153 @@ mod tests {
             error.contains("built without the `docker` feature"),
             "{error}"
         );
+    }
+
+    fn desktop_pool(
+        dir: &Path,
+        providers: SandboxProvidersFile,
+    ) -> Result<InstalledPool, String> {
+        let settings = crate::desktop::DesktopRemoteSandboxes {
+            version: 1,
+            providers: providers.clone(),
+            registry_allowlist: Vec::new(),
+        };
+        let bundle = crate::desktop::pinned_bundle(Some(&format!(
+            "ghcr.io/cognia/agent-bundle:v2.0.0@sha256:{}",
+            "c".repeat(64)
+        )));
+        let baseline = crate::desktop::write_baseline(dir, &settings, bundle).unwrap();
+        let none = |_: &str| None;
+        let secrets = |id: &str| (id == "remote-sandbox:cloud").then(|| "e2b_test_key".to_string());
+        install_with_inputs(
+            LocalProcessBackend::new(),
+            PoolInputs {
+                baseline: BaselineInputs {
+                    baseline_file: Some(baseline),
+                    ..BaselineInputs::default()
+                },
+                providers: Some(providers),
+                lookups: CredentialLookups {
+                    env: &none,
+                    secrets: &secrets,
+                },
+                local: LocalDriver::None,
+                device_approvals: true,
+                fallback_confinement: None,
+            },
+            dir,
+            "dep1",
+        )
+    }
+
+    fn cloud_provider() -> SandboxProvidersFile {
+        SandboxProvidersFile::parse(
+            br#"{"version":1,"providers":[{"id":"cloud","kind":"e2b",
+                "credential":{"secretId":"remote-sandbox:cloud"},"settings":{}}]}"#,
+        )
+        .expect("a valid providers file")
+    }
+
+    fn install_refusal(result: Result<InstalledPool, String>, expectation: &str) -> String {
+        match result {
+            Ok(_) => panic!("{expectation}"),
+            Err(error) => error,
+        }
+    }
+
+    /// Providers with the pool off are an operator asking for sandboxes
+    /// that would never start.
+    #[test]
+    fn providers_with_the_pool_off_refuse_boot() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let none = |_: &str| None;
+        let error = install_refusal(
+            install_with_inputs(
+                LocalProcessBackend::new(),
+                PoolInputs {
+                    baseline: inputs(Some("false")),
+                    providers: Some(cloud_provider()),
+                    lookups: CredentialLookups {
+                        env: &none,
+                        secrets: &none,
+                    },
+                    local: LocalDriver::IfBuilt,
+                    device_approvals: false,
+                    fallback_confinement: None,
+                },
+                dir.path(),
+                "dep1",
+            ),
+            "configured providers cannot be silently ignored",
+        );
+        assert!(error.starts_with("sandbox_providers_without_pool:"), "{error}");
+    }
+
+    /// An empty providers file is no providers: the off path is unchanged.
+    #[test]
+    fn an_empty_providers_file_keeps_the_off_path() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let none = |_: &str| None;
+        let existing: Arc<dyn ExecBackend> = LocalProcessBackend::new();
+        let pool = install_with_inputs(
+            Arc::clone(&existing),
+            PoolInputs {
+                baseline: inputs(None),
+                providers: Some(SandboxProvidersFile::empty()),
+                lookups: CredentialLookups {
+                    env: &none,
+                    secrets: &none,
+                },
+                local: LocalDriver::IfBuilt,
+                device_approvals: false,
+                fallback_confinement: None,
+            },
+            dir.path(),
+            "dep1",
+        )
+        .expect("an empty providers file boots");
+        assert!(Arc::ptr_eq(&existing, &pool.backend));
+        assert!(pool.services.is_none());
+    }
+
+    #[cfg(not(feature = "e2b"))]
+    #[test]
+    fn a_provider_kind_this_binary_lacks_refuses_boot_by_name() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let error = install_refusal(
+            desktop_pool(dir.path(), cloud_provider()),
+            "a provider this build cannot reach must not be dropped",
+        );
+        assert!(error.contains("provider cloud"), "{error}");
+        assert!(error.contains("built without the `e2b` provider"), "{error}");
+    }
+
+    #[cfg(feature = "e2b")]
+    #[tokio::test]
+    async fn a_desktop_installs_a_remote_only_provider_set() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let pool = desktop_pool(dir.path(), cloud_provider()).expect("a desktop pool installs");
+        assert!(pool.backend.routes_sandboxes());
+        let services = pool.services.expect("the pool is on");
+        assert!(services.admission.device_approvals());
+        let set = services.providers.expect("remote providers form a set");
+        assert!(!set.has_local());
+        // The only remote provider is the default without being named.
+        assert_eq!(set.default_remote(), Some("cloud"));
+        assert_eq!(services.status.driver(), "e2b");
+    }
+
+    #[test]
+    fn a_missing_provider_credential_refuses_boot() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let mut file = cloud_provider();
+        file.providers[0].credential = Some(crate::providers::CredentialSource::SecretId(
+            "remote-sandbox:missing".into(),
+        ));
+        let error = install_refusal(
+            desktop_pool(dir.path(), file),
+            "a provider without its credential cannot run",
+        );
+        assert!(error.contains("provider_credential_missing"), "{error}");
     }
 }

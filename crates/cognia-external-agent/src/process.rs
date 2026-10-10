@@ -46,6 +46,11 @@ pub trait ExternalAgentEventSink: Send + Sync + 'static {
     ///
     /// Defaulted to a no-op for the same reason as [`Self::stdout_raw`].
     fn sandbox_placement(&self, _agent_id: &str, _placement: &serde_json::Value) {}
+    /// What a remote sandbox pushed back when the agent's session ended
+    /// (ADR-0221). Only spawns with a remote workspace emit it.
+    ///
+    /// Defaulted to a no-op for the same reason as [`Self::stdout_raw`].
+    fn workspace_published(&self, _agent_id: &str, _publish: &serde_json::Value) {}
 }
 
 /// Whether a forwarded external-agent stderr line is a known-transient,

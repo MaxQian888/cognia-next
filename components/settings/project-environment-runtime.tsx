@@ -24,11 +24,18 @@
  * The browser sidecar is a fourth: the spec carries it, and the Docker driver
  * does not start one yet.
  *
+ * # Where it runs (ADR-0221)
+ *
+ * "Runs on" picks among the Host's drivers as its driver status lists them:
+ * automatic, the Host's own sandbox, or one remote provider by id. A saved
+ * target the Host does not list stays selectable so the refusal it earns
+ * has something to point at.
+ *
  * # Layout
  *
  * No frame and no heading of its own: the environment manager's "Runtime
  * environment" section names it and says it saves separately. Inside, the
- * five choices are a field grid that goes two-up when the section is wide
+ * six choices are a field grid that goes two-up when the section is wide
  * enough (`@container/environment-card`), and the preview, ports and
  * declaration are sub-blocks under a rule rather than three more bordered
  * boxes inside a bordered card. Its own save sits at its own end, labelled as
@@ -56,17 +63,37 @@ import {
   useProjectRuntimeEnvironment,
 } from "@/hooks/sandbox/use-project-runtime-environment"
 import { putProjectEnvironment } from "@/lib/db/project-environments"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 import {
   readRepositoryCoordinates,
   type RunEnvironmentSources,
 } from "@/lib/sandbox/run-environment"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { ProjectEnvironment, ProjectRuntimeSelection } from "@/types/project-environment"
-import type { IsolationTier } from "@/types/sandbox/environment-spec"
+import type {
+  ProjectEnvironment,
+  ProjectRuntimeSelection,
+  SandboxTarget,
+} from "@/types/project-environment"
+import { LOCAL_SANDBOX_PROVIDER_ID, type IsolationTier } from "@/types/sandbox/environment-spec"
 
 const TIERS: readonly IsolationTier[] = ["container", "gvisor", "vm"]
 const AUTO = "__auto__"
 const DEFAULT = "__default__"
+// Provider ids are `[a-z0-9][a-z0-9-]*` and never `local`, so the local
+// driver's own id cannot collide with one.
+const LOCAL = LOCAL_SANDBOX_PROVIDER_ID
+
+/** The select's value for a target; absent is `auto`. */
+function targetValue(target: SandboxTarget | undefined): string {
+  if (!target || target.kind === "auto") return AUTO
+  return target.kind === "local" ? LOCAL : target.providerId
+}
+
+/** `auto` is stored as no target, the default every older selection has. */
+function targetFromValue(value: string): SandboxTarget | undefined {
+  if (value === AUTO) return undefined
+  return value === LOCAL ? { kind: "local" } : { kind: "provider", providerId: value }
+}
 
 interface Props {
   projectId: string
@@ -171,6 +198,28 @@ export function ProjectEnvironmentRuntime({
 
   const available = new Set(driver?.availableTiers ?? [])
 
+  // ADR-0221: the drivers a run can be placed on. A Host that lists none has
+  // only its local driver (every Host before remote providers).
+  const providers = driver?.providers ?? []
+  const offersLocal =
+    providers.length === 0 ||
+    providers.some((provider) => provider.id === LOCAL_SANDBOX_PROVIDER_ID)
+  const remoteProviders = providers.filter((provider) => provider.remote)
+  const target = draft?.target
+  const missingTarget =
+    target !== undefined &&
+    ((target.kind === "local" && !offersLocal) ||
+      (target.kind === "provider" &&
+        !remoteProviders.some((provider) => provider.id === target.providerId)))
+  const targetHint =
+    target?.kind === "provider"
+      ? t("target.hintRemote")
+      : target?.kind === "local"
+        ? t("target.hintLocal")
+        : remoteProviders.length > 0
+          ? `${t("target.hintAuto")} ${t("target.hintRemote")}`
+          : t("target.hintAuto")
+
   return (
     <div
       className="space-y-4"
@@ -185,7 +234,9 @@ export function ProjectEnvironmentRuntime({
 
       {!state.loading && !state.poolEnabled ? (
         <div role="status" className="space-y-1" data-testid="runtime-pool-off">
-          <p className="text-[11px] text-muted-foreground">{t("poolOff")}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {detectHostProfile() === "desktop" ? t("poolOffDesktop") : t("poolOff")}
+          </p>
           {state.saved ? (
             <p className="text-[11px] text-muted-foreground">{t("poolOffKept")}</p>
           ) : null}
@@ -212,6 +263,20 @@ export function ProjectEnvironmentRuntime({
               {t("driverUnreachable", { reason: driver.unreachableReason ?? "" })}
             </p>
           )}
+          {remoteProviders.map((provider) => (
+            <p key={provider.id} data-testid={`runtime-provider-${provider.id}`}>
+              {provider.reachable
+                ? t("target.providerStatus", {
+                    label: provider.label ?? provider.id,
+                    instances: provider.usage?.instances ?? 0,
+                    sessions: provider.usage?.sessions ?? 0,
+                  })
+                : t("target.providerStatusUnreachable", {
+                    label: provider.label ?? provider.id,
+                    code: provider.unavailableCode ?? "",
+                  })}
+            </p>
+          ))}
         </div>
       ) : null}
 
@@ -238,6 +303,44 @@ export function ProjectEnvironmentRuntime({
           className="grid gap-x-4 gap-y-3 border-l-2 pl-3 @xl/environment-card:grid-cols-2"
           data-testid="runtime-selection"
         >
+          <Field
+            label={t("target.label")}
+            id={`${environment.id}-runtime-target`}
+            hint={targetHint}
+          >
+            <Select
+              value={targetValue(draft.target)}
+              onValueChange={(value) => update({ target: targetFromValue(value) })}
+            >
+              <SelectTrigger
+                id={`${environment.id}-runtime-target`}
+                aria-label={t("target.label")}
+                className="w-full min-w-0"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO}>{t("target.auto")}</SelectItem>
+                {offersLocal ? <SelectItem value={LOCAL}>{t("target.local")}</SelectItem> : null}
+                {remoteProviders.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.reachable
+                      ? t("target.provider", { label: provider.label ?? provider.id })
+                      : t("target.providerUnreachable", { label: provider.label ?? provider.id })}
+                  </SelectItem>
+                ))}
+                {missingTarget ? (
+                  // Kept visible so the refusal below has something to point at.
+                  <SelectItem value={targetValue(draft.target)}>
+                    {t("target.missing", {
+                      id: draft.target?.kind === "provider" ? draft.target.providerId : LOCAL,
+                    })}
+                  </SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+          </Field>
+
           <Field label={t("source")} id={`${environment.id}-runtime-source`}>
             <Select
               value={draft.source.kind === "catalog" ? draft.source.catalogEntryId : AUTO}

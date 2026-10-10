@@ -888,6 +888,42 @@ fn drop_writable(args: &mut Vec<String>, root: &Path) {
     }
 }
 
+/// Whether the desktop's OS sandbox launcher wraps `config` before it is
+/// handed to a backend.
+///
+/// A spawn with a runtime environment placement on a backend that routes
+/// sandboxes runs in its container (local or remote, ADR-0182/0221), the
+/// stronger confinement of the two; wrapping it as well would hand the
+/// container a launcher the agent bundle has no entry for. Every other spawn
+/// — including a placement on a desktop with no router, which falls back to
+/// this host — runs here, so it is wrapped.
+pub fn desktop_wrapper_applies(config: &ExternalAgentSpawnConfig, routes_sandboxes: bool) -> bool {
+    config.sandbox.is_none() || !routes_sandboxes
+}
+
+/// The desktop's spawn hardening after the command allowlist: wrap the launch
+/// unless the router will place it (see [`desktop_wrapper_applies`]). A
+/// routed spawn keeps its state key: the router strips it for the sandbox and
+/// [`desktop_fallback_confinement`] resolves it if the spawn falls back here.
+pub fn harden_desktop_spawn(
+    config: ExternalAgentSpawnConfig,
+    routes_sandboxes: bool,
+) -> Result<ExternalAgentSpawnConfig, String> {
+    if desktop_wrapper_applies(&config, routes_sandboxes) {
+        wrap_with_sandbox(config, &DesktopSandboxHost).map_err(|error| error.to_string())
+    } else {
+        Ok(config)
+    }
+}
+
+/// What the desktop's sandbox router runs a fallback through: the same
+/// launcher wrap an ordinary desktop spawn gets.
+pub fn desktop_fallback_confinement() -> crate::sandbox_routing_backend::FallbackConfinement {
+    std::sync::Arc::new(|config| {
+        wrap_with_sandbox(config, &DesktopSandboxHost).map_err(|error| error.to_string())
+    })
+}
+
 /// Rewrite a validated spawn config so the agent runs under the launcher.
 ///
 /// Call this **after** the command allowlist has run: the allowlist requires a
@@ -1238,6 +1274,29 @@ pub fn wrap_with_sandbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The desktop wrapper and a container never both apply, and a placement
+    /// nothing will route is wrapped because it falls back to this host.
+    #[test]
+    fn the_desktop_wrapper_stands_down_only_for_a_routed_placement() {
+        let mut config: ExternalAgentSpawnConfig = serde_json::from_value(serde_json::json!({
+            "id": "a", "command": "codex", "args": [], "env": {}, "cwd": "/tmp"
+        }))
+        .unwrap();
+        assert!(desktop_wrapper_applies(&config, false));
+        assert!(desktop_wrapper_applies(&config, true));
+        config.sandbox = Some(crate::sandbox_routing_backend::SandboxPlacement::Container {
+            hosted_tool_host_lease_ids: Vec::new(),
+            provider: None,
+            workspace: None,
+            spec: serde_json::json!({ "specDigest": "a".repeat(64) }),
+            isolation_mandatory: false,
+        });
+        assert!(desktop_wrapper_applies(&config, false));
+        assert!(!desktop_wrapper_applies(&config, true));
+        let routed = harden_desktop_spawn(config.clone(), true).expect("a routed spawn passes");
+        assert_eq!(routed.command, "codex", "a routed spawn is not rewritten");
+    }
     use std::cell::RefCell;
     use std::collections::HashMap;
 

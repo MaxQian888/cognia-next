@@ -9,13 +9,17 @@
  * whether egress and credentials are actually confined. Those three can all
  * differ from the request, so this is the only surface allowed to state them.
  *
+ * A remote sandbox (ADR-0221) also names its provider, the repository it
+ * cloned onto which branch, and — once the session ends — whether the work
+ * was pushed there.
+ *
  * Renders nothing for an agent that never asked for a runtime environment, so
  * a deployment with the pool off sees no trace of it (Q39) and call sites can
  * mount it unconditionally.
  */
 
 import { useTranslations } from "next-intl"
-import { BanIcon, BoxIcon, HourglassIcon, TriangleAlertIcon } from "lucide-react"
+import { BanIcon, BoxIcon, CloudIcon, HourglassIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -138,18 +142,78 @@ function Sandboxed({ report, className }: { report: SandboxPlacementReport; clas
         ? t("tooltip.egressNotEnforced", { tier: egressTier })
         : undefined,
     report.credentialsMode ? t("tooltip.credentials", { mode: report.credentialsMode }) : undefined,
+    ...remoteLines(report, t),
   ].filter((line): line is string => line !== undefined)
+
+  const provider = report.provider
+  const label = provider
+    ? tier
+      ? t("sandboxedOn", { provider, tier })
+      : t("sandboxedOnUntiered", { provider })
+    : tier
+      ? t("sandboxed", { tier })
+      : t("sandboxedUntiered")
 
   return (
     <Labeled
       testId="sandbox-placement-sandboxed"
       variant="secondary"
-      icon={<BoxIcon className="size-3" aria-hidden="true" />}
-      label={tier ? t("sandboxed", { tier }) : t("sandboxedUntiered")}
+      icon={
+        provider ? (
+          <CloudIcon className="size-3" aria-hidden="true" />
+        ) : (
+          <BoxIcon className="size-3" aria-hidden="true" />
+        )
+      }
+      label={label}
       className={className}
       lines={lines}
     />
   )
+}
+
+/**
+ * A remote sandbox's provider, the repository it cloned, and what became of
+ * the work when the session ended (ADR-0221). Nothing for a local sandbox.
+ */
+function remoteLines(
+  report: SandboxPlacementReport,
+  t: ReturnType<typeof useTranslations<"externalAgent.placement">>
+): (string | undefined)[] {
+  if (!report.provider) return []
+  const workspace = report.workspace
+  const branch = workspace?.branch ?? report.publish?.branch
+  const publish = report.publish
+  let outcome: string | undefined
+  if (!publish) {
+    outcome = branch ? t("tooltip.publishPending") : undefined
+  } else if (publish.pushed) {
+    outcome = t("tooltip.pushed", {
+      commit: (publish.commit ?? "").slice(0, 12),
+      branch: publish.branch ?? branch ?? "",
+    })
+  } else if (publish.code === "nothing_to_publish") {
+    outcome = t("tooltip.nothingToPublish", { branch: publish.branch ?? branch ?? "" })
+  } else if (publish.code === "sandbox_workspace_push_refused") {
+    outcome = t("tooltip.pushRefused", {
+      branch: publish.branch ?? branch ?? "",
+      message: publish.message ?? "",
+    })
+  } else {
+    outcome = t("tooltip.publishFailed", {
+      code: publish.code ?? "",
+      message: publish.message ?? "",
+    })
+  }
+  return [
+    t("tooltip.provider", { provider: report.provider }),
+    workspace?.remoteUrl && workspace.baseRef && branch
+      ? t("tooltip.workspace", { remote: workspace.remoteUrl, base: workspace.baseRef, branch })
+      : branch
+        ? t("tooltip.workspaceUnreported", { branch })
+        : undefined,
+    outcome,
+  ]
 }
 
 function Labeled({

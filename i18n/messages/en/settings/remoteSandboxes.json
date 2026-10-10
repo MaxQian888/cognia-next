@@ -1,0 +1,163 @@
+{
+  "title": "Remote sandboxes",
+  "description": "Cloud sandboxes this desktop can run project agents in, created when a run needs one: E2B, or a Kubernetes cluster you connect.",
+  "reload": "Reload",
+  "loading": "Reading the remote sandbox settings…",
+  "failed": "The remote sandbox settings could not be read.",
+  "availability": {
+    "active": "Remote sandboxes are on. Runs that ask for a runtime environment can be placed on the providers below.",
+    "noProviders": "No provider is configured, so every run stays on this desktop.",
+    "bundleUnpinnedTitle": "Not available in this build",
+    "bundleUnpinned": "This build ships no pinned agent bundle, so it cannot put an agent into a remote sandbox. Providers saved here are kept, and nothing runs remotely until a build that ships one.",
+    "bundle": "Agent bundle {tag}"
+  },
+  "restart": {
+    "title": "Restart Cognia to apply",
+    "body": "Saved changes take effect the next time the app starts. Sandboxes already running keep the settings they started with."
+  },
+  "installError": {
+    "title": "Remote sandboxes did not start",
+    "body": "The settings saved before this start were refused: {error}"
+  },
+  "providers": {
+    "title": "Providers",
+    "add": "Add provider",
+    "empty": "No providers yet.",
+    "kind": {
+      "e2b": "E2B",
+      "kubernetes": "Kubernetes"
+    },
+    "default": "Default",
+    "onlyDefault": "Default (only provider)",
+    "makeDefault": "Make default",
+    "clearDefault": "Clear default",
+    "edit": "Edit",
+    "remove": "Remove",
+    "limits": "Up to {concurrent} at once · {lifetime} min lifetime · idle after {idle} min",
+    "credential": {
+      "stored": "Credential stored",
+      "missing": "Credential missing",
+      "env": "Credential from {name}",
+      "file": "Credential from {path}",
+      "none": "No credential needed"
+    },
+    "defaultHint": "Runs set to “auto” use this desktop's own sandbox when it can, else the default provider.",
+    "live": {
+      "reachable": "Running: reachable, {instances, plural, =1 {# sandbox} other {# sandboxes}} and {sessions, plural, =1 {# session} other {# sessions}} in use",
+      "unreachable": "Running: unreachable ({code})",
+      "notRunning": "Not running in this session; it starts with the app next time.",
+      "unreadable": "The running pool's status could not be read."
+    }
+  },
+  "removeDialog": {
+    "title": "Remove {label}?",
+    "body": "Its stored credential is deleted too. Projects that name this provider are refused until they pick another. Sandboxes already running are not stopped.",
+    "cancel": "Cancel",
+    "confirm": "Remove"
+  },
+  "editor": {
+    "createTitle": "Add a remote sandbox provider",
+    "editTitle": "Edit {label}",
+    "description": "Saved to this desktop. Credentials go to the system's secret store and are never shown again.",
+    "kind": "Provider",
+    "id": "ID",
+    "idHint": "Lowercase letters, digits and dashes, up to 32. Projects name the provider by it.",
+    "label": "Name",
+    "labelPlaceholder": "Shown instead of the ID",
+    "credential": {
+      "e2b": "API key",
+      "kubeconfig": "Kubeconfig",
+      "kubeconfigPlaceholder": "Paste the kubeconfig YAML",
+      "keep": "A credential is stored. Leave this empty to keep it.",
+      "keepSource": "The credential is read from {source}. Type one to store it here instead.",
+      "required": "Required."
+    },
+    "limits": "Limits",
+    "maxConcurrent": "Sandboxes at once",
+    "maxLifetime": "Lifetime (minutes)",
+    "maxLifetimeHint": "Every sandbox is destroyed at this age, whatever it is doing.",
+    "idleTimeout": "Idle timeout (minutes)",
+    "idleTimeoutHint": "A persistent sandbox with no session is destroyed after this.",
+    "e2b": {
+      "apiUrl": "API endpoint",
+      "domain": "Sandbox domain",
+      "templatePrefix": "Template prefix",
+      "templateBuildTimeout": "Template build timeout (seconds)",
+      "delegatedRegistries": "Registries E2B may pull from with your credentials",
+      "delegatedRegistriesHint": "One registry host per line. E2B builds templates on its own servers, so a private image's pull credential is handed to it only for the registries listed here; any other private image is refused."
+    },
+    "kubernetes": {
+      "connection": "Connection",
+      "connectionKubeconfig": "Kubeconfig",
+      "connectionInCluster": "In-cluster service account",
+      "connectionInClusterHint": "Only when Cognia itself runs as a Pod in that cluster.",
+      "context": "Context",
+      "contextPlaceholder": "The kubeconfig's current context",
+      "namespace": "Namespace",
+      "runtimeClasses": "RuntimeClass per isolation tier",
+      "runtimeClassesHint": "gVisor and VM tiers are offered only when mapped and present in the cluster.",
+      "egress": "Network enforcement",
+      "egressNone": "None",
+      "egressNetworkPolicy": "NetworkPolicy",
+      "egressCilium": "Cilium",
+      "egressHint": {
+        "none": "Nothing restricts egress: every network setting is recorded, not enforced.",
+        "network-policy": "No-network runs are enforced. An allowlist is recorded but not enforced: NetworkPolicy cannot match host names.",
+        "cilium": "No-network runs and allowlists are both enforced."
+      },
+      "nodeSelector": "Node selector",
+      "nodeSelectorPlaceholder": "key=value, one per line",
+      "serviceAccount": "Service account",
+      "podReadyTimeout": "Ready timeout (seconds)"
+    },
+    "problem": {
+      "id_invalid": "Use 1–32 lowercase letters, digits or dashes, starting with a letter or digit, and not “local”.",
+      "id_taken": "Another provider already uses this ID.",
+      "label_invalid": "Keep the name to 64 characters.",
+      "credential_required": "Enter a credential.",
+      "out_of_range": "Enter a whole number from {min} to {max}.",
+      "url_invalid": "Use an https URL with no credentials, query or fragment (http only on localhost).",
+      "domain_invalid": "Enter a DNS name, such as e2b.app.",
+      "template_prefix_invalid": "Use 1–32 lowercase letters, digits, dashes or underscores, starting with a letter or digit.",
+      "registry_invalid": "“{entry}” is not a registry host.",
+      "namespace_invalid": "Use a DNS label: lowercase letters, digits and dashes, up to 63.",
+      "name_invalid": "Use a DNS name: lowercase letters, digits, dashes and dots.",
+      "node_selector_invalid": "“{entry}” is not a key=value label."
+    },
+    "cancel": "Cancel",
+    "save": "Save provider"
+  },
+  "registries": {
+    "title": "Allowed image registries",
+    "description": "Projects may only run images from these registries. A prefix narrows a registry to the repositories under it.",
+    "empty": "No registries are allowed, so only the built-in images can run.",
+    "registry": "Registry",
+    "registryPlaceholder": "ghcr.io",
+    "prefix": "Repository prefix",
+    "prefixPlaceholder": "acme (optional)",
+    "insecure": "Plain HTTP",
+    "add": "Add registry",
+    "removeRow": "Remove {registry}",
+    "save": "Save registries",
+    "saved": "Registries saved",
+    "problem": {
+      "registry_invalid": "Enter a registry host such as ghcr.io or localhost:5000.",
+      "prefix_invalid": "Use lowercase repository path components.",
+      "duplicate": "This registry and prefix are listed twice."
+    }
+  },
+  "saved": "Saved. Restart Cognia to apply.",
+  "removed": "{label} removed. Restart Cognia to apply.",
+  "errors": {
+    "remote_sandboxes_invalid": "The settings were refused: {message}",
+    "remote_sandboxes_registry_invalid": "The registry allowlist was refused: {message}",
+    "remote_sandboxes_unwritable": "The settings could not be written: {message}",
+    "remote_sandboxes_unreadable": "The settings could not be read: {message}",
+    "remote_sandboxes_version_unsupported": "These settings were written by a newer Cognia: {message}",
+    "remote_sandboxes_secret_unwritable": "The credential could not be stored: {message}",
+    "remote_sandboxes_secret_id_invalid": "A credential id was refused: {message}",
+    "remote_sandboxes_secret_unreferenced": "A credential no provider uses was refused: {message}",
+    "remote_sandboxes_secret_empty": "A credential cannot be empty.",
+    "unknown": "Something went wrong: {message}"
+  }
+}
