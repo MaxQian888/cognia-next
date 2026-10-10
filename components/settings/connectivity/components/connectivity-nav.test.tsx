@@ -36,5 +36,5 @@ it("binds every topic to the settings.connectivity.nav namespace", () => {
   expect(screen.getByRole("navigation", { name: "title" })).toBeInTheDocument()
   fireEvent.click(screen.getByText("items.sync.label"))
   expect(onSelect).toHaveBeenCalledWith("sync")
-  expect(screen.getAllByRole("button")).toHaveLength(7)
+  expect(screen.getAllByRole("button")).toHaveLength(8)
 })

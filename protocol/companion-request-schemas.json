@@ -5516,6 +5516,523 @@
       "properties": {},
       "additionalProperties": false
     },
+    "file_audit_list": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "grantId": {
+          "type": "string"
+        },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_credential_rotate": {
+      "type": "object",
+      "required": [
+        "credentialId"
+      ],
+      "properties": {
+        "credentialId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_grant_create": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "paths",
+            "permissions",
+            "protocols",
+            "expiresInSeconds"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 50,
+              "description": "FileSpace virtual paths, e.g. `/workspace/src`."
+            },
+            "permissions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "download",
+                  "write"
+                ]
+              },
+              "minItems": 1
+            },
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "webdav",
+                  "sftp"
+                ]
+              },
+              "minItems": 1
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "builtin",
+                "sftpgo"
+              ],
+              "description": "Absent: the Host's own listener."
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 60
+            },
+            "label": {
+              "type": "string"
+            },
+            "sshPublicKey": {
+              "type": "string",
+              "description": "An OpenSSH public key for SFTP key authentication."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_grant_list": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Only this conversation's grants."
+        },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_grant_resume": {
+      "type": "object",
+      "required": [
+        "grantId"
+      ],
+      "properties": {
+        "grantId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_grant_revoke": {
+      "type": "object",
+      "required": [
+        "grantId"
+      ],
+      "properties": {
+        "grantId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_grant_suspend": {
+      "type": "object",
+      "required": [
+        "grantId"
+      ],
+      "properties": {
+        "grantId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_share_activate": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The unlocked local account; null locks the service."
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_share_listener_set": {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "type": "object",
+          "required": [
+            "enabled",
+            "exposure",
+            "webdav",
+            "sftp",
+            "webdavPort",
+            "sftpPort",
+            "tunnelMode"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "exposure": {
+              "type": "string",
+              "enum": [
+                "loopback",
+                "lan",
+                "tunnel"
+              ]
+            },
+            "webdav": {
+              "type": "boolean"
+            },
+            "sftp": {
+              "type": "boolean"
+            },
+            "webdavPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "sftpPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "tunnelMode": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "named"
+              ]
+            },
+            "tunnelHostname": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tunnelToken": {
+              "type": "string",
+              "description": "A named cloudflared tunnel's token. Write-only: stored in the Host's secret store, never answered."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_share_policy_set": {
+      "type": "object",
+      "required": [
+        "push"
+      ],
+      "properties": {
+        "push": {
+          "type": "object",
+          "required": [
+            "policy"
+          ],
+          "properties": {
+            "policy": {
+              "type": "object",
+              "required": [
+                "allowPublicSnapshots",
+                "allowLiveGrants",
+                "allowProtocolCredentials",
+                "allowLiveWrite",
+                "allowAgentSharing",
+                "maxSnapshotTtlSeconds",
+                "maxLiveTtlSeconds"
+              ],
+              "properties": {
+                "allowPublicSnapshots": {
+                  "type": "boolean"
+                },
+                "allowLiveGrants": {
+                  "type": "boolean"
+                },
+                "allowProtocolCredentials": {
+                  "type": "boolean"
+                },
+                "allowLiveWrite": {
+                  "type": "boolean"
+                },
+                "allowAgentSharing": {
+                  "type": "boolean"
+                },
+                "maxSnapshotTtlSeconds": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "maxLiveTtlSeconds": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "description": "The effective file-sharing policy (the person's own intersected with the org's)."
+            },
+            "orgId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "orgRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_share_sftpgo_set": {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "baseUrl",
+                "homeBase",
+                "pathMappings"
+              ],
+              "properties": {
+                "baseUrl": {
+                  "type": "string"
+                },
+                "homeBase": {
+                  "type": "string"
+                },
+                "pathMappings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "hostPrefix",
+                      "sftpgoPrefix"
+                    ],
+                    "properties": {
+                      "hostPrefix": {
+                        "type": "string"
+                      },
+                      "sftpgoPrefix": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "publicSftpHost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "publicSftpPort": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "publicWebdavUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "apiKey": {
+                  "type": "string",
+                  "description": "SFTPGo's admin API key. Write-only: stored in the Host's secret store, never answered."
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null removes the provider and its admin key."
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_share_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "file_space_sync": {
+      "type": "object",
+      "required": [
+        "sessions"
+      ],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sessionId",
+              "state"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "archived",
+                  "deleted"
+                ]
+              },
+              "mounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "mountId",
+                    "virtualPath",
+                    "backing",
+                    "writable",
+                    "status"
+                  ],
+                  "properties": {
+                    "mountId": {
+                      "type": "string"
+                    },
+                    "virtualPath": {
+                      "type": "string",
+                      "description": "Where the mount appears, e.g. `/workspace`."
+                    },
+                    "backing": {
+                      "type": "string",
+                      "enum": [
+                        "disk",
+                        "dexie"
+                      ]
+                    },
+                    "hostPath": {
+                      "type": "string",
+                      "description": "The host directory of a disk mount; the Host validates and canonicalizes it."
+                    },
+                    "writable": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "`available`, `offline`, `missing`, `deleted`."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "assets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "mountId",
+                    "name",
+                    "size",
+                    "mediaType",
+                    "modifiedAt",
+                    "sourceId"
+                  ],
+                  "properties": {
+                    "mountId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "modifiedAt": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "sourceId": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "description": "The files of the Dexie-backed mounts (`/uploads`, `/artifacts`)."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "files_library_attach": {
       "type": "object",
       "description": "Use an item in a conversation. A file or image is bound to the conversation on the host, without copying bytes; an artifact or canvas document is answered `referenced`, for the device to stage as a reference from its text.",

@@ -99,10 +99,18 @@ describe("PerfManagedProcesses", () => {
             name: "local-main.mjs 127.0.0.1:51234",
             pid: 304,
           }),
+          mp({
+            subsystem: "fileShare",
+            id: "webdav",
+            name: "webdav http://127.0.0.1:27893",
+            pid: null,
+          }),
         ])}
       />
     )
     expect(screen.getByTestId("perf-managed-group-localBrowser")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-managed-group-fileShare")).toHaveTextContent("Network drive")
+    expect(screen.getByTestId("perf-managed-row-webdav")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-local-browser")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-web-tools")).toBeInTheDocument()
     expect(screen.getByTestId("perf-managed-row-hl-1")).toBeInTheDocument()

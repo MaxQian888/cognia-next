@@ -68,6 +68,7 @@ const SUBSYSTEM_RANK: Record<ManagedSubsystem, number> = {
   headlessTerminal: 7,
   tunnel: 8,
   localBrowser: 9,
+  fileShare: 10,
 }
 
 const SUBSYSTEM_ORDER = (Object.keys(SUBSYSTEM_RANK) as ManagedSubsystem[]).sort(

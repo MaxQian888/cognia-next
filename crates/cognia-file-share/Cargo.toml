@@ -1,0 +1,82 @@
+# ADR-0222 P2 — live file grants for a conversation's FileSpace.
+#
+# Owns `file-share.sqlite` (mount tables pushed by the WebView or headless
+# brain, grants, credentials, auth backoff, audit), the file gateway every live
+# operation goes through, and the providers that speak protocols for credential
+# audiences: the built-in WebDAV + SFTP listeners and the external SFTPGo
+# provider. Platform layer: it depends on `cognia-files` for confinement and
+# the sensitive-file floor, and on `cognia-companion-connectivity` for the
+# companion TLS certificate (LAN WebDAV) and the cloudflared launcher (tunnel
+# exposure). The renderer bridge that reads Dexie-backed mounts is injected by
+# the host (`AssetReader`), so this crate never reaches up into the companion
+# layer.
+[package]
+name = "cognia-file-share"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Live file grants, the file gateway and WebDAV/SFTP/SFTPGo providers for conversation FileSpaces (ADR-0222)."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_file_share"
+path = "src/lib.rs"
+
+[features]
+# ADR-0196 — the `#[tauri::command]` shells in `commands`. Only `src-tauri`
+# enables it.
+default = []
+tauri-host = ["dep:tauri"]
+
+[dependencies]
+# The `{ code, message, retryable }` envelope the command shells reject with.
+cognia-core = { path = "../cognia-core" }
+# The shared `pageSize` / `pageToken` envelope of the two list commands.
+cognia-problem = { path = "../cognia-problem" }
+cognia-files = { path = "../cognia-files" }
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-net = { path = "../cognia-net" }
+cognia-companion-connectivity = { path = "../cognia-companion-connectivity" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# The companion contract derives these wire types' response schemas.
+schemars.workspace = true
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time"] }
+tokio-util = "0.7"
+thiserror.workspace = true
+parking_lot.workspace = true
+log.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+rand.workspace = true
+data-encoding = "2"
+unicode-normalization = "0.1"
+bytes.workspace = true
+futures-util = { workspace = true, features = ["std"] }
+async-trait.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+# WebDAV: Apache-2.0, http 1 / hyper 1 like axum 0.8. No bundled
+# filesystems: every operation goes through the gateway.
+dav-server = { version = "0.11", default-features = false }
+axum.workspace = true
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+http = "1"
+headers = "0.4"
+# LAN exposure: the addresses a client on the same network can dial.
+local-ip-address = "0.6"
+# SFTP: the same pinned russh line `cognia-terminal` uses (ring backend, no
+# `rsa` feature — RUSTSEC-2023-0071), as a server this time.
+russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+russh-sftp = "3.0"
+tauri = { workspace = true, optional = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

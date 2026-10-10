@@ -7,12 +7,13 @@ import {
 } from "./nav-config"
 
 describe("connectivity nav-config", () => {
-  it("lists the seven topics exactly once", () => {
+  it("lists the eight topics exactly once", () => {
     const ids = CONNECTIVITY_NAV_ITEMS.map((item) => item.id)
     expect(ids).toEqual([
       "overview",
       "local-host",
       "cloud-relay",
+      "network-drive",
       "pairing",
       "remote-hosts",
       "push",

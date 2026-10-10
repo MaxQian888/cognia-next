@@ -78,11 +78,14 @@ export const DISPATCH_SOURCES = [
     "diagnostics",
     "host_admin",
     "environment",
+    "file_share",
   ].map(rpcFamilyFile),
-  // Two families dispatch outside rpc/: the browser gateway keys its arms on
-  // the same literals, and SFTP is served by its own service module.
+  // Three families dispatch outside rpc/: the browser gateway keys its arms on
+  // the same literals, and SFTP and live file shares are served by their own
+  // crates' command surfaces.
   COMPANION_SOURCES.browserGateway,
   COMPANION_SOURCES.sftpService,
+  COMPANION_SOURCES.fileShareRpc,
 ]
 
 /** Directories scanned for surviving old-name literals (R7). */

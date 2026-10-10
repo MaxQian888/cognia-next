@@ -45,6 +45,9 @@
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
+ * - `file-share-host-sync` — pushes the effective file-sharing policy and the
+ *   granted conversations' mount tables to the server's live file-share host
+ *   (ADR-0222); the host pulls tables and asset slices back over the bridge.
  * - `sftp-transfer-pump` — drains the durable SFTP transfer queue so a row an
  *   agent queues on the brain actually moves (ADR-0162).
  * - `issue-tracker` — the ADR-0132 board's runtime half: four issue sources,
@@ -183,6 +186,7 @@ import "./collab-refresh"
 import "./plan-notification"
 import "./room-runner"
 import "./sftp-transfer-pump"
+import "./file-share-host-sync"
 import "./bots"
 import "./router-fusion"
 import "./account-sync"

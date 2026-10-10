@@ -74,6 +74,11 @@ pub enum ManagedSubsystem {
     /// `local-main.mjs` on a loopback port, supervised by
     /// `cognia-local-browser`, which in turn owns the Chromium processes.
     LocalBrowser,
+    /// The live file-share listeners (ADR-0222): in-process WebDAV and SFTP
+    /// servers on their own ports, and the cloudflared child a tunnel
+    /// exposure spawns. They expose the user's files on the network, so they
+    /// are listed (and stoppable) like any other child.
+    FileShare,
 }
 
 /// Lifecycle state of a managed process, normalized across subsystems.
@@ -324,6 +329,50 @@ fn local_browser_row(info: &LocalBrowserManagedInfo) -> ManagedProcess {
     }
 }
 
+/// Rows for the live file-share listeners (ADR-0222). The WebDAV and SFTP
+/// servers run inside this process, so they carry no pid of their own; the
+/// tunnel row carries the cloudflared child's. The three stop and restart
+/// together, so any row's id routes to the whole listener.
+fn file_share_rows(status: &cognia_file_share::listener::ListenerStatus) -> Vec<ManagedProcess> {
+    let bind = match status.config.exposure {
+        cognia_file_share::listener::Exposure::Lan => "0.0.0.0",
+        _ => "127.0.0.1",
+    };
+    let row = |id: &str, name: String, pid: Option<u32>, detail: Option<String>| ManagedProcess {
+        subsystem: ManagedSubsystem::FileShare,
+        id: id.to_string(),
+        name,
+        pid,
+        status: ManagedStatus::Running,
+        can_kill: true,
+        can_restart: true,
+        detail,
+    };
+    let mut rows = Vec::new();
+    if let Some(port) = status.webdav_port {
+        let scheme = if status.config.webdav_tls() { "https" } else { "http" };
+        rows.push(row(
+            "webdav",
+            format!("webdav {scheme}://{bind}:{port}"),
+            None,
+            None,
+        ));
+    }
+    if let Some(port) = status.sftp_port {
+        // SFTP stays on loopback behind a tunnel; only `lan` binds it wide.
+        rows.push(row("sftp", format!("sftp {bind}:{port}"), None, None));
+    }
+    if status.tunnel_pid.is_some() || status.tunnel_url.is_some() {
+        rows.push(row(
+            "tunnel",
+            "cloudflared".to_string(),
+            status.tunnel_pid,
+            status.tunnel_url.clone(),
+        ));
+    }
+    rows
+}
+
 // ---------------------------------------------------------------------------
 // Aggregation + control
 // ---------------------------------------------------------------------------
@@ -409,6 +458,11 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         out.push(local_browser_row(&info));
     }
 
+    // The live file-share listeners (ADR-0222), when serving.
+    if let Some(service) = cognia_file_share::service::get() {
+        out.extend(file_share_rows(&service.listener_status().await));
+    }
+
     // Background jobs. Read from the process-global supervisor rather than
     // Tauri state, because the same registry has to work under the headless
     // binary where there is no `AppHandle` to hang state off.
@@ -487,16 +541,23 @@ async fn kill_subsystem(
             crate::browser::local::shutdown(app).await;
             Ok(())
         }
+        // Stops serving until the next restart (here, an unlock, or a
+        // settings change); the saved listener settings are kept.
+        ManagedSubsystem::FileShare => {
+            let service = cognia_file_share::service::require().map_err(|e| e.to_string())?;
+            service.shutdown().await;
+            Ok(())
+        }
         ManagedSubsystem::ExternalAgent => {
             Err("external-agent lifecycle is controlled in the renderer".to_string())
         }
     }
 }
 
-/// Restart the managed process `id`. Only code-server and the local browser
-/// runtime support this natively: code-server instances are keyed by project
-/// root and the runtime is a singleton, so a restart is just stop + re-start
-/// with no renderer state to keep in sync.
+/// Restart the managed process `id`. Only code-server, the local browser
+/// runtime and the file-share listener support this natively: code-server
+/// instances are keyed by project root and the other two are singletons, so a
+/// restart is just stop + re-start with no renderer state to keep in sync.
 async fn restart_subsystem(
     app: &AppHandle,
     subsystem: ManagedSubsystem,
@@ -509,6 +570,12 @@ async fn restart_subsystem(
             state.inner().ensure(app, id).await.map(|_| ())
         }
         ManagedSubsystem::LocalBrowser => crate::browser::local::restart(app).await,
+        // The listener restarts from its saved settings.
+        ManagedSubsystem::FileShare => {
+            let service = cognia_file_share::service::require().map_err(|e| e.to_string())?;
+            service.restart_listener().await;
+            Ok(())
+        }
         _ => Err(format!(
             "restart is not supported for {subsystem:?} via the native registry"
         )),
@@ -516,8 +583,8 @@ async fn restart_subsystem(
 }
 
 /// Control a managed process. `Kill` is served natively for every
-/// Rust-supervised subsystem; `Restart` only for code-server and the local
-/// browser runtime (the panel greys it out elsewhere), and external-agent control is routed through the renderer.
+/// Rust-supervised subsystem; `Restart` only for code-server, the local
+/// browser runtime and the file-share listener (the panel greys it out elsewhere), and external-agent control is routed through the renderer.
 #[tauri::command]
 pub async fn control_managed_process(
     app: AppHandle,
@@ -546,7 +613,7 @@ pub async fn list_managed_processes(app: AppHandle) -> Result<Vec<ManagedProcess
 /// This drift is not hypothetical — code-server was added to [`collect`] but
 /// not to the shutdown path, and leaked a Node server holding a port past every
 /// app exit until this list existed.
-pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 10] = [
+pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 11] = [
     ManagedSubsystem::ExternalAgent,
     ManagedSubsystem::AcpTerminal,
     ManagedSubsystem::HeadlessTerminal,
@@ -557,6 +624,7 @@ pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 10] = [
     ManagedSubsystem::Tunnel,
     ManagedSubsystem::BackgroundJob,
     ManagedSubsystem::LocalBrowser,
+    ManagedSubsystem::FileShare,
 ];
 
 /// Position of `subsystem` in [`ALL_SUBSYSTEMS`]. Exhaustive by construction.
@@ -576,6 +644,7 @@ const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
         ManagedSubsystem::Tunnel => 7,
         ManagedSubsystem::BackgroundJob => 8,
         ManagedSubsystem::LocalBrowser => 9,
+        ManagedSubsystem::FileShare => 10,
     }
 }
 
@@ -643,6 +712,12 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
         ManagedSubsystem::LocalBrowser => {
             crate::browser::local::shutdown(app).await;
         }
+        // Ends every WebDAV/SFTP session and the file-share tunnel.
+        ManagedSubsystem::FileShare => {
+            if let Some(service) = cognia_file_share::service::get() {
+                service.shutdown().await;
+            }
+        }
     }
 }
 
@@ -689,6 +764,50 @@ mod tests {
         assert_eq!(row.status, ManagedStatus::Running);
         assert!(row.can_kill && row.can_restart);
         assert_eq!(row.detail.as_deref(), Some("/work/proj"));
+    }
+
+    #[test]
+    fn file_share_rows_list_each_running_listener() {
+        use cognia_file_share::listener::{Exposure, ListenerConfig, ListenerStatus};
+        let mut status = ListenerStatus {
+            config: ListenerConfig {
+                enabled: true,
+                exposure: Exposure::Loopback,
+                ..ListenerConfig::default()
+            },
+            webdav_port: Some(27893),
+            sftp_port: Some(27894),
+            tunnel_url: None,
+            tunnel_pid: None,
+            tunnel_token_set: false,
+            errors: Vec::new(),
+            endpoints: Default::default(),
+        };
+        let rows = file_share_rows(&status);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.subsystem == ManagedSubsystem::FileShare
+            && row.can_kill
+            && row.can_restart
+            && row.pid.is_none()));
+        assert_eq!(rows[0].name, "webdav http://127.0.0.1:27893");
+        assert_eq!(rows[1].name, "sftp 127.0.0.1:27894");
+
+        status.tunnel_pid = Some(77);
+        status.tunnel_url = Some("https://x.trycloudflare.com".into());
+        let rows = file_share_rows(&status);
+        let tunnel = rows.iter().find(|row| row.id == "tunnel").unwrap();
+        assert_eq!(tunnel.pid, Some(77));
+        assert_eq!(tunnel.detail.as_deref(), Some("https://x.trycloudflare.com"));
+
+        status.webdav_port = None;
+        status.sftp_port = None;
+        status.tunnel_pid = None;
+        status.tunnel_url = None;
+        assert!(file_share_rows(&status).is_empty());
+        assert_eq!(
+            serde_json::to_string(&ManagedSubsystem::FileShare).unwrap(),
+            "\"fileShare\""
+        );
     }
 
     #[test]
@@ -928,7 +1047,7 @@ mod tests {
         // `teardown_subsystem` is exhaustive by `match`, but the list it is
         // driven from is not. Pin the two together so a new variant cannot be
         // collected without also being shut down (the code-server leak).
-        assert_eq!(ALL_SUBSYSTEMS.len(), 10);
+        assert_eq!(ALL_SUBSYSTEMS.len(), 11);
         for (i, subsystem) in ALL_SUBSYSTEMS.iter().enumerate() {
             assert_eq!(
                 subsystem_index(*subsystem),

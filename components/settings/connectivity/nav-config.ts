@@ -17,6 +17,7 @@ import {
   ActivityIcon,
   BellIcon,
   CloudIcon,
+  FolderSyncIcon,
   HardDriveIcon,
   QrCodeIcon,
   RefreshCwIcon,
@@ -30,7 +31,14 @@ import type {
 } from "@/components/settings/common/settings-panel-nav"
 
 export type ConnectivityPanelId =
-  "overview" | "local-host" | "cloud-relay" | "pairing" | "remote-hosts" | "push" | "sync"
+  | "overview"
+  | "local-host"
+  | "cloud-relay"
+  | "network-drive"
+  | "pairing"
+  | "remote-hosts"
+  | "push"
+  | "sync"
 
 export type ConnectivityNavGroupId = "statusGroup" | "hostGroup" | "devicesGroup" | "deliveryGroup"
 
@@ -48,6 +56,7 @@ export const CONNECTIVITY_NAV_GROUPS: readonly ConnectivityNavGroup[] = [
     items: [
       { id: "local-host", icon: HardDriveIcon },
       { id: "cloud-relay", icon: CloudIcon },
+      { id: "network-drive", icon: FolderSyncIcon },
     ],
   },
   {

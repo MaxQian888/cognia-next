@@ -1,0 +1,124 @@
+---
+title: Live sharing
+description: "Revocable WebDAV and SFTP access to chosen folders of one conversation, served by the host that has the files or by SFTPGo. Phase P2 of ADR-0222."
+---
+
+# Live sharing
+
+<Status variant="beta">P2 shipped · collaboration members (P3) designed</Status>
+
+<TLDR>
+  A share link is a frozen, encrypted copy. A **live share** is a grant: a WebDAV/SFTP sign-in for some
+  folders or files of one conversation, served live from the machine that holds them, until it expires or
+  you revoke it. `crates/cognia-file-share` owns the grants, the credentials, a gateway every request goes
+  through, the built-in WebDAV/SFTP listener and the optional SFTPGo provider. The app manages it from the
+  Files panel and Settings → Connectivity → Network drive.
+</TLDR>
+
+Decision record: [ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant)
+§4–§5 and §8 (which amends [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)).
+
+## Using it
+
+1. **Turn on the network drive** once: Settings → Connectivity → Network drive. Choose who can connect —
+   this computer only, the local network (WebDAV over HTTPS with this host's certificate, SFTP with its own
+   host key), or the internet through a cloudflared tunnel (WebDAV only) — and which protocols, on which
+   ports. Turning it on exposes nothing by itself: a client sees only what a grant gives it.
+2. **Share** from a conversation's **Files** panel: the hard-drive button on a folder or file row, or
+   **Share as network drive…** in the "Shared as network drive" section. Pick paths, whether the person
+   may download and change files, how long it lasts and over which protocols. An SSH public key lets an
+   SFTP client sign in without the password.
+3. **Hand over the card.** Each protocol gets its own username and a password shown **once**, the addresses
+   to dial, the fingerprints to check, and steps for macOS Finder, Windows (`net use`), rclone and OpenSSH.
+
+Every share appears in the Files panel of its conversation and, across conversations, under Settings →
+Connectivity → Network drive → Live file access, with **Suspend**, **Resume**, **Revoke**, **New password**
+(per protocol) and **Activity** (the audit trail of that share).
+
+What a share cannot do:
+
+- reach outside the paths it names, follow a symlink out of them, or read a file that looks like a
+  credential (`.env`, private keys, `.ssh/`, …) — the sensitive floor no grant overrides;
+- write to uploads, artifacts, or a folder this conversation cannot change;
+- outlive the file-sharing policy: the longest live access, whether network-drive credentials and writes
+  are allowed at all, and an organization's stricter policy all apply, and a share above a policy that was
+  tightened later is suspended;
+- survive its conversation being archived (suspended) or deleted (revoked), or its folder moving
+  (it becomes **Needs attention** until resumed against the new place).
+
+## Status and reasons
+
+| Status | Reason | Meaning |
+| --- | --- | --- |
+| Active | — | serving |
+| Suspended | `owner` | you suspended it; Resume brings it back |
+| Suspended | `policy` | goes beyond the current file-sharing policy |
+| Suspended | `session_archived` | the conversation was archived |
+| Needs attention (`stale`) | `mount_changed` | a granted folder now points somewhere else; Resume rebinds it |
+| Expired | `expired` | past its lifetime |
+| Revoked | `revoked`, `session_deleted`, `provider_failed` | permanently off |
+
+A card with no addresses says why: `listener_off` (the network drive is off), `sftpgo_unconfigured`, or
+`sftpgo_no_public_endpoint` (SFTPGo has no public address configured).
+
+## How it works
+
+```
+Files panel / Settings ──┐                       ┌── WebDAV (dav-server)
+paired device (RPC) ─────┼─► rpc.rs ─► service ──┤
+brain / WebView push ────┘     │                 └── SFTP (russh, subsystem only)
+                               ▼                          │
+                         file-share.sqlite ◄── gateway ◄──┘ every operation
+                         (per account)          grant → mount → policy → path → sensitive floor
+```
+
+- **One command surface.** `crates/cognia-file-share/src/rpc.rs` holds the thirteen `file_*` commands; the
+  desktop's Tauri shells (`commands.rs`, `tauri-host` feature) and the companion RPC
+  (`src-tauri/src/companion_api/rpc/file_share.rs`) both dispatch into it, so a paired phone sends the same
+  arguments the WebView does. Host-only: `file_share_activate`, `file_space_sync`, `file_share_policy_set`.
+  Reads (`file_share_status`, `file_grant_list`, `file_audit_list`) need `host.observe` and page by token.
+  Grant changes (`file_grant_create/revoke/suspend/resume`, `file_credential_rotate`) are `workspace.write`
+  control commands. `file_share_listener_set` and `file_share_sftpgo_set` are `host-admin` with step-up.
+- **Mount tables.** The host serves a conversation from the table the app gave it: which directory each disk
+  mount is, which uploads and artifacts are listed. The app pushes tables for conversations with grants
+  (`lib/filespace/host-sync.ts`, mounted as `FileShareHostSyncInitializer` on the desktop and as a brain
+  runtime on a headless server), and the host pulls one itself on every grant creation, on resume and once a
+  minute per conversation with a grant (`companion://filespace-mounts-request`, answered by
+  `lib/filespace/mount-table.ts`). Upload and artifact bytes are read the same way, at most 4 MiB a slice
+  (`lib/filespace/asset-responder.ts`).
+- **Shareable roots.** A disk mount must lie under a root the host would share: an active project root or the
+  managed execution directory on the desktop (`is_shareable_workspace_path`), the spawn policy's workspace
+  root on a headless server.
+- **The account.** The host serves the unlocked account's grants only. On the desktop the account session
+  binds it on unlock and unbinds it on lock; the renderer can only confirm it. A headless server binds its
+  local account at boot.
+- **Credentials.** Random usernames that carry no session information, 160-bit passwords stored as Argon2id,
+  persisted backoff per username and address, failed sign-ins only charged. Revoking or rotating drops the
+  live connections that used it.
+- **Process registry.** The listeners and the tunnel child appear under the **Network drive** subsystem on the
+  Performance page, with kill and restart.
+
+## SFTPGo
+
+On a server whose workspaces SFTPGo already serves, set Settings → Connectivity → Network drive → SFTPGo
+(admin API URL, an admin-scope API key kept in the system keychain, home base, path mappings from host paths
+to the paths SFTPGo sees, and the public SFTP/WebDAV address). Choosing **Served by: SFTPGo** in the share
+dialog then creates one SFTPGo user per credential, with a virtual folder per granted path, the sensitive
+floor as denied patterns and the grant's expiry; revoking deletes it. A path with no mapping refuses the grant
+(`sftpgo_path_unmapped`). Failed SFTPGo changes are retried in the background while the grant stays revoked
+locally. Deployment: `deploy/compose/compose.sftpgo.yaml` (see the compose README). SFTPGo is AGPL-3.0 and is
+never bundled into the app.
+
+## Where it lives
+
+| Concern | Module |
+| --- | --- |
+| Store, gateway, listeners, SFTPGo, service | `crates/cognia-file-share/` |
+| Command surface | `crates/cognia-file-share/src/rpc.rs`, `src-tauri/src/companion_api/rpc/file_share.rs` |
+| Host install, account binding, process rows | `src-tauri/src/startup/host_services.rs`, `src-tauri/src/account_auth/`, `src-tauri/src/process_registry/` |
+| Bridge (mount tables, asset reads) | `crates/cognia-companion/src/filespace_bridge.rs`, `crates/cognia-companion-bus/src/desktop_messages_bridge.rs` |
+| Wire types | `types/filespace/live.ts` |
+| Client, host sync, mount tables, mount steps | `lib/filespace/{grants-client,host-sync,mount-table,asset-responder,mount-instructions}.ts` |
+| Hook | `hooks/filespace/use-live-file-share.ts` |
+| Share dialog, credential card, grants list, audit | `components/filespace/live-*.tsx` |
+| Settings | `components/settings/connectivity/panels/network-drive-panel.tsx` and its blocks |

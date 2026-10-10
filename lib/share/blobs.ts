@@ -12,10 +12,11 @@
 // decrypted, hashed and collected into a `Blob`. Chunk requests present the
 // read ticket from the envelope read, so a file download never spends a view.
 //
-// `fetchImpl` is injected: the owner side passes `proxyFetch` (the server URL
-// is user-configured, so a renderer `fetch` would miss the proxy and the
-// shell's `connect-src`), the viewer uses the browser's `fetch`. Nothing here
-// imports app modules, so the standalone viewer can bundle it.
+// `fetchImpl` is injected, on both sides: the app passes `proxyFetch` (the
+// server URL is user-configured, so a renderer `fetch` would miss the proxy
+// and the shell's `connect-src`; in a plain browser it is the browser's own
+// `fetch`). Nothing here imports app modules, so the standalone viewer can
+// bundle it.
 
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
@@ -355,14 +356,14 @@ export interface DownloadShareBlobInput extends RetryOptions {
   readTicket: string
   material: Uint8Array
   entry: ShareFileEntry
-  fetchImpl?: FetchLike
+  /** The caller's managed fetch (`proxyFetch` in the app), like the upload side. */
+  fetchImpl: FetchLike
   onProgress?: ShareBlobProgress
 }
 
 /** Download, decrypt and verify one file. */
 export async function downloadShareBlob(input: DownloadShareBlobInput): Promise<Blob> {
-  const { entry } = input
-  const fetchImpl = input.fetchImpl ?? ((url, init) => fetch(url, init))
+  const { entry, fetchImpl } = input
   const type = entry.mime || "application/octet-stream"
   if (entry.chunkCount !== shareBlobChunkCount(entry.size)) {
     throw new ShareFileIntegrityError(entry.path)

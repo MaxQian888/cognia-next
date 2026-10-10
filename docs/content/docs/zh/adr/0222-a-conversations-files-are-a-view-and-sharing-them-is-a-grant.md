@@ -5,7 +5,7 @@ description: "每个对话拥有一个 FileSpace：从执行根、工作区根�
 
 # ADR 0222 — 对话的文件是一个视图，分享文件是一次授权
 
-**状态：** 提议中——P0（FileSpace、链接、“对话文件”面板）与 P1（附带文件的快照分享、文件分享策略、协作 `files.share`）已于 2026-10-10 交付
+**状态：** 提议中——P0（FileSpace、链接、“对话文件”面板）、P1（附带文件的快照分享、文件分享策略、协作 `files.share`）与 P2（经 WebDAV/SFTP 的实时授权、SFTPGo 提供方、网络驱动器设置）已于 2026-10-10 交付
 **日期：** 2026-10-10
 **设计：** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **相关：** [ADR-0037](./0037-public-share-links)（分享链接）、
@@ -49,9 +49,19 @@ P1 的实际实现：每个 blob 的分块 IV 共享一个随清单携带的随�
 
 `crates/cognia-file-share`（platform 层）持有 `file-share.sqlite`：由 WebView 或 headless brain 推送的挂载表；带路径、权限（`read`、`download`、`write`）、受众（`credential` 或 `collab`）、状态和强制过期时间的授权；凭证（Argon2id）；持久化的认证退避；以及持久审计日志。每一次实时操作都经过同一个网关，按顺序检查：授权；挂载点（会话有效、挂载可用、指纹未变——否则授权变为 `stale`）；当前修订版本下的有效策略；通过 `cognia-files` 的路径限根；以及任何授权都无法覆盖的敏感文件底线。
 
+P2 的实际实现：
+
+- **一套命令面。** 十三个命令都在 `crates/cognia-file-share/src/rpc.rs` 中，桌面的 `#[tauri::command]` 外壳与伴侣 RPC 共用，因此已配对设备与 WebView 发送的参数完全相同。`file_share_activate`、`file_space_sync`、`file_share_policy_set` 仅限宿主（service 作用域）；读取需要 `host.observe` 并按令牌分页；授权变更是 `workspace.write` 控制命令；监听器与 SFTPGo 设置属于 `host-admin` 并需要二次验证。审计中，应用与 brain 记为 `owner`，已配对设备记为 `device:<id>`。
+- **宿主主动拉取挂载表。** WebView 或 brain 会为有授权的对话推送挂载表，宿主也会在需要最新表时主动索取：每次创建授权时（已配对设备创建的授权由此绑定到当前路径）、恢复时，以及对每个仍有授权的对话每分钟一次（经桌面桥接的 `companion://filespace-mounts-request`；brain 会声明 `filespace` 能力）。拉取失败时保留上一份表，针对其他对话的回答会被拒绝。Dexie 中的文件以同样方式读取，每片最多 4 MiB。
+- **哪些目录可以分享。** 磁盘挂载必须位于宿主愿意分享的根之下：桌面端是当前项目的根，或应用数据目录下的托管执行目录（绝不包括应用数据目录本身、`~/.claude` 或经对话框授权的路径）；headless 服务器则是 spawn 策略的工作区根。
+- **账号由宿主决定。** 桌面端的账号会话在解锁时绑定已解锁账号、锁定时解除绑定；渲染进程只能确认该账号，不能指定其他账号，重复确认不会断开现有连接。headless 服务器在启动时绑定本地账号。
+- **模块比设计稿少。** 维护任务（过期、策略复检、提供方重试队列、挂载表拉取）在 `service.rs` 中运行；没有 `provider.rs` trait，因为两种提供方保存的东西（密码哈希与已创建的 SFTPGo 用户）差异大于共性。
+
 ### 5. 提供方只负责协议，不决定访问
 
 内置提供方在各自独立的监听器上运行 WebDAV（`dav-server`，Apache-2.0）和 SFTP（`russh` 加 `russh-sftp`，仅 subsystem——无 shell、exec 或转发），默认关闭，除非用户选择局域网或隧道，否则只绑定回环地址；所有操作都经过网关。SFTPGo 提供方为每个凭证创建一个 SFTPGo 用户，虚拟目录经配置的路径映射转换，并设置过期时间与禁止模式；SFTPGo 无法访问的路径会直接拒绝。SFTPGo 作为独立服务部署（`deploy/compose`），绝不打包进应用。
+
+P2 的实际实现：监听器的暴露方式为 `loopback`、`lan`（WebDAV 使用伴侣证书走 HTTPS，SFTP 使用持久的 Ed25519 主机密钥）或 `tunnel`（由 cloudflared 子进程以快速或命名隧道承载 WebDAV）。每个凭证卡片显示可达地址、两种指纹，以及访达、Windows、rclone 与 OpenSSH 的连接步骤；无法访问的共享会说明原因（`listener_off`、`sftpgo_unconfigured`、`sftpgo_no_public_endpoint`）。监听器与隧道子进程在进程注册表中以 `fileShare` 子系统出现。失败的 SFTPGo 变更会排队重试，同时授权在本地保持已撤销。界面入口是“文件”面板中的“以网络驱动器共享”分区，以及“设置 → 连接 → 网络驱动器”；编排覆盖文件为 `deploy/compose/compose.sftpgo.yaml`。
 
 ### 6. 协作成员通过请求访问宿主
 

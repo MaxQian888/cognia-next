@@ -1,0 +1,31 @@
+{
+  "$comment": "FileSpace path normalization vectors (ADR-0222). Read by lib/filespace/paths.test.ts and crates/cognia-file-share/src/paths.rs: the TS grammar and the Rust gateway must agree on every case.",
+  "normalize": [
+    { "input": "/", "expected": "/" },
+    { "input": "", "expected": null },
+    { "input": "///", "expected": "/" },
+    { "input": "workspace", "expected": "/workspace" },
+    { "input": "workspace/a", "expected": "/workspace/a" },
+    { "input": "/workspace//a/", "expected": "/workspace/a" },
+    { "input": "/workspace/./a", "expected": null },
+    { "input": "/workspace/../uploads", "expected": null },
+    { "input": "/a/b/../", "expected": null },
+    { "input": "/workspace/a\\b", "expected": null },
+    { "input": "/C:/x", "expected": null },
+    { "input": "C:", "expected": null },
+    { "input": "/x/C:", "expected": "/x/C:" },
+    { "input": "/1:", "expected": "/1:" },
+    { "input": "/ab:", "expected": "/ab:" },
+    { "input": "/workspace/a\u0000b", "expected": null },
+    { "input": "/workspace/a\u001fb", "expected": null },
+    { "input": "/workspace/a\u007fb", "expected": null },
+    { "input": "/workspace/cafe\u0301", "expected": "/workspace/caf\u00e9" },
+    { "input": "/workspace/日本語/ファイル.txt", "expected": "/workspace/日本語/ファイル.txt" },
+    { "input": "/workspace/ a ", "expected": "/workspace/ a " },
+    { "input": "  ", "expected": "/  " },
+    { "input": "/workspace/...", "expected": "/workspace/..." },
+    { "input": "/workspace/.env", "expected": "/workspace/.env" },
+    { "input": "/workspace/a%2F..%2Fb", "expected": "/workspace/a%2F..%2Fb" },
+    { "input": "/roots/pkg%2Ecore/src", "expected": "/roots/pkg%2Ecore/src" }
+  ]
+}

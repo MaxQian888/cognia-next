@@ -45,6 +45,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { downloadBlob } from "@/lib/files/download"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { formatBytes } from "@/lib/perf/backend/format"
 import {
   ShareFileIntegrityError,
@@ -209,6 +210,7 @@ function useShareFileBlobs(access: ShareFilesAccess | undefined) {
         readTicket: access.readTicket,
         material: access.material,
         entry: file,
+        fetchImpl: proxyFetch,
         onProgress: (bytes) => set({ status: "loading", done: bytes }),
       })
       pending.current.set(file.blobId, request)

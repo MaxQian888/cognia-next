@@ -185,6 +185,12 @@ const DiagnosticAutoSubmitInitializer = dynamic(
     import("./diagnostic-auto-submit-initializer").then((m) => m.DiagnosticAutoSubmitInitializer),
   { ssr: false }
 )
+// Live file sharing (ADR-0222 §7.5): pushes the effective file-sharing policy
+// and the granted conversations' mount tables to this machine's host.
+const FileShareHostSyncInitializer = dynamic(
+  () => import("./file-share-host-sync-initializer").then((m) => m.FileShareHostSyncInitializer),
+  { ssr: false }
+)
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
   useSyncExternalStore(
@@ -239,6 +245,7 @@ export function DesktopOnlyInitializers() {
       <SessionImportWatchInitializer />
       <BrowserDownloadsInitializer />
       <SitesInitializer />
+      <FileShareHostSyncInitializer />
       <RouterFusionInitializer />
     </>
   )

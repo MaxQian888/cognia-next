@@ -9,6 +9,7 @@ import {
   normalizeFileSpacePath,
   toFileSpacePath,
 } from "./paths"
+import pathFixtures from "./path-fixtures.json"
 
 const p = (value: string) => value as FileSpacePath
 
@@ -66,6 +67,14 @@ describe("normalizeFileSpacePath", () => {
   it("composes to NFC so the same name has one spelling", () => {
     const decomposed = "/workspace/cafe\u0301.md"
     expect(normalizeFileSpacePath(decomposed)).toBe("/workspace/caf\u00e9.md")
+  })
+
+  it("agrees with the Rust gateway on every shared vector", () => {
+    // crates/cognia-file-share/src/paths.rs reads the same file.
+    expect(pathFixtures.normalize.length).toBeGreaterThanOrEqual(20)
+    for (const { input, expected } of pathFixtures.normalize) {
+      expect([input, normalizeFileSpacePath(input)]).toEqual([input, expected])
+    }
   })
 
   it("bounds the length", () => {

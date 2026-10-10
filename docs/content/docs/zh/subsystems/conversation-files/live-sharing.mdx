@@ -1,0 +1,109 @@
+---
+title: 实时共享
+description: "对某个对话中选定文件夹的可撤销 WebDAV 与 SFTP 访问，由持有文件的宿主或 SFTPGo 提供。ADR-0222 的 P2 阶段。"
+---
+
+# 实时共享
+
+<Status variant="beta">P2 已交付 · 协作成员（P3）已设计</Status>
+
+<TLDR>
+  分享链接是一份冻结的加密副本。**实时共享**则是一次授权：针对某个对话中的部分文件夹或文件，签发一个
+  WebDAV/SFTP 登录，由持有这些文件的机器实时提供，直到过期或被你撤销。`crates/cognia-file-share`
+  负责授权、凭证、每个请求都必须经过的网关、内置的 WebDAV/SFTP 监听器，以及可选的 SFTPGo 提供方。
+  应用中通过“文件”面板和“设置 → 连接 → 网络驱动器”管理。
+</TLDR>
+
+决策记录：[ADR-0222](/docs/adr/0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant)
+§4–§5 与 §8（修订了 [ADR-0162](/docs/adr/0162-sftp-is-shell-equivalent)）。
+
+## 使用方式
+
+1. **先开启网络驱动器**（只需一次）：设置 → 连接 → 网络驱动器。选择谁可以连接——仅此电脑、局域网（WebDAV
+   使用此主机自己的证书走 HTTPS，SFTP 使用自己的主机密钥），或通过 cloudflared 隧道走互联网（仅 WebDAV）——以及
+   使用哪些协议和端口。开启本身不会暴露任何内容：客户端只能看到授权给它的东西。
+2. 在对话的 **文件** 面板中**共享**：文件夹或文件行上的硬盘按钮，或“以网络驱动器共享”分区中的
+   **以网络驱动器共享…**。选择路径、对方能否下载和修改、有效期以及使用哪些协议。提供 SSH 公钥后，SFTP
+   客户端可以不用密码登录。
+3. **交出连接卡片。** 每种协议都有自己的用户名和**只显示一次**的密码、要连接的地址、需要核对的指纹，以及
+   macOS 访达、Windows（`net use`）、rclone 与 OpenSSH 的连接步骤。
+
+每个共享都会出现在其对话的“文件”面板中；所有对话的共享汇总在“设置 → 连接 → 网络驱动器 → 实时文件访问”，
+提供 **暂停**、**恢复**、**撤销**、**生成新密码**（按协议）和 **活动**（该共享的审计记录）。
+
+共享做不到的事：
+
+- 访问它列出的路径之外的内容、通过符号链接跳出这些路径，或读取看起来像凭据的文件（`.env`、私钥、`.ssh/`
+  等）——这是任何授权都无法覆盖的敏感文件底线；
+- 写入上传的文件、产物，或此对话无法修改的文件夹；
+- 超出文件分享策略：实时访问的最长有效期、是否允许网络驱动器凭据和写入，以及组织更严格的策略都会生效；策略
+  事后收紧时，超出新上限的共享会被暂停；
+- 在对话被归档（暂停）或删除（撤销）、或其文件夹被移动后继续服务（会变为 **需要处理**，恢复后按新位置重新绑定）。
+
+## 状态与原因
+
+| 状态 | 原因 | 含义 |
+| --- | --- | --- |
+| 已启用 | — | 正在提供 |
+| 已暂停 | `owner` | 由你暂停；恢复即可继续 |
+| 已暂停 | `policy` | 超出了当前的文件分享策略 |
+| 已暂停 | `session_archived` | 对话已归档 |
+| 需要处理（`stale`） | `mount_changed` | 被授权的文件夹现在指向别处；恢复后重新绑定 |
+| 已过期 | `expired` | 已超过有效期 |
+| 已撤销 | `revoked`、`session_deleted`、`provider_failed` | 永久关闭 |
+
+没有地址的卡片会说明原因：`listener_off`（网络驱动器已关闭）、`sftpgo_unconfigured`，或
+`sftpgo_no_public_endpoint`（SFTPGo 未配置公共地址）。
+
+## 工作原理
+
+```
+文件面板 / 设置 ─────────┐                       ┌── WebDAV（dav-server）
+已配对设备（RPC）────────┼─► rpc.rs ─► service ──┤
+brain / WebView 推送 ────┘     │                 └── SFTP（russh，仅 subsystem）
+                               ▼                          │
+                         file-share.sqlite ◄── 网关 ◄──────┘ 每一次操作
+                         （按账号）           授权 → 挂载 → 策略 → 路径 → 敏感底线
+```
+
+- **一套命令面。** `crates/cognia-file-share/src/rpc.rs` 包含十三个 `file_*` 命令；桌面的 Tauri 外壳
+  （`commands.rs`，`tauri-host` 特性）和伴侣 RPC（`src-tauri/src/companion_api/rpc/file_share.rs`）都分发到这里，
+  因此已配对手机发送的参数与 WebView 完全相同。仅限宿主：`file_share_activate`、`file_space_sync`、
+  `file_share_policy_set`。读取（`file_share_status`、`file_grant_list`、`file_audit_list`）需要 `host.observe`
+  并按令牌分页。授权变更（`file_grant_create/revoke/suspend/resume`、`file_credential_rotate`）是
+  `workspace.write` 控制命令。`file_share_listener_set` 与 `file_share_sftpgo_set` 属于 `host-admin` 并需要二次验证。
+- **挂载表。** 宿主依据应用提供的挂载表服务一个对话：每个磁盘挂载对应哪个目录、列出哪些上传文件和产物。应用为
+  有授权的对话推送挂载表（`lib/filespace/host-sync.ts`，在桌面端挂载为 `FileShareHostSyncInitializer`，在 headless
+  服务器上作为 brain 运行时），宿主也会在每次创建授权、恢复时，以及对每个有授权的对话每分钟一次主动拉取
+  （`companion://filespace-mounts-request`，由 `lib/filespace/mount-table.ts` 回答）。上传文件与产物的字节以同样
+  方式读取，每片最多 4 MiB（`lib/filespace/asset-responder.ts`）。
+- **可分享的根。** 磁盘挂载必须位于宿主愿意分享的根之下：桌面端是当前项目的根或托管执行目录
+  （`is_shareable_workspace_path`），headless 服务器是 spawn 策略的工作区根。
+- **账号。** 宿主只提供已解锁账号的授权。桌面端的账号会话在解锁时绑定、锁定时解除；渲染进程只能确认该账号。
+  headless 服务器在启动时绑定本地账号。
+- **凭证。** 随机用户名不携带任何会话信息，160 位密码以 Argon2id 保存，按用户名与地址持久化退避，只对失败的
+  登录计数。撤销或生成新密码会断开使用它的现有连接。
+- **进程注册表。** 监听器与隧道子进程出现在“性能”页的 **网络驱动器** 子系统下，可终止和重启。
+
+## SFTPGo
+
+在 SFTPGo 已能访问工作区的服务器上，配置“设置 → 连接 → 网络驱动器 → SFTPGo”（管理 API 地址、保存在系统钥匙串
+中的管理员级 API 密钥、主目录根路径、从宿主路径到 SFTPGo 所见路径的映射，以及公共 SFTP/WebDAV 地址）。之后在
+共享对话框中选择 **提供方：SFTPGo**，就会为每个凭证创建一个 SFTPGo 用户：每个被授权路径一个虚拟目录，敏感文件
+底线作为禁止模式，过期时间与授权一致；撤销时删除该用户。没有映射的路径会拒绝授权（`sftpgo_path_unmapped`）。
+失败的 SFTPGo 变更会在后台重试，同时授权在本地保持已撤销。部署：`deploy/compose/compose.sftpgo.yaml`（见 compose
+README）。SFTPGo 采用 AGPL-3.0 许可，从不打包进应用。
+
+## 代码位置
+
+| 关注点 | 模块 |
+| --- | --- |
+| 存储、网关、监听器、SFTPGo、服务 | `crates/cognia-file-share/` |
+| 命令面 | `crates/cognia-file-share/src/rpc.rs`、`src-tauri/src/companion_api/rpc/file_share.rs` |
+| 宿主安装、账号绑定、进程行 | `src-tauri/src/startup/host_services.rs`、`src-tauri/src/account_auth/`、`src-tauri/src/process_registry/` |
+| 桥接（挂载表、资源读取） | `crates/cognia-companion/src/filespace_bridge.rs`、`crates/cognia-companion-bus/src/desktop_messages_bridge.rs` |
+| 线上类型 | `types/filespace/live.ts` |
+| 客户端、宿主同步、挂载表、连接步骤 | `lib/filespace/{grants-client,host-sync,mount-table,asset-responder,mount-instructions}.ts` |
+| Hook | `hooks/filespace/use-live-file-share.ts` |
+| 共享对话框、凭证卡片、授权列表、审计 | `components/filespace/live-*.tsx` |
+| 设置 | `components/settings/connectivity/panels/network-drive-panel.tsx` 及其区块 |

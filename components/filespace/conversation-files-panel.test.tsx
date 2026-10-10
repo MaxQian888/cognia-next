@@ -24,12 +24,23 @@ jest.mock("@/components/share/share-link-dialog", () => ({
     return <div data-testid="share-dialog" />
   },
 }))
+// Live sharing reads the host; the section has its own suite.
+jest.mock("@/hooks/filespace/use-live-file-share", () => ({ useLiveFileShare: jest.fn() }))
+const mockLiveSection = jest.fn()
+jest.mock("./live-sharing-section", () => ({
+  ...jest.requireActual("./live-sharing-section"),
+  LiveSharingSection: (props: Record<string, unknown>) => {
+    mockLiveSection(props)
+    return <div data-testid="live-section" />
+  },
+}))
 jest.mock("@/lib/files/download", () => ({ downloadBlob: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/tauri/clipboard", () => ({ writeClipboardText: jest.fn(async () => undefined) }))
 
 import { toast } from "sonner"
 import { useConversationFileSpace } from "@/hooks/filespace/use-conversation-filespace"
+import { useLiveFileShare } from "@/hooks/filespace/use-live-file-share"
 import { getSessionAsset } from "@/lib/db/session-assets"
 import { getSession } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
@@ -114,9 +125,19 @@ function loaded(
   }
 }
 
+const UNSUPPORTED = {
+  status: null,
+  grants: [],
+  error: "unknown_command",
+  errorMessage: null,
+  loading: false,
+  reload: jest.fn(),
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   useFileSpacePanelStore.setState({ focus: null })
+  ;(useLiveFileShare as jest.Mock).mockReturnValue(UNSUPPORTED)
 })
 
 describe("ConversationFilesPanel", () => {
@@ -326,6 +347,66 @@ describe("ConversationFilesPanel", () => {
       await act(async () => {})
       expect(toast.error).toHaveBeenCalledWith("toast.shareUnavailable")
       expect(screen.queryByTestId("share-dialog")).toBeNull()
+    })
+  })
+
+  describe("sharing as a network drive", () => {
+    const OFFERED = {
+      ...UNSUPPORTED,
+      error: null,
+      status: {
+        active: true,
+        policy: { allowLiveGrants: true, allowProtocolCredentials: true },
+      },
+    }
+    const liveButton = (testId: string) =>
+      screen.getByTestId(testId).querySelector('button[aria-label="grants.newShare"]')
+    const lastSection = () =>
+      mockLiveSection.mock.lastCall?.[0] as {
+        request: { seq: number; paths: FileSpacePath[] } | null
+        onCloseRequest: () => void
+        space: { sessionId: string }
+      }
+
+    it("reads this conversation's host only once its files are known", () => {
+      useSpace.mockReturnValue(undefined)
+      const { rerender } = render(<ConversationFilesPanel sessionId="s1" />, { wrapper })
+      expect(useLiveFileShare).toHaveBeenLastCalledWith({
+        sessionId: "s1",
+        hostId: undefined,
+        enabled: false,
+      })
+      useSpace.mockReturnValue(loaded({ hostId: "h1" }))
+      rerender(<ConversationFilesPanel sessionId="s1" />)
+      expect(useLiveFileShare).toHaveBeenLastCalledWith({
+        sessionId: "s1",
+        hostId: "h1",
+        enabled: true,
+      })
+    })
+
+    it("offers no row action where the host cannot share live", () => {
+      useSpace.mockReturnValue(loaded())
+      render(<ConversationFilesPanel sessionId="s1" />, { wrapper })
+      expect(liveButton("filespace-mount-workspace")).toBeNull()
+      expect(liveButton("filespace-entry-art-1")).toBeNull()
+    })
+
+    it("opens the live share on the row it starts from", () => {
+      ;(useLiveFileShare as jest.Mock).mockReturnValue(OFFERED)
+      useSpace.mockReturnValue(loaded())
+      render(<ConversationFilesPanel sessionId="s1" />, { wrapper })
+      expect(liveButton("filespace-mount-root:docs")).toBeDisabled()
+      expect(liveButton("filespace-entry-asset-2")).toBeNull()
+      expect(lastSection().request).toBeNull()
+
+      fireEvent.click(liveButton("filespace-mount-workspace")!)
+      expect(lastSection().request).toEqual({ seq: 1, paths: ["/workspace"] })
+      fireEvent.click(liveButton("filespace-entry-asset-1")!)
+      expect(lastSection().request).toEqual({ seq: 2, paths: ["/uploads/report.pdf"] })
+      act(() => lastSection().onCloseRequest())
+      expect(lastSection().request).toBeNull()
+      expect(lastSection().space.sessionId).toBe("s1")
     })
   })
 })

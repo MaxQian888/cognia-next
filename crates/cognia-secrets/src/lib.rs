@@ -5,6 +5,8 @@
 //! - [`keyring_secrets`] — namespaced plain-string secrets on top of it.
 //! - [`user_presence`] — OS user presence (LocalAuthentication, Windows
 //!   Hello, polkit) gating secret reveal/copy/export.
+//! - [`password_kdf`] — the one Argon2id cost for local passwords and
+//!   credentials (account passwords, file-share credentials).
 //! - [`api_key`] — the in-process Anthropic provider env store pushed by the
 //!   frontend and injected into the sidecar environment at spawn.
 //!
@@ -18,6 +20,7 @@
 pub mod api_key;
 pub mod keychain_access;
 pub mod keyring_secrets;
+pub mod password_kdf;
 pub mod secret_store;
 pub mod user_presence;
 

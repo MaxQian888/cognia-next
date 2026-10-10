@@ -70,6 +70,12 @@ describe("FileSharingPolicyCard: your policy", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
+  it("is the anchor the live-share surfaces link to", async () => {
+    const { container } = render(<FileSharingPolicyCard />)
+    await screen.findByRole("switch", { name: "Share files as links" })
+    expect(container.querySelector('[data-setting-id="file-sharing-policy"]')).not.toBeNull()
+  })
+
   it("shows no organization section outside an organization", async () => {
     render(<FileSharingPolicyCard />)
     await screen.findByRole("switch", { name: "Share files as links" })

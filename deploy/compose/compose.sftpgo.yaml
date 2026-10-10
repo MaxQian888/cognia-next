@@ -1,0 +1,77 @@
+# SFTPGo as the live file-share provider (ADR-0222 §7.4).
+#
+# An overlay on the T2 stack: SFTPGo serves the workspaces cognia-server's
+# agents work in, so it needs the shared `cognia_workspaces` volume that only
+# docker-compose.t2.yml declares.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+#     -f compose.sftpgo.yaml --profile server --profile sftpgo up -d --wait
+#
+# Then, once: sign in to the admin UI (loopback, SFTPGO_ADMIN_PORT), turn on
+# "Allow API key authentication" in your admin profile, create an admin-scope
+# API key, and enter it in Cognia → Settings → Connectivity → Network drive →
+# SFTPGo together with:
+#
+#   Admin API URL        http://sftpgo:8080      (the compose network name)
+#   Home directory base  /srv/sftpgo/homes
+#   Path mapping         /workspaces  →  /srv/sftpgo/workspaces
+#   Public SFTP host     the address people dial (port SFTPGO_SFTP_PORT)
+#   Public WebDAV URL    https://<your domain>:<SFTPGO_WEBDAV_PORT>/ behind TLS
+#
+# Cognia creates one SFTPGo user per share credential, scoped to the granted
+# folders only, and deletes it on revoke. SFTPGo is AGPL-3.0: it runs here as
+# a separate, unmodified upstream image and is never bundled into the app.
+services:
+  # SFTPGo runs as cognia-server's uid (below), but a fresh named volume is
+  # owned by root or by the image's own `sftpgo` user. Hand its state and
+  # home volumes over once before it starts.
+  sftpgo-init:
+    profiles: [sftpgo]
+    image: ${SFTPGO_IMAGE:-drakkan/sftpgo:v2.7}
+    user: "0:0"
+    entrypoint: ["chown", "-R", "10001:10001", "/var/lib/sftpgo", "/srv/sftpgo/homes"]
+    volumes:
+      - sftpgo_data:/var/lib/sftpgo
+      - sftpgo_homes:/srv/sftpgo/homes
+    restart: "no"
+
+  sftpgo:
+    profiles: [sftpgo]
+    # Pin a digest in production (`docker buildx imagetools inspect`).
+    image: ${SFTPGO_IMAGE:-drakkan/sftpgo:v2.7}
+    # The same uid/gid as cognia-server (Dockerfile.cognia-server), so a
+    # write grant can change files the agents created and vice versa.
+    user: "10001:10001"
+    depends_on:
+      sftpgo-init:
+        condition: service_completed_successfully
+    environment:
+      SFTPGO_DATA_PROVIDER__CREATE_DEFAULT_ADMIN: "true"
+      SFTPGO_DEFAULT_ADMIN_USERNAME: ${SFTPGO_ADMIN_USERNAME:-admin}
+      SFTPGO_DEFAULT_ADMIN_PASSWORD: ${SFTPGO_ADMIN_PASSWORD:?set SFTPGO_ADMIN_PASSWORD (openssl rand -hex 16)}
+      SFTPGO_HTTPD__BINDINGS__0__PORT: "8080"
+      SFTPGO_SFTPD__BINDINGS__0__PORT: "2022"
+      SFTPGO_WEBDAVD__BINDINGS__0__PORT: "10080"
+    ports:
+      # The admin UI and REST API stay on loopback: cognia-server reaches
+      # them over the compose network, an operator through an SSH tunnel.
+      - "${SFTPGO_ADMIN_BIND_ADDRESS:-127.0.0.1}:${SFTPGO_ADMIN_PORT:-8090}:8080"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${SFTPGO_SFTP_PORT:-2022}:2022"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${SFTPGO_WEBDAV_PORT:-10080}:10080"
+    volumes:
+      - sftpgo_data:/var/lib/sftpgo
+      - sftpgo_homes:/srv/sftpgo/homes
+      - cognia_workspaces:/srv/sftpgo/workspaces
+    healthcheck:
+      test: ["CMD", "sftpgo", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 512m
+    restart: unless-stopped
+
+volumes:
+  sftpgo_data:
+  sftpgo_homes:

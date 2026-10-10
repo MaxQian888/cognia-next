@@ -35,6 +35,11 @@ aes-gcm = { workspace = true, features = ["aes"] }
 parking_lot.workspace = true
 rand.workspace = true
 hex.workspace = true
+# `password_kdf`: the one Argon2id cost shared by account passwords and
+# file-share credentials (ADR-0222). Same version as src-tauri's.
+argon2 = "0.6"
+base64.workspace = true
+subtle.workspace = true
 dirs.workspace = true
 log.workspace = true
 keyring = { version = "4", default-features = false }

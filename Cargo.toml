@@ -149,6 +149,7 @@ members = [
   # ADR-0067 Tier C — leaves lifted out of the regrown `app_lib`.
   "crates/cognia-agents",
   "crates/cognia-files",
+  "crates/cognia-file-share",
   "crates/cognia-agent-state",
   # The provider-neutral deploy target contract, and the controller and signed
   # agent built on it. New crates, not extractions from `app_lib`.

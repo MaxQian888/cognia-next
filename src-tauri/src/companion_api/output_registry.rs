@@ -940,6 +940,20 @@ mod tests {
         ("environment_probe_get", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::ProbeCacheResult", schema: schema_of::<crate::companion_api::environment_pool::ProbeCacheResult> })),
         ("environment_driver_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::DriverStatus", schema: schema_of::<crate::companion_api::environment_pool::DriverStatus> })),
         ("environment_image_inspect", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::registry::ImageMetadata", schema: schema_of::<cognia_environment::registry::ImageMetadata> })),
+        // ── live file shares (cognia_file_share::rpc via rpc/file_share.rs) ──
+        ("file_share_activate", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::service::FileShareStatus", schema: schema_of::<cognia_file_share::service::FileShareStatus> })),
+        ("file_space_sync", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::service::SyncReport", schema: schema_of::<cognia_file_share::service::SyncReport> })),
+        ("file_share_policy_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::policy::PolicySnapshot", schema: schema_of::<cognia_file_share::policy::PolicySnapshot> })),
+        ("file_share_status", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::service::FileShareStatus", schema: schema_of::<cognia_file_share::service::FileShareStatus> })),
+        ("file_grant_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::model::CreatedGrant", schema: schema_of::<cognia_file_share::model::CreatedGrant> })),
+        ("file_grant_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::page::Page<cognia_file_share::model::GrantView>", schema: schema_of::<cognia_file_share::page::Page<cognia_file_share::model::GrantView>> })),
+        ("file_grant_revoke", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::model::GrantView", schema: schema_of::<cognia_file_share::model::GrantView> })),
+        ("file_grant_suspend", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::model::GrantView", schema: schema_of::<cognia_file_share::model::GrantView> })),
+        ("file_grant_resume", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::model::GrantView", schema: schema_of::<cognia_file_share::model::GrantView> })),
+        ("file_credential_rotate", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::model::IssuedCredential", schema: schema_of::<cognia_file_share::model::IssuedCredential> })),
+        ("file_audit_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::page::Page<cognia_file_share::store::AuditRow>", schema: schema_of::<cognia_file_share::page::Page<cognia_file_share::store::AuditRow>> })),
+        ("file_share_listener_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::listener::ListenerStatus", schema: schema_of::<cognia_file_share::listener::ListenerStatus> })),
+        ("file_share_sftpgo_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::sftpgo::SftpgoStatus", schema: schema_of::<cognia_file_share::sftpgo::SftpgoStatus> })),
     ];
 
     // ── The ledger ──────────────────────────────────────────────────────────
@@ -955,7 +969,7 @@ mod tests {
     // nothing to do with the command. `Opaque` is the one worth refusing,
     // because it is where an arm escapes having a shape at all.
     const OPAQUE_CEILING: usize = 158;
-    const DERIVED_FLOOR: usize = 57;
+    const DERIVED_FLOOR: usize = 70;
 
     // ── Reading a JSON Schema down to what a client can break on ────────────
 

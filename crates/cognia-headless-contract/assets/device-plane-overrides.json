@@ -2522,6 +2522,167 @@
         ]
       }
     },
+    "file_share_listener_set": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "config",
+          "adminLease"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": [
+              "enabled",
+              "exposure",
+              "webdav",
+              "sftp",
+              "webdavPort",
+              "sftpPort",
+              "tunnelMode"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "exposure": {
+                "type": "string",
+                "enum": [
+                  "loopback",
+                  "lan",
+                  "tunnel"
+                ]
+              },
+              "webdav": {
+                "type": "boolean"
+              },
+              "sftp": {
+                "type": "boolean"
+              },
+              "webdavPort": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "sftpPort": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "tunnelMode": {
+                "type": "string",
+                "enum": [
+                  "quick",
+                  "named"
+                ]
+              },
+              "tunnelHostname": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tunnelToken": {
+                "type": "string",
+                "description": "A named cloudflared tunnel's token. Write-only: stored in the Host's secret store, never answered."
+              }
+            },
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "file_share_sftpgo_set": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "config",
+          "adminLease"
+        ],
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "baseUrl",
+                  "homeBase",
+                  "pathMappings"
+                ],
+                "properties": {
+                  "baseUrl": {
+                    "type": "string"
+                  },
+                  "homeBase": {
+                    "type": "string"
+                  },
+                  "pathMappings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "hostPrefix",
+                        "sftpgoPrefix"
+                      ],
+                      "properties": {
+                        "hostPrefix": {
+                          "type": "string"
+                        },
+                        "sftpgoPrefix": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "publicSftpHost": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "publicSftpPort": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "publicWebdavUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "apiKey": {
+                    "type": "string",
+                    "description": "SFTPGo's admin API key. Write-only: stored in the Host's secret store, never answered."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null removes the provider and its admin key."
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "fleet_focus_terminal": {
       "inputSchemaSource": "contract",
       "inputSchema": {

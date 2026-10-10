@@ -25,20 +25,21 @@ describe("FileSharingPolicyFields", () => {
     expect(screen.getByRole("switch", { name: "Agents may share" })).not.toBeChecked()
   })
 
-  it("labels every control whose feature has not shipped, and only those", () => {
+  it("labels agent sharing, which has not shipped, and nothing else", () => {
     renderFields()
-    expect(screen.getAllByText("Not available yet")).toHaveLength(5)
+    expect(screen.getAllByText("Not available yet")).toHaveLength(1)
+    expect(within(row("Agents may share")).getByText("Not available yet")).toBeInTheDocument()
+    // Live access, its network credentials and writes ship with ADR-0222 phase 2.
     for (const label of [
+      "Share files as links",
       "Live access",
       "Network drive access",
       "Allow changes",
-      "Agents may share",
+      "Longest a file link may last",
       "Longest live access may last",
     ]) {
-      expect(within(row(label)).getByText("Not available yet")).toBeInTheDocument()
+      expect(within(row(label)).queryByText("Not available yet")).toBeNull()
     }
-    expect(within(row("Share files as links")).queryByText("Not available yet")).toBeNull()
-    expect(within(row("Longest a file link may last")).queryByText("Not available yet")).toBeNull()
   })
 
   it("keeps an edit one the plane accepts", async () => {

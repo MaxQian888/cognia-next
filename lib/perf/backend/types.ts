@@ -160,6 +160,11 @@ export type ManagedSubsystem =
   | "backgroundJob"
   /** The local Chromium runtime (ADR-0201), a singleton on a loopback port. */
   | "localBrowser"
+  /**
+   * Live file sharing (ADR-0222): the WebDAV and SFTP listeners (in-process,
+   * no pid of their own) and the cloudflared child fronting WebDAV.
+   */
+  | "fileShare"
 
 /** Normalized lifecycle state of a managed process (matches Rust `ManagedStatus`). */
 export type ManagedStatus = "starting" | "running" | "stopping" | "stopped" | "error"

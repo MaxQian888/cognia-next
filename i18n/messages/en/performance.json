@@ -245,6 +245,7 @@
       "chatSidecar": "Chat sidecar",
       "codeServer": "Pro IDE (code-server)",
       "externalAgent": "External agents",
+      "fileShare": "Network drive",
       "headlessTerminal": "Headless shells",
       "localBrowser": "Local browser runtime",
       "mcpServer": "MCP server",

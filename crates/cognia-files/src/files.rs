@@ -266,6 +266,27 @@ pub fn is_remote_workspace_path_allowed(path: &str) -> bool {
         && is_path_within_roots(path, &roots)
 }
 
+/// Whether a live file share (ADR-0222) may serve the directory `path`: it
+/// sits inside a root the renderer registered for a project (the same narrow
+/// set remote ACP sessions are confined to), or inside this host's managed
+/// execution directory (the task worktrees conversations run in). The roots
+/// seeded at boot (app data, agent credential trees, Documents) and dialog
+/// picks are deliberately not enough: they are in the general allow-list for
+/// the app's own reads and writes, not as something to expose on a network
+/// drive. Nothing registered means nothing allowed.
+pub fn is_shareable_workspace_path(path: &str, managed_execution_dir: Option<&Path>) -> bool {
+    if is_remote_workspace_path_allowed(path) {
+        return true;
+    }
+    let Some(managed) = managed_execution_dir.and_then(|dir| dir.canonicalize().ok()) else {
+        return false;
+    };
+    Path::new(path)
+        .canonicalize()
+        .map(|candidate| starts_with_any_canonical_root(&candidate, &[managed]))
+        .unwrap_or(false)
+}
+
 /// Wire name for a root the active desktop project registered.
 pub const WORKSPACE_ROOT_SOURCE_DESKTOP: &str = "desktop-project";
 /// Wire name for the server-owned workspaces directory
@@ -665,6 +686,36 @@ fn resolve_workspace_target(
         ));
     }
     Ok((root_path, target))
+}
+
+/// [`resolve_workspace_target`] for callers outside this crate (the ADR-0222
+/// file gateway), with the lexical half the in-crate commands get from their
+/// TS callers: `rel_path` must be relative, `/`-separated and free of `.`,
+/// `..` and empty segments. `""` is the root itself. Returns
+/// `(canonical_root, joined_target)`.
+pub fn resolve_confined_workspace_path(
+    root: &str,
+    rel_path: &str,
+    must_exist: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    if !rel_path.is_empty() {
+        if rel_path.starts_with('/') || rel_path.contains('\\') {
+            return Err(format!("not a relative workspace path: {rel_path}"));
+        }
+        if rel_path
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        {
+            return Err(format!("not a normalized workspace path: {rel_path}"));
+        }
+    }
+    resolve_workspace_target(root, rel_path, must_exist)
+}
+
+/// [`reject_symlinked_final`] for callers outside this crate: a write, rename
+/// or delete must not act through a symlinked final component.
+pub fn reject_symlinked_final_component(final_path: &Path) -> Result<(), String> {
+    reject_symlinked_final(final_path)
 }
 
 const SEARCH_HARD_LIMIT: usize = 200;
@@ -2089,6 +2140,76 @@ mod tests {
         // a Vec without panicking. The function's branch for missing dir is
         // already covered by the empty case if the user has no dir.
         let _ = scan_claude_skills_impl();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_workspace_paths_refuse_climbing_absolute_and_symlinked_escapes() {
+        let root = make_sandbox("confined-path");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "a").unwrap();
+        let outside = make_sandbox("confined-path-outside");
+        std::fs::write(outside.join("secret.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+        std::os::unix::fs::symlink(root.join("src/a.txt"), root.join("alias.txt")).unwrap();
+        let root_str = root.to_string_lossy().to_string();
+
+        let (canonical_root, target) =
+            resolve_confined_workspace_path(&root_str, "src/a.txt", true).unwrap();
+        assert!(target.ends_with("src/a.txt"));
+        assert_eq!(canonical_root, root.canonicalize().unwrap());
+        let (_, at_root) = resolve_confined_workspace_path(&root_str, "", true).unwrap();
+        assert_eq!(at_root, canonical_root.join(""));
+        assert!(resolve_confined_workspace_path(&root_str, "src/new.txt", false).is_ok());
+
+        for bad in ["/etc/passwd", "../x", "src/../../x", "src//a.txt", "./src", "src\\a"] {
+            assert!(
+                resolve_confined_workspace_path(&root_str, bad, false).is_err(),
+                "{bad} must be refused"
+            );
+        }
+        assert!(resolve_confined_workspace_path(&root_str, "escape/secret.txt", true).is_err());
+        assert!(resolve_confined_workspace_path(&root_str, "escape/new.txt", false).is_err());
+
+        // A symlink that stays inside the root reads fine, but nothing writes
+        // through it.
+        let (_, alias) = resolve_confined_workspace_path(&root_str, "alias.txt", true).unwrap();
+        assert!(reject_symlinked_final_component(&alias).is_err());
+        assert!(reject_symlinked_final_component(&root.join("src/a.txt")).is_ok());
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn shareable_paths_are_project_roots_and_managed_worktrees_only() {
+        let structural = make_sandbox("shareable-structural");
+        let managed = make_sandbox("shareable-managed");
+        std::fs::create_dir_all(managed.join("run-1/src")).unwrap();
+        // In the general allow-list (like app data or ~/.claude), but never
+        // registered for a project: not something to put on a network drive.
+        add_allowed_root(structural.to_string_lossy().to_string());
+        assert!(is_path_allowed(&structural.to_string_lossy()));
+        assert!(!is_shareable_workspace_path(&structural.to_string_lossy(), None));
+        assert!(!is_shareable_workspace_path(
+            &structural.to_string_lossy(),
+            Some(&managed)
+        ));
+        // A managed worktree is shareable; its parent directory is not.
+        let run = managed.join("run-1/src");
+        assert!(is_shareable_workspace_path(&run.to_string_lossy(), Some(&managed)));
+        assert!(!is_shareable_workspace_path(&run.to_string_lossy(), None));
+        assert!(!is_shareable_workspace_path(
+            &managed.parent().unwrap().to_string_lossy(),
+            Some(&managed)
+        ));
+        // A missing managed dir admits nothing.
+        assert!(!is_shareable_workspace_path(
+            &run.to_string_lossy(),
+            Some(&managed.join("missing"))
+        ));
+        let _ = std::fs::remove_dir_all(&structural);
+        let _ = std::fs::remove_dir_all(&managed);
     }
 
     fn make_sandbox(prefix: &str) -> PathBuf {

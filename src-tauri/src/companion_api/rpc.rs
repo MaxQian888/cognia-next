@@ -43,6 +43,7 @@ mod codex_app;
 mod data_sync;
 mod diagnostics;
 pub(crate) mod environment;
+mod file_share;
 mod filesystem;
 mod gateway_plane;
 mod host_admin;
@@ -1230,6 +1231,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     "environment_probe_get",
     "environment_driver_status",
     "environment_image_inspect",
+    // ADR-0222 live file shares (`cognia_file_share::rpc`).
+    "file_share_activate",
+    "file_space_sync",
+    "file_share_policy_set",
+    "file_share_status",
+    "file_grant_create",
+    "file_grant_list",
+    "file_grant_revoke",
+    "file_grant_suspend",
+    "file_grant_resume",
+    "file_credential_rotate",
+    "file_audit_list",
+    "file_share_listener_set",
+    "file_share_sftpgo_set",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -1555,6 +1570,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "environment_probe_get",
     "environment_driver_status",
     "environment_image_inspect",
+    // Live file shares: the service's state, the grant list and the audit
+    // trail.
+    "file_share_status",
+    "file_grant_list",
+    "file_audit_list",
 ];
 
 // ---------------------------------------------------------------------------
@@ -1921,6 +1941,15 @@ const CONTROL_COMMANDS: &[&str] = &[
     "environment_approval_revoke",
     "environment_egress_grant_create",
     "environment_egress_grant_delete",
+    // ADR-0222 — a live grant hands credentials for a conversation's files to
+    // someone else, so creating, resuming or re-keying one (and revoking, the
+    // other half of the same decision) needs remote control. The listener and
+    // the SFTPGo provider are host-admin with an admin lease instead.
+    "file_grant_create",
+    "file_grant_revoke",
+    "file_grant_suspend",
+    "file_grant_resume",
+    "file_credential_rotate",
 ];
 
 /// O(1) membership mirrors used on the request hot path. Command existence
@@ -1971,6 +2000,11 @@ const STEP_UP_COMMANDS: &[&str] = &[
     "connectors_keyring_get",
     "connectors_keyring_delete",
     "connectors_keyring_list",
+    // ADR-0222 — what the host exposes on the network: the built-in WebDAV /
+    // SFTP listener (port, LAN or tunnel exposure) and the SFTPGo provider's
+    // admin key. A paired device needs a fresh admin lease, as for the relay.
+    "file_share_listener_set",
+    "file_share_sftpgo_set",
 ];
 
 /// True when `name` requires the remote-control capability.
@@ -2494,6 +2528,12 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "mcp_oauth_load_entry",
     "mcp_oauth_refresh",
     "mcp_oauth_status",
+    // ADR-0222 — the account, the mount tables and the sharing policy a live
+    // file share is served from. Only the host's own app may set them; a
+    // device that could would choose which directories a credential reaches.
+    "file_share_activate",
+    "file_space_sync",
+    "file_share_policy_set",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -3511,6 +3551,10 @@ pub(super) async fn dispatch(
 
     if sftp::COMMANDS.contains(&name) {
         return sftp::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
+    }
+
+    if file_share::COMMANDS.contains(&name) {
+        return file_share::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
     if plugins::COMMANDS.contains(&name) {

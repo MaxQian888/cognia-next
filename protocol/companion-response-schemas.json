@@ -9753,6 +9753,595 @@
       },
       "additionalProperties": false
     },
+    "AuditRow": {
+      "description": "One audit row.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "bytes": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "channel": {
+          "type": "string"
+        },
+        "grantId": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "path": {
+          "type": ["string", "null"]
+        },
+        "principal": {
+          "type": "string"
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "remote": {
+          "type": ["string", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "at", "principal", "channel", "action", "outcome"],
+      "type": "object"
+    },
+    "ComponentError": {
+      "description": "One listener component's failure, kept for the settings surface.",
+      "properties": {
+        "component": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["component", "message"],
+      "type": "object"
+    },
+    "CreatedBy": {
+      "description": "Who created a grant.",
+      "enum": ["user"],
+      "type": "string"
+    },
+    "CredentialView": {
+      "description": "A credential as listed: never the secret.",
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "grantId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/$defs/Protocol"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderKind"
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "rotatedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "sshKeyFingerprint": {
+          "description": "SHA-256 fingerprint of the SFTP public key, when one was registered.",
+          "type": ["string", "null"]
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "grantId", "protocol", "provider", "username", "createdAt"],
+      "type": "object"
+    },
+    "Endpoints": {
+      "description": "Where a credential's protocols are reachable.",
+      "properties": {
+        "sftp": {
+          "items": {
+            "$ref": "#/$defs/SftpEndpoint"
+          },
+          "type": "array"
+        },
+        "sftpHostKeyFingerprint": {
+          "description": "`SHA256:\u2026` of the SFTP host key, for the client to verify.",
+          "type": ["string", "null"]
+        },
+        "tlsFingerprint": {
+          "description": "Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).",
+          "type": ["string", "null"]
+        },
+        "unavailableReason": {
+          "description": "Set when nothing serves the protocols yet (`listener_off`,\n`sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say\nwhat to turn on.",
+          "type": ["string", "null"]
+        },
+        "webdavUrls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["webdavUrls", "sftp"],
+      "type": "object"
+    },
+    "Exposure": {
+      "description": "Where the listeners are reachable from.",
+      "enum": ["loopback", "lan", "tunnel"],
+      "type": "string"
+    },
+    "Grant": {
+      "description": "A live grant for credential holders (P2's only audience).",
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/CreatedBy"
+        },
+        "creatorPrincipal": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": ["string", "null"]
+        },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/GrantPath"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/Permission"
+          },
+          "type": "array"
+        },
+        "policyRevision": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "protocols": {
+          "items": {
+            "$ref": "#/$defs/Protocol"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderKind"
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/GrantStatus"
+        },
+        "statusReason": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "sessionId",
+        "createdBy",
+        "creatorPrincipal",
+        "protocols",
+        "provider",
+        "permissions",
+        "status",
+        "expiresAt",
+        "policyRevision",
+        "createdAt",
+        "updatedAt",
+        "paths"
+      ],
+      "type": "object"
+    },
+    "GrantPath": {
+      "description": "One path a grant covers, inside one mount.",
+      "properties": {
+        "isDir": {
+          "type": "boolean"
+        },
+        "mountFingerprint": {
+          "type": "string"
+        },
+        "mountId": {
+          "type": "string"
+        },
+        "relPath": {
+          "description": "Normalized path inside the mount; `\"\"` is the whole mount.",
+          "type": "string"
+        },
+        "virtualPath": {
+          "description": "The FileSpace path this entry was granted as (`/workspace/src`).",
+          "type": "string"
+        }
+      },
+      "required": ["mountId", "relPath", "isDir", "mountFingerprint", "virtualPath"],
+      "type": "object"
+    },
+    "GrantStatus": {
+      "description": "A grant's lifecycle state.",
+      "oneOf": [
+        {
+          "const": "active",
+          "description": "Served.",
+          "type": "string"
+        },
+        {
+          "const": "suspended",
+          "description": "Paused by its owner, by the policy, or because its conversation was\narchived; resumable while unexpired.",
+          "type": "string"
+        },
+        {
+          "const": "stale",
+          "description": "A mount it covers now points elsewhere (fingerprint changed); the owner\nre-shares to reconfirm.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "Past its expiry.",
+          "type": "string"
+        },
+        {
+          "const": "revoked",
+          "description": "Withdrawn for good.",
+          "type": "string"
+        }
+      ]
+    },
+    "GrantView": {
+      "description": "A grant with its credentials, as listed.",
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialView"
+          },
+          "type": "array"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        }
+      },
+      "required": ["grant", "credentials"],
+      "type": "object"
+    },
+    "IssuedCredential": {
+      "description": "A credential at issue or rotation: the one time its password is shown.",
+      "properties": {
+        "credential": {
+          "$ref": "#/$defs/CredentialView"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "required": ["credential", "password"],
+      "type": "object"
+    },
+    "ListenerConfig": {
+      "description": "The stored listener settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "exposure": {
+          "$ref": "#/$defs/Exposure"
+        },
+        "sftp": {
+          "type": "boolean"
+        },
+        "sftpPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tunnelHostname": {
+          "description": "Public hostname of a named tunnel (`files.example.com`).",
+          "type": ["string", "null"]
+        },
+        "tunnelMode": {
+          "$ref": "#/$defs/TunnelMode"
+        },
+        "webdav": {
+          "type": "boolean"
+        },
+        "webdavPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["enabled", "exposure", "webdav", "sftp", "webdavPort", "sftpPort", "tunnelMode"],
+      "type": "object"
+    },
+    "ListenerStatus": {
+      "description": "The listeners as they are now.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/ListenerConfig"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/Endpoints"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/ComponentError"
+          },
+          "type": "array"
+        },
+        "sftpPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "tunnelPid": {
+          "description": "The cloudflared child's pid, for the process registry.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "tunnelTokenSet": {
+          "type": "boolean"
+        },
+        "tunnelUrl": {
+          "type": ["string", "null"]
+        },
+        "webdavPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        }
+      },
+      "required": ["config", "tunnelTokenSet", "errors", "endpoints"],
+      "type": "object"
+    },
+    "PathMapping": {
+      "description": "One host-to-SFTPGo path prefix translation.",
+      "properties": {
+        "hostPrefix": {
+          "description": "Absolute path prefix as this host sees it (`/srv/cognia/workspaces`).",
+          "type": "string"
+        },
+        "sftpgoPrefix": {
+          "description": "The same directory as SFTPGo sees it (`/srv/sftpgo/workspaces`).",
+          "type": "string"
+        }
+      },
+      "required": ["hostPrefix", "sftpgoPrefix"],
+      "type": "object"
+    },
+    "Permission": {
+      "description": "What a live grant allows on its paths.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "List directories and read metadata.",
+          "type": "string"
+        },
+        {
+          "const": "download",
+          "description": "Read file bytes.",
+          "type": "string"
+        },
+        {
+          "const": "write",
+          "description": "Create, overwrite, rename, delete and make directories.",
+          "type": "string"
+        }
+      ]
+    },
+    "PolicySnapshot": {
+      "description": "The stored policy with the host's revision.",
+      "properties": {
+        "allowAgentSharing": {
+          "type": "boolean"
+        },
+        "allowLiveGrants": {
+          "type": "boolean"
+        },
+        "allowLiveWrite": {
+          "type": "boolean"
+        },
+        "allowProtocolCredentials": {
+          "type": "boolean"
+        },
+        "allowPublicSnapshots": {
+          "type": "boolean"
+        },
+        "maxLiveTtlSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "maxSnapshotTtlSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "orgId": {
+          "description": "The org whose policy was intersected in, when any.",
+          "type": ["string", "null"]
+        },
+        "orgRevision": {
+          "description": "That org policy's revision on the plane.",
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "revision": {
+          "description": "Bumped by the host on every change; 0 until something is pushed.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowPublicSnapshots",
+        "allowLiveGrants",
+        "allowProtocolCredentials",
+        "allowLiveWrite",
+        "allowAgentSharing",
+        "maxSnapshotTtlSeconds",
+        "maxLiveTtlSeconds",
+        "revision",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "Protocol": {
+      "description": "A network protocol a credential speaks.",
+      "enum": ["webdav", "sftp"],
+      "type": "string"
+    },
+    "ProviderKind": {
+      "description": "Who serves a credential's protocol.",
+      "oneOf": [
+        {
+          "const": "builtin",
+          "description": "The in-process WebDAV/SFTP listeners.",
+          "type": "string"
+        },
+        {
+          "const": "sftpgo",
+          "description": "An external SFTPGo deployment that sees the same volume.",
+          "type": "string"
+        }
+      ]
+    },
+    "SftpEndpoint": {
+      "description": "One SFTP address a client can dial.",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["host", "port"],
+      "type": "object"
+    },
+    "SftpgoConfig": {
+      "description": "The stored provider settings (the API key lives in the secret store).",
+      "properties": {
+        "baseUrl": {
+          "description": "SFTPGo's HTTP base, e.g. `http://sftpgo:8080`.",
+          "type": "string"
+        },
+        "homeBase": {
+          "description": "Directory SFTPGo creates per-credential home directories under.",
+          "type": "string"
+        },
+        "pathMappings": {
+          "items": {
+            "$ref": "#/$defs/PathMapping"
+          },
+          "type": "array"
+        },
+        "publicSftpHost": {
+          "default": null,
+          "description": "What clients dial, for the result card.",
+          "type": ["string", "null"]
+        },
+        "publicSftpPort": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "publicWebdavUrl": {
+          "default": null,
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["baseUrl", "homeBase", "pathMappings"],
+      "type": "object"
+    },
+    "SftpgoStatus": {
+      "description": "The provider as the settings surface shows it.",
+      "properties": {
+        "apiKeySet": {
+          "type": "boolean"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SftpgoConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/Endpoints",
+          "description": "Where SFTPGo-served credentials dial, as a grant's card would show it."
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "healthy": {
+          "type": ["boolean", "null"]
+        }
+      },
+      "required": ["configured", "apiKeySet", "endpoints"],
+      "type": "object"
+    },
+    "TunnelMode": {
+      "description": "Which cloudflared tunnel fronts WebDAV in `tunnel` exposure.",
+      "enum": ["quick", "named"],
+      "type": "string"
+    },
     "FilesRemoteRefused": {
       "type": "object",
       "description": "A refused `files_library_*` call: a `files.errors.*` code, or `headless_host` from a brain that has no library.",
@@ -15020,6 +15609,393 @@
           "additionalProperties": false
         }
       ]
+    },
+    "file_share_activate": {
+      "description": "The whole service as the settings surface shows it.",
+      "properties": {
+        "accountId": {
+          "type": ["string", "null"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "activeGrants": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "listener": {
+          "$ref": "#/$defs/ListenerStatus"
+        },
+        "liveConnections": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pendingProviderOps": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicySnapshot"
+        },
+        "sessionsWithGrants": {
+          "description": "Conversations whose mount tables the app should keep pushing.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sftpgo": {
+          "$ref": "#/$defs/SftpgoStatus"
+        }
+      },
+      "required": [
+        "active",
+        "policy",
+        "listener",
+        "sftpgo",
+        "sessionsWithGrants",
+        "activeGrants",
+        "liveConnections",
+        "pendingProviderOps"
+      ],
+      "type": "object",
+      "title": "FileShareStatus"
+    },
+    "file_space_sync": {
+      "description": "What a sync accepted.",
+      "properties": {
+        "sessionsWithGrants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "synced": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["synced", "sessionsWithGrants"],
+      "type": "object",
+      "title": "SyncReport"
+    },
+    "file_share_policy_set": {
+      "description": "The stored policy with the host's revision.",
+      "properties": {
+        "allowAgentSharing": {
+          "type": "boolean"
+        },
+        "allowLiveGrants": {
+          "type": "boolean"
+        },
+        "allowLiveWrite": {
+          "type": "boolean"
+        },
+        "allowProtocolCredentials": {
+          "type": "boolean"
+        },
+        "allowPublicSnapshots": {
+          "type": "boolean"
+        },
+        "maxLiveTtlSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "maxSnapshotTtlSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "orgId": {
+          "description": "The org whose policy was intersected in, when any.",
+          "type": ["string", "null"]
+        },
+        "orgRevision": {
+          "description": "That org policy's revision on the plane.",
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "revision": {
+          "description": "Bumped by the host on every change; 0 until something is pushed.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowPublicSnapshots",
+        "allowLiveGrants",
+        "allowProtocolCredentials",
+        "allowLiveWrite",
+        "allowAgentSharing",
+        "maxSnapshotTtlSeconds",
+        "maxLiveTtlSeconds",
+        "revision",
+        "updatedAt"
+      ],
+      "type": "object",
+      "title": "PolicySnapshot"
+    },
+    "file_share_status": {
+      "description": "The whole service as the settings surface shows it.",
+      "properties": {
+        "accountId": {
+          "type": ["string", "null"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "activeGrants": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "listener": {
+          "$ref": "#/$defs/ListenerStatus"
+        },
+        "liveConnections": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pendingProviderOps": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicySnapshot"
+        },
+        "sessionsWithGrants": {
+          "description": "Conversations whose mount tables the app should keep pushing.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sftpgo": {
+          "$ref": "#/$defs/SftpgoStatus"
+        }
+      },
+      "required": [
+        "active",
+        "policy",
+        "listener",
+        "sftpgo",
+        "sessionsWithGrants",
+        "activeGrants",
+        "liveConnections",
+        "pendingProviderOps"
+      ],
+      "type": "object",
+      "title": "FileShareStatus"
+    },
+    "file_grant_create": {
+      "description": "The result of creating a grant.",
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/IssuedCredential"
+          },
+          "type": "array"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/Endpoints"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        }
+      },
+      "required": ["grant", "credentials", "endpoints"],
+      "type": "object",
+      "title": "CreatedGrant"
+    },
+    "file_grant_list": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/GrantView"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "type": "object",
+      "title": "Page_of_GrantView"
+    },
+    "file_grant_revoke": {
+      "description": "A grant with its credentials, as listed.",
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialView"
+          },
+          "type": "array"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        }
+      },
+      "required": ["grant", "credentials"],
+      "type": "object",
+      "title": "GrantView"
+    },
+    "file_grant_suspend": {
+      "description": "A grant with its credentials, as listed.",
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialView"
+          },
+          "type": "array"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        }
+      },
+      "required": ["grant", "credentials"],
+      "type": "object",
+      "title": "GrantView"
+    },
+    "file_grant_resume": {
+      "description": "A grant with its credentials, as listed.",
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialView"
+          },
+          "type": "array"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        }
+      },
+      "required": ["grant", "credentials"],
+      "type": "object",
+      "title": "GrantView"
+    },
+    "file_credential_rotate": {
+      "description": "A credential at issue or rotation: the one time its password is shown.",
+      "properties": {
+        "credential": {
+          "$ref": "#/$defs/CredentialView"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "required": ["credential", "password"],
+      "type": "object",
+      "title": "IssuedCredential"
+    },
+    "file_audit_list": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/AuditRow"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "type": "object",
+      "title": "Page_of_AuditRow"
+    },
+    "file_share_listener_set": {
+      "description": "The listeners as they are now.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/ListenerConfig"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/Endpoints"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/ComponentError"
+          },
+          "type": "array"
+        },
+        "sftpPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "tunnelPid": {
+          "description": "The cloudflared child's pid, for the process registry.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "tunnelTokenSet": {
+          "type": "boolean"
+        },
+        "tunnelUrl": {
+          "type": ["string", "null"]
+        },
+        "webdavPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        }
+      },
+      "required": ["config", "tunnelTokenSet", "errors", "endpoints"],
+      "type": "object",
+      "title": "ListenerStatus"
+    },
+    "file_share_sftpgo_set": {
+      "description": "The provider as the settings surface shows it.",
+      "properties": {
+        "apiKeySet": {
+          "type": "boolean"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SftpgoConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/Endpoints",
+          "description": "Where SFTPGo-served credentials dial, as a grant's card would show it."
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "healthy": {
+          "type": ["boolean", "null"]
+        }
+      },
+      "required": ["configured", "apiKeySet", "endpoints"],
+      "type": "object",
+      "title": "SftpgoStatus"
     },
     "files_library_list": {
       "$ref": "#/$defs/FilesRemoteListPage"

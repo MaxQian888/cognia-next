@@ -150,6 +150,11 @@ export function serializeBridgeFrame(frame: BridgeFrame): string {
  * answers a session-media request: the device waits out the full timeout and
  * reports a retryable 503 that describes nothing. Declaring the capability lets
  * the server refuse the read immediately, with a reason.
+ *
+ * `filespace` is the same promise for the live file-share host's two requests
+ * (ADR-0222): `/uploads` and `/artifacts` slices, answered on the media
+ * channel by `lib/filespace/asset-responder.ts`, and a conversation's mount
+ * table, answered by `lib/filespace/mount-table.ts`.
  */
 /**
  * `respond` command that carries a session-media answer.
@@ -161,7 +166,13 @@ export function serializeBridgeFrame(frame: BridgeFrame): string {
  */
 export const MEDIA_RESPONSE_COMMAND = "companion_media_response"
 
-export const DEFAULT_BRAIN_CAPABILITIES = ["sync", "messages", "writes", "media"] as const
+export const DEFAULT_BRAIN_CAPABILITIES = [
+  "sync",
+  "messages",
+  "writes",
+  "media",
+  "filespace",
+] as const
 
 export function buildHello(opts: {
   brainVersion: string

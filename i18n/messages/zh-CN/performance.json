@@ -245,6 +245,7 @@
       "chatSidecar": "聊天 sidecar",
       "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",
+      "fileShare": "网络驱动器",
       "headlessTerminal": "无头 Shell",
       "localBrowser": "本地浏览器运行时",
       "mcpServer": "MCP 服务器",

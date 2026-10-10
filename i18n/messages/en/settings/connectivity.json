@@ -23,6 +23,10 @@
         "label": "Cloud & relay",
         "description": "The relay, peer-to-peer upgrade, tunnel, sign-in, and collaboration server."
       },
+      "network-drive": {
+        "description": "Share conversation files over WebDAV and SFTP, SFTPGo, and every live share on this host.",
+        "label": "Network drive"
+      },
       "pairing": {
         "label": "Pairing",
         "description": "Invitations, browser enrollment, and the devices that redeemed them."

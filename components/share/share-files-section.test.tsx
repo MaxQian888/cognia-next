@@ -6,8 +6,10 @@ jest.mock("@/lib/share/blobs", () => ({
   downloadShareBlob: jest.fn(),
 }))
 jest.mock("@/lib/files/download", () => ({ downloadBlob: jest.fn() }))
+jest.mock("@/lib/network/proxy-fetch", () => ({ proxyFetch: jest.fn() }))
 
 import { downloadBlob } from "@/lib/files/download"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import {
   ShareFileIntegrityError,
   ShareTicketExpiredError,
@@ -132,6 +134,8 @@ describe("ShareFilesSection as a page (file-bundle)", () => {
     // Plain text, never markup.
     expect(await screen.findByText("<b>not markup</b>")).toBeInTheDocument()
     expect(download).toHaveBeenCalledTimes(1)
+    // Chunks go through the managed fetch, so a desktop proxy applies.
+    expect(download.mock.calls[0]![0].fetchImpl).toBe(proxyFetch)
   })
 
   it("says a file cannot be previewed and offers it as a download", async () => {

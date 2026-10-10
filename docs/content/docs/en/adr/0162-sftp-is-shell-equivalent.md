@@ -5,7 +5,7 @@ description: "File transfer over a saved SSH profile grants the same access as a
 
 # ADR 0162: SFTP is shell-equivalent
 
-**Status:** Accepted  
+**Status:** Accepted, amended by [ADR-0222](./0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant) (one confined file-share listener)  
 **Date:** 2026-09-01  
 **Builds on:** [ADR-0082](./0082-remote-development-remote-host), [ADR-0031](./0031-integrated-terminal)
 
@@ -86,6 +86,19 @@ The synchronized profile keeps losing its jump chain and its forwarding rules
 exactly as before. A paired device naming a profile gets a shell and a file
 transfer, and still never a listening port.
 
+**Amended by ADR-0222 (2026-10-10).** The rule stands for SSH: nothing here
+binds a socket for a shell, exec or forwarding. ADR-0222 adds one listener
+that is not shell-equivalent: the live file-share listener
+(`crates/cognia-file-share`), which serves WebDAV and an SFTP subsystem only
+to per-grant credentials, only the paths each grant names, through one
+gateway that re-checks the grant, the mount, the policy and a sensitive-file
+floor on every operation, and never trusts loopback. It is off until the
+owner turns it on. Turning it on is a `host-admin` command with step-up
+(`file_share_listener_set`), so an owner device holding `host.admin` can do
+it from a distance; a device without that grant cannot. Its SFTP is this
+listener's own, confined to grants, and is unrelated to the `ssh.files`
+transfer this record defines.
+
 ### Approval once, at open, never per chunk
 
 The transfer commands are chunked because the RPC body ceiling is 64 KB. A chunk
@@ -141,8 +154,9 @@ never presented for trust twice in one session.
 - A paired device without `ssh.files` cannot transfer files, even if it holds
   `terminal.open` and could reach the same bytes through the shell. The two
   grants are deliberately not folded together.
-- Nothing a paired device does can cause a socket to be bound. Decision 9 stands
-  unmodified.
+- Nothing a paired device does through SSH can cause a socket to be bound.
+  Decision 9 stands unmodified. The one exception, the ADR-0222 file-share
+  listener, needs `host.admin` with step-up and serves grants, not a shell.
 - An interrupted transfer resumes from the host's write head rather than the
   client's arithmetic, and a token that has expired forces a fresh approval.
 - A profile edited while a transfer is running invalidates the pooled connection

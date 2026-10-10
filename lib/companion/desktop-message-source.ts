@@ -59,6 +59,16 @@ import {
 } from "@/lib/chat/transcript/projection"
 import { transcriptCapabilitiesV1 } from "@/lib/chat/transcript/source"
 import {
+  answerFileSpaceAsset,
+  FILESPACE_ASSET_EVENT,
+  type FileSpaceAssetRequest,
+} from "@/lib/filespace/asset-responder"
+import {
+  FILESPACE_MOUNTS_EVENT,
+  readFileSpaceMounts,
+  type FileSpaceMountsRequest,
+} from "@/lib/filespace/mount-table"
+import {
   assertLocalMutationAllowed,
   assertSharedSessionRead,
 } from "@/lib/collab/shared-session-access"
@@ -222,6 +232,17 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
     SESSION_MEDIA_EVENT,
     (event) => void respondSessionMedia(event.payload, bridge)
   )
+  // ADR-0222: a live file share reading `/uploads` or `/artifacts` asks for
+  // one slice at a time and is answered on this same media channel.
+  const offFileSpaceAsset = await bridge.listen<FileSpaceAssetRequest>(
+    FILESPACE_ASSET_EVENT,
+    (event) => void answerFileSpaceAsset(event.payload, bridge)
+  )
+  // ...and pulls a conversation's mount table when it needs one fresh.
+  const offFileSpaceMounts = await bridge.listen<FileSpaceMountsRequest>(
+    FILESPACE_MOUNTS_EVENT,
+    (event) => void respondFileSpaceMounts(event.payload, bridge)
+  )
 
   return () => {
     installed = false
@@ -234,6 +255,8 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
     safeUnlisten(offSessionTimeline)
     safeUnlisten(offSessionTurnMessages)
     safeUnlisten(offSessionMedia)
+    safeUnlisten(offFileSpaceAsset)
+    safeUnlisten(offFileSpaceMounts)
   }
 }
 
@@ -255,6 +278,17 @@ async function respondError(
     result: null,
     error: error instanceof Error ? error.message : String(error),
   })
+}
+
+async function respondFileSpaceMounts(
+  request: FileSpaceMountsRequest,
+  bridge: RuntimeBridge
+): Promise<void> {
+  try {
+    await respondValue(request.requestId, await readFileSpaceMounts(request), bridge)
+  } catch (error) {
+    await respondError(request.requestId, error, bridge)
+  }
 }
 
 async function respondSessionTimeline(

@@ -3585,6 +3585,9 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("diagnostics.rs"),
         include_str!("host_admin.rs"),
         include_str!("environment.rs"),
+        // Live file shares: the arms live with the crate's one command
+        // surface, which the desktop shells share.
+        include_str!("../../../../crates/cognia-file-share/src/rpc.rs"),
     ]
     .join("\n");
 
@@ -4895,6 +4898,7 @@ fn command_families_cover_known_non_browser_commands_once() {
         super::diagnostics::COMMANDS,
         super::host_admin::COMMANDS,
         super::environment::COMMANDS,
+        super::file_share::COMMANDS,
     ];
     let routed: Vec<_> = families.into_iter().flatten().copied().collect();
     let unique: std::collections::HashSet<_> = routed.iter().copied().collect();

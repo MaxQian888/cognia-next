@@ -44,6 +44,9 @@ jest.mock("./panels/local-host-panel", () => ({
 jest.mock("./panels/cloud-relay-panel", () => ({
   CloudRelayPanel: () => <div data-testid="cloud-relay-panel" />,
 }))
+jest.mock("./panels/network-drive-panel", () => ({
+  NetworkDrivePanel: () => <div data-testid="network-drive-panel" />,
+}))
 jest.mock("./panels/pairing-panel", () => ({
   PairingPanel: () => <div data-testid="pairing-panel" />,
 }))
@@ -72,6 +75,10 @@ describe("ConnectivitySection", () => {
     const { unmount } = render(<ConnectivitySection />)
     expect(screen.getByTestId("remote-hosts-panel")).toBeInTheDocument()
     unmount()
+    params = new URLSearchParams("connectivityPanel=network-drive")
+    const second = render(<ConnectivitySection />)
+    expect(screen.getByTestId("network-drive-panel")).toBeInTheDocument()
+    second.unmount()
     params = new URLSearchParams("connectivityPanel=nope")
     render(<ConnectivitySection />)
     expect(screen.getByTestId("overview-panel")).toBeInTheDocument()

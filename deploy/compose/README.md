@@ -241,6 +241,45 @@ enable the experiment in Cognia settings. Add one identically isolated
 service/volume/secret per additional workspace; do not mount the aggregate
 `cognia_workspaces` volume into a runtime.
 
+### Network drives through SFTPGo (`compose.sftpgo.yaml`)
+
+A live file share (ADR-0222) gives a person a WebDAV/SFTP sign-in for some
+folders of one conversation. cognia-server can serve those itself (Settings →
+Connectivity → Network drive), or hand them to a separately deployed
+[SFTPGo](https://github.com/drakkan/sftpgo), which is the better fit on a
+server that already fronts file transfer. The overlay adds SFTPGo next to the
+T2 stack, with the shared `cognia_workspaces` volume mounted at
+`/srv/sftpgo/workspaces`:
+
+```bash
+# .env: SFTPGO_ADMIN_PASSWORD=$(openssl rand -hex 16)
+docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+  -f compose.sftpgo.yaml --profile server --profile sftpgo up -d --wait
+```
+
+Then, once:
+
+1. Open the admin UI on `127.0.0.1:${SFTPGO_ADMIN_PORT:-8090}` (an SSH
+   tunnel from elsewhere; it is never published wide), sign in as
+   `SFTPGO_ADMIN_USERNAME`, turn on **Allow API key authentication** in your
+   profile, and create an admin-scope API key.
+2. In Cognia, Settings → Connectivity → Network drive → SFTPGo: admin API URL
+   `http://sftpgo:8080`, the key, home directory base `/srv/sftpgo/homes`,
+   path mapping `/workspaces` → `/srv/sftpgo/workspaces`, and the public SFTP
+   host / WebDAV URL people should dial.
+
+Cognia then creates one SFTPGo user per share credential, with a virtual
+folder for each granted path only, the sensitive-file floor as denied
+patterns, and the grant's expiry; revoking deletes it. A folder with no
+mapping refuses the grant (`sftpgo_path_unmapped`) rather than exposing a
+wider tree. SFTPGo runs as cognia-server's uid (10001) so a write grant can
+change what agents created; `sftpgo-init` hands the state volumes over once.
+Put the WebDAV port behind TLS (Caddy or your own proxy) before publishing
+it: Windows will not send a password to a plain-HTTP WebDAV address.
+
+SFTPGo is AGPL-3.0. It runs here as the unmodified upstream image, as its own
+service, and is never bundled into the desktop app.
+
 ## Seccomp profile (`seccomp/cognia-userns.json`)
 
 The `cognia-server` service runs under a tuned seccomp profile so the ADR-0028

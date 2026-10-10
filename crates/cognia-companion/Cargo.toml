@@ -56,6 +56,8 @@ cognia-core = { path = "../cognia-core", features = ["rt"] }
 cognia-environment = { path = "../cognia-environment", default-features = false, features = ["store", "registry"] }
 cognia-external-agent = { path = "../cognia-external-agent" }
 cognia-files = { path = "../cognia-files" }
+# ADR-0222: the bridge reader live file shares use for `/uploads` and `/artifacts`.
+cognia-file-share = { path = "../cognia-file-share" }
 cognia-fleet = { path = "../cognia-fleet" }
 # ADR-0188: the gateway's brain bridge over the writes bridge (`gateway_brain`).
 cognia-gateway = { path = "../cognia-gateway" }

@@ -34,6 +34,7 @@ import {
 } from "./nav-config"
 import { CloudRelayPanel } from "./panels/cloud-relay-panel"
 import { LocalHostPanel } from "./panels/local-host-panel"
+import { NetworkDrivePanel } from "./panels/network-drive-panel"
 import { OverviewPanel } from "./panels/overview-panel"
 import { PairingPanel } from "./panels/pairing-panel"
 import { PushPanel } from "./panels/push-panel"
@@ -72,6 +73,8 @@ export function ConnectivitySection() {
         return <LocalHostPanel />
       case "cloud-relay":
         return <CloudRelayPanel />
+      case "network-drive":
+        return <NetworkDrivePanel />
       case "pairing":
         return <PairingPanel />
       case "remote-hosts":

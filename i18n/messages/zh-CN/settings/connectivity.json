@@ -23,6 +23,10 @@
         "label": "云与中继",
         "description": "中继、点对点升级、隧道、登录与协作服务器。"
       },
+      "network-drive": {
+        "description": "通过 WebDAV 和 SFTP 共享对话文件、SFTPGo，以及此主机上的所有实时共享。",
+        "label": "网络驱动器"
+      },
       "pairing": {
         "label": "配对",
         "description": "邀请、浏览器登记，以及已兑换邀请的设备。"

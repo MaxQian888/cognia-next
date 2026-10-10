@@ -1,0 +1,285 @@
+{
+  "audit": {
+    "action": "Action",
+    "at": "When",
+    "channel": {
+      "app": "App",
+      "sftp": "SFTP",
+      "sftpgo": "SFTPGo",
+      "webdav": "WebDAV"
+    },
+    "description": "Every sign-in, read, change and refusal, newest first.",
+    "empty": "No activity yet.",
+    "loadFailed": "Could not load the activity.",
+    "loadMore": "Load more",
+    "loading": "Loading activity…",
+    "outcome": {
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "failed": "Failed"
+    },
+    "path": "Path",
+    "principal": {
+      "credential": "{username}",
+      "device": "Paired device {id}",
+      "owner": "You",
+      "system": "Cognia"
+    },
+    "result": "Result",
+    "retry": "Try again",
+    "title": "Activity",
+    "via": "Via",
+    "who": "Who"
+  },
+  "credentials": {
+    "copied": "Copied",
+    "copy": "Copy {label}",
+    "copyFailed": "Could not copy.",
+    "endpoints": "Connect to",
+    "hide": "Hide password",
+    "hostKey": "SFTP host key",
+    "hostKeyHint": "Check that your SFTP client shows this fingerprint the first time it connects.",
+    "noInstructions": "Connection steps appear once the share is reachable.",
+    "onceWarning": "Copy the password now. It is shown only this once; if it is lost, issue a new one.",
+    "password": "Password",
+    "protocol": {
+      "sftp": "SFTP",
+      "webdav": "WebDAV"
+    },
+    "show": "Show password",
+    "sshKey": "Also signs in with SSH key {fingerprint}",
+    "steps": {
+      "finder": "In Finder choose Go → Connect to Server (⌘K), paste this address, and sign in with the username and password.",
+      "rclone": "Create the remote, then mount it. Mounting needs macFUSE, WinFsp or FUSE.",
+      "sftp": "Connect with OpenSSH. It asks for the password.",
+      "windows": "Run this in Command Prompt. Windows asks for the password.",
+      "windowsNeedsHttps": "Windows only sends a password to an HTTPS address unless its WebClient BasicAuthLevel is set to 2. Share over the local network or a tunnel to reach Windows."
+    },
+    "tab": {
+      "finder": "macOS Finder",
+      "rclone": "rclone",
+      "sftp": "Terminal",
+      "windows": "Windows"
+    },
+    "tls": "Certificate fingerprint",
+    "tlsHint": "This host uses its own certificate. Check this fingerprint when your client asks whether to trust it.",
+    "username": "Username"
+  },
+  "dialog": {
+    "blocked": {
+      "credentialsDisabled": "Network-drive credentials are turned off by your file-sharing policy.",
+      "liveDisabled": "Live access to files is turned off by your file-sharing policy.",
+      "locked": "Unlock your account on this host to share files live.",
+      "openPolicy": "File-sharing policy",
+      "title": "Network-drive sharing is off"
+    },
+    "cancel": "Cancel",
+    "create": "Create access",
+    "creating": "Creating…",
+    "description": "Give someone revocable access to these files over WebDAV or SFTP. They sign in with a username and password, and you can suspend or revoke it at any time.",
+    "done": "Done",
+    "expiry": "Expires after",
+    "files": "Files and folders",
+    "filesHint": "A folder is shared with everything inside it. Secrets such as .env files and keys are never served.",
+    "label": "Label",
+    "labelPlaceholder": "Who or what this is for",
+    "listener": {
+      "off": "The network drive is off on this host, so this share cannot be reached until you turn it on.",
+      "openSettings": "Network drive settings",
+      "protocolOff": "{protocol} is turned off in this host's network drive settings."
+    },
+    "noProtocol": "Choose at least one protocol.",
+    "nothingSelected": "Choose at least one file or folder.",
+    "permission": {
+      "download": "Download files",
+      "read": "See folders and file names",
+      "readHint": "Always allowed.",
+      "write": "Make changes",
+      "writeDisabledPolicy": "Changes are turned off by your file-sharing policy.",
+      "writeReadOnly": "Uploads and artifacts can only be read, and so can a folder this conversation cannot change."
+    },
+    "permissions": "Access",
+    "protocol": {
+      "sftp": "SFTP",
+      "sftpHint": "OpenSSH, rclone, Cyberduck, WinSCP",
+      "webdav": "WebDAV",
+      "webdavHint": "Finder, Windows Explorer, rclone"
+    },
+    "protocols": "Protocols",
+    "provider": {
+      "builtin": "This host",
+      "sftpgo": "SFTPGo"
+    },
+    "providerLabel": "Served by",
+    "resultDescription": "Send the address and sign-in below to whoever should connect.",
+    "resultTitle": "Network drive access created",
+    "sshKey": "SSH public key (optional)",
+    "sshKeyHint": "Lets an SFTP client sign in with this key instead of the password.",
+    "sshKeyPlaceholder": "ssh-ed25519 AAAA…",
+    "title": "Share as a network drive"
+  },
+  "errors": {
+    "credential_conflict": "Could not pick an unused username. Try again.",
+    "credential_hash_failed": "Could not secure the password. Try again.",
+    "credential_revoked": "That sign-in was already revoked.",
+    "file_share_locked": "Unlock your account on this host to manage live file sharing.",
+    "file_share_unavailable": "This host cannot share files live.",
+    "grant_expired": "This access has expired.",
+    "grant_not_active": "This access is not active.",
+    "grant_not_resumable": "This access cannot be turned back on.",
+    "host_key_failed": "The SFTP host key could not be loaded.",
+    "invalid_path": "One of the chosen paths is not part of this conversation's files.",
+    "invalid_request": "The request was not valid: {message}",
+    "listener_bind_failed": "The port is already in use or cannot be opened.",
+    "listener_tls_failed": "The HTTPS certificate could not be loaded.",
+    "mount_not_synced": "This host has not seen this conversation's files yet. Try again in a moment.",
+    "mount_read_only": "That folder can only be read, so changes cannot be allowed.",
+    "mount_unavailable": "One of the chosen folders is not available on this host right now.",
+    "not_found": "That access no longer exists.",
+    "policy_credentials_disabled": "Network-drive credentials are turned off by your file-sharing policy.",
+    "policy_exceeded": "This access goes beyond the current file-sharing policy.",
+    "policy_live_disabled": "Live access to files is turned off by your file-sharing policy.",
+    "policy_write_disabled": "Changes are turned off by your file-sharing policy.",
+    "provider_failed": "SFTPGo could not be updated. Try again.",
+    "secret_store_unavailable": "The system keychain is not available.",
+    "sensitive_path": "That path holds secrets and cannot be shared.",
+    "session_inactive": "This conversation is archived or deleted, so its files cannot be shared.",
+    "sftpgo_path_unmapped": "SFTPGo cannot see one of the chosen folders. Add a path mapping for it.",
+    "sftpgo_unconfigured": "SFTPGo is not configured on this host.",
+    "store_failed": "This host could not save the change. Try again.",
+    "ttl_exceeds_policy": "That lifetime is longer than your file-sharing policy allows.",
+    "unknown": "Something went wrong: {message}",
+    "unknown_command": "This host is too old to share files live."
+  },
+  "grants": {
+    "actions": {
+      "audit": "Activity",
+      "menu": "Actions for {label}",
+      "resume": "Resume",
+      "revoke": "Revoke",
+      "rotateFor": "New {protocol} password",
+      "suspend": "Suspend"
+    },
+    "conversation": "Conversation {id}",
+    "empty": "Nothing shared as a network drive yet.",
+    "expired": "Expired {when}",
+    "expires": "Expires {when}",
+    "newShare": "Share as network drive…",
+    "reason": {
+      "expired": "Expired",
+      "mount_changed": "A shared folder moved or changed. Resume to share it as it is now.",
+      "owner": "Suspended by you",
+      "policy": "Goes beyond the current file-sharing policy",
+      "provider_failed": "SFTPGo could not be updated",
+      "revoked": "Revoked",
+      "session_archived": "The conversation was archived",
+      "session_deleted": "The conversation was deleted"
+    },
+    "revokeConfirm": {
+      "confirm": "Revoke",
+      "description": "Anyone connected with it is disconnected now, and it cannot be turned back on.",
+      "title": "Revoke this access?"
+    },
+    "rotate": {
+      "description": "The old password stops working now, and anyone signed in with it is disconnected.",
+      "title": "New password for {username}"
+    },
+    "stats": "{grants, plural, one {# active share} other {# active shares}} · {connections, plural, one {# connection} other {# connections}}",
+    "status": {
+      "active": "Active",
+      "expired": "Expired",
+      "revoked": "Revoked",
+      "stale": "Needs attention",
+      "suspended": "Suspended"
+    },
+    "title": "Shared as network drive",
+    "toast": {
+      "resumed": "Access resumed",
+      "revoked": "Access revoked",
+      "suspended": "Access suspended"
+    },
+    "untitled": "Network drive access"
+  },
+  "settings": {
+    "access": {
+      "description": "Every network-drive share on this host, across conversations.",
+      "title": "Live file access"
+    },
+    "listener": {
+      "addresses": "Addresses",
+      "description": "Serve shared conversation files over WebDAV and SFTP from this host. A person who connects sees only what they were given.",
+      "enabled": "Serve network drives",
+      "exposure": {
+        "label": "Who can connect",
+        "lan": "Local network",
+        "lanHint": "Other devices on your network. WebDAV uses HTTPS with this host's own certificate.",
+        "loopback": "This computer only",
+        "loopbackHint": "Clients on this machine.",
+        "tunnel": "Internet, through a tunnel",
+        "tunnelHint": "A cloudflared tunnel publishes WebDAV at a public HTTPS address. SFTP stays on this computer."
+      },
+      "invalidPorts": "Ports must be between 1024 and 65535 and different from each other.",
+      "noProtocol": "Turn on WebDAV, SFTP or both.",
+      "port": "{protocol} port",
+      "problems": "Problems",
+      "publicUrl": "Public address",
+      "running": "Running",
+      "save": "Save",
+      "saved": "Network drive settings saved",
+      "saving": "Saving…",
+      "stopped": "Off",
+      "title": "Network drive",
+      "tunnel": {
+        "hostname": "Public hostname",
+        "mode": "Tunnel",
+        "named": "Named tunnel",
+        "namedHint": "Your own hostname through a Cloudflare tunnel token.",
+        "quick": "Quick tunnel",
+        "quickHint": "A random trycloudflare.com address, new on every start.",
+        "token": "Tunnel token",
+        "tokenSet": "A token is saved. Leave this empty to keep it."
+      }
+    },
+    "locked": "Unlock your account on this host to manage live file sharing.",
+    "pendingProviderOps": "{count, plural, one {# SFTPGo change is} other {# SFTPGo changes are}} waiting to be retried.",
+    "sftpgo": {
+      "addMapping": "Add mapping",
+      "agpl": "SFTPGo is AGPL-3.0 software you deploy yourself. Cognia only calls its admin API and never bundles it.",
+      "apiKey": "Admin API key",
+      "apiKeySet": "A key is saved. Leave this empty to keep it.",
+      "baseUrl": "Admin API URL",
+      "description": "Create share users in a separately deployed SFTPGo instead of serving them from this host. Useful on a server whose workspaces SFTPGo can already see.",
+      "health": {
+        "healthy": "Reachable",
+        "unchecked": "Not checked",
+        "unhealthy": "Not reachable"
+      },
+      "homeBase": "Home directory base",
+      "hostPrefix": "Path on this host",
+      "mappingHint": "SFTPGo usually sees the workspaces at a different path. Map each folder this host shares to the path SFTPGo uses.",
+      "mappings": "Path mapping",
+      "notConfigured": "Not configured",
+      "publicSftpHost": "Public SFTP host",
+      "publicSftpPort": "Public SFTP port",
+      "publicWebdavUrl": "Public WebDAV address",
+      "remove": "Remove SFTPGo",
+      "removeConfirm": {
+        "confirm": "Remove",
+        "description": "Shares served by SFTPGo stop working until it is configured again.",
+        "title": "Remove SFTPGo?"
+      },
+      "removeMapping": "Remove mapping",
+      "removed": "SFTPGo removed",
+      "save": "Save",
+      "saved": "SFTPGo settings saved",
+      "sftpgoPrefix": "Path SFTPGo sees",
+      "title": "SFTPGo"
+    }
+  },
+  "unavailable": {
+    "listener_off": "The network drive is off on this host. Turn it on in Settings → Connectivity → Network drive.",
+    "sftpgo_no_public_endpoint": "SFTPGo has no public address configured, so there is nowhere to connect yet.",
+    "sftpgo_unconfigured": "SFTPGo is not configured on this host.",
+    "unknown": "This share cannot be reached right now."
+  }
+}

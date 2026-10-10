@@ -53372,6 +53372,4583 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/file_audit_list:
+    post:
+      operationId: internalRpcFileAuditList
+      tags:
+        - headless-rpc
+      summary: file_audit_list (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                grantId:
+                  type: string
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: |-
+                  One page of a collection.
+
+                  Sparse rather than closed: `nextPageToken` is absent on the last page, and
+                  that absence is the signal a client reads.
+                properties:
+                  items:
+                    items:
+                      description: One audit row.
+                      properties:
+                        action:
+                          type: string
+                        at:
+                          format: int64
+                          type: integer
+                        bytes:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        channel:
+                          type: string
+                        grantId:
+                          type:
+                            - string
+                            - "null"
+                        id:
+                          format: int64
+                          type: integer
+                        outcome:
+                          type: string
+                        path:
+                          type:
+                            - string
+                            - "null"
+                        principal:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        remote:
+                          type:
+                            - string
+                            - "null"
+                        sessionId:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - id
+                        - at
+                        - principal
+                        - channel
+                        - action
+                        - outcome
+                      type: object
+                    type: array
+                  nextPageToken:
+                    description: Present exactly when another page exists.
+                    type:
+                      - string
+                      - "null"
+                required:
+                  - items
+                type: object
+                title: Page_of_AuditRow
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_credential_rotate:
+    post:
+      operationId: internalRpcFileCredentialRotate
+      tags:
+        - headless-rpc
+      summary: file_credential_rotate (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - credentialId
+              properties:
+                credentialId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: "A credential at issue or rotation: the one time its password is shown."
+                properties:
+                  credential:
+                    description: "A credential as listed: never the secret."
+                    properties:
+                      createdAt:
+                        format: int64
+                        type: integer
+                      grantId:
+                        type: string
+                      id:
+                        type: string
+                      protocol:
+                        description: A network protocol a credential speaks.
+                        enum:
+                          - webdav
+                          - sftp
+                        type: string
+                      provider:
+                        description: Who serves a credential's protocol.
+                        oneOf:
+                          - const: builtin
+                            description: The in-process WebDAV/SFTP listeners.
+                            type: string
+                          - const: sftpgo
+                            description: An external SFTPGo deployment that sees the same volume.
+                            type: string
+                      revokedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      rotatedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      sshKeyFingerprint:
+                        description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                        type:
+                          - string
+                          - "null"
+                      username:
+                        type: string
+                    required:
+                      - id
+                      - grantId
+                      - protocol
+                      - provider
+                      - username
+                      - createdAt
+                    type: object
+                  password:
+                    type: string
+                required:
+                  - credential
+                  - password
+                type: object
+                title: IssuedCredential
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_grant_create:
+    post:
+      operationId: internalRpcFileGrantCreate
+      tags:
+        - headless-rpc
+      summary: file_grant_create (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - request
+              properties:
+                request:
+                  type: object
+                  required:
+                    - sessionId
+                    - paths
+                    - permissions
+                    - protocols
+                    - expiresInSeconds
+                  properties:
+                    sessionId:
+                      type: string
+                    paths:
+                      type: array
+                      items:
+                        type: string
+                      minItems: 1
+                      maxItems: 50
+                      description: FileSpace virtual paths, e.g. `/workspace/src`.
+                    permissions:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - read
+                          - download
+                          - write
+                      minItems: 1
+                    protocols:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - webdav
+                          - sftp
+                      minItems: 1
+                    provider:
+                      type: string
+                      enum:
+                        - builtin
+                        - sftpgo
+                      description: "Absent: the Host's own listener."
+                    expiresInSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 60
+                    label:
+                      type: string
+                    sshPublicKey:
+                      type: string
+                      description: An OpenSSH public key for SFTP key authentication.
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The result of creating a grant.
+                properties:
+                  credentials:
+                    items:
+                      description: "A credential at issue or rotation: the one time its password is shown."
+                      properties:
+                        credential:
+                          description: "A credential as listed: never the secret."
+                          properties:
+                            createdAt:
+                              format: int64
+                              type: integer
+                            grantId:
+                              type: string
+                            id:
+                              type: string
+                            protocol:
+                              description: A network protocol a credential speaks.
+                              enum:
+                                - webdav
+                                - sftp
+                              type: string
+                            provider:
+                              description: Who serves a credential's protocol.
+                              oneOf:
+                                - const: builtin
+                                  description: The in-process WebDAV/SFTP listeners.
+                                  type: string
+                                - const: sftpgo
+                                  description: An external SFTPGo deployment that sees the same volume.
+                                  type: string
+                            revokedAt:
+                              format: int64
+                              type:
+                                - integer
+                                - "null"
+                            rotatedAt:
+                              format: int64
+                              type:
+                                - integer
+                                - "null"
+                            sshKeyFingerprint:
+                              description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                              type:
+                                - string
+                                - "null"
+                            username:
+                              type: string
+                          required:
+                            - id
+                            - grantId
+                            - protocol
+                            - provider
+                            - username
+                            - createdAt
+                          type: object
+                        password:
+                          type: string
+                      required:
+                        - credential
+                        - password
+                      type: object
+                    type: array
+                  endpoints:
+                    description: Where a credential's protocols are reachable.
+                    properties:
+                      sftp:
+                        items:
+                          description: One SFTP address a client can dial.
+                          properties:
+                            host:
+                              type: string
+                            port:
+                              format: uint16
+                              maximum: 65535
+                              minimum: 0
+                              type: integer
+                          required:
+                            - host
+                            - port
+                          type: object
+                        type: array
+                      sftpHostKeyFingerprint:
+                        description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                        type:
+                          - string
+                          - "null"
+                      tlsFingerprint:
+                        description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                        type:
+                          - string
+                          - "null"
+                      unavailableReason:
+                        description: |-
+                          Set when nothing serves the protocols yet (`listener_off`,
+                          `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                          what to turn on.
+                        type:
+                          - string
+                          - "null"
+                      webdavUrls:
+                        items:
+                          type: string
+                        type: array
+                    required:
+                      - webdavUrls
+                      - sftp
+                    type: object
+                  grant:
+                    description: A live grant for credential holders (P2's only audience).
+                    properties:
+                      createdAt:
+                        format: int64
+                        type: integer
+                      createdBy:
+                        description: Who created a grant.
+                        enum:
+                          - user
+                        type: string
+                      creatorPrincipal:
+                        type: string
+                      expiresAt:
+                        format: int64
+                        type: integer
+                      id:
+                        type: string
+                      label:
+                        type:
+                          - string
+                          - "null"
+                      paths:
+                        items:
+                          description: One path a grant covers, inside one mount.
+                          properties:
+                            isDir:
+                              type: boolean
+                            mountFingerprint:
+                              type: string
+                            mountId:
+                              type: string
+                            relPath:
+                              description: Normalized path inside the mount; `""` is the whole mount.
+                              type: string
+                            virtualPath:
+                              description: The FileSpace path this entry was granted as (`/workspace/src`).
+                              type: string
+                          required:
+                            - mountId
+                            - relPath
+                            - isDir
+                            - mountFingerprint
+                            - virtualPath
+                          type: object
+                        type: array
+                      permissions:
+                        items:
+                          description: What a live grant allows on its paths.
+                          oneOf:
+                            - const: read
+                              description: List directories and read metadata.
+                              type: string
+                            - const: download
+                              description: Read file bytes.
+                              type: string
+                            - const: write
+                              description: Create, overwrite, rename, delete and make directories.
+                              type: string
+                        type: array
+                      policyRevision:
+                        format: int64
+                        type: integer
+                      protocols:
+                        items:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        type: array
+                      provider:
+                        description: Who serves a credential's protocol.
+                        oneOf:
+                          - const: builtin
+                            description: The in-process WebDAV/SFTP listeners.
+                            type: string
+                          - const: sftpgo
+                            description: An external SFTPGo deployment that sees the same volume.
+                            type: string
+                      revokedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      sessionId:
+                        type: string
+                      status:
+                        description: A grant's lifecycle state.
+                        oneOf:
+                          - const: active
+                            description: Served.
+                            type: string
+                          - const: suspended
+                            description: |-
+                              Paused by its owner, by the policy, or because its conversation was
+                              archived; resumable while unexpired.
+                            type: string
+                          - const: stale
+                            description: |-
+                              A mount it covers now points elsewhere (fingerprint changed); the owner
+                              re-shares to reconfirm.
+                            type: string
+                          - const: expired
+                            description: Past its expiry.
+                            type: string
+                          - const: revoked
+                            description: Withdrawn for good.
+                            type: string
+                      statusReason:
+                        type:
+                          - string
+                          - "null"
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - id
+                      - sessionId
+                      - createdBy
+                      - creatorPrincipal
+                      - protocols
+                      - provider
+                      - permissions
+                      - status
+                      - expiresAt
+                      - policyRevision
+                      - createdAt
+                      - updatedAt
+                      - paths
+                    type: object
+                required:
+                  - grant
+                  - credentials
+                  - endpoints
+                type: object
+                title: CreatedGrant
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_grant_list:
+    post:
+      operationId: internalRpcFileGrantList
+      tags:
+        - headless-rpc
+      summary: file_grant_list (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                  description: Only this conversation's grants.
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: |-
+                  One page of a collection.
+
+                  Sparse rather than closed: `nextPageToken` is absent on the last page, and
+                  that absence is the signal a client reads.
+                properties:
+                  items:
+                    items:
+                      description: A grant with its credentials, as listed.
+                      properties:
+                        credentials:
+                          items:
+                            description: "A credential as listed: never the secret."
+                            properties:
+                              createdAt:
+                                format: int64
+                                type: integer
+                              grantId:
+                                type: string
+                              id:
+                                type: string
+                              protocol:
+                                description: A network protocol a credential speaks.
+                                enum:
+                                  - webdav
+                                  - sftp
+                                type: string
+                              provider:
+                                description: Who serves a credential's protocol.
+                                oneOf:
+                                  - const: builtin
+                                    description: The in-process WebDAV/SFTP listeners.
+                                    type: string
+                                  - const: sftpgo
+                                    description: An external SFTPGo deployment that sees the same volume.
+                                    type: string
+                              revokedAt:
+                                format: int64
+                                type:
+                                  - integer
+                                  - "null"
+                              rotatedAt:
+                                format: int64
+                                type:
+                                  - integer
+                                  - "null"
+                              sshKeyFingerprint:
+                                description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                                type:
+                                  - string
+                                  - "null"
+                              username:
+                                type: string
+                            required:
+                              - id
+                              - grantId
+                              - protocol
+                              - provider
+                              - username
+                              - createdAt
+                            type: object
+                          type: array
+                        grant:
+                          description: A live grant for credential holders (P2's only audience).
+                          properties:
+                            createdAt:
+                              format: int64
+                              type: integer
+                            createdBy:
+                              description: Who created a grant.
+                              enum:
+                                - user
+                              type: string
+                            creatorPrincipal:
+                              type: string
+                            expiresAt:
+                              format: int64
+                              type: integer
+                            id:
+                              type: string
+                            label:
+                              type:
+                                - string
+                                - "null"
+                            paths:
+                              items:
+                                description: One path a grant covers, inside one mount.
+                                properties:
+                                  isDir:
+                                    type: boolean
+                                  mountFingerprint:
+                                    type: string
+                                  mountId:
+                                    type: string
+                                  relPath:
+                                    description: Normalized path inside the mount; `""` is the whole mount.
+                                    type: string
+                                  virtualPath:
+                                    description: The FileSpace path this entry was granted as (`/workspace/src`).
+                                    type: string
+                                required:
+                                  - mountId
+                                  - relPath
+                                  - isDir
+                                  - mountFingerprint
+                                  - virtualPath
+                                type: object
+                              type: array
+                            permissions:
+                              items:
+                                description: What a live grant allows on its paths.
+                                oneOf:
+                                  - const: read
+                                    description: List directories and read metadata.
+                                    type: string
+                                  - const: download
+                                    description: Read file bytes.
+                                    type: string
+                                  - const: write
+                                    description: Create, overwrite, rename, delete and make directories.
+                                    type: string
+                              type: array
+                            policyRevision:
+                              format: int64
+                              type: integer
+                            protocols:
+                              items:
+                                description: A network protocol a credential speaks.
+                                enum:
+                                  - webdav
+                                  - sftp
+                                type: string
+                              type: array
+                            provider:
+                              description: Who serves a credential's protocol.
+                              oneOf:
+                                - const: builtin
+                                  description: The in-process WebDAV/SFTP listeners.
+                                  type: string
+                                - const: sftpgo
+                                  description: An external SFTPGo deployment that sees the same volume.
+                                  type: string
+                            revokedAt:
+                              format: int64
+                              type:
+                                - integer
+                                - "null"
+                            sessionId:
+                              type: string
+                            status:
+                              description: A grant's lifecycle state.
+                              oneOf:
+                                - const: active
+                                  description: Served.
+                                  type: string
+                                - const: suspended
+                                  description: |-
+                                    Paused by its owner, by the policy, or because its conversation was
+                                    archived; resumable while unexpired.
+                                  type: string
+                                - const: stale
+                                  description: |-
+                                    A mount it covers now points elsewhere (fingerprint changed); the owner
+                                    re-shares to reconfirm.
+                                  type: string
+                                - const: expired
+                                  description: Past its expiry.
+                                  type: string
+                                - const: revoked
+                                  description: Withdrawn for good.
+                                  type: string
+                            statusReason:
+                              type:
+                                - string
+                                - "null"
+                            updatedAt:
+                              format: int64
+                              type: integer
+                          required:
+                            - id
+                            - sessionId
+                            - createdBy
+                            - creatorPrincipal
+                            - protocols
+                            - provider
+                            - permissions
+                            - status
+                            - expiresAt
+                            - policyRevision
+                            - createdAt
+                            - updatedAt
+                            - paths
+                          type: object
+                      required:
+                        - grant
+                        - credentials
+                      type: object
+                    type: array
+                  nextPageToken:
+                    description: Present exactly when another page exists.
+                    type:
+                      - string
+                      - "null"
+                required:
+                  - items
+                type: object
+                title: Page_of_GrantView
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_grant_resume:
+    post:
+      operationId: internalRpcFileGrantResume
+      tags:
+        - headless-rpc
+      summary: file_grant_resume (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - grantId
+              properties:
+                grantId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: A grant with its credentials, as listed.
+                properties:
+                  credentials:
+                    items:
+                      description: "A credential as listed: never the secret."
+                      properties:
+                        createdAt:
+                          format: int64
+                          type: integer
+                        grantId:
+                          type: string
+                        id:
+                          type: string
+                        protocol:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        provider:
+                          description: Who serves a credential's protocol.
+                          oneOf:
+                            - const: builtin
+                              description: The in-process WebDAV/SFTP listeners.
+                              type: string
+                            - const: sftpgo
+                              description: An external SFTPGo deployment that sees the same volume.
+                              type: string
+                        revokedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        rotatedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        sshKeyFingerprint:
+                          description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                          type:
+                            - string
+                            - "null"
+                        username:
+                          type: string
+                      required:
+                        - id
+                        - grantId
+                        - protocol
+                        - provider
+                        - username
+                        - createdAt
+                      type: object
+                    type: array
+                  grant:
+                    description: A live grant for credential holders (P2's only audience).
+                    properties:
+                      createdAt:
+                        format: int64
+                        type: integer
+                      createdBy:
+                        description: Who created a grant.
+                        enum:
+                          - user
+                        type: string
+                      creatorPrincipal:
+                        type: string
+                      expiresAt:
+                        format: int64
+                        type: integer
+                      id:
+                        type: string
+                      label:
+                        type:
+                          - string
+                          - "null"
+                      paths:
+                        items:
+                          description: One path a grant covers, inside one mount.
+                          properties:
+                            isDir:
+                              type: boolean
+                            mountFingerprint:
+                              type: string
+                            mountId:
+                              type: string
+                            relPath:
+                              description: Normalized path inside the mount; `""` is the whole mount.
+                              type: string
+                            virtualPath:
+                              description: The FileSpace path this entry was granted as (`/workspace/src`).
+                              type: string
+                          required:
+                            - mountId
+                            - relPath
+                            - isDir
+                            - mountFingerprint
+                            - virtualPath
+                          type: object
+                        type: array
+                      permissions:
+                        items:
+                          description: What a live grant allows on its paths.
+                          oneOf:
+                            - const: read
+                              description: List directories and read metadata.
+                              type: string
+                            - const: download
+                              description: Read file bytes.
+                              type: string
+                            - const: write
+                              description: Create, overwrite, rename, delete and make directories.
+                              type: string
+                        type: array
+                      policyRevision:
+                        format: int64
+                        type: integer
+                      protocols:
+                        items:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        type: array
+                      provider:
+                        description: Who serves a credential's protocol.
+                        oneOf:
+                          - const: builtin
+                            description: The in-process WebDAV/SFTP listeners.
+                            type: string
+                          - const: sftpgo
+                            description: An external SFTPGo deployment that sees the same volume.
+                            type: string
+                      revokedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      sessionId:
+                        type: string
+                      status:
+                        description: A grant's lifecycle state.
+                        oneOf:
+                          - const: active
+                            description: Served.
+                            type: string
+                          - const: suspended
+                            description: |-
+                              Paused by its owner, by the policy, or because its conversation was
+                              archived; resumable while unexpired.
+                            type: string
+                          - const: stale
+                            description: |-
+                              A mount it covers now points elsewhere (fingerprint changed); the owner
+                              re-shares to reconfirm.
+                            type: string
+                          - const: expired
+                            description: Past its expiry.
+                            type: string
+                          - const: revoked
+                            description: Withdrawn for good.
+                            type: string
+                      statusReason:
+                        type:
+                          - string
+                          - "null"
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - id
+                      - sessionId
+                      - createdBy
+                      - creatorPrincipal
+                      - protocols
+                      - provider
+                      - permissions
+                      - status
+                      - expiresAt
+                      - policyRevision
+                      - createdAt
+                      - updatedAt
+                      - paths
+                    type: object
+                required:
+                  - grant
+                  - credentials
+                type: object
+                title: GrantView
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_grant_revoke:
+    post:
+      operationId: internalRpcFileGrantRevoke
+      tags:
+        - headless-rpc
+      summary: file_grant_revoke (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - grantId
+              properties:
+                grantId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: A grant with its credentials, as listed.
+                properties:
+                  credentials:
+                    items:
+                      description: "A credential as listed: never the secret."
+                      properties:
+                        createdAt:
+                          format: int64
+                          type: integer
+                        grantId:
+                          type: string
+                        id:
+                          type: string
+                        protocol:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        provider:
+                          description: Who serves a credential's protocol.
+                          oneOf:
+                            - const: builtin
+                              description: The in-process WebDAV/SFTP listeners.
+                              type: string
+                            - const: sftpgo
+                              description: An external SFTPGo deployment that sees the same volume.
+                              type: string
+                        revokedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        rotatedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        sshKeyFingerprint:
+                          description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                          type:
+                            - string
+                            - "null"
+                        username:
+                          type: string
+                      required:
+                        - id
+                        - grantId
+                        - protocol
+                        - provider
+                        - username
+                        - createdAt
+                      type: object
+                    type: array
+                  grant:
+                    description: A live grant for credential holders (P2's only audience).
+                    properties:
+                      createdAt:
+                        format: int64
+                        type: integer
+                      createdBy:
+                        description: Who created a grant.
+                        enum:
+                          - user
+                        type: string
+                      creatorPrincipal:
+                        type: string
+                      expiresAt:
+                        format: int64
+                        type: integer
+                      id:
+                        type: string
+                      label:
+                        type:
+                          - string
+                          - "null"
+                      paths:
+                        items:
+                          description: One path a grant covers, inside one mount.
+                          properties:
+                            isDir:
+                              type: boolean
+                            mountFingerprint:
+                              type: string
+                            mountId:
+                              type: string
+                            relPath:
+                              description: Normalized path inside the mount; `""` is the whole mount.
+                              type: string
+                            virtualPath:
+                              description: The FileSpace path this entry was granted as (`/workspace/src`).
+                              type: string
+                          required:
+                            - mountId
+                            - relPath
+                            - isDir
+                            - mountFingerprint
+                            - virtualPath
+                          type: object
+                        type: array
+                      permissions:
+                        items:
+                          description: What a live grant allows on its paths.
+                          oneOf:
+                            - const: read
+                              description: List directories and read metadata.
+                              type: string
+                            - const: download
+                              description: Read file bytes.
+                              type: string
+                            - const: write
+                              description: Create, overwrite, rename, delete and make directories.
+                              type: string
+                        type: array
+                      policyRevision:
+                        format: int64
+                        type: integer
+                      protocols:
+                        items:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        type: array
+                      provider:
+                        description: Who serves a credential's protocol.
+                        oneOf:
+                          - const: builtin
+                            description: The in-process WebDAV/SFTP listeners.
+                            type: string
+                          - const: sftpgo
+                            description: An external SFTPGo deployment that sees the same volume.
+                            type: string
+                      revokedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      sessionId:
+                        type: string
+                      status:
+                        description: A grant's lifecycle state.
+                        oneOf:
+                          - const: active
+                            description: Served.
+                            type: string
+                          - const: suspended
+                            description: |-
+                              Paused by its owner, by the policy, or because its conversation was
+                              archived; resumable while unexpired.
+                            type: string
+                          - const: stale
+                            description: |-
+                              A mount it covers now points elsewhere (fingerprint changed); the owner
+                              re-shares to reconfirm.
+                            type: string
+                          - const: expired
+                            description: Past its expiry.
+                            type: string
+                          - const: revoked
+                            description: Withdrawn for good.
+                            type: string
+                      statusReason:
+                        type:
+                          - string
+                          - "null"
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - id
+                      - sessionId
+                      - createdBy
+                      - creatorPrincipal
+                      - protocols
+                      - provider
+                      - permissions
+                      - status
+                      - expiresAt
+                      - policyRevision
+                      - createdAt
+                      - updatedAt
+                      - paths
+                    type: object
+                required:
+                  - grant
+                  - credentials
+                type: object
+                title: GrantView
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_grant_suspend:
+    post:
+      operationId: internalRpcFileGrantSuspend
+      tags:
+        - headless-rpc
+      summary: file_grant_suspend (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - grantId
+              properties:
+                grantId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: A grant with its credentials, as listed.
+                properties:
+                  credentials:
+                    items:
+                      description: "A credential as listed: never the secret."
+                      properties:
+                        createdAt:
+                          format: int64
+                          type: integer
+                        grantId:
+                          type: string
+                        id:
+                          type: string
+                        protocol:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        provider:
+                          description: Who serves a credential's protocol.
+                          oneOf:
+                            - const: builtin
+                              description: The in-process WebDAV/SFTP listeners.
+                              type: string
+                            - const: sftpgo
+                              description: An external SFTPGo deployment that sees the same volume.
+                              type: string
+                        revokedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        rotatedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        sshKeyFingerprint:
+                          description: SHA-256 fingerprint of the SFTP public key, when one was registered.
+                          type:
+                            - string
+                            - "null"
+                        username:
+                          type: string
+                      required:
+                        - id
+                        - grantId
+                        - protocol
+                        - provider
+                        - username
+                        - createdAt
+                      type: object
+                    type: array
+                  grant:
+                    description: A live grant for credential holders (P2's only audience).
+                    properties:
+                      createdAt:
+                        format: int64
+                        type: integer
+                      createdBy:
+                        description: Who created a grant.
+                        enum:
+                          - user
+                        type: string
+                      creatorPrincipal:
+                        type: string
+                      expiresAt:
+                        format: int64
+                        type: integer
+                      id:
+                        type: string
+                      label:
+                        type:
+                          - string
+                          - "null"
+                      paths:
+                        items:
+                          description: One path a grant covers, inside one mount.
+                          properties:
+                            isDir:
+                              type: boolean
+                            mountFingerprint:
+                              type: string
+                            mountId:
+                              type: string
+                            relPath:
+                              description: Normalized path inside the mount; `""` is the whole mount.
+                              type: string
+                            virtualPath:
+                              description: The FileSpace path this entry was granted as (`/workspace/src`).
+                              type: string
+                          required:
+                            - mountId
+                            - relPath
+                            - isDir
+                            - mountFingerprint
+                            - virtualPath
+                          type: object
+                        type: array
+                      permissions:
+                        items:
+                          description: What a live grant allows on its paths.
+                          oneOf:
+                            - const: read
+                              description: List directories and read metadata.
+                              type: string
+                            - const: download
+                              description: Read file bytes.
+                              type: string
+                            - const: write
+                              description: Create, overwrite, rename, delete and make directories.
+                              type: string
+                        type: array
+                      policyRevision:
+                        format: int64
+                        type: integer
+                      protocols:
+                        items:
+                          description: A network protocol a credential speaks.
+                          enum:
+                            - webdav
+                            - sftp
+                          type: string
+                        type: array
+                      provider:
+                        description: Who serves a credential's protocol.
+                        oneOf:
+                          - const: builtin
+                            description: The in-process WebDAV/SFTP listeners.
+                            type: string
+                          - const: sftpgo
+                            description: An external SFTPGo deployment that sees the same volume.
+                            type: string
+                      revokedAt:
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      sessionId:
+                        type: string
+                      status:
+                        description: A grant's lifecycle state.
+                        oneOf:
+                          - const: active
+                            description: Served.
+                            type: string
+                          - const: suspended
+                            description: |-
+                              Paused by its owner, by the policy, or because its conversation was
+                              archived; resumable while unexpired.
+                            type: string
+                          - const: stale
+                            description: |-
+                              A mount it covers now points elsewhere (fingerprint changed); the owner
+                              re-shares to reconfirm.
+                            type: string
+                          - const: expired
+                            description: Past its expiry.
+                            type: string
+                          - const: revoked
+                            description: Withdrawn for good.
+                            type: string
+                      statusReason:
+                        type:
+                          - string
+                          - "null"
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - id
+                      - sessionId
+                      - createdBy
+                      - creatorPrincipal
+                      - protocols
+                      - provider
+                      - permissions
+                      - status
+                      - expiresAt
+                      - policyRevision
+                      - createdAt
+                      - updatedAt
+                      - paths
+                    type: object
+                required:
+                  - grant
+                  - credentials
+                type: object
+                title: GrantView
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_share_activate:
+    post:
+      operationId: internalRpcFileShareActivate
+      tags:
+        - headless-rpc
+      summary: file_share_activate (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type:
+                    - string
+                    - "null"
+                  description: The unlocked local account; null locks the service.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The whole service as the settings surface shows it.
+                properties:
+                  accountId:
+                    type:
+                      - string
+                      - "null"
+                  active:
+                    type: boolean
+                  activeGrants:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  listener:
+                    description: The listeners as they are now.
+                    properties:
+                      config:
+                        description: The stored listener settings.
+                        properties:
+                          enabled:
+                            type: boolean
+                          exposure:
+                            description: Where the listeners are reachable from.
+                            enum:
+                              - loopback
+                              - lan
+                              - tunnel
+                            type: string
+                          sftp:
+                            type: boolean
+                          sftpPort:
+                            format: uint16
+                            maximum: 65535
+                            minimum: 0
+                            type: integer
+                          tunnelHostname:
+                            description: Public hostname of a named tunnel (`files.example.com`).
+                            type:
+                              - string
+                              - "null"
+                          tunnelMode:
+                            description: Which cloudflared tunnel fronts WebDAV in `tunnel` exposure.
+                            enum:
+                              - quick
+                              - named
+                            type: string
+                          webdav:
+                            type: boolean
+                          webdavPort:
+                            format: uint16
+                            maximum: 65535
+                            minimum: 0
+                            type: integer
+                        required:
+                          - enabled
+                          - exposure
+                          - webdav
+                          - sftp
+                          - webdavPort
+                          - sftpPort
+                          - tunnelMode
+                        type: object
+                      endpoints:
+                        description: Where a credential's protocols are reachable.
+                        properties:
+                          sftp:
+                            items:
+                              description: One SFTP address a client can dial.
+                              properties:
+                                host:
+                                  type: string
+                                port:
+                                  format: uint16
+                                  maximum: 65535
+                                  minimum: 0
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                              type: object
+                            type: array
+                          sftpHostKeyFingerprint:
+                            description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                            type:
+                              - string
+                              - "null"
+                          tlsFingerprint:
+                            description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                            type:
+                              - string
+                              - "null"
+                          unavailableReason:
+                            description: |-
+                              Set when nothing serves the protocols yet (`listener_off`,
+                              `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                              what to turn on.
+                            type:
+                              - string
+                              - "null"
+                          webdavUrls:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                          - webdavUrls
+                          - sftp
+                        type: object
+                      errors:
+                        items:
+                          description: One listener component's failure, kept for the settings surface.
+                          properties:
+                            component:
+                              type: string
+                            message:
+                              type: string
+                          required:
+                            - component
+                            - message
+                          type: object
+                        type: array
+                      sftpPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                      tunnelPid:
+                        description: The cloudflared child's pid, for the process registry.
+                        format: uint32
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                      tunnelTokenSet:
+                        type: boolean
+                      tunnelUrl:
+                        type:
+                          - string
+                          - "null"
+                      webdavPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                    required:
+                      - config
+                      - tunnelTokenSet
+                      - errors
+                      - endpoints
+                    type: object
+                  liveConnections:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  pendingProviderOps:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  policy:
+                    description: The stored policy with the host's revision.
+                    properties:
+                      allowAgentSharing:
+                        type: boolean
+                      allowLiveGrants:
+                        type: boolean
+                      allowLiveWrite:
+                        type: boolean
+                      allowProtocolCredentials:
+                        type: boolean
+                      allowPublicSnapshots:
+                        type: boolean
+                      maxLiveTtlSeconds:
+                        format: int64
+                        type: integer
+                      maxSnapshotTtlSeconds:
+                        format: int64
+                        type: integer
+                      orgId:
+                        description: The org whose policy was intersected in, when any.
+                        type:
+                          - string
+                          - "null"
+                      orgRevision:
+                        description: That org policy's revision on the plane.
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      revision:
+                        description: Bumped by the host on every change; 0 until something is pushed.
+                        format: int64
+                        type: integer
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - allowPublicSnapshots
+                      - allowLiveGrants
+                      - allowProtocolCredentials
+                      - allowLiveWrite
+                      - allowAgentSharing
+                      - maxSnapshotTtlSeconds
+                      - maxLiveTtlSeconds
+                      - revision
+                      - updatedAt
+                    type: object
+                  sessionsWithGrants:
+                    description: Conversations whose mount tables the app should keep pushing.
+                    items:
+                      type: string
+                    type: array
+                  sftpgo:
+                    description: The provider as the settings surface shows it.
+                    properties:
+                      apiKeySet:
+                        type: boolean
+                      config:
+                        anyOf:
+                          - description: The stored provider settings (the API key lives in the secret store).
+                            properties:
+                              baseUrl:
+                                description: SFTPGo's HTTP base, e.g. `http://sftpgo:8080`.
+                                type: string
+                              homeBase:
+                                description: Directory SFTPGo creates per-credential home directories under.
+                                type: string
+                              pathMappings:
+                                items:
+                                  description: One host-to-SFTPGo path prefix translation.
+                                  properties:
+                                    hostPrefix:
+                                      description: Absolute path prefix as this host sees it (`/srv/cognia/workspaces`).
+                                      type: string
+                                    sftpgoPrefix:
+                                      description: The same directory as SFTPGo sees it (`/srv/sftpgo/workspaces`).
+                                      type: string
+                                  required:
+                                    - hostPrefix
+                                    - sftpgoPrefix
+                                  type: object
+                                type: array
+                              publicSftpHost:
+                                default: null
+                                description: What clients dial, for the result card.
+                                type:
+                                  - string
+                                  - "null"
+                              publicSftpPort:
+                                default: null
+                                format: uint16
+                                maximum: 65535
+                                minimum: 0
+                                type:
+                                  - integer
+                                  - "null"
+                              publicWebdavUrl:
+                                default: null
+                                type:
+                                  - string
+                                  - "null"
+                            required:
+                              - baseUrl
+                              - homeBase
+                              - pathMappings
+                            type: object
+                          - type: "null"
+                      configured:
+                        type: boolean
+                      endpoints:
+                        description: Where SFTPGo-served credentials dial, as a grant's card would show it.
+                        properties:
+                          sftp:
+                            items:
+                              description: One SFTP address a client can dial.
+                              properties:
+                                host:
+                                  type: string
+                                port:
+                                  format: uint16
+                                  maximum: 65535
+                                  minimum: 0
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                              type: object
+                            type: array
+                          sftpHostKeyFingerprint:
+                            description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                            type:
+                              - string
+                              - "null"
+                          tlsFingerprint:
+                            description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                            type:
+                              - string
+                              - "null"
+                          unavailableReason:
+                            description: |-
+                              Set when nothing serves the protocols yet (`listener_off`,
+                              `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                              what to turn on.
+                            type:
+                              - string
+                              - "null"
+                          webdavUrls:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                          - webdavUrls
+                          - sftp
+                        type: object
+                      error:
+                        type:
+                          - string
+                          - "null"
+                      healthy:
+                        type:
+                          - boolean
+                          - "null"
+                    required:
+                      - configured
+                      - apiKeySet
+                      - endpoints
+                    type: object
+                required:
+                  - active
+                  - policy
+                  - listener
+                  - sftpgo
+                  - sessionsWithGrants
+                  - activeGrants
+                  - liveConnections
+                  - pendingProviderOps
+                type: object
+                title: FileShareStatus
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_share_listener_set:
+    post:
+      operationId: internalRpcFileShareListenerSet
+      tags:
+        - headless-rpc
+      summary: file_share_listener_set (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - config
+              properties:
+                config:
+                  type: object
+                  required:
+                    - enabled
+                    - exposure
+                    - webdav
+                    - sftp
+                    - webdavPort
+                    - sftpPort
+                    - tunnelMode
+                  properties:
+                    enabled:
+                      type: boolean
+                    exposure:
+                      type: string
+                      enum:
+                        - loopback
+                        - lan
+                        - tunnel
+                    webdav:
+                      type: boolean
+                    sftp:
+                      type: boolean
+                    webdavPort:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                    sftpPort:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                    tunnelMode:
+                      type: string
+                      enum:
+                        - quick
+                        - named
+                    tunnelHostname:
+                      type:
+                        - string
+                        - "null"
+                    tunnelToken:
+                      type: string
+                      description: "A named cloudflared tunnel's token. Write-only: stored in the Host's secret store, never answered."
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The listeners as they are now.
+                properties:
+                  config:
+                    description: The stored listener settings.
+                    properties:
+                      enabled:
+                        type: boolean
+                      exposure:
+                        description: Where the listeners are reachable from.
+                        enum:
+                          - loopback
+                          - lan
+                          - tunnel
+                        type: string
+                      sftp:
+                        type: boolean
+                      sftpPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type: integer
+                      tunnelHostname:
+                        description: Public hostname of a named tunnel (`files.example.com`).
+                        type:
+                          - string
+                          - "null"
+                      tunnelMode:
+                        description: Which cloudflared tunnel fronts WebDAV in `tunnel` exposure.
+                        enum:
+                          - quick
+                          - named
+                        type: string
+                      webdav:
+                        type: boolean
+                      webdavPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type: integer
+                    required:
+                      - enabled
+                      - exposure
+                      - webdav
+                      - sftp
+                      - webdavPort
+                      - sftpPort
+                      - tunnelMode
+                    type: object
+                  endpoints:
+                    description: Where a credential's protocols are reachable.
+                    properties:
+                      sftp:
+                        items:
+                          description: One SFTP address a client can dial.
+                          properties:
+                            host:
+                              type: string
+                            port:
+                              format: uint16
+                              maximum: 65535
+                              minimum: 0
+                              type: integer
+                          required:
+                            - host
+                            - port
+                          type: object
+                        type: array
+                      sftpHostKeyFingerprint:
+                        description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                        type:
+                          - string
+                          - "null"
+                      tlsFingerprint:
+                        description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                        type:
+                          - string
+                          - "null"
+                      unavailableReason:
+                        description: |-
+                          Set when nothing serves the protocols yet (`listener_off`,
+                          `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                          what to turn on.
+                        type:
+                          - string
+                          - "null"
+                      webdavUrls:
+                        items:
+                          type: string
+                        type: array
+                    required:
+                      - webdavUrls
+                      - sftp
+                    type: object
+                  errors:
+                    items:
+                      description: One listener component's failure, kept for the settings surface.
+                      properties:
+                        component:
+                          type: string
+                        message:
+                          type: string
+                      required:
+                        - component
+                        - message
+                      type: object
+                    type: array
+                  sftpPort:
+                    format: uint16
+                    maximum: 65535
+                    minimum: 0
+                    type:
+                      - integer
+                      - "null"
+                  tunnelPid:
+                    description: The cloudflared child's pid, for the process registry.
+                    format: uint32
+                    minimum: 0
+                    type:
+                      - integer
+                      - "null"
+                  tunnelTokenSet:
+                    type: boolean
+                  tunnelUrl:
+                    type:
+                      - string
+                      - "null"
+                  webdavPort:
+                    format: uint16
+                    maximum: 65535
+                    minimum: 0
+                    type:
+                      - integer
+                      - "null"
+                required:
+                  - config
+                  - tunnelTokenSet
+                  - errors
+                  - endpoints
+                type: object
+                title: ListenerStatus
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_share_policy_set:
+    post:
+      operationId: internalRpcFileSharePolicySet
+      tags:
+        - headless-rpc
+      summary: file_share_policy_set (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - push
+              properties:
+                push:
+                  type: object
+                  required:
+                    - policy
+                  properties:
+                    policy:
+                      type: object
+                      required:
+                        - allowPublicSnapshots
+                        - allowLiveGrants
+                        - allowProtocolCredentials
+                        - allowLiveWrite
+                        - allowAgentSharing
+                        - maxSnapshotTtlSeconds
+                        - maxLiveTtlSeconds
+                      properties:
+                        allowPublicSnapshots:
+                          type: boolean
+                        allowLiveGrants:
+                          type: boolean
+                        allowProtocolCredentials:
+                          type: boolean
+                        allowLiveWrite:
+                          type: boolean
+                        allowAgentSharing:
+                          type: boolean
+                        maxSnapshotTtlSeconds:
+                          type: integer
+                          format: int64
+                          minimum: 0
+                        maxLiveTtlSeconds:
+                          type: integer
+                          format: int64
+                          minimum: 0
+                      additionalProperties: false
+                      description: The effective file-sharing policy (the person's own intersected with the org's).
+                    orgId:
+                      type:
+                        - string
+                        - "null"
+                    orgRevision:
+                      type:
+                        - integer
+                        - "null"
+                      format: int64
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The stored policy with the host's revision.
+                properties:
+                  allowAgentSharing:
+                    type: boolean
+                  allowLiveGrants:
+                    type: boolean
+                  allowLiveWrite:
+                    type: boolean
+                  allowProtocolCredentials:
+                    type: boolean
+                  allowPublicSnapshots:
+                    type: boolean
+                  maxLiveTtlSeconds:
+                    format: int64
+                    type: integer
+                  maxSnapshotTtlSeconds:
+                    format: int64
+                    type: integer
+                  orgId:
+                    description: The org whose policy was intersected in, when any.
+                    type:
+                      - string
+                      - "null"
+                  orgRevision:
+                    description: That org policy's revision on the plane.
+                    format: int64
+                    type:
+                      - integer
+                      - "null"
+                  revision:
+                    description: Bumped by the host on every change; 0 until something is pushed.
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                required:
+                  - allowPublicSnapshots
+                  - allowLiveGrants
+                  - allowProtocolCredentials
+                  - allowLiveWrite
+                  - allowAgentSharing
+                  - maxSnapshotTtlSeconds
+                  - maxLiveTtlSeconds
+                  - revision
+                  - updatedAt
+                type: object
+                title: PolicySnapshot
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_share_sftpgo_set:
+    post:
+      operationId: internalRpcFileShareSftpgoSet
+      tags:
+        - headless-rpc
+      summary: file_share_sftpgo_set (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - config
+              properties:
+                config:
+                  anyOf:
+                    - type: object
+                      required:
+                        - baseUrl
+                        - homeBase
+                        - pathMappings
+                      properties:
+                        baseUrl:
+                          type: string
+                        homeBase:
+                          type: string
+                        pathMappings:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              - hostPrefix
+                              - sftpgoPrefix
+                            properties:
+                              hostPrefix:
+                                type: string
+                              sftpgoPrefix:
+                                type: string
+                            additionalProperties: false
+                        publicSftpHost:
+                          type:
+                            - string
+                            - "null"
+                        publicSftpPort:
+                          type:
+                            - integer
+                            - "null"
+                          minimum: 1
+                          maximum: 65535
+                        publicWebdavUrl:
+                          type:
+                            - string
+                            - "null"
+                        apiKey:
+                          type: string
+                          description: "SFTPGo's admin API key. Write-only: stored in the Host's secret store, never answered."
+                      additionalProperties: false
+                    - type: "null"
+                  description: Null removes the provider and its admin key.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The provider as the settings surface shows it.
+                properties:
+                  apiKeySet:
+                    type: boolean
+                  config:
+                    anyOf:
+                      - description: The stored provider settings (the API key lives in the secret store).
+                        properties:
+                          baseUrl:
+                            description: SFTPGo's HTTP base, e.g. `http://sftpgo:8080`.
+                            type: string
+                          homeBase:
+                            description: Directory SFTPGo creates per-credential home directories under.
+                            type: string
+                          pathMappings:
+                            items:
+                              description: One host-to-SFTPGo path prefix translation.
+                              properties:
+                                hostPrefix:
+                                  description: Absolute path prefix as this host sees it (`/srv/cognia/workspaces`).
+                                  type: string
+                                sftpgoPrefix:
+                                  description: The same directory as SFTPGo sees it (`/srv/sftpgo/workspaces`).
+                                  type: string
+                              required:
+                                - hostPrefix
+                                - sftpgoPrefix
+                              type: object
+                            type: array
+                          publicSftpHost:
+                            default: null
+                            description: What clients dial, for the result card.
+                            type:
+                              - string
+                              - "null"
+                          publicSftpPort:
+                            default: null
+                            format: uint16
+                            maximum: 65535
+                            minimum: 0
+                            type:
+                              - integer
+                              - "null"
+                          publicWebdavUrl:
+                            default: null
+                            type:
+                              - string
+                              - "null"
+                        required:
+                          - baseUrl
+                          - homeBase
+                          - pathMappings
+                        type: object
+                      - type: "null"
+                  configured:
+                    type: boolean
+                  endpoints:
+                    description: Where SFTPGo-served credentials dial, as a grant's card would show it.
+                    properties:
+                      sftp:
+                        items:
+                          description: One SFTP address a client can dial.
+                          properties:
+                            host:
+                              type: string
+                            port:
+                              format: uint16
+                              maximum: 65535
+                              minimum: 0
+                              type: integer
+                          required:
+                            - host
+                            - port
+                          type: object
+                        type: array
+                      sftpHostKeyFingerprint:
+                        description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                        type:
+                          - string
+                          - "null"
+                      tlsFingerprint:
+                        description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                        type:
+                          - string
+                          - "null"
+                      unavailableReason:
+                        description: |-
+                          Set when nothing serves the protocols yet (`listener_off`,
+                          `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                          what to turn on.
+                        type:
+                          - string
+                          - "null"
+                      webdavUrls:
+                        items:
+                          type: string
+                        type: array
+                    required:
+                      - webdavUrls
+                      - sftp
+                    type: object
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  healthy:
+                    type:
+                      - boolean
+                      - "null"
+                required:
+                  - configured
+                  - apiKeySet
+                  - endpoints
+                type: object
+                title: SftpgoStatus
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_share_status:
+    post:
+      operationId: internalRpcFileShareStatus
+      tags:
+        - headless-rpc
+      summary: file_share_status (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: The whole service as the settings surface shows it.
+                properties:
+                  accountId:
+                    type:
+                      - string
+                      - "null"
+                  active:
+                    type: boolean
+                  activeGrants:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  listener:
+                    description: The listeners as they are now.
+                    properties:
+                      config:
+                        description: The stored listener settings.
+                        properties:
+                          enabled:
+                            type: boolean
+                          exposure:
+                            description: Where the listeners are reachable from.
+                            enum:
+                              - loopback
+                              - lan
+                              - tunnel
+                            type: string
+                          sftp:
+                            type: boolean
+                          sftpPort:
+                            format: uint16
+                            maximum: 65535
+                            minimum: 0
+                            type: integer
+                          tunnelHostname:
+                            description: Public hostname of a named tunnel (`files.example.com`).
+                            type:
+                              - string
+                              - "null"
+                          tunnelMode:
+                            description: Which cloudflared tunnel fronts WebDAV in `tunnel` exposure.
+                            enum:
+                              - quick
+                              - named
+                            type: string
+                          webdav:
+                            type: boolean
+                          webdavPort:
+                            format: uint16
+                            maximum: 65535
+                            minimum: 0
+                            type: integer
+                        required:
+                          - enabled
+                          - exposure
+                          - webdav
+                          - sftp
+                          - webdavPort
+                          - sftpPort
+                          - tunnelMode
+                        type: object
+                      endpoints:
+                        description: Where a credential's protocols are reachable.
+                        properties:
+                          sftp:
+                            items:
+                              description: One SFTP address a client can dial.
+                              properties:
+                                host:
+                                  type: string
+                                port:
+                                  format: uint16
+                                  maximum: 65535
+                                  minimum: 0
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                              type: object
+                            type: array
+                          sftpHostKeyFingerprint:
+                            description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                            type:
+                              - string
+                              - "null"
+                          tlsFingerprint:
+                            description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                            type:
+                              - string
+                              - "null"
+                          unavailableReason:
+                            description: |-
+                              Set when nothing serves the protocols yet (`listener_off`,
+                              `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                              what to turn on.
+                            type:
+                              - string
+                              - "null"
+                          webdavUrls:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                          - webdavUrls
+                          - sftp
+                        type: object
+                      errors:
+                        items:
+                          description: One listener component's failure, kept for the settings surface.
+                          properties:
+                            component:
+                              type: string
+                            message:
+                              type: string
+                          required:
+                            - component
+                            - message
+                          type: object
+                        type: array
+                      sftpPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                      tunnelPid:
+                        description: The cloudflared child's pid, for the process registry.
+                        format: uint32
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                      tunnelTokenSet:
+                        type: boolean
+                      tunnelUrl:
+                        type:
+                          - string
+                          - "null"
+                      webdavPort:
+                        format: uint16
+                        maximum: 65535
+                        minimum: 0
+                        type:
+                          - integer
+                          - "null"
+                    required:
+                      - config
+                      - tunnelTokenSet
+                      - errors
+                      - endpoints
+                    type: object
+                  liveConnections:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  pendingProviderOps:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                  policy:
+                    description: The stored policy with the host's revision.
+                    properties:
+                      allowAgentSharing:
+                        type: boolean
+                      allowLiveGrants:
+                        type: boolean
+                      allowLiveWrite:
+                        type: boolean
+                      allowProtocolCredentials:
+                        type: boolean
+                      allowPublicSnapshots:
+                        type: boolean
+                      maxLiveTtlSeconds:
+                        format: int64
+                        type: integer
+                      maxSnapshotTtlSeconds:
+                        format: int64
+                        type: integer
+                      orgId:
+                        description: The org whose policy was intersected in, when any.
+                        type:
+                          - string
+                          - "null"
+                      orgRevision:
+                        description: That org policy's revision on the plane.
+                        format: int64
+                        type:
+                          - integer
+                          - "null"
+                      revision:
+                        description: Bumped by the host on every change; 0 until something is pushed.
+                        format: int64
+                        type: integer
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - allowPublicSnapshots
+                      - allowLiveGrants
+                      - allowProtocolCredentials
+                      - allowLiveWrite
+                      - allowAgentSharing
+                      - maxSnapshotTtlSeconds
+                      - maxLiveTtlSeconds
+                      - revision
+                      - updatedAt
+                    type: object
+                  sessionsWithGrants:
+                    description: Conversations whose mount tables the app should keep pushing.
+                    items:
+                      type: string
+                    type: array
+                  sftpgo:
+                    description: The provider as the settings surface shows it.
+                    properties:
+                      apiKeySet:
+                        type: boolean
+                      config:
+                        anyOf:
+                          - description: The stored provider settings (the API key lives in the secret store).
+                            properties:
+                              baseUrl:
+                                description: SFTPGo's HTTP base, e.g. `http://sftpgo:8080`.
+                                type: string
+                              homeBase:
+                                description: Directory SFTPGo creates per-credential home directories under.
+                                type: string
+                              pathMappings:
+                                items:
+                                  description: One host-to-SFTPGo path prefix translation.
+                                  properties:
+                                    hostPrefix:
+                                      description: Absolute path prefix as this host sees it (`/srv/cognia/workspaces`).
+                                      type: string
+                                    sftpgoPrefix:
+                                      description: The same directory as SFTPGo sees it (`/srv/sftpgo/workspaces`).
+                                      type: string
+                                  required:
+                                    - hostPrefix
+                                    - sftpgoPrefix
+                                  type: object
+                                type: array
+                              publicSftpHost:
+                                default: null
+                                description: What clients dial, for the result card.
+                                type:
+                                  - string
+                                  - "null"
+                              publicSftpPort:
+                                default: null
+                                format: uint16
+                                maximum: 65535
+                                minimum: 0
+                                type:
+                                  - integer
+                                  - "null"
+                              publicWebdavUrl:
+                                default: null
+                                type:
+                                  - string
+                                  - "null"
+                            required:
+                              - baseUrl
+                              - homeBase
+                              - pathMappings
+                            type: object
+                          - type: "null"
+                      configured:
+                        type: boolean
+                      endpoints:
+                        description: Where SFTPGo-served credentials dial, as a grant's card would show it.
+                        properties:
+                          sftp:
+                            items:
+                              description: One SFTP address a client can dial.
+                              properties:
+                                host:
+                                  type: string
+                                port:
+                                  format: uint16
+                                  maximum: 65535
+                                  minimum: 0
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                              type: object
+                            type: array
+                          sftpHostKeyFingerprint:
+                            description: "`SHA256:…` of the SFTP host key, for the client to verify."
+                            type:
+                              - string
+                              - "null"
+                          tlsFingerprint:
+                            description: Hex SHA-256 of the HTTPS certificate's public key (LAN WebDAV).
+                            type:
+                              - string
+                              - "null"
+                          unavailableReason:
+                            description: |-
+                              Set when nothing serves the protocols yet (`listener_off`,
+                              `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`), so the UI can say
+                              what to turn on.
+                            type:
+                              - string
+                              - "null"
+                          webdavUrls:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                          - webdavUrls
+                          - sftp
+                        type: object
+                      error:
+                        type:
+                          - string
+                          - "null"
+                      healthy:
+                        type:
+                          - boolean
+                          - "null"
+                    required:
+                      - configured
+                      - apiKeySet
+                      - endpoints
+                    type: object
+                required:
+                  - active
+                  - policy
+                  - listener
+                  - sftpgo
+                  - sessionsWithGrants
+                  - activeGrants
+                  - liveConnections
+                  - pendingProviderOps
+                type: object
+                title: FileShareStatus
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/file_space_sync:
+    post:
+      operationId: internalRpcFileSpaceSync
+      tags:
+        - headless-rpc
+      summary: file_space_sync (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessions
+              properties:
+                sessions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - sessionId
+                      - state
+                    properties:
+                      sessionId:
+                        type: string
+                      state:
+                        type: string
+                        enum:
+                          - active
+                          - archived
+                          - deleted
+                      mounts:
+                        type: array
+                        items:
+                          type: object
+                          required:
+                            - mountId
+                            - virtualPath
+                            - backing
+                            - writable
+                            - status
+                          properties:
+                            mountId:
+                              type: string
+                            virtualPath:
+                              type: string
+                              description: Where the mount appears, e.g. `/workspace`.
+                            backing:
+                              type: string
+                              enum:
+                                - disk
+                                - dexie
+                            hostPath:
+                              type: string
+                              description: The host directory of a disk mount; the Host validates and canonicalizes it.
+                            writable:
+                              type: boolean
+                            status:
+                              type: string
+                              description: "`available`, `offline`, `missing`, `deleted`."
+                          additionalProperties: false
+                      assets:
+                        type: array
+                        items:
+                          type: object
+                          required:
+                            - mountId
+                            - name
+                            - size
+                            - mediaType
+                            - modifiedAt
+                            - sourceId
+                          properties:
+                            mountId:
+                              type: string
+                            name:
+                              type: string
+                            size:
+                              type: integer
+                              format: int64
+                              minimum: 0
+                            mediaType:
+                              type: string
+                            modifiedAt:
+                              type: integer
+                              format: int64
+                            sourceId:
+                              type: string
+                          additionalProperties: false
+                        description: The files of the Dexie-backed mounts (`/uploads`, `/artifacts`).
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: What a sync accepted.
+                properties:
+                  sessionsWithGrants:
+                    items:
+                      type: string
+                    type: array
+                  synced:
+                    format: uint
+                    minimum: 0
+                    type: integer
+                required:
+                  - synced
+                  - sessionsWithGrants
+                type: object
+                title: SyncReport
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/files_library_attach:
     post:
       operationId: internalRpcFilesLibraryAttach
@@ -165536,6 +170113,19 @@ components:
           - external_bridge_start
           - external_bridge_status
           - external_bridge_stop
+          - file_audit_list
+          - file_credential_rotate
+          - file_grant_create
+          - file_grant_list
+          - file_grant_resume
+          - file_grant_revoke
+          - file_grant_suspend
+          - file_share_activate
+          - file_share_listener_set
+          - file_share_policy_set
+          - file_share_sftpgo_set
+          - file_share_status
+          - file_space_sync
           - files_library_attach
           - files_library_duplicate
           - files_library_favorite
@@ -166325,10 +170915,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 785
-  generatedRequestSchemaCount: 785
+  internalCommandCount: 798
+  generatedRequestSchemaCount: 798
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 785
+  contractRequestSchemaCount: 798
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 785
+  generatedResponseSchemaCount: 798
   loopbackOnly: true

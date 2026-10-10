@@ -473,7 +473,7 @@ describe("install guard", () => {
     teardown2()
     teardown1()
     // The second listener set did NOT fire.
-    expect(listen).toHaveBeenCalledTimes(9)
+    expect(listen).toHaveBeenCalledTimes(11)
   })
 
   it("forceReinstall: false short-circuits when already installed", async () => {
@@ -490,14 +490,14 @@ describe("install guard", () => {
       forceReinstall: true,
     })
     // All bridge listeners registered once.
-    expect(listen).toHaveBeenCalledTimes(9)
+    expect(listen).toHaveBeenCalledTimes(11)
 
     // Second call with forceReinstall: false short-circuits — no extra listens.
     const teardown2 = await installDesktopMessageSource({
       bridge: { listen, invoke, respondMedia },
       forceReinstall: false,
     })
-    expect(listen).toHaveBeenCalledTimes(9)
+    expect(listen).toHaveBeenCalledTimes(11)
 
     teardown2()
     teardown1()
@@ -1317,6 +1317,86 @@ describe("transcript bridge projections", () => {
     })
   })
 
+  it("answers a live file share's asset slice on the media channel", async () => {
+    type Listener = (event: { payload: unknown }) => void
+    const handlers: Record<string, Listener> = {}
+    let resolveMedia: ((value: MediaResponse) => void) | undefined
+    const answered = new Promise<MediaResponse>((resolve) => {
+      resolveMedia = resolve
+    })
+    await getDb().artifacts.put({
+      id: "art-1",
+      sessionId: "s1",
+      title: "Notes",
+      type: "document",
+      content: "hello world",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    await installDesktopMessageSource({
+      forceReinstall: true,
+      bridge: {
+        listen: jest.fn(async (event: string, handler: Listener) => {
+          handlers[event] = handler
+          return () => {}
+        }),
+        invoke: jest.fn(async () => undefined),
+        respondMedia: jest.fn(async (response: MediaResponse) => {
+          resolveMedia?.(response)
+        }),
+      },
+    })
+
+    handlers["companion://filespace-asset-request"]({
+      payload: {
+        requestId: "fs-rid",
+        kind: "filespace_asset",
+        sessionId: "s1",
+        mountId: "artifacts",
+        sourceId: "art-1",
+        offset: 6,
+        length: 5,
+      },
+    })
+
+    await expect(answered).resolves.toEqual({
+      requestId: "fs-rid",
+      bytes: new TextEncoder().encode("world"),
+      mediaType: "application/octet-stream",
+    })
+  })
+
+  it("answers the host's mount-table pull on the JSON channel", async () => {
+    type Listener = (event: { payload: unknown }) => void
+    const handlers: Record<string, Listener> = {}
+    const invoke = jest.fn(async () => undefined)
+    await installDesktopMessageSource({
+      forceReinstall: true,
+      bridge: {
+        listen: jest.fn(async (event: string, handler: Listener) => {
+          handlers[event] = handler
+          return () => {}
+        }),
+        invoke,
+        respondMedia,
+      },
+    })
+
+    handlers["companion://filespace-mounts-request"]({
+      payload: { requestId: "mt-rid", kind: "filespace_mounts", sessionId: "gone-session" },
+    })
+
+    // A conversation that no longer exists answers `deleted`, which is what
+    // makes the host revoke its grants.
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("companion_message_response", {
+        requestId: "mt-rid",
+        result: { sessionId: "gone-session", state: "deleted", mounts: [], assets: [] },
+        error: null,
+      })
+    )
+  })
+
   it("denies media hashes that are not referenced by the requested session", async () => {
     const hash = "b".repeat(64)
     type Listener = (event: { payload: unknown }) => void
@@ -1517,5 +1597,5 @@ it("contains native unregister rejections for all message-source channels", asyn
   stop()
   const attached = spies.map((spy) => spy.mock.calls.length)
   await Promise.all(failures.map((failure) => failure.catch(() => {})))
-  expect(attached).toEqual(Array(9).fill(1))
+  expect(attached).toEqual(Array(11).fill(1))
 })

@@ -204,6 +204,9 @@ cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 cognia-agents = { path = "../crates/cognia-agents", features = ["tauri-host"] }
 # ADR-0067 Tier C — confined filesystem surface (owns `gray_matter`, `ignore`).
 cognia-files = { path = "../crates/cognia-files", features = ["tauri-host"] }
+# ADR-0222 live file shares: the gateway, the built-in WebDAV/SFTP listeners,
+# the SFTPGo provider and their command shells.
+cognia-file-share = { path = "../crates/cognia-file-share", features = ["tauri-host"] }
 # ADR-0067 Tier C — SQLite mirrors of renderer-side agent state. Tauri-free
 # on purpose: the headless `cognia-server` bin links it directly.
 cognia-agent-state = { path = "../crates/cognia-agent-state" }
@@ -348,7 +351,6 @@ hmac.workspace = true
 sha1 = "0.11"
 sha2.workspace = true
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
-argon2 = "0.6"
 ed25519-dalek.workspace = true
 hex.workspace = true
 url.workspace = true

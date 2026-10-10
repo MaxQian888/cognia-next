@@ -77,6 +77,17 @@ const TRANSCRIPT_CAPABILITIES_EVENT: &str = "companion://transcript-capabilities
 const SESSION_TIMELINE_EVENT: &str = "companion://session-timeline-request";
 const SESSION_TURN_MESSAGES_EVENT: &str = "companion://session-turn-messages-request";
 const SESSION_MEDIA_EVENT: &str = "companion://session-media-request";
+/// ADR-0222: one slice of a Dexie-backed FileSpace file (`/uploads`,
+/// `/artifacts`) for a live share. Answered on the media channel, so the bytes
+/// travel raw like session media.
+pub const FILESPACE_ASSET_EVENT: &str = "companion://filespace-asset-request";
+/// Largest slice a FileSpace asset read asks for (one share chunk).
+pub const MAX_FILESPACE_ASSET_SLICE: usize = 4 * 1024 * 1024;
+/// ADR-0222: one conversation's FileSpace mount table, which the file-share
+/// host pulls when it needs it fresh (a grant created from a paired device,
+/// a resume, maintenance). Answered on the JSON channel
+/// (`companion_message_response`).
+pub const FILESPACE_MOUNTS_EVENT: &str = "companion://filespace-mounts-request";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Payload emitted to the WebView for a `message_update` RPC.
@@ -110,6 +121,15 @@ pub struct SessionListRequest {
     pub offset: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<i64>,
+}
+
+/// Payload emitted to the WebView (or brain) for a FileSpace mount table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSpaceMountsRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
 }
 
 /// Payload emitted to the WebView for a `message_get_by_session` RPC (Phase A1).
@@ -186,6 +206,18 @@ pub struct SessionMediaRequest {
     pub session_id: String,
     pub hash: String,
     pub variant: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSpaceAssetRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    pub mount_id: String,
+    pub source_id: String,
+    pub offset: u64,
+    pub length: u64,
 }
 
 /// Ceiling on one media answer, shared by both hosts.
@@ -333,6 +365,26 @@ impl DesktopMessagesBridge {
             before,
         };
         emit_or_cleanup(&self, transport, &request_id, LIST_EVENT, payload)?;
+        self.await_response(request_id, rx, timeout, request_guard)
+            .await
+    }
+
+    /// Ask the app that holds a conversation for its FileSpace mount table
+    /// (ADR-0222). The answer is the `SessionMountsInput` the file-share host
+    /// accepts from `file_space_sync`.
+    pub async fn filespace_mounts(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        session_id: String,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx, request_guard) = self.register(transport)?;
+        let payload = FileSpaceMountsRequest {
+            request_id: request_id.clone(),
+            kind: "filespace_mounts",
+            session_id,
+        };
+        emit_or_cleanup(&self, transport, &request_id, FILESPACE_MOUNTS_EVENT, payload)?;
         self.await_response(request_id, rx, timeout, request_guard)
             .await
     }
@@ -513,6 +565,66 @@ impl DesktopMessagesBridge {
         }
     }
 
+    /// Read one slice of a Dexie-backed FileSpace file (ADR-0222 live
+    /// shares). The renderer or brain answers on the media channel with the
+    /// raw bytes; a short slice means the end of the file.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn filespace_asset(
+        self: Arc<Self>,
+        transport: &dyn BridgeTransport,
+        session_id: String,
+        mount_id: String,
+        source_id: String,
+        offset: u64,
+        length: usize,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, String> {
+        let length = length.min(MAX_FILESPACE_ASSET_SLICE);
+        let mut request_guard = transport.reserve_request()?;
+        let request_id = Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.pending_media.lock().insert(request_id.clone(), tx);
+        let payload = FileSpaceAssetRequest {
+            request_id: request_id.clone(),
+            kind: "filespace_asset",
+            session_id,
+            mount_id,
+            source_id,
+            offset,
+            length: length as u64,
+        };
+        let value = serde_json::to_value(payload).map_err(|error| {
+            self.pending_media.lock().remove(&request_id);
+            error.to_string()
+        })?;
+        if let Err(error) = transport.emit(FILESPACE_ASSET_EVENT, value) {
+            self.pending_media.lock().remove(&request_id);
+            return Err(error);
+        }
+        let response = tokio::select! {
+            biased;
+            () = request_guard.disconnected() => {
+                self.pending_media.lock().remove(&request_id);
+                return Err("brain bridge disconnected".to_string());
+            },
+            result = tokio::time::timeout(timeout, rx) => match result {
+                Ok(Ok(result)) => result?,
+                Ok(Err(_)) => {
+                    self.pending_media.lock().remove(&request_id);
+                    return Err("filespace asset responder dropped".to_string());
+                }
+                Err(_) => {
+                    self.pending_media.lock().remove(&request_id);
+                    return Err("filespace asset request timed out".to_string());
+                }
+            },
+        };
+        if response.bytes.len() > length {
+            return Err("filespace asset answer exceeded the requested slice".to_string());
+        }
+        Ok(response.bytes)
+    }
+
     fn register(&self, transport: &dyn BridgeTransport) -> Result<PendingBridgeRequest, String> {
         let request_guard = transport.reserve_request()?;
         let request_id = Uuid::new_v4().to_string();
@@ -662,6 +774,80 @@ mod tests {
             handle.await.unwrap().unwrap(),
             json!({ "items": [], "revision": 1, "hasMore": false })
         );
+    }
+
+    #[tokio::test]
+    async fn filespace_mounts_ride_the_json_channel() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let reader = {
+            let bridge = Arc::clone(&bridge);
+            let transport = Arc::clone(&transport);
+            tokio::spawn(async move {
+                bridge
+                    .filespace_mounts(transport.as_ref(), "s1".into(), Duration::from_secs(5))
+                    .await
+            })
+        };
+        let (channel, payload) = loop {
+            if let Some(frame) = transport.last() {
+                break frame;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, FILESPACE_MOUNTS_EVENT);
+        assert_eq!(payload["kind"], "filespace_mounts");
+        assert_eq!(payload["sessionId"], "s1");
+        bridge.resolve(MessageBridgeResponse {
+            request_id: payload["requestId"].as_str().unwrap().to_string(),
+            result: Some(json!({ "sessionId": "s1", "state": "active" })),
+            error: None,
+        });
+        assert_eq!(reader.await.unwrap().unwrap()["state"], "active");
+    }
+
+    #[tokio::test]
+    async fn filespace_asset_slices_ride_the_media_channel() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let reader = {
+            let bridge = Arc::clone(&bridge);
+            let transport = Arc::clone(&transport);
+            tokio::spawn(async move {
+                bridge
+                    .filespace_asset(
+                        transport.as_ref(),
+                        "s1".into(),
+                        "uploads".into(),
+                        "asset-1".into(),
+                        8,
+                        MAX_FILESPACE_ASSET_SLICE * 2,
+                        Duration::from_secs(5),
+                    )
+                    .await
+            })
+        };
+        let (channel, payload) = loop {
+            if let Some(frame) = transport.last() {
+                break frame;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, FILESPACE_ASSET_EVENT);
+        assert_eq!(payload["kind"], "filespace_asset");
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["mountId"], "uploads");
+        assert_eq!(payload["sourceId"], "asset-1");
+        assert_eq!(payload["offset"], 8);
+        assert_eq!(payload["length"], MAX_FILESPACE_ASSET_SLICE as u64, "slices are capped");
+        bridge.resolve_media(MediaBridgeResponse {
+            request_id: payload["requestId"].as_str().unwrap().to_string(),
+            bytes: b"slice".to_vec(),
+            media_type: "application/octet-stream".into(),
+            etag: None,
+            error: None,
+        });
+        assert_eq!(reader.await.unwrap().unwrap(), b"slice");
     }
 
     #[tokio::test]

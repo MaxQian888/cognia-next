@@ -526,6 +526,35 @@ fn report_lark_env(
     ))
 }
 
+/// Install the live file-share service (ADR-0222) for this server's one local
+/// account. A mount may point only where the spawn policy lets an agent work
+/// (the workspaces volume and the managed task worktrees), and `/uploads`,
+/// `/artifacts` and mount tables are read from the brain over its bridge
+/// socket. The listener starts only if its saved settings enable it; the brain
+/// pushes the policy once it connects.
+async fn install_file_share(data_dir: &Path, local_account_id: &str, shared: &SharedState) {
+    let Some(services) = headless_services() else {
+        return;
+    };
+    let policy = services.spawn_policy.clone();
+    let service = cognia_file_share::service::install(
+        data_dir.to_path_buf(),
+        Arc::new(move |path: &str| {
+            policy
+                .validate_workspace_root(path)
+                .map_err(|violation| violation.to_string())
+        }),
+    );
+    let bridge = Arc::new(cognia_companion::filespace_bridge::BridgeFileSpaceSource::brain(
+        Arc::clone(&shared.desktop_messages_bridge),
+    ));
+    service.set_asset_reader(bridge.clone());
+    service.set_mount_source(bridge);
+    // The one account this server serves; the brain may confirm it, never
+    // choose another.
+    service.bind_account(Some(local_account_id.to_string())).await;
+}
+
 fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("COGNIA_DATA_DIR") {
         return PathBuf::from(dir);
@@ -1839,6 +1868,7 @@ async fn run_serve(
         .activate_account(&local_account_id)
         .map_err(|error| format!("activate headless plugin account: {error}"))?;
     install_headless_services(Some(services));
+    install_file_share(&data_dir, &local_account_id, &shared).await;
     if let Some(services) = headless_services() {
         // Degraded, not dead: a missing or broken sidecar script must not abort
         // boot. The data plane, sync, and every non-claude arm keep serving,
@@ -2104,6 +2134,10 @@ async fn run_serve(
         if let Err(error) = supervisor.shutdown().await {
             log::warn!("jobs: headless shutdown failed: {error}");
         }
+    }
+    // Ends every live WebDAV/SFTP session and the file-share tunnel.
+    if let Some(file_share) = cognia_file_share::service::get() {
+        file_share.shutdown().await;
     }
     if let Some(browser_handle) = browser_handle {
         app_lib::companion_api::browser_access::set_submissions_enabled(false);

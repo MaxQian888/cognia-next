@@ -1,0 +1,285 @@
+{
+  "audit": {
+    "action": "操作",
+    "at": "时间",
+    "channel": {
+      "app": "应用",
+      "sftp": "SFTP",
+      "sftpgo": "SFTPGo",
+      "webdav": "WebDAV"
+    },
+    "description": "每一次登录、读取、修改和拒绝，最新的在前。",
+    "empty": "暂无活动。",
+    "loadFailed": "无法加载活动记录。",
+    "loadMore": "加载更多",
+    "loading": "正在加载活动…",
+    "outcome": {
+      "allowed": "已允许",
+      "denied": "已拒绝",
+      "failed": "失败"
+    },
+    "path": "路径",
+    "principal": {
+      "credential": "{username}",
+      "device": "已配对设备 {id}",
+      "owner": "你",
+      "system": "Cognia"
+    },
+    "result": "结果",
+    "retry": "重试",
+    "title": "活动",
+    "via": "方式",
+    "who": "访问者"
+  },
+  "credentials": {
+    "copied": "已复制",
+    "copy": "复制{label}",
+    "copyFailed": "复制失败。",
+    "endpoints": "连接地址",
+    "hide": "隐藏密码",
+    "hostKey": "SFTP 主机密钥",
+    "hostKeyHint": "首次连接时，请确认 SFTP 客户端显示的指纹与此一致。",
+    "noInstructions": "共享可访问后会显示连接步骤。",
+    "onceWarning": "请立即复制密码。它只显示这一次；如果丢失，请重新生成。",
+    "password": "密码",
+    "protocol": {
+      "sftp": "SFTP",
+      "webdav": "WebDAV"
+    },
+    "show": "显示密码",
+    "sshKey": "也可使用 SSH 密钥 {fingerprint} 登录",
+    "steps": {
+      "finder": "在访达中选择「前往 → 连接服务器」(⌘K)，粘贴此地址，然后用用户名和密码登录。",
+      "rclone": "先创建远端，再挂载。挂载需要 macFUSE、WinFsp 或 FUSE。",
+      "sftp": "使用 OpenSSH 连接，它会提示输入密码。",
+      "windows": "在命令提示符中运行此命令，Windows 会提示输入密码。",
+      "windowsNeedsHttps": "除非 WebClient 的 BasicAuthLevel 设为 2，否则 Windows 只会向 HTTPS 地址发送密码。要让 Windows 连接，请通过局域网或隧道共享。"
+    },
+    "tab": {
+      "finder": "macOS 访达",
+      "rclone": "rclone",
+      "sftp": "终端",
+      "windows": "Windows"
+    },
+    "tls": "证书指纹",
+    "tlsHint": "此主机使用自己的证书。客户端询问是否信任时，请核对这个指纹。",
+    "username": "用户名"
+  },
+  "dialog": {
+    "blocked": {
+      "credentialsDisabled": "你的文件共享策略已关闭网络驱动器凭据。",
+      "liveDisabled": "你的文件共享策略已关闭文件的实时访问。",
+      "locked": "请先在此主机上解锁账号，才能实时共享文件。",
+      "openPolicy": "文件共享策略",
+      "title": "网络驱动器共享已关闭"
+    },
+    "cancel": "取消",
+    "create": "创建访问",
+    "creating": "正在创建…",
+    "description": "通过 WebDAV 或 SFTP 让他人访问这些文件，并可随时撤销。对方使用用户名和密码登录，你可以随时暂停或撤销。",
+    "done": "完成",
+    "expiry": "有效期",
+    "files": "文件和文件夹",
+    "filesHint": "共享文件夹时会包含其中的所有内容。.env 文件、密钥等机密永远不会被提供。",
+    "label": "标签",
+    "labelPlaceholder": "给谁用、做什么用",
+    "listener": {
+      "off": "此主机的网络驱动器已关闭，开启前无法访问这个共享。",
+      "openSettings": "网络驱动器设置",
+      "protocolOff": "此主机的网络驱动器设置中已关闭 {protocol}。"
+    },
+    "noProtocol": "请至少选择一种协议。",
+    "nothingSelected": "请至少选择一个文件或文件夹。",
+    "permission": {
+      "download": "下载文件",
+      "read": "查看文件夹和文件名",
+      "readHint": "始终允许。",
+      "write": "允许修改",
+      "writeDisabledPolicy": "你的文件共享策略已关闭修改权限。",
+      "writeReadOnly": "上传的文件和产物只能读取，此对话无法修改的文件夹也一样。"
+    },
+    "permissions": "权限",
+    "protocol": {
+      "sftp": "SFTP",
+      "sftpHint": "OpenSSH、rclone、Cyberduck、WinSCP",
+      "webdav": "WebDAV",
+      "webdavHint": "访达、Windows 资源管理器、rclone"
+    },
+    "protocols": "协议",
+    "provider": {
+      "builtin": "此主机",
+      "sftpgo": "SFTPGo"
+    },
+    "providerLabel": "提供方",
+    "resultDescription": "把下面的地址和登录信息发给需要连接的人。",
+    "resultTitle": "已创建网络驱动器访问",
+    "sshKey": "SSH 公钥（可选）",
+    "sshKeyHint": "SFTP 客户端可以用这个密钥代替密码登录。",
+    "sshKeyPlaceholder": "ssh-ed25519 AAAA…",
+    "title": "以网络驱动器共享"
+  },
+  "errors": {
+    "credential_conflict": "无法生成未被占用的用户名，请重试。",
+    "credential_hash_failed": "无法保护密码，请重试。",
+    "credential_revoked": "该登录凭据已被撤销。",
+    "file_share_locked": "请先在此主机上解锁账号，才能管理实时文件共享。",
+    "file_share_unavailable": "此主机不支持实时共享文件。",
+    "grant_expired": "此访问已过期。",
+    "grant_not_active": "此访问未处于启用状态。",
+    "grant_not_resumable": "此访问无法再恢复。",
+    "host_key_failed": "无法加载 SFTP 主机密钥。",
+    "invalid_path": "所选路径中有不属于此对话文件的路径。",
+    "invalid_request": "请求无效：{message}",
+    "listener_bind_failed": "端口已被占用或无法打开。",
+    "listener_tls_failed": "无法加载 HTTPS 证书。",
+    "mount_not_synced": "此主机还未获取此对话的文件，请稍后重试。",
+    "mount_read_only": "该文件夹只能读取，无法允许修改。",
+    "mount_unavailable": "所选文件夹中有一个当前在此主机上不可用。",
+    "not_found": "该访问已不存在。",
+    "policy_credentials_disabled": "你的文件共享策略已关闭网络驱动器凭据。",
+    "policy_exceeded": "此访问超出了当前的文件共享策略。",
+    "policy_live_disabled": "你的文件共享策略已关闭文件的实时访问。",
+    "policy_write_disabled": "你的文件共享策略已关闭修改权限。",
+    "provider_failed": "无法更新 SFTPGo，请重试。",
+    "secret_store_unavailable": "系统钥匙串不可用。",
+    "sensitive_path": "该路径包含机密信息，不能共享。",
+    "session_inactive": "此对话已归档或删除，无法共享其文件。",
+    "sftpgo_path_unmapped": "SFTPGo 看不到所选文件夹之一，请为其添加路径映射。",
+    "sftpgo_unconfigured": "此主机未配置 SFTPGo。",
+    "store_failed": "此主机无法保存更改，请重试。",
+    "ttl_exceeds_policy": "该有效期超出了文件共享策略允许的上限。",
+    "unknown": "出现问题：{message}",
+    "unknown_command": "此主机版本过旧，不支持实时共享文件。"
+  },
+  "grants": {
+    "actions": {
+      "audit": "活动",
+      "menu": "{label} 的操作",
+      "resume": "恢复",
+      "revoke": "撤销",
+      "rotateFor": "生成新的 {protocol} 密码",
+      "suspend": "暂停"
+    },
+    "conversation": "对话 {id}",
+    "empty": "还没有以网络驱动器共享的内容。",
+    "expired": "已于 {when} 过期",
+    "expires": "{when} 过期",
+    "newShare": "以网络驱动器共享…",
+    "reason": {
+      "expired": "已过期",
+      "mount_changed": "共享的文件夹已移动或更改。恢复后将按当前内容共享。",
+      "owner": "已由你暂停",
+      "policy": "超出了当前的文件共享策略",
+      "provider_failed": "无法更新 SFTPGo",
+      "revoked": "已撤销",
+      "session_archived": "对话已归档",
+      "session_deleted": "对话已删除"
+    },
+    "revokeConfirm": {
+      "confirm": "撤销",
+      "description": "正在使用它的连接会立即断开，且无法再恢复。",
+      "title": "撤销此访问？"
+    },
+    "rotate": {
+      "description": "旧密码会立即失效，使用旧密码登录的连接会被断开。",
+      "title": "{username} 的新密码"
+    },
+    "stats": "{grants} 个启用的共享 · {connections} 个连接",
+    "status": {
+      "active": "已启用",
+      "expired": "已过期",
+      "revoked": "已撤销",
+      "stale": "需要处理",
+      "suspended": "已暂停"
+    },
+    "title": "以网络驱动器共享",
+    "toast": {
+      "resumed": "已恢复访问",
+      "revoked": "已撤销访问",
+      "suspended": "已暂停访问"
+    },
+    "untitled": "网络驱动器访问"
+  },
+  "settings": {
+    "access": {
+      "description": "此主机上所有对话的网络驱动器共享。",
+      "title": "实时文件访问"
+    },
+    "listener": {
+      "addresses": "地址",
+      "description": "通过 WebDAV 和 SFTP 从此主机提供已共享的对话文件。连接者只能看到被授予的内容。",
+      "enabled": "提供网络驱动器",
+      "exposure": {
+        "label": "谁可以连接",
+        "lan": "局域网",
+        "lanHint": "同一网络中的其他设备。WebDAV 使用此主机自己的证书走 HTTPS。",
+        "loopback": "仅此电脑",
+        "loopbackHint": "本机上的客户端。",
+        "tunnel": "互联网（通过隧道）",
+        "tunnelHint": "cloudflared 隧道将 WebDAV 发布到公共 HTTPS 地址。SFTP 仍只在本机可用。"
+      },
+      "invalidPorts": "端口必须在 1024 到 65535 之间，且彼此不同。",
+      "noProtocol": "请开启 WebDAV、SFTP 或两者。",
+      "port": "{protocol} 端口",
+      "problems": "问题",
+      "publicUrl": "公共地址",
+      "running": "运行中",
+      "save": "保存",
+      "saved": "网络驱动器设置已保存",
+      "saving": "正在保存…",
+      "stopped": "已关闭",
+      "title": "网络驱动器",
+      "tunnel": {
+        "hostname": "公共主机名",
+        "mode": "隧道",
+        "named": "命名隧道",
+        "namedHint": "通过 Cloudflare 隧道令牌使用你自己的主机名。",
+        "quick": "快速隧道",
+        "quickHint": "随机的 trycloudflare.com 地址，每次启动都会变化。",
+        "token": "隧道令牌",
+        "tokenSet": "已保存令牌。留空则保持不变。"
+      }
+    },
+    "locked": "请先在此主机上解锁账号，才能管理实时文件共享。",
+    "pendingProviderOps": "有 {count} 项 SFTPGo 更改等待重试。",
+    "sftpgo": {
+      "addMapping": "添加映射",
+      "agpl": "SFTPGo 是由你自行部署的 AGPL-3.0 软件。Cognia 只调用它的管理 API，从不捆绑它。",
+      "apiKey": "管理 API 密钥",
+      "apiKeySet": "已保存密钥。留空则保持不变。",
+      "baseUrl": "管理 API 地址",
+      "description": "在单独部署的 SFTPGo 中创建共享用户，而不是由此主机直接提供。适用于 SFTPGo 已能访问工作区的服务器。",
+      "health": {
+        "healthy": "可访问",
+        "unchecked": "未检查",
+        "unhealthy": "无法访问"
+      },
+      "homeBase": "主目录根路径",
+      "hostPrefix": "此主机上的路径",
+      "mappingHint": "SFTPGo 看到的工作区路径通常不同。请把此主机共享的每个文件夹映射到 SFTPGo 使用的路径。",
+      "mappings": "路径映射",
+      "notConfigured": "未配置",
+      "publicSftpHost": "公共 SFTP 主机",
+      "publicSftpPort": "公共 SFTP 端口",
+      "publicWebdavUrl": "公共 WebDAV 地址",
+      "remove": "移除 SFTPGo",
+      "removeConfirm": {
+        "confirm": "移除",
+        "description": "由 SFTPGo 提供的共享将停止工作，直到重新配置。",
+        "title": "移除 SFTPGo？"
+      },
+      "removeMapping": "移除映射",
+      "removed": "已移除 SFTPGo",
+      "save": "保存",
+      "saved": "SFTPGo 设置已保存",
+      "sftpgoPrefix": "SFTPGo 看到的路径",
+      "title": "SFTPGo"
+    }
+  },
+  "unavailable": {
+    "listener_off": "此主机的网络驱动器已关闭。请在「设置 → 连接 → 网络驱动器」中开启。",
+    "sftpgo_no_public_endpoint": "SFTPGo 未配置公共地址，暂时无处可连。",
+    "sftpgo_unconfigured": "此主机未配置 SFTPGo。",
+    "unknown": "此共享当前无法访问。"
+  }
+}

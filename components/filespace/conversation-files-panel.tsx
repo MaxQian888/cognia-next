@@ -13,6 +13,10 @@
  *
  * "Share files…" (and each row's share action, with that row preselected)
  * opens the share dialog on a `file-bundle`: the files and nothing else.
+ *
+ * Where the host can share live (ADR-0222 §7.5), each row also offers "share
+ * as a network drive", and the "Shared as network drive" section lists the
+ * conversation's live shares with their controls.
  */
 
 import { useEffect, useRef, useState } from "react"
@@ -24,6 +28,7 @@ import {
   FileIcon,
   FolderGit2Icon,
   FolderIcon,
+  HardDriveIcon,
   LinkIcon,
   ServerIcon,
   Share2Icon,
@@ -37,6 +42,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConversationFileSpace } from "@/hooks/filespace/use-conversation-filespace"
+import { useLiveFileShare } from "@/hooks/filespace/use-live-file-share"
 import { getSessionAsset } from "@/lib/db/session-assets"
 import { getSession } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
@@ -52,6 +58,12 @@ import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { cn } from "@/lib/utils"
 import { useFileSpacePanelStore } from "@/stores/filespace/filespace-panel-store"
 import type { ChatSession } from "@cognia/agent-config-types"
+
+import {
+  LiveSharingSection,
+  liveSharingOffered,
+  type LiveShareRequest,
+} from "./live-sharing-section"
 import type {
   FileSpaceDexieEntry,
   FileSpaceMount,
@@ -84,7 +96,13 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
   const consumeFocus = useFileSpacePanelStore((state) => state.consumeFocus)
   const [highlight, setHighlight] = useState<FileSpacePath | null>(null)
   const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null)
+  const [liveRequest, setLiveRequest] = useState<LiveShareRequest | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const live = useLiveFileShare({
+    sessionId,
+    hostId: loaded?.space.hostId,
+    enabled: Boolean(sessionId && loaded && loaded.space.status !== "deleted"),
+  })
 
   // Apply a focus request aimed at this conversation once its rows exist;
   // one aimed at another conversation is left for that conversation's panel.
@@ -179,6 +197,11 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
       () => toast.error(t("toast.shareUnavailable"))
     )
   }
+  // Only offered where the host would issue a grant; the section says why not.
+  const shareLive = liveSharingOffered(live)
+    ? (paths: FileSpacePath[]) =>
+        setLiveRequest((previous) => ({ seq: (previous?.seq ?? 0) + 1, paths }))
+    : undefined
   const download = (entry: FileSpaceDexieEntry) => {
     void getSessionAsset(sessionId, entry.sourceId)
       .then((source) => {
@@ -234,6 +257,9 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
               }
               onOpen={() => open(mount.virtualPath as FileSpacePath)}
               onShare={() => share([mount.virtualPath as FileSpacePath])}
+              onShareLive={
+                shareLive ? () => shareLive([mount.virtualPath as FileSpacePath]) : undefined
+              }
               onCopyLink={() => copyLink(mount.virtualPath as FileSpacePath)}
             />
           ))}
@@ -265,6 +291,9 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
                 </Button>
               }
               onShare={entry.sourceAvailable ? () => share([entry.path]) : undefined}
+              onShareLive={
+                entry.sourceAvailable && shareLive ? () => shareLive([entry.path]) : undefined
+              }
               onCopyLink={() => copyLink(entry.path)}
             />
           ))}
@@ -293,11 +322,21 @@ export function ConversationFilesPanel({ sessionId }: ConversationFilesPanelProp
                 </Button>
               }
               onShare={() => share([entry.path])}
+              onShareLive={shareLive ? () => shareLive([entry.path]) : undefined}
               onCopyLink={() => copyLink(entry.path)}
             />
           ))}
         </Section>
       ) : null}
+
+      <LiveSharingSection
+        live={live}
+        space={space}
+        dexie={dexie}
+        request={liveRequest}
+        onRequest={(paths) => shareLive?.(paths)}
+        onCloseRequest={() => setLiveRequest(null)}
+      />
 
       {shareRequest ? (
         <ShareLinkDialog
@@ -354,6 +393,7 @@ function MountRow({
   focusedPath,
   onOpen,
   onShare,
+  onShareLive,
   onCopyLink,
 }: {
   mount: FileSpaceMount
@@ -361,6 +401,8 @@ function MountRow({
   focusedPath: FileSpacePath | null
   onOpen: () => void
   onShare: () => void
+  /** Absent where the host does not offer live sharing. */
+  onShareLive?: () => void
   onCopyLink: () => void
 }) {
   const t = useTranslations("filespace")
@@ -445,6 +487,9 @@ function MountRow({
             <ExternalLinkIcon className="size-3.5" />
           </Button>
           <ShareButton onShare={available && mount.hostPath ? onShare : undefined} />
+          {onShareLive ? (
+            <ShareLiveButton onShareLive={available && mount.hostPath ? onShareLive : undefined} />
+          ) : null}
           <CopyLinkButton onCopy={onCopyLink} />
         </div>
       </div>
@@ -458,6 +503,7 @@ function EntryRow({
   highlighted,
   primaryAction,
   onShare,
+  onShareLive,
   onCopyLink,
 }: {
   entry: FileSpaceDexieEntry
@@ -466,6 +512,8 @@ function EntryRow({
   primaryAction: React.ReactNode
   /** Absent when the row has nothing that could be shared. */
   onShare?: () => void
+  /** Absent where the host does not offer live sharing for this row. */
+  onShareLive?: () => void
   onCopyLink: () => void
 }) {
   const t = useTranslations("filespace")
@@ -492,6 +540,7 @@ function EntryRow({
       <div className="flex shrink-0 items-center">
         {primaryAction}
         <ShareButton onShare={onShare} />
+        {onShareLive ? <ShareLiveButton onShareLive={onShareLive} /> : null}
         <CopyLinkButton onCopy={onCopyLink} />
       </div>
     </li>
@@ -513,6 +562,25 @@ function ShareButton({ onShare }: { onShare?: () => void }) {
       onClick={onShare}
     >
       <Share2Icon className="size-3.5" />
+    </Button>
+  )
+}
+
+/** Share this row as a network drive; disabled when the row cannot be served. */
+function ShareLiveButton({ onShareLive }: { onShareLive?: () => void }) {
+  const t = useTranslations("liveShare")
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-7"
+      disabled={!onShareLive}
+      aria-label={t("grants.newShare")}
+      title={t("grants.newShare")}
+      onClick={onShareLive}
+    >
+      <HardDriveIcon className="size-3.5" />
     </Button>
   )
 }

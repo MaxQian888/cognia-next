@@ -29,6 +29,7 @@ import { getOrgFileSharingPolicy, saveOrgFileSharingPolicy } from "@/lib/collab/
 import type { CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { resolveLocalFileSharingPolicy, type FileSharingPolicy } from "@/lib/filespace/policy"
+import { FILE_SHARING_POLICY_SETTING_ID } from "@/lib/filespace/settings-links"
 
 import { FileSharingPolicyFields } from "./file-sharing-policy-fields"
 
@@ -55,7 +56,10 @@ function settingsOf(
 export function FileSharingPolicyCard() {
   const t = useTranslations("share.policy")
   return (
-    <div className="space-y-4 rounded-lg border p-4">
+    <div
+      className="space-y-4 rounded-lg border p-4"
+      data-setting-id={FILE_SHARING_POLICY_SETTING_ID}
+    >
       <div>
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <p className="text-xs text-muted-foreground">{t("description")}</p>

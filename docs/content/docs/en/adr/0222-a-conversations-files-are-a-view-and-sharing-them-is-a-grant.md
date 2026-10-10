@@ -5,7 +5,7 @@ description: "Each conversation gets a FileSpace: a derived virtual namespace ov
 
 # ADR 0222 — A conversation's files are a view, and sharing them is a grant
 
-**Status:** Proposed — P0 (FileSpace, links, Conversation files panel) and P1 (snapshot shares with files, file-sharing policy, collab `files.share`) shipped 2026-10-10
+**Status:** Proposed — P0 (FileSpace, links, Conversation files panel), P1 (snapshot shares with files, file-sharing policy, collab `files.share`) and P2 (live grants over WebDAV/SFTP, the SFTPGo provider, network-drive settings) shipped 2026-10-10
 **Date:** 2026-10-10
 **Design:** `docs/superpowers/specs/2026-10-10-conversation-filespace-and-sharing-design.md`
 **Related:** [ADR-0037](./0037-public-share-links) (share links),
@@ -101,6 +101,40 @@ otherwise the grant becomes `stale`), the effective policy at its current
 revision, path confinement through `cognia-files`, and a sensitive-file floor
 that no grant overrides.
 
+As built in P2:
+
+- **One command surface.** Thirteen commands live in
+  `crates/cognia-file-share/src/rpc.rs`, called both by the desktop's
+  `#[tauri::command]` shells and by the companion RPC, so a paired device and
+  the WebView send the same arguments. `file_share_activate`,
+  `file_space_sync` and `file_share_policy_set` are host-only (service
+  scope); the reads need `host.observe` and page by token; grant changes are
+  `workspace.write` control commands; the listener and SFTPGo settings are
+  `host-admin` with step-up. The audit records `owner` for the app and the
+  brain and `device:<id>` for a paired device.
+- **The host pulls mount tables.** The WebView or brain pushes tables for
+  conversations with grants, and the host also asks for one whenever it
+  needs it fresh: on every grant creation (which is how a grant made from a
+  paired device binds to current paths), on resume, and once a minute for
+  every conversation with an open grant (`companion://filespace-mounts-request`
+  over the desktop bridge; the brain announces a `filespace` capability). A
+  failed pull keeps the last table, and an answer for another conversation is
+  refused. Dexie-backed files are read the same way, in slices of at most
+  4 MiB.
+- **Which directories may be shared.** A disk mount must lie under a root the
+  host would share: on the desktop an active project root or the managed
+  execution directory under the app's data directory (never the app data,
+  `~/.claude` or a dialog-granted path), on a headless server the spawn
+  policy's workspace root.
+- **The host owns the account.** The desktop's account session binds the
+  unlocked account on unlock and unbinds it on lock; the renderer can only
+  confirm that account, never name another, and re-confirming it keeps live
+  connections. A headless server binds its local account at boot.
+- **Fewer modules than drafted.** Maintenance (expiry, policy re-check, the
+  provider retry queue, mount pulls) runs in `service.rs`; there is no
+  `provider.rs` trait, because the two providers differ in what they keep
+  (a hashed password versus a provisioned SFTPGo user) more than they share.
+
 ### 5. Providers speak protocols; they do not decide access
 
 The built-in provider runs WebDAV (`dav-server`, Apache-2.0) and SFTP (`russh`
@@ -111,6 +145,18 @@ provisions one SFTPGo user per credential with virtual folders translated
 through a configured path mapping, expiry and denied patterns. A grant whose
 paths SFTPGo cannot see fails closed. SFTPGo is deployed as a separate service
 (`deploy/compose`) and never bundled.
+
+As built in P2: the listener's exposure is `loopback`, `lan` (WebDAV over
+HTTPS with the companion certificate, SFTP with a persistent Ed25519 host key)
+or `tunnel` (a cloudflared child, quick or named, fronting WebDAV). Each
+credential's card shows the reachable addresses, both fingerprints and the
+steps for Finder, Windows, rclone and OpenSSH; an unreachable share says why
+(`listener_off`, `sftpgo_unconfigured`, `sftpgo_no_public_endpoint`). The
+listeners and the tunnel child appear in the process registry as the
+`fileShare` subsystem. SFTPGo changes that fail are queued and retried while
+the grant stays revoked locally. The surfaces are the Files panel's "Shared as
+network drive" section and Settings → Connectivity → Network drive; the
+overlay is `deploy/compose/compose.sftpgo.yaml`.
 
 ### 6. Collaboration members reach the host through requests
 

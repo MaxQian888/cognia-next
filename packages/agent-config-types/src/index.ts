@@ -3793,27 +3793,29 @@ export interface RouterFusionRunSummary {
 /**
  * The adjustable fields of a file-sharing policy (ADR-0222), all optional at rest.
  *
- * Dormant until later phases: live access (`allowLiveGrants`,
- * `allowProtocolCredentials`, `allowLiveWrite`, `maxLiveTtlSeconds`) has no
- * surface before ADR-0222 phase 2, and agent sharing (`allowAgentSharing`)
- * none before phase 3. They are stored and enforced by the plane today so a
- * policy set now already governs those features when they ship; the settings
- * UI labels them as not yet available (`FileSharingPolicyFields`).
+ * Live access (`allowLiveGrants`, `allowProtocolCredentials`,
+ * `allowLiveWrite`, `maxLiveTtlSeconds`) governs the network-drive grants of
+ * ADR-0222 phase 2; the host re-checks every grant against it.
+ *
+ * Dormant: agent sharing (`allowAgentSharing`) has no surface before phase 3.
+ * It is stored and enforced by the plane today so a policy set now already
+ * governs agents when they can share; the settings UI labels it as not yet
+ * available (`FileSharingPolicyFields`).
  */
 export interface FileSharingPolicySettings {
   /** Publish conversation files as public, end-to-end-encrypted snapshot links. */
   allowPublicSnapshots?: boolean
-  /** Give people live, revocable access to conversation files. Dormant until phase 2. */
+  /** Give people live, revocable access to conversation files. */
   allowLiveGrants?: boolean
-  /** Issue WebDAV/SFTP credentials for live access. Dormant until phase 2. */
+  /** Issue WebDAV/SFTP credentials for live access. */
   allowProtocolCredentials?: boolean
-  /** Let live access write, not only read. Dormant until phase 2. */
+  /** Let live access write, not only read. */
   allowLiveWrite?: boolean
   /** Let an agent share files on the person's behalf. Dormant until phase 3. */
   allowAgentSharing?: boolean
   /** Longest a snapshot link may live, in seconds. */
   maxSnapshotTtlSeconds?: number
-  /** Longest live access may last, in seconds. Dormant until phase 2. */
+  /** Longest live access may last, in seconds. */
   maxLiveTtlSeconds?: number
 }
 

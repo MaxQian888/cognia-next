@@ -418,6 +418,24 @@ pub const MEDIA_CAPABILITY: &str = "media";
 /// `true` when no brain is connected: the desktop data plane answers media
 /// through Tauri IPC and never consults this.
 pub fn brain_serves_media() -> bool {
+    brain_announces(MEDIA_CAPABILITY)
+}
+
+/// Capability a brain must announce before it will answer the live file-share
+/// host's two FileSpace requests (ADR-0222 §7.2): a slice of a session upload
+/// or artifact a share serves from `/uploads` or `/artifacts`, and a
+/// conversation's mount table. Same reasoning as [`MEDIA_CAPABILITY`]: an
+/// older brain would otherwise leave the WebDAV or SFTP client, or the device
+/// creating a grant, waiting out the timeout.
+pub const FILESPACE_CAPABILITY: &str = "filespace";
+
+/// Whether the connected brain announced it can answer FileSpace requests.
+/// `true` when no brain is connected, like [`brain_serves_media`].
+pub fn brain_serves_filespace() -> bool {
+    brain_announces(FILESPACE_CAPABILITY)
+}
+
+fn brain_announces(wanted: &str) -> bool {
     SOCKET_BRIDGE
         .read()
         .as_ref()
@@ -425,7 +443,7 @@ pub fn brain_serves_media() -> bool {
             slot.hello
                 .capabilities
                 .iter()
-                .any(|capability| capability == MEDIA_CAPABILITY)
+                .any(|capability| capability == wanted)
         })
         .unwrap_or(true)
 }
@@ -1151,6 +1169,15 @@ pub mod test_support {
     /// real WebSocket. Returns the receiver of the outgoing frame queue so
     /// the test can assert on emitted frames. Hold the slot lock first.
     pub fn install_socket_for_testing(state: &SharedState) -> TestBridgeReceiver {
+        install_socket_with_capabilities_for_testing(state, &[])
+    }
+
+    /// [`install_socket_for_testing`] for a brain that announced
+    /// `capabilities` in its hello. Hold the slot lock first.
+    pub fn install_socket_with_capabilities_for_testing(
+        state: &SharedState,
+        capabilities: &[&str],
+    ) -> TestBridgeReceiver {
         let (tx, rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
         let conn_id = CONN_COUNTER.fetch_add(1, Ordering::SeqCst);
         let transport = SocketBridgeTransport::new(tx, conn_id);
@@ -1161,7 +1188,7 @@ pub mod test_support {
             BrainHello {
                 brain_version: "0.0.0-test".to_string(),
                 account_id: "local_acct_a".to_string(),
-                capabilities: Vec::new(),
+                capabilities: capabilities.iter().map(|c| (*c).to_string()).collect(),
                 catalog_hash: crate::command_manifest::headless_contract()
                     .expect("embedded contract")
                     .catalog_hash()

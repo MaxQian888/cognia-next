@@ -139,42 +139,28 @@ pub fn clear_pepper(local_account_id: &str) -> Result<(), String> {
 /// the clear next to the hash and peppering there would put the one value the
 /// scheme depends on straight onto disk.
 fn derive(secret: &str, pepper: &[u8], salt: &[u8]) -> Result<Vec<u8>, String> {
-    use argon2::{Algorithm, Argon2, Params, Version};
-
     let params = crate::account_auth::default_kdf_params();
-    let argon_params = Params::new(
-        params.memory_cost,
-        params.time_cost,
-        params.parallelism,
-        Some(params.output_length),
-    )
-    .map_err(|err| format!("invalid quick unlock params: {err}"))?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
-
     let mut input = Vec::with_capacity(secret.len() + pepper.len());
     input.extend_from_slice(secret.as_bytes());
     input.extend_from_slice(pepper);
 
-    let mut output = vec![0_u8; params.output_length];
-    let result = argon
-        .hash_password_into(&input, salt, &mut output)
-        .map_err(|err| format!("quick unlock derivation failed: {err}"));
+    let result = cognia_secrets::password_kdf::derive(
+        &input,
+        salt,
+        params.memory_cost,
+        params.time_cost,
+        params.parallelism,
+        params.output_length,
+    )
+    .map_err(|err| format!("quick unlock derivation failed: {err}"));
     // Wipe the combined input before returning either way: it holds the
     // pepper, which must not linger in a reused allocation.
     input.iter_mut().for_each(|byte| *byte = 0);
-    result?;
-    Ok(output)
+    result
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0_u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    cognia_secrets::password_kdf::constant_time_eq(a, b)
 }
 
 /// Mint a quick-unlock verifier.

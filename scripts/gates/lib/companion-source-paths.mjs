@@ -62,6 +62,12 @@ export const COMPANION_SOURCES = Object.freeze({
    * live here.
    */
   sftpService: "crates/cognia-terminal/src/sftp_service.rs",
+  /**
+   * Not under `companion_api` either: `rpc/file_share.rs` hands off to the
+   * file-share crate's one command surface, which the desktop's
+   * `#[tauri::command]` shells share (ADR-0222).
+   */
+  fileShareRpc: "crates/cognia-file-share/src/rpc.rs",
 })
 
 /** The dispatch file of one RPC family, e.g. `rpcFamilyFile("chat")`. */

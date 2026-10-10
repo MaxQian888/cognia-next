@@ -4,10 +4,9 @@
  * The fields of one file-sharing policy (ADR-0222 §6.4), edited in place.
  * Used for the person's own policy and, by owners and admins, for the org's.
  *
- * Live access, its network credentials and writes, and agent sharing have no
- * surface yet (ADR-0222 phases 2 and 3). Their switches are real — the value
- * is stored and the plane enforces it, so a policy set now governs those
- * features the day they ship — and each is labelled as not yet available.
+ * Agent sharing has no surface yet (ADR-0222 phase 3). Its switch is real —
+ * the value is stored and the plane enforces it, so a policy set now governs
+ * agents the day they can share — and it is labelled as not yet available.
  */
 
 import { useTranslations } from "next-intl"
@@ -43,15 +42,15 @@ interface FlagRow {
 
 const FLAGS: readonly FlagRow[] = [
   { key: "allowPublicSnapshots", dormant: false },
-  { key: "allowLiveGrants", dormant: true },
-  { key: "allowProtocolCredentials", dormant: true, needsLive: true },
-  { key: "allowLiveWrite", dormant: true, needsLive: true },
+  { key: "allowLiveGrants", dormant: false },
+  { key: "allowProtocolCredentials", dormant: false, needsLive: true },
+  { key: "allowLiveWrite", dormant: false, needsLive: true },
   { key: "allowAgentSharing", dormant: true },
 ]
 
 const TTLS: readonly { key: TtlKey; dormant: boolean }[] = [
   { key: "maxSnapshotTtlSeconds", dormant: false },
-  { key: "maxLiveTtlSeconds", dormant: true },
+  { key: "maxLiveTtlSeconds", dormant: false },
 ]
 
 const HOUR = 60 * 60

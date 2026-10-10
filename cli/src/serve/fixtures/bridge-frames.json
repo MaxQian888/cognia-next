@@ -13,9 +13,10 @@
         "sync",
         "messages",
         "writes",
-        "media"
+        "media",
+        "filespace"
       ],
-      "catalogHash": "1cf4571ddb870b71f6ba2cb44b248afac2b1b2248c0b9d1c097b5578d04fe1f8",
+      "catalogHash": "a89d225e4602e3aba487d1de26c22d19a7f1c5e9cf1b5ba47e52e60fdcca8540",
       "contractVersion": 3
     },
     "helloAck": {
@@ -24,7 +25,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "1cf4571ddb870b71f6ba2cb44b248afac2b1b2248c0b9d1c097b5578d04fe1f8",
+      "catalogHash": "a89d225e4602e3aba487d1de26c22d19a7f1c5e9cf1b5ba47e52e60fdcca8540",
       "contractVersion": 3
     },
     "eventSyncPull": {

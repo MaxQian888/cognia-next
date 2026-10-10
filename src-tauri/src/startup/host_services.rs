@@ -18,7 +18,7 @@ use tauri_plugin_fs::FsExt as _;
 
 /// The installs [`install`] runs, in order. Pinned by a test so a step cannot
 /// be dropped from the boot silently again.
-pub(crate) const STEP_NAMES: [&str; 7] = [
+pub(crate) const STEP_NAMES: [&str; 8] = [
     "push_credentials",
     "default_allowed_roots",
     "backup_fs_scope",
@@ -26,7 +26,14 @@ pub(crate) const STEP_NAMES: [&str; 7] = [
     "gateway_brain_bridge",
     "wasm_host_services",
     "crash_screenshot_capture",
+    "file_share",
 ];
+
+/// The task worktrees conversations run in, under the data dir `lib.rs` hands
+/// the task-workspace service. A live file share may serve them (ADR-0222).
+pub(crate) fn managed_execution_dir(task_workspace_data_dir: &Path) -> PathBuf {
+    task_workspace_data_dir.join("task-workspaces").join("executions")
+}
 
 /// The directory the atomic backup stream writes into, mirrored into the
 /// dynamic fs scope so the stream helper may write there.
@@ -114,7 +121,38 @@ pub(crate) fn install(app: &tauri::App) {
         log::warn!("{err}");
     }
 
+    install_file_share(app);
+
     log::info!("host services installed: {}", STEP_NAMES.join(", "));
+}
+
+/// Install the live file-share service (ADR-0222). Nothing is served yet: the
+/// renderer activates the unlocked account and pushes the policy and mount
+/// tables, and the listener starts only if its saved settings enable it.
+/// Dexie-backed mounts (`/uploads`, `/artifacts`) and mount tables are read
+/// from the WebView over the companion bridge.
+fn install_file_share(app: &tauri::App) {
+    let Ok(app_data_dir) = app.path().app_data_dir() else {
+        log::warn!("file share: no app data dir; live file sharing is off");
+        return;
+    };
+    let managed = dirs::data_dir().map(|dir| managed_execution_dir(&dir.join("cognia")));
+    let validator = cognia_file_share::mounts::registered_root_validator(move |path| {
+        cognia_files::files::is_shareable_workspace_path(path, managed.as_deref())
+    });
+    let service = cognia_file_share::service::install(app_data_dir, validator);
+    let companion = app.state::<crate::companion_api::CompanionServerState>();
+    let bridge = std::sync::Arc::new(cognia_companion::filespace_bridge::BridgeFileSpaceSource::webview(
+        std::sync::Arc::clone(&companion.desktop_messages_bridge),
+        std::sync::Arc::new(cognia_companion_bus::bridge_transport::WebViewBridgeTransport(
+            app.handle().clone(),
+        )),
+    ));
+    service.set_asset_reader(bridge.clone());
+    service.set_mount_source(bridge);
+    // The account session, not the renderer, says which account is unlocked.
+    app.state::<crate::account_auth::AccountSecuritySession>()
+        .attach_file_share(service);
 }
 
 /// The primary screen as PNG bytes, for the crash reporter's attachment.
@@ -143,7 +181,16 @@ mod tests {
                 "gateway_brain_bridge",
                 "wasm_host_services",
                 "crash_screenshot_capture",
+                "file_share",
             ]
+        );
+    }
+
+    #[test]
+    fn shares_reach_the_task_worktrees_the_workspace_service_creates() {
+        assert_eq!(
+            managed_execution_dir(Path::new("/data/cognia")),
+            PathBuf::from("/data/cognia/task-workspaces/executions")
         );
     }
 

@@ -1,4 +1,3 @@
-use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,13 +9,13 @@ use tauri::{Emitter, Manager};
 pub mod cloud_deployment;
 
 const ALGORITHM: &str = "argon2id-v1";
-const SALT_LEN: usize = 16;
-const OUTPUT_LEN: usize = 32;
+const SALT_LEN: usize = cognia_secrets::password_kdf::SALT_LEN;
+const OUTPUT_LEN: usize = cognia_secrets::password_kdf::OUTPUT_LEN;
 const SALT_B64_LEN: usize = 22;
 const HASH_B64_LEN: usize = 43;
-const MEMORY_COST_KIB: u32 = 19_456;
-const TIME_COST: u32 = 2;
-const PARALLELISM: u32 = 1;
+const MEMORY_COST_KIB: u32 = cognia_secrets::password_kdf::MEMORY_COST_KIB;
+const TIME_COST: u32 = cognia_secrets::password_kdf::TIME_COST;
+const PARALLELISM: u32 = cognia_secrets::password_kdf::PARALLELISM;
 const MAX_PASSWORD_BYTES: usize = 4096;
 /// Minimum length enforced only when MINTING a new verifier. The verify path
 /// deliberately skips this so accounts created before the policy still unlock.
@@ -45,6 +44,10 @@ struct PasswordThrottleRecord {
 /// reads the principal from this state rather than trusting an IPC account id.
 pub struct AccountSecuritySession {
     gateway: parking_lot::Mutex<Option<(crate::gateway::GatewayState, Option<tauri::AppHandle>)>>,
+    /// The live file-share host (ADR-0222): serves the unlocked account's
+    /// grants and nothing while locked, bound from here rather than trusted
+    /// from the renderer.
+    file_share: parking_lot::Mutex<Option<std::sync::Arc<cognia_file_share::FileShareService>>>,
     active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
     throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
     throttle_path: Option<PathBuf>,
@@ -64,6 +67,7 @@ impl AccountSecuritySession {
             .unwrap_or_default();
         Self {
             gateway: parking_lot::Mutex::new(None),
+            file_share: parking_lot::Mutex::new(None),
             active: parking_lot::RwLock::new(None),
             throttle: parking_lot::Mutex::new(throttle),
             throttle_path,
@@ -76,6 +80,24 @@ impl AccountSecuritySession {
     pub fn attach_gateway(&self, gateway: crate::gateway::GatewayState, app: tauri::AppHandle) {
         gateway.require_local_account();
         *self.gateway.lock() = Some((gateway, Some(app)));
+    }
+
+    /// Hand the file-share host its account authority, and bind whatever is
+    /// unlocked right now.
+    pub fn attach_file_share(&self, service: std::sync::Arc<cognia_file_share::FileShareService>) {
+        let current = self
+            .active
+            .read()
+            .as_ref()
+            .map(|session| session.local_account_id.clone());
+        *self.file_share.lock() = Some(service.clone());
+        tauri::async_runtime::spawn(service.bind_account(current));
+    }
+
+    fn bind_file_share(&self, account: Option<String>) {
+        if let Some(service) = self.file_share.lock().as_ref() {
+            tauri::async_runtime::spawn(service.bind_account(account));
+        }
     }
 
     fn data_dir(&self) -> Option<&std::path::Path> {
@@ -94,6 +116,7 @@ impl AccountSecuritySession {
             local_account_id: local_account_id.to_owned(),
             verifier_digest,
         });
+        self.bind_file_share(Some(local_account_id.to_owned()));
     }
 
     fn clear(&self) {
@@ -105,6 +128,7 @@ impl AccountSecuritySession {
             }
         }
         *active = None;
+        self.bind_file_share(None);
     }
 
     fn require_active(&self) -> Result<ActiveAccountSecuritySession, String> {
@@ -801,19 +825,15 @@ fn derive_hash(
     params: &AccountPasswordKdfParams,
 ) -> Result<Vec<u8>, String> {
     validate_kdf_params(params)?;
-    let argon_params = Params::new(
+    cognia_secrets::password_kdf::derive(
+        password.as_bytes(),
+        salt,
         params.memory_cost,
         params.time_cost,
         params.parallelism,
-        Some(params.output_length),
+        params.output_length,
     )
-    .map_err(|err| format!("invalid password verifier params: {err}"))?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
-    let mut output = vec![0_u8; params.output_length];
-    argon
-        .hash_password_into(password.as_bytes(), salt, &mut output)
-        .map_err(|err| format!("password verifier derivation failed: {err}"))?;
-    Ok(output)
+    .map_err(|err| format!("password verifier derivation failed: {err}"))
 }
 
 fn validate_kdf_params(params: &AccountPasswordKdfParams) -> Result<(), String> {
@@ -833,14 +853,7 @@ fn verifier_error(reason: &str) -> String {
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut diff = 0_u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        diff |= a ^ b;
-    }
-    diff == 0
+    cognia_secrets::password_kdf::constant_time_eq(left, right)
 }
 
 #[cfg(test)]
@@ -1189,6 +1202,51 @@ mod tests {
         assert!(gateway.status().owner_account_id.is_none());
         assert!(gateway.status().account_generation > generation);
         assert!(session.require_active().is_err());
+    }
+
+    #[test]
+    fn unlocking_and_locking_bind_the_file_share_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = cognia_file_share::service::FileShareService::unactivated_for_tests(
+            dir.path().to_path_buf(),
+            std::sync::Arc::new(|path: &str| Ok(path.to_string())),
+        );
+        let session = AccountSecuritySession::new(None);
+        session.attach_file_share(service.clone());
+        // Nothing unlocked when it attached: the app may not activate anything.
+        let refused = tauri::async_runtime::block_on(async {
+            // Let the spawned binding land before asking.
+            for _ in 0..50 {
+                if service.activate(Some("acct-a".into())).await.is_err() {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        });
+        assert!(refused, "an unlocked account must come from the session, not the app");
+        session.activate("acct-a", "digest".into());
+        let served = tauri::async_runtime::block_on(async {
+            for _ in 0..50 {
+                if service.status().await.account_id.as_deref() == Some("acct-a") {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        });
+        assert!(served);
+        session.clear();
+        let locked = tauri::async_runtime::block_on(async {
+            for _ in 0..50 {
+                if !service.status().await.active {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        });
+        assert!(locked);
     }
 
     #[test]

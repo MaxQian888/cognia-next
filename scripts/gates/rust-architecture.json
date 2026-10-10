@@ -20,6 +20,7 @@
     "cognia-environment": "platform",
     "cognia-agents": "platform",
     "cognia-files": "platform",
+    "cognia-file-share": "platform",
     "cognia-media": "platform",
     "cognia-sandboxd": "platform",
     "cognia-provider-diagnostics": "platform",
@@ -84,7 +85,9 @@
     "cognia-agent-state -> cognia-gateway",
     "cognia-sandbox-pool -> cognia-external-agent",
     "cognia-task-workspace-host -> cognia-task-workspace",
-    "cognia-task-workspace-host -> cognia-git"
+    "cognia-task-workspace-host -> cognia-git",
+    "cognia-file-share -> cognia-files",
+    "cognia-file-share -> cognia-companion-connectivity"
   ],
   "forbidden": [
     {

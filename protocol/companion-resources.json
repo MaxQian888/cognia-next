@@ -1313,6 +1313,21 @@
         "copilot": {}
       }
     },
+    "file": {
+      "children": {
+        "share": {
+          "children": {
+            "policy": {},
+            "listener": {},
+            "sftpgo": {}
+          }
+        },
+        "space": {},
+        "grant": {},
+        "credential": {},
+        "audit": {}
+      }
+    },
     "files": {
       "children": {
         "library": {

@@ -2050,6 +2050,7 @@ dependencies = [
  "cognia-core",
  "cognia-environment",
  "cognia-external-agent",
+ "cognia-file-share",
  "cognia-files",
  "cognia-fleet",
  "cognia-gateway",
@@ -2413,6 +2414,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-file-share"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "axum-server",
+ "base64 0.23.1",
+ "bytes",
+ "cognia-companion-connectivity",
+ "cognia-core",
+ "cognia-files",
+ "cognia-net",
+ "cognia-problem",
+ "cognia-secrets",
+ "data-encoding",
+ "dav-server",
+ "futures-util",
+ "headers",
+ "hex",
+ "http",
+ "local-ip-address",
+ "log",
+ "parking_lot",
+ "rand 0.10.3",
+ "reqwest 0.13.5",
+ "rusqlite",
+ "russh",
+ "russh-sftp",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "cognia-files"
 version = "0.1.0"
 dependencies = [
@@ -2692,7 +2734,6 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
- "argon2",
  "async-trait",
  "axum",
  "axum-server",
@@ -2718,6 +2759,7 @@ dependencies = [
  "cognia-core",
  "cognia-environment",
  "cognia-external-agent",
+ "cognia-file-share",
  "cognia-files",
  "cognia-fleet",
  "cognia-gateway",
@@ -3122,6 +3164,8 @@ name = "cognia-secrets"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "argon2",
+ "base64 0.23.1",
  "block2",
  "cognia-core",
  "dirs 7.0.0",
@@ -3136,6 +3180,7 @@ dependencies = [
  "security-framework-sys",
  "serde",
  "serde_json",
+ "subtle",
  "tokio",
  "windows 0.62.2",
  "windows-future 0.3.2",
@@ -4219,6 +4264,34 @@ name = "date_header"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c03c416ed1a30fbb027ef484ba6ab6f80e1eada675e1a2b92fd673c045a1f1d"
+
+[[package]]
+name = "dav-server"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88e9e4e7a3546a5b348518694e9f3ed5cf3fc8856e50141c197f54d79b5714a8"
+dependencies = [
+ "bytes",
+ "chrono",
+ "derive-where",
+ "dyn-clone",
+ "futures-channel",
+ "futures-util",
+ "headers",
+ "htmlescape",
+ "http",
+ "http-body",
+ "http-body-util",
+ "log",
+ "mime_guess",
+ "percent-encoding",
+ "pin-project-lite",
+ "tokio",
+ "url",
+ "uuid",
+ "xml-rs 1.0.0",
+ "xmltree",
+]
 
 [[package]]
 name = "dbus"
@@ -6144,7 +6217,7 @@ checksum = "1a95dfc23a2b4a9a2f5ab41d194f8bfda3cabec42af4e39f08c339eb2a0c124d"
 dependencies = [
  "khronos_api",
  "log",
- "xml-rs",
+ "xml-rs 0.8.29",
 ]
 
 [[package]]
@@ -6502,6 +6575,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "headers"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc2700e3fe555c3310aa7286cac6167449f2c87e0eb58769c9208a1c58a1d106"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "headers-core",
+ "http",
+ "httpdate",
+ "mime",
+ "sha1 0.10.7",
+]
+
+[[package]]
+name = "headers-core"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
+dependencies = [
+ "http",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6611,6 +6708,12 @@ dependencies = [
  "log",
  "markup5ever",
 ]
+
+[[package]]
+name = "htmlescape"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9025058dae765dee5070ec375f591e2ba14638c63feff74f13805a72e523163"
 
 [[package]]
 name = "http"
@@ -18074,10 +18177,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
+name = "xml"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
+
+[[package]]
 name = "xml-rs"
 version = "0.8.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
+
+[[package]]
+name = "xml-rs"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3a56132a0d6ecbe77352edc10232f788fc4ceefefff4cab784a98e0e16b6b51"
+dependencies = [
+ "xml",
+]
+
+[[package]]
+name = "xmltree"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbc04313cab124e498ab1724e739720807b6dc405b9ed0edc5860164d2e4ff70"
+dependencies = [
+ "xml",
+]
 
 [[package]]
 name = "xmlwriter"
