@@ -233,3 +233,14 @@ it("moves its clock once a minute, re-evaluating the modified window", () => {
   expect(result.current.now).toBe(NOW + 120_000)
   expect(result.current.visible).toEqual([])
 })
+
+it("keeps what a paired host matched inside bodies the entries do not carry", () => {
+  const entries = [entry("artifact:plan"), entry("artifact:notes")]
+  const { result, rerender } = renderHook(({ m }) => useFilesView(entries, [], m), {
+    initialProps: { m: undefined as ReadonlySet<string> | undefined },
+  })
+  act(() => useFilesLibraryStore.getState().setSearch("revenue"))
+  expect(keys(result.current.visible)).toEqual([])
+  rerender({ m: new Set(["artifact:notes"]) })
+  expect(keys(result.current.visible)).toEqual(["artifact:notes"])
+})

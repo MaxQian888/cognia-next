@@ -24,3 +24,12 @@ it("returns the live folder list, empty until it resolves", async () => {
   await liveQuery.mock.calls[0]![0]()
   expect(listLibraryFolders).toHaveBeenCalled()
 })
+
+it("reads no folders while disabled", async () => {
+  ;(listLibraryFolders as jest.Mock).mockClear()
+  liveQuery.mockReturnValue(undefined)
+  renderHook(() => useFilesFolders({ enabled: false }))
+  expect(await liveQuery.mock.calls.at(-1)![0]()).toEqual([])
+  expect(liveQuery.mock.calls.at(-1)![1]).toEqual([false])
+  expect(listLibraryFolders).not.toHaveBeenCalled()
+})

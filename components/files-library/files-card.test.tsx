@@ -4,7 +4,10 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("./files-image-thumb", () => ({
-  FilesImageThumb: ({ hash }: { hash: string }) => <div data-testid={`thumb-${hash}`} />,
+  // The entry tells a paired device's thumbnail where the bytes live.
+  FilesImageThumb: ({ hash, entry }: { hash: string; entry?: { key: string } }) => (
+    <div data-testid={`thumb-${hash}`} data-entry={entry?.key} />
+  ),
 }))
 
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
@@ -167,7 +170,7 @@ it("draws an image upload (a duplicated image) as a picture", () => {
       ownedByFiles: true,
     }),
   })
-  expect(screen.getByTestId("thumb-original:sha")).toBeInTheDocument()
+  expect(screen.getByTestId("thumb-original:sha")).toHaveAttribute("data-entry", "upload:u")
 })
 
 it("in the Trash shows when it was deleted and only previews on double click", () => {

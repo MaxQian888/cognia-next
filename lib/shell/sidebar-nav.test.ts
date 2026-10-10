@@ -94,14 +94,18 @@ describe("getSidebarCatalog", () => {
     expect(getSidebarCatalog("mobile", standalonePhone).map((c) => c.id)).toContain("files")
   })
 
-  it("keeps Files off a paired client, whose local library is not the host's", () => {
-    const paired: RuntimeSnapshot = {
-      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
-      vaultState: "unlocked",
-      connectionState: "online",
-      host: { compatible: true, operations: [], grants: ["client.read", "client.write"] },
-    } as RuntimeSnapshot
-    expect(getSidebarCatalog("mobile", paired).map((c) => c.id)).not.toContain("files")
+  it("offers Files on a paired client exactly while its host serves the library (ADR-0223 §9)", () => {
+    const paired = (operations: string[]): RuntimeSnapshot =>
+      ({
+        target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations, grants: ["client.read", "client.write"] },
+      }) as RuntimeSnapshot
+    expect(getSidebarCatalog("mobile", paired(["files_library_list"])).map((c) => c.id)).toContain(
+      "files"
+    )
+    expect(getSidebarCatalog("mobile", paired([])).map((c) => c.id)).not.toContain("files")
   })
 
   it("keeps desktop-only items hidden on mobile even before runtime targeting settles", () => {

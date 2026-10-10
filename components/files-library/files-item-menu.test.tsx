@@ -12,7 +12,19 @@ jest.mock("@/lib/templates/feature-flags", () => ({
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider } from "@/hooks/files-library/files-backend"
+import { createRemoteFilesOps } from "@/lib/files-library/remote/remote-ops"
 import { FilesItemContextMenu, FilesItemMenu } from "./files-item-menu"
+
+function pairedWrapper() {
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops: createRemoteFilesOps({ client: {} as never, imageLimit: () => 60, onChanged: () => {} }),
+  }
+  return function Paired({ children }: { children: React.ReactNode }) {
+    return <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+  }
+}
 
 function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
   return {
@@ -193,4 +205,21 @@ it("offers no template entry for images and files", async () => {
   )
   await openMenu()
   expect(screen.queryByRole("menuitem", { name: "Save as template…" })).toBeNull()
+})
+
+it("keeps Share and Save as template listed but inert on a paired device, saying where to go", async () => {
+  useFilesLibraryStore.setState({ shareTarget: null })
+  render(<FilesItemMenu entry={entry()} title="Parser" actions={actions()} />, {
+    wrapper: pairedWrapper(),
+  })
+  const user = await openMenu()
+  const share = screen.getByRole("menuitem", { name: /^Share…/ })
+  expect(share).toHaveAttribute("aria-disabled", "true")
+  expect(share).toHaveTextContent("On the desktop")
+  const template = screen.getByRole("menuitem", { name: /^Save as template…/ })
+  expect(template).toHaveAttribute("aria-disabled", "true")
+  await user.click(share)
+  expect(useFilesLibraryStore.getState().shareTarget).toBeNull()
+  // Everything else still works against the host.
+  expect(screen.getByRole("menuitem", { name: "Duplicate" })).not.toHaveAttribute("aria-disabled")
 })

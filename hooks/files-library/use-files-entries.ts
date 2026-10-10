@@ -23,13 +23,19 @@ export interface UseFilesEntriesResult {
   loadMoreImages: () => void
 }
 
-export function useFilesEntries(): UseFilesEntriesResult {
+/**
+ * `enabled: false` reads nothing — the page is drawing another device's
+ * library (ADR-0223 §9) and this one's would only be discarded.
+ */
+export function useFilesEntries({
+  enabled = true,
+}: { enabled?: boolean } = {}): UseFilesEntriesResult {
   const artifacts = useArtifactStore((s) => s.artifacts)
   const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
   const [imageLimit, setImageLimit] = useState(FILES_IMAGE_PAGE_SIZE)
   const loaded = useClientLiveQuery(
-    () => loadFilesSources({ artifacts, canvasDocuments, imageLimit }),
-    [artifacts, canvasDocuments, imageLimit],
+    () => (enabled ? loadFilesSources({ artifacts, canvasDocuments, imageLimit }) : undefined),
+    [enabled, artifacts, canvasDocuments, imageLimit],
     undefined
   )
   const entries = useMemo(

@@ -46,6 +46,12 @@ export interface FilesQuery {
   activeProjectId?: string | null
   /** For the "modified" filter and the Suggested score. */
   now: number
+  /**
+   * Keys the search matched inside their content where the entries' own
+   * haystack does not hold the content (a paired device's titles-only
+   * entries, answered by the host). They match the search as well.
+   */
+  contentMatches?: ReadonlySet<string>
 }
 
 /** True when anything narrows the view beyond its place and lens. */
@@ -186,7 +192,7 @@ export function filterFilesEntries(
       matchesModified(entry, filters.modified, query.now) &&
       matchesSize(entry, filters.size) &&
       matchesProject(entry, filters.projectScope, query.activeProjectId) &&
-      matchesSearch(entry, query.search)
+      (matchesSearch(entry, query.search) || query.contentMatches?.has(entry.key) === true)
   )
 }
 

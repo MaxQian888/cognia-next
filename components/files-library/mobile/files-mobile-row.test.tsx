@@ -6,7 +6,10 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("../files-image-thumb", () => ({
-  FilesImageThumb: ({ hash }: { hash: string }) => <div data-testid={`thumb-${hash}`} />,
+  // The entry tells a paired device's thumbnail where the bytes live.
+  FilesImageThumb: ({ hash, entry }: { hash: string; entry?: { key: string } }) => (
+    <div data-testid={`thumb-${hash}`} data-entry={entry?.key} />
+  ),
 }))
 // The long-press haptic is a Capacitor call.
 jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn(async () => undefined) }))
@@ -177,4 +180,9 @@ it("leaves Select out of the menu while selecting", async () => {
 it("gives the menu button a 44px target", () => {
   setup()
   expect(screen.getByTestId("files-item-menu-artifact:a")).toHaveClass("size-11")
+})
+
+it("draws an image from its bytes, telling the thumbnail which entry they belong to", () => {
+  setup({ entry: entry({ key: "image:h", kind: "image", sourceId: "h" }) })
+  expect(screen.getByTestId("thumb-h")).toHaveAttribute("data-entry", "image:h")
 })

@@ -15,9 +15,11 @@
  *   - headless brain   — `lib/headless/runtimes/desktop-message-source.ts`
  *
  * The command surface is not a fixed list. `dispatchCommand` owns the arms
- * enumerated in its own switch and delegates six families wholesale:
+ * enumerated in its own switch and delegates seven families wholesale:
  * `perf_*` (`lib/perf/host-dispatch.ts`), `pet_*` (`lib/pet/remote/host-dispatch.ts`,
- * remote care of the desktop pet, ADR-0219), `scheduled_task_*`
+ * remote care of the desktop pet, ADR-0219), `files_library_*`
+ * (`lib/files-library/remote/host-dispatch.ts`, a paired device managing this
+ * desktop's Files library, ADR-0223 §9), `scheduled_task_*`
  * (`lib/scheduler/scheduled-task-rpc.ts`), `workflow_api_*`
  * (`lib/workflow/api/workflow-api-service.ts`), `router_fusion_run_*`
  * (`lib/router-fusion/gate/run-api-bridge.ts`) and `router_fusion_passthrough_*`
@@ -102,6 +104,7 @@ import {
   handleAgentTaskStart,
 } from "@/lib/companion/agent-task-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
+import { isFilesRemoteCommand } from "@/lib/files-library/remote/commands"
 import { isPetRemoteCommand } from "@/lib/pet/remote/commands"
 import { getDb } from "@/lib/db/schema"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
@@ -299,6 +302,14 @@ export async function dispatchCommand(
   if (isPetRemoteCommand(command)) {
     const { dispatchPetHostCommand } = await import("@/lib/pet/remote/host-dispatch")
     return dispatchPetHostCommand(command, payload)
+  }
+  // A paired device's Files page (ADR-0223 §9). The arms run on the library's
+  // own writers here, where Dexie is authoritative; on the headless brain they
+  // answer `headless_host`. Same split as `pet_*`: a leaf name check, and the
+  // arms load on a `files_library_*` call.
+  if (isFilesRemoteCommand(command)) {
+    const { dispatchFilesHostCommand } = await import("@/lib/files-library/remote/host-dispatch")
+    return dispatchFilesHostCommand(command, payload)
   }
   // Router + Fusion's Run API (ADR-0188 B2). The gateway serves `/v1/runs` and
   // round-trips every request here, where Dexie is authoritative. The gate

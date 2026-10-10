@@ -13,7 +13,19 @@ jest.mock("@/hooks/document-templates/use-document-templates", () => ({
 }))
 
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider } from "@/hooks/files-library/files-backend"
+import { createRemoteFilesOps } from "@/lib/files-library/remote/remote-ops"
 import { FilesNewMenu } from "./files-new-menu"
+
+function pairedWrapper() {
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops: createRemoteFilesOps({ client: {} as never, imageLimit: () => 60, onChanged: () => {} }),
+  }
+  return function Paired({ children }: { children: React.ReactNode }) {
+    return <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+  }
+}
 
 function actions() {
   return {
@@ -102,4 +114,24 @@ it("draws a 40px plus on the phone, with the same menu", async () => {
   expect(trigger).not.toHaveTextContent("New")
   await user.click(trigger)
   expect(screen.getByRole("menuitem", { name: "Upload files" })).toBeInTheDocument()
+})
+
+it("keeps the document entries listed but inert on a paired device", async () => {
+  templatesState.options = [{ id: "meeting", source: "builtin", name: "Meeting", icon: "meeting" }]
+  const a = actions()
+  const user = userEvent.setup()
+  render(<FilesNewMenu actions={a} />, { wrapper: pairedWrapper() })
+  await user.click(screen.getByRole("button", { name: "New" }))
+  const canvas = screen.getByRole("menuitem", { name: /^Canvas document/ })
+  expect(canvas).toHaveAttribute("aria-disabled", "true")
+  expect(canvas).toHaveTextContent("On the desktop")
+  // A plain disabled entry, not a submenu of templates that cannot be made here.
+  const fromTemplate = screen.getByTestId("files-new-from-template")
+  expect(fromTemplate).toHaveAttribute("aria-disabled", "true")
+  expect(screen.queryByTestId("files-new-template-meeting")).toBeNull()
+  // Uploads and folders go to the host.
+  expect(screen.getByRole("menuitem", { name: "Upload files" })).not.toHaveAttribute(
+    "aria-disabled"
+  )
+  expect(screen.getByRole("menuitem", { name: "Folder" })).not.toHaveAttribute("aria-disabled")
 })

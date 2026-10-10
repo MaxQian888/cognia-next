@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { type ComponentProps, createElement, type ReactNode } from "react"
 import { act, renderHook } from "@testing-library/react"
 
 const entriesState: { entries: unknown; imagesTruncated: boolean; loadMoreImages: jest.Mock } = {
@@ -12,7 +13,13 @@ jest.mock("./use-files-entries", () => ({ useFilesEntries: () => entriesState })
 const folderState: { folders: unknown[] } = { folders: [] }
 jest.mock("./use-files-folders", () => ({ useFilesFolders: () => folderState.folders }))
 const actions = { preview: jest.fn() }
-jest.mock("./use-files-actions", () => ({ useFilesActions: () => actions }))
+const actionsFor = jest.fn()
+jest.mock("./use-files-actions", () => ({
+  useFilesActions: (ops: unknown) => {
+    actionsFor(ops)
+    return actions
+  },
+}))
 const deepLink = jest.fn()
 jest.mock("./use-files-deep-link", () => ({ useFilesDeepLink: () => deepLink() }))
 
@@ -20,6 +27,9 @@ import type { LibraryFolder } from "@/lib/db/files-library-types"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { DEFAULT_FILES_VIEW_FILTERS, useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
+import { LOCAL_FILES_CAPABILITIES, type FilesOps } from "@/lib/files-library/ops"
+import { PAIRED_FILES_CAPABILITIES } from "@/lib/files-library/remote/remote-ops"
+import { FilesBackendProvider, type FilesBackend } from "./files-backend"
 import { FILES_PAGE_SIZE, useFilesPage } from "./use-files-page"
 
 function entry(key: string, overrides: Partial<FilesEntry> = {}): FilesEntry {
@@ -148,4 +158,80 @@ it("finds the previewed entry and knows when the place is the Trash", () => {
   expect(result.current.trash).toBe(false)
   act(() => useFilesLibraryStore.getState().setSection({ kind: "trash" }))
   expect(result.current.trash).toBe(true)
+})
+
+describe("over a mounted backend (ADR-0223 §9)", () => {
+  const remoteOps = { mode: "remote", capabilities: PAIRED_FILES_CAPABILITIES } as FilesOps
+  function mounted(backend: FilesBackend) {
+    return function Mounted({ children }: { children: ReactNode }) {
+      return createElement(
+        FilesBackendProvider,
+        { backend } as ComponentProps<typeof FilesBackendProvider>,
+        children
+      )
+    }
+  }
+
+  it("reads the mounted library, not this device's, and runs the actions on its ops", () => {
+    entriesState.entries = [entry("artifact:local")]
+    const refresh = jest.fn(async () => {})
+    const backend: FilesBackend = {
+      source: {
+        entries: [entry("artifact:host")],
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+        refresh,
+        error: "files_remote_unreachable",
+      },
+      ops: remoteOps,
+    }
+    const { result } = renderHook(() => useFilesPage(), { wrapper: mounted(backend) })
+    expect(result.current.entries?.map((e) => e.key)).toEqual(["artifact:host"])
+    expect(result.current.ops).toBe(remoteOps)
+    expect(actionsFor).toHaveBeenLastCalledWith(remoteOps)
+    expect(result.current.refresh).toBe(refresh)
+    expect(result.current.error).toBe("files_remote_unreachable")
+  })
+
+  it("keeps the template strip off where documents are held back", () => {
+    const backend: FilesBackend = {
+      source: {
+        entries: [entry("artifact:a")],
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+      },
+      ops: remoteOps,
+    }
+    const { result } = renderHook(() => useFilesPage(), { wrapper: mounted(backend) })
+    expect(result.current.showTemplates).toBe(false)
+  })
+
+  it("finds the host's body matches the entries' own titles miss", () => {
+    const backend: FilesBackend = {
+      source: {
+        entries: [
+          entry("artifact:a", { searchText: "plan" }),
+          entry("artifact:b", { searchText: "other" }),
+        ],
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+        contentMatches: new Set(["artifact:b"]),
+      },
+      ops: remoteOps,
+    }
+    const { result } = renderHook(() => useFilesPage(), { wrapper: mounted(backend) })
+    act(() => useFilesLibraryStore.getState().setSearch("revenue"))
+    expect(result.current.page.map((e) => e.key)).toEqual(["artifact:b"])
+  })
+
+  it("is this device's own library without a provider, with no refresh to offer", () => {
+    entriesState.entries = [entry("artifact:local")]
+    const { result } = renderHook(() => useFilesPage())
+    expect(result.current.ops.capabilities).toBe(LOCAL_FILES_CAPABILITIES)
+    expect(result.current.refresh).toBeUndefined()
+    expect(result.current.error).toBeUndefined()
+  })
 })

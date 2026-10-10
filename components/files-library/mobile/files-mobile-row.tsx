@@ -126,7 +126,12 @@ export const FilesMobileRow = memo(function FilesMobileRow({
         <span className="pointer-events-none relative z-10 flex min-h-14 w-full min-w-0 items-center gap-3 py-2 pl-3">
           <span className="relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40">
             {isThumbnailEntry(entry) ? (
-              <FilesImageThumb hash={thumbnailHash(entry)} alt="" className="size-full" />
+              <FilesImageThumb
+                hash={thumbnailHash(entry)}
+                alt=""
+                entry={entry}
+                className="size-full"
+              />
             ) : (
               <FilesEntryIcon entry={entry} className="size-5" />
             )}

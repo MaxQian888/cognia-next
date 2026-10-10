@@ -124,7 +124,12 @@ export function FilesRow({ entry, actions, previewed, selected, onSelect, now }:
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40">
               {isThumbnailEntry(entry) ? (
-                <FilesImageThumb hash={thumbnailHash(entry)} alt={title} className="size-full" />
+                <FilesImageThumb
+                  hash={thumbnailHash(entry)}
+                  alt={title}
+                  entry={entry}
+                  className="size-full"
+                />
               ) : (
                 <FilesEntryIcon entry={entry} className="size-4" />
               )}

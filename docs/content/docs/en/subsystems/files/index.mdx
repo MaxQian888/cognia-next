@@ -5,7 +5,7 @@ description: "The Files page: one managed space over artifacts, canvas documents
 
 # Files
 
-<Status variant="beta">Desktop, web and a standalone phone shipped · workspace files and the paired phone pending (ADR-0223 §8, §9)</Status>
+<Status variant="beta">Desktop, web and phones (standalone and paired) shipped · workspace files pending (ADR-0223 §8)</Status>
 
 <TLDR>
   `/files` lists everything conversations produce, plus files uploaded straight into Files, in one
@@ -94,6 +94,8 @@ card it already is.
 | Document templates | `lib/document-templates/`, `lib/db/document-templates.ts` |
 | Page and dialogs | `components/files-library/` |
 | Phone layout | `components/files-library/mobile/` |
+| Which library (local or a paired host's) | `hooks/files-library/files-backend.tsx`, `use-remote-files-backend.ts`, `lib/files-library/ops.ts` |
+| Paired host commands, client, bytes | `lib/files-library/remote/` |
 | Page model (both layouts) | `hooks/files-library/use-files-page.ts`, `use-files-deep-link.ts` |
 | Hooks | `hooks/files-library/`, `hooks/document-templates/` |
 | Store | `stores/files-library/files-library-store.ts` |
@@ -101,15 +103,10 @@ card it already is.
 
 ## Not yet shipped
 
-ADR-0223 is accepted, with two pieces still to build. Both need host-side Rust work.
+ADR-0223 is accepted, with one piece still to build, which needs host-side Rust work.
 
 - **Workspace files (§8).** There is no `workspace-file` kind and no Workspace files group: the type
   groups are the five above.
-- **The paired phone (§9).** A phone that is not paired runs Files over its own data, in its own
-  layout ([Management](/docs/subsystems/files/management#on-a-phone)). A paired client — phone or
-  browser — still has no Files page: the surface contract says `companion: hidden`, so the rail and ⌘K
-  leave it out, because its local tables are not the host's library. The `files_library_*` host
-  commands and the `library-media` resource that would serve it are not built yet.
 
 ## Pages
 
@@ -118,4 +115,6 @@ ADR-0223 is accepted, with two pieces still to build. Both need host-side Rust w
 - [Management](/docs/subsystems/files/management): layout, selection, keyboard, drag and drop, menus, rename, duplicate,
   zip export and deep links.
 - [Templates](/docs/subsystems/files/templates): the document template domain.
+- [On a paired device](/docs/subsystems/files/paired): the host's library over `files_library_*`, its
+  bytes, refresh, Use in chat, uploads and what stays on the desktop.
 - [Sharing](/docs/subsystems/files/sharing): publishing items as an encrypted file link.

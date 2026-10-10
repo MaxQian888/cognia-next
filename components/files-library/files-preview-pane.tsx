@@ -4,6 +4,11 @@
  * The Files inspector: a live preview of the selected entry, its details, the
  * conversations it appears in, and its primary actions — or, for an item in
  * the Trash (ADR-0223), when it goes for good with Restore and Delete forever.
+ *
+ * Content comes through the page's backend (`useFilesOps`): on a paired device
+ * it is the host's, read on demand, and the preview is where "Open" lands —
+ * read-only, with the way to the conversation instead (§9). An item larger
+ * than the device may move says so rather than loading.
  */
 
 import { useEffect, useState } from "react"
@@ -23,12 +28,13 @@ import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { Button } from "@/components/ui/button"
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files-actions"
 import { FILES_TRASH_RETENTION_MS } from "@/lib/db/files-library-types"
 import { getSessionsByIds } from "@/lib/db/sessions"
-import { downloadPayloadFor } from "@/lib/files-library/download"
 import { goToSession } from "@/lib/files-library/open"
 import { getProviderDisplayName } from "@/lib/ai/icons"
+import type { FilesOps } from "@/lib/files-library/ops"
 import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
 import { cn } from "@/lib/utils"
@@ -36,6 +42,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useFilesLibraryStore } from "@/stores/files-library"
 import { useRouter } from "next/navigation"
 import { thumbnailHash } from "@/lib/files-library/thumbnail"
+import type { Artifact } from "@/types/artifact/artifact"
 import { FilesImageThumb } from "./files-image-thumb"
 
 export interface FilesPreviewPaneProps {
@@ -62,6 +69,9 @@ export function FilesPreviewPane({
   const format = useFormatter()
   const router = useRouter()
   const title = displayTitle(entry, t)
+  const ops = useFilesOps()
+  // Open lands here where the item's own surface is another device's.
+  const readOnly = ops.capabilities.open === "preview"
   const sessions = useClientLiveQuery(
     () => getSessionsByIds(entry.sessionIds),
     [entry.sessionIds.join("\n")],
@@ -95,8 +105,17 @@ export function FilesPreviewPane({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="p-4">
-          <PreviewBody entry={entry} title={title} />
+          <PreviewBody entry={entry} title={title} ops={ops} />
         </div>
+
+        {readOnly && entry.trashedAt === undefined ? (
+          <p
+            className="mx-4 mb-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground"
+            data-testid="files-preview-read-only"
+          >
+            {t("remote.readOnly")}
+          </p>
+        ) : null}
 
         {!entry.originAlive ? (
           <p
@@ -162,14 +181,28 @@ export function FilesPreviewPane({
           className={cn("flex flex-wrap gap-2 border-t p-3", touch && TOUCH_FOOTER)}
           data-testid="files-preview-footer"
         >
-          <Button
-            size="sm"
-            onClick={() => void actions.open(entry)}
-            data-testid="files-preview-open"
-          >
-            <SquareArrowOutUpRightIcon aria-hidden />
-            {t("actions.open")}
-          </Button>
+          {readOnly ? (
+            // The preview is already what Open shows; its conversation is the way on.
+            entry.originSessionId && entry.originAlive ? (
+              <Button
+                size="sm"
+                onClick={() => void actions.goToConversation(entry.originSessionId!)}
+                data-testid="files-preview-open-conversation"
+              >
+                <SquareArrowOutUpRightIcon aria-hidden />
+                {t("preview.openConversation")}
+              </Button>
+            ) : null
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => void actions.open(entry)}
+              data-testid="files-preview-open"
+            >
+              <SquareArrowOutUpRightIcon aria-hidden />
+              {t("actions.open")}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -296,32 +329,83 @@ function GeneratedDetails({ generated }: { generated: NonNullable<FilesEntry["ge
   )
 }
 
-function PreviewBody({ entry, title }: { entry: FilesEntry; title: string }) {
-  const artifact = useArtifactStore((s) =>
-    entry.kind === "artifact" ? s.artifacts[entry.sourceId] : undefined
-  )
+/** Bigger than the device may move (a paired device's ceiling). */
+function overCeiling(entry: FilesEntry, ops: FilesOps): boolean {
+  const max = ops.capabilities.maxTransferBytes
+  return max !== undefined && (entry.byteSize ?? 0) > max
+}
+
+function PreviewBody({ entry, title, ops }: { entry: FilesEntry; title: string; ops: FilesOps }) {
   if (entry.kind === "image") {
     return (
       <FilesImageThumb
         hash={thumbnailHash(entry)}
         alt={title}
         full
+        entry={entry}
         className="max-h-[60vh] w-full rounded-md object-contain"
       />
     )
   }
+  if (overCeiling(entry, ops)) return <TooLarge />
   if (entry.kind === "artifact") {
-    return artifact ? (
-      <ArtifactPreview artifact={artifact} className="max-h-[60vh]" />
+    return ops.mode === "remote" ? (
+      <RemoteArtifactPreview entry={entry} ops={ops} />
     ) : (
-      <Unavailable />
+      <LocalArtifactPreview entry={entry} />
     )
   }
-  return <BlobPreview entry={entry} />
+  return <BlobPreview entry={entry} ops={ops} />
+}
+
+function LocalArtifactPreview({ entry }: { entry: FilesEntry }) {
+  const artifact = useArtifactStore((s) => s.artifacts[entry.sourceId])
+  return artifact ? (
+    <ArtifactPreview artifact={artifact} className="max-h-[60vh]" />
+  ) : (
+    <Unavailable />
+  )
+}
+
+/** The host's artifact, read once per version of the entry. */
+function RemoteArtifactPreview({ entry, ops }: { entry: FilesEntry; ops: FilesOps }) {
+  const t = useTranslations("files.preview")
+  const sourceKey = `${entry.key}|${entry.updatedAt}`
+  const [state, setState] = useState<{ key: string; artifact: Artifact | null } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void ops
+      .artifactFor(entry)
+      .then((artifact) => {
+        if (!cancelled) setState({ key: sourceKey, artifact })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        loggers.store.warn("files preview failed", { key: entry.key, error: String(error) })
+        setState({ key: sourceKey, artifact: null })
+      })
+    return () => {
+      cancelled = true
+    }
+    // `sourceKey` captures every input that changes the artifact.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey, ops])
+  if (!state || state.key !== sourceKey) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="files-preview-loading">
+        {t("loading")}
+      </p>
+    )
+  }
+  return state.artifact ? (
+    <ArtifactPreview artifact={state.artifact} className="max-h-[60vh]" />
+  ) : (
+    <Unavailable />
+  )
 }
 
 /** Canvas documents and uploads: the bytes as an object URL, rendered by the chat file preview. */
-function BlobPreview({ entry }: { entry: FilesEntry }) {
+function BlobPreview({ entry, ops }: { entry: FilesEntry; ops: FilesOps }) {
   const t = useTranslations("files.preview")
   const canvas = useArtifactStore((s) =>
     entry.kind === "canvas" ? s.canvasDocuments[entry.sourceId] : undefined
@@ -336,7 +420,8 @@ function BlobPreview({ entry }: { entry: FilesEntry }) {
   useEffect(() => {
     let cancelled = false
     let url: string | null = null
-    void downloadPayloadFor(entry)
+    void ops
+      .payloadFor(entry)
       .then((payload) => {
         if (cancelled) return
         if (!payload) {
@@ -364,7 +449,7 @@ function BlobPreview({ entry }: { entry: FilesEntry }) {
     }
     // `sourceKey` captures every input that changes the payload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey])
+  }, [sourceKey, ops])
 
   if (!state || state.key !== sourceKey) {
     return (
@@ -375,6 +460,15 @@ function BlobPreview({ entry }: { entry: FilesEntry }) {
   }
   if ("missing" in state) return <Unavailable />
   return <FilePartPreview url={state.url} mediaType={state.mediaType} filename={state.filename} />
+}
+
+function TooLarge() {
+  const t = useTranslations("files.remote")
+  return (
+    <p className="text-sm text-muted-foreground" data-testid="files-preview-too-large">
+      {t("tooLarge")}
+    </p>
+  )
 }
 
 function Unavailable() {

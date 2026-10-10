@@ -4,7 +4,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 
 jest.mock("./files-image-thumb", () => ({
-  FilesImageThumb: ({ hash }: { hash: string }) => <div data-testid={`thumb-${hash}`} />,
+  // The entry tells a paired device's thumbnail where the bytes live.
+  FilesImageThumb: ({ hash, entry }: { hash: string; entry?: { key: string } }) => (
+    <div data-testid={`thumb-${hash}`} data-entry={entry?.key} />
+  ),
 }))
 
 import { Table, TableBody } from "@/components/ui/table"
@@ -179,7 +182,7 @@ it("marks favorites, shares and deleted sources; draws pictures", () => {
   expect(screen.getByLabelText("Shared with you")).toBeInTheDocument()
   expect(screen.getByLabelText("Shared by 2 links")).toBeInTheDocument()
   expect(screen.getByText("Conversation deleted")).toBeInTheDocument()
-  expect(screen.getByTestId("thumb-h")).toBeInTheDocument()
+  expect(screen.getByTestId("thumb-h")).toHaveAttribute("data-entry")
 })
 
 it("shows no link marker for an item that was never shared", () => {

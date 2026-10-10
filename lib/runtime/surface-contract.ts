@@ -94,18 +94,24 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
-    // Files (ADR-0200, ADR-0223) aggregates THIS device's artifacts, canvas
-    // documents, media and uploads. None of those tables reach a companion,
-    // so a paired client's local copy is not the host's library: hidden there.
-    // Standalone — the desktop app, the web app and an unpaired phone, which
-    // gets its own layout (`components/files-library/mobile/`) — owns its
-    // database outright.
+    // Files (ADR-0200, ADR-0223) aggregates a device's artifacts, canvas
+    // documents, media and uploads. Standalone — the desktop app, the web app
+    // and an unpaired phone, which gets its own layout
+    // (`components/files-library/mobile/`) — owns its database outright and
+    // runs it locally. None of those tables reach a companion, so a paired
+    // client manages the HOST's library instead (§9): every read and write is
+    // a `files_library_*` call, and the host must advertise
+    // `files.library-remote` (which carries `files_library_list`, the
+    // operation named here). Nothing is mirrored and no change is queued — a
+    // move or a Trash replayed later would act on a library that moved on — so
+    // with the host offline the page is `blocked`, not stale.
     id: "files",
     route: "/files",
     navigation: true,
+    operation: "files_library_list",
     standalone: "full",
-    companion: "hidden",
-    offline: "local",
+    companion: "remote",
+    offline: "blocked",
   },
   {
     // The conversation manager (ADR-0213) is the chat's own data seen as a

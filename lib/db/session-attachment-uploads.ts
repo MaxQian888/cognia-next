@@ -141,6 +141,12 @@ export interface BeginAttachmentUploadInput {
   maxBytes?: number
   /** Ceiling for concurrently staged files per (session, device). */
   maxConcurrent?: number
+  /**
+   * Stage a file of any type. For an upload into the Files library (ADR-0223
+   * §9), which holds every kind of file; the commit's magic-byte inspection
+   * still runs. Chat attachments keep the composer's supported-type list.
+   */
+  acceptAnyType?: boolean
   now?: number
 }
 
@@ -177,7 +183,10 @@ export async function beginAttachmentUpload(
   if (!Number.isInteger(input.size) || input.size <= 0 || input.size > maxBytes) {
     throw new AttachmentUploadError("attachment_too_large")
   }
-  if (!isSupportedAttachmentDescriptor({ name: input.name, mediaType: input.mediaType })) {
+  if (
+    !input.acceptAnyType &&
+    !isSupportedAttachmentDescriptor({ name: input.name, mediaType: input.mediaType })
+  ) {
     throw new AttachmentUploadError("attachment_unsupported_type")
   }
 

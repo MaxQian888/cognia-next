@@ -11,7 +11,19 @@ jest.mock("@/lib/db/files-library-folders", () => ({
 import { deleteLibraryFolder } from "@/lib/db/files-library-folders"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider, type FilesBackend } from "@/hooks/files-library/files-backend"
+import type { FilesOps } from "@/lib/files-library/ops"
 import { FilesDeleteFolderDialog } from "./files-delete-folder-dialog"
+
+function withOps(ops: Partial<FilesOps>) {
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops,
+  } as unknown as FilesBackend
+  return function Paired({ children }: { children: React.ReactNode }) {
+    return <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+  }
+}
 
 const remove = deleteLibraryFolder as jest.Mock
 const folders: LibraryFolder[] = [
@@ -68,4 +80,13 @@ it("wraps long folder names inside a viewport-bounded confirmation", () => {
   render(<FilesDeleteFolderDialog folders={[{ ...folders[0]!, name: "folder".repeat(20) }]} />)
   expect(screen.getByRole("alertdialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
   expect(screen.getByRole("heading")).toHaveClass("[overflow-wrap:anywhere]")
+})
+
+it("deletes in the library the page manages", async () => {
+  const deleteFolder = jest.fn(async () => {})
+  useFilesLibraryStore.setState({ deleteFolderTarget: "lbf_a", section: { kind: "all" } })
+  render(<FilesDeleteFolderDialog folders={folders} />, { wrapper: withOps({ deleteFolder }) })
+  await userEvent.setup().click(screen.getByRole("button", { name: "Delete folder" }))
+  expect(deleteFolder).toHaveBeenCalledWith("lbf_a", "reparent")
+  expect(remove).not.toHaveBeenCalled()
 })

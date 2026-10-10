@@ -168,8 +168,8 @@ flowchart TB
 弹出它。空文件夹提示使用“移动”而不是拖动。在 Capacitor 外壳中，下载（单个或 zip）会交给系统分享面板
 （`downloadBlob`，`lib/files/download.ts`）。
 
-手机布局服务于独立模式的手机，它拥有自己的数据库。已配对的手机目前还没有文件页
-（[概览](/docs/subsystems/files#尚未交付)）。
+同一套手机布局既服务于独立模式的手机（使用它自己的数据库），也服务于配对的手机（使用桌面端的文件库，
+见[在配对设备上](/docs/subsystems/files/paired)），后者的列表还支持下拉刷新。
 
 ## Store
 

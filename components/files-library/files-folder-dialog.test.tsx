@@ -25,7 +25,20 @@ import {
   renameLibraryFolder,
 } from "@/lib/db/files-library-folders"
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider, type FilesBackend } from "@/hooks/files-library/files-backend"
+import type { FilesOps } from "@/lib/files-library/ops"
+import { FilesRemoteError } from "@/lib/files-library/remote/client"
 import { FilesFolderDialog } from "./files-folder-dialog"
+
+function withOps(ops: Partial<FilesOps>) {
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops,
+  } as unknown as FilesBackend
+  return function Paired({ children }: { children: React.ReactNode }) {
+    return <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+  }
+}
 
 const create = createLibraryFolder as jest.Mock
 const rename = renameLibraryFolder as jest.Mock
@@ -73,4 +86,24 @@ it("reports a refused write and stays open", async () => {
     expect(toast.error).toHaveBeenCalledWith("The parent folder no longer exists.")
   )
   expect(useFilesLibraryStore.getState().folderDialog).not.toBeNull()
+})
+
+it("creates in the library the page manages, mapping the host's refusals", async () => {
+  const createFolder = jest
+    .fn()
+    .mockRejectedValueOnce(new FilesRemoteError("headless_host"))
+    .mockResolvedValueOnce(undefined)
+  useFilesLibraryStore.setState({ folderDialog: { mode: "create", parentId: "root" } })
+  const user = userEvent.setup()
+  render(<FilesFolderDialog />, { wrapper: withOps({ createFolder }) })
+  await user.type(screen.getByLabelText("Name"), "Host{Enter}")
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "The paired host can’t manage its Files library. Open Files on the desktop app."
+    )
+  )
+  await user.click(screen.getByRole("button", { name: "Create" }))
+  await waitFor(() => expect(useFilesLibraryStore.getState().folderDialog).toBeNull())
+  expect(createFolder).toHaveBeenLastCalledWith("Host", "root")
+  expect(create).not.toHaveBeenCalled()
 })

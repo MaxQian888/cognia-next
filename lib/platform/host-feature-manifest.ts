@@ -4,6 +4,7 @@ import {
   COMPOSER_MAX_ATTACHMENTS,
   COMPOSER_MAX_ATTACHMENT_BYTES,
 } from "@/lib/chat/attachments/prepare"
+import { FILES_REMOTE_COMMAND_NAMES } from "@/lib/files-library/remote/commands"
 import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 import type { Platform } from "./detect"
 
@@ -92,6 +93,11 @@ export const HOST_FEATURE_IDS = [
   // shows the pet console's pairing remedy instead of offering actions that
   // would come back `headless-host` or `unknown command`.
   "pet.remote-care",
+  // A paired device's Files page (ADR-0223 §9). Its presence says this host
+  // answers the `files_library_*` arms over its own library; without it the
+  // `files` surface stays closed on a paired client rather than opening onto
+  // `headless_host` or `unknown command`.
+  "files.library-remote",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -315,6 +321,15 @@ export const PET_REMOTE_CARE_HOST_OPERATIONS = Object.freeze([
   "sync:petActivityLog",
 ] as const)
 
+/**
+ * A paired device's Files page (ADR-0223 §9): the reads, every management
+ * write and the upload staging. The bytes travel over the existing
+ * `session-media` binary resource, which needs no feature of its own.
+ */
+export const FILES_LIBRARY_REMOTE_HOST_OPERATIONS = Object.freeze([
+  ...FILES_REMOTE_COMMAND_NAMES,
+] as const)
+
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
 export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
   getCommandManifest()
@@ -399,6 +414,13 @@ export function buildLocalHostFeatureManifest({
     features["pet.remote-care"] = {
       version: 1,
       operations: [...PET_REMOTE_CARE_HOST_OPERATIONS],
+    }
+    // Desktop only, for the same reason: the headless brain installs the arms
+    // but holds no artifact store, canvas or Files library, and answers every
+    // one `headless_host`.
+    features["files.library-remote"] = {
+      version: 1,
+      operations: [...FILES_LIBRARY_REMOTE_HOST_OPERATIONS],
     }
   }
   if (platform === "tauri" || platform === "headless") {

@@ -30,6 +30,9 @@ import { downloadPayloadFor } from "@/lib/files-library/download"
 import { goToSession } from "@/lib/files-library/open"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { FilesBackendProvider, type FilesBackend } from "@/hooks/files-library/files-backend"
+import type { FilesOps } from "@/lib/files-library/ops"
+import { PAIRED_FILES_CAPABILITIES } from "@/lib/files-library/remote/remote-ops"
 import { FilesPreviewPane } from "./files-preview-pane"
 
 const payload = downloadPayloadFor as jest.Mock
@@ -318,4 +321,91 @@ it("keeps the desktop pane's compact buttons", async () => {
   await screen.findByTestId("files-preview-unavailable")
   expect(screen.getByTestId("files-preview-footer").className).not.toContain("h-11")
   expect(screen.getByRole("button", { name: "Close preview" })).toHaveClass("size-7")
+})
+
+describe("on a paired device (ADR-0223 §9)", () => {
+  function remote(over: Partial<FilesOps> = {}) {
+    const ops = {
+      mode: "remote",
+      capabilities: PAIRED_FILES_CAPABILITIES,
+      payloadFor: jest.fn(async () => ({
+        blob: new Blob(["# host"], { type: "text/markdown" }),
+        filename: "notes.md",
+      })),
+      artifactFor: jest.fn(async () => ({ id: "host-art" })),
+      ...over,
+    } as unknown as FilesOps
+    const backend = {
+      source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+      ops,
+    } as unknown as FilesBackend
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+    )
+    return { ops, wrapper }
+  }
+
+  it("reads the host's bytes, says it is read-only, and leads to the conversation instead of Open", async () => {
+    const { ops, wrapper } = remote()
+    const a = actions()
+    a.goToConversation = jest.fn<Promise<void>, [string]>(async () => {})
+    const user = userEvent.setup()
+    render(
+      <FilesPreviewPane entry={entry({ originSessionId: "s1" })} actions={a} onClose={jest.fn()} />,
+      { wrapper }
+    )
+    expect(await screen.findByTestId("file-part-preview")).toBeInTheDocument()
+    expect(ops.payloadFor).toHaveBeenCalled()
+    expect(payload).not.toHaveBeenCalled()
+    expect(screen.getByTestId("files-preview-read-only")).toHaveTextContent(
+      "Read-only here. Edit it on the desktop."
+    )
+    expect(screen.queryByTestId("files-preview-open")).toBeNull()
+    await user.click(screen.getByTestId("files-preview-open-conversation"))
+    expect(a.goToConversation).toHaveBeenCalledWith("s1")
+  })
+
+  it("previews the host's artifact from its text", async () => {
+    const { ops, wrapper } = remote()
+    render(
+      <FilesPreviewPane
+        entry={entry({ key: "artifact:a", kind: "artifact", sourceId: "a" })}
+        actions={actions()}
+        onClose={jest.fn()}
+      />,
+      { wrapper }
+    )
+    expect(await screen.findByTestId("artifact-preview-host-art")).toBeInTheDocument()
+    expect(ops.artifactFor).toHaveBeenCalledWith(expect.objectContaining({ key: "artifact:a" }))
+  })
+
+  it("says to open an item over the ceiling on the desktop, without reading it", () => {
+    const { ops, wrapper } = remote()
+    render(
+      <FilesPreviewPane
+        entry={entry({ byteSize: 10 * 1024 * 1024 + 1 })}
+        actions={actions()}
+        onClose={jest.fn()}
+      />,
+      { wrapper }
+    )
+    expect(screen.getByTestId("files-preview-too-large")).toHaveTextContent(
+      "Too large to open here. Open it on the desktop."
+    )
+    expect(ops.payloadFor).not.toHaveBeenCalled()
+  })
+
+  it("offers no way on for an item whose conversation is gone", () => {
+    const { wrapper } = remote()
+    render(
+      <FilesPreviewPane
+        entry={entry({ originSessionId: "s1", originAlive: false })}
+        actions={actions()}
+        onClose={jest.fn()}
+      />,
+      { wrapper }
+    )
+    expect(screen.queryByTestId("files-preview-open-conversation")).toBeNull()
+    expect(screen.queryByTestId("files-preview-open")).toBeNull()
+  })
 })

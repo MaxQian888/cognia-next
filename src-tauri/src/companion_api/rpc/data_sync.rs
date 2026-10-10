@@ -72,6 +72,28 @@ pub(super) const COMMANDS: &[&str] = &[
     "pet_chat_send",
     "pet_chat_list",
     "pet_chat_clear",
+    "files_library_list",
+    "files_library_folder_list",
+    "files_library_search",
+    "files_library_get",
+    "files_library_favorite",
+    "files_library_move",
+    "files_library_trash",
+    "files_library_restore",
+    "files_library_purge",
+    "files_library_touch",
+    "files_library_rename",
+    "files_library_duplicate",
+    "files_library_attach",
+    "files_library_folder_create",
+    "files_library_folder_rename",
+    "files_library_folder_move",
+    "files_library_folder_style",
+    "files_library_folder_delete",
+    "files_library_upload_init",
+    "files_library_upload_chunk",
+    "files_library_upload_commit",
+    "files_library_upload_abort",
     "device_capabilities_report",
     "session_mark_read",
     "session_mark_unread",
@@ -810,6 +832,34 @@ pub(super) async fn dispatch(
         | "pet_chat_send"
         | "pet_chat_list"
         | "pet_chat_clear"
+        // A paired device's Files page (ADR-0223 §9): the host's library, read
+        // and managed by its own writers in the renderer
+        // (`lib/files-library/remote/host-dispatch.ts`); a headless brain
+        // answers every arm `headless_host`. Each carries an explicit request
+        // schema, and the caller id is injected below: the keyed writes and
+        // the upload staging are scoped to the device.
+        | "files_library_list"
+        | "files_library_folder_list"
+        | "files_library_search"
+        | "files_library_get"
+        | "files_library_favorite"
+        | "files_library_move"
+        | "files_library_trash"
+        | "files_library_restore"
+        | "files_library_purge"
+        | "files_library_touch"
+        | "files_library_rename"
+        | "files_library_duplicate"
+        | "files_library_attach"
+        | "files_library_folder_create"
+        | "files_library_folder_rename"
+        | "files_library_folder_move"
+        | "files_library_folder_style"
+        | "files_library_folder_delete"
+        | "files_library_upload_init"
+        | "files_library_upload_chunk"
+        | "files_library_upload_commit"
+        | "files_library_upload_abort"
         // ADR-0060 — device capability report; TS arm persists onto the
         // caller's `pairedDevices` row (caller id injected below).
         | "device_capabilities_report"
@@ -1197,9 +1247,10 @@ fn wire_offset(offset: u64) -> Result<u32, (StatusCode, Json<RpcError>)> {
 
 /// The bridged list arms that page, and the legacy member each answers its
 /// rows under. `browser_context_list` has no offset underneath, so it is one
-/// page and never issues a token. `pet_chat_list` is deliberately absent: its
-/// TS arm reads `pageSize`/`pageToken` and issues its own token, so
-/// translating them here would page it twice.
+/// page and never issues a token. `pet_chat_list`, `files_library_list` and
+/// `files_library_folder_list` are deliberately absent: their TS arms read
+/// `pageSize`/`pageToken` and issue their own tokens, so translating them here
+/// would page them twice.
 const BRIDGED_PAGED_ARMS: &[(&str, &str, bool)] = &[
     ("workflow_run_list", "runs", true),
     ("memory_list", "memories", false),
@@ -1479,6 +1530,16 @@ mod tests {
         .unwrap();
         assert!(paging.is_none());
         assert_eq!(args, serde_json::json!({ "pageSize": 5, "pageToken": "opaque" }));
+        // So do the Files library's two pages (ADR-0223 §9).
+        for command in ["files_library_list", "files_library_folder_list"] {
+            let (args, paging) = bridged_page_args(
+                command,
+                serde_json::json!({ "pageSize": 7, "pageToken": "o200" }),
+            )
+            .unwrap();
+            assert!(paging.is_none(), "{command} pages natively");
+            assert_eq!(args, serde_json::json!({ "pageSize": 7, "pageToken": "o200" }));
+        }
         // Other bridged commands are untouched.
         let (args, paging) =
             bridged_page_args("workflow_create", serde_json::json!({ "a": 1 })).unwrap();

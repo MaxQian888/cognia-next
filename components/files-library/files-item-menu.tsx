@@ -10,6 +10,9 @@
  *   template platform is on), download; share as a link (ADR-0222's file
  *   bundle, `files-share-dialog.tsx`); and Move to Trash, which replaced both
  *   "Remove from Files" and "Delete".
+ *
+ * What the library holds back here (a paired device: sharing, and saving a
+ * template) stays listed, disabled, with where to do it instead (ADR-0223 §9).
  */
 
 import type { ReactNode } from "react"
@@ -39,6 +42,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import { hasDocumentDraft } from "@/lib/files-library/document-draft"
 import { isFilesShareAvailable } from "@/lib/files-library/share"
@@ -55,6 +59,10 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
   const openSaveTemplate = useFilesLibraryStore((s) => s.openSaveTemplate)
   const openShare = useFilesLibraryStore((s) => s.openShare)
+  const { capabilities } = useFilesOps()
+  const shareHeldBack = capabilities.share !== true
+  const createHeldBack = capabilities.createDocuments !== true
+  const onDesktop = t("remote.onDesktop")
 
   if (entry.trashedAt !== undefined) {
     return [
@@ -155,6 +163,8 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
             id: "save-template",
             label: t("actions.saveAsTemplate"),
             icon: LayoutTemplateIcon,
+            disabled: createHeldBack,
+            ...(createHeldBack ? { hint: onDesktop } : {}),
             onSelect: () => openSaveTemplate(entry.key),
           } satisfies FilesMenuNode,
         ]
@@ -171,7 +181,8 @@ export function useFilesItemMenu(entry: FilesEntry, actions: FilesActions): File
       id: "share",
       label: t("actions.share"),
       icon: Share2Icon,
-      disabled: !isFilesShareAvailable(entry),
+      disabled: shareHeldBack || !isFilesShareAvailable(entry),
+      ...(shareHeldBack ? { hint: onDesktop } : {}),
       onSelect: () => openShare([entry.key]),
     },
     { type: "separator", id: "sep-trash" },

@@ -11,6 +11,7 @@ import { getSessionAsset, putLibraryAsset, putSessionAsset } from "@/lib/db/sess
 import { useChatStore } from "@/stores/chat"
 import {
   attachEntryToSession,
+  bindEntryToSession,
   FilesUseInChatError,
   mentionCandidateFor,
   resolveUseInChatTarget,
@@ -166,6 +167,34 @@ describe("attachEntryToSession", () => {
     const bound = await getDb().messageMediaRefs.where("sessionId").equals("s2").toArray()
     expect(bound).toHaveLength(1)
     expect((await getSessionAsset("s2", bound[0]!.sessionAsset!.assetId))?.blob.size).toBe(64)
+    expect(await getDraft("s2")).toBeNull()
+  })
+
+  it("binds whatever the size when asked to bind (a paired device's Use in chat)", async () => {
+    const stored = await putSessionAsset({
+      sessionId: "s1",
+      assetId: "a1",
+      blob: new Blob(["tiny"]),
+      filename: "tiny.txt",
+      mediaType: "text/plain",
+    })
+    await bindEntryToSession(
+      entry({
+        kind: "session-upload",
+        sourceId: stored.contentHash,
+        title: "tiny.txt",
+        mediaType: "text/plain",
+        assetId: "a1",
+        assetSessionId: "s1",
+      }),
+      "s2"
+    )
+    const bound = await getDb().messageMediaRefs.where("sessionId").equals("s2").toArray()
+    expect(bound).toHaveLength(1)
+    expect((await getSessionAsset("s2", bound[0]!.sessionAsset!.assetId))?.filename).toBe(
+      "tiny.txt"
+    )
+    // Bound, not drafted: the device's composer is not this host's.
     expect(await getDraft("s2")).toBeNull()
   })
 

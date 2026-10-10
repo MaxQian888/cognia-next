@@ -36,9 +36,19 @@ it("is undefined until the sources load, then aggregates them", () => {
 it("widens the image window on demand", async () => {
   liveQuery.mockReturnValue(undefined)
   const { result } = renderHook(() => useFilesEntries())
-  expect(liveQuery.mock.calls.at(-1)![1][2]).toBe(500)
+  // deps: [enabled, artifacts, canvasDocuments, imageLimit]
+  expect(liveQuery.mock.calls.at(-1)![1][3]).toBe(500)
   act(() => result.current.loadMoreImages())
-  expect(liveQuery.mock.calls.at(-1)![1][2]).toBe(1000)
+  expect(liveQuery.mock.calls.at(-1)![1][3]).toBe(1000)
   await liveQuery.mock.calls.at(-1)![0]()
   expect(loadFilesSources).toHaveBeenCalledWith(expect.objectContaining({ imageLimit: 1000 }))
+})
+
+it("reads nothing while disabled, for a page drawing another device's library", async () => {
+  liveQuery.mockReturnValue(undefined)
+  ;(loadFilesSources as jest.Mock).mockClear()
+  const { result } = renderHook(() => useFilesEntries({ enabled: false }))
+  expect(await liveQuery.mock.calls.at(-1)![0]()).toBeUndefined()
+  expect(loadFilesSources).not.toHaveBeenCalled()
+  expect(result.current.entries).toBeUndefined()
 })

@@ -5,6 +5,9 @@
  * template, while the template platform is on), or add a folder.
  * While a folder is in view, uploads are filed in it and a new folder goes
  * inside it; anywhere else they land at the top level.
+ *
+ * Where the library holds document creation back (a paired device, ADR-0223
+ * §9), both document entries stay listed, disabled, saying to use the desktop.
  */
 
 import { useRef } from "react"
@@ -23,6 +26,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -30,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { DocumentTemplateGlyph } from "@/components/document-templates/document-template-glyph"
 import { useDocumentTemplates } from "@/hooks/document-templates/use-document-templates"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import { ROOT_LIBRARY_FOLDER_ID } from "@/lib/db/files-library-types"
 import { useFilesLibraryStore } from "@/stores/files-library"
@@ -48,6 +53,7 @@ export function FilesNewMenu({
   const section = useFilesLibraryStore((s) => s.section)
   const openFolderDialog = useFilesLibraryStore((s) => s.openFolderDialog)
   const folderId = section.kind === "folder" ? section.folderId : ROOT_LIBRARY_FOLDER_ID
+  const createHeldBack = useFilesOps().capabilities.createDocuments !== true
 
   return (
     <>
@@ -93,12 +99,33 @@ export function FilesNewMenu({
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => actions.newCanvasDocument()}
+            disabled={createHeldBack}
+            title={createHeldBack ? t("remote.createOnDesktopHint") : undefined}
             data-testid="files-new-canvas"
           >
             <PenLineIcon aria-hidden />
             {t("new.canvas")}
+            {createHeldBack ? (
+              <DropdownMenuShortcut className="tracking-normal">
+                {t("remote.onDesktop")}
+              </DropdownMenuShortcut>
+            ) : null}
           </DropdownMenuItem>
-          {templates.enabled && templates.options && templates.options.length > 0 ? (
+          {createHeldBack ? (
+            templates.enabled ? (
+              <DropdownMenuItem
+                disabled
+                title={t("remote.createOnDesktopHint")}
+                data-testid="files-new-from-template"
+              >
+                <LayoutTemplateIcon aria-hidden />
+                {t("new.fromTemplate")}
+                <DropdownMenuShortcut className="tracking-normal">
+                  {t("remote.onDesktop")}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            ) : null
+          ) : templates.enabled && templates.options && templates.options.length > 0 ? (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger data-testid="files-new-from-template">
                 <LayoutTemplateIcon aria-hidden />

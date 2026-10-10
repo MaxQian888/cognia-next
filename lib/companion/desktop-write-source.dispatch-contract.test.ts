@@ -97,6 +97,9 @@ jest.mock("@/lib/work-submission/paired-turn-adapter", () => ({
   dispatchPairedTurnCommand: jest.fn(async () => ({ admitted: true, submissionId: "work:r" })),
 }))
 
+jest.mock("@/lib/files-library/remote/host-dispatch", () => ({
+  dispatchFilesHostCommand: jest.fn(async () => ({ folders: [] })),
+}))
 jest.mock("@/lib/pet/remote/host-dispatch", () => ({
   dispatchPetHostCommand: jest.fn(async () => ({ ok: true, grantedXp: 3, grantedCoins: 1 })),
 }))
@@ -445,6 +448,32 @@ describe("dispatchCommand: the two Router + Fusion gateway families", () => {
     await expect(dispatchCommand("router_fusion_run_teleport", {})).rejects.toThrow(
       /unknown desktop-write command/i
     )
+  })
+})
+
+describe("dispatchCommand: files_library_*", () => {
+  it("delegates a paired device's Files family wholesale, payload untouched", async () => {
+    const files = jest.requireMock("@/lib/files-library/remote/host-dispatch") as Record<
+      string,
+      jest.Mock
+    >
+    const { FILES_REMOTE_COMMAND_NAMES } = jest.requireActual(
+      "@/lib/files-library/remote/commands"
+    ) as typeof import("@/lib/files-library/remote/commands")
+    const payload = { callerDeviceId: "dev-1" }
+    await expect(dispatchCommand("files_library_folder_list", payload)).resolves.toEqual({
+      folders: [],
+    })
+    expect(files.dispatchFilesHostCommand).toHaveBeenCalledWith(
+      "files_library_folder_list",
+      payload
+    )
+    for (const command of FILES_REMOTE_COMMAND_NAMES) {
+      await dispatchCommand(command, { callerDeviceId: "dev-1" })
+      expect(files.dispatchFilesHostCommand).toHaveBeenLastCalledWith(command, {
+        callerDeviceId: "dev-1",
+      })
+    }
   })
 })
 

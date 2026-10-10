@@ -5,7 +5,7 @@ description: "The Files page becomes a managed space: a sidebar of places (all, 
 
 # ADR 0223 — Files is a space you manage
 
-**Status:** Accepted. Implemented: §1–§7, §10, and §9 for a standalone phone. Pending: §8 (workspace files) and §9 for a paired phone, which both need host-side Rust work; until they ship, the Workspace files group is absent and a paired phone has no Files page.
+**Status:** Accepted. Implemented: §1–§7, §9 and §10. Pending: §8 (workspace files), which needs host-side Rust work; until it ships, the Workspace files group is absent.
 **Date:** 2026-10-10
 **Related:** [ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep) (Files, partly superseded),
 [ADR-0222](./0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant) (FileSpace and file sharing),
@@ -121,24 +121,60 @@ a filesystem backend (plain web) the kind is dormant and says so.
 
 ### 9. The phone
 
-A standalone phone runs Files over its own data. A paired phone reads and
-writes the host's library through `files_library_*` host commands and fetches
-bytes on demand as a `library-media` resource; the surface contract moves from
-`companion: hidden` to `companion: remote`. The phone layout is a list with
-long-press selection and drawers, without drag and drop or shortcuts.
+A standalone phone runs Files over its own data. A paired phone manages the
+host's library: the page mounts a different backend, and the layouts do not
+branch on which one they draw. The phone layout is a list with long-press
+selection and drawers, without drag and drop or shortcuts.
 
 On a paired phone:
 
-- the commands use the device capabilities `client.read` and `client.write`, as
-  remote pet care does (ADR-0219): a member device reads, an owner device
-  writes, and an admin can raise a member;
-- opening a canvas document or an artifact previews it read-only — text and
-  images through `library-media`, up to its 10 MiB cap, past which the preview
-  says to open it on the desktop — and an item from a conversation can jump to
-  that conversation on the phone;
-- Share is dormant and says to share from the desktop: the share policy, the
-  collaboration checks and the link records all live on the host, and
-  uploading a large selection would outlast the 30-second host bridge.
+- **The library is the host's, live.** Every read and write is one of 22
+  `files_library_*` host commands, bridged to the desktop renderer and run by
+  the same writers the desktop page uses. The host rebuilds its own aggregate
+  for every call and acts on the entries it finds there, so a phone can neither
+  claim an item is Files-owned nor reach a source its library never listed. The
+  list and the folders are read in pages; a list page carries the revision of
+  the list it was cut from, and a phone whose pages disagree starts over. The
+  surface contract moves from `companion: hidden` to `companion: remote` on
+  `files_library_list`, behind the host feature `files.library-remote`, which
+  only the desktop advertises (a headless brain answers every arm
+  `headless_host`).
+- **Nothing is mirrored and nothing is queued.** The phone re-reads after each
+  of its own changes, when the page becomes visible or regains focus, every
+  30 seconds while it stays visible, and on pull to refresh or Retry. A failed
+  read keeps what was shown and says why. With the host offline the page is
+  blocked: a move or a Trash replayed later would act on a library that has
+  moved on.
+- **Search** matches titles on the phone and asks the host which items match
+  inside their bodies (`files_library_search`), since the entries carry no
+  excerpts. ⌘K on a paired phone lists the host's items by title.
+- **Capabilities** are `client.read` and `client.write`, as remote pet care
+  does (ADR-0219): a member device reads, an owner device writes, and an admin
+  can raise a member. Duplicate, Use in chat, New folder and an upload's commit
+  carry a body `idempotencyKey` that the host folds retries onto, per device.
+- **Bytes** travel over the existing `session-media` binary resource, not a new
+  one: an item Files keeps is read under the library's sentinel session
+  (`library:files`), which the host authorizes by the library's own pin, and
+  anything else through a conversation that shows it. A held original
+  (`original:<sha>`) answers the original variant. The 10 MiB cap is the
+  resource's own; past it, the preview, a download and a zip say to use the
+  desktop, by name.
+- **Open** previews read-only — an artifact's or canvas document's text from
+  `files_library_get`, images and files from those bytes — and an item from a
+  conversation leads to that conversation instead.
+- **Use in chat** binds an image or file to the conversation on the host,
+  without copying bytes. An artifact or canvas document becomes a reference
+  chip in the phone's own composer, from the text the host returns.
+- **Upload** stages each file of at most 10 MiB on the attachment staging
+  channel, under the library's sentinel session and the device that began it,
+  then files it in the library at commit. Any type is accepted; the commit's
+  magic-byte inspection still runs.
+- **Held back, and labelled**: creating documents — a new canvas document, one
+  from a template, Save as template, the template strip — because the phone
+  cannot edit the host's canvas, and Share, because the share policy, the
+  collaboration checks and the link records all live on the host, and uploading
+  a large selection would outlast the 30-second host bridge. Each stays listed,
+  disabled, saying to use the desktop.
 
 ### 10. Sharing rides ADR-0222
 
@@ -170,8 +206,8 @@ apply unchanged.
 - One rule for what removing, restoring and purging mean, shared by the page,
   ⌘K and the purge task.
 - Trashed bytes count against the asset quota for up to 30 days.
-- The phone gains a host-command family and a binary resource; a paired client
-  never mirrors the Files tables.
+- The phone gains a host-command family; its bytes ride the existing session
+  media resource. A paired client never mirrors the Files tables.
 
 ## Rejected
 

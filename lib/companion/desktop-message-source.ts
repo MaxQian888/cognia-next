@@ -45,7 +45,10 @@ import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
-import { isMessageMediaReferencedBySession } from "@/lib/db/message-media-refs"
+import {
+  isMessageMediaReferencedBySession,
+  LIBRARY_REF_SESSION_ID,
+} from "@/lib/db/message-media-refs"
 import { commitTranscriptIndexPage } from "@/lib/db/chat-transcript-index"
 import {
   encodeTimelineCursor,
@@ -339,28 +342,52 @@ async function respondSessionMedia(
     await fail("INVALID_PARAMS")
     return
   }
-  const session = await getDb().sessions.get(request.sessionId)
-  if (
-    !session ||
-    !isSessionExposed(session, "external-connector") ||
-    !(await isMessageMediaReferencedBySession(request.sessionId, request.hash))
-  ) {
+  // The bytes are read under a key the session (or Files, below) references:
+  // an image by its hash, and a file's held original (`original:<hash>`, a
+  // conversation upload or a Files upload) — whose stored blob IS the
+  // original — by that key, for the original variant only.
+  const keys =
+    request.variant === "original" ? [request.hash, `original:${request.hash}`] : [request.hash]
+  const referenced: string[] = []
+  for (const key of keys) {
+    if (await isMessageMediaReferencedBySession(request.sessionId, key)) referenced.push(key)
+  }
+  if (referenced.length === 0) {
     await fail("MEDIA_NOT_FOUND")
     return
   }
-  try {
-    await assertSharedSessionRead(session)
-  } catch {
-    await fail("MEDIA_NOT_FOUND")
-    return
+  // Files' own pins (ADR-0223 §9): the library's sentinel session is no
+  // conversation, so there is no row to expose or share-check. A pin there is
+  // this desktop keeping the item in Files — what a paired device's Files page
+  // manages — and the reference above is the whole authorization, as it is
+  // for a conversation once that conversation is exposed.
+  if (request.sessionId !== LIBRARY_REF_SESSION_ID) {
+    const session = await getDb().sessions.get(request.sessionId)
+    if (!session || !isSessionExposed(session, "external-connector")) {
+      await fail("MEDIA_NOT_FOUND")
+      return
+    }
+    try {
+      await assertSharedSessionRead(session)
+    } catch {
+      await fail("MEDIA_NOT_FOUND")
+      return
+    }
   }
-  const media = await getMessageMedia(request.hash)
-  const blob =
-    request.variant === "thumbnail"
-      ? (media?.thumbBlob ?? media?.blob)
-      : request.variant === "original"
-        ? media?.originalBlob
-        : media?.blob
+  let media: Awaited<ReturnType<typeof getMessageMedia>> = undefined
+  let blob: Blob | undefined
+  for (const key of referenced) {
+    media = await getMessageMedia(key)
+    blob =
+      key !== request.hash
+        ? media?.blob
+        : request.variant === "thumbnail"
+          ? (media?.thumbBlob ?? media?.blob)
+          : request.variant === "original"
+            ? media?.originalBlob
+            : media?.blob
+    if (media && blob) break
+  }
   if (!media || !blob) {
     await fail("MEDIA_NOT_FOUND")
     return

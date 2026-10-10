@@ -8,6 +8,8 @@ jest.mock("@/lib/chat/media/resolve-media", () => ({
   releaseMedia: jest.fn(),
 }))
 import { acquireMedia, releaseMedia } from "@/lib/chat/media/resolve-media"
+import { FilesBackendProvider, type FilesBackend } from "@/hooks/files-library/files-backend"
+import type { FilesEntry } from "@/lib/files-library/types"
 import { FilesImageThumb } from "./files-image-thumb"
 
 const acquire = acquireMedia as jest.Mock
@@ -50,4 +52,26 @@ it("shows the placeholder when resolving throws", async () => {
   acquire.mockRejectedValue(new Error("db closed"))
   render(<FilesImageThumb hash="h4" alt="Err" />)
   expect(await screen.findByTestId("files-image-missing")).toBeInTheDocument()
+})
+
+it("fetches bytes the media store lacks from where the page's backend says they live", async () => {
+  acquire.mockResolvedValue({ url: "blob:host" })
+  const loader = jest.fn()
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops: {},
+    mediaLoaderFor: () => loader,
+  } as unknown as FilesBackend
+  const entry = {
+    key: "image:h4",
+    mediaHash: undefined,
+    sessionIds: ["s1"],
+  } as unknown as FilesEntry
+  render(
+    <FilesBackendProvider backend={backend}>
+      <FilesImageThumb hash="h4" alt="Host" entry={entry} />
+    </FilesBackendProvider>
+  )
+  expect(await screen.findByTestId("files-image")).toHaveAttribute("src", "blob:host")
+  expect(acquire).toHaveBeenCalledWith("cognia-media:h4", { thumbnail: true, loadMissing: loader })
 })

@@ -49,7 +49,9 @@ export interface FilesView {
 
 export function useFilesView(
   entries: readonly FilesEntry[] | undefined,
-  folders: readonly LibraryFolder[]
+  folders: readonly LibraryFolder[],
+  /** Content matches for the search the entries cannot answer themselves. */
+  contentMatches?: ReadonlySet<string>
 ): FilesView {
   const now = useMinuteClock()
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
@@ -70,9 +72,21 @@ export function useFilesView(
       search: deferredSearch,
       activeProjectId,
       now,
+      ...(contentMatches ? { contentMatches } : {}),
     }
     return sortFilesEntries(filterFilesEntries(entries, query), sort, query)
-  }, [entries, section, lens, filters, projectScope, deferredSearch, activeProjectId, now, sort])
+  }, [
+    entries,
+    section,
+    lens,
+    filters,
+    projectScope,
+    deferredSearch,
+    activeProjectId,
+    now,
+    sort,
+    contentMatches,
+  ])
 
   const childFolders = useMemo(
     () => (section.kind === "folder" ? childLibraryFolders(folders, section.folderId) : []),

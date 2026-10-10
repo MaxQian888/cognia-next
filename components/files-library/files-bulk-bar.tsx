@@ -4,7 +4,8 @@
  * The bar over the Files list while items are selected (ADR-0223): favorite,
  * move, export as a zip, share as one link and move to Trash — or, in the Trash, restore and
  * delete forever. Every action takes the whole selection and lands in one
- * write. Esc or "Clear" ends the selection.
+ * write. Esc or "Clear" ends the selection. Share stays on the bar, disabled
+ * with where to do it, when the library holds it back (ADR-0223 §9).
  */
 
 import { useTranslations } from "next-intl"
@@ -20,6 +21,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
 import type { FilesEntry } from "@/lib/files-library/types"
@@ -39,20 +41,25 @@ function BulkButton({
   onClick,
   testId,
   destructive = false,
+  heldBack,
 }: {
   label: string
   icon: React.ComponentType<{ className?: string }>
   onClick: () => void
   testId: string
   destructive?: boolean
+  /** Why it is disabled here and where to do it instead. */
+  heldBack?: string
 }) {
   return (
     <Button
       variant="outline"
       size="sm"
       onClick={onClick}
+      disabled={heldBack !== undefined}
       aria-label={label}
-      title={label}
+      aria-description={heldBack}
+      title={heldBack ?? label}
       className={destructive ? "text-destructive hover:text-destructive" : undefined}
       data-testid={testId}
     >
@@ -67,6 +74,7 @@ export function FilesBulkBar({ selected, folders, trash, actions, onClear }: Fil
   const openMove = useFilesLibraryStore((s) => s.openMove)
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
   const openShare = useFilesLibraryStore((s) => s.openShare)
+  const { capabilities } = useFilesOps()
   if (selected.length === 0) return null
   const keys = selected.map((entry) => entry.key)
   const allFavorite = selected.every((entry) => entry.favoritedAt !== undefined)
@@ -126,6 +134,7 @@ export function FilesBulkBar({ selected, folders, trash, actions, onClear }: Fil
               icon={Share2Icon}
               onClick={() => openShare(keys)}
               testId="files-bulk-share"
+              {...(capabilities.share !== true ? { heldBack: t("remote.shareOnDesktopHint") } : {})}
             />
             <BulkButton
               label={t("actions.trash")}

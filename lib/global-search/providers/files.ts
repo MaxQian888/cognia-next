@@ -11,11 +11,13 @@
  * an item renamed in Files is listed under that name (ADR-0223) — the palette
  * offers what the Files page shows, by the same rule (`isItemHidden`).
  *
- * Offered wherever the page itself runs: on every client that owns its
- * database — desktop, web and an unpaired phone — and not on a paired client,
- * whose `files` surface is hidden (`lib/runtime/surface-contract.ts`): its
- * local tables are not the host's library, and a hit would link to a page
- * that refuses to open.
+ * Offered wherever the page itself runs (`lib/runtime/surface-contract.ts`).
+ * On a client that owns its database — desktop, web, an unpaired phone — the
+ * three providers read it. On a paired client the page manages the host's
+ * library (ADR-0223 §9), and its local tables are not that library: the
+ * artifact and canvas providers stay empty there, and the items provider lists
+ * every kind from the host (`files_library_list`, titles only, the same
+ * identity-only rule), each linking to its preview on `/files`.
  */
 
 import { FileIcon, PenLineIcon, ShapesIcon } from "lucide-react"
@@ -30,6 +32,9 @@ import {
 import { listAllSessionAssets, listLibraryAssets } from "@/lib/db/session-assets"
 import { isImageMediaType, isItemHidden } from "@/lib/files-library/aggregate"
 import { filesLocationHref } from "@/lib/files-library/deep-link"
+import type { FilesRemoteClient } from "@/lib/files-library/remote/client"
+import { FILES_IMAGE_PAGE_SIZE } from "@/lib/files-library/sources"
+import type { FilesEntry } from "@/lib/files-library/types"
 import { getSurfaceContract, resolveSurfaceAvailability } from "@/lib/runtime/surface-contract"
 import { byProjectId } from "../workspace-scope"
 import { createListProvider } from "./list-provider"
@@ -54,6 +59,8 @@ export interface FilesProviderDeps {
   /** Files metadata by item key: what was removed, trashed or renamed. */
   libraryItems: () => Promise<ReadonlyMap<string, LibraryItemRow>>
   loadItems: (ctx: GlobalSearchContext) => Promise<FileSearchRow[]>
+  /** The paired host's library, as rows (paired clients only). */
+  loadRemoteItems?: () => Promise<FileSearchRow[]>
 }
 
 async function libraryItemsByKey(): Promise<Map<string, LibraryItemRow>> {
@@ -89,13 +96,44 @@ async function artifactState() {
   return useArtifactStore.getState()
 }
 
-/** An upload or a named image, as the palette lists it. */
+/** An upload or a named image (or, from a paired host, any item), as the palette lists it. */
 export interface FileSearchRow {
   key: string
   title: string
   mediaType?: string
   projectId?: string
   timestamp: number
+  /** Set for a paired host's rows, which are every kind. */
+  kind?: FilesEntry["kind"]
+}
+
+/**
+ * A paired host's library as palette rows: what its Files page shows (not
+ * trashed, not removed), under the name Files gives each item. Images
+ * without a name are left out, as they are on the desktop's palette.
+ */
+export async function loadRemoteFileSearchRows(
+  client: Pick<FilesRemoteClient, "list">
+): Promise<FileSearchRow[]> {
+  const { entries } = await client.list(FILES_IMAGE_PAGE_SIZE)
+  const rows: FileSearchRow[] = []
+  for (const entry of entries) {
+    if (entry.trashedAt !== undefined || entry.hidden || !entry.title.trim()) continue
+    rows.push({
+      key: entry.key,
+      title: entry.title,
+      kind: entry.kind,
+      ...(entry.mediaType ? { mediaType: entry.mediaType } : {}),
+      ...(entry.projectIds[0] ? { projectId: entry.projectIds[0] } : {}),
+      timestamp: entry.updatedAt,
+    })
+  }
+  return rows
+}
+
+async function liveRemoteRows(): Promise<FileSearchRow[]> {
+  const { liveFilesRemoteClient } = await import("@/lib/files-library/remote/live-transport")
+  return loadRemoteFileSearchRows(liveFilesRemoteClient())
 }
 
 /**
@@ -165,6 +203,7 @@ const defaultDeps: FilesProviderDeps = {
   canvasDocuments: async () => (await artifactState()).canvasDocuments,
   libraryItems: libraryItemsByKey,
   loadItems: (ctx) => loadFileSearchRows(ctx.sessions),
+  loadRemoteItems: liveRemoteRows,
 }
 
 /** The Files page runs on this client (see the module comment). */
@@ -176,6 +215,21 @@ function filesReachable(ctx: GlobalSearchContext): boolean {
   )
 }
 
+/** The page manages a paired host's library, not this client's tables. */
+function filesRemote(ctx: GlobalSearchContext): boolean {
+  return ctx.runtimeSnapshot?.target?.kind === "companion"
+}
+
+/** This client's own library is the one the page shows. */
+function filesLocal(ctx: GlobalSearchContext): boolean {
+  return filesReachable(ctx) && !filesRemote(ctx)
+}
+
+const ROW_ICONS = {
+  artifact: ShapesIcon,
+  canvas: PenLineIcon,
+} as const
+
 export function createFilesArtifactsProvider(
   deps: Pick<FilesProviderDeps, "artifacts"> &
     Partial<Pick<FilesProviderDeps, "libraryItems">> = defaultDeps
@@ -184,7 +238,7 @@ export function createFilesArtifactsProvider(
     id: FILES_ARTIFACTS_PROVIDER_ID,
     kind: "artifact",
     load: async (ctx) => {
-      if (!filesReachable(ctx)) return []
+      if (!filesLocal(ctx)) return []
       const [artifacts, items] = await Promise.all([
         deps.artifacts(),
         (deps.libraryItems ?? libraryItemsByKey)(),
@@ -217,7 +271,7 @@ export function createFilesCanvasProvider(
     id: FILES_CANVAS_PROVIDER_ID,
     kind: "canvas-document",
     load: async (ctx) => {
-      if (!filesReachable(ctx)) return []
+      if (!filesLocal(ctx)) return []
       const [documents, items] = await Promise.all([
         deps.canvasDocuments(),
         (deps.libraryItems ?? libraryItemsByKey)(),
@@ -242,11 +296,18 @@ export function createFilesCanvasProvider(
   })
 }
 
-export function createFilesItemsProvider(deps: Pick<FilesProviderDeps, "loadItems"> = defaultDeps) {
+export function createFilesItemsProvider(
+  deps: Pick<FilesProviderDeps, "loadItems" | "loadRemoteItems"> = defaultDeps
+) {
   return createListProvider<FileSearchRow>({
     id: FILES_ITEMS_PROVIDER_ID,
     kind: "library-file",
-    load: async (ctx) => (filesReachable(ctx) ? deps.loadItems(ctx) : []),
+    load: async (ctx) => {
+      if (!filesReachable(ctx)) return []
+      if (!filesRemote(ctx)) return deps.loadItems(ctx)
+      // The host unreachable is no hits, not a broken palette.
+      return deps.loadRemoteItems ? deps.loadRemoteItems().catch(() => []) : []
+    },
     getTitle: (row) => row.title,
     getSecondary: (row) => row.mediaType,
     getTimestamp: (row) => row.timestamp,
@@ -257,7 +318,9 @@ export function createFilesItemsProvider(deps: Pick<FilesProviderDeps, "loadItem
       title: row.title,
       titlePositions: match.positions,
       ...(row.mediaType ? { subtitle: row.mediaType } : {}),
-      icon: { lucide: FileIcon },
+      icon: {
+        lucide: row.kind === "artifact" || row.kind === "canvas" ? ROW_ICONS[row.kind] : FileIcon,
+      },
       score: match.score,
       timestamp: row.timestamp,
       action: { type: "navigate", href: filesHref(row.key) },

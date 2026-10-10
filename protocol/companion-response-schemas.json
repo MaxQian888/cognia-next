@@ -9752,6 +9752,548 @@
         }
       },
       "additionalProperties": false
+    },
+    "FilesRemoteRefused": {
+      "type": "object",
+      "description": "A refused `files_library_*` call: a `files.errors.*` code, or `headless_host` from a brain that has no library.",
+      "required": ["ok", "code"],
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FilesRemoteEntry": {
+      "type": "object",
+      "description": "One Files entry as the host aggregates it, without its search haystack and extracted excerpt.",
+      "required": [
+        "key",
+        "kind",
+        "sourceId",
+        "title",
+        "sourceTitle",
+        "projectIds",
+        "sessionIds",
+        "sharedWithMe",
+        "creator",
+        "originAlive",
+        "createdAt",
+        "updatedAt",
+        "ownedByFiles",
+        "hidden"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["artifact", "canvas", "image", "session-upload", "upload"]
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "sourceTitle": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "byteSize": {
+          "type": "number"
+        },
+        "projectIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "originSessionId": {
+          "type": "string"
+        },
+        "originSessionTitle": {
+          "type": "string"
+        },
+        "sharedWithMe": {
+          "type": "boolean"
+        },
+        "creator": {
+          "type": "string",
+          "enum": ["user", "ai"]
+        },
+        "originAlive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "lastAccessedAt": {
+          "type": "number"
+        },
+        "favoritedAt": {
+          "type": "number"
+        },
+        "folderId": {
+          "type": "string"
+        },
+        "ownedByFiles": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "trashedAt": {
+          "type": "number"
+        },
+        "sharedLinks": {
+          "type": "number"
+        },
+        "mediaHash": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "assetId": {
+          "type": "string"
+        },
+        "assetSessionId": {
+          "type": "string"
+        },
+        "generated": {
+          "type": "object",
+          "description": "What the generation job recorded about a video (ADR-0205)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "FilesRemoteFolder": {
+      "type": "object",
+      "required": ["id", "name", "parentFolderId", "createdAt", "updatedAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentFolderId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string",
+          "enum": ["gray", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"]
+        },
+        "icon": {
+          "type": "string",
+          "enum": [
+            "folder",
+            "star",
+            "briefcase",
+            "book",
+            "code",
+            "image",
+            "music",
+            "archive",
+            "heart",
+            "flag"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FilesRemoteListPage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "items", "imagesTruncated", "revision"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FilesRemoteEntry"
+              }
+            },
+            "imagesTruncated": {
+              "type": "boolean"
+            },
+            "nextPageToken": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Fingerprint of the whole list the page was cut from."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteFolderPage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "folders"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "folders": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FilesRemoteFolder"
+              }
+            },
+            "nextPageToken": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteSearch": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "items"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "kind", "title", "updatedAt", "projectIds"],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["artifact", "canvas", "image", "session-upload", "upload"]
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteDetail": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "entry"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "entry": {
+              "$ref": "#/$defs/FilesRemoteEntry"
+            },
+            "text": {
+              "type": "string"
+            },
+            "textTruncated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteOk": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteCount": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "count"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items the host acted on; keys it no longer lists, and items already in the requested state, are skipped."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteRename": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "name"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemotePurge": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "retired", "count"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "retired": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items whose source lives on, so they left Files without being deleted."
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteDuplicate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "kind", "key"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["canvas", "upload"]
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteAttach": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "sessionId", "created", "how"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "created": {
+              "type": "boolean"
+            },
+            "how": {
+              "type": "string",
+              "enum": ["bound", "referenced"]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteFolderCreate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "folderId"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "folderId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteUploadInit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "uploadId", "chunkSize", "resumeOffset", "complete"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "uploadId": {
+              "type": "string"
+            },
+            "chunkSize": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "resumeOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteUploadChunk": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "receivedBytes", "complete"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "receivedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
+    },
+    "FilesRemoteUploadCommit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "key"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/FilesRemoteRefused"
+        }
+      ]
     }
   },
   "commands": {
@@ -14478,6 +15020,72 @@
           "additionalProperties": false
         }
       ]
+    },
+    "files_library_list": {
+      "$ref": "#/$defs/FilesRemoteListPage"
+    },
+    "files_library_folder_list": {
+      "$ref": "#/$defs/FilesRemoteFolderPage"
+    },
+    "files_library_search": {
+      "$ref": "#/$defs/FilesRemoteSearch"
+    },
+    "files_library_get": {
+      "$ref": "#/$defs/FilesRemoteDetail"
+    },
+    "files_library_favorite": {
+      "$ref": "#/$defs/FilesRemoteCount"
+    },
+    "files_library_move": {
+      "$ref": "#/$defs/FilesRemoteCount"
+    },
+    "files_library_trash": {
+      "$ref": "#/$defs/FilesRemoteCount"
+    },
+    "files_library_restore": {
+      "$ref": "#/$defs/FilesRemoteCount"
+    },
+    "files_library_purge": {
+      "$ref": "#/$defs/FilesRemotePurge"
+    },
+    "files_library_touch": {
+      "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "files_library_rename": {
+      "$ref": "#/$defs/FilesRemoteRename"
+    },
+    "files_library_duplicate": {
+      "$ref": "#/$defs/FilesRemoteDuplicate"
+    },
+    "files_library_attach": {
+      "$ref": "#/$defs/FilesRemoteAttach"
+    },
+    "files_library_folder_create": {
+      "$ref": "#/$defs/FilesRemoteFolderCreate"
+    },
+    "files_library_folder_rename": {
+      "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "files_library_folder_move": {
+      "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "files_library_folder_style": {
+      "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "files_library_folder_delete": {
+      "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "files_library_upload_init": {
+      "$ref": "#/$defs/FilesRemoteUploadInit"
+    },
+    "files_library_upload_chunk": {
+      "$ref": "#/$defs/FilesRemoteUploadChunk"
+    },
+    "files_library_upload_commit": {
+      "$ref": "#/$defs/FilesRemoteUploadCommit"
+    },
+    "files_library_upload_abort": {
+      "$ref": "#/$defs/FilesRemoteOk"
     }
   }
 }

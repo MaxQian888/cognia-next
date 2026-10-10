@@ -6,7 +6,12 @@ import type { LibraryFolder } from "@/lib/db/files-library-types"
 
 const EMPTY: LibraryFolder[] = []
 
-/** Every Files folder, live. Empty until the first read resolves. */
-export function useFilesFolders(): LibraryFolder[] {
-  return useClientLiveQuery(() => listLibraryFolders(), [], EMPTY) ?? EMPTY
+/**
+ * Every Files folder, live. Empty until the first read resolves, and while
+ * `enabled` is false (the page draws another device's library).
+ */
+export function useFilesFolders({ enabled = true }: { enabled?: boolean } = {}): LibraryFolder[] {
+  return (
+    useClientLiveQuery(() => (enabled ? listLibraryFolders() : EMPTY), [enabled], EMPTY) ?? EMPTY
+  )
 }

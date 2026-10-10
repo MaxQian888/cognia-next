@@ -1353,6 +1353,148 @@ describe("transcript bridge projections", () => {
     expect(answer.bytes).toEqual(new Uint8Array())
     expect(answer.error).toBe("MEDIA_NOT_FOUND")
   })
+
+  // ADR-0223 §9: a paired device's Files page reads the bytes of what this
+  // desktop's Files keeps, through the library's sentinel session.
+  describe("Files library media", () => {
+    const sha = "c".repeat(64)
+    type Listener = (event: { payload: unknown }) => void
+
+    function bytesBlob(values: number[], type: string): Blob {
+      // fake-indexeddb cannot preserve jsdom Blob identity through cloning.
+      return { type, arrayBuffer: async () => Uint8Array.from(values).buffer } as unknown as Blob
+    }
+
+    async function ask(sessionId: string, variant: string): Promise<MediaResponse> {
+      const handlers: Record<string, Listener> = {}
+      let resolveMedia: ((value: MediaResponse) => void) | undefined
+      const answered = new Promise<MediaResponse>((resolve) => {
+        resolveMedia = resolve
+      })
+      const stop = await installDesktopMessageSource({
+        forceReinstall: true,
+        bridge: {
+          listen: jest.fn(async (event: string, handler: Listener) => {
+            handlers[event] = handler
+            return () => {}
+          }),
+          invoke: jest.fn(async () => undefined),
+          respondMedia: jest.fn(async (response: MediaResponse) => {
+            resolveMedia?.(response)
+          }),
+        },
+      })
+      try {
+        handlers["companion://session-media-request"]({
+          payload: { requestId: "lib-rid", kind: "session_media", sessionId, hash: sha, variant },
+        })
+        return await answered
+      } finally {
+        stop()
+      }
+    }
+
+    it("serves an image Files keeps, with no conversation row to check", async () => {
+      await getDb().messageMediaRefs.put({
+        messageId: `library:image:${sha}`,
+        sessionId: "library:files",
+        hash: sha,
+      })
+      mockGetMessageMedia.mockResolvedValueOnce({
+        hash: sha,
+        mediaType: "image/png",
+        width: 1,
+        height: 1,
+        blob: bytesBlob([7, 8], "image/png"),
+        byteSize: 2,
+        createdAt: 1,
+        lastUsedAt: 1,
+      })
+
+      const answer = await ask("library:files", "canonical")
+
+      expect(answer.error ?? null).toBeNull()
+      expect(answer.bytes).toEqual(new Uint8Array([7, 8]))
+    })
+
+    it("serves a Files upload's held original under its original key", async () => {
+      await getDb().messageMediaRefs.put({
+        messageId: "library:upload:asset-1",
+        sessionId: "library:files",
+        hash: `original:${sha}`,
+      })
+      mockGetMessageMedia.mockImplementation(async (key: string) =>
+        key === `original:${sha}`
+          ? {
+              hash: key,
+              mediaType: "application/pdf",
+              width: 0,
+              height: 0,
+              blob: bytesBlob([1, 2, 3], "application/pdf"),
+              byteSize: 3,
+              createdAt: 1,
+              lastUsedAt: 1,
+            }
+          : undefined
+      )
+      try {
+        const answer = await ask("library:files", "original")
+        expect(answer.error ?? null).toBeNull()
+        expect(answer.bytes).toEqual(new Uint8Array([1, 2, 3]))
+        expect(answer.mediaType).toBe("application/pdf")
+
+        // A held original has only the original variant.
+        expect((await ask("library:files", "canonical")).error).toBe("MEDIA_NOT_FOUND")
+      } finally {
+        mockGetMessageMedia.mockReset()
+        mockGetMessageMedia.mockImplementation((...args: unknown[]) =>
+          (jest.requireActual("@/lib/db/message-media") as typeof messageMedia).getMessageMedia(
+            ...(args as [string])
+          )
+        )
+      }
+    })
+
+    it("serves a conversation's file through that conversation, once it is exposed", async () => {
+      await putExposedSession("s-files")
+      await getDb().messageMediaRefs.put({
+        messageId: "session-asset:x",
+        sessionId: "s-files",
+        hash: `original:${sha}`,
+      })
+      mockGetMessageMedia.mockImplementation(async (key: string) =>
+        key === `original:${sha}`
+          ? {
+              hash: key,
+              mediaType: "text/plain",
+              width: 0,
+              height: 0,
+              blob: bytesBlob([9], "text/plain"),
+              byteSize: 1,
+              createdAt: 1,
+              lastUsedAt: 1,
+            }
+          : undefined
+      )
+      try {
+        expect((await ask("s-files", "original")).bytes).toEqual(new Uint8Array([9]))
+        // The same bytes are not readable through a conversation that lacks them.
+        await putExposedSession("s-other")
+        expect((await ask("s-other", "original")).error).toBe("MEDIA_NOT_FOUND")
+      } finally {
+        mockGetMessageMedia.mockReset()
+        mockGetMessageMedia.mockImplementation((...args: unknown[]) =>
+          (jest.requireActual("@/lib/db/message-media") as typeof messageMedia).getMessageMedia(
+            ...(args as [string])
+          )
+        )
+      }
+    })
+
+    it("refuses bytes Files does not keep", async () => {
+      expect((await ask("library:files", "canonical")).error).toBe("MEDIA_NOT_FOUND")
+    })
+  })
 })
 
 it("contains native unregister rejections for all message-source channels", async () => {

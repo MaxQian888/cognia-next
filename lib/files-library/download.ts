@@ -25,6 +25,40 @@ function extensionOf(mediaType: string): string {
   return subtype === "jpeg" ? "jpg" : subtype
 }
 
+/**
+ * The download name for an artifact or canvas document, from the entry alone —
+ * what a paired device names the text the host sent it, by the same rule as
+ * {@link downloadPayloadFor}.
+ */
+export function documentFilenameFor(
+  entry: Pick<FilesEntry, "kind" | "sourceTitle" | "language" | "subtype">
+): string {
+  if (entry.kind === "canvas") {
+    return withExtension(
+      safeFilename(entry.sourceTitle, "document"),
+      getFileExtension(entry.language ?? "markdown")
+    )
+  }
+  const extension = getFileExtension(
+    entry.language ?? (entry.subtype === "document" ? "markdown" : (entry.subtype ?? "text"))
+  )
+  return withExtension(safeFilename(entry.sourceTitle, "artifact"), extension)
+}
+
+/** The download name for an image or file's bytes, by the same rule as {@link downloadPayloadFor}. */
+export function mediaFilenameFor(
+  entry: Pick<FilesEntry, "kind" | "title" | "sourceId">,
+  mediaType: string
+): string {
+  if (entry.kind === "image") {
+    return withExtension(
+      safeFilename(entry.title, `image-${entry.sourceId.slice(0, 8)}`),
+      extensionOf(mediaType)
+    )
+  }
+  return safeFilename(entry.title, "file")
+}
+
 /** Null when the source is gone (deleted elsewhere since the grid loaded). */
 export async function downloadPayloadFor(entry: FilesEntry): Promise<FilesDownloadPayload | null> {
   switch (entry.kind) {

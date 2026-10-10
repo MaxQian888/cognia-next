@@ -36,6 +36,7 @@ import {
   getLibraryAsset,
   getSessionAssetMetadata,
   hashSessionAssetSource,
+  putSessionAsset,
 } from "@/lib/db/session-assets"
 import { createSession, getSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
@@ -209,4 +210,37 @@ export async function attachEntryToSession(
   }
   await setDraft(sessionId, draft?.text ?? "", [...attachments, meta])
   return "draft"
+}
+
+/**
+ * Bind an image or file to `sessionId` as a conversation asset, whatever its
+ * size — the paired-device path (ADR-0223 §9), where the device's composer is
+ * not this host's and a draft attachment would never reach it. Held originals
+ * are bound without copying; an image, which the media store keeps by its
+ * canonical hash rather than as a held original, is stored as the
+ * conversation's asset (content-addressed, so the bytes are not duplicated).
+ */
+export async function bindEntryToSession(entry: FilesEntry, sessionId: string): Promise<void> {
+  const source = await loadHeldSource(entry)
+  const assetId = newAssetId()
+  if (source.contentHash) {
+    await bindHeldSessionAsset({
+      sessionId,
+      assetId,
+      contentHash: source.contentHash,
+      filename: source.name,
+      mediaType: source.mediaType,
+      ...(source.extractedContent
+        ? { extractedContent: { ...source.extractedContent, attachmentId: assetId } }
+        : {}),
+    })
+    return
+  }
+  await putSessionAsset({
+    sessionId,
+    assetId,
+    blob: source.blob,
+    filename: source.name,
+    mediaType: source.mediaType,
+  })
 }

@@ -1,5 +1,6 @@
 import {
   ENVIRONMENT_CATALOG_HOST_OPERATIONS,
+  FILES_LIBRARY_REMOTE_HOST_OPERATIONS,
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
   INBOX_RELAY_HOST_OPERATIONS,
   PET_REMOTE_CARE_HOST_OPERATIONS,
@@ -29,6 +30,28 @@ describe("host feature manifest", () => {
     for (const platform of ["headless", "web", "mobile"] as const) {
       expect(
         buildLocalHostFeatureManifest({ platform }).features["pet.remote-care"]
+      ).toBeUndefined()
+    }
+  })
+
+  it("advertises the Files library to paired devices on the desktop only (ADR-0223 §9)", () => {
+    const desktop = buildLocalHostFeatureManifest({ platform: "tauri" })
+    expect(desktop.features["files.library-remote"]).toEqual({
+      version: 1,
+      operations: [...FILES_LIBRARY_REMOTE_HOST_OPERATIONS],
+    })
+    expect(FILES_LIBRARY_REMOTE_HOST_OPERATIONS).toHaveLength(22)
+    for (const operation of [
+      "files_library_list",
+      "files_library_trash",
+      "files_library_upload_commit",
+    ]) {
+      expect(supportsHostFeatureOperation(desktop, "files.library-remote", operation)).toBe(true)
+    }
+    // The headless brain has no library and answers every arm `headless_host`.
+    for (const platform of ["headless", "web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["files.library-remote"]
       ).toBeUndefined()
     }
   })

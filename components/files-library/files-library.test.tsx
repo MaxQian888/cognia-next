@@ -54,6 +54,16 @@ jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => comp
 jest.mock("./mobile/files-mobile-library", () => ({
   FilesMobileLibrary: () => <div data-testid="files-mobile" />,
 }))
+let runtimeTarget: unknown = null
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => ({ target: runtimeTarget }),
+}))
+const remoteBackend = {
+  current: null as unknown,
+}
+jest.mock("@/hooks/files-library/use-remote-files-backend", () => ({
+  useRemoteFilesBackend: () => remoteBackend.current,
+}))
 let params = new URLSearchParams()
 const router = { push: jest.fn(), replace: jest.fn() }
 jest.mock("next/navigation", () => ({
@@ -92,6 +102,7 @@ const grid = () => within(screen.getByTestId("files-grid"))
 
 beforeEach(() => {
   compact = false
+  runtimeTarget = null
   params = new URLSearchParams()
   router.replace.mockClear()
   folderState.folders = []
@@ -284,4 +295,55 @@ it("lays a phone-width page out as the compact list (ADR-0223 §9)", () => {
   expect(screen.getByTestId("files-mobile")).toBeInTheDocument()
   expect(screen.queryByTestId("files-grid")).toBeNull()
   expect(screen.queryByTestId("files-sidebar")).toBeNull()
+})
+
+describe("on a device paired to a desktop (ADR-0223 §9)", () => {
+  const pairedOps = () =>
+    jest.requireActual("@/lib/files-library/remote/remote-ops").createRemoteFilesOps({
+      client: {},
+      imageLimit: () => 60,
+      onChanged: () => {},
+    })
+
+  beforeEach(() => {
+    runtimeTarget = { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" }
+  })
+
+  it("manages the host's library, not this device's", () => {
+    entriesState.entries = [entry("artifact:local")]
+    remoteBackend.current = {
+      source: {
+        entries: [entry("artifact:host")],
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+        refresh: jest.fn(async () => {}),
+      },
+      ops: pairedOps(),
+    }
+    render(<FilesLibrary />)
+    expect(grid().getByText("artifact:host")).toBeInTheDocument()
+    expect(screen.queryByText("artifact:local")).not.toBeInTheDocument()
+    // Nothing to create here: the template strip stays off.
+    expect(screen.queryByTestId("files-template-strip")).not.toBeInTheDocument()
+  })
+
+  it("says why the list may be stale and offers Retry, instead of loading forever", async () => {
+    const refresh = jest.fn(async () => {})
+    remoteBackend.current = {
+      source: {
+        entries: undefined,
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+        refresh,
+        error: "files_remote_unreachable",
+      },
+      ops: pairedOps(),
+    }
+    render(<FilesLibrary />)
+    expect(screen.queryByLabelText("Loading files")).not.toBeInTheDocument()
+    await act(async () => fireEvent.click(screen.getByTestId("files-remote-retry")))
+    expect(refresh).toHaveBeenCalled()
+  })
 })

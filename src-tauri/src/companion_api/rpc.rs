@@ -563,6 +563,32 @@ const KNOWN_COMMANDS: &[&str] = &[
     "pet_chat_send",
     "pet_chat_list",
     "pet_chat_clear",
+    // A paired device's Files page (ADR-0223 §9). Bridged to the desktop
+    // renderer, which owns the library; like the pet, deliberately NOT in
+    // `CONTROL_COMMANDS`: managing the library is the device's own client
+    // surface, not remote control of the host.
+    "files_library_list",
+    "files_library_folder_list",
+    "files_library_search",
+    "files_library_get",
+    "files_library_favorite",
+    "files_library_move",
+    "files_library_trash",
+    "files_library_restore",
+    "files_library_purge",
+    "files_library_touch",
+    "files_library_rename",
+    "files_library_duplicate",
+    "files_library_attach",
+    "files_library_folder_create",
+    "files_library_folder_rename",
+    "files_library_folder_move",
+    "files_library_folder_style",
+    "files_library_folder_delete",
+    "files_library_upload_init",
+    "files_library_upload_chunk",
+    "files_library_upload_commit",
+    "files_library_upload_abort",
     // ADR-0060 — a paired device reports its platform capability manifest
     // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
     // row by the TS dispatch arm. Direct `transport.call` from the mobile
@@ -1227,6 +1253,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Remote pet care reads: the live snapshot and the chat history page.
     "pet_get",
     "pet_chat_list",
+    // The Files library's reads (ADR-0223 §9): list and folder pages, search
+    // and one entry's detail.
+    "files_library_list",
+    "files_library_folder_list",
+    "files_library_search",
+    "files_library_get",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -2091,6 +2123,32 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "pet_chat_send",
     "pet_chat_list",
     "pet_chat_clear",
+    // The Files library (ADR-0223 §9). The keyed writes (duplicate, attach,
+    // folder create, upload commit) are deduped by the renderer's ledger on
+    // `<callerDeviceId>:<command>:<idempotencyKey>`, and an upload is staged
+    // under the device that began it, so every arm needs the verified id.
+    "files_library_list",
+    "files_library_folder_list",
+    "files_library_search",
+    "files_library_get",
+    "files_library_favorite",
+    "files_library_move",
+    "files_library_trash",
+    "files_library_restore",
+    "files_library_purge",
+    "files_library_touch",
+    "files_library_rename",
+    "files_library_duplicate",
+    "files_library_attach",
+    "files_library_folder_create",
+    "files_library_folder_rename",
+    "files_library_folder_move",
+    "files_library_folder_style",
+    "files_library_folder_delete",
+    "files_library_upload_init",
+    "files_library_upload_chunk",
+    "files_library_upload_commit",
+    "files_library_upload_abort",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",

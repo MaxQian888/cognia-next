@@ -27,10 +27,11 @@
  * "New → Upload files", the system file picker.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { CheckSquareIcon, ChevronDownIcon, PanelLeftIcon, SearchIcon, Trash2Icon } from "lucide-react"
 
+import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { Surface } from "@/components/surface/surface"
 import { Button } from "@/components/ui/button"
@@ -50,6 +51,7 @@ import { FilesFilterPopover } from "../files-filter-popover"
 import { FilesLensTabs } from "../files-lens-tabs"
 import { FilesNewMenu } from "../files-new-menu"
 import { FilesPreviewPane } from "../files-preview-pane"
+import { FilesRemoteNotice } from "../files-remote-notice"
 import { FilesSidebar } from "../files-sidebar"
 import { FilesTemplateStrip } from "../files-template-strip"
 import { FilesMobileBulkBar } from "./files-mobile-bulk-bar"
@@ -204,18 +206,26 @@ export function FilesMobileLibrary() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="files-body">
+      <FilesMobileScroller refresh={files.refresh}>
+        <FilesRemoteNotice
+          error={files.error}
+          refresh={files.refresh}
+          touch
+          className="mx-3 mt-3 w-auto"
+        />
         {files.showTemplates ? (
           <div className="px-3 pt-3">
             <FilesTemplateStrip actions={actions} />
           </div>
         ) : null}
         {visible === undefined ? (
-          <div className="space-y-2 p-3" aria-busy="true" aria-label={t("loading")}>
-            {Array.from({ length: 8 }, (_, index) => (
-              <Skeleton key={index} className="h-14 w-full rounded-md" />
-            ))}
-          </div>
+          files.error ? null : (
+            <div className="space-y-2 p-3" aria-busy="true" aria-label={t("loading")}>
+              {Array.from({ length: 8 }, (_, index) => (
+                <Skeleton key={index} className="h-14 w-full rounded-md" />
+              ))}
+            </div>
+          )
         ) : files.empty ? (
           <FilesEmpty
             section={section}
@@ -277,7 +287,7 @@ export function FilesMobileLibrary() {
             )}
           </div>
         ) : null}
-      </div>
+      </FilesMobileScroller>
 
       {selecting ? (
         <FilesMobileBulkBar
@@ -342,6 +352,33 @@ export function FilesMobileLibrary() {
         actions={actions}
         onDeleted={stopSelecting}
       />
+    </div>
+  )
+}
+
+/**
+ * The list's scroller: pull to refresh where the library is read on demand
+ * (a paired host's), a plain scroller where it is live.
+ */
+function FilesMobileScroller({
+  refresh,
+  children,
+}: {
+  refresh: (() => Promise<void>) | undefined
+  children: ReactNode
+}) {
+  if (refresh) {
+    return (
+      <div className="min-h-0 flex-1" data-testid="files-body">
+        <PullToRefresh onRefresh={refresh} className="overscroll-contain">
+          {children}
+        </PullToRefresh>
+      </div>
+    )
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="files-body">
+      {children}
     </div>
   )
 }

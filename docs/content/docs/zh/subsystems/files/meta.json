@@ -1,4 +1,4 @@
 {
   "title": "文件",
-  "pages": ["index", "data", "management", "templates", "sharing"]
+  "pages": ["index", "data", "management", "templates", "sharing", "paired"]
 }

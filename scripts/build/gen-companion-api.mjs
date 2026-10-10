@@ -579,12 +579,16 @@ const HOST_CATEGORIES = [
     id: "sessions",
     title: "Sessions and messages",
     description:
-      "Chat sessions, messages, conversations, characters, the desktop pet, and transcripts.",
+      "Chat sessions, messages, conversations, characters, the desktop pet, the Files library, and transcripts.",
     skill: "cognia-host-sessions",
     // `pet_` is here: the pet is a companion character the user talks to and
     // cares for (ADR-0219), and its arms answer from the same renderer Dexie
-    // as the conversation reads, not from a runtime or a job.
-    pattern: /^(session_|message_|conversation_|character_|transcript_|thread_handoff_|pet_)/,
+    // as the conversation reads, not from a runtime or a job. `files_library_`
+    // too: the Files library is what the conversations produced (ADR-0223),
+    // served from that same Dexie — not files on a disk, which the
+    // `development` arms serve.
+    pattern:
+      /^(session_|message_|conversation_|character_|transcript_|thread_handoff_|pet_|files_library_)/,
   },
   {
     id: "agents",
@@ -692,6 +696,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^provider_diagnostics_/, "provider-diagnostics"],
   [/^provider_profiles_/, "provider-profiles"],
   [/^perf_/, "performance"],
+  [/^files_library_/, "files-library"],
   [/^project_environment_/, "project-environments"],
   [/^scheduled_task_/, "scheduled-tasks"],
   [/^(?:skill_|skills_)/, "skills"],

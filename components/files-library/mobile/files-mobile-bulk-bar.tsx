@@ -11,7 +11,9 @@
  * column rather than floating (`/files` owns the viewport on the compact
  * shell), so it cannot cover the last row. Every button is a 44px+ target
  * with an icon and a label, and each acts on the whole selection in one write
- * — the same actions as the desktop bar (`files-bulk-bar.tsx`).
+ * — the same actions as the desktop bar (`files-bulk-bar.tsx`). Share stays
+ * in the dock when the library holds it back (a paired phone), disabled and
+ * saying where to share instead (ADR-0223 §9).
  */
 
 import { useTranslations } from "next-intl"
@@ -26,6 +28,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import { impact } from "@/lib/capacitor/haptics"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
@@ -58,6 +61,7 @@ function DockButton({
   disabled,
   destructive = false,
   testId,
+  hint,
 }: {
   label: string
   icon: React.ComponentType<{ "aria-hidden"?: boolean }>
@@ -65,6 +69,8 @@ function DockButton({
   disabled: boolean
   destructive?: boolean
   testId: string
+  /** A second, dimmed line: where to do what is disabled here. */
+  hint?: string
 }) {
   return (
     <Button
@@ -80,6 +86,9 @@ function DockButton({
     >
       <Icon aria-hidden />
       {label}
+      {hint ? (
+        <span className="text-[10px] font-normal text-muted-foreground">{hint}</span>
+      ) : null}
     </Button>
   )
 }
@@ -98,6 +107,7 @@ export function FilesMobileBulkBar({
   const openMove = useFilesLibraryStore((s) => s.openMove)
   const openDeleteForever = useFilesLibraryStore((s) => s.openDeleteForever)
   const openShare = useFilesLibraryStore((s) => s.openShare)
+  const shareHeldBack = useFilesOps().capabilities.share !== true
   const count = selected.length
   const none = count === 0
   const allChecked = count > 0 && count >= visibleCount
@@ -179,9 +189,10 @@ export function FilesMobileBulkBar({
           <DockButton
             label={t("mobile.dock.share")}
             icon={Share2Icon}
-            disabled={none}
+            disabled={none || shareHeldBack}
             onClick={() => openShare(keys)}
             testId="files-mobile-bulk-share"
+            {...(shareHeldBack ? { hint: t("remote.onDesktop") } : {})}
           />
           <DockButton
             label={t("mobile.dock.download")}

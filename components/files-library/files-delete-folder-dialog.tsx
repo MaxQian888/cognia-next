@@ -16,9 +16,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { deleteLibraryFolder } from "@/lib/db/files-library-folders"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import type { LibraryFolder } from "@/lib/db/files-library-types"
 import { folderDescendants } from "@/lib/files-library/dnd"
+import { folderErrorKey } from "./files-folder-dialog"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
 /**
@@ -31,6 +32,7 @@ export function FilesDeleteFolderDialog({ folders }: { folders: readonly Library
   const target = useFilesLibraryStore((s) => s.deleteFolderTarget)
   const close = useFilesLibraryStore((s) => s.closeDeleteFolder)
   const setSection = useFilesLibraryStore((s) => s.setSection)
+  const ops = useFilesOps()
   const folder = folders.find((candidate) => candidate.id === target)
   const [cascade, setCascade] = useState(false)
 
@@ -76,14 +78,17 @@ export function FilesDeleteFolderDialog({ folders }: { folders: readonly Library
               // A cascade also deletes every folder under this one.
               const gone = cascade ? folderDescendants(folders, folder.id) : new Set<string>()
               gone.add(folder.id)
-              void deleteLibraryFolder(folder.id, cascade ? "cascade" : "reparent")
+              void ops
+                .deleteFolder(folder.id, cascade ? "cascade" : "reparent")
                 .then(() => {
                   const section = useFilesLibraryStore.getState().section
                   if (section.kind === "folder" && gone.has(section.folderId)) {
                     setSection({ kind: "folder", folderId: parent })
                   }
                 })
-                .catch(() => toast.error(t("errors.unknown")))
+                .catch((error: unknown) =>
+                  toast.error(t(folderErrorKey(error, (key) => t.has(key))))
+                )
               close()
               setCascade(false)
             }}

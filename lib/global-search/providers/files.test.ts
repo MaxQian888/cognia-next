@@ -10,6 +10,7 @@ import {
   createFilesCanvasProvider,
   createFilesItemsProvider,
   loadFileSearchRows,
+  loadRemoteFileSearchRows,
   type FileSearchRow,
 } from "./files"
 
@@ -113,7 +114,24 @@ describe("Files ⌘K providers", () => {
     for (const p of providers()) {
       expect((await p.search(makeProviderInput("s", { ctx: phone }))).items).not.toEqual([])
     }
-    // A paired client's tables are not the host's library: no way in.
+    // A paired client whose host does not serve the library: no way in.
+    const pairedTo = (operations: string[]) =>
+      makeTestContext({
+        platform: "mobile",
+        isTauri: false,
+        runtimeSnapshot: {
+          target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
+          vaultState: "unlocked",
+          connectionState: "online",
+          host: { compatible: true, operations, grants: ["client.read"] },
+        } as never,
+      })
+    for (const p of providers()) {
+      expect((await p.search(makeProviderInput("s", { ctx: pairedTo([]) }))).items).toEqual([])
+    }
+  })
+
+  it("lists a paired host's library, never this client's own tables (ADR-0223 §9)", async () => {
     const paired = makeTestContext({
       platform: "mobile",
       isTauri: false,
@@ -121,12 +139,86 @@ describe("Files ⌘K providers", () => {
         target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "mobile" },
         vaultState: "unlocked",
         connectionState: "online",
-        host: { compatible: true, operations: [], grants: ["client.read"] },
+        host: { compatible: true, operations: ["files_library_list"], grants: ["client.read"] },
       } as never,
     })
-    for (const p of providers()) {
-      expect((await p.search(makeProviderInput("s", { ctx: paired }))).items).toEqual([])
+    const loadItems = jest.fn(async () => [] as FileSearchRow[])
+    const items = createFilesItemsProvider({
+      loadItems,
+      loadRemoteItems: async () => [
+        { key: "artifact:h1", title: "Host spec", kind: "artifact", timestamp: 2 },
+        {
+          key: "upload:h2",
+          title: "spec.pdf",
+          kind: "upload",
+          mediaType: "application/pdf",
+          timestamp: 1,
+        },
+      ],
+    })
+    const out = await items.search(makeProviderInput("spec", { ctx: paired }))
+    expect(out.items.map((item) => item.id).sort()).toEqual([
+      "library-file:artifact:h1",
+      "library-file:upload:h2",
+    ])
+    expect(out.items.find((item) => item.id === "library-file:artifact:h1")!.action).toEqual({
+      type: "navigate",
+      href: "/files?item=artifact%3Ah1",
+    })
+    expect(loadItems).not.toHaveBeenCalled()
+    // The artifact and canvas lists are this client's store: empty here.
+    for (const p of [
+      createFilesArtifactsProvider({ artifacts: async () => artifacts }),
+      createFilesCanvasProvider({ canvasDocuments: async () => canvas }),
+    ]) {
+      expect((await p.search(makeProviderInput("parser", { ctx: paired }))).items).toEqual([])
     }
+    // An unreachable host is no hits, not a broken palette.
+    const failing = createFilesItemsProvider({
+      loadItems,
+      loadRemoteItems: async () => Promise.reject(new Error("offline")),
+    })
+    expect((await failing.search(makeProviderInput("spec", { ctx: paired }))).items).toEqual([])
+  })
+})
+
+describe("loadRemoteFileSearchRows", () => {
+  it("lists what the host's Files page shows, under its Files names", async () => {
+    const list = jest.fn(async () => ({
+      imagesTruncated: false,
+      entries: [
+        {
+          key: "artifact:a",
+          kind: "artifact",
+          title: "Plan",
+          projectIds: ["p1"],
+          updatedAt: 3,
+          hidden: false,
+        },
+        {
+          key: "upload:t",
+          kind: "upload",
+          title: "old.pdf",
+          projectIds: [],
+          updatedAt: 2,
+          hidden: false,
+          trashedAt: 1,
+        },
+        {
+          key: "upload:h",
+          kind: "upload",
+          title: "gone.pdf",
+          projectIds: [],
+          updatedAt: 2,
+          hidden: true,
+        },
+        { key: "image:x", kind: "image", title: "", projectIds: [], updatedAt: 1, hidden: false },
+      ],
+    }))
+    const rows = await loadRemoteFileSearchRows({ list } as never)
+    expect(rows).toEqual([
+      { key: "artifact:a", title: "Plan", kind: "artifact", projectId: "p1", timestamp: 3 },
+    ])
   })
 })
 

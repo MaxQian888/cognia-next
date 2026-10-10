@@ -186,8 +186,9 @@ New → Upload files (the system picker). Rows have no right-click menu, which R
 same long-press. An empty folder says to use Move rather than to drag. Downloads, single or zip, go
 to the system share sheet in the Capacitor shell (`downloadBlob`, `lib/files/download.ts`).
 
-The phone layout serves a standalone phone, which owns its database. A paired phone has no Files page
-yet ([Overview](/docs/subsystems/files#not-yet-shipped)).
+The same layout serves a standalone phone, over its own database, and a paired one, over the
+desktop's library ([On a paired device](/docs/subsystems/files/paired)), where the list also pulls to
+refresh.
 
 ## Store
 

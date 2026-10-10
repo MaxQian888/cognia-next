@@ -7,7 +7,19 @@ import userEvent from "@testing-library/user-event"
 import type { FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { useFilesLibraryStore } from "@/stores/files-library"
+import { FilesBackendProvider } from "@/hooks/files-library/files-backend"
+import { createRemoteFilesOps } from "@/lib/files-library/remote/remote-ops"
 import { FilesBulkBar } from "./files-bulk-bar"
+
+function pairedWrapper() {
+  const backend = {
+    source: { entries: [], imagesTruncated: false, loadMoreImages: () => {}, folders: [] },
+    ops: createRemoteFilesOps({ client: {} as never, imageLimit: () => 60, onChanged: () => {} }),
+  }
+  return function Paired({ children }: { children: React.ReactNode }) {
+    return <FilesBackendProvider backend={backend}>{children}</FilesBackendProvider>
+  }
+}
 
 function entry(overrides: Partial<FilesEntry> = {}): FilesEntry {
   return {
@@ -117,4 +129,21 @@ it("restores or deletes forever in the Trash", async () => {
   await user.click(screen.getByRole("button", { name: "Restore" }))
   expect(a.restore).toHaveBeenCalledWith(selected)
   expect(onClear).toHaveBeenCalled()
+})
+
+it("keeps Share on the bar, disabled, on a paired device", () => {
+  render(
+    <FilesBulkBar
+      selected={two()}
+      folders={[]}
+      trash={false}
+      actions={actions()}
+      onClear={jest.fn()}
+    />,
+    { wrapper: pairedWrapper() }
+  )
+  const share = screen.getByRole("button", { name: "Share…" })
+  expect(share).toBeDisabled()
+  expect(share).toHaveAttribute("title", "Share links are made on the desktop app.")
+  expect(screen.getByRole("button", { name: "Move to Trash" })).not.toBeDisabled()
 })

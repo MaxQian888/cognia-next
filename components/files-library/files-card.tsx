@@ -95,6 +95,7 @@ export function FilesCard({
           <FilesImageThumb
             hash={thumbnailHash(entry)}
             alt={title}
+            entry={entry}
             className="absolute inset-0 size-full"
           />
         ) : (

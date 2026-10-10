@@ -3,7 +3,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { putLibraryAsset, putSessionAsset } from "@/lib/db/session-assets"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { downloadPayloadFor } from "./download"
+import { documentFilenameFor, downloadPayloadFor, mediaFilenameFor } from "./download"
 import type { FilesEntry } from "./types"
 
 jest.setTimeout(30_000)
@@ -114,5 +114,26 @@ describe("downloadPayloadFor", () => {
     await expect(session!.blob.text()).resolves.toBe("theirs")
     expect(await downloadPayloadFor(entry({ kind: "upload", sourceId: "gone" }))).toBeNull()
     expect(await downloadPayloadFor(entry({ kind: "session-upload", sourceId: "gone" }))).toBeNull()
+  })
+})
+
+describe("filenames without the source at hand (a paired device's download)", () => {
+  it("names documents by type and language, as the local download does", () => {
+    expect(
+      documentFilenameFor({ kind: "artifact", sourceTitle: "Parser", language: "typescript" })
+    ).toBe("Parser.ts")
+    expect(
+      documentFilenameFor({ kind: "artifact", sourceTitle: "Notes", subtype: "document" })
+    ).toBe("Notes.md")
+    expect(documentFilenameFor({ kind: "canvas", sourceTitle: "Plan" })).toBe("Plan.md")
+  })
+
+  it("names images by their type, and files as Files shows them", () => {
+    expect(
+      mediaFilenameFor({ kind: "image", title: "", sourceId: "abcdef1234" }, "image/jpeg")
+    ).toBe("image-abcdef12.jpg")
+    expect(
+      mediaFilenameFor({ kind: "upload", title: "deck.pdf", sourceId: "x" }, "application/pdf")
+    ).toBe("deck.pdf")
   })
 })

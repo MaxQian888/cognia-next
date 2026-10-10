@@ -2,8 +2,9 @@
 
 /**
  * Every action the Files page offers (ADR-0223), with the toast that reports
- * it. The writes themselves live in `lib/db/files-library-*` and
- * `lib/files-library/*`; this hook only sequences them and speaks to the user.
+ * it. The writes themselves are the library's `FilesOps`
+ * (`lib/files-library/ops.ts`): this device's database, or a paired host's
+ * over `files_library_*`; this hook only sequences them and speaks to the user.
  *
  * Bulk actions take a list and write it in one transaction, so a selection
  * lands on every item or on none.
@@ -15,19 +16,8 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { loggers } from "@cognia/logging"
 
-import {
-  LibraryItemError,
-  restoreLibraryItems,
-  setLibraryItemsFavorite,
-  setLibraryItemsFolder,
-  touchLibraryItemOpened,
-  trashLibraryItems,
-} from "@/lib/db/files-library-items"
-import {
-  LibraryFolderError,
-  moveLibraryFolder,
-  setLibraryFolderStyle,
-} from "@/lib/db/files-library-folders"
+import { LibraryItemError } from "@/lib/db/files-library-items"
+import { LibraryFolderError } from "@/lib/db/files-library-folders"
 import type {
   LibraryFolder,
   LibraryFolderColor,
@@ -41,21 +31,14 @@ import {
   type DocumentTemplateOption,
 } from "@/lib/document-templates/service"
 import { downloadBlob } from "@/lib/files/download"
-import { downloadPayloadFor } from "@/lib/files-library/download"
-import { duplicateFilesEntry, FilesDuplicateError } from "@/lib/files-library/duplicate"
+import { FilesDuplicateError } from "@/lib/files-library/duplicate"
 import { buildFilesZip, FilesExportError } from "@/lib/files-library/export-zip"
 import { goToSession, openFilesEntry } from "@/lib/files-library/open"
-import { FilesRenameError, renameFilesEntry } from "@/lib/files-library/rename"
-import { purgeTrashedItems } from "@/lib/files-library/trash"
-import { entrySource, type FilesEntry } from "@/lib/files-library/types"
-import { uploadFileToLibrary } from "@/lib/files-library/upload"
-import {
-  attachEntryToSession,
-  FilesUseInChatError,
-  mentionCandidateFor,
-  resolveUseInChatTarget,
-  stageEntryMention,
-} from "@/lib/files-library/use-in-chat"
+import { createLocalFilesOps, type FilesOps } from "@/lib/files-library/ops"
+import { FilesRemoteError } from "@/lib/files-library/remote/client"
+import { FilesRenameError } from "@/lib/files-library/rename"
+import type { FilesEntry } from "@/lib/files-library/types"
+import { FilesUseInChatError } from "@/lib/files-library/use-in-chat"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -73,12 +56,15 @@ function errorKey(error: unknown): string {
     error instanceof FilesDuplicateError ||
     error instanceof FilesExportError ||
     error instanceof SessionAssetError ||
-    error instanceof DocumentTemplateError
+    error instanceof DocumentTemplateError ||
+    error instanceof FilesRemoteError
   ) {
     return error.code
   }
   return "unknown"
 }
+
+const DEFAULT_OPS = createLocalFilesOps()
 
 export interface FilesActions {
   open: (entry: FilesEntry) => Promise<void>
@@ -111,17 +97,33 @@ export interface FilesActions {
   ) => Promise<void>
 }
 
-export function useFilesActions(): FilesActions {
+/**
+ * The page's actions over a library's `FilesOps` — this device's own by
+ * default, a paired host's when the page runs remote (ADR-0223 §9).
+ */
+export function useFilesActions(ops: FilesOps = DEFAULT_OPS): FilesActions {
   const t = useTranslations("files")
   const router = useRouter()
   const select = useFilesLibraryStore((s) => s.select)
+  const { capabilities } = ops
+  const maxBytes = capabilities.maxTransferBytes
+
+  // A code without its own message (an upload refusal, a transport failure)
+  // reads as the generic one rather than as a raw key.
+  const message = useCallback(
+    (error: unknown) => {
+      const key = `errors.${errorKey(error)}`
+      return t.has(key) ? t(key) : t("errors.unknown")
+    },
+    [t]
+  )
 
   const fail = useCallback(
     (action: string, error: unknown) => {
       log.warn("files action failed", { action, error: String(error) })
-      toast.error(t(`errors.${errorKey(error)}`))
+      toast.error(message(error))
     },
-    [t]
+    [message]
   )
 
   const deselect = useCallback(
@@ -132,14 +134,17 @@ export function useFilesActions(): FilesActions {
     [select]
   )
 
-  const touch = useCallback(async (entry: FilesEntry) => {
-    try {
-      await touchLibraryItemOpened(entrySource(entry))
-    } catch (error) {
-      // Recency is a convenience; a failed touch must not block the open.
-      log.warn("files touch failed", { key: entry.key, error: String(error) })
-    }
-  }, [])
+  const touch = useCallback(
+    async (entry: FilesEntry) => {
+      try {
+        await ops.touch(entry)
+      } catch (error) {
+        // Recency is a convenience; a failed touch must not block the open.
+        log.warn("files touch failed", { key: entry.key, error: String(error) })
+      }
+    },
+    [ops]
+  )
 
   const preview = useCallback(
     (entry: FilesEntry) => {
@@ -153,20 +158,25 @@ export function useFilesActions(): FilesActions {
     async (entry: FilesEntry) => {
       try {
         await touch(entry)
+        // Where the item's own surface is another device's, Open reads it here.
+        if (capabilities.open === "preview") {
+          select(entry.key)
+          return
+        }
         const target = await openFilesEntry(entry, router)
         if (target === "preview") select(entry.key)
       } catch (error) {
         fail("open", error)
       }
     },
-    [router, select, touch, fail]
+    [router, select, touch, fail, capabilities.open]
   )
 
   const setFavorite = useCallback(
     async (entries: readonly FilesEntry[], favorite: boolean) => {
       if (entries.length === 0) return
       try {
-        await setLibraryItemsFavorite(entries.map(entrySource), favorite)
+        await ops.setFavorite(entries, favorite)
         toast.success(
           entries.length === 1
             ? t(favorite ? "toasts.favorited" : "toasts.unfavorited", {
@@ -180,7 +190,7 @@ export function useFilesActions(): FilesActions {
         fail("favorite", error)
       }
     },
-    [t, fail]
+    [ops, t, fail]
   )
 
   const toggleFavorite = useCallback(
@@ -192,7 +202,7 @@ export function useFilesActions(): FilesActions {
     async (entries: readonly FilesEntry[], folderId: string | null) => {
       if (entries.length === 0) return
       try {
-        await setLibraryItemsFolder(entries.map(entrySource), folderId)
+        await ops.moveToFolder(entries, folderId)
         toast.success(
           t(folderId === null ? "toasts.unfiled" : "toasts.moved", { count: entries.length })
         )
@@ -200,29 +210,27 @@ export function useFilesActions(): FilesActions {
         fail("move", error)
       }
     },
-    [t, fail]
+    [ops, t, fail]
   )
 
   const restore = useCallback(
     async (entries: readonly FilesEntry[]) => {
       if (entries.length === 0) return
       try {
-        await restoreLibraryItems(
-          entries.map((entry) => ({ ...entrySource(entry), originAlive: entry.originAlive }))
-        )
+        await ops.restore(entries)
         toast.success(t("toasts.restored", { count: entries.length }))
       } catch (error) {
         fail("restore", error)
       }
     },
-    [t, fail]
+    [ops, t, fail]
   )
 
   const trash = useCallback(
     async (entries: readonly FilesEntry[]) => {
       if (entries.length === 0) return
       try {
-        await trashLibraryItems(entries.map(entrySource))
+        await ops.trash(entries)
         deselect(entries)
         toast.success(
           entries.length === 1
@@ -233,12 +241,7 @@ export function useFilesActions(): FilesActions {
             action: {
               label: t("toasts.undo"),
               onClick: () => {
-                void restoreLibraryItems(
-                  entries.map((entry) => ({
-                    ...entrySource(entry),
-                    originAlive: entry.originAlive,
-                  }))
-                ).catch((error: unknown) => fail("undo-trash", error))
+                void ops.restore(entries).catch((error: unknown) => fail("undo-trash", error))
               },
             },
           }
@@ -247,22 +250,14 @@ export function useFilesActions(): FilesActions {
         fail("trash", error)
       }
     },
-    [deselect, t, fail]
+    [ops, deselect, t, fail]
   )
 
   const deleteForever = useCallback(
     async (entries: readonly FilesEntry[]) => {
       if (entries.length === 0) return
       try {
-        const outcome = await purgeTrashedItems(
-          entries.map((entry) => ({
-            key: entry.key,
-            kind: entry.kind,
-            sourceId: entry.sourceId,
-            ownedByFiles: entry.ownedByFiles,
-            originAlive: entry.originAlive,
-          }))
-        )
+        const outcome = await ops.purge(entries)
         deselect(entries)
         toast.success(
           t("toasts.deletedForever", { count: entries.length }),
@@ -274,13 +269,13 @@ export function useFilesActions(): FilesActions {
         fail("delete-forever", error)
       }
     },
-    [deselect, t, fail]
+    [ops, deselect, t, fail]
   )
 
   const rename = useCallback(
     async (entry: FilesEntry, name: string) => {
       try {
-        await renameFilesEntry(entry, name)
+        await ops.rename(entry, name)
         toast.success(t("toasts.renamed", { title: name.trim() }))
         return true
       } catch (error) {
@@ -288,14 +283,14 @@ export function useFilesActions(): FilesActions {
         return false
       }
     },
-    [t, fail]
+    [ops, t, fail]
   )
 
   const duplicate = useCallback(
     async (entry: FilesEntry) => {
       try {
         const projectId = useProjectStore.getState().activeProjectId ?? undefined
-        const result = await duplicateFilesEntry(entry, {
+        const result = await ops.duplicate(entry, {
           suffix: t("copySuffix"),
           fallbackName: displayTitle(entry, t),
           ...(projectId ? { projectId } : {}),
@@ -306,13 +301,17 @@ export function useFilesActions(): FilesActions {
         fail("duplicate", error)
       }
     },
-    [select, t, fail]
+    [ops, select, t, fail]
   )
 
   const download = useCallback(
     async (entry: FilesEntry) => {
       try {
-        const payload = await downloadPayloadFor(entry)
+        if (maxBytes !== undefined && (entry.byteSize ?? 0) > maxBytes) {
+          toast.error(t("errors.files_remote_too_large"))
+          return
+        }
+        const payload = await ops.payloadFor(entry)
         if (!payload) {
           toast.error(t("errors.files_source_missing"))
           return
@@ -323,15 +322,29 @@ export function useFilesActions(): FilesActions {
         fail("download", error)
       }
     },
-    [t, touch, fail]
+    [ops, maxBytes, t, touch, fail]
   )
 
   const exportZip = useCallback(
     async (entries: readonly FilesEntry[], folders: readonly LibraryFolder[]) => {
       if (entries.length === 0) return
+      // Refused by name where items move one piece at a time with a ceiling:
+      // a zip that silently lacked them would read as complete.
+      if (maxBytes !== undefined) {
+        const oversized = entries.filter((entry) => (entry.byteSize ?? 0) > maxBytes)
+        if (oversized.length > 0) {
+          toast.error(
+            t("errors.files_remote_zip_too_large", {
+              name: displayTitle(oversized[0]!, t),
+              more: oversized.length - 1,
+            })
+          )
+          return
+        }
+      }
       const toastId = toast.loading(t("toasts.exporting", { count: entries.length }))
       try {
-        const result = await buildFilesZip(entries, folders)
+        const result = await buildFilesZip(entries, folders, { payloadFor: ops.payloadFor })
         downloadBlob(result.blob, t("exportFilename"))
         toast.success(
           t("toasts.exported", { count: result.written }),
@@ -345,28 +358,34 @@ export function useFilesActions(): FilesActions {
         toast.dismiss(toastId)
       }
     },
-    [t, fail]
+    [ops, maxBytes, t, fail]
   )
 
   const useInChat = useCallback(
     async (entry: FilesEntry) => {
       try {
         const title = displayTitle(entry, t)
-        const { session } = await resolveUseInChatTarget(t("newChatTitle", { title }))
-        if (mentionCandidateFor(entry)) {
-          await stageEntryMention(entry, session.id)
-          toast.success(t("toasts.referenced", { title }))
-        } else {
-          const how = await attachEntryToSession(entry, session.id)
-          toast.success(t(how === "bound" ? "toasts.bound" : "toasts.attached", { title }))
-        }
+        const outcome = await ops.useInChat(entry, t("newChatTitle", { title }))
+        toast.success(
+          t(
+            outcome.how === "referenced"
+              ? "toasts.referenced"
+              : outcome.how === "bound"
+                ? // On a paired device every file is bound on the host, whatever its size.
+                  ops.mode === "remote"
+                  ? "toasts.boundOnHost"
+                  : "toasts.bound"
+                : "toasts.attached",
+            { title }
+          )
+        )
         void touch(entry)
-        await goToSession(session.id, router)
+        await goToSession(outcome.sessionId, router)
       } catch (error) {
         fail("use-in-chat", error)
       }
     },
-    [router, t, touch, fail]
+    [ops, router, t, touch, fail]
   )
 
   const goToConversation = useCallback(
@@ -387,23 +406,30 @@ export function useFilesActions(): FilesActions {
       const toastId = toast.loading(t("toasts.uploading", { count: files.length }))
       let stored = 0
       for (const file of files) {
+        if (maxBytes !== undefined && file.size > maxBytes) {
+          toast.error(
+            t("toasts.uploadFailed", {
+              name: file.name,
+              reason: t("errors.files_remote_too_large"),
+            })
+          )
+          continue
+        }
         try {
-          await uploadFileToLibrary(file, {
+          await ops.upload(file, {
             ...(projectId ? { projectId } : {}),
             ...(folderId ? { folderId } : {}),
           })
           stored += 1
         } catch (error) {
           log.warn("files upload failed", { name: file.name, error: String(error) })
-          toast.error(
-            t("toasts.uploadFailed", { name: file.name, reason: t(`errors.${errorKey(error)}`) })
-          )
+          toast.error(t("toasts.uploadFailed", { name: file.name, reason: message(error) }))
         }
       }
       toast.dismiss(toastId)
       if (stored > 0) toast.success(t("toasts.uploaded", { count: stored }))
     },
-    [t]
+    [ops, maxBytes, t, message]
   )
 
   const openOnCanvas = useCallback(
@@ -415,7 +441,12 @@ export function useFilesActions(): FilesActions {
     [router]
   )
 
+  // Held back where documents cannot be edited (ADR-0223 §9); the page
+  // labels the entry points, and a stray call does nothing.
+  const canCreate = capabilities.createDocuments === true
+
   const newCanvasDocument = useCallback(() => {
+    if (!canCreate) return
     const id = useArtifactStore.getState().createCanvasDocument({
       title: t("untitledDocument"),
       content: "",
@@ -424,21 +455,22 @@ export function useFilesActions(): FilesActions {
       createdBy: "user",
     })
     openOnCanvas(id)
-  }, [openOnCanvas, t])
+  }, [canCreate, openOnCanvas, t])
 
   const newFromTemplate = useCallback(
     (template: DocumentTemplateOption) => {
+      if (!canCreate) return
       const id = createDocumentFromTemplate(template, {
         createCanvasDocument: (params) => useArtifactStore.getState().createCanvasDocument(params),
       })
       openOnCanvas(id)
     },
-    [openOnCanvas]
+    [canCreate, openOnCanvas]
   )
 
   const deleteTemplate = useCallback(
     async (template: DocumentTemplateOption) => {
-      if (template.source !== "user") return
+      if (!canCreate || template.source !== "user") return
       try {
         await deleteDocumentTemplate(template.id)
         toast.success(t("toasts.templateDeleted", { name: template.name }), {
@@ -456,19 +488,19 @@ export function useFilesActions(): FilesActions {
         fail("delete-template", error)
       }
     },
-    [t, fail]
+    [canCreate, t, fail]
   )
 
   const moveFolder = useCallback(
     async (folderId: string, parentId: string) => {
       try {
-        await moveLibraryFolder(folderId, parentId)
+        await ops.moveFolder(folderId, parentId)
         toast.success(t("toasts.folderMoved"))
       } catch (error) {
         fail("move-folder", error)
       }
     },
-    [t, fail]
+    [ops, t, fail]
   )
 
   const setFolderStyle = useCallback(
@@ -477,12 +509,12 @@ export function useFilesActions(): FilesActions {
       style: { color?: LibraryFolderColor | null; icon?: LibraryFolderIcon | null }
     ) => {
       try {
-        await setLibraryFolderStyle(folderId, style)
+        await ops.setFolderStyle(folderId, style)
       } catch (error) {
         fail("folder-style", error)
       }
     },
-    [fail]
+    [ops, fail]
   )
 
   return {

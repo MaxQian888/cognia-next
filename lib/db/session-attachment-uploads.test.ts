@@ -347,6 +347,32 @@ describe("session attachment uploads", () => {
     ).rejects.toMatchObject({ code: "attachment_unsupported_type" })
   })
 
+  it("stages any type for a Files library upload, still under the ceiling", async () => {
+    const init = await beginAttachmentUpload({
+      sessionId: "library:files",
+      deviceId: "dev-a",
+      name: "installer.dmg",
+      mediaType: "application/octet-stream",
+      size: 10,
+      hash: "a".repeat(64),
+      maxBytes: 10,
+      acceptAnyType: true,
+    })
+    expect(init.uploadId).toBeTruthy()
+    await expect(
+      beginAttachmentUpload({
+        sessionId: "library:files",
+        deviceId: "dev-a",
+        name: "big.dmg",
+        mediaType: "application/octet-stream",
+        size: 11,
+        hash: "b".repeat(64),
+        maxBytes: 10,
+        acceptAnyType: true,
+      })
+    ).rejects.toMatchObject({ code: "attachment_too_large" })
+  })
+
   it("refuses a file above the ceiling and a malformed hash", async () => {
     await expect(
       beginAttachmentUpload({

@@ -139,6 +139,9 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
+import { createLocalFilesOps, type FilesOps } from "@/lib/files-library/ops"
+import { FilesRemoteError } from "@/lib/files-library/remote/client"
+import { PAIRED_FILES_CAPABILITIES } from "@/lib/files-library/remote/remote-ops"
 import { displayTitle, useFilesActions } from "./use-files-actions"
 
 const success = toast.success as jest.Mock
@@ -465,7 +468,9 @@ describe("download / exportZip", () => {
   it("shows progress, downloads the zip and dismisses the progress toast", async () => {
     await hook().exportZip([entry(), canvas()], folders)
     expect(toast.loading).toHaveBeenCalledWith("Preparing 2 items…")
-    expect(buildFilesZip).toHaveBeenCalledWith([expect.anything(), expect.anything()], folders)
+    expect(buildFilesZip).toHaveBeenCalledWith([expect.anything(), expect.anything()], folders, {
+      payloadFor: expect.any(Function),
+    })
     expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "Files.zip")
     expect(success).toHaveBeenLastCalledWith("Downloaded 2 items as a zip.", undefined)
     expect(toast.dismiss).toHaveBeenCalledWith("t1")
@@ -718,6 +723,108 @@ describe("error mapping", () => {
     expect(error).toHaveBeenLastCalledWith("Something went wrong. Try again.")
     ;(setLibraryItemsFavorite as jest.Mock).mockRejectedValueOnce("string failure")
     await hook().toggleFavorite(entry())
+    expect(error).toHaveBeenLastCalledWith("Something went wrong. Try again.")
+  })
+})
+
+describe("on a paired device's library (ADR-0223 §9)", () => {
+  const TEN_MIB = 10 * 1024 * 1024
+
+  function remoteOps(over: Partial<FilesOps> = {}): FilesOps {
+    return {
+      ...createLocalFilesOps(),
+      mode: "remote",
+      capabilities: PAIRED_FILES_CAPABILITIES,
+      touch: jest.fn(async () => {}),
+      payloadFor: jest.fn(async () => ({ blob: new Blob(["x"]), filename: "x.txt" })),
+      upload: jest.fn(async () => {}),
+      useInChat: jest.fn(async () => ({ sessionId: "s-host", how: "bound" as const })),
+      ...over,
+    }
+  }
+  const remoteHook = (ops: FilesOps) => renderHook(() => useFilesActions(ops)).result.current
+
+  it("opens in place: the item's own surface is the host's", async () => {
+    await remoteHook(remoteOps()).open(entry())
+    expect(openFilesEntry).not.toHaveBeenCalled()
+    expect(useFilesLibraryStore.getState().selectedKey).toBe("artifact:a")
+  })
+
+  it("refuses to move anything over the ceiling, naming it", async () => {
+    const ops = remoteOps()
+    const big = entry({
+      key: "upload:big",
+      kind: "upload",
+      title: "huge.mov",
+      byteSize: TEN_MIB + 1,
+    })
+    await remoteHook(ops).download(big)
+    expect(ops.payloadFor).not.toHaveBeenCalled()
+    expect(error).toHaveBeenLastCalledWith("Larger than 10 MB. Open it on the desktop.")
+
+    await remoteHook(ops).exportZip([entry(), big], [])
+    expect(buildFilesZip).not.toHaveBeenCalled()
+    expect(error).toHaveBeenLastCalledWith(
+      "“huge.mov” is larger than 10 MB. Download it on the desktop."
+    )
+    const big2 = { ...big, key: "upload:big2", title: "b.mov" }
+    await remoteHook(ops).exportZip([big, big2], [])
+    expect(error).toHaveBeenLastCalledWith(
+      "“huge.mov” and 1 more are larger than 10 MB. Download them on the desktop."
+    )
+
+    const file = new File(["x"], "clip.mov")
+    Object.defineProperty(file, "size", { value: TEN_MIB + 1 })
+    await remoteHook(ops).upload([file])
+    expect(ops.upload).not.toHaveBeenCalled()
+    expect(error.mock.calls.at(-1)![0]).toMatch(/Could not upload “clip\.mov”/)
+  })
+
+  it("zips through the library's own payloads", async () => {
+    const ops = remoteOps()
+    await remoteHook(ops).exportZip([entry()], [])
+    expect((buildFilesZip as jest.Mock).mock.calls[0][2]).toEqual({ payloadFor: ops.payloadFor })
+  })
+
+  it("says a file was bound on the host", async () => {
+    const file = entry({ key: "upload:u", kind: "upload", sourceId: "u", title: "notes.pdf" })
+    await remoteHook(remoteOps()).useInChat(file)
+    expect(success.mock.calls.at(-1)![0]).toMatch(
+      /added to the conversation’s files on the desktop/
+    )
+    expect(goToSession).toHaveBeenCalledWith("s-host", expect.anything())
+  })
+
+  it("makes no documents where they are held back", () => {
+    const create = jest.spyOn(useArtifactStore.getState(), "createCanvasDocument")
+    const h = remoteHook(remoteOps())
+    h.newCanvasDocument()
+    h.newFromTemplate({
+      id: "x",
+      source: "builtin",
+      name: "x",
+      content: "",
+      language: "markdown",
+      type: "text",
+      icon: "meeting",
+    } as never)
+    expect(create).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
+    create.mockRestore()
+  })
+
+  it("maps the host's refusal codes, and an unknown one to the generic message", async () => {
+    const ops = remoteOps({
+      setFavorite: jest
+        .fn()
+        .mockRejectedValueOnce(new FilesRemoteError("headless_host"))
+        .mockRejectedValueOnce(new FilesRemoteError("something_new")),
+    })
+    await remoteHook(ops).toggleFavorite(entry())
+    expect(error).toHaveBeenLastCalledWith(
+      "The paired host can’t manage its Files library. Open Files on the desktop app."
+    )
+    await remoteHook(ops).toggleFavorite(entry())
     expect(error).toHaveBeenLastCalledWith("Something went wrong. Try again.")
   })
 })

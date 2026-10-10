@@ -89,6 +89,8 @@ import type { LibraryFolder } from "@/lib/db/files-library-types"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { DEFAULT_FILES_VIEW_FILTERS, useFilesLibraryStore } from "@/stores/files-library"
 import { useProjectStore } from "@/stores/project/project-store"
+import { FilesBackendProvider, type FilesBackend } from "@/hooks/files-library/files-backend"
+import { createRemoteFilesOps } from "@/lib/files-library/remote/remote-ops"
 import { FilesMobileLibrary } from "./files-mobile-library"
 
 function entry(key: string, overrides: Partial<FilesEntry> = {}): FilesEntry {
@@ -296,4 +298,56 @@ it("searches from its own full-width field", async () => {
   render(<FilesMobileLibrary />)
   await user.type(screen.getByTestId("files-search"), "beta")
   expect(useFilesLibraryStore.getState().search).toBe("beta")
+})
+
+describe("over a paired desktop's library (ADR-0223 §9)", () => {
+  function hostBackend(over: Partial<FilesBackend["source"]> = {}): FilesBackend {
+    return {
+      source: {
+        entries: [entry("artifact:host")],
+        imagesTruncated: false,
+        loadMoreImages: jest.fn(),
+        folders: [],
+        refresh: jest.fn(async () => {}),
+        ...over,
+      },
+      ops: createRemoteFilesOps({ client: {} as never, imageLimit: () => 60, onChanged: () => {} }),
+    }
+  }
+  const renderOver = (backend: FilesBackend) =>
+    render(
+      <FilesBackendProvider backend={backend}>
+        <FilesMobileLibrary />
+      </FilesBackendProvider>
+    )
+
+  it("pulls to refresh the host's list, which a live local list has no need of", () => {
+    renderOver(hostBackend())
+    expect(within(screen.getByTestId("files-body")).getByTestId("pull-to-refresh")).toBeInTheDocument()
+    expect(screen.getByText("artifact:host")).toBeInTheDocument()
+  })
+
+  it("shows why the list may be stale, with Retry", async () => {
+    const refresh = jest.fn(async () => {})
+    renderOver(hostBackend({ entries: undefined, error: "files_remote_unreachable", refresh }))
+    expect(screen.queryByLabelText("Loading files")).toBeNull()
+    await act(async () => fireEvent.click(screen.getByTestId("files-remote-retry")))
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it("keeps Share in the dock, disabled, saying to share from the desktop", () => {
+    renderOver(hostBackend())
+    fireEvent.click(screen.getByTestId("files-mobile-select"))
+    fireEvent.click(screen.getByTestId("files-mobile-open-artifact:host"))
+    const share = screen.getByTestId("files-mobile-bulk-share")
+    expect(share).toBeDisabled()
+    expect(share).toHaveTextContent("On the desktop")
+    expect(screen.getByTestId("files-mobile-bulk-favorite")).not.toBeDisabled()
+  })
+})
+
+it("has no pull to refresh over this device's own live library", () => {
+  entriesState.entries = [entry("artifact:a")]
+  render(<FilesMobileLibrary />)
+  expect(screen.queryByTestId("pull-to-refresh")).toBeNull()
 })

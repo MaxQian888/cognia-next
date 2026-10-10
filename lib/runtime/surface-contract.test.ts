@@ -181,23 +181,51 @@ describe("/performance (capability-driven, ADR-0035)", () => {
   })
 })
 
-describe("/files (every client that owns its database, ADR-0200 / ADR-0223)", () => {
+describe("/files (its own library standalone, the host's when paired, ADR-0200 / ADR-0223 §9)", () => {
   const files = getSurfaceContract("files")!
+  const paired = (
+    platform: "web" | "mobile",
+    over: Partial<RuntimeSnapshot> = {},
+    operations = ["files_library_list"],
+    grants = ["client.read", "client.write"]
+  ) =>
+    snapshot({
+      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations, grants },
+      ...over,
+    } as Partial<RuntimeSnapshot>)
 
-  it("runs standalone on its own database and is hidden from a paired client", () => {
-    expect(files).toMatchObject({ standalone: "full", companion: "hidden", offline: "local" })
-    expect(files.operation).toBeUndefined()
+  it("runs standalone on its own database, and manages a paired host's over files_library_*", () => {
+    expect(files).toMatchObject({
+      operation: "files_library_list",
+      standalone: "full",
+      companion: "remote",
+      offline: "blocked",
+    })
     expect(resolveSurfaceAvailability(files, snapshot()).state).toBe("available")
     for (const platform of ["web", "mobile"] as const) {
-      expect(
-        resolveSurfaceAvailability(
-          files,
-          snapshot({
-            target: { id: "desktop", kind: "companion", hostKind: "desktop", platform },
-          })
-        ).state
-      ).toBe("unsupported")
+      expect(resolveSurfaceAvailability(files, paired(platform)).state).toBe("available")
     }
+  })
+
+  it("stays closed on a paired client whose host does not serve its library", () => {
+    expect(resolveSurfaceAvailability(files, paired("mobile", {}, ["pet_get"])).state).toBe(
+      "unsupported"
+    )
+    expect(
+      resolveSurfaceAvailability(files, paired("mobile", {}, undefined, ["host.observe"]))
+    ).toMatchObject({ state: "requires-grant", requiredGrant: "client.read" })
+  })
+
+  it("is blocked, not stale, while the host is unreachable: nothing is mirrored or queued", () => {
+    const offline = resolveSurfaceAvailability(
+      files,
+      paired("mobile", { connectionState: "offline" })
+    )
+    expect(offline.state).not.toBe("available")
+    expect(offline.state).not.toBe("read-only")
   })
 
   it("puts the rail entry on the phone too: an unpaired phone owns its library", () => {

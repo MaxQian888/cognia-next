@@ -1312,6 +1312,19 @@
       "children": {
         "copilot": {}
       }
+    },
+    "files": {
+      "children": {
+        "library": {
+          "children": {
+            "favorite": {},
+            "folder": {},
+            "recent": {},
+            "trash": {},
+            "upload": {}
+          }
+        }
+      }
     }
   }
 }

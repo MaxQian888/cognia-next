@@ -5069,6 +5069,85 @@ fn pet_remote_care_commands_are_bridged_and_bind_the_caller() {
     }
 }
 
+/// A paired device's Files page (ADR-0223 §9). Every arm rides the generic
+/// desktop-writes bridge to the renderer that owns the library, binds the
+/// verified caller (the keyed writes and the upload staging are scoped to it),
+/// stays off the remote-control gate, and only the four reads skip the
+/// idempotency cache.
+#[test]
+fn files_library_commands_are_bridged_and_bind_the_caller() {
+    let reads = [
+        "files_library_list",
+        "files_library_folder_list",
+        "files_library_search",
+        "files_library_get",
+    ];
+    let writes = [
+        "files_library_favorite",
+        "files_library_move",
+        "files_library_trash",
+        "files_library_restore",
+        "files_library_purge",
+        "files_library_touch",
+        "files_library_rename",
+        "files_library_duplicate",
+        "files_library_attach",
+        "files_library_folder_create",
+        "files_library_folder_rename",
+        "files_library_folder_move",
+        "files_library_folder_style",
+        "files_library_folder_delete",
+        "files_library_upload_init",
+        "files_library_upload_chunk",
+        "files_library_upload_commit",
+        "files_library_upload_abort",
+    ];
+    use crate::companion_api::command_manifest::{CommandIdempotency, CommandOperation};
+    for command in reads.iter().chain(writes.iter()) {
+        assert!(KNOWN_COMMANDS.contains(command), "{command} is known");
+        assert!(data_sync::COMMANDS.contains(command), "{command} is bridged");
+        assert!(
+            !is_control_command(command),
+            "{command} is the device's own client surface, not remote control"
+        );
+        assert!(
+            CALLER_DEVICE_ID_COMMANDS.contains(command),
+            "{command} must bind callerDeviceId"
+        );
+        let bound = inject_caller_device_id(
+            command,
+            json!({ "callerDeviceId": "spoofed" }),
+            "verified-device",
+        );
+        assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+            .expect("files library commands have a manifest descriptor");
+        assert_eq!(
+            descriptor.target,
+            crate::companion_api::command_manifest::CommandTarget::Execution
+        );
+    }
+    for command in reads {
+        assert!(READ_ONLY_COMMANDS_SET.contains(command), "{command} reads");
+        assert!(READ_ONLY_COMMANDS.contains(&command), "{command} skips the cache");
+        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "client.read");
+        assert_eq!(descriptor.operation, CommandOperation::Read, "{command} reads");
+    }
+    for command in writes {
+        assert!(!READ_ONLY_COMMANDS_SET.contains(command), "{command} writes");
+        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "client.write");
+        assert_ne!(descriptor.operation, CommandOperation::Read, "{command} writes");
+        // A retried move, Trash or upload must replay its first answer.
+        assert_eq!(
+            descriptor.idempotency,
+            CommandIdempotency::Required,
+            "{command} requires an idempotency key"
+        );
+    }
+}
+
 /// The goal lifecycle a paired phone drives beyond pause/resume/stop: the
 /// acceptance verdict, delete, a held manual-continue turn, a verifier retry,
 /// the subgoal checklist (generate / mark a step / clear), and the verifier

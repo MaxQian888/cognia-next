@@ -19,6 +19,10 @@
  *
  * A phone-width page draws the same model (`useFilesPage`) as a two-line list
  * instead (`mobile/files-mobile-library.tsx`, ADR-0223 §9).
+ *
+ * Which library it manages is the backend mounted here: this device's own,
+ * or — on a device paired to a desktop — the host's, read and changed over
+ * `files_library_*` (`useRemoteFilesBackend`). The layouts do not branch on it.
  */
 
 import { useTranslations } from "next-intl"
@@ -28,9 +32,12 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FilesBackendProvider, useLocalFilesBackend } from "@/hooks/files-library/files-backend"
 import { useFilesKeyboard } from "@/hooks/files-library/use-files-keyboard"
 import { useFilesPage } from "@/hooks/files-library/use-files-page"
+import { useRemoteFilesBackend } from "@/hooks/files-library/use-remote-files-backend"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import type { FilesEntry } from "@/lib/files-library/types"
 import {
   FILES_SIDEBAR_MAX_PX,
@@ -50,6 +57,7 @@ import { FilesLensTabs } from "./files-lens-tabs"
 import { FilesListTable } from "./files-list-table"
 import { FilesNewMenu } from "./files-new-menu"
 import { FilesPreviewPane } from "./files-preview-pane"
+import { FilesRemoteNotice } from "./files-remote-notice"
 import { FilesSidebar } from "./files-sidebar"
 import { FilesTemplateStrip } from "./files-template-strip"
 import { FilesToolbar } from "./files-toolbar"
@@ -60,10 +68,38 @@ export { FILES_PAGE_SIZE } from "@/hooks/files-library/use-files-page"
 const NO_ENTRIES: readonly FilesEntry[] = []
 
 /**
+ * The library this device manages: the paired host's when the runtime
+ * targets a companion host (the surface contract already kept the route
+ * closed unless that host serves `files_library_*`), else its own.
+ */
+export function FilesLibrary() {
+  const companion = useRuntimeSnapshot().target?.kind === "companion"
+  return companion ? <RemoteFilesLibrary /> : <LocalFilesLibrary />
+}
+
+function LocalFilesLibrary() {
+  const backend = useLocalFilesBackend()
+  return (
+    <FilesBackendProvider backend={backend}>
+      <FilesLayout />
+    </FilesBackendProvider>
+  )
+}
+
+function RemoteFilesLibrary() {
+  const backend = useRemoteFilesBackend()
+  return (
+    <FilesBackendProvider backend={backend}>
+      <FilesLayout />
+    </FilesBackendProvider>
+  )
+}
+
+/**
  * A phone-width page (the phone shell, or a narrow window) gets the compact
  * layout; the model under both is `useFilesPage`.
  */
-export function FilesLibrary() {
+function FilesLayout() {
   const compact = useCompactLayout()
   return compact ? <FilesMobileLibrary /> : <FilesLibraryBody />
 }
@@ -194,21 +230,28 @@ function FilesLibraryBody() {
             onKeyDown={onKeyDown}
             data-testid="files-body"
           >
+            <FilesRemoteNotice
+              error={files.error}
+              refresh={files.refresh}
+              className="mx-4 mt-4 w-auto"
+            />
             {showTemplates ? (
               <div className="px-4 pt-4">
                 <FilesTemplateStrip actions={actions} />
               </div>
             ) : null}
             {visible === undefined ? (
-              <div
-                className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4 p-4"
-                aria-busy="true"
-                aria-label={t("loading")}
-              >
-                {Array.from({ length: 12 }, (_, index) => (
-                  <Skeleton key={index} className="aspect-square rounded-xl" />
-                ))}
-              </div>
+              files.error ? null : (
+                <div
+                  className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-4 p-4"
+                  aria-busy="true"
+                  aria-label={t("loading")}
+                >
+                  {Array.from({ length: 12 }, (_, index) => (
+                    <Skeleton key={index} className="aspect-square rounded-xl" />
+                  ))}
+                </div>
+              )
             ) : empty ? (
               <FilesEmpty
                 section={section}

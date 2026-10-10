@@ -276,6 +276,14 @@ describe("filterFilesEntries", () => {
     ).toEqual(["i"])
   })
 
+  it("also keeps what the host matched inside a body the entries do not carry", () => {
+    const searched = query({ search: "revenue" })
+    expect(keys(filterFilesEntries(entries, searched))).toEqual([])
+    expect(
+      keys(filterFilesEntries(entries, { ...searched, contentMatches: new Set(["c", "t1"]) }))
+    ).toEqual(["c"])
+  })
+
   it("ignores the lens in the Trash", () => {
     for (const lens of ["suggested", "favorites", "mine", "ai", "shared"] as const) {
       expect(

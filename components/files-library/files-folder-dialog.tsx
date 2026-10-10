@@ -14,17 +14,24 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  createLibraryFolder,
-  LibraryFolderError,
-  renameLibraryFolder,
-} from "@/lib/db/files-library-folders"
+import { useFilesOps } from "@/hooks/files-library/files-backend"
 import { ROOT_LIBRARY_FOLDER_ID } from "@/lib/db/files-library-types"
 import { useFilesLibraryStore } from "@/stores/files-library"
 
-/** Create a folder (at the top level or inside another), or rename one. */
+/** The `files.errors.*` key for a folder write's refusal. */
+export function folderErrorKey(error: unknown, has: (key: string) => boolean): string {
+  const code = (error as { code?: unknown } | null)?.code
+  const key = typeof code === "string" ? `errors.${code}` : ""
+  return key && has(key) ? key : "errors.unknown"
+}
+
+/**
+ * Create a folder (at the top level or inside another), or rename one, in
+ * the library the page manages (this device's, or a paired host's).
+ */
 export function FilesFolderDialog() {
   const t = useTranslations("files")
+  const ops = useFilesOps()
   const dialog = useFilesLibraryStore((s) => s.folderDialog)
   const close = useFilesLibraryStore((s) => s.closeFolderDialog)
   const setFolderExpanded = useFilesLibraryStore((s) => s.setFolderExpanded)
@@ -42,16 +49,16 @@ export function FilesFolderDialog() {
     setBusy(true)
     try {
       if (dialog.mode === "create") {
-        await createLibraryFolder({ name, parentFolderId: dialog.parentId })
+        await ops.createFolder(name, dialog.parentId)
         // The new folder shows under its parent in the sidebar tree.
         if (dialog.parentId !== ROOT_LIBRARY_FOLDER_ID) setFolderExpanded(dialog.parentId, true)
       } else {
-        await renameLibraryFolder(dialog.folderId, name)
+        await ops.renameFolder(dialog.folderId, name)
       }
       close()
       setDraft(null)
     } catch (error) {
-      toast.error(t(`errors.${error instanceof LibraryFolderError ? error.code : "unknown"}`))
+      toast.error(t(folderErrorKey(error, (key) => t.has(key))))
     } finally {
       setBusy(false)
     }
