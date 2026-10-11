@@ -693,6 +693,12 @@
         },
         "feature_manifest": {},
         "paired": {},
+        "secret": {
+          "children": {
+            "git": {},
+            "provider": {}
+          }
+        },
         "state": {}
       }
     },

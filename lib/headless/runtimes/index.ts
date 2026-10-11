@@ -11,6 +11,9 @@
  * - `host-event-publisher` — installs the authenticated bridge publisher
  *   before any authoritative runtime can emit sync, workflow, or connector
  *   events, and keeps it installed until reverse teardown completes.
+ * - `host-provider-keys` — loads the provider keys paired devices sealed on
+ *   this host into the provider-settings overlay, before the scheduler's first
+ *   run, and follows `host://secrets-changed` (ADR-0224 A6).
  * - `desktop-sync-source` — answers `companion://sync-pull-request` from the
  *   brain's Dexie (T-A2).
  * - `desktop-message-source` — the five message/session RPCs plus the
@@ -168,6 +171,7 @@
  */
 
 import "./host-event-publisher"
+import "./host-provider-keys"
 import "./desktop-sync-source"
 import "./desktop-message-source"
 import "./a2ui-dispatch"

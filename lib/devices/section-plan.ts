@@ -26,6 +26,7 @@ import type { DeviceKind, DeviceRow } from "./types"
 
 export type DeviceSectionId =
   | "always-on"
+  | "host-secrets"
   | "ssh"
   | "files"
   | "access"
@@ -75,6 +76,7 @@ export const NOT_APPLICABLE_SECTION_ID = "not-applicable"
 
 const WIDE: Record<DeviceSectionId, boolean> = {
   "always-on": true,
+  "host-secrets": true,
   ssh: true,
   files: true,
   access: true,
@@ -131,6 +133,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
   ],
   "remote-host": [
     "always-on",
+    "host-secrets",
     "workspaces",
     "routing",
     "shell-tiers",
@@ -159,6 +162,9 @@ export function canOwnTiming(row: DeviceRow): boolean {
 function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
   switch (id) {
     case "always-on":
+    // Secrets go over the host's own management channel, which names the host
+    // by its store id too (ADR-0224 A6).
+    case "host-secrets":
       // Moving work names the host by its store id; a `/pair` host has none.
       return row.kind === "remote-host" && Boolean(row.hostId)
     case "ssh":

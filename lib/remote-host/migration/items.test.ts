@@ -309,6 +309,8 @@ describe("createOnHost", () => {
         enabled: false,
         triggerOverrides: { nightly: false },
         credentialBindings: { chat: { adapterId: "cai_1" } },
+        // Interactive on the host since ADR-0224 A6.
+        adminLease: "lease",
       })
     )
     expect(call.mock.calls[0]![1]).not.toHaveProperty("policyGrant")
@@ -338,6 +340,7 @@ describe("armOnHost", () => {
       ["bot_installation_mutate", "set_enabled"],
       ["adapter_instance_mutate", "configure"],
     ])
+    expect(call.mock.calls[1]![1]).toMatchObject({ adminLease: "lease" })
   })
 })
 
@@ -357,6 +360,7 @@ describe("removeFromHost and remoteStatus", () => {
     expect(call.mock.calls[1]![1]).toMatchObject({
       operation: "uninstall",
       installationId: "boti_x",
+      adminLease: "lease",
     })
     expect(call.mock.calls[2]![1]).toMatchObject({
       operation: "remove",

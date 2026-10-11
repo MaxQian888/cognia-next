@@ -100,6 +100,7 @@
     "unresolvedHandler": "Its handler did not load, so this Bot could not run once installed."
   },
   "lifecycle": {
+    "awaitingApproval": "Waiting for approval on the host — code {code}. Approve it there, then try again.",
     "bound": "Credential bound",
     "configSaved": "Settings saved",
     "definitionMissing": "That Bot's definition is gone. Reinstall the plugin that owned it, or uninstall this Bot.",

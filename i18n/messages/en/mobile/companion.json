@@ -144,6 +144,7 @@
     "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----",
     "apnsLabel": "APNs (iOS)",
     "apnsTeamIdPlaceholder": "TEAM1234DE",
+    "awaitingApproval": "Waiting for approval on the host — code {code}. Approve it there, then try again.",
     "bundleId": "Bundle ID",
     "clearApns": "Clear APNs",
     "clearFcm": "Clear FCM",

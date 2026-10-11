@@ -8,9 +8,13 @@
 
 use cognia_secrets::secret_store;
 
-const SERVICE: &str = "com.cognia.platforms";
+/// Owned by `host_secrets`, which indexes these entries for "Secrets on this
+/// host" (ADR-0224 A6); one constant so the two cannot drift.
+const SERVICE: &str = cognia_secrets::host_secrets::CONNECTOR_SERVICE;
 
-fn account_key(adapter_id: &str, credential: &str) -> String {
+/// The store account for `(adapter_id, credential)`, which is also the name
+/// `host_secrets` lists the credential under.
+pub fn account_key(adapter_id: &str, credential: &str) -> String {
     format!("{adapter_id}:{credential}")
 }
 

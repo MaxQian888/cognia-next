@@ -29,6 +29,14 @@ jest.mock("@/lib/tauri", () => ({
   transport: { call: (...args: unknown[]) => mockRelay(...args) },
 }))
 
+// The approval helper's own behaviour is pinned in its test; here it only has
+// to be what the relay sends through.
+const mockApproval = jest.fn(async (_command: string, args: Record<string, unknown>) => args)
+jest.mock("@/lib/tauri/interactive-approval", () => ({
+  withInteractiveApproval: (command: string, args: Record<string, unknown>) =>
+    mockApproval(command, args),
+}))
+
 const NOW = 1_700_000_000_000
 
 let restoreRoute: (() => void) | undefined
@@ -546,6 +554,34 @@ it("relays installation configuration to a supporting host with stable per-opera
   await expect(
     updateBotConfig("host-install", {}, { ...grant, maxConcurrentRuns: 99 } as never)
   ).rejects.toThrow()
+})
+
+// ADR-0224 A6: a Bot installation change on a paired host is host
+// configuration, sent under an admin lease minted for it.
+it("sends a relayed installation change under an interactive approval", async () => {
+  restoreRoute?.()
+  restoreRoute = __setBotWriteRouteDepsForTests({
+    isRemoteHostActive: () => true,
+    hasLocalDatabase: () => true,
+    activeHostFeatureManifest: () =>
+      ({
+        schemaVersion: 2,
+        features: { "bots.control": { version: 1, operations: ["bot_installation_mutate"] } },
+        operations: [{ name: "bot_installation_mutate", healthy: true }],
+      }) as never,
+  })
+  mockApproval.mockImplementationOnce(async (_command, args) => ({ ...args, adminLease: "lease" }))
+  mockRelay.mockResolvedValue({ id: "host-install", status: "disabled", credentialBindings: {} })
+  await uninstallBotInstallation("host-install")
+  expect(mockApproval).toHaveBeenLastCalledWith(
+    "bot_installation_mutate",
+    expect.objectContaining({ operation: "uninstall" })
+  )
+  expect(mockRelay).toHaveBeenLastCalledWith(
+    "bot_installation_mutate",
+    expect.objectContaining({ operation: "uninstall", adminLease: "lease" }),
+    expect.any(Object)
+  )
 })
 
 it("refuses local configuration mutations against a synced host mirror after disconnect", async () => {

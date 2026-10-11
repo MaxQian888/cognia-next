@@ -12981,6 +12981,82 @@
     "host_feature_manifest": {
       "$ref": "#/$defs/HostFeatureManifest"
     },
+    "host_git_credential_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "host_git_credential_set": {
+      "type": "object",
+      "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["provider", "git"] },
+        "name": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "host_provider_credential_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "host_provider_credential_set": {
+      "type": "object",
+      "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["provider", "git"] },
+        "name": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "host_provider_credentials_load": {
+      "type": "object",
+      "description": "Provider keys sealed on this host, for its own runtime only (service-internal). The only command that returns a secret value.",
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["providerId", "apiKey"],
+            "properties": {
+              "providerId": { "type": "string" },
+              "apiKey": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "host_secret_list": {
+      "type": "object",
+      "description": "Secrets on this host by kind and name, with when and by which paired device each was set. Never a value.",
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["provider", "git", "connector"] },
+              "name": { "type": "string" },
+              "setAt": { "type": "integer" },
+              "setBy": {
+                "type": "object",
+                "required": ["deviceId"],
+                "properties": {
+                  "deviceId": { "type": "string" },
+                  "label": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "host_state_snapshot": {
       "$ref": "#/$defs/HostStateSnapshot"
     },

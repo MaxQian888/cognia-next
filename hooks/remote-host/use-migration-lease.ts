@@ -31,7 +31,8 @@ export interface UseMigrationLeaseResult {
 /**
  * The one admin lease a batch of moves, plugin transfers and take-backs uses
  * (ADR-0224, ADR-0153). Asked for only from an explicit user action, and kept
- * for the session of the panel so a batch prompts the host once.
+ * for the session of the panel so a batch prompts the host once. The secrets
+ * panel (A6) holds its own, for its own operations, through `deps.request`.
  */
 export function useMigrationLease(
   hostId: string | null,

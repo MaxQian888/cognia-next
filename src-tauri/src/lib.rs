@@ -1114,6 +1114,7 @@ pub fn run() {
             keyring_secrets::secret_store_get,
             keyring_secrets::secret_store_set,
             keyring_secrets::secret_store_delete,
+            keyring_secrets::host_provider_credentials_load,
             turn_provision::turn_provision,
             telemetry::telemetry_secret_set,
             telemetry::telemetry_secret_has,

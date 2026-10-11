@@ -190,6 +190,29 @@ adding a connection asks where it runs, with the host chosen. Keep it on **This
 device** to stay local; otherwise it is created here and moved straight away, and
 anything the host cannot take stays here with the reason shown.
 
+## Secrets on the host
+
+Work that runs while nobody is at the desktop still needs keys. A model provider key
+is a setting of each device and never syncs, so the host's own settings usually have
+none. Open the host in **Devices** and use **Secrets on this host** to seal keys on it:
+
+- **Provider keys.** The host uses one for any provider its own settings have no key
+  for, in scheduled tasks, Bots and every other run. A key in the host's settings
+  always wins.
+- **Git tokens**, by git host (`github.com`). Used when the host clones a repository
+  from that host and was given no token.
+- **Connection credentials** are listed too. They belong to their connection, which
+  sets and removes them, including when a connection is moved to the host.
+
+A key is sent once over this device's own connection to the host and sealed there under
+the host's master key. The list shows names, when each was set and by which device,
+never a value. Sealing or removing one needs the host's approval, like other host
+administration, and only an owner device can do it. When a device is revoked, the
+secrets it set on the host are deleted with it.
+
+Pushing credentials, changing a Bot installation and arming its triggers from a paired
+device now ask for the same approval.
+
 ## Keep the master key safe
 
 Everything the host stores encrypted (device identities, provider and connector

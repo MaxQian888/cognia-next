@@ -35,6 +35,11 @@ jest.mock("./sections/activity-section", () => ({
   PlacementSection: marker("placement"),
 }))
 jest.mock("./sections/wan-section", () => ({ WanSection: marker("wan") }))
+// Both read over the host's management channel; their own tests cover them.
+jest.mock("./host-secrets/host-secrets-section", () => ({
+  HostSecretsSection: marker("host-secrets"),
+}))
+jest.mock("./always-on/always-on-section", () => ({ AlwaysOnSection: marker("always-on") }))
 jest.mock("./sections/files-section", () => ({ FilesSection: marker("files") }))
 jest.mock("./ssh-host-controls", () => ({
   SshHostControls: () => <div data-testid="ssh-controls" />,

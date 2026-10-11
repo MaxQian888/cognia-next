@@ -2044,6 +2044,164 @@ async fn github_workspace_housekeeping_arms_reach_the_headless_host() {
     assert!(!workspace.exists());
 }
 
+// ── Host secrets (ADR-0224 A6) ───────────────────────────────────────────
+
+/// A provider key and a git token set by a paired device come back from the
+/// list as names with their writer, never as values; the service-only load is
+/// the one place a value comes out, and delete removes both.
+#[tokio::test]
+async fn host_secret_arms_seal_attribute_and_never_return_values() {
+    let state = test_state();
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let device = |name: &'static str, args: Value| {
+        let state = &state;
+        let host = &host;
+        async move {
+            dispatch(name, args, state, host, "hs-phone", Some(ACCOUNT_ID), Some("device")).await
+        }
+    };
+
+    let set = device(
+        "host_provider_credential_set",
+        json!({ "providerId": "hs-deepseek", "apiKey": "sk-hs-secret", "adminLease": "lease" }),
+    )
+    .await
+    .expect("set provider key");
+    assert_eq!(set, json!({ "kind": "provider", "name": "hs-deepseek" }));
+    let git = device(
+        "host_git_credential_set",
+        json!({ "host": "https://HS.example.com/acme/app.git", "token": "ghp_hs", "adminLease": "lease" }),
+    )
+    .await
+    .expect("set git token");
+    assert_eq!(git, json!({ "kind": "git", "name": "hs.example.com" }));
+
+    let listed = device("host_secret_list", json!({})).await.expect("list");
+    let text = listed.to_string();
+    assert!(!text.contains("sk-hs-secret") && !text.contains("ghp_hs"), "{text}");
+    let provider = listed["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "hs-deepseek")
+        .expect("listed");
+    assert_eq!(provider["kind"], "provider");
+    assert_eq!(provider["setBy"]["deviceId"], "hs-phone");
+    assert!(provider["setAt"].is_i64());
+
+    let loaded = dispatch(
+        "host_provider_credentials_load",
+        json!({}),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect("load");
+    assert!(loaded["keys"]
+        .as_array()
+        .unwrap()
+        .contains(&json!({ "providerId": "hs-deepseek", "apiKey": "sk-hs-secret" })));
+
+    device(
+        "host_provider_credential_delete",
+        json!({ "providerId": "hs-deepseek", "adminLease": "lease" }),
+    )
+    .await
+    .expect("delete");
+    device("host_git_credential_delete", json!({ "host": "hs.example.com", "adminLease": "lease" }))
+        .await
+        .expect("delete git");
+    let after = device("host_secret_list", json!({})).await.expect("list");
+    assert!(!after.to_string().contains("hs-deepseek"));
+    assert!(!after.to_string().contains("hs.example.com"));
+}
+
+/// The loopback brain writing for itself is not a device: nothing it sets is
+/// cascaded when some device is revoked. A git host that is not one is refused
+/// before anything is stored.
+#[tokio::test]
+async fn host_secret_writes_from_the_service_plane_are_unattributed() {
+    let state = test_state();
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    dispatch(
+        "connectors_keyring_set",
+        json!({ "adapterId": "hs-svc", "credential": "botToken", "value": "b" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect("set");
+    let entries = cognia_secrets::host_secrets::list().unwrap();
+    let entry = entries
+        .iter()
+        .find(|entry| entry.name == "hs-svc:botToken")
+        .expect("connector credential listed");
+    assert_eq!(entry.set_by, None);
+    assert!(entry.set_at.is_some());
+
+    let refused = dispatch(
+        "host_git_credential_set",
+        json!({ "host": "ssh://git@hs.example.com/a", "token": "t" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await;
+    assert!(refused.is_err());
+}
+
+/// ADR-0224 A6: secret writes and the host configuration that was ungated
+/// (push credentials, Bot installation changes, trigger arming) need an
+/// interactive admin lease; reading names does not, and the only command that
+/// returns values never leaves the loopback plane.
+#[test]
+fn host_secret_and_host_configuration_approval_classes_are_pinned() {
+    use crate::companion_api::command_manifest::{descriptor, CommandApproval};
+    for name in [
+        "host_provider_credential_set",
+        "host_provider_credential_delete",
+        "host_git_credential_set",
+        "host_git_credential_delete",
+        "companion_push_configure_fcm",
+        "companion_push_configure_apns",
+        "companion_push_configure_hms",
+        "companion_push_clear_fcm",
+        "companion_push_clear_apns",
+        "companion_push_clear_hms",
+        "bot_installation_mutate",
+        "bot_trigger_set_armed",
+    ] {
+        let descriptor = descriptor(name).expect("registered");
+        assert_eq!(descriptor.approval, CommandApproval::Interactive, "{name}");
+        assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+    }
+    for name in [
+        "host_secret_list",
+        "host_provider_credential_set",
+        "host_provider_credential_delete",
+        "host_git_credential_set",
+        "host_git_credential_delete",
+    ] {
+        assert_eq!(descriptor(name).unwrap().capability, "secret.manage", "{name}");
+        assert!(!is_service_only_command(name), "{name} is for paired devices");
+    }
+    assert_eq!(
+        descriptor("host_secret_list").unwrap().approval,
+        CommandApproval::None
+    );
+    assert!(is_service_only_command("host_provider_credentials_load"));
+}
+
 // ── Connector command plane arms (ADR-0059 T-A5) ─────────────────────────
 
 /// Keyring set → list → get → delete through the dispatch arms, mixing

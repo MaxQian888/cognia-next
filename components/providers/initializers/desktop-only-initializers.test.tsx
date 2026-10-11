@@ -76,7 +76,7 @@ describe("DesktopOnlyInitializers", () => {
     // open, and the two together opened the window twice at boot.
     // FileShareHostSyncInitializer joined for live file sharing, ADR-0222.
     // GlancePublisherInitializer joined for the tray panel, ADR-0225.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(27)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(28)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 

@@ -51,6 +51,7 @@ import {
   resolveBotLifecycleWriteAvailability,
 } from "./route"
 import { transport } from "@/lib/tauri"
+import { withInteractiveApproval } from "@/lib/tauri/interactive-approval"
 import type { BotLifecycleMutation } from "./lifecycle-host"
 
 /** User-selected authority, separate from plugin-controlled configuration. */
@@ -343,13 +344,21 @@ export async function uninstallBotInstallationLocally(installationId: string): P
   await uninstallBot(installationId)
 }
 
-/** The host is authoritative; do not optimistically install into the companion mirror. */
+/**
+ * The host is authoritative; do not optimistically install into the companion
+ * mirror. The mutation is `approval: interactive` on the host (ADR-0224 A6),
+ * so it carries an admin lease minted by the gesture that sent it; a host
+ * waiting on a person throws `HostConsentRequiredError` with the code.
+ */
 async function relayLifecycle(input: BotLifecycleMutation): Promise<BotInstallationRow> {
   const availability = resolveBotLifecycleWriteAvailability()
   if (availability.state !== "available") throw new BotLifecycleUnavailableError(availability)
-  return transport.call<BotInstallationRow>(BOT_WRITE_COMMANDS.mutateInstallation, input, {
-    idempotencyKey: input.operationId,
-  })
+  const command = BOT_WRITE_COMMANDS.mutateInstallation
+  return transport.call<BotInstallationRow>(
+    command,
+    await withInteractiveApproval(command, input as Record<string, unknown>),
+    { idempotencyKey: input.operationId }
+  )
 }
 
 /**

@@ -28,9 +28,11 @@
 //! 1. Store transaction — the authority. Nothing else happens if it refuses.
 //! 2. Short-circuit when the device was already in the target state, so a
 //!    repeated click does not re-publish teardown to live sockets.
-//! 3. Signaling registration cleanup — **revoke only**. A suspended device
-//!    keeps its registration and its keyring entry so resume can bring the same
-//!    identity back; dropping them would make suspension a slow revocation.
+//! 3. Signaling registration cleanup and the device's host secrets
+//!    (ADR-0224 A6) — **revoke only**. A suspended device keeps its
+//!    registration, its keyring entry and the secrets it sent so resume can
+//!    bring the same identity back; dropping them would make suspension a slow
+//!    revocation.
 //! 4. Refresh the signaling hub, for every action. The hub is rebuilt from the
 //!    registrations filtered to active devices, and `sync_devices` cancels
 //!    whatever disappeared — so suspend cancels the WebRTC client and resume
@@ -220,6 +222,7 @@ pub fn apply(
     // ── 3. Signaling registration cleanup (revoke only) ─────────────────────
     if action == LifecycleAction::Revoke {
         clear_signaling_registration(device_id)?;
+        forget_device_secrets(device_id);
     }
 
     // ── 4. Rebuild the signaling hub ────────────────────────────────────────
@@ -282,6 +285,69 @@ pub const RENDERER_LIFECYCLE_EVENT: &str = "companion://device-lifecycle";
 ///
 /// Lifted out of `api.rs` so both callers get it; the HTTP handler now goes
 /// through here too.
+/// Delete the secrets a revoked device sealed on this host (ADR-0224 A6).
+///
+/// Provider keys, git tokens and connector credentials a device sent are
+/// indexed by writer in `host_secrets`; a revoked device must not leave keys
+/// behind that it can no longer see or remove. Runs after the store has
+/// revoked the device, so a failure here cannot keep the device authorized: it
+/// is logged, the undeleted entries stay indexed under the device, and the
+/// next revoke sweep (or "Secrets on this host") still finds them. Suspension
+/// keeps them, because resume brings the same device back.
+pub fn forget_device_secrets(device_id: &str) {
+    match cognia_secrets::host_secrets::forget_device(device_id) {
+        Ok(removed) if removed.is_empty() => {}
+        Ok(removed) => log::info!(
+            "revoked device {device_id}: removed {} host secret(s): {}",
+            removed.len(),
+            removed
+                .iter()
+                .map(|(kind, name)| format!("{}/{name}", kind.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Err(error) => log::error!(
+            "revoked device {device_id}: its host secrets could not all be removed: {error}"
+        ),
+    }
+}
+
+/// Forget the host secrets of every writer this host no longer knows as a
+/// live device: revoked, or gone from the store. Returns how many devices
+/// were swept.
+///
+/// [`apply`] already does this for a revoke it performs. The sweep is for a
+/// revocation another process made: `cognia-server devices revoke-device` run
+/// next to a serving host edits the database directly, and the running
+/// server's secret cache would write the deleted entries back on its next
+/// write. The host runs this at boot and before it lists or loads secrets.
+pub fn sweep_revoked_device_secrets(tenant_id: &str) -> usize {
+    let Some(store) = security_store() else {
+        return 0;
+    };
+    let writers = match cognia_secrets::host_secrets::writer_device_ids() {
+        Ok(writers) => writers,
+        Err(error) => {
+            log::warn!("host secret sweep: index unreadable: {error}");
+            return 0;
+        }
+    };
+    let mut swept = 0;
+    for device_id in writers {
+        match store.device_state(tenant_id, &device_id) {
+            Ok(Some(DeviceLifecycleState::Revoked)) | Ok(None) => {
+                forget_device_secrets(&device_id);
+                swept += 1;
+            }
+            Ok(Some(_)) => {}
+            // An unreadable store is not evidence of revocation; keep the
+            // secrets and try again on the next sweep.
+            Err(error) => log::warn!("host secret sweep: state of {device_id}: {error}"),
+        }
+    }
+    swept
+}
+
 fn clear_signaling_registration(device_id: &str) -> Result<(), LifecycleError> {
     let key_ref = match super::signaling::registration_store::installed() {
         Some(registrations) => registrations
@@ -478,7 +544,87 @@ mod tests {
         // `audit_records_suspend_and_resume_with_the_actor`.
     }
 
-    /// The headline defect: revoking from the desktop must reach the store, not
+    /// ADR-0224 A6: a revoked device leaves no secrets behind on the host.
+    /// A suspended one keeps them, because resume brings the same device back.
+    #[test]
+    fn revoking_a_device_deletes_the_host_secrets_it_wrote() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind, SecretWriter};
+        let _scope = store_scope();
+        let _store = store_with_owners(&["owner-keep", "sec-doomed", "sec-paused"]);
+        let context = lifecycle_context();
+        let by = |device: &str| {
+            Some(SecretWriter {
+                device_id: device.to_string(),
+                label: None,
+            })
+        };
+        host_secrets::set(HostSecretKind::Provider, "lc-doomed", "k", by("sec-doomed"), 1)
+            .unwrap();
+        host_secrets::set(HostSecretKind::Provider, "lc-paused", "k", by("sec-paused"), 1)
+            .unwrap();
+
+        apply(
+            &context,
+            &LifecycleActor::local_trust_root(TENANT),
+            "sec-paused",
+            LifecycleAction::Suspend,
+        )
+        .expect("suspend");
+        apply(
+            &context,
+            &LifecycleActor::local_trust_root(TENANT),
+            "sec-doomed",
+            LifecycleAction::Revoke,
+        )
+        .expect("revoke");
+
+        assert_eq!(
+            host_secrets::get(HostSecretKind::Provider, "lc-doomed").unwrap(),
+            None
+        );
+        assert_eq!(
+            host_secrets::get(HostSecretKind::Provider, "lc-paused")
+                .unwrap()
+                .as_deref(),
+            Some("k")
+        );
+    }
+
+    /// A device revoked behind this process's back (the CLI next to a running
+    /// server) loses its host secrets at the next sweep; live devices keep
+    /// theirs, and a writer the store no longer knows is treated as gone.
+    #[test]
+    fn the_sweep_forgets_secrets_of_devices_revoked_elsewhere() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind, SecretWriter};
+        let _scope = store_scope();
+        let store = store_with_owners(&["owner-keep", "sw-revoked", "sw-live"]);
+        let by = |device: &str| {
+            Some(SecretWriter {
+                device_id: device.to_string(),
+                label: None,
+            })
+        };
+        host_secrets::set(HostSecretKind::Provider, "sw-revoked", "k", by("sw-revoked"), 1)
+            .unwrap();
+        host_secrets::set(HostSecretKind::Provider, "sw-live", "k", by("sw-live"), 1).unwrap();
+        host_secrets::set(HostSecretKind::Provider, "sw-ghost", "k", by("sw-ghost"), 1).unwrap();
+        // Revoked straight in the store, as the CLI does.
+        store
+            .revoke_device(TENANT, "local-cli-trust-root", "sw-revoked", true, NOW)
+            .unwrap();
+
+        // At least these two: the secret store is process-global, so a
+        // writer another test left behind (and this store does not know) is
+        // swept as well.
+        assert!(sweep_revoked_device_secrets(TENANT) >= 2);
+        assert_eq!(host_secrets::get(HostSecretKind::Provider, "sw-revoked").unwrap(), None);
+        assert_eq!(host_secrets::get(HostSecretKind::Provider, "sw-ghost").unwrap(), None);
+        assert!(host_secrets::get(HostSecretKind::Provider, "sw-live")
+            .unwrap()
+            .is_some());
+    }
+
+
     /// just an in-process cache the canonical auth plane never reads.
     #[test]
     fn a_desktop_revoke_reaches_the_store_not_only_the_cache() {

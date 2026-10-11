@@ -5567,6 +5567,7 @@
       "unresolvedHandler": "Its handler did not load, so this Bot could not run once installed."
     },
     "lifecycle": {
+      "awaitingApproval": "Waiting for approval on the host — code {code}. Approve it there, then try again.",
       "bound": "Credential bound",
       "configSaved": "Settings saved",
       "definitionMissing": "That Bot's definition is gone. Reinstall the plugin that owned it, or uninstall this Bot.",
@@ -14306,6 +14307,55 @@
       "always-on": "Always-on",
       "desktop": "Desktop",
       "headless": "Headless server"
+    },
+    "hostSecrets": {
+      "add": {
+        "apiKey": "API key",
+        "gitHint": "Used when {host} clones from this git host and was given no token. Sent over this device's connection to {host} and not shown again.",
+        "gitHost": "Git host",
+        "gitHostPlaceholder": "github.com",
+        "kind": {
+          "git": "Git token",
+          "provider": "Provider key"
+        },
+        "provider": "Provider",
+        "providerHint": "Used by {host} for providers its own settings have no key for. Sent over this device's connection to {host} and not shown again.",
+        "providerPlaceholder": "Choose a provider",
+        "save": "Seal on {host}",
+        "saving": "Sealing…",
+        "title": "Seal a secret",
+        "token": "Access token"
+      },
+      "confirm": {
+        "gitBody": "{host} can no longer clone private repositories from this git host.",
+        "keep": "Keep it",
+        "providerBody": "Work on {host} that uses this provider stops being able to call it, unless {host}'s own settings have a key.",
+        "remove": "Remove",
+        "title": "Remove {name}?"
+      },
+      "connectorNote": "Set and removed with their connection.",
+      "description": "Keys {host} uses for work that runs while nobody is at it. They are sealed on {host}; their values never come back to this device.",
+      "empty": "{host} keeps no secrets yet.",
+      "kind": {
+        "connector": "Connection credentials",
+        "git": "Git tokens",
+        "provider": "Provider keys"
+      },
+      "loading": "Reading what {host} keeps…",
+      "meta": "{count, plural, =0 {none} one {# secret} other {# secrets}}",
+      "remove": "Remove",
+      "removeAria": "Remove {name}",
+      "removed": "{name} was removed from {host}.",
+      "removing": "Removing…",
+      "revokeNote": "Secrets a device set here are deleted when that device is revoked on {host}.",
+      "saved": "{name} is sealed on {host}.",
+      "setBy": "Set {when} by {device}",
+      "setByHost": "Set {when} on {host} itself",
+      "setByHostUndated": "Set on {host} itself",
+      "setByUndated": "Set by {device}",
+      "thisDevice": "this device",
+      "title": "Secrets on this host",
+      "tooOld": "{host} is too old to keep secrets for this device. Update it first."
     },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
@@ -25104,6 +25154,7 @@
         "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----",
         "apnsLabel": "APNs (iOS)",
         "apnsTeamIdPlaceholder": "TEAM1234DE",
+        "awaitingApproval": "Waiting for approval on the host — code {code}. Approve it there, then try again.",
         "bundleId": "Bundle ID",
         "clearApns": "Clear APNs",
         "clearFcm": "Clear FCM",

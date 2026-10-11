@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
+import { HostConsentRequiredError } from "@/lib/tauri/admin-lease"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -136,6 +137,12 @@ export function useBotLifecycleActions(): BotLifecycleActions {
       }
       if (error instanceof BotControlTargetMissingError) {
         toast.error(t(`write.missing.${error.what}`))
+        return
+      }
+      // The host wants a person to approve this device first (ADR-0224 A6):
+      // not a failure, and the code is what they approve.
+      if (error instanceof HostConsentRequiredError) {
+        toast.info(t("lifecycle.awaitingApproval", { code: error.consentCode ?? "—" }))
         return
       }
       toast.error(t("write.failed"), {

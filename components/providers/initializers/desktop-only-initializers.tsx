@@ -167,6 +167,12 @@ const RouterFusionInitializer = dynamic(
   () => import("./router-fusion-initializer").then((m) => m.RouterFusionInitializer),
   { ssr: false }
 )
+// Provider keys paired devices sealed on this desktop host fill providers it
+// has no key for, for work moved here from other devices (ADR-0224 A6).
+const HostProviderKeysInitializer = dynamic(
+  () => import("./host-provider-keys-initializer").then((m) => m.HostProviderKeysInitializer),
+  { ssr: false }
+)
 // The desktop chat copilot's main-window half (ADR-0194 §8): the capture
 // command and the controller behind the `chat-copilot` overlay. Desktop-only
 // because reading another app's window needs the native automation engine.
@@ -254,6 +260,7 @@ export function DesktopOnlyInitializers() {
       <SitesInitializer />
       <FileShareHostSyncInitializer />
       <RouterFusionInitializer />
+      <HostProviderKeysInitializer />
     </>
   )
 }

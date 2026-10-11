@@ -100,6 +100,7 @@
     "unresolvedHandler": "它的处理函数没有加载成功，安装后也无法运行。"
   },
   "lifecycle": {
+    "awaitingApproval": "正在等待主机批准 —— 批准码 {code}。在主机上批准后再试一次。",
     "bound": "凭据已绑定",
     "configSaved": "设置已保存",
     "definitionMissing": "这个 Bot 的定义已不存在。请重新安装拥有它的插件，或卸载这个 Bot。",

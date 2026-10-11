@@ -531,9 +531,8 @@ async function createBotInstallation(
   // The wire grant is the complete triple; a partial stored ceiling stays
   // behind and the host applies its own defaults, which only narrow.
   const grant = botPolicyGrantSchema.safeParse(installation.policyGrant)
-  await context.transport.call(
-    "bot_installation_mutate",
-    botInstallMutation(
+  await context.transport.call("bot_installation_mutate", {
+    ...botInstallMutation(
       {
         entry: item.entry,
         scope: installation.scope,
@@ -547,8 +546,10 @@ async function createBotInstallation(
         ...(grant.success ? { policyGrant: grant.data } : {}),
       },
       context.operationId
-    )
-  )
+    ),
+    // Interactive on the host (ADR-0224 A6), like every write a move makes.
+    adminLease: context.adminLease,
+  })
 }
 
 async function createConnectorInstance(
@@ -637,6 +638,7 @@ export async function armOnHost(
       operationId: crypto.randomUUID(),
       installationId: remoteItemId,
       enabled: true,
+      adminLease: context.adminLease,
     })
     return
   }
@@ -668,6 +670,7 @@ export async function removeFromHost(
       operation: "uninstall",
       operationId: crypto.randomUUID(),
       installationId: remoteItemId,
+      adminLease: context.adminLease,
     })
     return
   }

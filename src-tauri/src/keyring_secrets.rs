@@ -85,6 +85,38 @@ pub async fn keyring_secret_clear(input: KeyringInput) -> Result<(), String> {
     secret_store_delete(input).await
 }
 
+/// One provider key sealed on this host by a paired device (ADR-0224 A6).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostProviderKey {
+    pub provider_id: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HostProviderKeys {
+    pub keys: Vec<HostProviderKey>,
+}
+
+/// The provider keys paired devices sealed on this desktop host, for its own
+/// renderer to fill in providers it has no key for. The same answer the
+/// headless brain gets from the service-only companion command of this name.
+#[tauri::command]
+pub async fn host_provider_credentials_load() -> Result<HostProviderKeys, String> {
+    on_blocking_pool(|| {
+        Ok(HostProviderKeys {
+            keys: cognia_secrets::host_secrets::provider_keys()?
+                .into_iter()
+                .map(|(provider_id, api_key)| HostProviderKey {
+                    provider_id,
+                    api_key,
+                })
+                .collect(),
+        })
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +173,29 @@ mod tests {
             None
         );
         secret_store_delete(webhook).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_provider_keys_load_as_named_objects() {
+        cognia_secrets::host_secrets::set(
+            cognia_secrets::host_secrets::HostSecretKind::Provider,
+            "load-test-provider",
+            "sk-load",
+            None,
+            1,
+        )
+        .unwrap();
+        let loaded = host_provider_credentials_load().await.unwrap();
+        assert!(loaded.keys.contains(&HostProviderKey {
+            provider_id: "load-test-provider".into(),
+            api_key: "sk-load".into(),
+        }));
+        let wire = serde_json::to_value(&loaded).unwrap();
+        assert!(wire["keys"][0]["providerId"].is_string(), "{wire}");
+        cognia_secrets::host_secrets::delete(
+            cognia_secrets::host_secrets::HostSecretKind::Provider,
+            "load-test-provider",
+        )
+        .unwrap();
     }
 }

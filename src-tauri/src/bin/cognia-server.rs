@@ -1124,6 +1124,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("local account binding failed: {error}").into());
     }
 
+    // Secrets a device sealed here do not outlive its revocation, including
+    // one made by this binary's `devices revoke-device` while the server was
+    // down or beside it (ADR-0224 A6).
+    if matches!(&cli.command, CliCommand::Serve { .. }) {
+        let swept = app_lib::companion_api::device_lifecycle::sweep_revoked_device_secrets(
+            &resolve_tenant(None),
+        );
+        if swept > 0 {
+            log::info!("removed the host secrets of {swept} revoked device(s)");
+        }
+    }
+
     // One tenant owns one Headless data volume and exactly one live server
     // process. The OS releases this advisory lock after a crash, while the
     // retained metadata file explains the previous owner during recovery.
@@ -1433,6 +1445,11 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                     app_lib::companion_api::signaling::envelope::clear_signaling_key(&key_ref)?;
                 }
             }
+            // The secrets it sealed here go with it (ADR-0224 A6). A server
+            // running beside this command still holds them in its cache; it
+            // drops them at its next sweep (before it lists or loads secrets,
+            // and at boot), because the device is revoked in the database.
+            app_lib::companion_api::device_lifecycle::forget_device_secrets(&device_id);
             println!("revoked device {device_id} for tenant {tenant_id}");
             Ok(())
         }

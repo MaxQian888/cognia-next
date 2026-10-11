@@ -618,5 +618,54 @@
       "here": "This device",
       "hint": "{host} keeps it running when this device is off. Anything tied to this device stays here, and you see why."
     }
+  },
+  "hostSecrets": {
+    "title": "Secrets on this host",
+    "meta": "{count, plural, =0 {none} one {# secret} other {# secrets}}",
+    "description": "Keys {host} uses for work that runs while nobody is at it. They are sealed on {host}; their values never come back to this device.",
+    "loading": "Reading what {host} keeps…",
+    "empty": "{host} keeps no secrets yet.",
+    "tooOld": "{host} is too old to keep secrets for this device. Update it first.",
+    "kind": {
+      "provider": "Provider keys",
+      "git": "Git tokens",
+      "connector": "Connection credentials"
+    },
+    "connectorNote": "Set and removed with their connection.",
+    "thisDevice": "this device",
+    "setBy": "Set {when} by {device}",
+    "setByUndated": "Set by {device}",
+    "setByHost": "Set {when} on {host} itself",
+    "setByHostUndated": "Set on {host} itself",
+    "remove": "Remove",
+    "removing": "Removing…",
+    "removeAria": "Remove {name}",
+    "removed": "{name} was removed from {host}.",
+    "saved": "{name} is sealed on {host}.",
+    "revokeNote": "Secrets a device set here are deleted when that device is revoked on {host}.",
+    "confirm": {
+      "title": "Remove {name}?",
+      "providerBody": "Work on {host} that uses this provider stops being able to call it, unless {host}'s own settings have a key.",
+      "gitBody": "{host} can no longer clone private repositories from this git host.",
+      "keep": "Keep it",
+      "remove": "Remove"
+    },
+    "add": {
+      "title": "Seal a secret",
+      "kind": {
+        "provider": "Provider key",
+        "git": "Git token"
+      },
+      "provider": "Provider",
+      "providerPlaceholder": "Choose a provider",
+      "gitHost": "Git host",
+      "gitHostPlaceholder": "github.com",
+      "apiKey": "API key",
+      "token": "Access token",
+      "providerHint": "Used by {host} for providers its own settings have no key for. Sent over this device's connection to {host} and not shown again.",
+      "gitHint": "Used when {host} clones from this git host and was given no token. Sent over this device's connection to {host} and not shown again.",
+      "save": "Seal on {host}",
+      "saving": "Sealing…"
+    }
   }
 }

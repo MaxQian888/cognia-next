@@ -498,11 +498,35 @@ pub fn task_workspace_bundle_list() -> Result<Vec<WorkspaceBundle>, String> {
 /// addressable from a phone. It is registered only in
 /// `companion_api/rpc/service_plane.rs`, which is loopback-only and
 /// service-token gated.
+///
+/// A caller that sends no token gets the one this host keeps for the
+/// remote's git host, if a paired device stored one (ADR-0224 A6): an
+/// always-on host clones for work nobody is there to authenticate.
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn task_workspace_remote_source_ensure(
     input: EnsureRemoteSource,
 ) -> Result<RemoteSourceCheckout, String> {
+    let input = with_stored_git_token(input);
     blocking(move |service| service.ensure_remote_source(&input)).await
+}
+
+/// Fill in the host's stored git token when the caller sent none. A token the
+/// caller did send always wins, and an unreadable store means "no token", the
+/// same as before the store existed: the fetch then fails as unauthenticated
+/// rather than this command failing for a reason the caller cannot act on.
+fn with_stored_git_token(mut input: EnsureRemoteSource) -> EnsureRemoteSource {
+    if input
+        .credential
+        .as_deref()
+        .is_some_and(|token| !token.trim().is_empty())
+    {
+        return input;
+    }
+    match cognia_secrets::host_secrets::git_token_for_remote(&input.remote_url) {
+        Ok(token) => input.credential = token,
+        Err(error) => log::warn!("stored git token unreadable: {error}"),
+    }
+    input
 }
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]
@@ -1198,6 +1222,36 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_remote_source_without_a_token_uses_the_one_stored_for_its_host() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind};
+        host_secrets::set(HostSecretKind::Git, "supply.example.com", "ghp_stored", None, 1)
+            .unwrap();
+        let input = |credential: Option<&str>| super::EnsureRemoteSource {
+            remote_url: "https://supply.example.com/acme/app.git".to_string(),
+            base: Default::default(),
+            credential: credential.map(str::to_string),
+        };
+        assert_eq!(
+            super::with_stored_git_token(input(None)).credential.as_deref(),
+            Some("ghp_stored")
+        );
+        assert_eq!(
+            super::with_stored_git_token(input(Some("  "))).credential.as_deref(),
+            Some("ghp_stored")
+        );
+        assert_eq!(
+            super::with_stored_git_token(input(Some("ghp_sent"))).credential.as_deref(),
+            Some("ghp_sent")
+        );
+        let elsewhere = super::EnsureRemoteSource {
+            remote_url: "https://other.example.com/a.git".to_string(),
+            base: Default::default(),
+            credential: None,
+        };
+        assert_eq!(super::with_stored_git_token(elsewhere).credential, None);
+    }
+
     use super::*;
     use tempfile::TempDir;
 

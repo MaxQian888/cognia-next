@@ -122,6 +122,7 @@ describe("planDeviceSections", () => {
     // placement card, the only remaining half, is pulled up beside it.
     expect(ids(plan.sections)).toEqual([
       "always-on",
+      "host-secrets",
       "workspaces",
       "routing",
       "identity",
@@ -142,6 +143,8 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("routing")
     // Nor can always-on work be moved to it: a move names the host by its id.
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("always-on")
+    // Nor can its secrets be managed: they go over a channel named by that id.
+    expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-secrets")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
   })

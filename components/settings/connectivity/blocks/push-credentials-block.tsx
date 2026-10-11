@@ -21,6 +21,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useHostAdminReachForCommand } from "@/hooks/connectivity/use-host-admin-reach"
 import { transport } from "@/lib/tauri"
+import { HostConsentRequiredError } from "@/lib/tauri/admin-lease"
+import { withInteractiveApproval } from "@/lib/tauri/interactive-approval"
 
 import { HostReachNotice } from "./host-reach-notice"
 
@@ -41,6 +43,18 @@ async function fetchPushStatus(): Promise<PushConfigStatus> {
   return transport.call<PushConfigStatus>("companion_push_status")
 }
 
+/**
+ * Configure or clear one push credential. On a paired host these are
+ * `approval: interactive` (ADR-0224 A6): the call carries an admin lease
+ * minted for it by this click.
+ */
+async function writePushCredential(
+  command: string,
+  args: Record<string, unknown> = {}
+): Promise<void> {
+  await transport.call<void>(command, await withInteractiveApproval(command, args))
+}
+
 export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
   const t = useTranslations("mobile.companion.push")
   const reach = useHostAdminReachForCommand("companion_push_status")
@@ -51,6 +65,17 @@ export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
   const hmsReach = useHostAdminReachForCommand("companion_push_configure_hms")
   const hmsClearReach = useHostAdminReachForCommand("companion_push_clear_hms")
   const available = reach.available
+  // A host waiting on a person is not a failure: say who has to approve what.
+  const reportFailure = useCallback(
+    (key: string, err: unknown) => {
+      if (err instanceof HostConsentRequiredError) {
+        toast.info(t("awaitingApproval", { code: err.consentCode ?? "—" }))
+        return
+      }
+      toast.error(t(key, { message: err instanceof Error ? err.message : String(err) }))
+    },
+    [t]
+  )
   const [status, setStatus] = useState<PushConfigStatus | null>(null)
   const [statusFailed, setStatusFailed] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
@@ -112,35 +137,31 @@ export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
     }
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_configure_fcm", {
+      await writePushCredential("companion_push_configure_fcm", {
         serviceAccountJson: fcmJson.trim(),
       })
       setFcmJson("")
       toast.success(t("fcmConfigured"))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("fcmConfigureFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("fcmConfigureFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [fcmJson, refresh, t])
+  }, [fcmJson, refresh, reportFailure, t])
 
   const onClearFcm = useCallback(async () => {
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_clear_fcm")
+      await writePushCredential("companion_push_clear_fcm")
       toast.success(t("fcmCleared"))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("fcmClearFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("fcmClearFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [refresh, t])
+  }, [refresh, reportFailure, t])
 
   const onSubmitApns = useCallback(async () => {
     const required = ["keyId", "teamId", "bundleId", "privateKeyPem"] as const
@@ -152,33 +173,29 @@ export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
     }
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_configure_apns", apns)
+      await writePushCredential("companion_push_configure_apns", apns)
       toast.success(t("apnsConfigured"))
       setApns((prev) => ({ ...prev, privateKeyPem: "" }))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("apnsConfigureFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("apnsConfigureFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [apns, refresh, t])
+  }, [apns, refresh, reportFailure, t])
 
   const onClearApns = useCallback(async () => {
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_clear_apns")
+      await writePushCredential("companion_push_clear_apns")
       toast.success(t("apnsCleared"))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("apnsClearFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("apnsClearFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [refresh, t])
+  }, [refresh, reportFailure, t])
 
   const onSubmitHms = useCallback(async () => {
     if (!hms.appId.trim()) {
@@ -191,7 +208,7 @@ export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
     }
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_configure_hms", {
+      await writePushCredential("companion_push_configure_hms", {
         appId: hms.appId.trim(),
         clientSecret: hms.clientSecret.trim(),
       })
@@ -199,29 +216,25 @@ export function PushCredentialsBlock({ onStatus }: PushCredentialsBlockProps) {
       toast.success(t("hmsConfigured"))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("hmsConfigureFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("hmsConfigureFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [hms, refresh, t])
+  }, [hms, refresh, reportFailure, t])
 
   const onClearHms = useCallback(async () => {
     setBusy(true)
     try {
-      await transport.call<void>("companion_push_clear_hms")
+      await writePushCredential("companion_push_clear_hms")
       setHms((prev) => ({ ...prev, clientSecret: "" }))
       toast.success(t("hmsCleared"))
       await refresh()
     } catch (err) {
-      toast.error(
-        t("hmsClearFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
+      reportFailure("hmsClearFailed", err)
     } finally {
       setBusy(false)
     }
-  }, [refresh, t])
+  }, [refresh, reportFailure, t])
 
   const fcmDisabled = !fcmReach.available || busy
   const apnsDisabled = !apnsReach.available || busy

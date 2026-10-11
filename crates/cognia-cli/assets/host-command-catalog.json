@@ -4440,7 +4440,7 @@
       "operation": "write",
       "capability": "workspace.write",
       "risk": "low",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "bot_installation_mutate (workspace.write)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
@@ -4841,7 +4841,7 @@
       "operation": "write",
       "capability": "workspace.write",
       "risk": "low",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "bot_trigger_set_armed (workspace.write)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
@@ -11497,7 +11497,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_clear_apns (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -11521,7 +11521,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_clear_fcm (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -11545,7 +11545,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_clear_hms (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -11569,7 +11569,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_configure_apns (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -11699,7 +11699,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_configure_fcm (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -11750,7 +11750,7 @@
       "operation": "write",
       "capability": "host.admin",
       "risk": "high",
-      "approval": "none",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "companion_push_configure_hms (host.admin)",
       "description": "Loopback service-token command. Target: host-admin; risk: high.",
@@ -35610,6 +35610,329 @@
             }
           }
         }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_git_credential_delete",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "host_git_credential_delete (secret.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_git_credential_set",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "host_git_credential_set (secret.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "host",
+          "token"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
+        "required": [
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "git"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_provider_credential_delete",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "host_provider_credential_delete (secret.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "providerId"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_provider_credential_set",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "host_provider_credential_set (secret.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "providerId"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "apiKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "api_key"
+                ]
+              },
+              {
+                "required": [
+                  "apiKey"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
+        "required": [
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "git"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_provider_credentials_load",
+      "category": "system",
+      "resource": "host",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_provider_credentials_load (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Provider keys sealed on this host, for its own runtime only (service-internal). The only command that returns a secret value.",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "providerId",
+                "apiKey"
+              ],
+              "properties": {
+                "providerId": {
+                  "type": "string"
+                },
+                "apiKey": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_secret_list",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "secret.manage",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_secret_list (secret.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Secrets on this host by kind and name, with when and by which paired device each was set. Never a value.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "name"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "provider",
+                    "git",
+                    "connector"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "setAt": {
+                  "type": "integer"
+                },
+                "setBy": {
+                  "type": "object",
+                  "required": [
+                    "deviceId"
+                  ],
+                  "properties": {
+                    "deviceId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -75636,5 +75959,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "0c9c71725a8bc78ce042a5280784aff67d6bf7432996e92a7bb0a7725ac66a1e"
+  "catalogHash": "3bc2ed90a1b8256d18bb215732c9c674351f801932180d947f9f970f08c50399"
 }

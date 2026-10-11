@@ -54,6 +54,10 @@ export const HOST_FEATURE_IDS = [
   // with their provenance. Its absence is what a migration preflight reads as
   // "this host is too old to receive it", rather than finding out halfway.
   "always-on.migration",
+  // Secrets a paired owner device seals on this host for unattended work
+  // (ADR-0224 A6): provider keys and git tokens, listed by name only. Its
+  // absence is what the device page reads as "update the host first".
+  "always-on.secrets",
   "workflow.execution",
   // Host-owned external-agent configurations. Its presence is what tells a
   // browser that this host can BE the authority for an external agent — that
@@ -293,6 +297,18 @@ export const ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS = Object.freeze([
   "plugin_cogpack_upload_write",
   "plugin_cogpack_upload_abort",
   "plugin_cogpack_transfer_install",
+] as const)
+
+/**
+ * Secrets a paired owner device keeps on this host (ADR-0224 A6). The list is
+ * names only; the writes are `approval: interactive`.
+ */
+export const ALWAYS_ON_SECRETS_HOST_OPERATIONS = Object.freeze([
+  "host_secret_list",
+  "host_provider_credential_set",
+  "host_provider_credential_delete",
+  "host_git_credential_set",
+  "host_git_credential_delete",
 ] as const)
 
 /**
@@ -719,6 +735,11 @@ export function buildLocalHostFeatureManifest({
         ...ALWAYS_ON_MIGRATION_HOST_OPERATIONS,
         ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
       ],
+    }
+    // Both hosts seal secrets in the same store, through the same Rust arms.
+    features["always-on.secrets"] = {
+      version: 1,
+      operations: [...ALWAYS_ON_SECRETS_HOST_OPERATIONS],
     }
     // Runtime environments. Advertised by every host that carries the arms;
     // whether the pool is ON is `environment_driver_status`, and the arms say so

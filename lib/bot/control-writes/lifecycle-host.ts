@@ -138,10 +138,26 @@ async function validateBinding(
   }
 }
 
+/**
+ * The mutation without its approval token. `bot_installation_mutate` is
+ * `approval: interactive` (ADR-0224 A6), so a paired device sends an
+ * `adminLease` the RPC layer has already checked and forwards untouched; the
+ * mutation schema is closed and would refuse it as an unknown key.
+ */
+function withoutApprovalToken(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const {
+    adminLease: _adminLease,
+    admin_lease: _adminLeaseSnake,
+    ...mutation
+  } = raw as Record<string, unknown>
+  return mutation
+}
+
 export async function mutateBotInstallationOnHost(raw: unknown) {
   if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) !== "local")
     throw new Error("Bot lifecycle mutation must execute on its owning host")
-  const input = botLifecycleMutationSchema.parse(raw)
+  const input = botLifecycleMutationSchema.parse(withoutApprovalToken(raw))
   if (input.operation === "install") {
     const entry = (await readHostBotCatalog()).find(
       (item) => item.definitionId === input.definitionId

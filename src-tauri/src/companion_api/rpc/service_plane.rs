@@ -51,6 +51,13 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_keyring_get",
     "connectors_keyring_delete",
     "connectors_keyring_list",
+    // ADR-0224 A6 — secrets a paired device keeps on this host.
+    "host_secret_list",
+    "host_provider_credential_set",
+    "host_provider_credential_delete",
+    "host_git_credential_set",
+    "host_git_credential_delete",
+    "host_provider_credentials_load",
     "connectors_http_request",
     "connectors_ws_open",
     "connectors_ws_send",
@@ -976,8 +983,19 @@ pub(super) async fn dispatch(
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value: String = required(&args, "value")?;
+            // Indexed under the writing device (ADR-0224 A6), so the
+            // credential is listed under "Secrets on this host" and goes when
+            // that device is revoked.
+            let writer = secret_writer(device_id, tenant_id, scope);
+            let name = crate::connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::set(&adapter_id, &credential, &value)
+                crate::connectors::keyring::set(&adapter_id, &credential, &value)?;
+                cognia_secrets::host_secrets::note_written(
+                    cognia_secrets::host_secrets::HostSecretKind::Connector,
+                    &name,
+                    writer,
+                    now_ms(),
+                )
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1000,8 +1018,13 @@ pub(super) async fn dispatch(
         "connectors_keyring_delete" => {
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
+            let name = crate::connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::delete(&adapter_id, &credential)
+                crate::connectors::keyring::delete(&adapter_id, &credential)?;
+                cognia_secrets::host_secrets::note_deleted(
+                    cognia_secrets::host_secrets::HostSecretKind::Connector,
+                    &name,
+                )
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1019,6 +1042,80 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             to_json(present)
+        }
+
+        // ── Host secrets (ADR-0224 A6) ─────────────────────────────────────
+        // Provider keys and git tokens a paired owner device seals on this
+        // host for unattended work. Values go in and never come back out to a
+        // device: the list carries names, kinds and who set them, and only
+        // the service-only `host_provider_credentials_load` returns values, to
+        // this host's own runtime. Writes are `approval: interactive`, so the
+        // admin lease was checked before this arm ran.
+        "host_secret_list" => {
+            let tenant = secret_tenant(tenant_id);
+            let (swept, entries) = tokio::task::spawn_blocking(move || {
+                let swept = sweep_revoked_writers(&tenant);
+                cognia_secrets::host_secrets::list().map(|entries| (swept, entries))
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            announce_sweep(swept, host);
+            Ok(json!({ "entries": entries }))
+        }
+
+        "host_provider_credential_set" | "host_git_credential_set" => {
+            let (kind, name) = host_secret_target(name, &args)?;
+            let value: String = if kind == HostSecretKind::Provider {
+                required_aliased(&args, "api_key", "apiKey")?
+            } else {
+                required(&args, "token")?
+            };
+            let writer = secret_writer(device_id, tenant_id, scope);
+            let stored = name.clone();
+            tokio::task::spawn_blocking(move || {
+                cognia_secrets::host_secrets::set(kind, &stored, &value, writer, now_ms())
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::malformed)?;
+            host.publish_host_event(
+                SECRETS_CHANGED_EVENT,
+                json!({ "kind": kind.as_str(), "name": name, "action": "set" }),
+            );
+            Ok(json!({ "kind": kind.as_str(), "name": name }))
+        }
+
+        "host_provider_credential_delete" | "host_git_credential_delete" => {
+            let (kind, name) = host_secret_target(name, &args)?;
+            let removed = name.clone();
+            tokio::task::spawn_blocking(move || cognia_secrets::host_secrets::delete(kind, &removed))
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(RpcError::internal)?;
+            host.publish_host_event(
+                SECRETS_CHANGED_EVENT,
+                json!({ "kind": kind.as_str(), "name": name, "action": "deleted" }),
+            );
+            Ok(Value::Null)
+        }
+
+        "host_provider_credentials_load" => {
+            let tenant = secret_tenant(tenant_id);
+            let keys = tokio::task::spawn_blocking(move || {
+                // No announcement: the caller is the runtime that would reload.
+                sweep_revoked_writers(&tenant);
+                cognia_secrets::host_secrets::provider_keys()
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            Ok(json!({
+                "keys": keys
+                    .into_iter()
+                    .map(|(provider_id, api_key)| json!({ "providerId": provider_id, "apiKey": api_key }))
+                    .collect::<Vec<_>>()
+            }))
         }
 
         "connectors_http_request" => {
@@ -1684,6 +1781,87 @@ pub(super) async fn dispatch(
         unknown => Err(RpcError::unknown_command(unknown)),
     };
     result
+}
+
+// ---------------------------------------------------------------------------
+// Host secrets (ADR-0224 A6)
+// ---------------------------------------------------------------------------
+
+use cognia_secrets::host_secrets::{HostSecretKind, SecretWriter};
+
+/// Published when a host secret is set or removed; the host's own runtime
+/// reloads its provider keys on it. Kind and name only.
+const SECRETS_CHANGED_EVENT: &str = "host://secrets-changed";
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+/// The device a secret write is attributed to, or `None` for this host's own
+/// loopback caller. Only an attributed secret is deleted when its writer is
+/// revoked. The label is the device's name on this host at write time.
+fn secret_writer(
+    device_id: &str,
+    tenant_id: Option<&str>,
+    scope: Option<&str>,
+) -> Option<SecretWriter> {
+    if scope == Some("service") || device_id.is_empty() {
+        return None;
+    }
+    let label = tenant_id.and_then(|tenant| {
+        crate::companion_api::security_store::security_store()?
+            .list_devices(tenant)
+            .ok()?
+            .into_iter()
+            .find(|device| device.device_id == device_id)
+            .map(|device| device.display_name)
+    });
+    Some(SecretWriter {
+        device_id: device_id.to_string(),
+        label,
+    })
+}
+
+/// Which secret a provider or git command names, validated.
+fn host_secret_target(
+    command: &str,
+    args: &Value,
+) -> Result<(HostSecretKind, String), (StatusCode, Json<RpcError>)> {
+    if command.starts_with("host_provider_") {
+        let provider_id: String = required_aliased(args, "provider_id", "providerId")?;
+        let provider_id = provider_id.trim().to_string();
+        cognia_secrets::host_secrets::validate_name(HostSecretKind::Provider, &provider_id)
+            .map_err(RpcError::malformed)?;
+        Ok((HostSecretKind::Provider, provider_id))
+    } else {
+        let host: String = required(args, "host")?;
+        let host =
+            cognia_secrets::host_secrets::normalize_git_host(&host).map_err(RpcError::malformed)?;
+        Ok((HostSecretKind::Git, host))
+    }
+}
+
+fn secret_tenant(tenant_id: Option<&str>) -> String {
+    tenant_id
+        .map(str::to_string)
+        .unwrap_or_else(crate::companion_api::host_identity::current_tenant_or_unbound)
+}
+
+/// Drop the secrets of devices revoked behind this process's back (the
+/// `cognia-server devices` CLI beside a running server) before answering with
+/// what is stored. Blocking: run it off the async executor.
+fn sweep_revoked_writers(tenant: &str) -> usize {
+    crate::companion_api::device_lifecycle::sweep_revoked_device_secrets(tenant)
+}
+
+/// Tell the runtime its provider keys may have changed.
+fn announce_sweep(swept: usize, host: &super::super::dispatch_host::DispatchHost) {
+    if swept > 0 {
+        host.publish_host_event(SECRETS_CHANGED_EVENT, json!({ "action": "swept" }));
+    }
 }
 
 #[cfg(test)]

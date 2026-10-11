@@ -144,6 +144,7 @@
     "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n... .p8 文件内容 ...\n-----END PRIVATE KEY-----",
     "apnsLabel": "APNs (iOS)",
     "apnsTeamIdPlaceholder": "TEAM1234DE",
+    "awaitingApproval": "正在等待主机批准 —— 批准码 {code}。在主机上批准后再试一次。",
     "bundleId": "Bundle ID",
     "clearApns": "清除 APNs",
     "clearFcm": "清除 FCM",

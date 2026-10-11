@@ -62,6 +62,8 @@ export const MIGRATION_LEASE_OPERATIONS = [
   "scheduled_task_delete",
   "adapter_instance_mutate",
   "connectors_keyring_set",
+  // Interactive since ADR-0224 A6: a Bot's install, arm and take-back.
+  "bot_installation_mutate",
   ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
 ] as const
 

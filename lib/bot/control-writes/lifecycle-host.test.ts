@@ -420,3 +420,17 @@ describe("lifecycle hooks on the host path", () => {
     expect(await getDb().botInstallations.get(installed.id)).toBeUndefined()
   })
 })
+
+// ADR-0224 A6: a paired device's mutation arrives with the admin lease the
+// RPC layer already checked. The closed mutation schema must not refuse it.
+it("accepts a relayed mutation that still carries its approval token", async () => {
+  const installed = await mutateBotInstallationOnHost({
+    ...input,
+    operationId: "123e4567-e89b-42d3-a456-426614174001",
+    adminLease: "lease",
+  })
+  expect(installed.id).toBeTruthy()
+  await expect(
+    mutateBotInstallationOnHost({ ...input, operationId: "x", unexpected: true })
+  ).rejects.toThrow()
+})

@@ -618,5 +618,54 @@
       "here": "本设备",
       "hint": "本设备关机时，{host} 会继续运行它。与本设备绑定的内容会留在本设备，并说明原因。"
     }
+  },
+  "hostSecrets": {
+    "title": "此主机上的密钥",
+    "meta": "{count, plural, =0 {无} other {# 个密钥}}",
+    "description": "{host} 在无人值守时运行任务所用的密钥。它们密封保存在 {host} 上，其值不会再传回本设备。",
+    "loading": "正在读取 {host} 保存的内容…",
+    "empty": "{host} 还没有保存任何密钥。",
+    "tooOld": "{host} 版本过旧，无法为本设备保存密钥。请先更新它。",
+    "kind": {
+      "provider": "提供商密钥",
+      "git": "Git 令牌",
+      "connector": "连接凭据"
+    },
+    "connectorNote": "随其连接一起设置和移除。",
+    "thisDevice": "本设备",
+    "setBy": "由 {device} 于 {when} 设置",
+    "setByUndated": "由 {device} 设置",
+    "setByHost": "由 {host} 自身于 {when} 设置",
+    "setByHostUndated": "由 {host} 自身设置",
+    "remove": "移除",
+    "removing": "正在移除…",
+    "removeAria": "移除 {name}",
+    "removed": "已从 {host} 移除 {name}。",
+    "saved": "{name} 已密封保存在 {host} 上。",
+    "revokeNote": "某台设备在此设置的密钥，会在该设备于 {host} 上被吊销时删除。",
+    "confirm": {
+      "title": "移除 {name}？",
+      "providerBody": "{host} 上使用此提供商的任务将无法再调用它，除非 {host} 自身的设置里有密钥。",
+      "gitBody": "{host} 将无法再从此 Git 主机克隆私有仓库。",
+      "keep": "保留",
+      "remove": "移除"
+    },
+    "add": {
+      "title": "密封保存一个密钥",
+      "kind": {
+        "provider": "提供商密钥",
+        "git": "Git 令牌"
+      },
+      "provider": "提供商",
+      "providerPlaceholder": "选择提供商",
+      "gitHost": "Git 主机",
+      "gitHostPlaceholder": "github.com",
+      "apiKey": "API 密钥",
+      "token": "访问令牌",
+      "providerHint": "当 {host} 自身设置中没有该提供商的密钥时使用。通过本设备与 {host} 的连接发送，之后不再显示。",
+      "gitHint": "当 {host} 从此 Git 主机克隆且未提供令牌时使用。通过本设备与 {host} 的连接发送，之后不再显示。",
+      "save": "密封保存到 {host}",
+      "saving": "正在密封保存…"
+    }
   }
 }

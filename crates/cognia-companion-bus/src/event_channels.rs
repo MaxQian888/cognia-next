@@ -553,6 +553,14 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "plugin runtime lifecycle; ids and status",
     },
     EventChannelSpec {
+        pattern: "host://secrets-changed",
+        audience: ChannelAudience::ServiceOnly,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "a host secret was set or removed (ADR-0224 A6); kind and name, never a value. \
+               For the host's own runtime, which reloads provider keys",
+    },
+    EventChannelSpec {
         pattern: "plugin-wasm://renderer-request",
         audience: ChannelAudience::ServiceOnly,
         default_on: false,

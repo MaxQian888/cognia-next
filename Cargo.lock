@@ -3329,6 +3329,7 @@ dependencies = [
  "cognia-git-mirror",
  "cognia-hooks",
  "cognia-problem",
+ "cognia-secrets",
  "cognia-task-workspace",
  "hex",
  "log",

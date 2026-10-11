@@ -553,6 +553,35 @@
         "additionalProperties": false
       }
     },
+    "bot_trigger_set_armed": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Arm or disarm one trigger. An absolute value rather than a toggle, so a queued command replayed after a reconnect lands on what the user last asked for.",
+        "required": [
+          "installationId",
+          "triggerId",
+          "armed",
+          "adminLease"
+        ],
+        "properties": {
+          "installationId": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "armed": {
+            "type": "boolean"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "browser_act": {
       "inputSchemaSource": "zod-contract",
       "inputSchema": {
@@ -1731,6 +1760,281 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    "companion_push_clear_apns": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "adminLease"
+        ]
+      }
+    },
+    "companion_push_clear_fcm": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "adminLease"
+        ]
+      }
+    },
+    "companion_push_clear_hms": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "adminLease"
+        ]
+      }
+    },
+    "companion_push_configure_apns": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "production",
+          "adminLease"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `keyId`."
+          },
+          "team_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `teamId`."
+          },
+          "bundle_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `bundleId`."
+          },
+          "private_key_pem": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `privateKeyPem`."
+          },
+          "production": {
+            "type": "boolean",
+            "example": false
+          },
+          "keyId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `keyId`."
+          },
+          "teamId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `teamId`."
+          },
+          "bundleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `bundleId`."
+          },
+          "privateKeyPem": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `privateKeyPem`."
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "key_id"
+                ]
+              },
+              {
+                "required": [
+                  "keyId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "team_id"
+                ]
+              },
+              {
+                "required": [
+                  "teamId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "bundle_id"
+                ]
+              },
+              {
+                "required": [
+                  "bundleId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "private_key_pem"
+                ]
+              },
+              {
+                "required": [
+                  "privateKeyPem"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "companion_push_configure_fcm": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service_account_json": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `serviceAccountJson`."
+          },
+          "serviceAccountJson": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `serviceAccountJson`."
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "service_account_json"
+                ]
+              },
+              {
+                "required": [
+                  "serviceAccountJson"
+                ]
+              }
+            ]
+          }
+        ],
+        "required": [
+          "adminLease"
+        ]
+      }
+    },
+    "companion_push_configure_hms": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "AppGallery Connect OAuth client ID. Also accepted as `appId`."
+          },
+          "client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Host-only client secret. Also accepted as `clientSecret`."
+          },
+          "appId": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "AppGallery Connect OAuth client ID. Also accepted as `appId`."
+          },
+          "clientSecret": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Host-only client secret. Also accepted as `clientSecret`."
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "app_id"
+                ]
+              },
+              {
+                "required": [
+                  "appId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "client_secret"
+                ]
+              },
+              {
+                "required": [
+                  "clientSecret"
+                ]
+              }
+            ]
+          }
+        ],
+        "required": [
+          "adminLease"
+        ]
       }
     },
     "connectors_keyring_delete": {
@@ -5719,6 +6023,126 @@
         "additionalProperties": false,
         "required": [
           "adminLease"
+        ]
+      }
+    },
+    "host_git_credential_delete": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "host",
+          "adminLease"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "host_git_credential_set": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "host",
+          "token",
+          "adminLease"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "host_provider_credential_delete": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "providerId",
+          "adminLease"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "host_provider_credential_set": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "providerId",
+          "adminLease"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "apiKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "api_key"
+                ]
+              },
+              {
+                "required": [
+                  "apiKey"
+                ]
+              }
+            ]
+          }
         ]
       }
     },

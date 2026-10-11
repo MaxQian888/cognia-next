@@ -9,6 +9,8 @@
 //!   credentials (account passwords, file-share credentials).
 //! - [`api_key`] — the in-process Anthropic provider env store pushed by the
 //!   frontend and injected into the sidecar environment at spawn.
+//! - [`host_secrets`] — provider, git and connector secrets a paired device
+//!   keeps on an always-on host, indexed by writer (ADR-0224 A6).
 //!
 //! `app_lib` re-aliases each module (`pub use cognia_secrets::secret_store;`)
 //! so existing `crate::secret_store::…` call sites are unchanged. The thin
@@ -18,6 +20,7 @@
 //! `[dev-dependencies]` — see the note in `Cargo.toml`.
 
 pub mod api_key;
+pub mod host_secrets;
 pub mod keychain_access;
 pub mod keyring_secrets;
 pub mod password_kdf;

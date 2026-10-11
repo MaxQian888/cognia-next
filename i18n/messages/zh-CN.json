@@ -5567,6 +5567,7 @@
       "unresolvedHandler": "它的处理函数没有加载成功，安装后也无法运行。"
     },
     "lifecycle": {
+      "awaitingApproval": "正在等待主机批准 —— 批准码 {code}。在主机上批准后再试一次。",
       "bound": "凭据已绑定",
       "configSaved": "设置已保存",
       "definitionMissing": "这个 Bot 的定义已不存在。请重新安装拥有它的插件，或卸载这个 Bot。",
@@ -14306,6 +14307,55 @@
       "always-on": "常驻 host",
       "desktop": "桌面",
       "headless": "Headless 服务器"
+    },
+    "hostSecrets": {
+      "add": {
+        "apiKey": "API 密钥",
+        "gitHint": "当 {host} 从此 Git 主机克隆且未提供令牌时使用。通过本设备与 {host} 的连接发送，之后不再显示。",
+        "gitHost": "Git 主机",
+        "gitHostPlaceholder": "github.com",
+        "kind": {
+          "git": "Git 令牌",
+          "provider": "提供商密钥"
+        },
+        "provider": "提供商",
+        "providerHint": "当 {host} 自身设置中没有该提供商的密钥时使用。通过本设备与 {host} 的连接发送，之后不再显示。",
+        "providerPlaceholder": "选择提供商",
+        "save": "密封保存到 {host}",
+        "saving": "正在密封保存…",
+        "title": "密封保存一个密钥",
+        "token": "访问令牌"
+      },
+      "confirm": {
+        "gitBody": "{host} 将无法再从此 Git 主机克隆私有仓库。",
+        "keep": "保留",
+        "providerBody": "{host} 上使用此提供商的任务将无法再调用它，除非 {host} 自身的设置里有密钥。",
+        "remove": "移除",
+        "title": "移除 {name}？"
+      },
+      "connectorNote": "随其连接一起设置和移除。",
+      "description": "{host} 在无人值守时运行任务所用的密钥。它们密封保存在 {host} 上，其值不会再传回本设备。",
+      "empty": "{host} 还没有保存任何密钥。",
+      "kind": {
+        "connector": "连接凭据",
+        "git": "Git 令牌",
+        "provider": "提供商密钥"
+      },
+      "loading": "正在读取 {host} 保存的内容…",
+      "meta": "{count, plural, =0 {无} other {# 个密钥}}",
+      "remove": "移除",
+      "removeAria": "移除 {name}",
+      "removed": "已从 {host} 移除 {name}。",
+      "removing": "正在移除…",
+      "revokeNote": "某台设备在此设置的密钥，会在该设备于 {host} 上被吊销时删除。",
+      "saved": "{name} 已密封保存在 {host} 上。",
+      "setBy": "由 {device} 于 {when} 设置",
+      "setByHost": "由 {host} 自身于 {when} 设置",
+      "setByHostUndated": "由 {host} 自身设置",
+      "setByUndated": "由 {device} 设置",
+      "thisDevice": "本设备",
+      "title": "此主机上的密钥",
+      "tooOld": "{host} 版本过旧，无法为本设备保存密钥。请先更新它。"
     },
     "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
     "hostUnreachableTitle": "当前显示的是本地记录",
@@ -25104,6 +25154,7 @@
         "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n... .p8 文件内容 ...\n-----END PRIVATE KEY-----",
         "apnsLabel": "APNs (iOS)",
         "apnsTeamIdPlaceholder": "TEAM1234DE",
+        "awaitingApproval": "正在等待主机批准 —— 批准码 {code}。在主机上批准后再试一次。",
         "bundleId": "Bundle ID",
         "clearApns": "清除 APNs",
         "clearFcm": "清除 FCM",

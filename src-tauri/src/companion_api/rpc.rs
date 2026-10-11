@@ -500,6 +500,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_keyring_get",
     "connectors_keyring_delete",
     "connectors_keyring_list",
+    // ADR-0224 A6 — secrets a paired device keeps on this host. The writes
+    // are `approval: interactive` in the manifest; the load is service-only.
+    "host_secret_list",
+    "host_provider_credential_set",
+    "host_provider_credential_delete",
+    "host_git_credential_set",
+    "host_git_credential_delete",
+    "host_provider_credentials_load",
     "connectors_http_request",
     "connectors_ws_open",
     "connectors_ws_send",
@@ -2572,7 +2580,10 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // ADR-0224 A5 — the brain's half of a plugin transfer it accepted. A
     // device reaches the install only through `plugin_cogpack_transfer_install`,
     // which runs the host's own signature and policy checks first.
-    "plugin_cogpack_install_staged",
+    "plugin_cogpack_install_staged",    // ADR-0224 A6 — the provider keys sealed on this host, for its own
+    // runtime. The only host-secret command that returns values, so no
+    // device plane may reach it; devices see names via `host_secret_list`.
+    "host_provider_credentials_load",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =

@@ -10,10 +10,15 @@ jest.mock("@/hooks/connectivity/use-host-admin-reach", () => ({
   useHostAdminReachForCommand: (command: string) => reach(command),
 }))
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
+let target: { kind: string } | null = null
+jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
+  getRuntimeSnapshot: () => ({ target }),
+}))
 let status: PushConfigStatus = { fcmConfigured: false, apnsConfigured: false }
 const defaultCall = async (name: string) => {
   if (name === "companion_push_status") return status
+  if (name === "host_admin_lease_issue") return { token: "lease-1", operations: [], expiresAt: 0 }
   if (name === "companion_push_configure_fcm") status = { ...status, fcmConfigured: true }
   if (name === "companion_push_configure_hms") status = { ...status, hmsConfigured: true }
   if (name === "companion_push_clear_hms") status = { ...status, hmsConfigured: false }
@@ -28,6 +33,7 @@ describe("PushCredentialsBlock", () => {
   beforeEach(() => {
     reach.mockReturnValue({ available: true })
     status = { fcmConfigured: false, apnsConfigured: false }
+    target = null
     call.mockReset().mockImplementation(defaultCall)
     jest.mocked(toast.success).mockClear()
     jest.mocked(toast.error).mockClear()
@@ -123,7 +129,7 @@ describe("PushCredentialsBlock", () => {
     expect(toast.success).toHaveBeenCalledWith("hmsConfigured")
     expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ hmsConfigured: true }))
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "clearHms" })))
-    expect(call).toHaveBeenCalledWith("companion_push_clear_hms")
+    expect(call).toHaveBeenCalledWith("companion_push_clear_hms", {})
     expect(toast.success).toHaveBeenCalledWith("hmsCleared")
     expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ hmsConfigured: false }))
   })
@@ -167,5 +173,39 @@ describe("PushCredentialsBlock", () => {
     expect(screen.getByRole("button", { name: "saveHms" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "clearHms" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "saveFcm" })).toBeEnabled()
+  })
+
+  // ADR-0224 A6: push credentials are host configuration, approved per click.
+  it("sends an admin lease minted for the command when it configures a paired host", async () => {
+    target = { kind: "companion" }
+    render(<PushCredentialsBlock />)
+    fireEvent.change(screen.getByLabelText("fcmAria"), { target: { value: '{"type":"sa"}' } })
+    await act(async () => {
+      fireEvent.click(screen.getByText("saveFcm"))
+    })
+    expect(call).toHaveBeenCalledWith("host_admin_lease_issue", {
+      operations: ["companion_push_configure_fcm"],
+      ttlSeconds: 600,
+    })
+    expect(call).toHaveBeenCalledWith("companion_push_configure_fcm", {
+      serviceAccountJson: '{"type":"sa"}',
+      adminLease: "lease-1",
+    })
+  })
+
+  it("says the host is waiting for approval, with its code, instead of failing", async () => {
+    target = { kind: "companion" }
+    call.mockImplementation(async (name: string) => {
+      if (name === "host_admin_lease_issue") throw new Error("REMOTE_CONSENT_REQUIRED (code K7Q2)")
+      return defaultCall(name)
+    })
+    render(<PushCredentialsBlock />)
+    fireEvent.change(screen.getByLabelText("fcmAria"), { target: { value: '{"type":"sa"}' } })
+    await act(async () => {
+      fireEvent.click(screen.getByText("saveFcm"))
+    })
+    expect(toast.info).toHaveBeenCalledWith("awaitingApproval")
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalledWith("companion_push_configure_fcm", expect.anything())
   })
 })

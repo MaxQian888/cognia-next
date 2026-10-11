@@ -40,6 +40,8 @@ cognia-companion-bus = { path = "../cognia-companion-bus" }
 cognia-problem = { path = "../cognia-problem" }
 # `rt::spawn` for the hook sink, which fires from sync service code.
 cognia-core = { path = "../cognia-core", features = ["rt"] }
+# The git token this host keeps for a remote's git host (ADR-0224 A6).
+cognia-secrets = { path = "../cognia-secrets" }
 tauri = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt", "time"] }
 parking_lot.workspace = true
@@ -50,6 +52,7 @@ log.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 tempfile.workspace = true
 # The resource-read tests pin the content digest the service reports.
 hex.workspace = true

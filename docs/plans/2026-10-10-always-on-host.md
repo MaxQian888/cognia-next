@@ -156,6 +156,16 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 5. Desktop UI on the management channel: "Secrets on this host", showing names, provider and when set, never values.
 6. Tests: store round trip, revoke cascade, approval classes pinned.
 
+**A6 outcome (2026-10-11).** Built against the plan with these deviations:
+
+- **Store** (`crates/cognia-secrets/src/host_secrets.rs`): provider keys (`com.cognia.host-provider-credentials/v1`, the `keyring_secrets` namespace `host-provider-credentials`), git tokens by git host (`com.cognia.host-git-credentials/v1`) and the existing connector service, all over `secret_store`. A metadata-only index (`com.cognia.host-secret-index/v1`) records `{ setAt, setBy }` per secret; the loopback service plane writes unattributed.
+- **Commands:** `host_secret_list` (names, kinds, when, by which device; `secret.manage`, approval `none`, because it carries no value), `host_provider_credential_set/delete` and `host_git_credential_set/delete` (`secret.manage`, `interactive`), and the service-only `host_provider_credentials_load`, the one command that returns values, plus a Tauri command of the same name for a desktop host's renderer. Changes publish the service-only `host://secrets-changed`.
+- **Unattended runs:** the keys fill providers with no key of their own at `createProviderSettingsSnapshot`, the point all provider resolution reads (`lib/host-secrets/`). The brain loads them in the `host-provider-keys` runtime, ahead of the scheduler and awaited; a desktop host in `HostProviderKeysInitializer`. Both reload on the event.
+- **Connector and git:** `connectors_keyring_set/delete` index the writer. `task_workspace_remote_source_ensure` uses the stored token for the remote's git host when the caller sends none.
+- **Revoke cascade:** `device_lifecycle::apply` deletes a revoked device's secrets (suspension keeps them). `cognia-server devices revoke-device` bypasses `apply`, so it cascades itself, and because a running server's secret cache would write deleted entries back, the server also sweeps writers that are revoked or unknown at boot and before it lists or loads secrets.
+- **Approval classes:** the three `companion_push_configure_*` and, per the ADR's "push credentials", the three `companion_push_clear_*`, plus `bot_installation_mutate` and `bot_trigger_set_armed`, are `interactive`. The push block and the Bot console mint a lease per gesture (`lib/tauri/interactive-approval.ts`) and show the host's approval code; the outbound queue already leases interactive commands; the A5 migration sends its lease on every Bot call.
+- **UI:** a **Secrets on this host** section on the remote host's device page (`components/devices/host-secrets/`), gated on the host manifest's new `always-on.secrets` feature: grouped list, seal a provider key or git token, remove with a confirmation, the approval code in place. Connection credentials are listed read-only, since they belong to their connection.
+
 ### A7 — Declared permission and parked approvals
 
 1. **Permission profile** on bot installations and scheduled tasks, folded through `lib/bot/policy/ceilings.ts` and `AgentCapabilityGrantV1` (narrowing only).

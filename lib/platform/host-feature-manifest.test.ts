@@ -220,6 +220,26 @@ describe("host feature manifest", () => {
     }
   })
 
+  it("advertises host secrets from desktop and headless hosts only (ADR-0224 A6)", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      expect(buildLocalHostFeatureManifest({ platform }).features["always-on.secrets"]).toEqual({
+        version: 1,
+        operations: [
+          "host_secret_list",
+          "host_provider_credential_set",
+          "host_provider_credential_delete",
+          "host_git_credential_set",
+          "host_git_credential_delete",
+        ],
+      })
+    }
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["always-on.secrets"]
+      ).toBeUndefined()
+    }
+  })
+
   it("advertises the versioned Twin draft review operation on execution hosts", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
 

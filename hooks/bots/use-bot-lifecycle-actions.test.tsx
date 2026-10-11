@@ -64,8 +64,13 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
 
 const success = jest.fn()
 const error = jest.fn()
+const info = jest.fn()
 jest.mock("sonner", () => ({
-  toast: { success: (...a: unknown[]) => success(...a), error: (...a: unknown[]) => error(...a) },
+  toast: {
+    success: (...a: unknown[]) => success(...a),
+    error: (...a: unknown[]) => error(...a),
+    info: (...a: unknown[]) => info(...a),
+  },
 }))
 
 import { useBotLifecycleActions, useBotLifecycleReadiness } from "./use-bot-lifecycle-actions"
@@ -110,6 +115,7 @@ beforeEach(() => {
   uninstallBotInstallation.mockClear().mockResolvedValue(undefined)
   success.mockClear()
   error.mockClear()
+  info.mockClear()
   availability = { state: "available", reason: "local-host" }
 })
 
@@ -200,6 +206,19 @@ describe("useBotLifecycleActions", () => {
     expect(error).toHaveBeenCalledWith(
       "That Bot's definition is gone. Reinstall the plugin that owned it, or uninstall this Bot."
     )
+  })
+
+  it("says the host is waiting for approval, with the code, rather than failing", async () => {
+    const { HostConsentRequiredError } = jest.requireActual("@/lib/tauri/admin-lease")
+    uninstallBotInstallation.mockRejectedValue(
+      new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED (code K7Q2)", "K7Q2")
+    )
+    const { result } = renderHook(() => useBotLifecycleActions())
+    await act(async () => {
+      await result.current.uninstall("boti_1")
+    })
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("K7Q2"))
+    expect(error).not.toHaveBeenCalled()
   })
 
   it("keeps the underlying message for anything unexpected", async () => {

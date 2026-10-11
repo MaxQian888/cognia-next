@@ -626,6 +626,7 @@ commands.allow = [
   "host_consent_respond",
   "host_mode_get",
   "host_mode_set",
+  "host_provider_credentials_load",
   "integration_ingress_ack",
   "integration_ingress_deadletter",
   "integration_ingress_deadletters",

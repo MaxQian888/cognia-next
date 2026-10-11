@@ -7,6 +7,9 @@ describe("headless runtime roster", () => {
       const names = registry.listHeadlessRuntimes().map((runtime) => runtime.name)
 
       expect(names[0]).toBe("host-event-publisher")
+      // Sealed provider keys are loaded before anything that can start a run.
+      expect(names.indexOf("host-provider-keys")).toBeGreaterThan(0)
+      expect(names.indexOf("host-provider-keys")).toBeLessThan(names.indexOf("scheduler"))
       expect(names).toContain("workflow-runtime")
       expect(names).toContain("workflow-trigger-bridge")
       expect(names).not.toContain("twin-job-worker")

@@ -4186,6 +4186,24 @@
     },
     "plugin_install_origin_record": {
       "to": "plugin.install_origin.record"
+    },
+    "host_secret_list": {
+      "to": "host.secret.list"
+    },
+    "host_provider_credential_set": {
+      "to": "host.secret.provider.set"
+    },
+    "host_provider_credential_delete": {
+      "to": "host.secret.provider.delete"
+    },
+    "host_git_credential_set": {
+      "to": "host.secret.git.set"
+    },
+    "host_git_credential_delete": {
+      "to": "host.secret.git.delete"
+    },
+    "host_provider_credentials_load": {
+      "to": "host.secret.provider.load"
     }
   }
 }

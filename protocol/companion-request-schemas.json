@@ -10075,6 +10075,84 @@
       },
       "additionalProperties": false
     },
+    "host_git_credential_delete": {
+      "type": "object",
+      "required": [
+        "host"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "host_git_credential_set": {
+      "type": "object",
+      "required": [
+        "host",
+        "token"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "additionalProperties": false
+    },
+    "host_provider_credential_delete": {
+      "type": "object",
+      "required": [
+        "providerId"
+      ],
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "host_provider_credential_set": {
+      "type": "object",
+      "required": [
+        "providerId",
+        "apiKey"
+      ],
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "apiKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "additionalProperties": false
+    },
+    "host_provider_credentials_load": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "host_secret_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "host_state_snapshot": {
       "type": "object",
       "required": [

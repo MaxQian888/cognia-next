@@ -14,6 +14,7 @@
  * resolution logic pure and unit-testable.
  */
 
+import { overlayHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
@@ -320,7 +321,9 @@ export function createProviderSettingsSnapshot(
 ): ProviderSettingsSnapshot {
   return {
     defaultProvider: input.defaultProvider,
-    providers: { ...(input.providerSettings ?? {}) },
+    // Keys a paired device sealed on this host fill providers that have none
+    // of their own (ADR-0224 A6): an always-on host's unattended runs.
+    providers: overlayHostProviderKeys({ ...(input.providerSettings ?? {}) }),
     customProviders: (input.customProviders ?? []).map(richToDefinition),
   }
 }
