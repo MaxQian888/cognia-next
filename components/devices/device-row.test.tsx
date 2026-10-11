@@ -62,6 +62,17 @@ describe("DeviceRowButton", () => {
     expect(screen.getByTestId("device-row-device:a")).toHaveAttribute("aria-current", "true")
   })
 
+  it("badges the always-on host in the list (ADR-0224 A4)", () => {
+    const { rerender } = render(
+      <DeviceRowButton row={row({ hostRole: "always-on" })} selected={false} onSelect={jest.fn()} />
+    )
+    expect(screen.getByTestId("always-on-badge")).toBeInTheDocument()
+    rerender(
+      <DeviceRowButton row={row({ hostRole: "headless" })} selected={false} onSelect={jest.fn()} />
+    )
+    expect(screen.queryByTestId("always-on-badge")).toBeNull()
+  })
+
   it("shows no lifecycle badge while a device is active", () => {
     render(<DeviceRowButton row={row()} selected={false} onSelect={jest.fn()} />)
     expect(screen.queryByText("Active")).not.toBeInTheDocument()

@@ -93,6 +93,18 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 5. The management channel: a hook over `openRemoteHostTarget` (`lib/remote-host/target-transport.ts:31`) that host panels share.
 6. Tests for each builder and component; i18n for every label.
 
+**A4 outcome (2026-10-11).** Built and run live against a headless host, from the desktop shell and the CLI:
+
+- **Management channel** (`lib/remote-host/management-channel.ts`, hook `hooks/remote-host/use-management-channel.ts`): one reference-counted connection per host over `openRemoteHostTarget`, kept warm for 150 s after the last lease and keyed by `RemoteHost.id` whichever ref a caller uses. A re-paired or removed host's channel is closed and reopened, so stale keys are never read as a revocation. The console's "Read its worktrees" now goes through it.
+- **Liveness** (`lib/remote-host/liveness.ts`, `RemoteHostLivenessInitializer`, desktop-only, one per origin through a Web Lock): every paired host except the routed one and revoked ones is asked `host_feature_manifest` about every 60 s (inside the 90 s manifest TTL), backing off to 10 min while it does not answer. `recordHostProbe` writes `lastProbe` and, on a version-matched answer, `lastConnectedAt` / the manifest, which is what the ADR-0136 authority reads. That covers A5 step 8 without further change.
+- **Session evidence:** a persisted `connectionState` other than `revoked` is reset on rehydrate (`rehydratedHosts`); `lastProbe` is not trusted across a relaunch.
+- **Relay route for desktop-paired hosts:** the store and `openRemoteHostTarget` now import the signaling key as a `CryptoKey`. The vault and pairing hand back only the JWK, so `CompanionTransport`'s relay fallback had been off for every remote host the desktop paired.
+- **Rows:** `DeviceRow.hostRole` (`always-on` > `headless` > `desktop`, from `alwaysOn`, the manifest's `platform`, or local host mode) and probe-backed liveness for hosts the desktop is not routing to. The **Always-on** badge sits in the row and hero; Identity gains **Host role**; Presence gains **Last check** with **Check now**.
+- **Platform:** the desktop registers as `desktop` (was `unknown`), with the `tauri` capability baseline.
+- **CLI over the relay** (the A2 gap): `host login` keeps the CLI's own relay room (`HostRecord.relay`, redacted like the device key), and device commands fall back to it when the address does not answer (`cli/src/api/relay-transport.ts`, `withRelayFallback`). A DPoP token exchange that never reached the host now reports `network`, not `auth`, so the fallback can see it. Raw `api request` and `--wait` stay direct and say so.
+- **Fixed on the way:** with synchronous storage the store's `onRehydrateStorage` read `useRemoteHostStore` before `create()` returned, throwing on every boot once a host was persisted.
+- **Not verifiable in a dev build:** desktop relay pairing and the desktop's relay route. The signaling server refuses browser WebSocket upgrades from origins not on `SIGNALING_ALLOWED_ORIGINS`, and a dev webview's origin is `http://localhost:3000`. The desktop smoke therefore used the host's loopback listener; the relay route was proven from the CLI.
+
 ### A5 — Per-item ownership and migration
 
 1. **Owner field.**

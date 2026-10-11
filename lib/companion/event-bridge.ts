@@ -73,6 +73,7 @@ const KNOWN_PLATFORMS: ReadonlySet<DevicePlatform> = new Set([
   "android",
   "web",
   "browser",
+  "desktop",
   "unknown",
 ])
 

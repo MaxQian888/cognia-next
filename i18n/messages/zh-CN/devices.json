@@ -137,7 +137,16 @@
     "conflictTitle": "主机与本地记录不一致",
     "conflictBody": "上方显示的是主机的判定，也是实际生效的那一个。本地镜像已过期——通常是通过 CLI 或 Owner API 改动的。",
     "connectionErrorTitle": "上次连接失败",
-    "streamCount": "{count, plural, other {# 条事件流}}"
+    "streamCount": "{count, plural, other {# 条事件流}}",
+    "hostRole": "Host 角色",
+    "lastCheck": "最近检查",
+    "lastCheckNever": "本次会话尚未检查",
+    "lastCheckOk": "{when}有响应",
+    "lastCheckFailed": "{when}无响应：{error}",
+    "checkNow": "立即检查",
+    "checking": "检查中…",
+    "checkAnswered": "Host 已响应。",
+    "checkNoAnswer": "Host 没有响应：{error}"
   },
   "capabilities": {
     "group": {
@@ -476,5 +485,10 @@
   "pairingAlert": {
     "title": "有新设备完成配对",
     "body": "{label}（{platform}）已与此主机配对。如果不是你本人操作，请在「设备」中撤销它。"
+  },
+  "hostRole": {
+    "always-on": "常驻 host",
+    "headless": "Headless 服务器",
+    "desktop": "桌面"
   }
 }

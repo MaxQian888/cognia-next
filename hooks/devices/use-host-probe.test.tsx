@@ -5,38 +5,36 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { useHostProbe } from "./use-host-probe"
 
-function target(environments: unknown, close = jest.fn()) {
+function lease(environments: unknown, release = jest.fn()) {
   return {
     host: {} as never,
-    close,
+    release,
     transport: { call: jest.fn().mockResolvedValue(environments) } as never,
   }
 }
 
 it("stays idle until asked, so mounting the console dials nobody", () => {
-  const openTarget = jest.fn()
-  renderHook(() => useHostProbe("h1", { openTarget }))
-  expect(openTarget).not.toHaveBeenCalled()
+  const acquire = jest.fn()
+  renderHook(() => useHostProbe("h1", { acquire }))
+  expect(acquire).not.toHaveBeenCalled()
 })
 
-it("reads the host's worktrees over its own transport", async () => {
-  const close = jest.fn()
-  const openTarget = jest
-    .fn()
-    .mockResolvedValue(target([{ environmentId: "e1", path: "/w" }], close))
-  const { result } = renderHook(() => useHostProbe("h1", { openTarget }))
+it("reads the host's worktrees over its management channel", async () => {
+  const release = jest.fn()
+  const acquire = jest.fn().mockResolvedValue(lease([{ environmentId: "e1", path: "/w" }], release))
+  const { result } = renderHook(() => useHostProbe("h1", { acquire }))
 
   act(() => result.current.probe())
   await waitFor(() => expect(result.current.state.status).toBe("ready"))
-  expect(openTarget).toHaveBeenCalledWith("h1")
-  // The transport is per-probe, so leaving it open would hold a live
-  // connection to a remote machine for as long as the console is mounted.
-  expect(close).toHaveBeenCalled()
+  expect(acquire).toHaveBeenCalledWith("h1")
+  // A lease nobody gives back keeps the channel to that machine open for as
+  // long as the console is mounted.
+  expect(release).toHaveBeenCalled()
 })
 
 it("carries the failure verbatim rather than reporting an empty host", async () => {
-  const openTarget = jest.fn().mockRejectedValue(new Error("credential is unavailable"))
-  const { result } = renderHook(() => useHostProbe("h1", { openTarget }))
+  const acquire = jest.fn().mockRejectedValue(new Error("credential is unavailable"))
+  const { result } = renderHook(() => useHostProbe("h1", { acquire }))
 
   act(() => result.current.probe())
   await waitFor(() => expect(result.current.state.status).toBe("error"))
@@ -52,12 +50,12 @@ it("drops a result whose host is no longer selected", async () => {
   const slow = new Promise((resolve) => {
     release = resolve
   })
-  const openTarget = jest.fn().mockImplementation(async () => {
+  const acquire = jest.fn().mockImplementation(async () => {
     await slow
-    return target([{ environmentId: "stale", path: "/stale" }])
+    return lease([{ environmentId: "stale", path: "/stale" }])
   })
 
-  const { result, rerender } = renderHook(({ host }) => useHostProbe(host, { openTarget }), {
+  const { result, rerender } = renderHook(({ host }) => useHostProbe(host, { acquire }), {
     initialProps: { host: "h1" as string | null },
   })
   act(() => result.current.probe())
@@ -71,8 +69,8 @@ it("drops a result whose host is no longer selected", async () => {
 })
 
 it("does nothing when there is no host to probe", () => {
-  const openTarget = jest.fn()
-  const { result } = renderHook(() => useHostProbe(null, { openTarget }))
+  const acquire = jest.fn()
+  const { result } = renderHook(() => useHostProbe(null, { acquire }))
   act(() => result.current.probe())
-  expect(openTarget).not.toHaveBeenCalled()
+  expect(acquire).not.toHaveBeenCalled()
 })

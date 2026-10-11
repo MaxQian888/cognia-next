@@ -14173,6 +14173,11 @@
         "versionMismatch": "需要升级"
       }
     },
+    "hostRole": {
+      "always-on": "常驻 host",
+      "desktop": "桌面",
+      "headless": "Headless 服务器"
+    },
     "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
     "hostUnreachableTitle": "当前显示的是本地记录",
     "justNow": "刚刚",
@@ -14226,6 +14231,10 @@
       "appVersion": "应用版本",
       "attention": "前后台",
       "baseUrl": "地址",
+      "checkAnswered": "Host 已响应。",
+      "checkNoAnswer": "Host 没有响应：{error}",
+      "checkNow": "立即检查",
+      "checking": "检查中…",
       "conflictBody": "上方显示的是主机的判定，也是实际生效的那一个。本地镜像已过期——通常是通过 CLI 或 Owner API 改动的。",
       "conflictTitle": "主机与本地记录不一致",
       "connection": "连接",
@@ -14236,9 +14245,14 @@
       "eventPlaneState": "流健康度",
       "fingerprint": "指纹",
       "fingerprintCopied": "指纹已复制",
+      "hostRole": "Host 角色",
       "identity": "身份",
       "isThisDevice": "本机",
       "kind": "类型",
+      "lastCheck": "最近检查",
+      "lastCheckFailed": "{when}无响应：{error}",
+      "lastCheckNever": "本次会话尚未检查",
+      "lastCheckOk": "{when}有响应",
       "lastConnected": "最近连接",
       "lastSeen": "最近可见",
       "noStreams": "当前没有打开的事件流。",

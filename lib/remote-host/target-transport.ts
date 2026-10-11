@@ -7,6 +7,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import {
   getRemoteTransportFactory,
   useRemoteHostStore,
+  withSigningKey,
   type RemoteHost,
 } from "@/stores/remote-host/remote-host-store"
 
@@ -54,11 +55,16 @@ export async function openRemoteHostTarget(
     throw new Error(`Remote Host ${host.label} credential is unavailable; pair it again`)
   }
 
-  const config: CompanionConfig = {
+  const paired: CompanionConfig = {
     ...host.config,
     devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
     signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk,
   }
+  // The relay route signs its room with a CryptoKey; the vault hands back the
+  // JWK. Without the import an always-on host behind NAT, which only the relay
+  // reaches, could never be managed (ADR-0224 A4). A key that will not import
+  // still leaves the direct route.
+  const config = await withSigningKey(paired).catch(() => paired)
   // Same construction the store activates a host through, so a transport seam
   // installed for one covers the other and there is one place to change how a
   // companion transport is built.

@@ -187,15 +187,17 @@ export async function generateDeviceIdentity(): Promise<DeviceIdentity> {
 /**
  * The paired-device platform label this client reports at registration —
  * the same vocabulary `lib/companion/event-bridge.ts` normalises on receipt
- * (`ios` | `android` | `web` | `unknown`).
+ * (`ios` | `android` | `web` | `desktop` | `unknown`). The desktop app says
+ * `desktop` (ADR-0224 A4): a host listing the desktops that manage it used to
+ * show them as an unknown platform.
  */
-export function devicePlatformLabel(): "ios" | "android" | "web" | "unknown" {
+export function devicePlatformLabel(): "ios" | "android" | "web" | "desktop" | "unknown" {
   if (typeof window === "undefined") return "unknown"
   const cap = (window as unknown as { Capacitor?: { getPlatform?: () => string } }).Capacitor
   const native = typeof cap?.getPlatform === "function" ? cap.getPlatform() : null
   if (native === "ios" || native === "android") return native
   if (native === "web" || !("__TAURI_INTERNALS__" in window)) return "web"
-  return "unknown"
+  return "desktop"
 }
 
 export async function registerCompanionDevice(

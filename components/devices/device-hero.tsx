@@ -42,6 +42,7 @@ import { HostConnectionState, HostControls, isPairedCompanionHost } from "./host
 import { PairedDeviceLifecycle, PairedDeviceLifecycleNotice } from "./paired-device-lifecycle"
 import {
   AdminStateBadge,
+  AlwaysOnBadge,
   DeviceKindIcon,
   ReachabilityLabel,
   useDeviceRelativeTime,
@@ -188,6 +189,7 @@ export function DeviceHero({ row, actions, onRepairHost, children }: DeviceHeroP
               <h2 className="min-w-0 truncate text-[15px] font-semibold leading-tight">
                 {row.label}
               </h2>
+              <AlwaysOnBadge role={row.hostRole} />
               <AdminStateBadge state={row.adminState} />
             </div>
           )}

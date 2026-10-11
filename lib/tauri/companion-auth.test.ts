@@ -462,7 +462,7 @@ describe("devicePlatformLabel (ADR-0127)", () => {
     expect(devicePlatformLabel()).toBe("unknown")
   })
 
-  it("reports the Capacitor native platform, web for a browser, unknown for a Tauri desktop", () => {
+  it("reports the Capacitor native platform, web for a browser, desktop for the Tauri app", () => {
     g.window = {}
     expect(devicePlatformLabel()).toBe("web")
     g.window = { Capacitor: { getPlatform: () => "ios" } }
@@ -471,8 +471,10 @@ describe("devicePlatformLabel (ADR-0127)", () => {
     expect(devicePlatformLabel()).toBe("android")
     g.window = { Capacitor: { getPlatform: () => "web" } }
     expect(devicePlatformLabel()).toBe("web")
+    // ADR-0224 A4: a host listing the desktops that manage it used to show
+    // them as an unknown platform.
     g.window = { __TAURI_INTERNALS__: {} }
-    expect(devicePlatformLabel()).toBe("unknown")
+    expect(devicePlatformLabel()).toBe("desktop")
   })
 })
 

@@ -37,6 +37,10 @@ describe("baselinePlatformFor", () => {
     expect(baselinePlatformFor("web")).toBe("web")
   })
 
+  it("gives a paired desktop app the desktop baseline (ADR-0224 A4)", () => {
+    expect(baselinePlatformFor("desktop")).toBe("tauri")
+  })
+
   it("refuses to invent a baseline for a device that would not name its platform", () => {
     expect(baselinePlatformFor("unknown")).toBeUndefined()
     expect(baselinePlatformFor(undefined)).toBeUndefined()

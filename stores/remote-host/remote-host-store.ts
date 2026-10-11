@@ -37,6 +37,7 @@ import { codeServerClient } from "@/lib/codeserver/client"
 import { CompanionTransport } from "@/lib/tauri/transport-companion"
 import { transport } from "@/lib/tauri/transport-instance"
 import { setActiveRemoteEndpoint, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { importSigningPrivateKey } from "@/lib/signaling/crypto"
 import type { Transport } from "@/lib/tauri/transport-types"
 import {
   clearRemoteHostCredential,
@@ -85,6 +86,25 @@ export interface RemoteHost {
    * this window to it.
    */
   alwaysOn?: boolean
+  /**
+   * The last liveness probe through the management channel (ADR-0224 A4).
+   *
+   * A host this desktop is not routing to has no live connection to report on,
+   * so without a probe its `lastConnectedAt` froze at the last activation and
+   * every reader (the device console, the ADR-0136 timing authority) saw an
+   * always-on host as gone. Session evidence, like `connectionState`: it is
+   * not trusted across a relaunch.
+   */
+  lastProbe?: RemoteHostProbe
+}
+
+export interface RemoteHostProbe {
+  /** Epoch ms the probe settled. */
+  at: number
+  /** Whether the host answered with a usable, version-matched manifest. */
+  ok: boolean
+  /** Why it did not, verbatim, when `ok` is false. */
+  error?: string
 }
 
 export interface RemoteHostState {
@@ -123,16 +143,49 @@ function withoutPersistedSecrets(config: CompanionConfig): CompanionConfig {
   }
 }
 
+/**
+ * Whether a config can take the relay route: its signaling key is a usable
+ * `CryptoKey`, not only the JWK the credential vault and pairing hand back.
+ * `CompanionTransport` signs the room with the `CryptoKey`; without it the
+ * relay fallback is silently off, which strands a host behind NAT.
+ */
+export function needsSigningKeyImport(config: CompanionConfig): boolean {
+  return config.signalingPrivateKeyJwk !== undefined && config.signalingPrivateKey === undefined
+}
+
+/** Import the signaling key so the relay route is available. */
+export async function withSigningKey(config: CompanionConfig): Promise<CompanionConfig> {
+  if (!needsSigningKeyImport(config)) return config
+  return {
+    ...config,
+    signalingPrivateKey: await importSigningPrivateKey(config.signalingPrivateKeyJwk!),
+  }
+}
+
 async function hydrateHostCredential(id: string): Promise<CompanionConfig | null> {
   const host = useRemoteHostStore.getState().hosts.find((candidate) => candidate.id === id)
   if (!host) return null
-  if (host.config.devicePrivateKeyJwk) return host.config
-  const credential = await loadRemoteHostCredential(id)
-  if (!credential) return null
-  const config: CompanionConfig = {
-    ...host.config,
-    devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
-    signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk,
+  let config: CompanionConfig
+  if (host.config.devicePrivateKeyJwk) {
+    if (!needsSigningKeyImport(host.config)) return host.config
+    config = host.config
+  } else {
+    const credential = await loadRemoteHostCredential(id)
+    if (!credential) return null
+    config = {
+      ...host.config,
+      devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
+      signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk,
+    }
+  }
+  try {
+    config = await withSigningKey(config)
+  } catch {
+    // A key that will not import leaves the direct route working; only the
+    // relay fallback is lost, and the transport says so when it needs it.
+    // Dropped from this in-memory copy (the vault keeps it) so activation
+    // does not come back here forever.
+    config = { ...config, signalingPrivateKeyJwk: undefined }
   }
   useRemoteHostStore.setState((state) => ({
     hosts: state.hosts.map((candidate) =>
@@ -294,6 +347,93 @@ export async function refreshHostFeatureManifest(id: string): Promise<HostFeatur
   }
 }
 
+/** What a liveness probe through the management channel came back with. */
+export type HostProbeOutcome =
+  { kind: "answered"; manifest: unknown } | { kind: "failed"; error: unknown }
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isRevocation(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return normalized.includes("revoked") || normalized.includes("unauthorized")
+}
+
+/**
+ * Record a liveness probe of a host (ADR-0224 A4).
+ *
+ * A usable answer is the same one activation accepts: a parseable feature
+ * manifest from the build this pairing was made with. It refreshes the
+ * manifest and `lastConnectedAt`, which is the timestamp the device console
+ * and the ADR-0136 timing authority read, so an always-on host the desktop is
+ * not driving no longer looks gone five minutes after the last activation.
+ *
+ * The routed connection's state belongs to activation: for the active host a
+ * probe only adds evidence. For an inactive host it records the two facts a
+ * probe can establish on its own (revoked, wrong version) and clears them once
+ * the host answers properly again. A host that merely did not answer keeps its
+ * state; `lastProbe` says it did not answer.
+ */
+export function recordHostProbe(
+  id: string,
+  outcome: HostProbeOutcome,
+  now: number = Date.now()
+): RemoteHostProbe | null {
+  const state = useRemoteHostStore.getState()
+  const host = state.hosts.find((candidate) => candidate.id === id)
+  if (!host) return null
+  const active = state.activeHostId === id
+
+  let probe: RemoteHostProbe
+  let patch: Partial<RemoteHost> = {}
+  if (outcome.kind === "failed") {
+    const message = errorText(outcome.error)
+    probe = { at: now, ok: false, error: message }
+    if (!active && isRevocation(message)) {
+      patch = { connectionState: "revoked", connectionError: message }
+    }
+  } else {
+    const manifest = parseHostFeatureManifest(outcome.manifest)
+    if (!manifest) {
+      probe = { at: now, ok: false, error: "the host's feature manifest could not be read" }
+    } else if (manifest.hostBuildId !== host.config.serverVersion) {
+      const message = "host feature manifest version mismatch"
+      probe = { at: now, ok: false, error: message }
+      if (!active) patch = { connectionState: "versionMismatch", connectionError: message }
+    } else {
+      probe = { at: now, ok: true }
+      patch = { featureManifest: manifest, featureManifestAt: now, lastConnectedAt: now }
+      if (!active && host.connectionState !== "disconnected") {
+        patch = { ...patch, connectionState: "disconnected", connectionError: undefined }
+      }
+    }
+  }
+
+  useRemoteHostStore.setState((current) => ({
+    hosts: current.hosts.map((candidate) =>
+      candidate.id === id ? { ...candidate, ...patch, lastProbe: probe } : candidate
+    ),
+  }))
+  return probe
+}
+
+/**
+ * Hosts as they come back from storage. Connection state is session evidence:
+ * a `ready` written while the last session was driving the host said nothing
+ * about this one, yet the device console read it as a live socket. Only a
+ * revocation is a durable fact about the pairing; everything else starts
+ * disconnected until activation or a probe says otherwise.
+ */
+export function rehydratedHosts(hosts: readonly RemoteHost[]): RemoteHost[] {
+  return hosts.map((host) => {
+    const { lastProbe: _session, ...rest } = host
+    return host.connectionState === "revoked"
+      ? rest
+      : { ...rest, connectionState: "disconnected", connectionError: undefined }
+  })
+}
+
 async function probeHostConnection(id: string): Promise<void> {
   const [capabilities, manifest] = await Promise.all([
     refreshHostCapabilities(id),
@@ -439,7 +579,11 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       activateHost: (id) => {
         const host = get().hosts.find((h) => h.id === id)
         if (!host) return
-        if (!host.config.devicePrivateKeyJwk || !host.config.deviceKeyThumbprint) {
+        if (
+          !host.config.devicePrivateKeyJwk ||
+          !host.config.deviceKeyThumbprint ||
+          needsSigningKeyImport(host.config)
+        ) {
           void hydrateHostCredential(id).then((config) => {
             if (config) {
               get().activateHost(id)
@@ -553,11 +697,24 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           config: withoutPersistedSecrets(host.config),
         })),
       }),
+      merge: (persisted, current) => {
+        const stored = persisted as Partial<RemoteHostState> | undefined
+        return {
+          ...current,
+          ...stored,
+          activeHostId: null,
+          hosts: rehydratedHosts(Array.isArray(stored?.hosts) ? stored.hosts : current.hosts),
+        }
+      },
       onRehydrateStorage: () => (state) => {
         if (!state) return
-        for (const host of state.hosts) {
-          void hydrateHostCredential(host.id)
-        }
+        // Deferred: with synchronous storage this runs while `create()` is
+        // still building the store, so `useRemoteHostStore` is not assigned
+        // yet and reading it throws (seen once a host was persisted).
+        const ids = state.hosts.map((host) => host.id)
+        queueMicrotask(() => {
+          for (const id of ids) void hydrateHostCredential(id).catch(() => null)
+        })
       },
     }
   )

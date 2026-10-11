@@ -13,8 +13,11 @@ import type { RoomDescriptor } from "@/lib/signaling/crypto"
  * enrollment, holding only `browser.submit` and `browser.read-own`, with no
  * signaling room and no grant a phone could be given. It is listed here so the
  * device console can show it and revoke it like any other pairing.
+ *
+ * `desktop` is the Cognia desktop app paired into another host, for example to
+ * manage an always-on host (ADR-0224 A4). It used to register as `unknown`.
  */
-export type DevicePlatform = "ios" | "android" | "web" | "browser" | "unknown"
+export type DevicePlatform = "ios" | "android" | "web" | "browser" | "desktop" | "unknown"
 
 /** Public, signed locator for the durable terminal host. Never contains secrets. */
 export interface TerminalHostDescriptor {

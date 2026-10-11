@@ -18,6 +18,7 @@ import { render, renderHook, screen } from "@testing-library/react"
 
 import {
   AdminStateBadge,
+  AlwaysOnBadge,
   CapabilityDot,
   DeviceKindIcon,
   GrantStateBadge,
@@ -60,6 +61,17 @@ describe("AdminStateBadge", () => {
   it("renders paused and revoked", () => {
     render(<AdminStateBadge state="revoked" />)
     expect(screen.getByText("Revoked")).toBeInTheDocument()
+  })
+})
+
+describe("AlwaysOnBadge (ADR-0224 A4)", () => {
+  it("badges only the always-on role", () => {
+    const { rerender } = render(<AlwaysOnBadge role="always-on" />)
+    expect(screen.getByTestId("always-on-badge")).toHaveTextContent("hostRole.always-on")
+    for (const role of ["headless", "desktop", undefined] as const) {
+      rerender(<AlwaysOnBadge role={role} />)
+      expect(screen.queryByTestId("always-on-badge")).toBeNull()
+    }
   })
 })
 

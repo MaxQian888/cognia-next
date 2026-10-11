@@ -14173,6 +14173,11 @@
         "versionMismatch": "Upgrade required"
       }
     },
+    "hostRole": {
+      "always-on": "Always-on",
+      "desktop": "Desktop",
+      "headless": "Headless server"
+    },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
     "justNow": "just now",
@@ -14226,6 +14231,10 @@
       "appVersion": "App version",
       "attention": "Attention",
       "baseUrl": "Address",
+      "checkAnswered": "The host answered.",
+      "checkNoAnswer": "The host did not answer: {error}",
+      "checkNow": "Check now",
+      "checking": "Checking…",
       "conflictBody": "The host's answer is shown above and is the one enforced. The local mirror is stale — it was most likely changed from the CLI or the Owner API.",
       "conflictTitle": "This host and the local record disagree",
       "connection": "Connection",
@@ -14236,9 +14245,14 @@
       "eventPlaneState": "Stream health",
       "fingerprint": "Fingerprint",
       "fingerprintCopied": "Fingerprint copied",
+      "hostRole": "Host role",
       "identity": "Identity",
       "isThisDevice": "This device",
       "kind": "Kind",
+      "lastCheck": "Last check",
+      "lastCheckFailed": "No answer {when}: {error}",
+      "lastCheckNever": "Not checked yet this session",
+      "lastCheckOk": "Answered {when}",
       "lastConnected": "Last connected",
       "lastSeen": "Last seen",
       "noStreams": "No event stream is open right now.",

@@ -5,6 +5,7 @@ import {
   dispatchTargetRef,
   pairedDeviceRef,
   remoteHostRef,
+  resolveHostRole,
   rowNeedsAttention,
   summarizeDeviceRows,
   workerRef,
@@ -415,6 +416,60 @@ describe("remote host liveness", () => {
     const row = find(rows, "host:h1")
     expect(row.liveness.source).toBe("manifest")
     expect(row.reachability).toBe("offline")
+  })
+
+  /**
+   * ADR-0224 A4. A host the desktop is not routing to has no socket; the
+   * liveness probe over its management channel is its evidence, trusted for
+   * the same window as any manifest and no longer.
+   */
+  it("reads an inactive host's liveness from its last probe", () => {
+    const answered = buildDeviceRows(
+      input({
+        remoteHosts: [
+          host({
+            connectionState: "disconnected",
+            lastConnectedAt: NOW - 30_000,
+            lastProbe: { at: NOW - 30_000, ok: true },
+          }),
+        ],
+      })
+    )
+    expect(find(answered, "host:h1")).toMatchObject({
+      reachability: "online",
+      liveness: { online: true, source: "manifest", lastSeenAt: NOW - 30_000 },
+      lastProbe: { ok: true },
+    })
+
+    const lapsed = buildDeviceRows(
+      input({
+        remoteHosts: [
+          host({
+            connectionState: "disconnected",
+            lastConnectedAt: NOW - 600_000,
+            lastProbe: { at: NOW - 600_000, ok: true },
+          }),
+        ],
+      })
+    )
+    expect(find(lapsed, "host:h1").reachability).toBe("offline")
+
+    const missed = buildDeviceRows(
+      input({
+        remoteHosts: [
+          host({
+            connectionState: "disconnected",
+            lastConnectedAt: NOW - 120_000,
+            lastProbe: { at: NOW - 5_000, ok: false, error: "the host did not answer" },
+          }),
+        ],
+      })
+    )
+    expect(find(missed, "host:h1")).toMatchObject({
+      liveness: { online: false },
+      lastProbe: { ok: false, error: "the host did not answer" },
+    })
+    expect(find(missed, "host:h1").reachability).not.toBe("online")
   })
 
   it("reports a host that was never reached as unknown, not offline", () => {
@@ -946,5 +1001,42 @@ describe("SSH host reachability from a probe", () => {
 
   it("ignores a probe recorded against some other host", () => {
     expect(sshRow(new Map([["other", { online: true, at: NOW }]])).reachability).toBe("unknown")
+  })
+})
+
+describe("host roles (ADR-0224 A4)", () => {
+  it("resolves always-on before the platform, and nothing for a host that never said", () => {
+    expect(resolveHostRole({ alwaysOn: true, platform: "headless" })).toBe("always-on")
+    expect(resolveHostRole({ alwaysOn: true })).toBe("always-on")
+    expect(resolveHostRole({ platform: "headless" })).toBe("headless")
+    expect(resolveHostRole({ platform: "tauri" })).toBe("desktop")
+    expect(resolveHostRole({ platform: "mobile" })).toBeUndefined()
+    expect(resolveHostRole({})).toBeUndefined()
+  })
+
+  it("labels a remote host by its pairing and by the platform its manifest reports", () => {
+    const headless = { ...manifestV2("srv"), platform: "headless" as const }
+    const rows = buildDeviceRows(
+      input({
+        remoteHosts: [
+          host({ id: "h1", featureManifest: manifestV2("desk") }),
+          host({ id: "h2", featureManifest: headless }),
+          host({ id: "h3", featureManifest: headless, alwaysOn: true }),
+          host({ id: "h4" }),
+        ],
+      })
+    )
+    const byHost = (id: string) => rows.find((row) => row.hostId === id)
+    expect(byHost("h1")).toMatchObject({ hostRole: "desktop", platform: "tauri" })
+    expect(byHost("h2")).toMatchObject({ hostRole: "headless", platform: "headless" })
+    expect(byHost("h3")).toMatchObject({ hostRole: "always-on", platform: "headless" })
+    expect(byHost("h4")?.hostRole).toBeUndefined()
+  })
+
+  it("labels this desktop always-on in host mode, and a desktop otherwise", () => {
+    expect(find(buildDeviceRows(input()), "local").hostRole).toBe("desktop")
+    expect(
+      find(buildDeviceRows(input({ local: { ...LOCAL, hostMode: true } })), "local").hostRole
+    ).toBe("always-on")
   })
 })

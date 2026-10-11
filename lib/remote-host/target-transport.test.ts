@@ -1,5 +1,10 @@
 /** @jest-environment jsdom */
 
+const mockImportSigningPrivateKey = jest.fn(async (..._args: unknown[]) => ({ imported: true }))
+jest.mock("@/lib/signaling/crypto", () => ({
+  importSigningPrivateKey: (...args: unknown[]) => mockImportSigningPrivateKey(...args),
+}))
+
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
@@ -105,7 +110,30 @@ it("uses an inline credential and disposes the isolated transport", async () => 
 
   expect(config?.devicePrivateKeyJwk?.d).toBe("inline-private")
   expect(config?.signalingPrivateKeyJwk?.d).toBe("signal-private")
+  // ADR-0224 A4: the relay route signs with a CryptoKey, so an always-on host
+  // only the relay reaches can still be managed.
+  expect(mockImportSigningPrivateKey).toHaveBeenCalledWith({
+    kty: "EC",
+    crv: "P-256",
+    d: "signal-private",
+  })
+  expect(config?.signalingPrivateKey).toMatchObject({ imported: true })
   expect(loadCredential).not.toHaveBeenCalled()
   target.close()
   expect(destroy).toHaveBeenCalledTimes(1)
+})
+
+it("keeps the direct route when the signaling key will not import", async () => {
+  mockImportSigningPrivateKey.mockRejectedValueOnce(new Error("bad key"))
+  const createTransport = jest.fn((_provider: () => CompanionConfig) => transport)
+  await openRemoteHostTarget("local-row", {
+    loadCredential: jest.fn(async () => ({
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      signalingPrivateKeyJwk: { kty: "EC", crv: "P-256", d: "bad" },
+    })),
+    createTransport,
+  })
+  const config = createTransport.mock.calls[0]?.[0]()
+  expect(config?.devicePrivateKeyJwk?.d).toBe("private")
+  expect(config?.signalingPrivateKey).toBeUndefined()
 })

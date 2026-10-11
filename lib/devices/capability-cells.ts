@@ -61,6 +61,9 @@ export function baselinePlatformFor(platform: DevicePlatform | undefined): Platf
       return "mobile"
     case "web":
       return "web"
+    // A desktop app paired into this host as a client (ADR-0224 A4).
+    case "desktop":
+      return "tauri"
     // The browser extension is not a platform in this vocabulary: it runs no
     // Cognia shell, reports nothing, and holds SecurityStore ids instead.
     case "browser":

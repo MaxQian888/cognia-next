@@ -66,6 +66,7 @@ import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
+import { useHostingState } from "@/hooks/platform/use-hosting-state"
 import { projectSandboxConnectionCapabilities } from "@/lib/sandbox/runtime-availability"
 
 /**
@@ -231,6 +232,8 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const [companionHost, setCompanionHost] = useState<RemoteHostInput | null>(null)
   const refreshGeneration = useRef(0)
 
+  // ADR-0224 A3/A4: this desktop's own role in the console.
+  const hostMode = useHostingState().hostMode.enabled
   const { hosts, activeHostId } = useRemoteHostStore(
     useShallow((state) => ({ hosts: state.hosts, activeHostId: state.activeHostId }))
   )
@@ -411,6 +414,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
         capabilities: detectLocalCapabilities(),
         microvmAvailable: runtimeAvailability.microvm.available,
         osSandboxAvailable: runtimeAvailability.os.available,
+        hostMode,
       },
       pairedDevices: pairedDevices ?? [],
       hostDevices: hostDevices ?? undefined,
@@ -476,6 +480,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     runtimeAvailability.os.available,
     now,
     localLabel,
+    hostMode,
   ])
 
   return {

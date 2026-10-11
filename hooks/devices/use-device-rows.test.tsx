@@ -64,6 +64,13 @@ jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
   useSandboxRuntimeAvailability: () => runtimeAvailability,
 }))
 
+// ADR-0224 A3. The predicate has its own suite; a real hook would put
+// `host_mode_get` into this file's transport mock.
+let hostModeEnabled = false
+jest.mock("@/hooks/platform/use-hosting-state", () => ({
+  useHostingState: () => ({ hostMode: { enabled: hostModeEnabled, bootHidden: false } }),
+}))
+
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: (selector: (state: unknown) => unknown) =>
     selector({ hosts: remoteHosts, activeHostId: activeRemoteHostId }),
@@ -94,6 +101,7 @@ jest.mock("@/lib/companion/device-presence-registry", () => ({
 }))
 
 beforeEach(() => {
+  hostModeEnabled = false
   pairedRows.length = 0
   companionHost = null
   remoteHosts = []
@@ -126,6 +134,13 @@ describe("useDeviceRows", () => {
       ])
     )
     expect(result.current.summary).toMatchObject({ total: 1, online: 1 })
+  })
+
+  it("marks this desktop as the always-on host while host mode is on", async () => {
+    hostModeEnabled = true
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows[0]).toMatchObject({ ref: "local", hostRole: "always-on" })
   })
 
   it("names this device by the hardware model once the native shell reports it", async () => {

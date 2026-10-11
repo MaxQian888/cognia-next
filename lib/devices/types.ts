@@ -233,6 +233,20 @@ export interface DevicePresenceSummary {
   streams: readonly EventStreamConnection[]
 }
 
+/**
+ * What kind of host a machine is, for a row that is a host (ADR-0224 A4).
+ *
+ *  - `always-on`: the machine the user keeps on for the account's bots,
+ *    schedules and connectors: a remote host paired as always-on, or this
+ *    desktop in always-on host mode.
+ *  - `headless`: a `cognia-server` with no desktop session.
+ *  - `desktop`: a desktop app acting as a host.
+ *
+ * Absent on rows that are not hosts (paired phones, workers, SSH boxes) and on
+ * a remote host that has not said what it runs.
+ */
+export type HostRole = "always-on" | "headless" | "desktop"
+
 export interface DeviceRow {
   /** Identity within the placement candidate space. Stable, never a label. */
   ref: string
@@ -274,6 +288,8 @@ export interface DeviceRow {
   fingerprint?: string
   /** Owner vs member, from the host SecurityStore. */
   role?: string
+  /** Host rows only: what kind of host this is. See {@link HostRole}. */
+  hostRole?: HostRole
 
   adminState: DeviceAdminState
   /**
@@ -293,6 +309,12 @@ export interface DeviceRow {
   lastConnectedAt?: number
   connectionState?: RemoteHostConnectionState
   connectionError?: string
+  /**
+   * Remote hosts: the last liveness probe over the management channel, when
+   * one ran this session. `error` is verbatim, because "did not answer" and
+   * "refused this device" need different fixes.
+   */
+  lastProbe?: RemoteHostProbeInput
 
   capabilities: readonly DeviceCapabilityCell[]
   capabilitiesReportedAt?: number
@@ -321,9 +343,20 @@ export type RemoteHostConnectionState =
  * store pulls in zustand, the credential vault, and the transport, none of
  * which a row builder should need to load in a unit test.
  */
+/** Structural subset of the store's `RemoteHostProbe`. */
+export interface RemoteHostProbeInput {
+  at: number
+  ok: boolean
+  error?: string
+}
+
 export interface RemoteHostInput {
   id: string
   label: string
+  /** Paired as the user's always-on host (ADR-0224). */
+  alwaysOn?: boolean
+  /** The last liveness probe this session, if any. */
+  lastProbe?: RemoteHostProbeInput
   connectionState: RemoteHostConnectionState
   connectionError?: string
   addedAt: number
@@ -424,6 +457,8 @@ export interface LocalDeviceInput {
   microvmAvailable: boolean
   /** `sandbox_health_probe` said the OS sandbox backend is installed. */
   osSandboxAvailable: boolean
+  /** This desktop is in always-on host mode (ADR-0224 A3). */
+  hostMode?: boolean
 }
 
 export interface BuildDeviceRowsInput {

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 
 import {
   AdminStateBadge,
+  AlwaysOnBadge,
   DeviceKindIcon,
   ReachabilityDot,
   useDeviceRelativeTime,
@@ -66,6 +67,7 @@ export function DeviceRowButton({ row, selected, onSelect }: DeviceRowButtonProp
         <span className="flex items-center gap-1.5">
           <ReachabilityDot reachability={row.reachability} />
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
+          <AlwaysOnBadge role={row.hostRole} />
           {needsAttention ? (
             // `role="img"`: a label on a role-less span is dropped from the
             // accessibility tree, so the dot was colour-only to a screen reader.

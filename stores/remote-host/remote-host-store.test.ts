@@ -30,6 +30,16 @@ jest.mock("@/lib/codeserver/client", () => ({
   codeServerClient: { stopAll: () => mockStopAll() },
 }))
 
+// jsdom has no WebCrypto ECDSA; the import itself is `lib/signaling/crypto`'s
+// to test. Here only "the store asks for the CryptoKey" matters.
+const mockImportSigningPrivateKey = jest.fn(async (..._args: unknown[]) => ({
+  type: "private",
+  imported: true,
+}))
+jest.mock("@/lib/signaling/crypto", () => ({
+  importSigningPrivateKey: (...args: unknown[]) => mockImportSigningPrivateKey(...args),
+}))
+
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { CapabilityId } from "@/lib/platform/capabilities"
 import {
@@ -43,10 +53,15 @@ import {
   activeHostCapabilities,
   activeHostFeatureManifest,
   activeHostSupportsFeature,
+  needsSigningKeyImport,
+  recordHostProbe,
   refreshHostCapabilities,
   refreshHostFeatureManifest,
+  rehydratedHosts,
   useActiveHostSupportsFeature,
   useRemoteHostStore,
+  withSigningKey,
+  type RemoteHost,
 } from "./remote-host-store"
 import { act, renderHook } from "@testing-library/react"
 import { transport } from "@/lib/tauri"
@@ -764,6 +779,235 @@ describe("persisted host migration", () => {
     expect(mockClearRemoteHostCredential).toHaveBeenCalledWith("legacy-host")
     expect(useRemoteHostStore.getState().hosts).toEqual([])
     expect(useRemoteHostStore.getState().activeHostId).toBeNull()
+  })
+})
+
+describe("connection state is session evidence (ADR-0224 A4)", () => {
+  function stored(overrides: Partial<RemoteHost>): RemoteHost {
+    return {
+      id: "h1",
+      label: "Mini",
+      credentialRef: "remote-host:h1",
+      addedAt: 1,
+      connectionState: "ready",
+      config: makeConfig({ devicePrivateKeyJwk: undefined }),
+      ...overrides,
+    }
+  }
+
+  it("does not carry a persisted ready into the next session", async () => {
+    window.localStorage.setItem(
+      "cognia-remote-hosts",
+      JSON.stringify({
+        version: 3,
+        state: {
+          hosts: [
+            stored({ id: "h1", connectionState: "ready", lastProbe: { at: 5, ok: true } }),
+            stored({ id: "h2", connectionState: "revoked", connectionError: "revoked" }),
+            stored({ id: "h3", connectionState: "versionMismatch", connectionError: "version" }),
+          ],
+        },
+      })
+    )
+    await useRemoteHostStore.persist.rehydrate()
+    const hosts = useRemoteHostStore.getState().hosts
+    expect(hosts.map((host) => host.connectionState)).toEqual([
+      "disconnected",
+      "revoked",
+      "disconnected",
+    ])
+    expect(hosts[0]?.lastProbe).toBeUndefined()
+    expect(hosts[1]?.connectionError).toBe("revoked")
+    expect(useRemoteHostStore.getState().activeHostId).toBeNull()
+  })
+
+  it("keeps the last-seen time across the reset", () => {
+    expect(
+      rehydratedHosts([stored({ lastConnectedAt: 42, connectionState: "degraded" })])[0]
+    ).toMatchObject({ lastConnectedAt: 42, connectionState: "disconnected" })
+  })
+})
+
+describe("boot with a persisted host", () => {
+  /**
+   * Synchronous storage rehydrates inside `create()`, before the store
+   * constant is assigned. Hydrating credentials right there threw "Cannot
+   * access 'useRemoteHostStore' before initialization" on every boot once a
+   * host was paired.
+   */
+  it("loads the store and hydrates the host's credential without a TDZ error", async () => {
+    window.localStorage.setItem(
+      "cognia-remote-hosts",
+      JSON.stringify({
+        version: 3,
+        state: {
+          hosts: [
+            {
+              id: "boot-host",
+              label: "Mini",
+              credentialRef: "remote-host:boot-host",
+              addedAt: 1,
+              connectionState: "ready",
+              config: makeConfig({ devicePrivateKeyJwk: undefined }),
+            },
+          ],
+        },
+      })
+    )
+    mockLoadRemoteHostCredential.mockClear()
+    const unhandled = jest.fn()
+    process.on("unhandledRejection", unhandled)
+    try {
+      let loaded: typeof import("./remote-host-store") | undefined
+      jest.isolateModules(() => {
+        loaded = jest.requireActual("./remote-host-store")
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(loaded?.useRemoteHostStore.getState().hosts[0]?.connectionState).toBe("disconnected")
+      expect(mockLoadRemoteHostCredential).toHaveBeenCalledWith("boot-host")
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+    }
+  })
+})
+
+describe("recordHostProbe (ADR-0224 A4)", () => {
+  const manifest = (hostBuildId = "1.2.3") => ({
+    schemaVersion: 2,
+    hostBuildId,
+    platform: "headless",
+    generatedAt: 1,
+    hostIdentity: { id: "stable", kind: "cloud" },
+    protocol: { min: 1, max: 2 },
+    operations: [],
+    deviceGrants: [],
+    features: {},
+    limits: {
+      rpcJsonBodyBytes: 1,
+      skillMaxResources: 1,
+      skillMaxResourceBytes: 1,
+      skillUploadChunkBytes: 1,
+      mcpRequestBodyBytes: 1,
+      maxConcurrentProxyCalls: 1,
+    },
+  })
+
+  function seed(overrides: Partial<RemoteHost> = {}, activeHostId: string | null = null) {
+    useRemoteHostStore.setState({
+      activeHostId,
+      hosts: [
+        {
+          id: "h1",
+          label: "Mini",
+          credentialRef: "remote-host:h1",
+          addedAt: 1,
+          connectionState: "disconnected",
+          config: makeConfig(),
+          ...overrides,
+        },
+      ],
+    })
+  }
+  const only = () => useRemoteHostStore.getState().hosts[0]!
+
+  it("records a matching manifest as the host being seen now", () => {
+    seed({ connectionState: "versionMismatch", connectionError: "old" })
+    expect(recordHostProbe("h1", { kind: "answered", manifest: manifest() }, 100)).toEqual({
+      at: 100,
+      ok: true,
+    })
+    expect(only()).toMatchObject({
+      lastConnectedAt: 100,
+      featureManifestAt: 100,
+      featureManifest: { hostBuildId: "1.2.3" },
+      lastProbe: { at: 100, ok: true },
+      // The host answers properly again, so the old verdict goes.
+      connectionState: "disconnected",
+      connectionError: undefined,
+    })
+  })
+
+  it("flags a host running another build, without counting it as seen", () => {
+    seed()
+    expect(
+      recordHostProbe("h1", { kind: "answered", manifest: manifest("9.9.9") }, 100)
+    ).toMatchObject({ ok: false, error: "host feature manifest version mismatch" })
+    expect(only()).toMatchObject({ connectionState: "versionMismatch" })
+    expect(only().lastConnectedAt).toBeUndefined()
+  })
+
+  it("records an unreadable manifest as a miss", () => {
+    seed()
+    expect(
+      recordHostProbe("h1", { kind: "answered", manifest: { nope: true } }, 100)
+    ).toMatchObject({
+      ok: false,
+    })
+    expect(only().connectionState).toBe("disconnected")
+  })
+
+  it("marks a refused device revoked, and leaves a host that did not answer alone", () => {
+    seed()
+    recordHostProbe("h1", { kind: "failed", error: new Error("network unreachable") }, 100)
+    expect(only()).toMatchObject({
+      connectionState: "disconnected",
+      lastProbe: { ok: false, error: "network unreachable" },
+    })
+    recordHostProbe("h1", { kind: "failed", error: new Error("401 Unauthorized") }, 200)
+    expect(only()).toMatchObject({ connectionState: "revoked" })
+  })
+
+  it("only adds evidence for the host being routed to", () => {
+    seed({ connectionState: "ready" }, "h1")
+    recordHostProbe("h1", { kind: "failed", error: "unauthorized" }, 100)
+    expect(only().connectionState).toBe("ready")
+    recordHostProbe("h1", { kind: "answered", manifest: manifest() }, 200)
+    expect(only()).toMatchObject({ connectionState: "ready", lastConnectedAt: 200 })
+  })
+
+  it("answers null for a host that is gone", () => {
+    seed()
+    expect(recordHostProbe("nope", { kind: "failed", error: "x" })).toBeNull()
+  })
+})
+
+describe("the relay route needs the signaling key as a CryptoKey (ADR-0224 A4)", () => {
+  const signalingPrivateKeyJwk = { kty: "EC", crv: "P-256", d: "signaling" }
+
+  it("imports the key only when the JWK is there and the CryptoKey is not", async () => {
+    expect(needsSigningKeyImport(makeConfig())).toBe(false)
+    const config = makeConfig({ signalingPrivateKeyJwk })
+    expect(needsSigningKeyImport(config)).toBe(true)
+    const ready = await withSigningKey(config)
+    expect(mockImportSigningPrivateKey).toHaveBeenCalledWith(signalingPrivateKeyJwk)
+    expect(ready.signalingPrivateKey).toMatchObject({ imported: true })
+    expect(needsSigningKeyImport(ready)).toBe(false)
+  })
+
+  it("activates a relay-paired host with its key imported", async () => {
+    mockImportSigningPrivateKey.mockClear()
+    const host = useRemoteHostStore.getState().addHost({
+      label: "Mini",
+      config: makeConfig({ signalingPrivateKeyJwk }),
+    })
+    useRemoteHostStore.getState().activateHost(host.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockImportSigningPrivateKey).toHaveBeenCalledWith(signalingPrivateKeyJwk)
+    expect(useRemoteHostStore.getState().activeHostId).toBe(host.id)
+    expect(lastProvider?.().signalingPrivateKey).toMatchObject({ imported: true })
+  })
+
+  it("still activates over the direct route when the key will not import", async () => {
+    mockImportSigningPrivateKey.mockRejectedValueOnce(new Error("bad key"))
+    const host = useRemoteHostStore.getState().addHost({
+      label: "Mini",
+      config: makeConfig({ signalingPrivateKeyJwk }),
+    })
+    useRemoteHostStore.getState().activateHost(host.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(useRemoteHostStore.getState().activeHostId).toBe(host.id)
+    expect(lastProvider?.().signalingPrivateKey).toBeUndefined()
   })
 })
 

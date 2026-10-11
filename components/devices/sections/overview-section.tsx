@@ -25,12 +25,15 @@
  * it was refused.
  */
 
-import { ActivityIcon, CopyIcon, IdCardIcon, RadioIcon } from "lucide-react"
+import { ActivityIcon, CopyIcon, IdCardIcon, RadioIcon, RefreshCwIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import type { DeviceRow } from "@/lib/devices/types"
+import { probeHostLiveness } from "@/lib/remote-host/liveness"
+import { cn } from "@/lib/utils"
 
 import { DeviceSection } from "../device-section"
 import {
@@ -104,6 +107,11 @@ export function IdentitySection({ row }: { row: DeviceRow }) {
           </DeviceFactRow>
         ) : null}
         {row.role ? <DeviceFactRow label={t("overview.role")}>{row.role}</DeviceFactRow> : null}
+        {row.hostRole ? (
+          <DeviceFactRow label={t("overview.hostRole")}>
+            <span data-testid="overview-host-role">{t(`hostRole.${row.hostRole}`)}</span>
+          </DeviceFactRow>
+        ) : null}
         {row.ownerUserId ? (
           <DeviceFactRow label={t("overview.owner")} mono={!row.ownerLabel}>
             {row.ownerLabel ?? row.ownerUserId}
@@ -158,8 +166,70 @@ export function PresenceSection({ row }: { row: DeviceRow }) {
             {t(`connectionState.${row.connectionState}`)}
           </DeviceFactRow>
         ) : null}
+        {row.kind === "remote-host" && row.hostId ? (
+          <HostLivenessFact row={row} hostId={row.hostId} />
+        ) : null}
       </DeviceFactList>
     </DeviceSection>
+  )
+}
+
+/**
+ * The last liveness probe over the host's management channel (ADR-0224 A4),
+ * and a way to ask now rather than wait for the next one. The failure text is
+ * shown verbatim: "did not answer" and "refused this device" need different
+ * fixes.
+ */
+function HostLivenessFact({ row, hostId }: { row: DeviceRow; hostId: string }) {
+  const t = useTranslations("devices")
+  const relative = useDeviceRelativeTime()
+  const [checking, setChecking] = useState(false)
+  const probe = row.lastProbe
+
+  const checkNow = async () => {
+    setChecking(true)
+    try {
+      const result = await probeHostLiveness(hostId)
+      if (result?.ok) toast.success(t("overview.checkAnswered"))
+      else toast.error(t("overview.checkNoAnswer", { error: result?.error ?? "" }))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <DeviceFactRow label={t("overview.lastCheck")}>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          data-testid="overview-last-check"
+          data-ok={probe ? String(probe.ok) : undefined}
+          className={cn(
+            "min-w-0 break-words",
+            probe && !probe.ok && "text-amber-700 dark:text-amber-400"
+          )}
+        >
+          {!probe
+            ? t("overview.lastCheckNever")
+            : probe.ok
+              ? t("overview.lastCheckOk", { when: relative(probe.at) })
+              : t("overview.lastCheckFailed", {
+                  when: relative(probe.at),
+                  error: probe.error ?? "",
+                })}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-1.5 text-xs"
+          disabled={checking}
+          onClick={() => void checkNow()}
+          data-testid="overview-check-now"
+        >
+          <RefreshCwIcon className={cn("size-3", checking && "animate-spin")} aria-hidden="true" />
+          {checking ? t("overview.checking") : t("overview.checkNow")}
+        </Button>
+      </span>
+    </DeviceFactRow>
   )
 }
 

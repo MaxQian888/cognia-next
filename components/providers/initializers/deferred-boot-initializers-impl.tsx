@@ -11,6 +11,7 @@ import { ProviderOAuthRefreshInitializer } from "./provider-oauth-refresh-initia
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { SessionPowerInitializer } from "./session-power-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
+import { RemoteHostLivenessInitializer } from "./remote-host-liveness-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
@@ -72,6 +73,12 @@ export function DeferredBootInitializersImpl() {
       <MediaGenerationInitializer />
       <RoutingRuntimeInitializer />
       <RemoteNotificationInitializer />
+      {/*
+        Probes paired hosts this desktop is not driving (ADR-0224 A4), so the
+        device console and the timing authority see an always-on host as
+        alive. Order-independent; desktop-gated inside.
+      */}
+      <RemoteHostLivenessInitializer />
       <GatewayProvider />
       {/* No ordering dependency: a registration-only dispatch table. */}
       <ExecutionControlInitializer />

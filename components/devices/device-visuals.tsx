@@ -22,6 +22,7 @@ import {
   SmartphoneIcon,
   CpuIcon,
   TerminalIcon,
+  ZapIcon,
   type LucideIcon,
 } from "lucide-react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
@@ -34,6 +35,7 @@ import type {
   DeviceGrantState,
   DeviceKind,
   DeviceReachability,
+  HostRole,
 } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
 
@@ -164,6 +166,27 @@ export function AdminStateBadge({ state }: { state: DeviceAdminState }) {
   return (
     <Badge variant="outline" className={cn("font-normal", ADMIN_TONE[state])}>
       {t(`adminState.${state}`)}
+    </Badge>
+  )
+}
+
+/**
+ * Marks the account's always-on host (ADR-0224 A4) wherever the machine is
+ * named. Only that role gets a badge: it is the one the user chose, and it
+ * changes what the machine is trusted to do while they are away. `headless`
+ * and `desktop` are facts the overview states in words.
+ */
+export function AlwaysOnBadge({ role }: { role: HostRole | undefined }) {
+  const t = useTranslations("devices")
+  if (role !== "always-on") return null
+  return (
+    <Badge
+      variant="outline"
+      className="shrink-0 gap-1 border-sky-500/40 px-1.5 py-0 text-[11px] font-normal text-sky-700 dark:text-sky-300"
+      data-testid="always-on-badge"
+    >
+      <ZapIcon className="size-3" aria-hidden="true" />
+      {t("hostRole.always-on")}
     </Badge>
   )
 }

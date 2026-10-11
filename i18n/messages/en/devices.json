@@ -137,7 +137,16 @@
     "conflictTitle": "This host and the local record disagree",
     "conflictBody": "The host's answer is shown above and is the one enforced. The local mirror is stale — it was most likely changed from the CLI or the Owner API.",
     "connectionErrorTitle": "Last connection attempt failed",
-    "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
+    "streamCount": "{count, plural, =1 {1 stream} other {# streams}}",
+    "hostRole": "Host role",
+    "lastCheck": "Last check",
+    "lastCheckNever": "Not checked yet this session",
+    "lastCheckOk": "Answered {when}",
+    "lastCheckFailed": "No answer {when}: {error}",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "checkAnswered": "The host answered.",
+    "checkNoAnswer": "The host did not answer: {error}"
   },
   "capabilities": {
     "group": {
@@ -476,5 +485,10 @@
   "pairingAlert": {
     "title": "New device paired",
     "body": "{label} ({platform}) was paired with this host. If this wasn't you, revoke it in Devices."
+  },
+  "hostRole": {
+    "always-on": "Always-on",
+    "headless": "Headless server",
+    "desktop": "Desktop"
   }
 }

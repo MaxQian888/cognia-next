@@ -28,6 +28,7 @@ import {
 import { buildDeviceRuntime } from "./device-runtime"
 import { buildGrantRows, ownerPermits, type GrantEvidence } from "./grant-capabilities"
 import { buildDevicePlacement } from "./placement-directory"
+import type { Platform } from "@/lib/platform/detect"
 import type {
   BuildDeviceRowsInput,
   DeviceAdminState,
@@ -35,6 +36,7 @@ import type {
   DeviceRow,
   DeviceWanSummary,
   HostDeviceSummaryInput,
+  HostRole,
   RemoteHostInput,
   SshHostInput,
   WorkerInput,
@@ -321,6 +323,21 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
   }
 }
 
+/**
+ * The role of a host row (ADR-0224 A4). Always-on wins: it is the user's
+ * statement about what the machine is for, and a headless server or a desktop
+ * can both be one. Otherwise the platform the host runs says it.
+ */
+export function resolveHostRole(input: {
+  alwaysOn?: boolean
+  platform?: Platform
+}): HostRole | undefined {
+  if (input.alwaysOn) return "always-on"
+  if (input.platform === "headless") return "headless"
+  if (input.platform === "tauri") return "desktop"
+  return undefined
+}
+
 function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput): DeviceRow {
   const lastSeenAt = host.lastConnectedAt ?? host.featureManifestAt ?? host.capabilitiesAt ?? 0
   /**
@@ -333,10 +350,22 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
    * against `lastConnectedAt`, and a host that is connected but has not yet
    * recorded one would be reported offline while it is answering calls.
    */
+  /*
+   * A host the desktop is not routing to has no socket to vouch for it. Its
+   * evidence is the liveness probe over the management channel (ADR-0224 A4):
+   * a version-matched manifest, trusted for the same TTL as any manifest, so a
+   * host that stops answering ages out on its own. Before the first probe of
+   * a session (or after a miss) the persisted timestamp still says how long
+   * ago it was last seen, without claiming it is here now.
+   */
+  const probe = host.lastProbe
   const liveness: PlacementLiveness =
     host.connectionState === "ready"
       ? { online: true, lastSeenAt: lastSeenAt > 0 ? lastSeenAt : input.now, source: "socket" }
-      : { online: false, lastSeenAt, source: "manifest" }
+      : probe?.ok
+        ? { online: true, lastSeenAt: probe.at, source: "manifest" }
+        : { online: false, lastSeenAt, source: "manifest" }
+  const platform = host.featureManifest?.platform
   const adminState: DeviceAdminState =
     host.connectionState === "revoked" ? "revoked" : lastSeenAt > 0 ? "active" : "unknown"
 
@@ -357,6 +386,8 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
     label: host.label,
     isSelf: false,
     hostId: host.id,
+    platform,
+    hostRole: resolveHostRole({ alwaysOn: host.alwaysOn, platform }),
     serverVersion: host.config.serverVersion,
     baseUrl: host.config.baseUrl,
     fingerprint: host.config.serverFingerprint,
@@ -368,6 +399,7 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
     lastConnectedAt: host.lastConnectedAt,
     connectionState: host.connectionState,
     connectionError: host.connectionError,
+    lastProbe: probe,
     capabilities,
     capabilitiesReportedAt: host.capabilitiesAt,
     capabilityReportMissing:
@@ -508,6 +540,10 @@ function buildLocalRow(input: BuildDeviceRowsInput): DeviceRow {
     label: input.local.label,
     isSelf: true,
     platform: input.local.platform,
+    hostRole: resolveHostRole({
+      alwaysOn: input.local.hostMode,
+      platform: input.local.platform,
+    }),
     appVersion: input.local.appVersion,
     adminState: "active",
     reachability: "online",

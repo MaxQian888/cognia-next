@@ -1,4 +1,17 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+const probeHostLivenessMock = jest.fn()
+jest.mock("@/lib/remote-host/liveness", () => ({
+  probeHostLiveness: (...args: unknown[]) => probeHostLivenessMock(...args),
+}))
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
 
 import type { DeviceRow } from "@/lib/devices/types"
 
@@ -175,5 +188,54 @@ describe("device ownership (ADR-0149 §5, step one)", () => {
     // The local device is not a paired device and has no owner to report.
     render(<OverviewSection row={row({ kind: "local", isSelf: true })} />)
     expect(screen.queryByText("Belongs to")).not.toBeInTheDocument()
+  })
+})
+
+describe("host role and liveness (ADR-0224 A4)", () => {
+  beforeEach(() => {
+    probeHostLivenessMock.mockReset()
+    toastSuccess.mockReset()
+    toastError.mockReset()
+  })
+
+  const remote = (overrides: Partial<DeviceRow> = {}) =>
+    row({ ref: "host:h1", kind: "remote-host", hostId: "h1", label: "Mac mini", ...overrides })
+
+  it("states the host role in words", () => {
+    render(<OverviewSection row={remote({ hostRole: "always-on" })} />)
+    expect(screen.getByTestId("overview-host-role")).toHaveTextContent("Always-on")
+  })
+
+  it("says the host was not checked yet, and shows a failed check verbatim", () => {
+    const { unmount } = render(<OverviewSection row={remote()} />)
+    expect(screen.getByTestId("overview-last-check")).toHaveTextContent(
+      "Not checked yet this session"
+    )
+    unmount()
+    render(
+      <OverviewSection
+        row={remote({ lastProbe: { at: Date.now() - 5_000, ok: false, error: "relay closed" } })}
+      />
+    )
+    const fact = screen.getByTestId("overview-last-check")
+    expect(fact).toHaveAttribute("data-ok", "false")
+    expect(fact).toHaveTextContent("relay closed")
+  })
+
+  it("checks the host now through its management channel", async () => {
+    probeHostLivenessMock.mockResolvedValueOnce({ at: Date.now(), ok: true })
+    render(<OverviewSection row={remote()} />)
+    fireEvent.click(screen.getByTestId("overview-check-now"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("The host answered."))
+    expect(probeHostLivenessMock).toHaveBeenCalledWith("h1")
+
+    probeHostLivenessMock.mockResolvedValueOnce({ at: Date.now(), ok: false, error: "timeout" })
+    fireEvent.click(screen.getByTestId("overview-check-now"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("The host did not answer: timeout"))
+  })
+
+  it("offers no check on rows that are not remote hosts", () => {
+    render(<OverviewSection row={row()} />)
+    expect(screen.queryByTestId("overview-check-now")).toBeNull()
   })
 })

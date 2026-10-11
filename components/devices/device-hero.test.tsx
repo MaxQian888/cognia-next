@@ -121,6 +121,13 @@ describe("DeviceHero", () => {
     rerender(<DeviceHero row={row({ adminState: "revoked" })} />)
     expect(screen.getByText("Revoked")).toBeInTheDocument()
   })
+
+  it("badges the always-on host beside its name (ADR-0224 A4)", () => {
+    const { rerender } = render(<DeviceHero row={row({ hostRole: "always-on" })} />)
+    expect(screen.getByTestId("always-on-badge")).toBeInTheDocument()
+    rerender(<DeviceHero row={row({ hostRole: "desktop" })} />)
+    expect(screen.queryByTestId("always-on-badge")).toBeNull()
+  })
 })
 
 describe("DeviceHero — actions beside the name", () => {
