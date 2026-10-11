@@ -161,6 +161,26 @@ async function listWorkspaceSessionsNow(projectId: string): Promise<ChatSession[
   return [...scoped, ...unscoped].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/**
+ * The ids of {@link listWorkspaceSessions}, read over primary keys only: the
+ * scoped rows by the `projectId` index, plus every row with no workspace,
+ * which every workspace lists. For a filter that needs membership and not the
+ * rows (the tray panel's workspace scope, ADR-0225 §8), this reads no session
+ * body at all, so a live query over it costs keys on each session write.
+ */
+export async function listWorkspaceSessionIds(projectId: string): Promise<string[]> {
+  const db = getDb()
+  return db.transaction("r", db.sessions, async () => {
+    const [scopedHere, allIds, scopedAnywhere] = await Promise.all([
+      db.sessions.where("projectId").equals(projectId).primaryKeys(),
+      db.sessions.toCollection().primaryKeys(),
+      db.sessions.where("projectId").above("").primaryKeys(),
+    ])
+    const scopedSet = new Set(scopedAnywhere)
+    return [...scopedHere, ...allIds.filter((id) => !scopedSet.has(id))]
+  })
+}
+
 export interface WorkspaceConversationCounts {
   conversations: number
   messages: number

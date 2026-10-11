@@ -74,8 +74,9 @@ describe("DesktopOnlyInitializers", () => {
     // the Update Center sweep covers every host, not just the desktop.
     // PetWindowInitializer was removed: PetMount owns the overlay's cold-start
     // open, and the two together opened the window twice at boot.
-    // FileShareHostSyncInitializer joined for live file sharing, ADR-0222.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(26)
+    // FileShareHostSyncInitializer joined for live file sharing, ADR-0222.
+    // GlancePublisherInitializer joined for the tray panel, ADR-0225.)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(27)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 

@@ -10,10 +10,9 @@
  * those straight to Rust (`tray_run_native_action`), which already implements
  * them for the OS menu.
  *
- * It also answers `tray-panel://state-request`: the panel is a least-privilege
- * webview with no Dexie and no stores, so it cannot build the
- * `TrayStateSnapshot` its `when` expressions are evaluated against, and asks
- * the window that already maintains one.
+ * The state the panel renders (and its actions' `when` expressions read) no
+ * longer comes from here: it is the Glance snapshot, published by
+ * `GlancePublisherInitializer` (ADR-0225).
  */
 
 import { useEffect, useRef } from "react"
@@ -27,13 +26,7 @@ import { handleTrayUsageCommand } from "@/lib/tray/dispatcher"
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
-import {
-  onTrayPanelRequest,
-  onTrayPanelStateRequest,
-  sendTrayPanelResult,
-  sendTrayPanelState,
-} from "@/lib/tauri/tray-panel"
-import { useTrayStateSnapshot } from "@/lib/tray/state-snapshot"
+import { onTrayPanelRequest, sendTrayPanelResult } from "@/lib/tauri/tray-panel"
 import type { TrayPanelResolvedEffect, TrayPanelRunRequest } from "@/lib/tray-panel/types"
 import { useChatStore } from "@/stores/chat"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
@@ -81,14 +74,6 @@ export function TrayPanelInitializer() {
   useEffect(() => {
     tRef.current = t
   }, [t])
-
-  // Live snapshot, maintained by the same hook the tray menu's `when` filtering
-  // uses. Held in a ref so a state change doesn't re-subscribe the listeners.
-  const snapshot = useTrayStateSnapshot()
-  const snapshotRef = useRef(snapshot)
-  useEffect(() => {
-    snapshotRef.current = snapshot
-  }, [snapshot])
 
   useEffect(() => {
     // Rust broadcasts nothing here, but `emitTo("main", …)` still reaches every
@@ -155,18 +140,10 @@ export function TrayPanelInitializer() {
       })()
     }
 
-    void Promise.all([
-      onTrayPanelRequest(handle).then((dispose) => {
-        if (alive) unlistens.push(dispose)
-        else safeUnlisten(dispose)
-      }),
-      onTrayPanelStateRequest(() => {
-        if (alive) void sendTrayPanelState(snapshotRef.current)
-      }).then((dispose) => {
-        if (alive) unlistens.push(dispose)
-        else safeUnlisten(dispose)
-      }),
-    ])
+    void onTrayPanelRequest(handle).then((dispose) => {
+      if (alive) unlistens.push(dispose)
+      else safeUnlisten(dispose)
+    })
 
     return () => {
       alive = false

@@ -36,10 +36,6 @@ export const TRAY_PANEL_RESULT_EVENT = "tray-panel://result"
 export const TRAY_PANEL_HIDDEN_EVENT = "tray-panel://hidden"
 /** Rust → renderer: the panel was just revealed. */
 export const TRAY_PANEL_SHOWN_EVENT = "tray-panel://shown"
-/** Panel → main: "send me the current app state so I can filter my actions". */
-export const TRAY_PANEL_STATE_REQUEST_EVENT = "tray-panel://state-request"
-/** Main → panel: the current `TrayStateSnapshot`. */
-export const TRAY_PANEL_STATE_EVENT = "tray-panel://state"
 
 /** Defaults mirroring `TrayPanelConfig::default()` on the Rust side. */
 export const DEFAULT_TRAY_PANEL_CONFIG: TrayPanelConfig = {
@@ -181,53 +177,6 @@ export async function sendTrayPanelResult(result: TrayPanelRunResult): Promise<b
     // emitting to a closed window is expected, not an error worth logging.
     return false
   }
-}
-
-/**
- * Panel → main: ask for the current app-state snapshot.
- *
- * The panel is a least-privilege webview with no Dexie and no app stores, so it
- * cannot build a `TrayStateSnapshot` itself — but its actions' `when`
- * expressions are evaluated against one. Rather than duplicate the whole
- * snapshot pipeline, it asks the window that already maintains it
- * (`useTrayStateSnapshot`, driven by the tray sync loop).
- */
-export async function requestTrayPanelState(): Promise<boolean> {
-  if (!isTauri()) return false
-  try {
-    await emitTo(MAIN_WINDOW_LABEL, TRAY_PANEL_STATE_REQUEST_EVENT, null)
-    return true
-  } catch (err) {
-    loggers.tray?.warn?.("requestTrayPanelState failed", { error: String(err) })
-    return false
-  }
-}
-
-/** Main → panel: reply with (or push) the current snapshot. */
-export async function sendTrayPanelState(snapshot: unknown): Promise<boolean> {
-  if (!isTauri()) return false
-  try {
-    await emitTo(TRAY_PANEL_WINDOW_LABEL, TRAY_PANEL_STATE_EVENT, snapshot)
-    return true
-  } catch {
-    // The panel is usually closed — pushing to a window that isn't there is
-    // the normal case, not an error.
-    return false
-  }
-}
-
-/** Subscribe to snapshot pushes (panel window side). */
-export async function onTrayPanelState<T>(handler: (snapshot: T) => void): Promise<() => void> {
-  if (!isTauri()) return () => {}
-  const unlisten = await listen<T>(TRAY_PANEL_STATE_EVENT, (event) => handler(event.payload))
-  return () => safeUnlisten(unlisten)
-}
-
-/** Subscribe to snapshot requests (main window side). */
-export async function onTrayPanelStateRequest(handler: () => void): Promise<() => void> {
-  if (!isTauri()) return () => {}
-  const unlisten = await listen(TRAY_PANEL_STATE_REQUEST_EVENT, () => handler())
-  return () => safeUnlisten(unlisten)
 }
 
 /** Subscribe to run requests (main window side). */

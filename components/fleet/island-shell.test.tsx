@@ -30,6 +30,17 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => tauriState.on }))
 const listenMock = jest.fn()
 jest.mock("@tauri-apps/api/event", () => ({ listen: (...args: unknown[]) => listenMock(...args) }))
 
+// The focus seam (ADR-0225) is its own channel; the native-lifecycle suite
+// below counts only the window's geometry and hover listeners.
+let focusRowHandler: ((rowId: string) => void) | undefined
+const focusRowOff = jest.fn()
+jest.mock("@/lib/island/client", () => ({
+  onIslandFocusRow: async (handler: (rowId: string) => void) => {
+    focusRowHandler = handler
+    return focusRowOff
+  },
+}))
+
 const dispatchMock = jest.fn(async () => true)
 const islandState: { current: IslandState } = { current: EMPTY_ISLAND_STATE }
 jest.mock("@/hooks/island/use-island-state", () => ({
@@ -111,6 +122,8 @@ beforeEach(() => {
   setTuckedMock.mockReset()
   dispatchMock.mockClear()
   detailArgs.mockClear()
+  focusRowHandler = undefined
+  focusRowOff.mockClear()
   listenMock.mockReset().mockResolvedValue(() => {})
   tauriState.on = false
   detailSlot.rowId = null
@@ -570,6 +583,52 @@ describe("window reporting", () => {
       fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
     })
     expect(resizeMock.mock.calls.at(-1)?.[0]).toBe(ISLAND_EXPANDED_WIDTH)
+  })
+})
+
+describe("focus requests from other surfaces", () => {
+  it("opens the island and pins the requested row", async () => {
+    setState([
+      row({ capabilities: { ...NO_ISLAND_CAPABILITIES, detail: true } }),
+      row({
+        id: "external:opencode:other",
+        capabilities: { ...NO_ISLAND_CAPABILITIES, detail: true },
+      }),
+    ])
+    render(<IslandShell />)
+    await act(async () => {})
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-expanded", "false")
+
+    act(() => focusRowHandler?.("external:opencode:other"))
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-expanded", "true")
+    expect(detailArgs).toHaveBeenLastCalledWith("external:opencode:other", 3)
+  })
+
+  it("reopens an island the user had collapsed", async () => {
+    setState([row({ capabilities: { ...NO_ISLAND_CAPABILITIES, detail: true } })])
+    render(<IslandShell />)
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("island-pill"))
+    fireEvent.click(screen.getByRole("button", { name: "collapse" }))
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-expanded", "false")
+
+    act(() => focusRowHandler?.("external:opencode:oc"))
+    expect(screen.getByTestId("island-shell")).toHaveAttribute("data-expanded", "true")
+  })
+
+  it("drops a request for a row that is no longer in the projection", async () => {
+    setState([row({ capabilities: { ...NO_ISLAND_CAPABILITIES, detail: true } })])
+    render(<IslandShell />)
+    await act(async () => {})
+    act(() => focusRowHandler?.("external:opencode:gone"))
+    expect(detailArgs).toHaveBeenLastCalledWith(null, 3)
+  })
+
+  it("stops listening on unmount", async () => {
+    const { unmount } = render(<IslandShell />)
+    await act(async () => {})
+    unmount()
+    expect(focusRowOff).toHaveBeenCalledTimes(1)
   })
 })
 

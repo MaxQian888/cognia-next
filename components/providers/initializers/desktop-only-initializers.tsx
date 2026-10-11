@@ -154,6 +154,12 @@ const IslandInitializer = dynamic(
   () => import("./island-initializer").then((m) => m.IslandInitializer),
   { ssr: false }
 )
+// The glance publisher (ADR-0225): builds the snapshot the tray panel window
+// renders and runs its requests. Computes nothing until a consumer subscribes.
+const GlancePublisherInitializer = dynamic(
+  () => import("./glance-publisher-initializer").then((m) => m.GlancePublisherInitializer),
+  { ssr: false }
+)
 // Router + Fusion chat runs are ledgered in this desktop window (ADR-0188); the
 // initializer keeps breaker trips across restarts and seals runs a closed
 // window left behind. Inert — nothing loaded, no database opened — while off.
@@ -241,6 +247,7 @@ export function DesktopOnlyInitializers() {
       <TrayPanelInitializer />
       <UsageDockInitializer />
       <IslandInitializer />
+      <GlancePublisherInitializer />
       <ChatCopilotInitializer />
       <SessionImportWatchInitializer />
       <BrowserDownloadsInitializer />

@@ -18379,6 +18379,190 @@
       "runStartingIn": "第 {count} 次运行开始 · {workspace}"
     }
   },
+  "glance": {
+    "errors": {
+      "commandUnavailable": "该命令暂不可用。",
+      "deliveryFailed": "Cognia 主窗口未响应。",
+      "quotaEnable": "无法为该账号开启配额查询。",
+      "quotaRefresh": "无法刷新该配额来源。",
+      "requestFailed": "Cognia 无法完成该操作。",
+      "timeout": "Cognia 主窗口未及时响应。"
+    },
+    "modules": {
+      "activity": {
+        "dayTitle": "{day}：{tokens} tokens",
+        "label": "活动",
+        "loading": "正在读取活动…",
+        "longestStreak": "{count, plural, other {最长连续 # 天}}",
+        "open": "打开用量",
+        "peakHour": "高峰 {hour}:00",
+        "range": {
+          "1m": "1M",
+          "1y": "1Y",
+          "3m": "3M"
+        },
+        "rangeLabel": "活动范围",
+        "streak": "{count, plural, =0 {无连续} other {连续 # 天}}",
+        "summary": "{days} 个活跃日 · 连续 {streak} 天"
+      },
+      "agenda": {
+        "connectivity": {
+          "offline": "离线",
+          "paired": "{connected}/{total} 台设备在线",
+          "remote": "正在操控远程主机",
+          "unpaired": "未配对设备"
+        },
+        "label": "计划 · 通知 · 连接",
+        "lastContact": "{when}在线",
+        "lastFailed": "上次失败",
+        "lastOk": "上次成功",
+        "lastOutcomeHint": "{name}，{when}",
+        "loading": "正在读取…",
+        "next": "下次 {time} {name}",
+        "noneScheduled": "没有计划任务",
+        "openConnectivity": "打开连接设置",
+        "openNotifications": "打开通知",
+        "openScheduler": "打开定时任务",
+        "schedulerRemote": "定时任务在其他主机上运行",
+        "unread": "{count, plural, =0 {无未读} other {# 条未读}}"
+      },
+      "fleet": {
+        "awaiting": "{count} 待审批",
+        "empty": "没有正在运行的任务",
+        "failed": "{count} 失败",
+        "fleetLink": "Fleet",
+        "label": "运行中",
+        "loading": "正在读取任务…",
+        "more": "{count, plural, other {还有 # 个任务}}",
+        "openFiltered": "在 Agent Fleet 中打开一个「{state}」的任务",
+        "openFleet": "打开 Agent Fleet",
+        "openRow": "在 Agent Fleet 中打开「{title}」",
+        "readOnly": "只读 · 在 Fleet 中处理",
+        "stat": {
+          "awaiting": "待审批",
+          "failed": "失败",
+          "working": "运行中"
+        },
+        "state": {
+          "awaiting": "待审批",
+          "failed": "失败",
+          "stale": "已失联"
+        },
+        "working": "{count} 运行"
+      },
+      "pet": {
+        "care": {
+          "feed": "喂食",
+          "play": "玩耍",
+          "sleep": "睡觉"
+        },
+        "careFailed": "操作失败，请重试。",
+        "disabled": "桌宠已关闭",
+        "label": "桌宠",
+        "loading": "正在读取桌宠…",
+        "mood": {
+          "content": "满足",
+          "grumpy": "不高兴",
+          "happy": "开心",
+          "lonely": "孤单",
+          "tired": "疲惫"
+        },
+        "needs": {
+          "bond": "亲密",
+          "energy": "精力",
+          "mood": "心情"
+        },
+        "needsShort": "心情 {mood}% · 精力 {energy}%",
+        "open": "打开桌宠",
+        "unwell": "身体不适"
+      },
+      "quick": {
+        "label": "快捷动作"
+      },
+      "quota": {
+        "collapse": "收起 {name}",
+        "discoveredHint": "本机已登录",
+        "enable": "开启",
+        "enableFor": "为 {name} 开启配额查询",
+        "enabling": "正在开启…",
+        "expand": "展开 {name}",
+        "global": "全局",
+        "globalHint": "配额属于账号，不随工作区筛选。",
+        "label": "配额",
+        "lastGood": "显示的是{when}的读数",
+        "loading": "正在读取配额…",
+        "manage": "管理",
+        "meterLabel": "{name} {window} 已用",
+        "noReading": "尚无读数",
+        "none": "还没有配额来源",
+        "open": "打开配额设置",
+        "refreshFailed": "刷新失败，请稍后重试。",
+        "refreshing": "刷新中…",
+        "resetsIn": "{when}重置",
+        "retry": "重试",
+        "retryEnable": "重试",
+        "retryFor": "重试 {name}",
+        "setUp": "去设置",
+        "state": {
+          "error": "错误",
+          "exhausted": "已耗尽",
+          "stale": "过期 · {when}"
+        },
+        "updated": "更新于{when}",
+        "used": "已用 {pct}%"
+      },
+      "recents": {
+        "empty": "没有最近的会话",
+        "label": "最近",
+        "loading": "正在读取会话…",
+        "resume": "继续「{title}」"
+      },
+      "usage": {
+        "allToolsCancel": "暂不",
+        "allToolsConfirm": "统计全部工具",
+        "allToolsConsent": "统计“全部工具”需要读取本机 Claude Code、Codex、Gemini CLI 等智能体的会话文件。数据只在本机读取，不会上传；这些用量也不会计入 Cognia 的预算。",
+        "budgetDay": "每日预算",
+        "budgetMeter": "预算已用",
+        "budgetMonth": "每月预算",
+        "freshness": {
+          "partial": "不完整",
+          "stale": "非最新"
+        },
+        "freshnessHint": {
+          "partial": "部分工具的会话文件无法读取。",
+          "stale": "部分工具的会话文件近期无法读取。"
+        },
+        "hideSpend": "隐藏花费",
+        "label": "用量",
+        "loading": "正在读取用量…",
+        "lowerBound": "{count, plural, other {# 轮没有价格，花费为下限}}",
+        "month": "30 天",
+        "noBudget": "未设置预算",
+        "noUsage": "近 30 天无用量",
+        "open": "打开用量",
+        "providerShare": "{provider} 的 token 占比",
+        "scope": {
+          "allTools": "全部工具",
+          "cognia": "Cognia",
+          "label": "统计范围"
+        },
+        "showSpend": "显示花费",
+        "sparkline": "近 7 天 token 趋势",
+        "spendHidden": "花费已隐藏",
+        "today": "今日",
+        "topModel": "Top",
+        "turns": "{count, plural, =0 {无对话轮次} other {# 轮}}",
+        "week": "7 天",
+        "workspaceOnly": "仅本工作区"
+      }
+    },
+    "presets": {
+      "agentOps": "Agent 运维",
+      "balanced": "均衡",
+      "minimal": "极简",
+      "usageFirst": "用量优先"
+    }
+  },
   "globalSearch": {
     "actions": {
       "adoptWorkspaces": "收编已检测到的文件夹",
@@ -52096,6 +52280,28 @@
         "remove": "删除字段",
         "required": "必填",
         "submitOnEnter": "回车提交"
+      },
+      "layout": {
+        "autofocus": "打开时聚焦委派输入框",
+        "autofocusHint": "面板一打开就可以直接输入任务。",
+        "description": "面板的尺寸和显示的数据。修改会立即应用到已打开的面板。",
+        "maxHeight": "最大高度",
+        "maxHeightHint": "面板随内容增高，超过此高度后滚动。也可以拖动面板底边调整。",
+        "px": "{px}px",
+        "scope": "数据范围",
+        "scopeHint": "模块统计哪些数据。面板头部也可以切换。",
+        "scopeOptions": {
+          "all": "全部",
+          "workspace": "仅当前工作区"
+        },
+        "title": "面板布局",
+        "width": "宽度",
+        "widthHint": "模块会按宽度自动调整排布。",
+        "widthOptions": {
+          "narrow": "窄 · {px}px",
+          "standard": "标准 · {px}px",
+          "wide": "宽 · {px}px"
+        }
       }
     },
     "usageCost": {
@@ -57282,6 +57488,10 @@
         "label": "停止自动化"
       }
     },
+    "delegate": {
+      "options": "选项",
+      "optionsLabel": "委派选项"
+    },
     "dismiss": "关闭面板",
     "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
     "errors": {
@@ -57295,24 +57505,38 @@
       "unknownCommand": "未知命令：{id}",
       "unknownPlaceholder": "未知占位符：{ids}"
     },
+    "footer": {
+      "connecting": "正在连接…",
+      "openApp": "打开 Cognia",
+      "updated": "更新于{when}"
+    },
     "openSettings": "打开设置",
+    "quick": {
+      "edit": "编辑动作",
+      "label": "快捷"
+    },
+    "refresh": "刷新",
+    "resize": "拖动以调整面板最大高度",
     "run": "执行",
+    "scope": {
+      "all": "全部",
+      "hint": "配额等账号级数据不随工作区筛选。",
+      "label": "显示哪些数据",
+      "noWorkspace": "未打开工作区",
+      "workspace": "当前工作区 · {name}"
+    },
+    "status": {
+      "automation": "自动化运行中",
+      "awaiting": "{running} 个运行中 · {awaiting} 个待审批",
+      "awaitingShort": "{running} · {awaiting} 待审批",
+      "idle": "空闲",
+      "running": "{count} 个运行中"
+    },
     "targets": {
       "activeSession": "当前会话",
       "newSession": "新建会话"
     },
-    "title": "Cognia",
-    "usage": {
-      "loading": "正在读取用量…",
-      "meter": "预算已用",
-      "noPricing": "这些模型暂无价格数据",
-      "openFull": "查看完整用量",
-      "partialPricing": "{count, plural, other {# 轮无价格数据}}",
-      "refresh": "刷新",
-      "sparkline": "每日趋势",
-      "title": "用量",
-      "turns": "{count, plural, =0 {无对话轮次} other {# 轮}}"
-    }
+    "title": "Cognia"
   },
   "tts": {
     "nowPlaying": {

@@ -122,6 +122,11 @@ describe("section-keys", () => {
       expect(keyToSection("composerAssistance")).toBe("conversation")
     })
 
+    it("desktop owns the tray panel layout (ADR-0225)", () => {
+      expect(SECTION_OWNED_KEYS.desktop).toContain("trayPanelLayout")
+      expect(keyToSection("trayPanelLayout")).toBe("desktop")
+    })
+
     it("those keys are canonical DEFAULTS keys, so the completeness guard covers them", () => {
       // Before ADR-0127 none of these were in DEFAULTS, so the guard passed
       // while reset / review / transfer silently skipped them.

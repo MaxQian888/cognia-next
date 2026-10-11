@@ -22,6 +22,9 @@ import { isTauri } from "@/lib/tauri"
 import { getTrayPanelConfig, openTrayPanel, setTrayLeftClickAction } from "@/lib/tauri/tray-panel"
 import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
 import { __resetTrayPanelStoreForTesting, useTrayPanelStore } from "@/lib/tray-panel/store"
+import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import type { GlancePanelSettings } from "@/types/glance/layout"
 import type { TrayPanelAction } from "@/lib/tray-panel/types"
 
 import { TrayPanelSettings } from "./tray-panel-settings"
@@ -46,8 +49,19 @@ function seed(actions: TrayPanelAction[]) {
   useTrayPanelStore.setState({ actions, hydrated: true, hydrate: async () => {} })
 }
 
+const saveSettingsMock = jest.fn(async () => {})
+
+function seedLayout(layout: Partial<GlancePanelSettings> | undefined) {
+  useSettingsStore.setState({
+    settings: { trayPanelLayout: layout } as never,
+    save: saveSettingsMock as never,
+  })
+}
+
 beforeEach(() => {
   __resetTrayPanelStoreForTesting()
+  saveSettingsMock.mockClear()
+  seedLayout(undefined)
   isTauriMock.mockReset().mockReturnValue(true)
   getConfigMock.mockReset().mockResolvedValue({ leftClick: "panel", width: 380, height: 460 })
   setLeftClickMock.mockReset().mockResolvedValue(true)
@@ -192,5 +206,88 @@ describe("TrayPanelSettings", () => {
 
     await user.click(screen.getByRole("button", { name: /actions.reset/ }))
     expect(useTrayPanelStore.getState().actions).toEqual(DEFAULT_TRAY_PANEL_ACTIONS)
+  })
+
+  describe("panel layout", () => {
+    it("shows the shipped layout when none is stored", () => {
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      expect(screen.getByRole("combobox", { name: "layout.width" })).toHaveTextContent(
+        'layout.widthOptions.standard:{"px":380}'
+      )
+      expect(screen.getByRole("combobox", { name: "layout.scope" })).toHaveTextContent(
+        "layout.scopeOptions.all"
+      )
+      expect(screen.getByRole("slider", { name: "layout.maxHeight" })).toHaveAttribute(
+        "aria-valuenow",
+        String(DEFAULT_GLANCE_PANEL_SETTINGS.maxHeight)
+      )
+      expect(screen.getByRole("switch", { name: "layout.autofocus" })).not.toBeChecked()
+    })
+
+    it("reads a stored layout through the normalizer", () => {
+      seedLayout({
+        ...DEFAULT_GLANCE_PANEL_SETTINGS,
+        width: "wide",
+        maxHeight: 99999,
+        scope: "workspace",
+      })
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      expect(screen.getByRole("combobox", { name: "layout.width" })).toHaveTextContent(
+        "layout.widthOptions.wide"
+      )
+      expect(screen.getByRole("combobox", { name: "layout.scope" })).toHaveTextContent(
+        "layout.scopeOptions.workspace"
+      )
+      expect(screen.getByText('layout.px:{"px":860}')).toBeInTheDocument()
+    })
+
+    it("saves a width change into the whole layout", async () => {
+      const user = userEvent.setup()
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      await user.click(screen.getByRole("combobox", { name: "layout.width" }))
+      await user.click(await screen.findByRole("option", { name: /layout\.widthOptions\.narrow/ }))
+      expect(saveSettingsMock).toHaveBeenCalledWith({
+        trayPanelLayout: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "narrow" },
+      })
+    })
+
+    it("saves the scope", async () => {
+      const user = userEvent.setup()
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      await user.click(screen.getByRole("combobox", { name: "layout.scope" }))
+      await user.click(await screen.findByRole("option", { name: "layout.scopeOptions.workspace" }))
+      expect(saveSettingsMock).toHaveBeenCalledWith({
+        trayPanelLayout: expect.objectContaining({ scope: "workspace" }),
+      })
+    })
+
+    it("saves the autofocus switch", async () => {
+      const user = userEvent.setup()
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      await user.click(screen.getByRole("switch", { name: "layout.autofocus" }))
+      expect(saveSettingsMock).toHaveBeenCalledWith({
+        trayPanelLayout: expect.objectContaining({ autofocusDelegate: true }),
+      })
+    })
+
+    it("moves the max height locally and writes once on commit", async () => {
+      const user = userEvent.setup()
+      seed([custom("a")])
+      render(<TrayPanelSettings />)
+      const slider = screen.getByRole("slider", { name: "layout.maxHeight" })
+      slider.focus()
+      await user.keyboard("{ArrowRight}")
+      expect(saveSettingsMock).toHaveBeenCalledTimes(1)
+      expect(saveSettingsMock).toHaveBeenCalledWith({
+        trayPanelLayout: expect.objectContaining({
+          maxHeight: DEFAULT_GLANCE_PANEL_SETTINGS.maxHeight + 10,
+        }),
+      })
+    })
   })
 })

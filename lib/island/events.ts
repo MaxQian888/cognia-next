@@ -1,11 +1,11 @@
 /**
  * The complete cross-window event vocabulary for the task control island.
  *
- * Exactly six topics, defined once. No component builds an event name by hand,
- * so a rename cannot leave one side of the bridge listening to a topic nobody
- * emits any more. Three flow main to island (state, action result, detail
- * response) and three flow island to main (state request, action intent,
- * detail request).
+ * Exactly seven topics, defined once. No component builds an event name by
+ * hand, so a rename cannot leave one side of the bridge listening to a topic
+ * nobody emits any more. Four flow main to island (state, action result,
+ * detail response, focus row) and three flow island to main (state request,
+ * action intent, detail request).
  */
 
 export const ISLAND_WINDOW_LABEL = "island"
@@ -23,6 +23,12 @@ export const ISLAND_ACTION_RESULT_EVENT = "island://action-result"
 export const ISLAND_DETAIL_REQUEST_EVENT = "island://detail-request"
 /** Main to island: redacted detail, or a refusal. */
 export const ISLAND_DETAIL_RESPONSE_EVENT = "island://detail-response"
+/**
+ * Main to island: expand and pin one row. Sent when another glance surface
+ * (the tray panel's Fleet summary, ADR-0225) routes a click to the island,
+ * which is where that task's controls live.
+ */
+export const ISLAND_FOCUS_ROW_EVENT = "island://focus-row"
 
 /** Every topic, for the gate test that pins the vocabulary. */
 export const ISLAND_EVENTS = [
@@ -32,4 +38,5 @@ export const ISLAND_EVENTS = [
   ISLAND_ACTION_RESULT_EVENT,
   ISLAND_DETAIL_REQUEST_EVENT,
   ISLAND_DETAIL_RESPONSE_EVENT,
+  ISLAND_FOCUS_ROW_EVENT,
 ] as const

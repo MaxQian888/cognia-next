@@ -95,5 +95,27 @@
     "remove": "Remove field",
     "required": "Required",
     "submitOnEnter": "Enter submits"
+  },
+  "layout": {
+    "autofocus": "Focus the delegate box on open",
+    "autofocusHint": "Start typing a task as soon as the panel opens.",
+    "description": "How big the panel is and which data it shows. Changes repaint an open panel right away.",
+    "maxHeight": "Maximum height",
+    "maxHeightHint": "The panel grows with its content up to this height, then scrolls. You can also drag the panel's bottom edge.",
+    "px": "{px}px",
+    "scope": "Data",
+    "scopeHint": "Which data the modules count. The panel header switches this too.",
+    "scopeOptions": {
+      "all": "Everything",
+      "workspace": "Current workspace only"
+    },
+    "title": "Panel layout",
+    "width": "Width",
+    "widthHint": "Modules rearrange themselves to fit the width.",
+    "widthOptions": {
+      "narrow": "Narrow · {px}px",
+      "standard": "Standard · {px}px",
+      "wide": "Wide · {px}px"
+    }
   }
 }

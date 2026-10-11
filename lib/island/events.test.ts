@@ -4,6 +4,7 @@ import {
   ISLAND_DETAIL_REQUEST_EVENT,
   ISLAND_DETAIL_RESPONSE_EVENT,
   ISLAND_EVENTS,
+  ISLAND_FOCUS_ROW_EVENT,
   ISLAND_STATE_EVENT,
   ISLAND_STATE_REQUEST_EVENT,
   ISLAND_WINDOW_LABEL,
@@ -11,9 +12,9 @@ import {
 } from "./events"
 
 describe("island event vocabulary", () => {
-  it("is exactly six unique topics, all namespaced", () => {
-    expect(ISLAND_EVENTS).toHaveLength(6)
-    expect(new Set(ISLAND_EVENTS).size).toBe(6)
+  it("is exactly seven unique topics, all namespaced", () => {
+    expect(ISLAND_EVENTS).toHaveLength(7)
+    expect(new Set(ISLAND_EVENTS).size).toBe(7)
     for (const event of ISLAND_EVENTS) expect(event.startsWith("island://")).toBe(true)
   })
 
@@ -28,6 +29,7 @@ describe("island event vocabulary", () => {
         ISLAND_ACTION_RESULT_EVENT,
         ISLAND_DETAIL_REQUEST_EVENT,
         ISLAND_DETAIL_RESPONSE_EVENT,
+        ISLAND_FOCUS_ROW_EVENT,
       ].sort()
     )
   })

@@ -27,6 +27,10 @@
       "label": "停止自动化"
     }
   },
+  "delegate": {
+    "options": "选项",
+    "optionsLabel": "委派选项"
+  },
   "dismiss": "关闭面板",
   "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
   "errors": {
@@ -40,22 +44,36 @@
     "unknownCommand": "未知命令：{id}",
     "unknownPlaceholder": "未知占位符：{ids}"
   },
+  "footer": {
+    "connecting": "正在连接…",
+    "openApp": "打开 Cognia",
+    "updated": "更新于{when}"
+  },
   "openSettings": "打开设置",
+  "quick": {
+    "edit": "编辑动作",
+    "label": "快捷"
+  },
+  "refresh": "刷新",
+  "resize": "拖动以调整面板最大高度",
   "run": "执行",
+  "scope": {
+    "all": "全部",
+    "hint": "配额等账号级数据不随工作区筛选。",
+    "label": "显示哪些数据",
+    "noWorkspace": "未打开工作区",
+    "workspace": "当前工作区 · {name}"
+  },
+  "status": {
+    "automation": "自动化运行中",
+    "awaiting": "{running} 个运行中 · {awaiting} 个待审批",
+    "awaitingShort": "{running} · {awaiting} 待审批",
+    "idle": "空闲",
+    "running": "{count} 个运行中"
+  },
   "targets": {
     "activeSession": "当前会话",
     "newSession": "新建会话"
   },
-  "title": "Cognia",
-  "usage": {
-    "loading": "正在读取用量…",
-    "meter": "预算已用",
-    "noPricing": "这些模型暂无价格数据",
-    "openFull": "查看完整用量",
-    "partialPricing": "{count, plural, other {# 轮无价格数据}}",
-    "refresh": "刷新",
-    "sparkline": "每日趋势",
-    "title": "用量",
-    "turns": "{count, plural, =0 {无对话轮次} other {# 轮}}"
-  }
+  "title": "Cognia"
 }

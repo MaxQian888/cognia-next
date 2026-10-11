@@ -15,7 +15,7 @@
  * next open).
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArrowDownIcon,
@@ -29,10 +29,13 @@ import {
   TrashIcon,
   MousePointerClickIcon,
   LayoutPanelTopIcon,
+  PanelsTopLeftIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -46,6 +49,7 @@ import {
   SettingsStack,
 } from "@/components/settings/common/settings-block"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
+import { clampMaxHeight, normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { isTauri } from "@/lib/tauri"
 import {
   DEFAULT_TRAY_PANEL_CONFIG,
@@ -58,10 +62,21 @@ import { describeEffect } from "@/lib/tray-panel/resolve"
 import { useTrayPanelStore } from "@/lib/tray-panel/store"
 import type { TrayLeftClickAction, TrayPanelAction } from "@/lib/tray-panel/types"
 import { cn } from "@/lib/utils"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  GLANCE_MAX_HEIGHT_MAX,
+  GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_WIDTH_PX,
+  type GlancePanelSettings,
+  type GlanceScope,
+  type GlanceWidthStep,
+} from "@/types/glance/layout"
 
 import { TrayPanelActionEditor, blankAction } from "./tray-panel-action-editor"
 
 const LEFT_CLICK_ACTIONS: TrayLeftClickAction[] = ["panel", "toggle-window", "none"]
+const WIDTH_STEPS: GlanceWidthStep[] = ["narrow", "standard", "wide"]
+const SCOPES: GlanceScope[] = ["all", "workspace"]
 
 export function TrayPanelSettings() {
   const t = useTranslations("settings.trayPanel")
@@ -78,6 +93,20 @@ export function TrayPanelSettings() {
     DEFAULT_TRAY_PANEL_CONFIG.leftClick
   )
   const [editing, setEditing] = useState<TrayPanelAction | null>(null)
+
+  // The panel's own layout (ADR-0225) lives in AppSettings; the panel window
+  // receives it through the glance snapshot, so a change here repaints an open
+  // panel immediately.
+  const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
+  const saveSettings = useSettingsStore((s) => s.save)
+  const layout = useMemo(() => normalizeGlancePanelSettings(storedLayout), [storedLayout])
+  const patchLayout = useCallback(
+    (patch: Partial<GlancePanelSettings>) =>
+      void saveSettings({ trayPanelLayout: { ...layout, ...patch } }),
+    [layout, saveSettings]
+  )
+  // The slider moves locally and commits on release, so a drag is one write.
+  const [draftHeight, setDraftHeight] = useState<number | null>(null)
 
   useEffect(() => {
     void hydrate()
@@ -144,6 +173,94 @@ export function TrayPanelSettings() {
             <ExternalLinkIcon className="mr-1.5 size-3.5" />
             {t("behavior.previewAction")}
           </Button>
+        </SettingsField>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon={<PanelsTopLeftIcon />}
+        title={t("layout.title")}
+        description={t("layout.description")}
+        settingId="tray-panel-layout"
+      >
+        <SettingsField
+          htmlFor="tray-panel-width"
+          label={t("layout.width")}
+          description={t("layout.widthHint")}
+        >
+          <Select
+            value={layout.width}
+            onValueChange={(v) => patchLayout({ width: v as GlanceWidthStep })}
+          >
+            <SelectTrigger id="tray-panel-width" className="w-48" aria-label={t("layout.width")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {WIDTH_STEPS.map((step) => (
+                <SelectItem key={step} value={step}>
+                  {t(`layout.widthOptions.${step}`, { px: GLANCE_WIDTH_PX[step] })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsField>
+
+        <SettingsField
+          htmlFor="tray-panel-max-height"
+          label={t("layout.maxHeight")}
+          description={t("layout.maxHeightHint")}
+        >
+          <div className="flex w-64 items-center gap-3">
+            <Slider
+              id="tray-panel-max-height"
+              aria-label={t("layout.maxHeight")}
+              min={GLANCE_MAX_HEIGHT_MIN}
+              max={GLANCE_MAX_HEIGHT_MAX}
+              step={10}
+              value={[draftHeight ?? layout.maxHeight]}
+              onValueChange={([v]) => setDraftHeight(v)}
+              onValueCommit={([v]) => {
+                setDraftHeight(null)
+                patchLayout({ maxHeight: clampMaxHeight(v) })
+              }}
+            />
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {t("layout.px", { px: draftHeight ?? layout.maxHeight })}
+            </span>
+          </div>
+        </SettingsField>
+
+        <SettingsField
+          htmlFor="tray-panel-scope"
+          label={t("layout.scope")}
+          description={t("layout.scopeHint")}
+        >
+          <Select
+            value={layout.scope}
+            onValueChange={(v) => patchLayout({ scope: v as GlanceScope })}
+          >
+            <SelectTrigger id="tray-panel-scope" className="w-48" aria-label={t("layout.scope")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SCOPES.map((scope) => (
+                <SelectItem key={scope} value={scope}>
+                  {t(`layout.scopeOptions.${scope}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsField>
+
+        <SettingsField
+          htmlFor="tray-panel-autofocus"
+          label={t("layout.autofocus")}
+          description={t("layout.autofocusHint")}
+        >
+          <Switch
+            id="tray-panel-autofocus"
+            checked={layout.autofocusDelegate}
+            onCheckedChange={(checked) => patchLayout({ autofocusDelegate: checked })}
+          />
         </SettingsField>
       </SettingsBlock>
 

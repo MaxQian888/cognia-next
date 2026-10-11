@@ -84,6 +84,20 @@ describe("useUsageGlance", () => {
     expect(result.current.loading).toBe(false)
   })
 
+  it("counts only the filtered sessions when given a session filter", () => {
+    liveRows = [row(), row({ messageId: "m2", sessionId: "s2" })]
+    const filter = new Set(["s2"])
+    const { result } = renderHook(() => useUsageGlance({ query: cognia, sessionFilter: filter }))
+    expect(result.current.snapshot?.turns).toBe(1)
+    expect(result.current.snapshot?.knownCostUsd).toBeCloseTo(2, 6)
+  })
+
+  it("counts every row when the filter is null", () => {
+    liveRows = [row(), row({ messageId: "m2", sessionId: "s2" })]
+    const { result } = renderHook(() => useUsageGlance({ query: cognia, sessionFilter: null }))
+    expect(result.current.snapshot?.turns).toBe(2)
+  })
+
   it("reports loading until the first read lands", () => {
     liveRows = undefined
     const { result } = renderHook(() => useUsageGlance({ query: cognia }))

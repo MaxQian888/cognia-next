@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -17,6 +17,8 @@ jest.mock("./notification-center", () => ({
     </button>
   ),
 }))
+
+import { requestNotificationCenter } from "@/lib/notifications/center-request"
 
 import { NotificationBell } from "./notification-bell"
 
@@ -85,4 +87,21 @@ it("labels the trigger with the unread count when directed", () => {
   expect(
     screen.getByRole("button", { name: 'notificationCenter.bell.unreadAria:{"count":2}' })
   ).toBeInTheDocument()
+})
+
+it("opens the center when another surface asks for it", async () => {
+  render(<NotificationBell />)
+  expect(screen.queryByTestId("center-stub")).not.toBeInTheDocument()
+  let handled = false
+  act(() => {
+    handled = requestNotificationCenter()
+  })
+  expect(handled).toBe(true)
+  expect(await screen.findByTestId("center-stub")).toBeInTheDocument()
+})
+
+it("stops answering center requests once unmounted", () => {
+  const { unmount } = render(<NotificationBell />)
+  unmount()
+  expect(requestNotificationCenter()).toBe(false)
 })

@@ -21,6 +21,7 @@ import {
   listAgentThreadSessions,
   listScopedSessions,
   listWorkspaceSessions,
+  listWorkspaceSessionIds,
   countWorkspaceConversations,
   deleteSession,
   listSessionBranches,
@@ -1642,6 +1643,23 @@ describe("workspace (project) scoping", () => {
       b1.id,
       hostRow.id,
     ])
+  })
+
+  it("listWorkspaceSessionIds is the id set of listWorkspaceSessions", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const a1 = await createSession({ title: "a1" })
+    const b1 = await createSession({ title: "b1", projectId: "proj-B" })
+    const legacy = await createSession({ title: "legacy" })
+    await getDb().sessions.update(legacy.id, { projectId: undefined })
+
+    for (const project of ["proj-A", "proj-B", "proj-empty"]) {
+      const ids = await listWorkspaceSessionIds(project)
+      const rows = await listWorkspaceSessions(project)
+      expect([...ids].sort()).toEqual(rows.map((r) => r.id).sort())
+    }
+    expect(await listWorkspaceSessionIds("proj-A")).toContain(a1.id)
+    expect(await listWorkspaceSessionIds("proj-A")).not.toContain(b1.id)
+    expect(await listWorkspaceSessionIds("proj-empty")).toEqual([legacy.id])
   })
 
   it("listWorkspaceSessions re-emits in a liveQuery when a workspace-less row changes", async () => {

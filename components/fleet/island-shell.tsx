@@ -74,6 +74,7 @@ import {
   islandWidth,
   type IslandPresentation,
 } from "@/lib/island/layout"
+import { onIslandFocusRow } from "@/lib/island/client"
 import type { IslandRowProjection } from "@/lib/island/types"
 import { isTauri } from "@/lib/tauri"
 import { islandResize, islandSetTucked } from "@/lib/tauri/fleet"
@@ -164,6 +165,28 @@ export function IslandShell() {
   const updateHover = useCallback((inside: boolean) => {
     setHovering(inside)
     if (inside) setManuallyCollapsed(false)
+  }, [])
+
+  // Another surface routed a click here (ADR-0225: the tray panel's Fleet
+  // summary is read-only and sends its clicks to the island, where the task's
+  // controls live). Pin that row and hold the island open, exactly as if the
+  // user had clicked it here, so its approvals and answers are on screen.
+  useEffect(() => {
+    let disposed = false
+    let off: (() => void) | undefined
+    void onIslandFocusRow((rowId) => {
+      if (disposed) return
+      setManuallyCollapsed(false)
+      setPinnedOpen(true)
+      setPinnedRowId(rowId)
+    }).then((dispose) => {
+      if (disposed) dispose()
+      else off = dispose
+    })
+    return () => {
+      disposed = true
+      off?.()
+    }
   }, [])
 
   useEffect(() => {

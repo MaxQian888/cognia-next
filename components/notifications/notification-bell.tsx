@@ -5,19 +5,25 @@
 // approvals, critical), a plain dot for ambient activity — opening the
 // notification center. Styled to sit in the desktop status bar footer.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatedActionIcon } from "@/components/shared/animated-action-icon"
 import { BellIcon as AnimatedBellIcon } from "@/components/ui/bell"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useNotifications } from "@/hooks/notifications/use-notifications"
+import { onNotificationCenterRequest } from "@/lib/notifications/center-request"
 import { NotificationCenter } from "./notification-center"
 
 export function NotificationBell({ className }: { className?: string }) {
   const t = useTranslations("notificationCenter")
   const { directedUnread, ambientUnseen } = useNotifications()
   const [open, setOpen] = useState(false)
+
+  // Other surfaces (the tray panel's agenda line) route "show my
+  // notifications" here rather than to a page, because this popover is the
+  // notification center on the desktop.
+  useEffect(() => onNotificationCenterRequest(() => setOpen(true)), [])
 
   const hasDirected = directedUnread > 0
   const hasAmbient = !hasDirected && ambientUnseen > 0

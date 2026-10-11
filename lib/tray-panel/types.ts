@@ -160,7 +160,7 @@ export interface TrayPanelAction {
   labelKey?: string
   description?: string
   descriptionKey?: string
-  /** Lucide icon name, resolved by `components/tray-panel/action-icon.tsx`. */
+  /** Lucide icon name, resolved by `resolveIcon` (`lib/a2ui/resolve-icon.ts`). */
   icon?: string
   fields: TrayPanelField[]
   effect: TrayPanelEffect

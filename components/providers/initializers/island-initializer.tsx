@@ -39,6 +39,7 @@ import {
   onIslandStateRequest,
   sendIslandActionResult,
   sendIslandDetailResponse,
+  sendIslandFocusRow,
   sendIslandState,
 } from "@/lib/island/client"
 import { chatStatusOf, conversationCandidates, conversationFacts } from "@/lib/island/conversations"
@@ -52,7 +53,9 @@ import {
   stopConversation,
 } from "@/lib/island/main-window-controls"
 import { attentionOwner, fleetSessionOwner, taskIdentity } from "@/lib/island/owner"
+import { takePendingIslandFocus } from "@/lib/island/focus-request"
 import { projectIslandState, type IslandConversationFacts } from "@/lib/island/projection"
+import { publishIslandProjection } from "@/lib/island/projection-store"
 import { useIslandStore } from "@/lib/island/store"
 import type { IslandActionIntent, IslandDetailRequest, IslandState } from "@/lib/island/types"
 import { isTauri } from "@/lib/tauri"
@@ -145,8 +148,10 @@ export function IslandInitializer() {
   }, [fleet, attention, conversations, detailVisibility, hydrated])
 
   // Push on every change. A closed island makes the emit resolve false, which
-  // is the normal case rather than an error.
+  // is the normal case rather than an error. The same projection is published
+  // in-window for the tray panel's Fleet summary (ADR-0225).
   useEffect(() => {
+    publishIslandProjection(state)
     if (state) void sendIslandState(state)
   }, [state])
 
@@ -268,7 +273,15 @@ export function IslandInitializer() {
     const track = (off: () => void) => (alive ? offs.push(off) : off())
 
     void onIslandStateRequest(() => {
-      if (alive && latest.current) void sendIslandState(latest.current)
+      if (!alive || !latest.current) return
+      // A freshly opened island asks for state once it has mounted, which is
+      // the first moment it can hear a focus request. Hand over any focus a
+      // glance surface parked while the window was opening, after the state,
+      // so the row it names is already in the island's projection.
+      const focusRowId = takePendingIslandFocus(Date.now())
+      void sendIslandState(latest.current).then(() => {
+        if (alive && focusRowId) void sendIslandFocusRow(focusRowId)
+      })
     }).then(track)
 
     void onIslandActionIntent((intent: IslandActionIntent) => {

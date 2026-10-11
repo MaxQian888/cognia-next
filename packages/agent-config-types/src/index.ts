@@ -5138,6 +5138,14 @@ export interface AppSettings {
    */
   mobileHomeLayout?: import("@/types/shell/mobile-home").MobileHomeLayout
   /**
+   * The desktop tray panel's glance layout (ADR-0225): module order, sizes and
+   * visibility, the preset it came from, width step, max height, data scope
+   * and per-module options. Lives in settings JSON like `mobileHomeLayout`, so
+   * it is backed up and account-synced without a Dexie migration. Read through
+   * `normalizeGlancePanelSettings` (`lib/glance/presets.ts`), never raw.
+   */
+  trayPanelLayout?: import("@/types/glance/layout").GlancePanelSettings
+  /**
    * Customization of the mobile bottom tab bar: tab order, hidden tabs, and the
    * launch landing tab. Lives in settings JSON (same pattern as `sidebarLayout`)
    * — no Dexie migration. See `@/types/shell/mobile-tabs` for the model.

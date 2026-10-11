@@ -11,24 +11,18 @@ import {
   MAIN_WINDOW_LABEL,
   TRAY_PANEL_RESULT_EVENT,
   TRAY_PANEL_RUN_EVENT,
-  TRAY_PANEL_STATE_EVENT,
-  TRAY_PANEL_STATE_REQUEST_EVENT,
   TRAY_PANEL_WINDOW_LABEL,
   closeTrayPanel,
   getTrayPanelConfig,
   onTrayPanelRequest,
   onTrayPanelResult,
-  onTrayPanelState,
-  onTrayPanelStateRequest,
   onTrayPanelVisibility,
   openTrayPanel,
-  requestTrayPanelState,
   resizeTrayPanel,
   revealTrayPanel,
   runNativeTrayAction,
   sendTrayPanelRequest,
   sendTrayPanelResult,
-  sendTrayPanelState,
   setTrayLeftClickAction,
   toggleTrayPanel,
 } from "./tray-panel"
@@ -151,26 +145,11 @@ describe("cross-window messaging", () => {
   it("treats a result emitted to a closed panel as expected, not an error", async () => {
     emitToMock.mockRejectedValue(new Error("window not found"))
     await expect(sendTrayPanelResult({ requestId: "r", ok: false })).resolves.toBe(false)
-    await expect(sendTrayPanelState({})).resolves.toBe(false)
   })
 
   it("reports a failed request delivery so the panel can say so", async () => {
     emitToMock.mockRejectedValue(new Error("boom"))
     await expect(sendTrayPanelRequest(request)).resolves.toBe(false)
-  })
-
-  it("routes state requests and pushes over their own channels", async () => {
-    await requestTrayPanelState()
-    expect(emitToMock).toHaveBeenCalledWith(MAIN_WINDOW_LABEL, TRAY_PANEL_STATE_REQUEST_EVENT, null)
-    await sendTrayPanelState({ platform: { os: "macos" } })
-    expect(emitToMock).toHaveBeenCalledWith(TRAY_PANEL_WINDOW_LABEL, TRAY_PANEL_STATE_EVENT, {
-      platform: { os: "macos" },
-    })
-  })
-
-  it("reports a failed state request", async () => {
-    emitToMock.mockRejectedValue(new Error("boom"))
-    await expect(requestTrayPanelState()).resolves.toBe(false)
   })
 })
 
@@ -184,18 +163,7 @@ describe("subscriptions", () => {
 
     await onTrayPanelRequest((r) => seen.push(r))
     await onTrayPanelResult((r) => seen.push(r))
-    await onTrayPanelState((s) => seen.push(s))
-    expect(seen).toEqual(["payload", "payload", "payload"])
-  })
-
-  it("fires the state-request handler with no payload", async () => {
-    const handler = jest.fn()
-    listenMock.mockImplementation((_name: string, cb: (e: unknown) => void) => {
-      cb({ payload: null })
-      return Promise.resolve(() => {})
-    })
-    await onTrayPanelStateRequest(handler)
-    expect(handler).toHaveBeenCalledWith()
+    expect(seen).toEqual(["payload", "payload"])
   })
 
   it("maps the two visibility channels to a boolean", async () => {
@@ -216,13 +184,7 @@ describe("subscriptions", () => {
   it("returns a no-op unsubscribe off Tauri", async () => {
     isTauriMock.mockReturnValue(false)
     const handler = jest.fn()
-    for (const subscribe of [
-      onTrayPanelRequest,
-      onTrayPanelResult,
-      onTrayPanelState,
-      onTrayPanelStateRequest,
-      onTrayPanelVisibility,
-    ]) {
+    for (const subscribe of [onTrayPanelRequest, onTrayPanelResult, onTrayPanelVisibility]) {
       const dispose = await (subscribe as (h: unknown) => Promise<() => void>)(handler)
       expect(typeof dispose).toBe("function")
       dispose()

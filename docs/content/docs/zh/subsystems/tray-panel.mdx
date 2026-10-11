@@ -1,0 +1,99 @@
+---
+title: 托盘面板
+description: 点击桌面托盘图标打开的速览面板 —— 由模块组装的 Fleet、用量、额度、日程、活跃度、快捷操作、最近会话与宠物，只做摘要与路由，数据来自主窗口发布的同一份快照。
+---
+
+# 托盘面板
+
+<Status variant="beta">Beta · 桌面端 · ADR-0225 第一阶段</Status>
+
+<TLDR>
+  左键点击托盘图标，会打开一个置顶的小窗口：页头放工作区范围切换和总体状态胶囊，中间是一列**速览模块**，
+  底部固定一条**委托栏**，最下面是页脚。面板不持有数据，自己也不执行任何操作。面板持有租约期间，
+  主窗口构建一份不含内容的 `GlanceSnapshotV1` 推给它，并替它执行请求。每个模块只汇总一个子系统并路由过去，
+  控制权留在子系统自己手里：Agent Fleet 的审批与逐任务停止仍在 Island 上。
+</TLDR>
+
+## 布局
+
+| 区域     | 内容                                                                                   |
+| -------- | -------------------------------------------------------------------------------------- |
+| 页头     | 标题、范围切换（全部 / 当前工作区）、状态胶囊（自动化 › 待处理 › 运行中 › 空闲）、刷新、设置、关闭 |
+| 速览栈   | 已存布局中可见的模块，按顺序排列。面板达到最大高度后滚动                                   |
+| 委托栏   | 主托盘操作，呈现为一行可增高的输入框，其余字段放在选项菜单里                               |
+| 页脚     | 打开 Cognia，以及快照的新鲜度（「12 秒前更新」/「连接中…」）                              |
+| 调整手柄 | 拖动，或按 ↑ / ↓ 以 40 px 步进，设置最大高度（240–860 px）                                |
+
+窗口随内容自适应：`ResizeObserver` 让原生窗口贴合卡片尺寸，左上角位置保持不动。各区块在同一个容器里用细线分隔，
+不做成一张张卡片。
+
+## 模块
+
+每个模块都登记在 `lib/glance/registry.ts`，声明可用尺寸、对应的快照切片和路由去向。模块不支持的尺寸会降级到最接近的可用尺寸。
+
+| 模块       | 尺寸                          | 显示                                                                 | 路由到                           |
+| ---------- | ----------------------------- | -------------------------------------------------------------------- | -------------------------------- |
+| `fleet`    | compact · standard · expanded | 运行 / 待处理 / 失败计数与前几行。**只读**                            | Island，并聚焦到被点击的行        |
+| `usage`    | compact · standard · expanded | 今日 / 7 天 / 30 天的 token、轮次或花费、预算进度、各提供商占比        | 设置 › 订阅 › 用量                |
+| `quota`    | compact · standard · expanded | 每个已登录来源的窗口「已用 %」，状态为正常 / 预警 / 耗尽 / 出错 / 过期 | 设置 › 订阅                       |
+| `agenda`   | compact · standard            | 下一次计划运行、上次结果、未读通知、连接状态                          | 计划任务条目、通知中心、设备      |
+| `activity` | compact · standard · expanded | 1 / 3 / 12 个月的每日热力图、连续天数、高峰时段                        | 设置 › 订阅 › 用量                |
+| `quick`    | compact · standard            | 主操作之外的用户托盘操作（仅桌面宿主）                                | 设置 › 桌面（编辑操作）           |
+| `recents`  | compact · standard            | 最近几次会话                                                          | 对应会话                          |
+| `pet`      | compact · standard            | 宠物状态，以及喂食 / 玩耍 / 抚摸 / 睡觉 / 清洁                         | 宠物页                            |
+
+预设（`balanced`、`usage-first`、`agent-ops`、`minimal`）位于 `lib/glance/presets.ts`。
+已存布局只能通过 `normalizeGlancePanelSettings` 读取：未知 id 丢弃，重复项保留第一个，缺失的模块以隐藏状态补在末尾，越界高度会被钳制。
+
+## 数据流
+
+```
+tray-panel 窗口                           主窗口
+───────────────                           ──────
+useGlanceConsumer ── glance://subscribe ──▶ GlanceSubscriptionRegistry（租约，TTL 60s）
+   （可见时每 20s 续约）                          │
+                                                  ▼
+                                          useGlanceSources(active)
+                                          只构建可见模块的切片
+                    ◀── glance://snapshot ── GlancePublisherInitializer（120 ms 防抖）
+send(request) ───── glance://request ────▶ executeGlanceRequest
+                    ◀── glance://result ───
+```
+
+- **租约。** 面板隐藏时结束租约；过期租约每 10 秒清理一次。没有存活的租约时，发布端不做任何计算。
+- **顺序。** 快照带 `epoch`（每次发布端启动生成）和 `revision`，消费端只接受更新的快照。
+- **不含内容。** 切片只携带计数、标签和 id，从不携带提示词、提问或权限请求的内容。名称在离开主窗口前会先脱敏并截断。
+- **请求。** `parseGlanceRequest` 严格校验每个请求。路由类请求在主窗口接手后关闭面板；轻量请求（范围、用量口径、花费显示、
+  活跃度区间、尺寸、额度刷新 / 启用、宠物照料）不关闭面板。15 秒内没有回应的请求按超时处理，转圈不会一直挂着。
+
+## 归属规则
+
+- 面板从不自己执行托盘操作。原生操作交给 Rust，其余操作照旧经 `tray-panel://run` 交给主窗口。
+- Fleet 只是摘要。点击某一行会调用 `requestIslandFocus`：打开 Island（窗口挂载前先暂存这次聚焦），并固定该行，让它的审批与回答直接可见。
+- 「查看通知」会打开状态栏的通知中心（`requestNotificationCenter`）；没有挂载通知铃铛时，退回到 设置 › 通知。
+- 额度读数来自主窗口的 `providerLimits` 表。在磁盘上发现的登录会路由到 设置 › 订阅 去采纳；已停用的保险库账号可以在面板里直接启用。
+- 遵守 ADR-0165 的显式开启约定：花费默认隐藏，需用户主动显示；切换到「全部工具」用量口径前会先征得同意。额度等账号级数据从不按工作区过滤。
+
+## 设置
+
+设置 › 桌面 › 托盘面板 › **面板布局** 可以设置宽度档位（320 / 380 / 460 px）、最大高度、默认范围，以及打开时委托栏是否自动获得焦点。
+布局存为 `AppSettings.trayPanelLayout`（同步类别 `desktop-only`），因此无需 Dexie 迁移即可随备份保存；面板打开时，下一份快照就会按新设置重绘。
+
+## 代码位置
+
+| 关注点                   | 路径                                                              |
+| ------------------------ | ----------------------------------------------------------------- |
+| 布局类型与预设           | `types/glance/layout.ts`、`lib/glance/{registry,presets}.ts`      |
+| 快照与切片构建           | `lib/glance/snapshot.ts`、`lib/glance/build-*.ts`                 |
+| 请求、租约、归属路由     | `lib/glance/{requests,subscriptions,owner-routes}.ts`             |
+| 传输                     | `lib/tauri/glance.ts`                                             |
+| 发布端（主窗口）         | `components/providers/initializers/glance-publisher-initializer.tsx`、`hooks/glance/` |
+| 模块组件                 | `components/glance/`                                              |
+| 面板窗口                 | `components/tray-panel/`、`app/tray-panel/`                       |
+| Island 聚焦接缝          | `lib/island/{focus-request,projection-store}.ts`                  |
+| 通知中心接缝             | `lib/notifications/center-request.ts`                             |
+
+## 尚未包含
+
+第一阶段交付了注册表、快照、桌面面板、Fleet 路由和额度状态。就地编辑与预设选择（第二阶段）、移动端首页与速览抽屉（第三阶段），
+以及插件模块扩展点、菜单栏标题与 Capacity Dock 数据源（第四阶段），按 ADR-0225 的交付计划推进。

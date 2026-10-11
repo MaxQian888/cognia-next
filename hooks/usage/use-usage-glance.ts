@@ -55,6 +55,12 @@ export interface UseUsageGlanceOptions {
   quota?: UsageGlanceQuota | null
   /** Budget fold, supplied by the caller that already reads the budget plane. */
   budget?: UsageGlanceBudget | null
+  /**
+   * Count only these sessions' rows. `null`/absent counts every row. The tray
+   * panel's workspace scope (ADR-0225 §8) passes the workspace's session ids;
+   * the projection itself stays scope-agnostic, so the filter lives here.
+   */
+  sessionFilter?: ReadonlySet<string> | null
 }
 
 export interface UseUsageGlanceResult {
@@ -80,7 +86,7 @@ async function readRows(fromMs: number): Promise<SessionUsageRow[]> {
 }
 
 export function useUsageGlance(opts: UseUsageGlanceOptions): UseUsageGlanceResult {
-  const { query, enabled = true, quota = null, budget = null } = opts
+  const { query, enabled = true, quota = null, budget = null, sessionFilter = null } = opts
   const [scanning, setScanning] = useState(false)
   const [scanTick, setScanTick] = useState(0)
   const inFlight = useRef<Promise<void> | null>(null)
@@ -157,8 +163,9 @@ export function useUsageGlance(opts: UseUsageGlanceOptions): UseUsageGlanceResul
     if (!enabled || rows === undefined) return null
     const freshness =
       query.scope === "all-tools" ? foldSourceFreshness(sourceStates ?? []) : "fresh"
-    return buildUsageGlance({ rows, query, freshness, quota, budget, now: nowMs })
-  }, [enabled, rows, query, sourceStates, quota, budget, nowMs])
+    const scoped = sessionFilter ? rows.filter((row) => sessionFilter.has(row.sessionId)) : rows
+    return buildUsageGlance({ rows: scoped, query, freshness, quota, budget, now: nowMs })
+  }, [enabled, rows, query, sourceStates, quota, budget, nowMs, sessionFilter])
 
   return {
     snapshot,

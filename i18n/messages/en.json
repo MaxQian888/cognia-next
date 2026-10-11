@@ -18379,6 +18379,190 @@
       "runStartingIn": "Run #{count} starting · {workspace}"
     }
   },
+  "glance": {
+    "errors": {
+      "commandUnavailable": "That command isn't available right now.",
+      "deliveryFailed": "Cognia's main window didn't respond.",
+      "quotaEnable": "Couldn't turn on quota for that account.",
+      "quotaRefresh": "Couldn't refresh that quota source.",
+      "requestFailed": "Cognia couldn't do that.",
+      "timeout": "Cognia's main window didn't answer in time."
+    },
+    "modules": {
+      "activity": {
+        "dayTitle": "{day}: {tokens} tokens",
+        "label": "Activity",
+        "loading": "Reading activity…",
+        "longestStreak": "{count, plural, one {Longest streak # day} other {Longest streak # days}}",
+        "open": "Open usage",
+        "peakHour": "Busiest hour {hour}:00",
+        "range": {
+          "1m": "1M",
+          "1y": "1Y",
+          "3m": "3M"
+        },
+        "rangeLabel": "Activity range",
+        "streak": "{count, plural, =0 {No streak} one {# day streak} other {# day streak}}",
+        "summary": "{days} active days · {streak} day streak"
+      },
+      "agenda": {
+        "connectivity": {
+          "offline": "Offline",
+          "paired": "{connected}/{total} devices connected",
+          "remote": "Steering a remote host",
+          "unpaired": "No devices paired"
+        },
+        "label": "Schedule · notifications · connection",
+        "lastContact": "seen {when}",
+        "lastFailed": "Last run failed",
+        "lastOk": "Last run OK",
+        "lastOutcomeHint": "{name}, {when}",
+        "loading": "Reading…",
+        "next": "Next {time} {name}",
+        "noneScheduled": "Nothing scheduled",
+        "openConnectivity": "Open connection settings",
+        "openNotifications": "Open notifications",
+        "openScheduler": "Open scheduled tasks",
+        "schedulerRemote": "Scheduled tasks run on another host",
+        "unread": "{count, plural, =0 {No unread} other {# unread}}"
+      },
+      "fleet": {
+        "awaiting": "{count} awaiting",
+        "empty": "Nothing running",
+        "failed": "{count} failed",
+        "fleetLink": "Fleet",
+        "label": "Running",
+        "loading": "Reading tasks…",
+        "more": "{count, plural, one {# more task} other {# more tasks}}",
+        "openFiltered": "Open Agent Fleet at a task that is {state}",
+        "openFleet": "Open Agent Fleet",
+        "openRow": "Open “{title}” in Agent Fleet",
+        "readOnly": "Read-only · act in Fleet",
+        "stat": {
+          "awaiting": "Awaiting",
+          "failed": "Failed",
+          "working": "Running"
+        },
+        "state": {
+          "awaiting": "Awaiting",
+          "failed": "Failed",
+          "stale": "Stale"
+        },
+        "working": "{count} running"
+      },
+      "pet": {
+        "care": {
+          "feed": "Feed",
+          "play": "Play",
+          "sleep": "Sleep"
+        },
+        "careFailed": "That didn't work. Try again.",
+        "disabled": "The pet is turned off",
+        "label": "Pet",
+        "loading": "Reading the pet…",
+        "mood": {
+          "content": "Content",
+          "grumpy": "Grumpy",
+          "happy": "Happy",
+          "lonely": "Lonely",
+          "tired": "Tired"
+        },
+        "needs": {
+          "bond": "Bond",
+          "energy": "Energy",
+          "mood": "Mood"
+        },
+        "needsShort": "Mood {mood}% · energy {energy}%",
+        "open": "Open pet",
+        "unwell": "Not feeling well"
+      },
+      "quick": {
+        "label": "Quick actions"
+      },
+      "quota": {
+        "collapse": "Collapse {name}",
+        "discoveredHint": "Signed in on this machine",
+        "enable": "Turn on",
+        "enableFor": "Turn on quota for {name}",
+        "enabling": "Turning on…",
+        "expand": "Expand {name}",
+        "global": "Global",
+        "globalHint": "Quota belongs to the account, so the workspace filter doesn't apply.",
+        "label": "Quota",
+        "lastGood": "Showing the reading from {when}",
+        "loading": "Reading quota…",
+        "manage": "Manage",
+        "meterLabel": "{name} {window} used",
+        "noReading": "No reading yet",
+        "none": "No quota sources yet",
+        "open": "Open quota settings",
+        "refreshFailed": "Couldn't refresh. Try again in a moment.",
+        "refreshing": "Refreshing…",
+        "resetsIn": "resets {when}",
+        "retry": "Retry",
+        "retryEnable": "Try again",
+        "retryFor": "Retry {name}",
+        "setUp": "Set up",
+        "state": {
+          "error": "Error",
+          "exhausted": "Used up",
+          "stale": "Old · {when}"
+        },
+        "updated": "Updated {when}",
+        "used": "{pct}% used"
+      },
+      "recents": {
+        "empty": "No recent conversations",
+        "label": "Recent",
+        "loading": "Reading conversations…",
+        "resume": "Resume “{title}”"
+      },
+      "usage": {
+        "allToolsCancel": "Not now",
+        "allToolsConfirm": "Count all tools",
+        "allToolsConsent": "Counting all tools reads the session files of Claude Code, Codex, Gemini CLI and other agents on this machine. Nothing leaves this machine, and their usage never counts toward Cognia's budget.",
+        "budgetDay": "Daily budget",
+        "budgetMeter": "Budget used",
+        "budgetMonth": "Monthly budget",
+        "freshness": {
+          "partial": "Partial",
+          "stale": "Not current"
+        },
+        "freshnessHint": {
+          "partial": "Some tools' session files couldn't be read.",
+          "stale": "Some tools' session files couldn't be read recently."
+        },
+        "hideSpend": "Hide spend",
+        "label": "Usage",
+        "loading": "Reading usage…",
+        "lowerBound": "{count, plural, one {# turn has no price, so spend is a lower bound} other {# turns have no price, so spend is a lower bound}}",
+        "month": "30 days",
+        "noBudget": "No budget set",
+        "noUsage": "No usage in the last 30 days",
+        "open": "Open usage",
+        "providerShare": "{provider} share of tokens",
+        "scope": {
+          "allTools": "All tools",
+          "cognia": "Cognia",
+          "label": "Count usage from"
+        },
+        "showSpend": "Show spend",
+        "sparkline": "Tokens over the last 7 days",
+        "spendHidden": "Spend is hidden",
+        "today": "Today",
+        "topModel": "Top",
+        "turns": "{count, plural, =0 {no turns} one {# turn} other {# turns}}",
+        "week": "7 days",
+        "workspaceOnly": "This workspace"
+      }
+    },
+    "presets": {
+      "agentOps": "Agent ops",
+      "balanced": "Balanced",
+      "minimal": "Minimal",
+      "usageFirst": "Usage first"
+    }
+  },
   "globalSearch": {
     "actions": {
       "adoptWorkspaces": "Adopt detected folders",
@@ -52096,6 +52280,28 @@
         "remove": "Remove field",
         "required": "Required",
         "submitOnEnter": "Enter submits"
+      },
+      "layout": {
+        "autofocus": "Focus the delegate box on open",
+        "autofocusHint": "Start typing a task as soon as the panel opens.",
+        "description": "How big the panel is and which data it shows. Changes repaint an open panel right away.",
+        "maxHeight": "Maximum height",
+        "maxHeightHint": "The panel grows with its content up to this height, then scrolls. You can also drag the panel's bottom edge.",
+        "px": "{px}px",
+        "scope": "Data",
+        "scopeHint": "Which data the modules count. The panel header switches this too.",
+        "scopeOptions": {
+          "all": "Everything",
+          "workspace": "Current workspace only"
+        },
+        "title": "Panel layout",
+        "width": "Width",
+        "widthHint": "Modules rearrange themselves to fit the width.",
+        "widthOptions": {
+          "narrow": "Narrow · {px}px",
+          "standard": "Standard · {px}px",
+          "wide": "Wide · {px}px"
+        }
       }
     },
     "usageCost": {
@@ -57282,6 +57488,10 @@
         "label": "Stop automation"
       }
     },
+    "delegate": {
+      "options": "Options",
+      "optionsLabel": "Delegate options"
+    },
     "dismiss": "Close panel",
     "empty": "No actions yet — add one in Settings › Desktop.",
     "errors": {
@@ -57295,24 +57505,38 @@
       "unknownCommand": "Unknown command: {id}",
       "unknownPlaceholder": "Unknown placeholder: {ids}"
     },
+    "footer": {
+      "connecting": "Connecting…",
+      "openApp": "Open Cognia",
+      "updated": "Updated {when}"
+    },
     "openSettings": "Open settings",
+    "quick": {
+      "edit": "Edit actions",
+      "label": "Quick"
+    },
+    "refresh": "Refresh",
+    "resize": "Drag to change the panel's maximum height",
     "run": "Run",
+    "scope": {
+      "all": "All",
+      "hint": "Quota and other account-wide figures are never filtered by workspace.",
+      "label": "Show data for",
+      "noWorkspace": "No workspace open",
+      "workspace": "Current workspace · {name}"
+    },
+    "status": {
+      "automation": "Automation running",
+      "awaiting": "{running} running · {awaiting} awaiting",
+      "awaitingShort": "{running} · {awaiting} awaiting",
+      "idle": "Idle",
+      "running": "{count} running"
+    },
     "targets": {
       "activeSession": "Current conversation",
       "newSession": "New conversation"
     },
-    "title": "Cognia",
-    "usage": {
-      "loading": "Reading usage…",
-      "meter": "Budget used",
-      "noPricing": "No pricing for these models yet",
-      "openFull": "Open full usage",
-      "partialPricing": "{count, plural, one {# turn has no pricing} other {# turns have no pricing}}",
-      "refresh": "Refresh",
-      "sparkline": "Daily trend",
-      "title": "Usage",
-      "turns": "{count, plural, =0 {no turns} one {# turn} other {# turns}}"
-    }
+    "title": "Cognia"
   },
   "tts": {
     "nowPlaying": {

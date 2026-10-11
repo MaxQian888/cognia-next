@@ -1,82 +1,133 @@
 "use client"
 
 /**
- * Root view of the tray quick panel — rendered by `app/tray-panel/page.tsx`
- * inside the frameless, always-on-top `"tray-panel"` Tauri window that Rust
- * opens when the user clicks the tray icon.
+ * Root view of the tray quick panel (ADR-0225): a mini control center rendered
+ * by `app/tray-panel/page.tsx` inside the frameless, always-on-top
+ * `"tray-panel"` Tauri window Rust opens when the user clicks the tray icon.
  *
- * The panel runs NOTHING itself. It resolves an action against the values the
- * user typed and hands the result to the main window over `tray-panel://run`;
- * that window owns the chat stores, the router and the command registries. This
- * is the same split the selection toolbar uses, and it is what keeps this
- * webview least-privilege (see `src-tauri/capabilities/tray-panel.json`).
+ * Layout, top to bottom: a header (workspace scope, overall status, refresh,
+ * settings, close), the glance stack (scrolls past the user's max height), the
+ * delegate bar, and a footer. One container; sections separated by hairlines.
  *
- * Transient state — which action is expanded, half-typed values, validation
- * errors — is reset on every `tray-panel://shown`, because the window survives
- * a dismissal for cheap re-show and the user expects a fresh panel each time
- * they click the icon.
+ * The panel runs nothing itself and owns no data. Everything it shows is the
+ * Glance snapshot the main window publishes (`useGlanceConsumer`); everything
+ * it does is either a glance request (routes and light actions) or a resolved
+ * tray action handed to the main window over `tray-panel://run`.
+ *
+ * Transient state is reset on every `tray-panel://shown`, because the window
+ * survives a dismissal for cheap re-show and each click should open a fresh
+ * panel.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
-import { ChevronRightIcon, SendIcon, SettingsIcon, XIcon } from "lucide-react"
+import { useFormatter, useTranslations } from "next-intl"
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  MonitorIcon,
+  RefreshCwIcon,
+  SettingsIcon,
+  XIcon,
+} from "lucide-react"
 
+import { GlanceProvider, type GlanceContextValue } from "@/components/glance/glance-context"
+import { GlanceDot } from "@/components/glance/glance-primitives"
+import { GlanceStack } from "@/components/glance/glance-stack"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Spinner } from "@/components/ui/spinner"
-import { resolveIcon } from "@/lib/a2ui/resolve-icon"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { useGlanceConsumer } from "@/hooks/glance/use-glance-consumer"
+import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
+import type { GlanceRequestBody } from "@/lib/glance/requests"
+import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import { schedulePetWindowReveal } from "@/lib/pet/reveal"
-import { DELEGATE_PROMPT_FIELD, resolveLabel } from "@/lib/tray-panel/defaults"
+import {
+  closeTrayPanel,
+  onTrayPanelResult,
+  onTrayPanelVisibility,
+  resizeTrayPanel,
+} from "@/lib/tauri/tray-panel"
 import {
   actionForChord,
   chordFromEvent,
   openTriggeredActions,
-  resolveAction,
   resolvePrimaryAction,
   visibleActions,
-  type TrayPanelValidationError,
 } from "@/lib/tray-panel/resolve"
 import { useTrayPanelStore } from "@/lib/tray-panel/store"
-import { defaultValuesFor } from "@/lib/tray-panel/template"
-import type { TrayPanelAction, TrayPanelFieldValue, TrayPanelValues } from "@/lib/tray-panel/types"
+import type { TrayPanelAction } from "@/lib/tray-panel/types"
 import { defaultSnapshot } from "@/lib/tray/sync"
-import { USAGE_REFRESH_COMMAND } from "@/lib/tray/usage-section"
-import type { TrayStateSnapshot } from "@/lib/tray/types"
-import {
-  closeTrayPanel,
-  onTrayPanelResult,
-  onTrayPanelState,
-  onTrayPanelVisibility,
-  requestTrayPanelState,
-  resizeTrayPanel,
-  runNativeTrayAction,
-  sendTrayPanelRequest,
-} from "@/lib/tauri/tray-panel"
-import { showMainWindow } from "@/lib/tauri/pet-window"
 import { cn } from "@/lib/utils"
+import {
+  GLANCE_MAX_HEIGHT_MAX,
+  GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_WIDTH_PX,
+  type GlanceScope,
+} from "@/types/glance/layout"
 
-import { TrayPanelFieldControl } from "./tray-panel-field-control"
-import { TrayPanelUsageSection } from "./tray-panel-usage-section"
+import { TrayPanelDelegateBar } from "./tray-panel-delegate-bar"
+import { TrayPanelQuickActions, TrayPanelQuickActionsProvider } from "./tray-panel-quick-actions"
+import { TrayPanelRunnerProvider, useTrayPanelRunnerState } from "./tray-panel-runner"
 
 /** Extra px around the measured card so its shadow isn't clipped. */
 const SHADOW_MARGIN = 16
 
-/** Synthetic action id for the usage refresh button, so `busyId` can track it. */
-export const USAGE_REFRESH_ACTION_ID = "trayPanel.__usageRefresh"
+export const TRAY_PANEL_CONSUMER = "tray-panel"
+export const TRAY_PANEL_WINDOW_LABEL = "tray-panel"
 
-/** Where "Open full usage" lands in the main window. */
-export const USAGE_SETTINGS_PATH = "/settings?section=subscription"
+/** Used until the first snapshot lands: the shipped layout, every slice loading. */
+export function placeholderSnapshot(): GlanceSnapshotV1 {
+  return {
+    version: GLANCE_SNAPSHOT_VERSION,
+    epoch: 0,
+    revision: 0,
+    generatedAt: 0,
+    config: DEFAULT_GLANCE_PANEL_SETTINGS,
+    workspace: null,
+    when: defaultSnapshot(),
+    fleet: null,
+    usage: null,
+    quota: null,
+    agenda: null,
+    activity: null,
+    recents: null,
+    pet: null,
+  }
+}
 
-/** Seed every visible action's form with its declared defaults. */
-export function seedValues(actions: readonly TrayPanelAction[]): Record<string, TrayPanelValues> {
-  const out: Record<string, TrayPanelValues> = {}
-  for (const action of actions) out[action.id] = defaultValuesFor(action.fields)
-  return out
+export type TrayPanelStatus =
+  | { kind: "automation" }
+  | { kind: "awaiting"; running: number; awaiting: number }
+  | { kind: "running"; running: number }
+  | { kind: "idle" }
+
+/** The header pill: automation outranks a waiting task, which outranks work. */
+export function trayPanelStatus(snapshot: GlanceSnapshotV1): TrayPanelStatus {
+  if (snapshot.when.automation.running) return { kind: "automation" }
+  const running = snapshot.fleet?.counts.working ?? snapshot.when.chat.activeCount ?? 0
+  const awaiting = snapshot.fleet?.counts.awaiting ?? (snapshot.when.chat.awaitingApproval ? 1 : 0)
+  if (awaiting > 0) return { kind: "awaiting", running, awaiting }
+  if (running > 0) return { kind: "running", running }
+  return { kind: "idle" }
+}
+
+/** Every element arrow keys may land on, in render order, visible only. */
+function navTargets(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>("[data-glance-nav]")].filter(
+    (el) => el.offsetParent !== null && !el.hasAttribute("disabled")
+  )
 }
 
 export function TrayPanelView() {
   const t = useTranslations("trayPanel")
-  const tRoot = useTranslations()
+  const tGlance = useTranslations("glance")
+  const format = useFormatter()
   const cardRef = useRef<HTMLDivElement>(null)
 
   const actions = useTrayPanelStore((s) => s.actions)
@@ -85,66 +136,44 @@ export function TrayPanelView() {
     void hydrate()
   }, [hydrate])
 
-  // The panel has no Dexie and no app stores, so the snapshot its `when`
-  // expressions read is pushed by the main window on request. Until it lands,
-  // the neutral default keeps every ungated action visible rather than hiding
-  // the whole list behind an unanswered request.
-  const [snapshot, setSnapshot] = useState<TrayStateSnapshot>(() => defaultSnapshot())
-  useEffect(() => {
-    let disposed = false
-    let off: (() => void) | undefined
-    void onTrayPanelState<TrayStateSnapshot>((next) => {
-      if (!disposed && next) setSnapshot(next)
-    }).then((dispose) => {
-      if (disposed) dispose()
-      else off = dispose
-    })
-    void requestTrayPanelState()
-    return () => {
-      disposed = true
-      off?.()
-    }
-  }, [])
+  const [visible, setVisible] = useState(true)
+  const { snapshot: received, send } = useGlanceConsumer(
+    TRAY_PANEL_CONSUMER,
+    TRAY_PANEL_WINDOW_LABEL,
+    visible
+  )
+  const [placeholder] = useState(placeholderSnapshot)
+  const snapshot = received ?? placeholder
+  const config = snapshot.config
 
-  const visible = useMemo(() => visibleActions(actions, snapshot), [actions, snapshot])
-  const primary = useMemo(() => resolvePrimaryAction(actions, snapshot), [actions, snapshot])
+  const visible_ = useMemo(() => visibleActions(actions, snapshot.when), [actions, snapshot.when])
+  const primary = useMemo(
+    () => resolvePrimaryAction(actions, snapshot.when),
+    [actions, snapshot.when]
+  )
   const secondary = useMemo(
-    () => visible.filter((a) => a.id !== primary?.id && a.trigger.kind !== "open"),
-    [visible, primary]
+    () => visible_.filter((a) => a.id !== primary?.id && a.trigger.kind !== "open"),
+    [visible_, primary]
   )
 
-  // Declared defaults are DERIVED from the catalogue, never copied into state:
-  // an action edited in settings while the panel was closed must not keep
-  // values keyed to fields that no longer exist, and seeding through an effect
-  // would be a cascading render (`react-hooks/set-state-in-effect`). Only what
-  // the user actually typed is state, layered on top.
-  const declaredDefaults = useMemo(() => seedValues(actions), [actions])
-  const [overrides, setOverrides] = useState<Record<string, TrayPanelValues>>({})
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [errorsByAction, setErrorsByAction] = useState<Record<string, TrayPanelValidationError[]>>(
-    {}
-  )
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [failure, setFailure] = useState<string | null>(null)
+  const runner = useTrayPanelRunnerState(actions)
+  const { reset, run, settle } = runner
+  const [glanceFailure, setGlanceFailure] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [revealNonce, setRevealNonce] = useState(0)
   const firedForRef = useRef<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
-  const valuesFor = useCallback(
-    (actionId: string): TrayPanelValues => ({
-      ...(declaredDefaults[actionId] ?? {}),
-      ...(overrides[actionId] ?? {}),
-    }),
-    [declaredDefaults, overrides]
-  )
-
-  /** Drop everything transient. Called from the re-open event, not an effect. */
-  const reset = useCallback(() => {
-    setOverrides({})
-    setExpandedId(null)
-    setErrorsByAction({})
-    setBusyId(null)
-    setFailure(null)
-  }, [])
+  // A clock for relative labels, ticking only while the panel is on screen.
+  useEffect(() => {
+    if (!visible) return
+    const first = setTimeout(() => setNow(Date.now()), 0)
+    const timer = setInterval(() => setNow(Date.now()), 15_000)
+    return () => {
+      clearTimeout(first)
+      clearInterval(timer)
+    }
+  }, [visible])
 
   // Paint through to the desktop while mounted (transparent page background).
   useEffect(() => {
@@ -155,27 +184,26 @@ export function TrayPanelView() {
     }
   }, [])
 
-  // Reveal only AFTER the first painted frame — Rust creates the window
-  // `visible(false)` so the user never sees the pre-hydration opaque page
-  // background inside what must be a transparent window. Focus so the native
-  // blur-to-close arms and the composer is typeable immediately.
+  // Reveal only AFTER the first painted frame: Rust creates the window hidden
+  // so the user never sees the pre-hydration opaque background. Focus so the
+  // native blur-to-close arms and the keyboard works immediately.
   useEffect(() => schedulePetWindowReveal({ focus: true }), [])
 
-  // A native re-show reuses this webview, so the reset has to hang off the
-  // event rather than off mount.
+  // A native re-show reuses this webview, so the reset hangs off the event.
   useEffect(() => {
     let disposed = false
     let off: (() => void) | undefined
     void onTrayPanelVisibility((shown) => {
-      if (disposed || !shown) return
+      if (disposed) return
+      setVisible(shown)
+      if (!shown) return
       reset()
+      setGlanceFailure(null)
       void hydrate().then(() => {
         if (disposed) return
-        // Keep the previous reveal key armed until hydration settles: `reset`
-        // changes the `run` callback identity, and clearing this earlier would
-        // let that render execute the stale pre-hydration open action.
+        // Keep the previous reveal key armed until hydration settles, or the
+        // pre-hydration catalogue's open actions would run.
         firedForRef.current = null
-        void requestTrayPanelState()
         setRevealNonce((value) => value + 1)
       })
     }).then((dispose) => {
@@ -188,16 +216,13 @@ export function TrayPanelView() {
     }
   }, [hydrate, reset])
 
-  // The main window reports failures back so the panel can say what went wrong
-  // instead of silently dismissing. Successes need no message — the window is
-  // already coming forward with the result.
+  // The main window reports tray-action failures back, so the panel can say
+  // what went wrong instead of silently dismissing.
   useEffect(() => {
     let disposed = false
     let off: (() => void) | undefined
     void onTrayPanelResult((result) => {
-      if (disposed) return
-      setBusyId(null)
-      if (!result.ok) setFailure(result.error ?? t("errors.runFailed"))
+      if (!disposed) settle(result.ok, result.error)
     }).then((dispose) => {
       if (disposed) dispose()
       else off = dispose
@@ -206,78 +231,88 @@ export function TrayPanelView() {
       disposed = true
       off?.()
     }
-  }, [t])
+  }, [settle])
 
-  const run = useCallback(
-    async (action: TrayPanelAction) => {
-      const label = resolveLabel(action, (key) => tRoot(key))
-      const resolved = resolveAction(action, valuesFor(action.id), crypto.randomUUID(), label)
-      if (!resolved.ok) {
-        setErrorsByAction((prev) => ({ ...prev, [action.id]: resolved.errors }))
-        // Expand so the offending field is on screen when it gets highlighted.
-        if (action.fields.length > 0) setExpandedId(action.id)
-        return
-      }
-      setErrorsByAction((prev) => ({ ...prev, [action.id]: [] }))
-      setBusyId(action.id)
-      setFailure(null)
-
-      // Native actions are implemented in Rust and already emit the legacy
-      // `tray://*` events the main window listens for — no round trip needed,
-      // and they keep working while that window is still booting.
-      if (resolved.request.effect.kind === "native") {
-        const ok = await runNativeTrayAction(resolved.request.effect.action)
-        setBusyId(null)
-        if (!ok) {
-          setFailure(t("errors.runFailed"))
-          return
-        }
-        void closeTrayPanel()
-        return
-      }
-
-      // Raise the window from here rather than waiting for the main window to
-      // do it: the feedback is instant, and it does not depend on a listener
-      // in a window that may still be booting.
-      if (resolved.request.focusMainWindow) void showMainWindow()
-
-      const sent = await sendTrayPanelRequest(resolved.request)
-      if (!sent) {
-        setBusyId(null)
-        setFailure(t("errors.deliveryFailed"))
-        return
-      }
-      // Dismiss like a menu selection. The main window owns the outcome from
-      // here; a failure arrives as a toast there.
-      void closeTrayPanel()
-    },
-    [valuesFor, t, tRoot]
+  // `open`-triggered actions fire once per reveal (read-only by construction).
+  const openActions = useMemo(
+    () => openTriggeredActions(actions, snapshot.when),
+    [actions, snapshot.when]
   )
-
-  // `open`-triggered actions fire once per reveal. Restricted to read-only
-  // effects by `isTriggerLegal`, so this can never start a billed turn.
-  const openActions = useMemo(() => openTriggeredActions(actions, snapshot), [actions, snapshot])
   useEffect(() => {
     if (openActions.length === 0) return
     const key = openActions.map((a) => a.id).join("|")
     if (firedForRef.current === key) return
     firedForRef.current = key
-    // Deferred out of the effect body: `run` sets state on its synchronous
-    // path (busy flag, cleared errors), and doing that inline would cascade a
-    // render right after mount.
     queueMicrotask(() => {
       for (const action of openActions) void run(action)
     })
   }, [openActions, revealNonce, run])
 
-  // Escape dismisses; a bound chord runs its action. Blur dismissal is native.
+  /** Route to an owner surface: the panel steps aside once the main window took it. */
+  const route = useCallback(
+    (body: GlanceRequestBody) => {
+      setGlanceFailure(null)
+      void send(body).then((errorKey) => {
+        if (errorKey) setGlanceFailure(tGlance(errorKey))
+        else void closeTrayPanel()
+      })
+    },
+    [send, tGlance]
+  )
+  const sendLight = useCallback(
+    async (body: GlanceRequestBody) => {
+      const errorKey = await send(body)
+      setGlanceFailure(errorKey ? tGlance(errorKey) : null)
+      return errorKey
+    },
+    [send, tGlance]
+  )
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    await sendLight({ kind: "refresh" })
+    setRefreshing(false)
+  }, [sendLight])
+
+  // Escape dismisses; arrows walk the rows; → / ← open and close an
+  // expandable row; a bound chord runs its action. Blur dismissal is native.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const typing = target?.tagName === "TEXTAREA" || target?.tagName === "INPUT"
       if (e.key === "Escape") {
         void closeTrayPanel()
         return
       }
-      const match = actionForChord(actions, snapshot, chordFromEvent(e))
+      const card = cardRef.current
+      if (card && !typing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        const targets = navTargets(card)
+        if (targets.length === 0) return
+        e.preventDefault()
+        const index = targets.indexOf(document.activeElement as HTMLElement)
+        const next =
+          index < 0
+            ? targets[e.key === "ArrowDown" ? 0 : targets.length - 1]
+            : targets[
+                Math.max(0, Math.min(targets.length - 1, index + (e.key === "ArrowDown" ? 1 : -1)))
+              ]
+        next.focus()
+        next.scrollIntoView({ block: "nearest" })
+        return
+      }
+      if (!typing && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+        const active = document.activeElement as HTMLElement | null
+        if (active?.dataset.glanceExpand !== undefined) {
+          const open = active.getAttribute("aria-expanded") === "true"
+          if ((e.key === "ArrowRight" && !open) || (e.key === "ArrowLeft" && open)) {
+            e.preventDefault()
+            active.click()
+          }
+        }
+        return
+      }
+      if (typing) return
+      const match = actionForChord(actions, snapshot.when, chordFromEvent(e))
       if (match) {
         e.preventDefault()
         void run(match)
@@ -285,10 +320,52 @@ export function TrayPanelView() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [actions, snapshot, run])
+  }, [actions, snapshot.when, run])
 
-  // Fit the native window to the card — SIZE ONLY, never reposition, so
-  // expanding an action's form grows the panel from its fixed top-left.
+  // Max height: the stored value, or the live value while the edge is dragged.
+  const [dragHeight, setDragHeight] = useState<number | null>(null)
+  const maxHeight = dragHeight ?? config.maxHeight
+  const onGripPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const card = cardRef.current
+    if (!card) return
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = card.getBoundingClientRect().height
+    const grip = event.currentTarget
+    grip.setPointerCapture(event.pointerId)
+    let latest = startHeight
+    const move = (ev: PointerEvent) => {
+      latest = Math.round(
+        Math.min(
+          GLANCE_MAX_HEIGHT_MAX,
+          Math.max(GLANCE_MAX_HEIGHT_MIN, startHeight + ev.clientY - startY)
+        )
+      )
+      setDragHeight(latest)
+    }
+    const up = () => {
+      grip.removeEventListener("pointermove", move)
+      grip.removeEventListener("pointerup", up)
+      grip.removeEventListener("pointercancel", up)
+      void sendLight({ kind: "set-max-height", maxHeight: latest }).then(() => setDragHeight(null))
+    }
+    grip.addEventListener("pointermove", move)
+    grip.addEventListener("pointerup", up)
+    grip.addEventListener("pointercancel", up)
+  }
+  const onGripKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+    event.preventDefault()
+    event.stopPropagation()
+    const next = Math.min(
+      GLANCE_MAX_HEIGHT_MAX,
+      Math.max(GLANCE_MAX_HEIGHT_MIN, config.maxHeight + (event.key === "ArrowDown" ? 40 : -40))
+    )
+    void sendLight({ kind: "set-max-height", maxHeight: next })
+  }
+
+  // Fit the native window to the card: SIZE ONLY, never reposition, so the
+  // panel grows from its fixed top-left.
   const lastSize = useRef<{ w: number; h: number } | null>(null)
   useEffect(() => {
     const el = cardRef.current
@@ -308,229 +385,224 @@ export function TrayPanelView() {
     return () => ro.disconnect()
   }, [])
 
-  const setFieldValue = (actionId: string, fieldId: string, value: TrayPanelFieldValue) => {
-    setOverrides((prev) => ({
-      ...prev,
-      [actionId]: { ...(prev[actionId] ?? {}), [fieldId]: value },
-    }))
+  const status = trayPanelStatus(snapshot)
+  const openSettings: TrayPanelAction = {
+    id: "trayPanel.__settings",
+    label: t("openSettings"),
+    fields: [],
+    trigger: { kind: "manual" },
+    effect: { kind: "native", action: "settings" },
+  }
+  const openApp: TrayPanelAction = {
+    id: "trayPanel.__openApp",
+    label: t("footer.openApp"),
+    fields: [],
+    trigger: { kind: "manual" },
+    effect: { kind: "native", action: "show" },
   }
 
-  const invalidFields = (actionId: string): Set<string> =>
-    new Set(
-      (errorsByAction[actionId] ?? [])
-        .filter(
-          (e): e is Extract<TrayPanelValidationError, { kind: "required" }> => e.kind === "required"
-        )
-        .map((e) => e.fieldId)
-    )
-
-  const errorMessage = (actionId: string): string | null => {
-    const errors = errorsByAction[actionId] ?? []
-    if (errors.length === 0) return null
-    const first = errors[0]
-    switch (first.kind) {
-      case "required":
-        return t("errors.required")
-      case "unknownPlaceholder":
-        return t("errors.unknownPlaceholder", { ids: first.ids.join(", ") })
-      case "badTarget":
-        return t("errors.badTarget", { value: first.value })
-      case "illegalTrigger":
-        return t("errors.illegalTrigger")
-      case "emptyEffect":
-        return t("errors.emptyEffect")
-    }
+  const glance: GlanceContextValue = {
+    snapshot,
+    platform: "desktop",
+    width: config.width,
+    now,
+    send: sendLight,
+    route,
   }
+
+  const setScope = (scope: GlanceScope) => {
+    if (scope !== config.scope) void sendLight({ kind: "set-scope", scope })
+  }
+  const failure = runner.failure ?? glanceFailure
 
   return (
     <div className="flex min-h-screen w-screen items-start justify-center bg-transparent p-2">
       <div
         ref={cardRef}
         data-testid="tray-panel-card"
-        className="w-full overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg"
+        data-width={config.width}
+        style={{ width: GLANCE_WIDTH_PX[config.width], maxHeight }}
+        className="flex flex-col overflow-hidden rounded-xl border bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-xl"
       >
-        <header className="flex items-center justify-between gap-2 border-b px-3 py-2">
-          <span className="text-xs font-semibold tracking-tight">{t("title")}</span>
-          <div className="flex items-center gap-0.5">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              aria-label={t("openSettings")}
-              onClick={() =>
-                void run({
-                  id: "trayPanel.__settings",
-                  label: t("openSettings"),
-                  fields: [],
-                  trigger: { kind: "manual" },
-                  effect: { kind: "native", action: "settings" },
-                })
-              }
-            >
-              <SettingsIcon className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              aria-label={t("dismiss")}
-              onClick={() => void closeTrayPanel()}
-            >
-              <XIcon className="size-3.5" />
-            </Button>
-          </div>
-        </header>
-
-        {/*
-          Spend readout (ADR-0165). The projection's presence IS the gate: the
-          main window only builds one when the tray leads with a spend metric,
-          so a quota-configured install sees the panel it has always had and
-          this component needs no second copy of that pref to stay in sync.
-          Both controls travel the same cross-window request path as every
-          other action, because this webview owns no Dexie and starts no scan.
-        */}
-        {snapshot.usage?.glance ? (
-          <TrayPanelUsageSection
-            glance={snapshot.usage.glance}
-            metric={snapshot.usage.glance.query.metric}
-            refreshing={busyId === USAGE_REFRESH_ACTION_ID}
-            onRefresh={() =>
-              void run({
-                id: USAGE_REFRESH_ACTION_ID,
-                label: t("usage.refresh"),
-                fields: [],
-                trigger: { kind: "manual" },
-                effect: { kind: "command", commandId: USAGE_REFRESH_COMMAND },
-                focusMainWindow: false,
-              })
-            }
-            onOpenFull={() =>
-              void run({
-                id: "trayPanel.__usageOpen",
-                label: t("usage.openFull"),
-                fields: [],
-                trigger: { kind: "manual" },
-                effect: { kind: "navigate", path: USAGE_SETTINGS_PATH },
-              })
-            }
-          />
-        ) : null}
-
-        {primary ? (
-          <section className="space-y-2.5 border-b px-3 py-3" data-testid="tray-panel-primary">
-            {primary.fields.map((field, index) => (
-              <TrayPanelFieldControl
-                key={field.id}
-                field={field}
-                value={valuesFor(primary.id)[field.id]}
-                invalid={invalidFields(primary.id).has(field.id)}
-                autoFocus={index === 0 && field.id === DELEGATE_PROMPT_FIELD}
-                onChange={(next) => setFieldValue(primary.id, field.id, next)}
-                onSubmit={() => void run(primary)}
-              />
-            ))}
-            {errorMessage(primary.id) ? (
-              <p className="text-xs text-destructive">{errorMessage(primary.id)}</p>
-            ) : null}
-            <Button
-              size="sm"
-              className="h-8 w-full"
-              disabled={busyId === primary.id}
-              onClick={() => void run(primary)}
-            >
-              {busyId === primary.id ? (
-                <Spinner className="size-3.5" />
-              ) : (
-                <SendIcon className="size-3.5" />
-              )}
-              {resolveLabel(primary, (key) => tRoot(key))}
-            </Button>
-          </section>
-        ) : null}
-
-        <ScrollArea className="max-h-64">
-          <div className="flex flex-col p-1.5" data-testid="tray-panel-actions">
-            {secondary.length === 0 ? (
-              <p className="px-2 py-3 text-center text-xs text-muted-foreground">{t("empty")}</p>
-            ) : null}
-            {secondary.map((action) => {
-              const Icon = resolveIcon(action.icon)
-              const expanded = expandedId === action.id
-              const hasFields = action.fields.length > 0
-              return (
-                <div key={action.id} className="min-w-0">
+        <GlanceProvider value={glance}>
+          <TrayPanelRunnerProvider runner={runner}>
+            <header className="flex shrink-0 items-center gap-1.5 border-b py-2 pl-3.5 pr-2">
+              <span className="shrink-0 text-[13px] font-semibold tracking-tight">
+                {t("title")}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    data-testid={`tray-panel-action-${action.id}`}
-                    aria-expanded={hasFields ? expanded : undefined}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs",
-                      "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent",
-                      busyId === action.id && "opacity-60"
-                    )}
-                    onClick={() => {
-                      // An action with inputs opens its form first; one without
-                      // runs straight away, which is what a menu row should do.
-                      if (hasFields) setExpandedId(expanded ? null : action.id)
-                      else void run(action)
-                    }}
+                    aria-label={t("scope.label")}
+                    className="inline-flex min-w-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                   >
-                    {Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-                    <span className="min-w-0 flex-1 truncate">
-                      {resolveLabel(action, (key) => tRoot(key))}
+                    <span className="truncate">
+                      {config.scope === "workspace" && snapshot.workspace
+                        ? snapshot.workspace.name
+                        : t("scope.all")}
                     </span>
-                    {action.trigger.kind === "hotkey" ? (
-                      <kbd className="shrink-0 rounded border px-1 text-[10px] text-muted-foreground">
-                        {action.trigger.chord}
-                      </kbd>
-                    ) : null}
-                    {hasFields ? (
-                      <ChevronRightIcon
-                        aria-hidden
-                        className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                          expanded && "rotate-90"
-                        )}
-                      />
-                    ) : null}
+                    <ChevronDownIcon aria-hidden className="size-3 shrink-0" />
                   </button>
-                  {hasFields && expanded ? (
-                    <div className="space-y-2.5 rounded-md bg-muted/40 px-2.5 py-2.5">
-                      {action.fields.map((field) => (
-                        <TrayPanelFieldControl
-                          key={field.id}
-                          field={field}
-                          value={valuesFor(action.id)[field.id]}
-                          invalid={invalidFields(action.id).has(field.id)}
-                          onChange={(next) => setFieldValue(action.id, field.id, next)}
-                          onSubmit={() => void run(action)}
-                        />
-                      ))}
-                      {errorMessage(action.id) ? (
-                        <p className="text-xs text-destructive">{errorMessage(action.id)}</p>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="h-7 w-full text-xs"
-                        disabled={busyId === action.id}
-                        onClick={() => void run(action)}
-                      >
-                        {t("run")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        </ScrollArea>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60">
+                  <DropdownMenuLabel className="text-xs">{t("scope.label")}</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => setScope("all")}>
+                    <CheckIcon className={cn("size-3.5", config.scope !== "all" && "invisible")} />
+                    {t("scope.all")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!snapshot.workspace}
+                    onSelect={() => setScope("workspace")}
+                  >
+                    <CheckIcon
+                      className={cn("size-3.5", config.scope !== "workspace" && "invisible")}
+                    />
+                    <span className="truncate">
+                      {snapshot.workspace
+                        ? t("scope.workspace", { name: snapshot.workspace.name })
+                        : t("scope.noWorkspace")}
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <p className="px-2 py-1 text-[11px] text-muted-foreground">{t("scope.hint")}</p>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <span className="min-w-0 flex-1" />
+              <button
+                type="button"
+                data-testid="tray-panel-status"
+                onClick={() =>
+                  status.kind === "idle"
+                    ? undefined
+                    : route(
+                        status.kind === "awaiting"
+                          ? { kind: "open-fleet", filter: "awaiting" }
+                          : { kind: "open-fleet" }
+                      )
+                }
+                disabled={status.kind === "idle"}
+                className="inline-flex min-w-0 items-center gap-1.5 overflow-hidden rounded-full bg-muted px-2 py-0.5 text-[11.5px] enabled:hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <GlanceDot
+                  tone={
+                    status.kind === "automation" || status.kind === "awaiting"
+                      ? "warn"
+                      : status.kind === "running"
+                        ? "run"
+                        : "idle"
+                  }
+                  pulse={status.kind === "running"}
+                />
+                <span className="truncate">
+                  {status.kind === "automation"
+                    ? t("status.automation")
+                    : status.kind === "awaiting"
+                      ? config.width === "narrow"
+                        ? t("status.awaitingShort", {
+                            running: status.running,
+                            awaiting: status.awaiting,
+                          })
+                        : t("status.awaiting", {
+                            running: status.running,
+                            awaiting: status.awaiting,
+                          })
+                      : status.kind === "running"
+                        ? t("status.running", { count: status.running })
+                        : t("status.idle")}
+                </span>
+              </button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0"
+                aria-label={t("refresh")}
+                disabled={refreshing}
+                onClick={() => void refresh()}
+              >
+                <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0"
+                aria-label={t("openSettings")}
+                onClick={() => void run(openSettings)}
+              >
+                <SettingsIcon className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0"
+                aria-label={t("dismiss")}
+                onClick={() => void closeTrayPanel()}
+              >
+                <XIcon className="size-3.5" />
+              </Button>
+            </header>
 
-        {failure ? (
-          <p className="border-t px-3 py-2 text-xs text-destructive" role="alert">
-            {failure}
-          </p>
-        ) : null}
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+              data-testid="tray-panel-body"
+            >
+              <TrayPanelQuickActionsProvider actions={secondary}>
+                <GlanceStack
+                  entries={config.entries}
+                  renderers={{ quick: TrayPanelQuickActions }}
+                />
+              </TrayPanelQuickActionsProvider>
+            </div>
+
+            {primary ? (
+              <TrayPanelDelegateBar
+                action={primary}
+                autoFocus={config.autofocusDelegate}
+                revealNonce={revealNonce}
+              />
+            ) : null}
+
+            {failure ? (
+              <p className="shrink-0 border-t px-3.5 py-1.5 text-xs text-destructive" role="alert">
+                {failure}
+              </p>
+            ) : null}
+
+            <footer className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-1 text-[11.5px] text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => void run(openApp)}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <MonitorIcon aria-hidden className="size-3" />
+                {t("footer.openApp")}
+              </button>
+              <span className="flex-1" />
+              <span className="tabular-nums" data-testid="tray-panel-updated">
+                {received
+                  ? t("footer.updated", {
+                      when: format.relativeTime(new Date(snapshot.generatedAt), now),
+                    })
+                  : t("footer.connecting")}
+              </span>
+            </footer>
+          </TrayPanelRunnerProvider>
+        </GlanceProvider>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("resize")}
+          aria-valuemin={GLANCE_MAX_HEIGHT_MIN}
+          aria-valuemax={GLANCE_MAX_HEIGHT_MAX}
+          aria-valuenow={maxHeight}
+          tabIndex={0}
+          data-testid="tray-panel-resize"
+          onPointerDown={onGripPointerDown}
+          onKeyDown={onGripKeyDown}
+          className="group grid h-2 shrink-0 cursor-ns-resize place-items-center focus-visible:outline-none"
+        >
+          <span className="h-[3px] w-8 rounded-full bg-muted transition-colors group-hover:bg-muted-foreground/50 group-focus-visible:bg-ring" />
+        </div>
       </div>
     </div>
   )

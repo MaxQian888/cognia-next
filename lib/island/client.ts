@@ -19,6 +19,7 @@ import {
   ISLAND_ACTION_RESULT_EVENT,
   ISLAND_DETAIL_REQUEST_EVENT,
   ISLAND_DETAIL_RESPONSE_EVENT,
+  ISLAND_FOCUS_ROW_EVENT,
   ISLAND_STATE_EVENT,
   ISLAND_STATE_REQUEST_EVENT,
   ISLAND_WINDOW_LABEL,
@@ -85,6 +86,11 @@ export function sendIslandDetailResponse(response: IslandDetailResponse): Promis
   return emitToWindow(ISLAND_WINDOW_LABEL, ISLAND_DETAIL_RESPONSE_EVENT, response)
 }
 
+/** Ask the island to expand and pin one row (see `lib/island/focus-request.ts`). */
+export function sendIslandFocusRow(rowId: string): Promise<boolean> {
+  return emitToWindow(ISLAND_WINDOW_LABEL, ISLAND_FOCUS_ROW_EVENT, { rowId })
+}
+
 export function onIslandStateRequest(handler: () => void): Promise<() => void> {
   return listenHere<unknown>(ISLAND_STATE_REQUEST_EVENT, () => handler())
 }
@@ -123,6 +129,13 @@ export function onIslandActionResult(
   handler: (result: IslandActionResult) => void
 ): Promise<() => void> {
   return listenHere<IslandActionResult>(ISLAND_ACTION_RESULT_EVENT, handler)
+}
+
+export function onIslandFocusRow(handler: (rowId: string) => void): Promise<() => void> {
+  return listenHere<unknown>(ISLAND_FOCUS_ROW_EVENT, (payload) => {
+    const rowId = (payload as { rowId?: unknown } | null)?.rowId
+    if (typeof rowId === "string" && rowId.length > 0) handler(rowId)
+  })
 }
 
 export function onIslandDetailResponse(

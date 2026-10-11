@@ -95,5 +95,27 @@
     "remove": "删除字段",
     "required": "必填",
     "submitOnEnter": "回车提交"
+  },
+  "layout": {
+    "autofocus": "打开时聚焦委派输入框",
+    "autofocusHint": "面板一打开就可以直接输入任务。",
+    "description": "面板的尺寸和显示的数据。修改会立即应用到已打开的面板。",
+    "maxHeight": "最大高度",
+    "maxHeightHint": "面板随内容增高，超过此高度后滚动。也可以拖动面板底边调整。",
+    "px": "{px}px",
+    "scope": "数据范围",
+    "scopeHint": "模块统计哪些数据。面板头部也可以切换。",
+    "scopeOptions": {
+      "all": "全部",
+      "workspace": "仅当前工作区"
+    },
+    "title": "面板布局",
+    "width": "宽度",
+    "widthHint": "模块会按宽度自动调整排布。",
+    "widthOptions": {
+      "narrow": "窄 · {px}px",
+      "standard": "标准 · {px}px",
+      "wide": "宽 · {px}px"
+    }
   }
 }

@@ -1,0 +1,117 @@
+---
+title: Tray Panel
+description: The desktop tray icon opens a glance surface — Fleet, usage, quota, agenda, activity, quick actions, recents and pet, assembled from modules — that summarizes and routes, fed by one snapshot the main window publishes.
+---
+
+# Tray Panel
+
+<Status variant="beta">Beta · desktop · ADR-0225 phase 1</Status>
+
+<TLDR>
+  Left-clicking the tray icon opens a small always-on-top window: a header with the workspace scope
+  and an overall status pill, a single column of **glance modules**, a pinned **delegate bar**, and a
+  footer. The panel owns no data and runs nothing itself. The main window builds a content-free
+  `GlanceSnapshotV1` while a panel holds a lease on it, and executes the panel's requests. Every
+  module summarizes a subsystem and routes to it; the subsystem keeps its controls. Agent Fleet's
+  approvals and per-task stop stay on the Island.
+</TLDR>
+
+## Layout
+
+| Region       | What it holds                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Header       | Title, scope switch (all / current workspace), status pill (automation › awaiting › running › idle), refresh, settings, close |
+| Glance stack | The visible modules of the stored layout, in order. Scrolls once the panel reaches its max height                     |
+| Delegate bar | The primary tray action as one growing line, its other fields in an options menu                                    |
+| Footer       | Open Cognia, and how fresh the snapshot is ("Updated 12s ago" / "Connecting…")                                      |
+| Resize grip  | Drag, or ↑ / ↓ in 40 px steps, to set the max height (240–860 px)                                                   |
+
+The window hugs its content: a `ResizeObserver` fits the native window to the card, never moving
+its top-left. Sections are separated by hairlines inside one container, not boxed as cards.
+
+## Modules
+
+Every module is registered in `lib/glance/registry.ts` with its sizes, its snapshot slice and the
+owner surface it routes to. A size a module does not support degrades to the nearest one it does.
+
+| Module     | Sizes                         | Shows                                                                                       | Routes to                                    |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `fleet`    | compact · standard · expanded | Working / awaiting / failed counts and the top rows. **Read-only**                          | The Island, focused on the clicked row       |
+| `usage`    | compact · standard · expanded | Tokens today / 7 days / 30 days, turns or spend, budget meter, provider shares              | Settings › Subscription › Usage              |
+| `quota`    | compact · standard · expanded | Each credentialed source's windows as "used %", with ok / warn / exhausted / error / stale | Settings › Subscription                      |
+| `agenda`   | compact · standard            | Next scheduled run, last outcome, unread notifications, connectivity                        | Scheduler item, notification center, devices |
+| `activity` | compact · standard · expanded | Daily heatmap over 1 / 3 / 12 months, streaks, peak hour                                    | Settings › Subscription › Usage              |
+| `quick`    | compact · standard            | The user's tray actions other than the primary (desktop host only)                         | Settings › Desktop to edit them              |
+| `recents`  | compact · standard            | The last few conversations                                                                  | That conversation                            |
+| `pet`      | compact · standard            | Pet needs, and feed / play / pet / sleep / clean                                            | The pet page                                 |
+
+Presets (`balanced`, `usage-first`, `agent-ops`, `minimal`) live in `lib/glance/presets.ts`.
+`normalizeGlancePanelSettings` is the only reader of stored layouts: unknown ids drop, duplicates
+keep the first, missing modules are appended hidden, out-of-range heights clamp.
+
+## Data flow
+
+```
+tray-panel window                         main window
+─────────────────                         ───────────
+useGlanceConsumer ── glance://subscribe ──▶ GlanceSubscriptionRegistry (lease, TTL 60s)
+   (renew every 20s while visible)                │
+                                                  ▼
+                                          useGlanceSources(active)
+                                          builds only the visible slices
+                    ◀── glance://snapshot ── GlancePublisherInitializer (debounced 120 ms)
+send(request) ───── glance://request ────▶ executeGlanceRequest
+                    ◀── glance://result ───
+```
+
+- **Leases.** A hidden panel ends its lease; an expired lease is pruned every 10 s. With no live
+  lease the publisher computes nothing.
+- **Ordering.** Snapshots carry an `epoch` (per publisher boot) and a `revision`; consumers keep only
+  newer ones.
+- **Content-free.** Slices carry counts, labels and ids, never prompt text, questions or
+  permission payloads. Names are redacted and truncated before they leave the main window.
+- **Requests.** `parseGlanceRequest` validates every request strictly. Routes close the panel once
+  the main window took them; light requests (scope, usage scope, spend, activity range, size,
+  quota refresh / enable, pet care) keep it open. A request with no answer resolves to a timeout
+  after 15 s, so no spinner hangs.
+
+## Ownership rules
+
+- The panel never runs a tray action itself. Native actions go to Rust; the rest go to the main
+  window over `tray-panel://run`, exactly as before.
+- Fleet is a summary. Clicking a row calls `requestIslandFocus`, which opens the Island (parking the
+  focus until it mounts) and pins that row so its approvals and answers are on screen.
+- "Show notifications" opens the status-bar notification center (`requestNotificationCenter`),
+  falling back to Settings › Notifications when no bell is mounted.
+- Quota readings come from the `providerLimits` table in the main window. A login discovered on disk
+  routes to Settings › Subscription to be adopted; a disabled vault account can be turned on inline.
+- ADR-0165 opt-ins hold: spend is hidden until the user shows it, and the all-tools usage scope asks
+  for consent first. Quota and other account-wide figures are never filtered by workspace.
+
+## Settings
+
+Settings › Desktop › Tray panel › **Panel layout** sets the width step (320 / 380 / 460 px), the max
+height, the default scope and whether the delegate bar takes focus on open. The layout is stored as
+`AppSettings.trayPanelLayout` (sync category `desktop-only`), so it is backed up without a Dexie
+migration and an open panel repaints from the next snapshot.
+
+## Where it lives
+
+| Concern                       | Path                                                              |
+| ----------------------------- | ----------------------------------------------------------------- |
+| Layout types and presets      | `types/glance/layout.ts`, `lib/glance/{registry,presets}.ts`      |
+| Snapshot and slice builders   | `lib/glance/snapshot.ts`, `lib/glance/build-*.ts`                 |
+| Requests, leases, owner routes | `lib/glance/{requests,subscriptions,owner-routes}.ts`            |
+| Transport                     | `lib/tauri/glance.ts`                                             |
+| Publisher (main window)       | `components/providers/initializers/glance-publisher-initializer.tsx`, `hooks/glance/` |
+| Module kit                    | `components/glance/`                                              |
+| Panel window                  | `components/tray-panel/`, `app/tray-panel/`                       |
+| Island focus seam             | `lib/island/{focus-request,projection-store}.ts`                  |
+| Notification center seam      | `lib/notifications/center-request.ts`                             |
+
+## Not yet
+
+Phase 1 ships the registry, the snapshot, the desktop panel, Fleet routing and the quota states.
+In-place editing and the preset picker (phase 2), the mobile home and Glance drawer (phase 3), and
+the plugin module point, menu-bar title and Capacity Dock feed (phase 4) follow ADR-0225's
+delivery plan.

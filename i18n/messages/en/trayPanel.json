@@ -27,6 +27,10 @@
       "label": "Stop automation"
     }
   },
+  "delegate": {
+    "options": "Options",
+    "optionsLabel": "Delegate options"
+  },
   "dismiss": "Close panel",
   "empty": "No actions yet — add one in Settings › Desktop.",
   "errors": {
@@ -40,22 +44,36 @@
     "unknownCommand": "Unknown command: {id}",
     "unknownPlaceholder": "Unknown placeholder: {ids}"
   },
+  "footer": {
+    "connecting": "Connecting…",
+    "openApp": "Open Cognia",
+    "updated": "Updated {when}"
+  },
   "openSettings": "Open settings",
+  "quick": {
+    "edit": "Edit actions",
+    "label": "Quick"
+  },
+  "refresh": "Refresh",
+  "resize": "Drag to change the panel's maximum height",
   "run": "Run",
+  "scope": {
+    "all": "All",
+    "hint": "Quota and other account-wide figures are never filtered by workspace.",
+    "label": "Show data for",
+    "noWorkspace": "No workspace open",
+    "workspace": "Current workspace · {name}"
+  },
+  "status": {
+    "automation": "Automation running",
+    "awaiting": "{running} running · {awaiting} awaiting",
+    "awaitingShort": "{running} · {awaiting} awaiting",
+    "idle": "Idle",
+    "running": "{count} running"
+  },
   "targets": {
     "activeSession": "Current conversation",
     "newSession": "New conversation"
   },
-  "title": "Cognia",
-  "usage": {
-    "loading": "Reading usage…",
-    "meter": "Budget used",
-    "noPricing": "No pricing for these models yet",
-    "openFull": "Open full usage",
-    "partialPricing": "{count, plural, one {# turn has no pricing} other {# turns have no pricing}}",
-    "refresh": "Refresh",
-    "sparkline": "Daily trend",
-    "title": "Usage",
-    "turns": "{count, plural, =0 {no turns} one {# turn} other {# turns}}"
-  }
+  "title": "Cognia"
 }

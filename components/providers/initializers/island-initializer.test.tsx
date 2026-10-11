@@ -16,6 +16,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 const pushMock = jest.fn<Promise<boolean>, [IslandState]>(async (_state: IslandState) => true)
 const actionResultMock = jest.fn(async () => true)
 const detailResponseMock = jest.fn(async () => true)
+const focusRowMock = jest.fn(async (_rowId: string) => true)
 let onStateRequest: () => void = () => {}
 let onActionIntent: (intent: IslandActionIntent) => void = () => {}
 let onDetailRequest: (request: IslandDetailRequest) => void = () => {}
@@ -34,6 +35,7 @@ jest.mock("@/lib/island/client", () => ({
   sendIslandState: (state: IslandState) => pushMock(state),
   sendIslandActionResult: (...a: unknown[]) => actionResultMock(...(a as [])),
   sendIslandDetailResponse: (...a: unknown[]) => detailResponseMock(...(a as [])),
+  sendIslandFocusRow: (rowId: string) => focusRowMock(rowId),
   onIslandStateRequest: async (handler: () => void) => {
     onStateRequest = handler
     return registerListener(stateOff)
@@ -136,6 +138,11 @@ jest.mock("@/lib/island/store", () => ({
 }))
 
 import * as controls from "@/lib/island/main-window-controls"
+import { __resetIslandFocusForTesting, requestIslandFocus } from "@/lib/island/focus-request"
+import {
+  __resetIslandProjectionForTesting,
+  getIslandProjection,
+} from "@/lib/island/projection-store"
 import { IslandInitializer } from "./island-initializer"
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -180,6 +187,9 @@ beforeEach(() => {
   showWindowMock.mockReset().mockResolvedValue(undefined)
   focusWindowMock.mockReset().mockResolvedValue(undefined)
   getWindowMock.mockReset().mockReturnValue({ show: showWindowMock, setFocus: focusWindowMock })
+  focusRowMock.mockClear()
+  __resetIslandFocusForTesting()
+  __resetIslandProjectionForTesting()
   stateOff.mockClear()
   actionOff.mockClear()
   detailOff.mockClear()
@@ -228,6 +238,41 @@ it("re-seeds an island that just mounted and asked", async () => {
   pushMock.mockClear()
   await act(async () => onStateRequest())
   expect(pushMock).toHaveBeenCalledTimes(1)
+})
+
+it("publishes the same projection in-window for the tray panel", async () => {
+  await mount()
+  expect(getIslandProjection()).toBe(pushMock.mock.calls.at(-1)![0])
+})
+
+it("hands a focus parked while the island opened to it after the state", async () => {
+  await mount()
+  const rowId = pushMock.mock.calls.at(-1)![0].rows[0].id
+  await requestIslandFocus(rowId, {
+    isOpen: async () => false,
+    open: async () => true,
+    send: async () => true,
+    now: () => Date.now(),
+  })
+  pushMock.mockClear()
+
+  await act(async () => onStateRequest())
+  expect(pushMock).toHaveBeenCalledTimes(1)
+  expect(focusRowMock).toHaveBeenCalledWith(rowId)
+  expect(pushMock.mock.invocationCallOrder[0]).toBeLessThan(
+    focusRowMock.mock.invocationCallOrder[0]
+  )
+
+  // Taken once: a later re-seed carries no focus.
+  focusRowMock.mockClear()
+  await act(async () => onStateRequest())
+  expect(focusRowMock).not.toHaveBeenCalled()
+})
+
+it("re-seeds without a focus when nothing was parked", async () => {
+  await mount()
+  await act(async () => onStateRequest())
+  expect(focusRowMock).not.toHaveBeenCalled()
 })
 
 it("hands an intent to the executor with its CURRENT projection", async () => {
