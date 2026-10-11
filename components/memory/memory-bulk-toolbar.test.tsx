@@ -1,8 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryBulkToolbar } from "./memory-bulk-toolbar"
 
 function setup(over: Partial<Parameters<typeof MemoryBulkToolbar>[0]> = {}) {
@@ -11,6 +10,7 @@ function setup(over: Partial<Parameters<typeof MemoryBulkToolbar>[0]> = {}) {
     onPin: jest.fn(),
     onUnpin: jest.fn(),
     onArchive: jest.fn(),
+    onRestore: jest.fn(),
     onDelete: jest.fn(),
     onClear: jest.fn(),
   }
@@ -27,75 +27,61 @@ function setup(over: Partial<Parameters<typeof MemoryBulkToolbar>[0]> = {}) {
 }
 
 describe("MemoryBulkToolbar", () => {
-  it("shows the selected count", () => {
-    setup({ selectedCount: 3 })
-    expect(screen.getByTestId("memory-bulk-count").textContent).toContain("3")
-  })
-
-  it("pins and unpins the selection", () => {
-    const { onPin, onUnpin } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /^pin$/i }))
-    expect(onPin).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: /^unpin$/i }))
-    expect(onUnpin).toHaveBeenCalled()
-  })
-
-  it("clears the selection", () => {
-    const { onClear } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /clear selection/i }))
-    expect(onClear).toHaveBeenCalled()
-  })
-
-  it("toggles select-all through the header checkbox", () => {
-    const { onToggleSelectAll } = setup({ allSelected: false })
-    fireEvent.click(screen.getByTestId("memory-bulk-select-all"))
-    expect(onToggleSelectAll).toHaveBeenCalledWith(true)
-  })
-
-  it("deletes only after confirming", () => {
-    const { onDelete } = setup({ selectedCount: 2 })
-    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }))
-    expect(onDelete).not.toHaveBeenCalled()
-    const dialog = screen.getByRole("alertdialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
-    expect(onDelete).toHaveBeenCalled()
-  })
-
-  it("disables every action while a bulk mutation is in flight", () => {
-    const { onPin } = setup({ busy: true })
-    const pin = screen.getByRole("button", { name: /^pin$/i })
-    expect(pin).toBeDisabled()
-    expect(screen.getByRole("button", { name: /^unpin$/i })).toBeDisabled()
-    expect(screen.getByRole("button", { name: /^delete$/i })).toBeDisabled()
-    fireEvent.click(pin)
-    expect(onPin).not.toHaveBeenCalled()
-  })
-})
-
-describe("MemoryBulkToolbar — archive", () => {
-  // Archive is the softer default: `invalidate` keeps history and can be undone
-  // from the Archived view, so it is offered alongside the permanent delete
-  // rather than the permanent delete being the only bulk removal.
-  it("confirms before archiving the selection", async () => {
-    const { onArchive } = setup({ selectedCount: 4 })
-    await userEvent.click(screen.getByTestId("memory-bulk-archive"))
-    expect(onArchive).not.toHaveBeenCalled()
-    const dialog = await screen.findByRole("alertdialog")
-    expect(dialog.textContent).toContain("4")
-    await userEvent.click(within(dialog).getByRole("button", { name: "Archive" }))
-    expect(onArchive).toHaveBeenCalled()
-  })
-
-  it("keeps archive and permanent delete as separate actions", () => {
+  it("shows the selected count as a named toolbar", () => {
     setup()
-    expect(screen.getByTestId("memory-bulk-archive")).toBeTruthy()
-    expect(screen.getByTestId("memory-bulk-delete")).toBeTruthy()
+    expect(screen.getByRole("toolbar")).toBeInTheDocument()
+    expect(screen.getByTestId("memory-bulk-count")).toHaveTextContent("2")
+  })
+
+  it("pins, unpins and archives the selection at once — archive is undone from its toast", () => {
+    const handlers = setup()
+    fireEvent.click(screen.getByTestId("memory-bulk-pin"))
+    fireEvent.click(screen.getByTestId("memory-bulk-unpin"))
+    fireEvent.click(screen.getByTestId("memory-bulk-archive"))
+    expect(handlers.onPin).toHaveBeenCalledTimes(1)
+    expect(handlers.onUnpin).toHaveBeenCalledTimes(1)
+    expect(handlers.onArchive).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("requests delete without confirming itself — the console owns the one confirmation", () => {
+    const handlers = setup()
+    fireEvent.click(screen.getByTestId("memory-bulk-delete"))
+    expect(handlers.onDelete).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers restore instead of pin and archive in the Archived view", () => {
+    const handlers = setup({ archivedView: true })
+    expect(screen.queryByTestId("memory-bulk-archive")).toBeNull()
+    expect(screen.queryByTestId("memory-bulk-pin")).toBeNull()
+    fireEvent.click(screen.getByTestId("memory-bulk-restore"))
+    expect(handlers.onRestore).toHaveBeenCalledTimes(1)
+  })
+
+  it("toggles select-all and clears", () => {
+    const handlers = setup()
+    fireEvent.click(screen.getByTestId("memory-bulk-select-all"))
+    expect(handlers.onToggleSelectAll).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByTestId("memory-bulk-clear"))
+    expect(handlers.onClear).toHaveBeenCalledTimes(1)
   })
 
   it("disables every action while a bulk mutation is in flight", () => {
     setup({ busy: true })
-    for (const testid of ["memory-bulk-archive", "memory-bulk-delete"]) {
-      expect(screen.getByTestId(testid).hasAttribute("disabled")).toBe(true)
+    for (const id of ["pin", "unpin", "archive", "delete", "clear"]) {
+      expect(screen.getByTestId(`memory-bulk-${id}`)).toBeDisabled()
     }
+  })
+
+  it("disables the actions with nothing selected, but still lets the mode be left", () => {
+    setup({ selectedCount: 0 })
+    expect(screen.getByTestId("memory-bulk-delete")).toBeDisabled()
+    expect(screen.getByTestId("memory-bulk-clear")).toBeEnabled()
+  })
+
+  it("goes icon-only when compact, and every button keeps its name", () => {
+    setup({ layout: "compact" })
+    expect(screen.getByTestId("memory-bulk-toolbar")).toHaveAttribute("data-layout", "compact")
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument()
   })
 })

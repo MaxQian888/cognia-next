@@ -220,6 +220,52 @@ describe("controlled mobile panes", () => {
     expect(screen.queryByTestId("shut-detail")).toBeNull()
   })
 
+  test("a selection-driven pane opens without a trigger strip or a second close button", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <FeaturePageShell
+        storageId="inspector"
+        rightPane={{
+          label: "Detail",
+          content: <div data-testid="inspector-detail" />,
+          open: true,
+          onOpenChange,
+          overlayTrigger: false,
+          overlayCloseButton: false,
+        }}
+      >
+        <div data-testid="inspector-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("inspector-detail")).toBeInTheDocument()
+    expect(screen.queryByTestId("feature-shell-inspector-pane-controls")).toBeNull()
+    expect(screen.queryByLabelText("openRight:Detail")).toBeNull()
+    expect(screen.queryByRole("button", { name: /close/i })).toBeNull()
+    // The pane is named for assistive tech even though its title is hidden.
+    expect(screen.getByRole("dialog", { name: "Detail" })).toBeInTheDocument()
+  })
+
+  test("keeps the strip for a trigger pane beside a trigger-less one", () => {
+    render(
+      <FeaturePageShell
+        storageId="mixed"
+        leftPane={{ label: "Sections", content: <div /> }}
+        rightPane={{
+          label: "Detail",
+          content: <div data-testid="mixed-detail" />,
+          open: false,
+          onOpenChange: jest.fn(),
+          overlayTrigger: false,
+        }}
+      >
+        <div />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("feature-shell-mixed-pane-controls")).toBeInTheDocument()
+    expect(screen.getByLabelText("openLeft:Sections")).toBeInTheDocument()
+    expect(screen.queryByLabelText("openRight:Detail")).toBeNull()
+  })
+
   test("the left pane takes the same controls", () => {
     const onOpenChange = jest.fn()
     render(

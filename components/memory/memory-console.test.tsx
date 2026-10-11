@@ -72,6 +72,7 @@ jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
   listMemoryRevisions: jest.fn(async () => []),
 }))
+jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
 jest.mock("@/lib/db/memory-governance", () => ({
   listMemoryEvidence: jest.fn(async () => []),
   listMemoryAuditEvents: jest.fn(async () => []),
@@ -311,12 +312,53 @@ describe("MemoryConsole — row actions", () => {
     expect(mockManage).not.toHaveBeenCalledWith({ kind: "delete", id: "m1" })
   })
 
-  it("still allows a permanent delete from the overflow menu", async () => {
+  it("confirms a permanent delete from the row menu before running it", async () => {
     mockData = [mem({ id: "m1" })]
     render(<MemoryConsole />)
     await userEvent.click(screen.getByTestId("memory-row-more"))
     await userEvent.click(screen.getByTestId("memory-row-delete"))
-    expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "m1" })
+    // The row menu used to delete on a single click.
+    expect(mockManage).not.toHaveBeenCalled()
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Delete this memory?")
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "m1" }))
+    expect(mockToastSuccess).toHaveBeenCalledWith("Deleted 1 memory")
+  })
+
+  it("archives at once and undoes it from the toast", async () => {
+    mockData = [mem({ id: "m1" })]
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-row-archive"))
+    await waitFor(() =>
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        "Archived 1 memory",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) })
+      )
+    )
+    const [, options] = mockToastSuccess.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ]
+    options.action.onClick()
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "restore", id: "m1" }))
+  })
+
+  it("restores an archived row from its own action", async () => {
+    mockData = [mem({ id: "m1", status: "invalidated", invalidatedAt: 1 })]
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-view-archived"))
+    await userEvent.click(screen.getByTestId("memory-row-restore"))
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "restore", id: "m1" }))
+  })
+
+  it("moves a memory to a workspace from the row menu", async () => {
+    mockData = [mem({ id: "m1" })]
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-row-more"))
+    await userEvent.click(screen.getByTestId("memory-row-move"))
+    const dialog = screen.getByTestId("memory-move-dialog")
+    expect(within(dialog).getByTestId("memory-move-confirm")).toBeDisabled()
   })
 
   it("saves a row's inline edit", async () => {
@@ -416,11 +458,9 @@ describe("MemoryConsole — add & bulk", () => {
     await userEvent.click(within(rows()[0]!).getByTestId("memory-row-select"))
     await userEvent.click(screen.getByTestId("memory-bulk-select-all"))
     await userEvent.click(screen.getByTestId("memory-bulk-archive"))
-    await userEvent.click(screen.getByRole("button", { name: "Archive" }))
     await waitFor(() =>
       expect(screen.getByTestId("memory-bulk-count")).toHaveTextContent("1 selected")
     )
-    expect(mockToastSuccess).not.toHaveBeenCalled()
     expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("1 succeeded; 1 failed"))
   })
   it("creates a memory with explicit provenance", async () => {
@@ -456,8 +496,24 @@ describe("MemoryConsole — add & bulk", () => {
     render(<MemoryConsole />)
     await userEvent.click(within(rows()[0]!).getByTestId("memory-row-select"))
     await userEvent.click(screen.getByTestId("memory-bulk-archive"))
-    await userEvent.click(screen.getByRole("button", { name: "Archive" }))
     await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "invalidate", id: "a" }))
+
+    await userEvent.click(within(rows()[1]!).getByTestId("memory-row-select"))
+    await userEvent.click(screen.getByTestId("memory-bulk-delete"))
+    expect(mockManage).not.toHaveBeenCalledWith({ kind: "delete", id: "b" })
+    const dialog = screen.getByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "b" }))
+  })
+
+  it("offers restore, not archive, for a selection in the Archived view", async () => {
+    mockData = [mem({ id: "a", status: "invalidated", invalidatedAt: 1 })]
+    render(<MemoryConsole />)
+    await userEvent.click(screen.getByTestId("memory-view-archived"))
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-row-select"))
+    expect(screen.queryByTestId("memory-bulk-archive")).toBeNull()
+    await userEvent.click(screen.getByTestId("memory-bulk-restore"))
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "restore", id: "a" }))
   })
 
   it("select-all covers every visible row", async () => {

@@ -1,19 +1,30 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { MemoryMobileBody } from "./memory-mobile-body"
-import { useLiveQuery } from "dexie-react-hooks"
 import type { Memory } from "@/types/memory/memory"
 
-const enqueueMock = jest.fn()
-const pinMock = jest.fn()
-const updateMock = jest.fn()
-const invalidateMock = jest.fn()
+let mockData: Memory[] | undefined = []
+jest.mock("@/hooks/ui", () => {
+  const actual = jest.requireActual("@/hooks/ui")
+  return {
+    ...actual,
+    useLiveQueryState: () => ({
+      data: mockData,
+      isLoading: mockData === undefined,
+      isEmpty: mockData !== undefined && mockData.length === 0,
+    }),
+  }
+})
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: (query: () => unknown) => {
+    const result = query()
+    return result instanceof Promise ? [] : result
+  },
+}))
 
-jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 // jsdom has no layout — render every item so count/text assertions hold.
 const scrollToIndexMock = jest.fn()
 jest.mock("@tanstack/react-virtual", () => ({
@@ -22,33 +33,55 @@ jest.mock("@tanstack/react-virtual", () => ({
       Array.from({ length: count }, (_, index) => ({
         index,
         key: index,
-        start: index * 104,
-        size: 104,
-        end: (index + 1) * 104,
+        start: index * 88,
+        size: 88,
+        end: (index + 1) * 88,
         lane: 0,
       })),
-    getTotalSize: () => count * 104,
+    getTotalSize: () => count * 88,
     measureElement: jest.fn(),
     scrollToIndex: (...args: unknown[]) => scrollToIndexMock(...args),
   }),
 }))
-const mobileToastError = jest.fn()
+
+const mockToastError = jest.fn()
+const mockToastSuccess = jest.fn()
 jest.mock("sonner", () => ({
-  toast: { error: (...args: unknown[]) => mobileToastError(...args), success: jest.fn() },
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+    warning: jest.fn(),
+  },
 }))
-jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn().mockResolvedValue([]) }))
+
+const mockRunSyncDown = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/sync/companion-sync", () => ({
+  runSyncDown: (...args: unknown[]) => mockRunSyncDown(...args),
+}))
+
+let mockAuthority: "local" | "host" = "local"
+const mockRun = jest.fn()
+jest.mock("@/lib/memory/control-plane/routed-manage", () => ({
+  memoryWriteAuthority: () => mockAuthority,
+  subscribeMemoryWriteAuthority: () => () => {},
+  runMemoryCommand: (...args: unknown[]) => mockRun(...args),
+}))
+
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
-  setMemoryPinned: (...args: unknown[]) => pinMock(...args),
-  updateMemory: (...args: unknown[]) => updateMock(...args),
-  invalidateMemory: (...args: unknown[]) => invalidateMock(...args),
+  listMemoryRevisions: jest.fn(async () => []),
 }))
-jest.mock("@/lib/db/mobile-outbound-queue", () => ({
-  enqueue: (...args: unknown[]) => enqueueMock(...args),
-}))
-// The mirror leg writes one audit row per mutation; keep the suite off Dexie.
+jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
 jest.mock("@/lib/db/memory-governance", () => ({
-  appendMemoryAuditEvent: jest.fn().mockResolvedValue(undefined),
+  listMemoryEvidence: jest.fn(async () => []),
+  listMemoryAuditEvents: jest.fn(async () => []),
+}))
+jest.mock("@/lib/memory/lint/run-memory-lint", () => ({
+  runMemoryLint: jest.fn(async () => ({ findings: [], contradictionCheck: "ran", scanned: 0 })),
+}))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => ({ connectionState: "online", target: null, vaultState: "unlocked" }),
 }))
 jest.mock("@/components/interactions/pull-to-refresh", () => ({
   PullToRefresh: ({
@@ -64,187 +97,243 @@ jest.mock("@/components/interactions/pull-to-refresh", () => ({
     </div>
   ),
 }))
-jest.mock("@/components/memory/memory-row", () => ({
-  MemoryRow: ({
-    memory,
-    onPinToggle,
-    onSave,
-    onArchive,
-  }: {
-    memory: { id: string; text: string }
-    onPinToggle: (id: string, pinned: boolean) => void
-    onSave: (id: string, text: string) => void
-    onArchive: (id: string) => void
-  }) => (
-    <div data-testid={`memory-row-${memory.id}`}>
-      {memory.text}
-      <button onClick={() => onPinToggle(memory.id, true)}>pin</button>
-      <button onClick={() => onSave(memory.id, "updated")}>save</button>
-      <button onClick={() => onSave(memory.id, "mail me at bob@example.com")}>save-pii</button>
-      <button onClick={() => onArchive(memory.id)}>forget</button>
-    </div>
-  ),
-}))
 
-const liveQuery = useLiveQuery as jest.Mock
+import { MemoryMobileBody } from "./memory-mobile-body"
 
-function mem(over: Partial<Memory>): Memory {
-  return { id: "m1", text: "remember milk", key: "groceries", ...over } as unknown as Memory
+let seq = 0
+function mem(over: Partial<Memory> = {}): Memory {
+  seq += 1
+  const now = 1_700_000_000_000
+  return {
+    id: over.id ?? `m${seq}`,
+    scope: "global",
+    type: "semantic",
+    text: `memory ${seq}`,
+    tags: [],
+    importance: 5,
+    createdAt: now,
+    updatedAt: now,
+    lastAccessedAt: now,
+    accessCount: 0,
+    version: 1,
+    status: "active",
+    pinned: false,
+    provenance: "user",
+    ...over,
+  }
 }
 
-describe("<MemoryMobileBody />", () => {
-  beforeEach(() => {
-    jest.clearAllMocks()
-    enqueueMock.mockResolvedValue({ id: "job-1" })
-    pinMock.mockResolvedValue(undefined)
-    updateMock.mockResolvedValue(undefined)
-    invalidateMock.mockResolvedValue(undefined)
-  })
+const rows = () => screen.queryAllByTestId("memory-touch-row")
 
-  it("renders the memory list", () => {
-    liveQuery.mockReturnValue([mem({ id: "m1", text: "remember milk" })])
+beforeEach(() => {
+  seq = 0
+  mockData = []
+  mockAuthority = "local"
+  mockRun.mockReset()
+  mockRun.mockResolvedValue({ ok: true })
+  mockRunSyncDown.mockClear()
+  mockToastError.mockClear()
+  mockToastSuccess.mockClear()
+  scrollToIndexMock.mockClear()
+  window.history.replaceState({}, "", "/memory")
+})
+
+describe("MemoryMobileBody — layout", () => {
+  it("renders a full-bleed list with the title in a sticky header", () => {
+    mockData = [mem({ text: "likes tea" }), mem({ text: "lives in Shanghai" })]
     render(<MemoryMobileBody />)
-    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
-  })
-
-  it("fills the width and keeps the title off the shell's banner", () => {
-    liveQuery.mockReturnValue([])
-    render(<MemoryMobileBody />)
-    const main = screen.getByTestId("mobile-memory-body")
-    expect(main).toHaveClass("w-full", "min-w-0", "pb-6", "safe-area-pt")
-    expect(main).not.toHaveClass("pt-3")
-    expect(main.querySelector("header")).toHaveClass("pt-3")
-  })
-
-  it("filters memories by the search query", async () => {
-    liveQuery.mockReturnValue([
-      mem({ id: "m1", text: "remember milk" }),
-      mem({ id: "m2", text: "buy bread" }),
-    ])
-    const user = userEvent.setup()
-    render(<MemoryMobileBody />)
-    await user.type(screen.getByTestId("mobile-memory-search"), "milk")
-    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
-    expect(screen.queryByTestId("memory-row-m2")).not.toBeInTheDocument()
-  })
-
-  it("shows only one workspace's memories when opened for it", () => {
-    liveQuery.mockReturnValue([
-      mem({ id: "m1", text: "remember milk", projectId: "p1" }),
-      mem({ id: "m2", text: "buy bread", projectId: "p2" }),
-      mem({ id: "m3", text: "global note" }),
-    ])
-    render(<MemoryMobileBody projectId="p1" />)
-    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
-    expect(screen.queryByTestId("memory-row-m2")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("memory-row-m3")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mobile-memory-body").className).toContain("w-full")
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument()
+    expect(rows()).toHaveLength(2)
+    // No resident per-row buttons: one menu per row.
+    expect(within(rows()[0]!).getAllByRole("button", { name: "More actions" })).toHaveLength(1)
   })
 
   it("gives the screen a way back to the hub that opened it", () => {
-    liveQuery.mockReturnValue([])
     render(<MemoryMobileBody />)
-    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /back/i })).toBeInTheDocument()
   })
 
-  it("shows the empty state when there are no memories, and how they arrive", () => {
-    liveQuery.mockReturnValue([])
-    render(<MemoryMobileBody />)
-    expect(screen.getByTestId("empty-state")).toHaveTextContent("No memories yet")
-    expect(screen.getByTestId("empty-state")).toHaveTextContent("/remember")
-    expect(screen.getByTestId("mobile-spot-icon-memory")).toBeInTheDocument()
-  })
-
-  // `undefined` is "not read yet". Rendering it as the empty store told a
-  // phone full of memories that it had none, for a frame or a slow read.
   it("shows a skeleton, not the empty state, before the first read", () => {
-    liveQuery.mockReturnValue(undefined)
+    mockData = undefined
     render(<MemoryMobileBody />)
     expect(screen.getByTestId("mobile-memory-loading")).toBeInTheDocument()
-    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+    expect(screen.queryByText("No memories yet")).toBeNull()
   })
 
-  // "No memories yet" is a claim about the store; a search that matched none
-  // is a claim about the search, and gets the way back.
-  it("tells a search with no hits apart from an empty store", async () => {
-    liveQuery.mockReturnValue([mem({ id: "m1", text: "remember milk" })])
-    const user = userEvent.setup()
+  it("explains an empty store and offers to add the first memory", async () => {
     render(<MemoryMobileBody />)
-    const search = screen.getByTestId("mobile-memory-search")
-    await user.type(search, "zzz")
-    expect(screen.getByTestId("empty-state")).toHaveTextContent("No memories match")
-    await user.click(screen.getByTestId("mobile-memory-clear-search"))
-    expect(search).toHaveValue("")
-    expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
+    expect(screen.getByText("No memories yet")).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId("mobile-memory-add-first"))
+    expect(screen.getByRole("dialog", { name: "Add memory" })).toBeInTheDocument()
   })
 
-  it("queues desktop-authoritative edits before updating the local mirror", async () => {
-    liveQuery.mockReturnValue([mem({ id: "m1" })])
-    const user = userEvent.setup()
+  it("only offers the external tab where agent files are on this machine", () => {
     render(<MemoryMobileBody />)
-
-    await user.click(screen.getByRole("button", { name: "pin" }))
-    await user.click(screen.getByRole("button", { name: "save" }))
-    await user.click(screen.getByRole("button", { name: "forget" }))
-
-    expect(enqueueMock).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ command: "memory_update", payload: { id: "m1", pinned: true } })
-    )
-    expect(enqueueMock).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ command: "memory_update", payload: { id: "m1", text: "updated" } })
-    )
-    expect(enqueueMock).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({ command: "memory_forget", payload: { id: "m1" } })
-    )
-    expect(pinMock).toHaveBeenCalledWith("m1", true)
-    expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
-    expect(invalidateMock).toHaveBeenCalledWith("m1")
+    expect(screen.getByTestId("mobile-memory-tab-app")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-memory-tab-health")).toBeInTheDocument()
+    expect(screen.queryByTestId("mobile-memory-tab-external")).toBeNull()
   })
 
-  it("refuses a PII edit before it reaches the queue", async () => {
-    // Queueing a write the desktop is going to reject would leave the mirror
-    // looking edited until the next pull silently undid it.
-    liveQuery.mockReturnValue([mem({ id: "m1" })])
-    const user = userEvent.setup()
+  it("switches to the health tab", async () => {
+    mockData = [mem()]
     render(<MemoryMobileBody />)
+    await userEvent.click(screen.getByTestId("mobile-memory-tab-health"))
+    expect(screen.getByTestId("memory-health-panel")).toBeInTheDocument()
+    expect(rows()).toHaveLength(0)
+  })
+})
 
-    await user.click(screen.getByRole("button", { name: "save-pii" }))
-
-    expect(enqueueMock).not.toHaveBeenCalled()
-    expect(updateMock).not.toHaveBeenCalled()
-    expect(mobileToastError).toHaveBeenCalled()
+describe("MemoryMobileBody — finding memories", () => {
+  it("filters by the search query and tells no-hits apart from an empty store", async () => {
+    mockData = [mem({ text: "likes tea" }), mem({ text: "lives in Shanghai" })]
+    render(<MemoryMobileBody />)
+    fireEvent.change(screen.getByTestId("mobile-memory-search"), { target: { value: "tea" } })
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.change(screen.getByTestId("mobile-memory-search"), { target: { value: "zzz" } })
+    await waitFor(() => expect(screen.getByText("No memories match")).toBeInTheDocument())
+    await userEvent.click(screen.getByTestId("mobile-memory-clear-search"))
+    await waitFor(() => expect(rows()).toHaveLength(2))
   })
 
-  it("pull-to-refresh syncs memories down and swallows sync failures", async () => {
-    const { runSyncDown } = jest.requireMock("@/lib/sync/companion-sync") as {
-      runSyncDown: jest.Mock
-    }
-    liveQuery.mockReturnValue([mem({ id: "m1" })])
+  it("shows only one workspace's memories when opened for it", () => {
+    mockData = [
+      mem({ text: "here", scope: "workspace", projectId: "p1" }),
+      mem({ text: "elsewhere", scope: "workspace", projectId: "p2" }),
+    ]
+    render(<MemoryMobileBody projectId="p1" />)
+    expect(rows()).toHaveLength(1)
+    expect(screen.getByText("here")).toBeInTheDocument()
+  })
+
+  it("narrows by quick view", async () => {
+    mockData = [mem({ pinned: true, text: "pinned one" }), mem({ text: "plain" })]
     render(<MemoryMobileBody />)
-    fireEvent.click(screen.getByText("refresh"))
-    await waitFor(() => expect(runSyncDown).toHaveBeenCalledWith({ only: ["memories"] }))
-    runSyncDown.mockRejectedValueOnce(new Error("offline"))
-    fireEvent.click(screen.getByText("refresh"))
-    await waitFor(() => expect(runSyncDown).toHaveBeenCalledTimes(2))
+    await userEvent.click(screen.getByTestId("memory-view-pinned"))
+    expect(rows()).toHaveLength(1)
+    expect(screen.getByText("pinned one")).toBeInTheDocument()
+  })
+
+  it("opens filter and sort in a drawer", async () => {
+    mockData = [mem({ type: "episodic" }), mem({ type: "semantic" })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(screen.getByTestId("mobile-memory-filter"))
+    expect(await screen.findByTestId("memory-filter-drawer")).toBeInTheDocument()
+    // vaul reads pointer transforms jsdom does not compute; a click is what matters.
+    fireEvent.click(screen.getByTestId("memory-drawer-types-episodic"))
+    await waitFor(() => expect(rows()).toHaveLength(1))
   })
 
   it("scrolls the deep-linked memory into view once", () => {
-    liveQuery.mockReturnValue([mem({ id: "m1" }), mem({ id: "m2", text: "second" })])
-    render(<MemoryMobileBody initialSelectedId="m2" />)
-    expect(scrollToIndexMock).toHaveBeenCalledWith(1)
+    mockData = [mem({ id: "a" }), mem({ id: "b" })]
+    render(<MemoryMobileBody initialSelectedId="b" />)
+    expect(scrollToIndexMock).toHaveBeenCalledTimes(1)
+    expect(scrollToIndexMock).toHaveBeenCalledWith(1, { align: "center" })
+  })
+})
+
+describe("MemoryMobileBody — acting on memories", () => {
+  it("opens the inspector as a sheet on tap", async () => {
+    mockData = [mem({ id: "a", text: "likes tea" })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-open"))
+    const sheet = await screen.findByTestId("mobile-memory-inspector")
+    expect(within(sheet).getByTestId("memory-inspector")).toHaveAttribute("data-memory-id", "a")
   })
 
-  it("surfaces a toast when the outbound enqueue fails", async () => {
-    liveQuery.mockReturnValue([mem({ id: "m1" })])
-    enqueueMock.mockRejectedValueOnce(new Error("queue full"))
+  it("edits from the row menu by opening the inspector's editor", async () => {
+    mockData = [mem({ id: "a" })]
     render(<MemoryMobileBody />)
-    fireEvent.click(screen.getByText("pin"))
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-more"))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }))
+    const sheet = await screen.findByTestId("mobile-memory-inspector")
+    expect(within(sheet).getByRole("textbox", { name: "Text" })).toBeInTheDocument()
+  })
+
+  it("pins from the row menu with the desired state", async () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-more"))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pin" }))
     await waitFor(() =>
-      expect(mobileToastError).toHaveBeenCalledWith("The memory operation failed — please try again")
+      expect(mockRun).toHaveBeenCalledWith(
+        { kind: "pin", id: "a", pinned: true },
+        expect.objectContaining({ authority: "local" })
+      )
     )
-    // The optimistic local write must not run when the enqueue failed.
-    expect(pinMock).not.toHaveBeenCalled()
+  })
+
+  it("confirms a permanent delete before it runs", async () => {
+    mockData = [mem({ id: "a" })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-more"))
+    await userEvent.click(screen.getByTestId("memory-touch-delete"))
+    expect(mockRun).not.toHaveBeenCalled()
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }))
+    await waitFor(() =>
+      expect(mockRun).toHaveBeenCalledWith({ kind: "delete", id: "a" }, expect.anything())
+    )
+  })
+
+  it("restores an archived memory from its menu", async () => {
+    mockData = [mem({ id: "a", status: "invalidated", invalidatedAt: 1 })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(screen.getByTestId("memory-view-archived"))
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-more"))
+    await userEvent.click(screen.getByTestId("memory-touch-restore"))
+    await waitFor(() =>
+      expect(mockRun).toHaveBeenCalledWith({ kind: "restore", id: "a" }, expect.anything())
+    )
+  })
+
+  it("selects by long press and acts on the selection from the header", async () => {
+    jest.useFakeTimers()
+    try {
+      mockData = [mem({ id: "a" }), mem({ id: "b" })]
+      render(<MemoryMobileBody />)
+      const target = within(rows()[0]!).getByTestId("memory-touch-open").parentElement!
+      fireEvent.pointerDown(target, { pointerType: "touch", clientX: 0, clientY: 0 })
+      act(() => {
+        jest.advanceTimersByTime(600)
+      })
+      fireEvent.pointerUp(target)
+      expect(screen.getByTestId("memory-bulk-toolbar")).toHaveAttribute("data-layout", "compact")
+      expect(screen.queryByTestId("mobile-memory-search")).toBeNull()
+      // A tap now toggles instead of opening.
+      fireEvent.click(within(rows()[1]!).getByTestId("memory-touch-open"))
+      expect(screen.getByTestId("memory-bulk-count")).toHaveTextContent("2")
+    } finally {
+      jest.useRealTimers()
+    }
+    await userEvent.click(screen.getByTestId("memory-bulk-archive"))
+    await waitFor(() => expect(mockRun).toHaveBeenCalledTimes(2))
+    expect(mockRun).toHaveBeenCalledWith({ kind: "invalidate", id: "a" }, expect.anything())
+    expect(mockRun).toHaveBeenCalledWith({ kind: "invalidate", id: "b" }, expect.anything())
+  })
+})
+
+describe("MemoryMobileBody — who owns the store", () => {
+  it("re-reads on pull when this device owns its memory — there is no host to pull from", async () => {
+    render(<MemoryMobileBody />)
+    await userEvent.click(screen.getByText("refresh"))
+    expect(mockRunSyncDown).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("memory-host-chip")).toBeNull()
+  })
+
+  it("pulls memories from the host and says whose memory this is on a paired device", async () => {
+    mockAuthority = "host"
+    render(<MemoryMobileBody />)
+    expect(screen.getByTestId("memory-host-chip")).toBeInTheDocument()
+    await userEvent.click(screen.getByText("refresh"))
+    await waitFor(() => expect(mockRunSyncDown).toHaveBeenCalledWith({ only: ["memories"] }))
+  })
+
+  it("surfaces a toast when a command fails", async () => {
+    mockRun.mockRejectedValueOnce(new Error("no runtime target"))
+    mockData = [mem({ id: "a" })]
+    render(<MemoryMobileBody />)
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-touch-more"))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pin" }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
   })
 })

@@ -342,6 +342,10 @@ jest.mock("@/lib/memory/api/mutate-memory", () => ({
   updateExternalMemory: (...args: unknown[]) => mockMemoryUpdate(...(args as [])),
   forgetExternalMemory: (...args: unknown[]) => mockMemoryForget(...(args as [])),
 }))
+const mockManageForCaller = jest.fn()
+jest.mock("@/lib/memory/api/manage-for-caller", () => ({
+  manageMemoryForCaller: (...args: unknown[]) => mockManageForCaller(...(args as [])),
+}))
 
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
@@ -2545,6 +2549,46 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
         caller: expect.objectContaining({ transport: "companion" }),
       })
     )
+  })
+
+  it("memory_mutate parses the console command and runs it as the verified device", async () => {
+    await expect(dispatchCommand("memory_mutate", {})).rejects.toThrow(/command is malformed/)
+    await expect(
+      dispatchCommand("memory_mutate", { command: { kind: "pin", id: "m1", pinned: "yes" } })
+    ).rejects.toThrow(/command is malformed/)
+    await expect(
+      dispatchCommand("memory_mutate", {
+        command: { kind: "restore", id: "m1" },
+        operationId: 42,
+      })
+    ).rejects.toThrow(/operationId must be a string/)
+    expect(mockManageForCaller).not.toHaveBeenCalled()
+
+    mockManageForCaller.mockResolvedValue({ ok: true, memoryId: "m1" })
+    expect(
+      await dispatchCommand("memory_mutate", {
+        command: { kind: "restore", id: "m1" },
+        operationId: "op-1",
+        callerDeviceId: "phone-1",
+      })
+    ).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockManageForCaller).toHaveBeenCalledWith(
+      { kind: "restore", id: "m1" },
+      {
+        caller: expect.objectContaining({
+          principalId: "companion:phone-1",
+          transport: "companion",
+        }),
+        operationId: "op-1",
+      }
+    )
+  })
+
+  it("memory_mutate passes structured refusals back unchanged", async () => {
+    mockManageForCaller.mockResolvedValue({ ok: false, reason: "unauthorized_namespace" })
+    expect(
+      await dispatchCommand("memory_mutate", { command: { kind: "delete", id: "m1" } })
+    ).toEqual({ ok: false, reason: "unauthorized_namespace" })
   })
 
   it("issue_apply_action validates, allowlists kinds and runs the board gate with the run state", async () => {

@@ -17,7 +17,9 @@ import {
   listMemories,
   listMemoriesBySourceMessageId,
   listMemoryRevisions,
+  moveMemoryToNamespace,
   recordRetrievalFeedback,
+  restoreArchivedMemory,
   restoreMemoryRevision,
   setMemoriesPinned,
   setMemoryPinned,
@@ -552,6 +554,84 @@ describe("revision snapshots", () => {
     // The second snapshot's live window starts where the first one ended.
     expect(revisions[0].revisedAt).toBe(revisions[1].invalidatedAt)
     expect(await listMemoryRevisions("missing")).toEqual([])
+  })
+})
+
+describe("moveMemoryToNamespace", () => {
+  it("moves a character row to global and clears every namespace id", async () => {
+    await createMemory(buildInput({ id: "m1", scope: "character", characterId: "c1" }))
+    const moved = await moveMemoryToNamespace("m1", { scope: "global" })
+    expect(moved?.scope).toBe("global")
+    const got = await getMemory("m1")
+    expect(got?.scope).toBe("global")
+    expect(got?.characterId).toBeUndefined()
+    expect(got?.projectId).toBeUndefined()
+    expect(got?.agentId).toBeUndefined()
+  })
+
+  it("keeps branch and path narrowing only inside the same workspace", async () => {
+    await createMemory(
+      buildInput({
+        id: "w1",
+        scope: "workspace",
+        projectId: "p1",
+        branch: "main",
+        pathPattern: "src/",
+        scopeRationale: "narrowed",
+      })
+    )
+    await moveMemoryToNamespace("w1", { scope: "workspace", projectId: "p1" })
+    let got = await getMemory("w1")
+    expect(got?.branch).toBe("main")
+    expect(got?.pathPattern).toBe("src/")
+    expect(got?.scopeRationale).toBeUndefined()
+
+    await moveMemoryToNamespace("w1", { scope: "workspace", projectId: "p2" })
+    got = await getMemory("w1")
+    expect(got?.projectId).toBe("p2")
+    expect(got?.branch).toBeUndefined()
+    expect(got?.pathPattern).toBeUndefined()
+  })
+
+  it("moves into an agent namespace and is invisible to listing by the old scope", async () => {
+    await createMemory(buildInput({ id: "m1", scope: "workspace", projectId: "p1" }))
+    await moveMemoryToNamespace("m1", { scope: "agent", agentId: "a1" })
+    const got = await getMemory("m1")
+    expect(got?.agentId).toBe("a1")
+    expect(got?.projectId).toBeUndefined()
+    expect((await listMemories({ scope: "workspace" })).map((m) => m.id)).not.toContain("m1")
+  })
+
+  it("returns undefined for a missing row", async () => {
+    expect(await moveMemoryToNamespace("missing", { scope: "global" })).toBeUndefined()
+  })
+})
+
+describe("restoreArchivedMemory", () => {
+  it("brings an archived row back with no archive markers left", async () => {
+    await createMemory(buildInput({ id: "m1" }))
+    await invalidateMemory("m1", "m2")
+    const result = await restoreArchivedMemory("m1")
+    expect(result.ok).toBe(true)
+    const got = await getMemory("m1")
+    expect(got?.status).toBe("active")
+    expect(got?.invalidatedAt).toBeUndefined()
+    expect(got?.supersededById).toBeUndefined()
+  })
+
+  it("reports already_active for a live row and leaves it untouched", async () => {
+    const row = await createMemory(buildInput({ id: "m1" }))
+    expect(await restoreArchivedMemory("m1")).toEqual({ ok: false, reason: "already_active" })
+    expect((await getMemory("m1"))?.updatedAt).toBe(row.updatedAt)
+  })
+
+  it("refuses a revision snapshot and a missing row", async () => {
+    await createMemory(buildInput({ id: "m1", text: "first" }))
+    await updateMemory("m1", { text: "second", bumpVersion: true })
+    const [snapshot] = await listMemoryRevisions("m1")
+    expect(snapshot).toBeDefined()
+    expect(await restoreArchivedMemory(snapshot!.id)).toEqual({ ok: false, reason: "not_found" })
+    expect(await restoreArchivedMemory("missing")).toEqual({ ok: false, reason: "not_found" })
   })
 })
 

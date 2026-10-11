@@ -299,6 +299,10 @@ export type MemoryAuditAction =
   | "conflict"
   | "pinned"
   | "unpinned"
+  /** An archived memory brought back into recall (`manageMemory` `restore`). */
+  | "restored"
+  /** Moved to another namespace by the user (`manageMemory` `relocate`). */
+  | "relocated"
   /**
    * A user's verdict on a recalled memory (helpful / wrong / outdated).
    *
@@ -341,7 +345,8 @@ export interface MemoryOperationRow {
   principalId: string
   /** Caller-supplied idempotency key, unique per principal. */
   operationId: string
-  kind: "store" | "update" | "forget"
+  /** `manage` = a `/memory` console command a paired device ran on the host. */
+  kind: "store" | "update" | "forget" | "manage"
   /** djb2 hash of the canonical request payload (`memoryOperationRequestHash`). */
   requestHash: string
   /** The memory row the operation applied to. */

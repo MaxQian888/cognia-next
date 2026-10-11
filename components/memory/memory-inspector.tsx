@@ -22,7 +22,10 @@ import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
 import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import {
   ArchiveIcon,
+  ArchiveRestoreIcon,
   ArrowUpRightIcon,
+  CopyIcon,
+  FolderInputIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -51,7 +54,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
-import { ConfirmActionDialog } from "@/components/agent/workspace/settings/confirm-action-dialog"
+import { useMemoryNamespaceOptions } from "@/components/memory/memory-namespace-picker"
 import { MemoryRevisionHistory } from "@/components/memory/memory-revision-history"
 import { beliefStrength } from "@cognia/memory/lifecycle/belief"
 
@@ -69,10 +72,18 @@ export interface MemoryInspectorProps {
   onSave: (id: string, patch: MemoryInspectorPatch) => void
   /** Called with the *desired* pinned state, not the current one. */
   onPinToggle: (id: string, pinned: boolean) => void
-  /** Soft delete — keeps history, restorable from the Archived view. */
+  /** Soft delete — keeps history; undone from its toast or with Restore. */
   onArchive: (id: string) => void
-  /** Permanent delete. Confirmed inside this component. */
+  /** Bring an archived memory back into recall. */
+  onRestore?: (id: string) => void
+  /** Open the move dialog (another namespace). */
+  onMove?: (id: string) => void
+  /** Copy the text; the caller confirms it. */
+  onCopy?: (text: string) => void
+  /** Request a permanent delete; the console confirms it. */
   onDelete: (id: string) => void
+  /** Open straight into the editor (a touch row's "Edit"). */
+  initialEditing?: boolean
   onReview?: (id: string, status: "verified" | "conflict") => void
   evidence?: readonly MemoryEvidence[]
   auditEvents?: readonly MemoryAuditEvent[]
@@ -120,7 +131,11 @@ export function MemoryInspector({
   onSave,
   onPinToggle,
   onArchive,
+  onRestore,
+  onMove,
+  onCopy,
   onDelete,
+  initialEditing = false,
   onReview,
   evidence = [],
   auditEvents = [],
@@ -158,13 +173,17 @@ export function MemoryInspector({
     return matchesPath(memory.pathPattern, readerContext.path) ? "applies" : "elsewhere"
   })()
   const now = useNow()
+  const workspaces = useMemoryNamespaceOptions("workspace")
+  const characters = useMemoryNamespaceOptions("character")
+  // Names, not ids — and the id itself when nothing here names it (a deleted
+  // workspace whose memories survive is exactly when the user needs to see it).
+  const namespaceLabel = (kind: "workspace" | "character" | "agent", id: string) =>
+    (kind === "workspace" ? workspaces : characters).find((option) => option.id === id)?.name || id
 
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(initialEditing && memory.status !== "invalidated")
   const [textDraft, setTextDraft] = useState(memory.text)
   const [tagsDraft, setTagsDraft] = useState(memory.tags.join(", "))
   const [importanceDraft, setImportanceDraft] = useState(memory.importance)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmArchive, setConfirmArchive] = useState(false)
 
   const invalidated = memory.status === "invalidated"
   const review = memory.reviewStatus ?? "unreviewed"
@@ -321,18 +340,31 @@ export function MemoryInspector({
 
           <Section title={t("sections.status")}>
             <div className="flex flex-wrap items-center gap-1.5">
+              {/* Each badge says which question it answers. Three bare values
+                  side by side read as one sentence, and "Unknown" alone said
+                  nothing about what was unknown. */}
               <Badge
                 variant={review === "conflict" ? "destructive" : "outline"}
                 className="font-normal"
                 data-testid="memory-inspector-review"
               >
-                {tGovernance(review)}
+                {t("status.review", { value: tGovernance(review) })}
               </Badge>
-              <Badge variant="outline" className="font-normal">
-                {tGovernance(memory.evidenceState ?? "legacy")}
+              <Badge
+                variant="outline"
+                className="font-normal"
+                data-testid="memory-inspector-evidence"
+              >
+                {t("status.evidence", { value: tGovernance(memory.evidenceState ?? "legacy") })}
               </Badge>
-              <Badge variant="outline" className="font-normal">
-                {tGovernance(memory.contaminationState ?? "unknown")}
+              <Badge
+                variant="outline"
+                className="font-normal"
+                data-testid="memory-inspector-context"
+              >
+                {t("status.context", {
+                  value: tGovernance(memory.contaminationState ?? "unknown"),
+                })}
               </Badge>
             </div>
             {onReview && !invalidated ? (
@@ -394,6 +426,21 @@ export function MemoryInspector({
             <FieldGrid>
               <Field label={t("fields.scope")} value={tScopes(memory.scope)} />
               <Field label={tPanel("provenanceLabel")} value={tProv(memory.provenance)} />
+              {memory.projectId ? (
+                <Field
+                  label={t("fields.workspace")}
+                  value={namespaceLabel("workspace", memory.projectId)}
+                />
+              ) : null}
+              {memory.characterId ? (
+                <Field
+                  label={t("fields.character")}
+                  value={namespaceLabel("character", memory.characterId)}
+                />
+              ) : null}
+              {memory.agentId ? (
+                <Field label={t("fields.agent")} value={namespaceLabel("agent", memory.agentId)} />
+              ) : null}
               {memory.key ? <Field label={t("fields.key")} value={memory.key} mono /> : null}
               <Field label={t("fields.created")} value={at(memory.createdAt)} />
               <Field label={t("fields.updated")} value={at(memory.updatedAt)} />
@@ -401,15 +448,29 @@ export function MemoryInspector({
                 <Field label={t("fields.archivedAt")} value={at(memory.invalidatedAt)} />
               ) : null}
             </FieldGrid>
-            {memory.sourceSessionId ? (
-              <Button size="sm" variant="ghost" className="mt-1.5 h-7 px-2" asChild>
-                {/* The message, not just the conversation — see memory-row. */}
-                <Link href={buildSessionHref(memory.sourceSessionId, memory.sourceMessageId)}>
-                  <ArrowUpRightIcon className="size-3.5" />
-                  {t("source")}
-                </Link>
-              </Button>
-            ) : null}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              {memory.sourceSessionId ? (
+                <Button size="sm" variant="ghost" className="h-7 px-2" asChild>
+                  {/* The message, not just the conversation — see memory-row. */}
+                  <Link href={buildSessionHref(memory.sourceSessionId, memory.sourceMessageId)}>
+                    <ArrowUpRightIcon className="size-3.5" />
+                    {t("source")}
+                  </Link>
+                </Button>
+              ) : null}
+              {onMove && !invalidated ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  onClick={() => onMove(memory.id)}
+                  data-testid="memory-inspector-move"
+                >
+                  <FolderInputIcon className="size-3.5" />
+                  {t("moveNamespace")}
+                </Button>
+              ) : null}
+            </div>
             {/* Which conversations have actually reached for this memory —
                 the question that decides whether it still earns its place. */}
             <MentionBacklinksPanel target={entityBacklinkTarget("memory", memory.id)} />
@@ -611,11 +672,21 @@ export function MemoryInspector({
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setConfirmArchive(true)}
+            onClick={() => onArchive(memory.id)}
             data-testid="memory-inspector-archive"
           >
             <ArchiveIcon className="size-4" />
             {tPanel("archive")}
+          </Button>
+        ) : onRestore ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onRestore(memory.id)}
+            data-testid="memory-inspector-restore"
+          >
+            <ArchiveRestoreIcon className="size-4" />
+            {tPanel("restore")}
           </Button>
         ) : null}
         <DropdownMenu>
@@ -625,9 +696,15 @@ export function MemoryInspector({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {onCopy ? (
+              <DropdownMenuItem onSelect={() => onCopy(memory.text)}>
+                <CopyIcon className="size-4" />
+                {tPanel("copyText")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => setConfirmDelete(true)}
+              onSelect={() => onDelete(memory.id)}
               data-testid="memory-inspector-delete"
             >
               <Trash2Icon className="size-4" />
@@ -636,26 +713,6 @@ export function MemoryInspector({
           </DropdownMenuContent>
         </DropdownMenu>
       </footer>
-
-      <ConfirmActionDialog
-        open={confirmArchive}
-        onOpenChange={setConfirmArchive}
-        title={tPanel("archiveConfirm.title")}
-        description={tPanel("archiveConfirm.description")}
-        confirmLabel={tPanel("archiveConfirm.confirm")}
-        cancelLabel={tPanel("archiveConfirm.cancel")}
-        onConfirm={() => onArchive(memory.id)}
-      />
-      <ConfirmActionDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title={t("deleteConfirm.title")}
-        description={t("deleteConfirm.description")}
-        confirmLabel={t("deleteConfirm.confirm")}
-        cancelLabel={t("deleteConfirm.cancel")}
-        tone="destructive"
-        onConfirm={() => onDelete(memory.id)}
-      />
     </div>
   )
 }

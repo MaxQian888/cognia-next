@@ -8,6 +8,7 @@ import { ExternalMemoryTab } from "./external-memory-tab"
 const meta = {
   title: "Memory/ExternalMemoryTab",
   component: ExternalMemoryTab,
+  args: { onHost: false },
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (
@@ -21,4 +22,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const DesktopOnlyFallback: Story = {}
+export const DesktopOnlyFallback: Story = { args: { onHost: false } }
+
+/** A paired client: the files are on the host's disk, so it points there. */
+export const OnHost: Story = { args: { onHost: true } }

@@ -88,6 +88,8 @@ const AUDIT_ACTIONS: Record<MemoryAuditAction, true> = {
   conflict: true,
   pinned: true,
   unpinned: true,
+  restored: true,
+  relocated: true,
   feedback: true,
 }
 

@@ -5,11 +5,14 @@ import {
   hardDeleteMemory,
   invalidateMemory,
   listMemories,
+  moveMemoryToNamespace,
   recordRetrievalFeedback,
+  restoreArchivedMemory,
   restoreMemoryRevision,
   setMemoryPinned,
   updateMemory,
   type ListMemoriesQuery,
+  type MemoryNamespaceTarget,
 } from "@/lib/db/memories"
 import type { RetrievalFeedbackVerdict } from "@cognia/memory/lifecycle/retrieval-feedback"
 import { appendMemoryAuditEvent, createMemoryEvidence } from "@/lib/db/memory-governance"
@@ -59,6 +62,17 @@ export type ManageMemoryCommand =
    * `invalidated`, history preserved; mirrors `forgetExternalMemory`.
    */
   | { kind: "invalidate"; id: string; supersededById?: string }
+  /**
+   * Undo an archive: the row is recallable again. The inverse of `invalidate`,
+   * which the bulk archive confirmation has always promised ("can be
+   * restored") without anything implementing it.
+   */
+  | { kind: "restore"; id: string }
+  /**
+   * Move a memory into another namespace — who can recall it changes, so this
+   * is its own command rather than a field on `update`.
+   */
+  | { kind: "relocate"; id: string; target: MemoryNamespaceTarget }
   /**
    * One-shot conflict disposition from the comparison card. `keep` verifies
    * `keepId` and soft-invalidates `dropId` (superseded link); `keep-both`
@@ -318,7 +332,14 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
 
   const settings = await getSettings().catch(() => undefined)
   const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled && command.kind !== "delete" && command.kind !== "invalidate") {
+  // Removing a row from recall and moving it between namespaces embed nothing,
+  // so the learning switch must not strand the user's cleanup.
+  if (
+    !config.enabled &&
+    command.kind !== "delete" &&
+    command.kind !== "invalidate" &&
+    command.kind !== "relocate"
+  ) {
     return { ok: false, reason: "disabled" }
   }
 
@@ -375,6 +396,52 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
       memoryId: command.id,
       reason: "restored",
       metadata: { revisionId: command.revisionId, version: restored.memory.version },
+    })
+    return { ok: true, memoryId: command.id }
+  }
+
+  if (command.kind === "restore") {
+    if (config.temporary) return { ok: false, reason: "temporary" }
+    const restored = await restoreArchivedMemory(command.id)
+    if (!restored.ok) {
+      // Already live is the state the user asked for.
+      if (restored.reason === "already_active") return { ok: true, memoryId: command.id }
+      return { ok: false, reason: "not_found" }
+    }
+    // `invalidate` dropped the vector doc; put it back so semantic recall finds
+    // the row again. Its text was gated when written, but the embedder is an
+    // outbound call, so it is checked again rather than trusted.
+    if (hasNoLeakingPii(restored.memory.text)) {
+      try {
+        const sink = await tryBuildMemoryVectorSink(config)
+        await sink?.upsert(existing.vectorDocId ?? existing.id, restored.memory.text)
+      } catch {
+        // Canonical restore remains BM25-searchable.
+        noteMemoryVectorFailure()
+      }
+    }
+    await appendMemoryAuditEvent({ action: "restored", memoryId: command.id, reason: "user" })
+    return { ok: true, memoryId: command.id }
+  }
+
+  if (command.kind === "relocate") {
+    const target = command.target
+    const namespaceId =
+      target.scope === "workspace"
+        ? target.projectId
+        : target.scope === "character"
+          ? target.characterId
+          : target.scope === "agent"
+            ? target.agentId
+            : "global"
+    if (!namespaceId?.trim()) return { ok: false, reason: "scope_denied" }
+    const moved = await moveMemoryToNamespace(command.id, target)
+    if (!moved) return { ok: false, reason: "not_found" }
+    await appendMemoryAuditEvent({
+      action: "relocated",
+      memoryId: command.id,
+      reason: "user",
+      metadata: { from: existing.scope, to: target.scope },
     })
     return { ok: true, memoryId: command.id }
   }

@@ -3,6 +3,17 @@
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AddMemoryDialog } from "./add-memory-dialog"
+import { useProjectStore } from "@/stores/project/project-store"
+
+jest.mock("@/lib/db/characters", () => ({
+  listCharacters: async () => [{ id: "char-1", name: "Coding Assistant" }],
+}))
+
+beforeEach(() => {
+  useProjectStore.setState({
+    projects: [{ id: "project-1", name: "Cognia" }] as never,
+  })
+})
 
 function setup(open = true) {
   const onOpenChange = jest.fn()
@@ -59,7 +70,9 @@ describe("AddMemoryDialog", () => {
 
     const submit = screen.getByRole("button", { name: "Add memory" }) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: " project-1 " } })
+    // Picked by name, not typed as an id.
+    fireEvent.click(screen.getByLabelText("Workspace"))
+    fireEvent.click(screen.getByRole("option", { name: "Cognia" }))
     fireEvent.change(screen.getByLabelText("Branch (optional)"), { target: { value: " main " } })
     fireEvent.click(submit)
 
@@ -69,6 +82,22 @@ describe("AddMemoryDialog", () => {
         projectId: "project-1",
         branch: "main",
       })
+    )
+  })
+
+  it("picks a character by name and keeps an escape hatch for any other id", () => {
+    const { onCreate } = setup()
+    fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "Talks in haiku" } })
+    fireEvent.click(screen.getByLabelText("Scope"))
+    fireEvent.click(screen.getByRole("option", { name: "Character" }))
+    fireEvent.click(screen.getByLabelText("Character"))
+    fireEvent.click(screen.getByRole("option", { name: "Other ID…" }))
+    fireEvent.change(screen.getByLabelText("Custom ID for Character"), {
+      target: { value: " external-agent " },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }))
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "character", characterId: "external-agent" })
     )
   })
 

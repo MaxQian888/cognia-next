@@ -336,6 +336,82 @@ export async function relocateMemoryNamespace(
   await getDb().memories.update(id, { ...next, updatedAt: Date.now() })
 }
 
+/** The namespace a user can move a memory into from `/memory`. */
+export type MemoryNamespaceTarget =
+  | { scope: "global" }
+  | { scope: "workspace"; projectId: string }
+  | { scope: "character"; characterId: string }
+  | { scope: "agent"; agentId: string }
+
+/**
+ * Move a memory into exactly one namespace, clearing the ids of every other.
+ *
+ * {@link relocateMemoryNamespace} only sets fields, which is right for the
+ * workspace repair (it only ever adds a `projectId`) and wrong for a user move:
+ * a row going from `character` to `global` that kept its `characterId` would
+ * still match that character's reader and nobody else's expectation. `branch`
+ * and `pathPattern` narrow a workspace row, so they only survive a move that
+ * stays inside the same workspace.
+ */
+export async function moveMemoryToNamespace(
+  id: string,
+  target: MemoryNamespaceTarget
+): Promise<Memory | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.memories, async () => {
+    const row = await db.memories.get(id)
+    if (!row) return undefined
+    const sameWorkspace =
+      target.scope === "workspace" &&
+      row.scope === "workspace" &&
+      row.projectId === target.projectId
+    const next: Memory = {
+      ...row,
+      scope: target.scope,
+      projectId: target.scope === "workspace" ? target.projectId : undefined,
+      characterId: target.scope === "character" ? target.characterId : undefined,
+      agentId: target.scope === "agent" ? target.agentId : undefined,
+      branch: sameWorkspace ? row.branch : undefined,
+      pathPattern: sameWorkspace ? row.pathPattern : undefined,
+      // The automatic narrowing rationale described the old namespace.
+      scopeRationale: undefined,
+      updatedAt: Date.now(),
+    }
+    await db.memories.put(next)
+    return next
+  })
+}
+
+/**
+ * Bring an archived memory back into recall.
+ *
+ * The inverse of {@link invalidateMemory}: status, `invalidatedAt` and the
+ * supersession link are cleared together, so the row reads exactly like a live
+ * one again. Revision snapshots are history and never restorable on their own
+ * (their owner's revision restore is the path for those), so they report
+ * `not_found`; a row that is already active reports `already_active` rather
+ * than being rewritten.
+ */
+export async function restoreArchivedMemory(
+  id: string
+): Promise<{ ok: true; memory: Memory } | { ok: false; reason: "not_found" | "already_active" }> {
+  const db = getDb()
+  return db.transaction("rw", db.memories, async () => {
+    const row = await db.memories.get(id)
+    if (!row || row.revisionOf !== undefined) return { ok: false, reason: "not_found" } as const
+    if (row.status !== "invalidated") return { ok: false, reason: "already_active" } as const
+    const next: Memory = {
+      ...row,
+      status: "active",
+      invalidatedAt: undefined,
+      supersededById: undefined,
+      updatedAt: Date.now(),
+    }
+    await db.memories.put(next)
+    return { ok: true, memory: next } as const
+  })
+}
+
 /**
  * Record one user verdict on a recalled memory.
  *

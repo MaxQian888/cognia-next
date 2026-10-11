@@ -1156,6 +1156,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "memory_store",
     "memory_update",
     "memory_forget",
+    // The `/memory` console on a paired device: one `manageMemory` command
+    // (pin, edit, review, archive/restore, move, resolve, delete, clear) run on
+    // the host as the verified device. CONTROL-gated like the writes above.
+    "memory_mutate",
     "retrieval_profile_dek_export",
     // ── Settings / conversation overrides ───────────────────────────────────
     "conversation_overrides_update",
@@ -1965,6 +1969,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "memory_store",
     "memory_update",
     "memory_forget",
+    "memory_mutate",
     // App-data restore overwrites local state.
     "backup_import",
     // Fleet control — answering a parked permission or question, injecting an
@@ -2291,6 +2296,7 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "memory_store",
     "memory_update",
     "memory_forget",
+    "memory_mutate",
 ];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in

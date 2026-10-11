@@ -772,6 +772,37 @@ function getState(table: SyncableTable): SyncState {
   return state
 }
 
+/**
+ * Bumped by {@link rewindSyncTable}. A pull compares the value it started with
+ * against the value when it lands, so a pull already in flight when a rewind
+ * happens cannot write its (newer) watermark back over the rewind.
+ */
+const rewindGenerations = new Map<SyncableTable, number>()
+
+/**
+ * Forget one table's watermark, so its next pull starts again from zero.
+ *
+ * For a mirror that holds a write the host never made: a paired client applies
+ * a command to its mirror optimistically and queues it for the host, and when
+ * the host refuses it (a namespace grant, a policy, a row that is gone) nothing
+ * changed upstream, so a delta pull would never send the row back to correct
+ * the mirror. Re-reading the table from zero does. Rare by construction — it
+ * runs on a refusal, never on the normal path.
+ */
+export function rewindSyncTable(table: SyncableTable): void {
+  rewindGenerations.set(table, (rewindGenerations.get(table) ?? 0) + 1)
+  const state = getState(table)
+  state.since = 0
+  state.cursor = undefined
+  void saveCursor({
+    serverKey: hydratedServerKey ?? "",
+    table,
+    since: 0,
+    lastSyncAt: state.lastSyncAt,
+    lastError: state.lastError,
+  })
+}
+
 export function getSyncStateFor(table: SyncableTable): Readonly<SyncState> {
   return { ...getState(table) }
 }
@@ -1162,6 +1193,8 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
         }
         if (hostChanged()) return staleHost
         const state = getState(table)
+        const rewindAtStart = rewindGenerations.get(table) ?? 0
+        const rewound = () => (rewindGenerations.get(table) ?? 0) !== rewindAtStart
         let resumeCursor: SyncCursor = {
           since: state.since,
           ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
@@ -1193,8 +1226,10 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
               since: outcome.failure.progress.nextSince,
               cursor: outcome.failure.progress.nextCursor,
             }
-            state.since = resumeCursor.since
-            state.cursor = resumeCursor.cursor
+            if (!rewound()) {
+              state.since = resumeCursor.since
+              state.cursor = resumeCursor.cursor
+            }
           }
           await awaitQuotaCooldown(opts.signal)
           if (hostChanged()) return staleHost
@@ -1209,7 +1244,7 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
         // restarts. The outcome still reaches the caller, which says so.
         if (!outcome.ok && outcome.failure.reason === "no_host") return outcome
         const progress = outcome.ok ? outcome.result : outcome.failure.progress
-        if (progress && progress.nextSince >= state.since) {
+        if (progress && !rewound() && progress.nextSince >= state.since) {
           state.since = progress.nextSince
           state.cursor = progress.nextCursor
         }
@@ -1606,6 +1641,7 @@ export function __resetSyncStateForTests(): void {
   foregroundHiddenSince = null
   lastForegroundSync = 0
   stateMap.clear()
+  rewindGenerations.clear()
   inflight = null
   tablePulls = new WeakMap()
   pullBudgets = new WeakMap()

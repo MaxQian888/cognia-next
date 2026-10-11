@@ -53,6 +53,7 @@ it does not *create* it automatically — reviewed evidence still has to be prom
 ```
 lib/memory/
   api/            store-memory · search-memory · mutate-memory · wire   # the write funnel
+                  manage-for-caller · mirror-memory                     # host side / paired mirror of a manage command
   retrieve/       retriever                                             # scope-union read
   extract/        extractor · salience                                  # conversation → candidate facts
   write/          run-memory-extraction · run-episodic-distill          # background write jobs
@@ -60,6 +61,7 @@ lib/memory/
   forget/         decay                                                 # importance decay + eviction
   lifecycle/      job-worker · maintenance · enqueue-reconcile          # the memoryJobs queue
   control-plane/  policy · manage · contamination                       # governance decisions
+                  routed-manage · remote-outcomes · command-wire        # where a manage command runs (local or host)
   runtime/        apply-memory-context · build-deps                     # injection into a turn
   external/       providers (claude-code · codex) · discover · edit     # foreign memory files
   CONTEXT.md                                                            # domain glossary
@@ -68,7 +70,9 @@ packages/memory/src/            # the extracted core — zero `@/` imports
 lib/db/memories.ts              # Dexie CRUD: create/get/update/invalidate/touch/pin/list
 lib/plugin/api/memory-api.ts    # plugin-facing ctx.memory
 lib/external-bridge/handlers/memory.ts   # MCP tools
+hooks/memory/use-memory-console.ts       # the console's state, shared by desktop and phone shells
 components/memory/              # console · detail panel · conflict resolver · bulk toolbar
+components/mobile/memory/       # the phone shell over the same hook
 app/memory/                     # the management route
 ```
 
@@ -145,6 +149,17 @@ Three surfaces can reach memory from outside the app, and all of them write thro
   (`lib/plugin/api/memory-api.ts:112`).
 - **Companion RPC** — the mobile/remote surface, over the transport described in
   [Companion API](./companion-api).
+
+### Managing memory from a paired client
+
+The console's own writes (pin, archive, restore, move, edit, resolve, delete, clear) go through
+`runMemoryCommand()` (`lib/memory/control-plane/routed-manage.ts`). `memoryWriteAuthority()` decides
+where they run: on the host when a remote host transport is active or the runtime target is a companion
+(a browser on a headless brain host, a desktop driving a remote host, a paired phone); locally
+otherwise, including a standalone Capacitor phone with no host. A host-bound command is PII-gated, queued
+as `memory_mutate` `{ command, operationId }`, and applied optimistically to the local mirror. The host's
+`manageMemoryForCaller()` checks the device's namespace grants and replays through the operation ledger;
+a refusal rewinds the `memories` sync cursor and re-pulls the canonical rows. See ADR-0069 §8.
 
 ## Related
 

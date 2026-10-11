@@ -99,6 +99,9 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   // authority instead of only changing the offline sync mirror.
   "memory_update",
   "memory_forget",
+  // The whole `/memory` console from a paired device (ADR-0069): one
+  // `manageMemory` command per row, run on the host as the verified device.
+  "memory_mutate",
   // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
   "external_agent_update",
   // Host-owned external-agent configurations (head + revision store in

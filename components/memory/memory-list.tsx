@@ -41,6 +41,9 @@ export interface MemoryListProps {
   onPinToggle: (id: string, pinned: boolean) => void
   onSave: (id: string, text: string) => void
   onArchive: (id: string) => void
+  onRestore: (id: string) => void
+  onMove: (id: string) => void
+  onCopy: (text: string) => void
   onDelete: (id: string) => void
   onTagClick: (tag: string) => void
   onClearFilters: () => void
@@ -63,6 +66,9 @@ export function MemoryList({
   onPinToggle,
   onSave,
   onArchive,
+  onRestore,
+  onMove,
+  onCopy,
   onDelete,
   onTagClick,
   onClearFilters,
@@ -159,6 +165,9 @@ export function MemoryList({
                 onPinToggle={onPinToggle}
                 onSave={onSave}
                 onArchive={onArchive}
+                onRestore={onRestore}
+                onMove={onMove}
+                onCopy={onCopy}
                 onDelete={onDelete}
                 onTagClick={onTagClick}
               />

@@ -24,6 +24,10 @@ import {
 } from "@/lib/queue/outbound-approval"
 import { subscribeToHostConsent } from "@/lib/host-consent/client"
 import { runSyncDown } from "@/lib/sync/companion-sync"
+import {
+  settleRemoteMemoryMutation,
+  subscribeRemoteMemoryRefusals,
+} from "@/lib/memory/control-plane/remote-outcomes"
 import { transport } from "@/lib/tauri"
 import {
   getActiveRemoteTransport,
@@ -72,6 +76,9 @@ const liveDispatcher: OutboundDispatcher = {
       noteOutboundApprovalRefused(error)
       throw error
     }
+    // The `/memory` console's commands: the mirror already moved, so the
+    // host's answer decides between a follow-up pull and a rewind-and-repull.
+    if (command === "memory_mutate") void settleRemoteMemoryMutation(result)
     if (command === "workflow_trigger_manual") {
       setTimeout(() => {
         void runSyncDown({ only: ["workflowRuns"] }).catch(() => {})
@@ -126,6 +133,7 @@ export function CompanionOutboundRunnerProvider({
   // Same strings the mobile banner shows. One wait, one wording, wherever the
   // user happens to be standing.
   const tApproval = useTranslations("mobile.offline")
+  const tMemoryErrors = useTranslations("memory.errors")
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const hasLocalProfile = useAccountStore(
     (state) => state.activeAccountId !== null || state.accounts.length > 0
@@ -198,6 +206,16 @@ export function CompanionOutboundRunnerProvider({
           : 0,
     }
   }, [localAccountId, scopeOverride, targetId])
+
+  // A memory command the host refused already rolled the mirror back; say so,
+  // wherever the user is now — the console that sent it may be long closed.
+  useEffect(
+    () =>
+      subscribeRemoteMemoryRefusals(({ reason }) => {
+        toast.error(tMemoryErrors("hostRefused", { reason: tMemoryErrors(reason) }))
+      }),
+    [tMemoryErrors]
+  )
 
   useEffect(() => {
     if (!enabled || !scope) return

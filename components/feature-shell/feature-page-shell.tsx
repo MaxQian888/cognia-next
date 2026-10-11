@@ -49,7 +49,7 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useBreakpoint } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
 import { centerPaneSize, paneSize } from "./pane-size"
@@ -85,6 +85,20 @@ export interface FeaturePaneConfig {
    */
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /**
+   * Whether the overlay tiers show a trigger button for this pane. Default
+   * `true`. A pane that only exists while something is selected — an
+   * inspector — is opened by the selection itself, so its trigger is a dead
+   * button that appears and disappears with the selection and pushes the list
+   * down a strip as it does. Turn it off there and pass `open`.
+   */
+  overlayTrigger?: boolean
+  /**
+   * Whether the overlay Sheet draws its own close button. Default `true`. Turn
+   * it off for content that already has a close control in its header, or the
+   * two sit on top of each other.
+   */
+  overlayCloseButton?: boolean
   /**
    * The pane's width in pixels after a resize settles (desktop only; called
    * once per drag, not per frame). A route that remembers its rail width
@@ -342,7 +356,9 @@ function FeaturePageShellOverlay({
   children,
   centerClassName,
 }: Omit<FeaturePageShellProps, "storageId"> & { storageId: string }) {
-  const t = useTranslations("featureShell")
+  const leftTrigger = leftPane ? leftPane.overlayTrigger !== false : false
+  const rightTrigger = rightPane ? rightPane.overlayTrigger !== false : false
+  const showStrip = leftTrigger || rightTrigger
 
   return (
     <div
@@ -356,54 +372,17 @@ function FeaturePageShellOverlay({
         </div>
       ) : null}
 
-      {leftPane || rightPane ? (
+      {showStrip ? (
         <div
           className="flex min-h-9 shrink-0 items-center justify-between border-b border-border/60 bg-muted/20 px-2"
           data-testid={`feature-shell-${storageId}-pane-controls`}
         >
-          {leftPane ? (
-            <Sheet open={leftPane.open} onOpenChange={leftPane.onOpenChange}>
-              <SheetTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("openLeft", { name: leftPane.label })}
-                >
-                  <PanelLeftIcon className="size-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent
-                side="left"
-                className={cn("p-0", leftPane.mobileWidthClass ?? "w-[280px]")}
-              >
-                <div className="flex h-full flex-col overflow-hidden">{leftPane.content}</div>
-              </SheetContent>
-            </Sheet>
-          ) : (
-            <span />
-          )}
-
-          {rightPane ? (
-            <Sheet open={rightPane.open} onOpenChange={rightPane.onOpenChange}>
-              <SheetTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("openRight", { name: rightPane.label })}
-                >
-                  <PanelRightIcon className="size-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent
-                side="right"
-                className={cn("p-0", rightPane.mobileWidthClass ?? "w-[320px]")}
-              >
-                <div className="flex h-full flex-col overflow-hidden">{rightPane.content}</div>
-              </SheetContent>
-            </Sheet>
-          ) : null}
+          {leftPane && leftTrigger ? <OverlayPane pane={leftPane} side="left" trigger /> : <span />}
+          {rightPane && rightTrigger ? <OverlayPane pane={rightPane} side="right" trigger /> : null}
         </div>
       ) : null}
+      {leftPane && !leftTrigger ? <OverlayPane pane={leftPane} side="left" /> : null}
+      {rightPane && !rightTrigger ? <OverlayPane pane={rightPane} side="right" /> : null}
 
       <div
         className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", centerClassName)}
@@ -412,5 +391,49 @@ function FeaturePageShellOverlay({
         {children}
       </div>
     </div>
+  )
+}
+
+/**
+ * One side pane in the overlay tiers: a Sheet, with or without the strip
+ * trigger. Every Sheet is titled with the pane label (visually hidden), so a
+ * screen reader announces what opened instead of an unnamed dialog.
+ */
+function OverlayPane({
+  pane,
+  side,
+  trigger = false,
+}: {
+  pane: FeaturePaneConfig
+  side: "left" | "right"
+  trigger?: boolean
+}) {
+  const t = useTranslations("featureShell")
+  const Icon = side === "left" ? PanelLeftIcon : PanelRightIcon
+  return (
+    <Sheet open={pane.open} onOpenChange={pane.onOpenChange}>
+      {trigger ? (
+        <SheetTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t(side === "left" ? "openLeft" : "openRight", { name: pane.label })}
+          >
+            <Icon className="size-4" />
+          </Button>
+        </SheetTrigger>
+      ) : null}
+      <SheetContent
+        side={side}
+        showCloseButton={pane.overlayCloseButton !== false}
+        className={cn(
+          "p-0",
+          pane.mobileWidthClass ?? (side === "left" ? "w-[280px]" : "w-[320px]")
+        )}
+      >
+        <SheetTitle className="sr-only">{pane.label}</SheetTitle>
+        <div className="flex h-full flex-col overflow-hidden">{pane.content}</div>
+      </SheetContent>
+    </Sheet>
   )
 }

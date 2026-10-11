@@ -124,4 +124,11 @@ describe("ExternalMemoryTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /rescan/i }))
     expect(refresh).toHaveBeenCalled()
   })
+
+  it("points a paired device at the host instead of reading this machine's files", () => {
+    mockHook.mockClear()
+    render(<ExternalMemoryTab onHost />)
+    expect(screen.getByText("On the host")).toBeInTheDocument()
+    expect(mockHook).not.toHaveBeenCalled()
+  })
 })

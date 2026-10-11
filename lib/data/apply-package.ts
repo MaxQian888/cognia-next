@@ -55,6 +55,7 @@ import {
   MEMORY_EVIDENCE_KINDS,
   MEMORY_JOB_KINDS,
   isMemoryValidationStrategy,
+  type MemoryAuditAction,
   type MemoryAuditEvent,
   type MemoryEvidence,
   type MemoryJob,
@@ -1531,20 +1532,27 @@ const JOB_STATUSES = new Set([
   "cancelled",
   "completed",
 ])
-const AUDIT_ACTIONS = new Set([
-  "recall-allowed",
-  "recall-denied",
-  "learn-allowed",
-  "learn-denied",
-  "created",
-  "revised",
-  "promoted",
-  "invalidated",
-  "deleted",
-  "conflict",
-  "pinned",
-  "unpinned",
-])
+// Keyed by the union so a new audit action cannot be added without deciding
+// here whether a backup may carry it. The hand-written list this replaced had
+// already fallen behind (`feedback` rows were dropped on every restore).
+const AUDIT_ACTION_TABLE: Record<MemoryAuditAction, true> = {
+  "recall-allowed": true,
+  "recall-denied": true,
+  "learn-allowed": true,
+  "learn-denied": true,
+  created: true,
+  revised: true,
+  promoted: true,
+  invalidated: true,
+  deleted: true,
+  conflict: true,
+  pinned: true,
+  unpinned: true,
+  restored: true,
+  relocated: true,
+  feedback: true,
+}
+const AUDIT_ACTIONS = new Set<string>(Object.keys(AUDIT_ACTION_TABLE))
 const SAFE_IDENTIFIER = /^[\w./:@-]{1,512}$/u
 
 function isRecord(value: unknown): value is Record<string, unknown> {

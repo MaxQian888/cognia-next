@@ -48,7 +48,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useLearnedMemories, useRecalledMemories } from "@/hooks/memory/use-message-memories"
 import { usePlatform } from "@/hooks/use-platform"
 import type { SourcesPart } from "@/lib/claude/parts-extensions"
-import { manageMemory, type ManageMemoryResult } from "@/lib/memory/control-plane/manage"
+import type { ManageMemoryResult } from "@/lib/memory/control-plane/manage"
+import { runMemoryCommand, type RoutedMemoryResult } from "@/lib/memory/control-plane/routed-manage"
 import { cn } from "@/lib/utils"
 import type { Memory } from "@/types/memory/memory"
 
@@ -96,7 +97,10 @@ function ChipSurface({
   )
 }
 
-function surfaceMutationError(result: ManageMemoryResult, t: (key: string) => string): boolean {
+function surfaceMutationError(
+  result: ManageMemoryResult | RoutedMemoryResult,
+  t: (key: string) => string
+): boolean {
   if (result.ok) return false
   toast.error(t(`memoryChips.errors.${result.reason}`))
   return true
@@ -151,7 +155,8 @@ function LearnedRow({ memory }: { memory: Memory }) {
       return
     }
     setBusy(true)
-    const result = await manageMemory({ kind: "update", id: memory.id, patch: { text } })
+    // Routed by who owns the store: a paired device edits its host's memory.
+    const result = await runMemoryCommand({ kind: "update", id: memory.id, patch: { text } })
     setBusy(false)
     if (surfaceMutationError(result, t)) return
     setEditing(false)
@@ -159,7 +164,7 @@ function LearnedRow({ memory }: { memory: Memory }) {
 
   const undo = async () => {
     setBusy(true)
-    const result = await manageMemory({ kind: "invalidate", id: memory.id })
+    const result = await runMemoryCommand({ kind: "invalidate", id: memory.id })
     setBusy(false)
     surfaceMutationError(result, t)
   }

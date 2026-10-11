@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryWorkbenchPanel } from "./memory-workbench-panel"
 
 jest.mock("@/components/rag/retrieval-control-panel", () => ({
@@ -77,8 +77,9 @@ jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(() => Promise.resolve(returnedMemories)),
 }))
 
-jest.mock("@/lib/memory/control-plane/manage", () => ({
-  manageMemory: jest.fn(() => Promise.resolve({ ok: true })),
+const mockRun = jest.fn(() => Promise.resolve(true))
+jest.mock("@/hooks/memory/use-memory-command", () => ({
+  useMemoryCommand: () => ({ run: mockRun, authority: "local" }),
 }))
 
 jest.mock("@/lib/memory/history-filter", () => ({
@@ -186,26 +187,35 @@ describe("MemoryWorkbenchPanel", () => {
     expect(screen.getByTestId("memory-row-mem_2")).toBeInTheDocument()
   })
 
-  it("calls manageMemory with pin command when pin is toggled", () => {
-    const { manageMemory } = jest.requireMock("@/lib/memory/control-plane/manage")
+  it("runs a pin command with the desired state when pin is toggled", () => {
     const { filterAndSortMemories } = jest.requireMock("@/lib/memory/history-filter")
     filterAndSortMemories.mockReturnValue(mockMemories)
     render(<MemoryWorkbenchPanel />)
 
     const pinButtons = screen.getAllByText("pin")
     fireEvent.click(pinButtons[0])
-    expect(manageMemory).toHaveBeenCalledWith({ kind: "pin", id: "mem_1", pinned: true })
+    expect(mockRun).toHaveBeenCalledWith({ kind: "pin", id: "mem_1", pinned: true })
   })
 
-  it("calls manageMemory with delete command when delete is clicked", () => {
-    const { manageMemory } = jest.requireMock("@/lib/memory/control-plane/manage")
+  it("asks before a permanent delete, and deletes only once confirmed", () => {
     const { filterAndSortMemories } = jest.requireMock("@/lib/memory/history-filter")
     filterAndSortMemories.mockReturnValue(mockMemories)
     render(<MemoryWorkbenchPanel />)
 
     const deleteButtons = screen.getAllByText("delete")
     fireEvent.click(deleteButtons[1])
-    expect(manageMemory).toHaveBeenCalledWith({ kind: "delete", id: "mem_2" })
+    expect(mockRun).not.toHaveBeenCalled()
+    const dialog = screen.getByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "confirm" }))
+    expect(mockRun).toHaveBeenCalledWith({ kind: "delete", id: "mem_2" })
+  })
+
+  it("archives without asking — archive is restorable", () => {
+    const { filterAndSortMemories } = jest.requireMock("@/lib/memory/history-filter")
+    filterAndSortMemories.mockReturnValue(mockMemories)
+    render(<MemoryWorkbenchPanel />)
+    fireEvent.click(screen.getAllByText("archive")[0])
+    expect(mockRun).toHaveBeenCalledWith({ kind: "invalidate", id: "mem_1" })
   })
 
   it("opens add memory dialog when add button is clicked", () => {

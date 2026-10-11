@@ -11434,6 +11434,492 @@
       },
       "additionalProperties": false
     },
+    "memory_mutate": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "description": "One `/memory` console command (`ManageMemoryCommand`), run on the host as the verified device. Parsed again by `parseManageMemoryCommand`; producer identity (`actorId`, `commandId`) is never taken from the wire.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "text",
+                "type",
+                "importance",
+                "tags"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "create"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20000
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "semantic",
+                    "episodic",
+                    "procedural"
+                  ]
+                },
+                "importance": {
+                  "type": "number"
+                },
+                "tags": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "global",
+                    "workspace",
+                    "character",
+                    "agent"
+                  ]
+                },
+                "characterId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "branch": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "pathPattern": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "patch"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "update"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "patch": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 20000
+                    },
+                    "tags": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 512
+                      }
+                    },
+                    "importance": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "pinned"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "pin"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "pinned": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "status"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "review"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "verified",
+                    "conflict"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "verdict"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "retrieval-feedback"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "helpful",
+                    "wrong",
+                    "outdated"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "delete"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "restore"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "invalidate"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "supersededById": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "revisionId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "restore-revision"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "revisionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "target"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "relocate"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "target": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "scope"
+                      ],
+                      "properties": {
+                        "scope": {
+                          "const": "global"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "scope",
+                        "projectId"
+                      ],
+                      "properties": {
+                        "scope": {
+                          "const": "workspace"
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "scope",
+                        "characterId"
+                      ],
+                      "properties": {
+                        "scope": {
+                          "const": "character"
+                        },
+                        "characterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "scope",
+                        "agentId"
+                      ],
+                      "properties": {
+                        "scope": {
+                          "const": "agent"
+                        },
+                        "agentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "keepId",
+                "dropId",
+                "mode"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "resolve-conflict"
+                },
+                "keepId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "dropId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "keep",
+                    "keep-both",
+                    "merge"
+                  ]
+                },
+                "mergedText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20000
+                },
+                "rationale": {
+                  "type": "string",
+                  "maxLength": 20000
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "clear"
+                },
+                "query": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "global",
+                        "workspace",
+                        "character",
+                        "agent"
+                      ]
+                    },
+                    "characterId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "semantic",
+                        "episodic",
+                        "procedural"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "invalidated"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "operationId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
+        }
+      },
+      "additionalProperties": false
+    },
     "memory_search": {
       "type": "object",
       "required": [

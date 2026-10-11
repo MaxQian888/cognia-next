@@ -1094,6 +1094,27 @@ describe("applyBackupPackage — learned memory", () => {
     }
   }
 
+  it("keeps every audit action the memory console writes, including restore, relocate and feedback", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memoryAuditEvents = (["restored", "relocated", "feedback"] as const).map(
+      (action, index) => ({
+        id: `maudit_${action}`,
+        action,
+        memoryId: "mem_1",
+        reason: "user",
+        createdAt: 10 + index,
+      })
+    )
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const actions = (await db.memoryAuditEvents.toArray()).map((row) => row.action).sort()
+    expect(actions).toEqual(expect.arrayContaining(["feedback", "relocated", "restored"]))
+  })
+
   it("restores the complete memory provenance graph", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(

@@ -43,13 +43,17 @@ import {
   type MemorySortKey,
 } from "@/lib/memory/history-filter"
 import { cn } from "@/lib/utils"
+import { useMemoryFacetGroups } from "./memory-facet-groups"
 
 /** Row height preset — mirrors the logging workspace's density switch. */
 export type MemoryDensity = "comfortable" | "compact"
 
-const SORT_KEYS: readonly MemorySortKey[] = ["recent", "importance", "accessed", "created"]
-const MAX_TAG_OPTIONS = 12
-const MAX_BRANCH_OPTIONS = 12
+export const MEMORY_SORT_KEYS: readonly MemorySortKey[] = [
+  "recent",
+  "importance",
+  "accessed",
+  "created",
+]
 
 export interface MemoryToolbarProps {
   view: MemoryQuickViewId
@@ -74,12 +78,6 @@ export interface MemoryToolbarProps {
   onDensityChange: (density: MemoryDensity) => void
 }
 
-/** Toggle a value in a readonly facet array without mutating it. */
-function toggle<T>(values: readonly T[] | undefined, value: T): T[] {
-  const current = values ?? []
-  return current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
-}
-
 export function MemoryToolbar({
   view,
   onViewChange,
@@ -94,64 +92,18 @@ export function MemoryToolbar({
   onDensityChange,
 }: MemoryToolbarProps) {
   const t = useTranslations("memory.panel")
-  const tTypes = useTranslations("memory.types")
-  const tScopes = useTranslations("memory.scopes")
-  const tProv = useTranslations("memory.provenance")
-  const tKind = useTranslations("memory.projectKind")
-  const tFresh = useTranslations("memory.freshness")
-
+  const groups = useMemoryFacetGroups({ facets, filter, onFilterChange, projectNames })
   const activeCount = countActiveMemoryFilters(filter)
-  const hasFacets =
-    facets.types.length > 0 ||
-    facets.scopes.length > 0 ||
-    facets.provenances.length > 0 ||
-    facets.tags.length > 0 ||
-    facets.projectMemoryKinds.length > 0 ||
-    facets.projectIds.length > 0 ||
-    facets.branches.length > 0 ||
-    facets.freshness.length > 0
+  const hasFacets = groups.some((group) => group.options.length > 0)
 
   return (
-    <div className="flex items-center gap-2" data-testid="memory-toolbar">
-      <nav
-        className="flex shrink-0 items-center gap-1"
-        aria-label={t("title")}
-        data-testid="memory-view-chips"
-      >
-        {MEMORY_QUICK_VIEWS.map((candidate) => {
-          const selected = candidate.id === view
-          const count = viewCounts[candidate.id] ?? 0
-          return (
-            <button
-              key={candidate.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => onViewChange(candidate.id)}
-              data-testid={`memory-view-${candidate.id}`}
-              className={cn(
-                "flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs whitespace-nowrap",
-                "motion-safe:transition-colors motion-safe:duration-150",
-                selected
-                  ? "border-primary/40 bg-primary/10 text-foreground"
-                  : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              )}
-            >
-              <span>{t(`views.${candidate.labelKey}`)}</span>
-              <span
-                className={cn(
-                  "tabular-nums",
-                  selected ? "text-primary" : "text-muted-foreground/70"
-                )}
-              >
-                {count}
-              </span>
-            </button>
-          )
-        })}
-      </nav>
-
-      <span className="flex-1" />
+    <div className="flex min-w-0 items-center gap-2" data-testid="memory-toolbar">
+      <MemoryQuickViews
+        view={view}
+        onViewChange={onViewChange}
+        viewCounts={viewCounts}
+        className="min-w-0 flex-1"
+      />
 
       <div className="relative shrink-0">
         <SearchIcon
@@ -163,7 +115,7 @@ export function MemoryToolbar({
           onChange={(event) => onFilterChange({ ...filter, query: event.target.value })}
           placeholder={t("searchPlaceholder")}
           aria-label={t("searchLabel")}
-          className="h-8 w-40 pl-8 @2xl/feature-header:w-56"
+          className="h-8 w-32 pl-8 @xl/feature-header:w-40 @2xl/feature-header:w-56"
           data-testid="memory-search"
         />
       </div>
@@ -193,85 +145,16 @@ export function MemoryToolbar({
             </DropdownMenuLabel>
           ) : null}
 
-          <FacetGroup
-            label={t("filter.types")}
-            options={facets.types}
-            selected={filter.types}
-            render={(value) => tTypes(value)}
-            onToggle={(value) => onFilterChange({ ...filter, types: toggle(filter.types, value) })}
-          />
-          <FacetGroup
-            label={t("filter.scopes")}
-            options={facets.scopes}
-            selected={filter.scopes}
-            render={(value) => tScopes(value)}
-            onToggle={(value) =>
-              onFilterChange({ ...filter, scopes: toggle(filter.scopes, value) })
-            }
-          />
-          <FacetGroup
-            label={t("filter.provenances")}
-            options={facets.provenances}
-            selected={filter.provenances}
-            render={(value) => tProv(value)}
-            onToggle={(value) =>
-              onFilterChange({ ...filter, provenances: toggle(filter.provenances, value) })
-            }
-          />
-          <FacetGroup
-            label={t("filter.tags")}
-            options={facets.tags.slice(0, MAX_TAG_OPTIONS)}
-            selected={filter.tags}
-            render={(value) => value}
-            onToggle={(value) => onFilterChange({ ...filter, tags: toggle(filter.tags, value) })}
-          />
-          {/*
-            The corpus partition, as one axis with six values. `personal` is the
-            ABSENCE of a `projectMemoryKind`, resolved by the same predicate the
-            retriever partitions on, so the console can never disagree with what
-            was actually recalled.
-          */}
-          <FacetGroup
-            label={t("filter.projectMemoryKinds")}
-            options={facets.projectMemoryKinds}
-            selected={filter.projectMemoryKinds}
-            render={(value) => tKind(value)}
-            onToggle={(value) =>
-              onFilterChange({
-                ...filter,
-                projectMemoryKinds: toggle(filter.projectMemoryKinds, value),
-              })
-            }
-          />
-          <FacetGroup
-            label={t("filter.projectIds")}
-            options={facets.projectIds}
-            selected={filter.projectIds}
-            // The unscoped row gets a name rather than an empty checkbox row —
-            // "no workspace" is a real answer to "which workspace", not a gap.
-            render={(value) => projectNames?.[value] || value || t("filter.noWorkspace")}
-            onToggle={(value) =>
-              onFilterChange({ ...filter, projectIds: toggle(filter.projectIds, value) })
-            }
-          />
-          <FacetGroup
-            label={t("filter.branches")}
-            options={facets.branches.slice(0, MAX_BRANCH_OPTIONS)}
-            selected={filter.branches}
-            render={(value) => value}
-            onToggle={(value) =>
-              onFilterChange({ ...filter, branches: toggle(filter.branches, value) })
-            }
-          />
-          <FacetGroup
-            label={t("filter.freshness")}
-            options={facets.freshness}
-            selected={filter.freshness}
-            render={(value) => tFresh(value)}
-            onToggle={(value) =>
-              onFilterChange({ ...filter, freshness: toggle(filter.freshness, value) })
-            }
-          />
+          {groups.map((group) => (
+            <FacetGroup
+              key={group.key}
+              label={group.label}
+              options={group.options}
+              selected={group.selected}
+              render={group.render}
+              onToggle={group.toggle}
+            />
+          ))}
 
           {activeCount > 0 ? (
             <>
@@ -306,7 +189,7 @@ export function MemoryToolbar({
             value={sort}
             onValueChange={(value) => onSortChange(value as MemorySortKey)}
           >
-            {SORT_KEYS.map((key) => (
+            {MEMORY_SORT_KEYS.map((key) => (
               <DropdownMenuRadioItem key={key} value={key} data-testid={`memory-sort-${key}`}>
                 {t(`sort.${key}`)}
               </DropdownMenuRadioItem>
@@ -325,6 +208,71 @@ export function MemoryToolbar({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+    </div>
+  )
+}
+
+export interface MemoryQuickViewsProps {
+  view: MemoryQuickViewId
+  onViewChange: (view: MemoryQuickViewId) => void
+  viewCounts: Record<MemoryQuickViewId, number>
+  className?: string
+  /** Taller chips for a touch layout. */
+  size?: "default" | "touch"
+}
+
+/**
+ * The quick views (All / Pinned / Needs review / Conflicts / Archived) as one
+ * tab list. It scrolls sideways instead of wrapping or pushing the search and
+ * menus off the edge, which is what clipped "Display" in a 900px window.
+ */
+export function MemoryQuickViews({
+  view,
+  onViewChange,
+  viewCounts,
+  className,
+  size = "default",
+}: MemoryQuickViewsProps) {
+  const t = useTranslations("memory.panel")
+  return (
+    <div
+      role="tablist"
+      aria-label={t("viewsLabel")}
+      className={cn(
+        "flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        className
+      )}
+      data-testid="memory-view-chips"
+    >
+      {MEMORY_QUICK_VIEWS.map((candidate) => {
+        const selected = candidate.id === view
+        const count = viewCounts[candidate.id] ?? 0
+        return (
+          <button
+            key={candidate.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onViewChange(candidate.id)}
+            data-testid={`memory-view-${candidate.id}`}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-pill border whitespace-nowrap",
+              size === "touch" ? "h-8 px-3 text-sm" : "px-2.5 py-1 text-xs",
+              "motion-safe:transition-colors motion-safe:duration-150",
+              selected
+                ? "border-primary/40 bg-primary/10 text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+            )}
+          >
+            <span>{t(`views.${candidate.labelKey}`)}</span>
+            <span
+              className={cn("tabular-nums", selected ? "text-primary" : "text-muted-foreground/70")}
+            >
+              {count}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

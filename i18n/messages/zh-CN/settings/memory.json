@@ -74,7 +74,8 @@
         "workspace": "工作区记忆"
       }
     },
-    "title": "危险区域"
+    "title": "危险区域",
+    "clearQueued": "清除请求已发送到主机。"
   },
   "description": "助手跨会话记住关于你的内容。",
   "enabled": {

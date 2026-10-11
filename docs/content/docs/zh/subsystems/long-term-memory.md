@@ -49,6 +49,7 @@ description: 持久化的个人记忆 —— 一条事实如何从对话中被�
 ```
 lib/memory/
   api/            store-memory · search-memory · mutate-memory · wire   # 写入漏斗
+                  manage-for-caller · mirror-memory                     # 管理命令的主机端 / 配对镜像
   retrieve/       retriever                                             # 作用域并集读取
   extract/        extractor · salience                                  # 对话 → 候选事实
   write/          run-memory-extraction · run-episodic-distill          # 后台写入任务
@@ -56,6 +57,7 @@ lib/memory/
   forget/         decay                                                 # 重要度衰减 + 淘汰
   lifecycle/      job-worker · maintenance · enqueue-reconcile          # memoryJobs 队列
   control-plane/  policy · manage · contamination                       # 治理决策
+                  routed-manage · remote-outcomes · command-wire        # 管理命令在哪执行（本地或主机）
   runtime/        apply-memory-context · build-deps                     # 注入回合
   external/       providers（claude-code · codex）· discover · edit     # 外部记忆文件
   CONTEXT.md                                                            # 领域词汇表
@@ -64,7 +66,9 @@ packages/memory/src/            # 抽取出的内核 —— 零 `@/` 导入
 lib/db/memories.ts              # Dexie CRUD：create/get/update/invalidate/touch/pin/list
 lib/plugin/api/memory-api.ts    # 面向插件的 ctx.memory
 lib/external-bridge/handlers/memory.ts   # MCP 工具
+hooks/memory/use-memory-console.ts       # 控制台状态，桌面与手机外壳共用
 components/memory/              # 控制台 · 详情面板 · 冲突解决 · 批量工具条
+components/mobile/memory/       # 同一 hook 之上的手机外壳
 app/memory/                     # 管理页路由
 ```
 
@@ -124,6 +128,10 @@ type MemorySensitivity        = "normal" | "sensitive"
 - **MCP 工具**（`lib/external-bridge/handlers/memory.ts`）—— `memory_search` / `memory_list` 归于 `memory:read` 权限，`memory_store` / `memory_update` / `memory_forget` 归于 `memory:write`。两个权限默认均为 **OFF**：这是蒸馏后的个人内容，暴露必须是显式选择。
 - **插件** —— `ctx.memory`，由 `createMemoryAPI(pluginId)` 按插件构建（`lib/plugin/api/memory-api.ts:112`）。
 - **Companion RPC** —— 移动端 / 远程接口面，走 [Companion API](./companion-api) 所述传输层。
+
+### 从配对客户端管理记忆
+
+控制台自身的写操作（置顶、归档、恢复、移动、编辑、解决冲突、删除、清空）都经过 `runMemoryCommand()`（`lib/memory/control-plane/routed-manage.ts`）。`memoryWriteAuthority()` 决定它们在哪里执行：远程主机传输处于活动状态或运行时目标是 companion（headless 大脑主机上的浏览器、驱动远程主机的桌面端、已配对的手机）时在主机上执行；否则在本地执行，包括没有主机的独立 Capacitor 手机。发往主机的命令先过 PII 门禁，作为 `memory_mutate` `{ command, operationId }` 入队，并乐观地应用到本地镜像。主机端的 `manageMemoryForCaller()` 检查设备的命名空间授权，并通过操作账本重放；被拒绝时回退 `memories` 同步游标并重新拉取规范行。见 ADR-0069 §8。
 
 ## 相关文档
 

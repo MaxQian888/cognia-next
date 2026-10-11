@@ -424,6 +424,7 @@ mod tests {
         ("memory_store", OutputShape::Opaque(RootType::Any)),
         ("memory_update", OutputShape::Opaque(RootType::Object)),
         ("memory_forget", OutputShape::Opaque(RootType::Any)),
+        ("memory_mutate", OutputShape::Declared(RootType::Object)),
         ("retrieval_profile_dek_export", OutputShape::Declared(RootType::Object)),
         ("conversation_overrides_update", OutputShape::Opaque(RootType::Object)),
         ("backup_export", OutputShape::Opaque(RootType::Object)),

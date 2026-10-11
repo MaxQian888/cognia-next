@@ -4,7 +4,7 @@
  * Destructive memory operations, separated from the settings above them and
  * collapsed by default.
  *
- * The scope selector is the point: `manageMemory({ kind: "clear" })` used to be
+ * The scope selector is the point: a `clear` command used to be
  * all-or-nothing, so "my workspace memories are stale" had no answer short of
  * deleting everything the assistant had ever learned. `clearMemories(query)`
  * already supported a filter — only the command dropped it.
@@ -17,7 +17,7 @@ import { DatabaseBackupIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionCollapse } from "@/components/chat/motion/motion-reveal"
-import { manageMemory } from "@/lib/memory/control-plane/manage"
+import { isQueuedMemoryResult, runMemoryCommand } from "@/lib/memory/control-plane/routed-manage"
 import type { ListMemoriesQuery } from "@/lib/db/memories"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -131,8 +131,12 @@ export function MemoryDangerZone({ defaultOpen = false }: MemoryDangerZoneProps)
         cancelLabel={t("confirm.cancel")}
         tone="destructive"
         onConfirm={async () => {
-          const result = await manageMemory({ kind: "clear", query: clearQueryFor(scope) })
-          if (result.ok) {
+          // On a paired device the host owns the store, so the clear is sent
+          // there and its count is the host's to report.
+          const result = await runMemoryCommand({ kind: "clear", query: clearQueryFor(scope) })
+          if (isQueuedMemoryResult(result)) {
+            toast.success(t("clearQueued"))
+          } else if (result.ok) {
             toast.success(t("cleared", { count: result.clearedCount ?? 0 }))
           } else {
             toast.error(t("clearFailed"))

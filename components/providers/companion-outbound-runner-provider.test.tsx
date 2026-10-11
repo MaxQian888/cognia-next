@@ -8,6 +8,7 @@ import {
 } from "@/lib/runtime/runtime-target-context"
 import { updateRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { CompanionOutboundRunnerProvider } from "./companion-outbound-runner-provider"
+import { settleRemoteMemoryMutation } from "@/lib/memory/control-plane/remote-outcomes"
 
 const unsubscribe = jest.fn()
 let pendingObserver: { next?: (count: number) => void } | undefined
@@ -52,7 +53,7 @@ jest.mock("@/lib/platform/web-companion", () => ({
 }))
 
 jest.mock("sonner", () => ({
-  toast: { loading: jest.fn(), dismiss: jest.fn() },
+  toast: { loading: jest.fn(), dismiss: jest.fn(), error: jest.fn() },
 }))
 
 let mockApprovalState: "not-required" | "held" | "blocked" = "not-required"
@@ -749,4 +750,26 @@ it("hands a refused dispatch to the approval gate so the retry re-mints its leas
 
   await expect(options.dispatcher.call("host_state_submit", { actions: [] })).rejects.toBe(refusal)
   expect(mockNoteRefused).toHaveBeenCalledWith(refusal)
+})
+
+it("says so when the host refused a memory command, wherever the user now is", async () => {
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="web"
+      webCompanionOverride={false}
+    />
+  )
+  await settleRemoteMemoryMutation(
+    { ok: false, reason: "unauthorized_namespace" },
+    {
+      rewind: jest.fn(),
+      pull: jest.fn(async () => undefined),
+      schedule: jest.fn(),
+      cancel: jest.fn(),
+    }
+  )
+  expect(toast.error).toHaveBeenCalledWith(
+    expect.stringContaining("The host didn't apply your memory change")
+  )
 })

@@ -2173,6 +2173,9 @@
     "memory_list": {
       "to": "memory.list"
     },
+    "memory_mutate": {
+      "to": "memory.mutate"
+    },
     "memory_search": {
       "to": "memory.search"
     },

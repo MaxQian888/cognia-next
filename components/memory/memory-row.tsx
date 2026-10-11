@@ -26,9 +26,11 @@ import Link from "next/link"
 import { buildSessionHref } from "@/lib/chat/message-permalink"
 import {
   ArchiveIcon,
+  ArchiveRestoreIcon,
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  FolderInputIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PinIcon,
@@ -52,7 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 
-/** Row height preset. `compact` is what the mobile mirror and workbench use. */
+/** Row height preset. `compact` is what the context workbench uses. */
 export type MemoryRowDensity = "comfortable" | "compact"
 
 const MAX_VISIBLE_TAGS = 3
@@ -63,9 +65,9 @@ export interface MemoryRowProps {
   onPinToggle: (id: string, pinned: boolean) => void
   onSave: (id: string, text: string) => void
   /**
-   * Permanent delete. Callers are expected to confirm first. Omit on surfaces
-   * that have no hard-delete path (the mobile mirror can only archive), and the
-   * menu item is left out rather than offered and then failing.
+   * Request a permanent delete. The console confirms before anything runs
+   * (`useMemoryConsole().requestDelete`). Omit on surfaces with no delete path
+   * and the menu item is left out rather than offered and then failing.
    */
   onDelete?: (id: string) => void
   /**
@@ -73,6 +75,12 @@ export interface MemoryRowProps {
    * Omit on surfaces that cannot archive (the row then offers delete only).
    */
   onArchive?: (id: string) => void
+  /** Bring an archived memory back. Shown in place of Archive on archived rows. */
+  onRestore?: (id: string) => void
+  /** Move to another namespace (opens the move dialog). */
+  onMove?: (id: string) => void
+  /** Copy the text; the caller confirms it. Falls back to a silent clipboard write. */
+  onCopy?: (text: string) => void
   /** Open the detail sidebar for this memory. Makes the row body clickable. */
   onOpenDetail?: (id: string) => void
   /** Highlight this row as the one currently shown in the detail sidebar. */
@@ -94,6 +102,9 @@ function MemoryRowImpl({
   onSave,
   onDelete,
   onArchive,
+  onRestore,
+  onMove,
+  onCopy,
   onOpenDetail,
   active,
   selectable,
@@ -162,11 +173,7 @@ function MemoryRowImpl({
         "hover:bg-accent/40",
         active && "bg-primary/8 hover:bg-primary/10",
         selected && "bg-primary/5",
-        invalidated && "opacity-70",
-        // The pinned marker is a rail, not a border colour — it survives the
-        // active/selected background swaps that a border would fight with.
-        memory.pinned &&
-          "before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary/60"
+        invalidated && "opacity-70"
       )}
     >
       {selectable ? (
@@ -214,6 +221,13 @@ function MemoryRowImpl({
         )}
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {memory.pinned ? (
+            <PinIcon
+              className="size-3 shrink-0 text-primary/70"
+              aria-label={t("pinnedLabel")}
+              data-testid="memory-row-pinned"
+            />
+          ) : null}
           <Badge variant="outline" className="h-5 px-1.5 font-normal">
             {tTypes(memory.type)}
           </Badge>
@@ -372,6 +386,20 @@ function MemoryRowImpl({
                 <ArchiveIcon className="size-4" />
               </Button>
             ) : null}
+            {onRestore && invalidated ? (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t("restore")}
+                onClick={(event) => {
+                  stop(event)
+                  onRestore(memory.id)
+                }}
+                data-testid="memory-row-restore"
+              >
+                <ArchiveRestoreIcon className="size-4" />
+              </Button>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -379,20 +407,31 @@ function MemoryRowImpl({
                   variant="ghost"
                   aria-label={t("moreActions")}
                   onClick={stop}
+                  onKeyDown={stop}
                   data-testid="memory-row-more"
                 >
                   <MoreHorizontalIcon className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
                   onSelect={() => {
-                    void navigator.clipboard?.writeText(memory.text)
+                    if (onCopy) onCopy(memory.text)
+                    else void navigator.clipboard?.writeText(memory.text)
                   }}
                 >
                   <CopyIcon className="size-4" />
                   {t("copyText")}
                 </DropdownMenuItem>
+                {onMove && !invalidated ? (
+                  <DropdownMenuItem
+                    onSelect={() => onMove(memory.id)}
+                    data-testid="memory-row-move"
+                  >
+                    <FolderInputIcon className="size-4" />
+                    {t("move")}
+                  </DropdownMenuItem>
+                ) : null}
                 {onDelete ? (
                   <>
                     <DropdownMenuSeparator />

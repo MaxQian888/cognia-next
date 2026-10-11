@@ -29,6 +29,7 @@ import {
   installResumeSync,
   installWorkflowRunStatusSync,
   getSyncStateFor,
+  rewindSyncTable,
   runSyncDown,
   runStagedSyncDown,
   snapshotSyncStates,
@@ -104,6 +105,44 @@ describe("resumable table cursors", () => {
       cursor: "row-600",
       lastError: null,
     })
+  })
+})
+
+describe("rewindSyncTable", () => {
+  const page = (nextSince: number) => ({
+    ok: true as const,
+    result: { table: "memories" as const, applied: 1, nextSince, nextCursor: `c${nextSince}` },
+  })
+
+  it("makes the next pull start from zero", async () => {
+    const t = makeTransport()
+    const run = jest.fn().mockResolvedValueOnce(page(500)).mockResolvedValueOnce(page(500))
+    const opts = { transport: t, handlers: [{ table: "memories" as const, run }] }
+    await runSyncDown(opts)
+    expect(getSyncStateFor("memories")).toMatchObject({ since: 500 })
+    rewindSyncTable("memories")
+    expect(getSyncStateFor("memories")).toMatchObject({ since: 0 })
+    expect(getSyncStateFor("memories").cursor).toBeUndefined()
+    await runSyncDown(opts)
+    expect(run.mock.calls[1][1]).toMatchObject({ since: 0 })
+    expect(run.mock.calls[1][1].cursor).toBeUndefined()
+  })
+
+  it("keeps a pull already in flight from writing its watermark over the rewind", async () => {
+    const t = makeTransport()
+    let release: (value: unknown) => void = () => {}
+    const run = jest.fn(
+      () =>
+        new Promise<SyncOutcome>((resolve) => {
+          release = resolve as (value: unknown) => void
+        })
+    )
+    const pending = runSyncDown({ transport: t, handlers: [{ table: "memories", run }] })
+    while (run.mock.calls.length === 0) await new Promise((resolve) => setTimeout(resolve, 1))
+    rewindSyncTable("memories")
+    release(page(900))
+    await pending
+    expect(getSyncStateFor("memories")).toMatchObject({ since: 0 })
   })
 })
 

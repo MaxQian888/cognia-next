@@ -74,7 +74,8 @@
         "workspace": "Workspace memories"
       }
     },
-    "title": "Danger zone"
+    "title": "Danger zone",
+    "clearQueued": "Clear sent to the host."
   },
   "description": "What the assistant remembers about you across sessions.",
   "enabled": {

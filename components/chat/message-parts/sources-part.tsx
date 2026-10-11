@@ -334,9 +334,9 @@ const MemoryFeedbackButtons = memo(function MemoryFeedbackButtons({
   const vote = useCallback(
     (verdict: (typeof RETRIEVAL_FEEDBACK_OPTIONS)[number]["verdict"]) => {
       setVoted(verdict)
-      void import("@/lib/memory/control-plane/manage")
-        .then(({ manageMemory }) =>
-          manageMemory({ kind: "retrieval-feedback", id: memoryId, verdict })
+      void import("@/lib/memory/control-plane/routed-manage")
+        .then(({ runMemoryCommand }) =>
+          runMemoryCommand({ kind: "retrieval-feedback", id: memoryId, verdict })
         )
         .then((result) => {
           if (result.ok) toast.success(t("feedbackRecorded"))

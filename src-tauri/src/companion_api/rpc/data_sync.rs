@@ -189,6 +189,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "memory_store",
     "memory_update",
     "memory_forget",
+    "memory_mutate",
     "retrieval_profile_dek_export",
     "conversation_overrides_update",
     "backup_export",
@@ -1021,6 +1022,7 @@ pub(super) async fn dispatch(
         | "memory_store"
         | "memory_update"
         | "memory_forget"
+        | "memory_mutate"
         | "retrieval_profile_dek_export"
         | "conversation_overrides_update"
         | "backup_export"

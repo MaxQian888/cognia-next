@@ -798,6 +798,10 @@ export async function dispatchCommand(
       return memoryUpdateRpc(payload)
     case "memory_forget":
       return memoryForgetRpc(payload)
+    // The `/memory` console on a paired device: one `manageMemory` command,
+    // run here as the verified device (namespace grants, operation ledger).
+    case "memory_mutate":
+      return memoryMutateRpc(payload)
     case "retrieval_profile_dek_export":
       return retrievalProfileDekExport(payload)
     // External agents (ADR-0056, Wave 4). The desktop's external-agent config
@@ -1759,6 +1763,22 @@ async function memoryForgetRpc(payload: Record<string, unknown>): Promise<unknow
     expectedVersion:
       typeof payload.expectedVersion === "number" ? payload.expectedVersion : undefined,
     operationId: payload.operationId as string | undefined,
+  })
+}
+
+async function memoryMutateRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const { parseManageMemoryCommand } = await import("@/lib/memory/control-plane/command-wire")
+  const command = parseManageMemoryCommand(payload.command)
+  if (!command) throw new Error("memory_mutate.command is malformed")
+  const operationId = payload.operationId
+  if (operationId !== undefined && (typeof operationId !== "string" || operationId.length > 200)) {
+    throw new Error("memory_mutate.operationId must be a string of at most 200 characters")
+  }
+  const { manageMemoryForCaller } = await import("@/lib/memory/api/manage-for-caller")
+  const { companionCaller } = await import("@/lib/memory/api/caller")
+  return manageMemoryForCaller(command, {
+    caller: companionCaller(payload.callerDeviceId as string | undefined),
+    ...(operationId ? { operationId } : {}),
   })
 }
 

@@ -30,7 +30,38 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui
 import { ExternalMemoryRow } from "./external-memory-row"
 import { ExternalMemoryEditor } from "./external-memory-editor"
 
-export function ExternalMemoryTab() {
+export interface ExternalMemoryTabProps {
+  /**
+   * This device is a paired client: the files are on the host's disk, not on
+   * a desktop this device could become, so the empty state says where to go.
+   */
+  onHost?: boolean
+}
+
+export function ExternalMemoryTab({ onHost = false }: ExternalMemoryTabProps) {
+  // A paired client — including a desktop driving a remote host — would read
+  // THIS machine's agent files while the rest of the page shows the host's
+  // memory, so it does not read them at all.
+  if (onHost) return <ExternalMemoryUnavailable onHost />
+  return <LocalExternalMemory />
+}
+
+function ExternalMemoryUnavailable({ onHost }: { onHost: boolean }) {
+  const t = useTranslations("memory.external")
+  return (
+    <Empty className="h-full" data-testid="external-memory-unsupported">
+      <EmptyMedia variant="icon">
+        <LockIcon />
+      </EmptyMedia>
+      <EmptyTitle>{onHost ? t("hostOnly.title") : t("desktopOnly.title")}</EmptyTitle>
+      <EmptyDescription>
+        {onHost ? t("hostOnly.description") : t("desktopOnly.description")}
+      </EmptyDescription>
+    </Empty>
+  )
+}
+
+function LocalExternalMemory() {
   const t = useTranslations("memory.external")
   const { files, loading, unsupported, allowedRoots, refresh } = useExternalMemory()
   const [selected, setSelected] = useState<ExternalMemoryFile | null>(null)
@@ -52,17 +83,7 @@ export function ExternalMemoryTab() {
   )
   const presentCount = useMemo(() => files.filter((file) => file.exists).length, [files])
 
-  if (unsupported) {
-    return (
-      <Empty className="h-full" data-testid="external-memory-unsupported">
-        <EmptyMedia variant="icon">
-          <LockIcon />
-        </EmptyMedia>
-        <EmptyTitle>{t("desktopOnly.title")}</EmptyTitle>
-        <EmptyDescription>{t("desktopOnly.description")}</EmptyDescription>
-      </Empty>
-    )
-  }
+  if (unsupported) return <ExternalMemoryUnavailable onHost={false} />
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="external-memory-tab">

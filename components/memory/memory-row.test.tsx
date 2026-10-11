@@ -242,3 +242,29 @@ it("wraps long memory text and tag labels without displacing row actions", () =>
   expect(screen.getByText(text)).toHaveClass("break-words")
   expect(screen.getByText(tag)).toHaveClass("max-w-full", "whitespace-normal", "break-all")
 })
+
+describe("MemoryRow — restore, move, pin marker", () => {
+  it("marks a pinned memory with a named glyph", () => {
+    setup({ pinned: true })
+    expect(screen.getByTestId("memory-row-pinned")).toHaveAttribute("aria-label", "Pinned")
+  })
+
+  it("restores an archived row from its own button", () => {
+    const onRestore = jest.fn()
+    setup({ status: "invalidated", invalidatedAt: 1 }, { onRestore })
+    fireEvent.click(screen.getByTestId("memory-row-restore"))
+    expect(onRestore).toHaveBeenCalledWith("m1")
+  })
+
+  it("moves a live row from the menu, and hands copy to the caller", async () => {
+    const onMove = jest.fn()
+    const onCopy = jest.fn()
+    setup({}, { onMove, onCopy })
+    await openRowMenu()
+    await userEvent.click(screen.getByTestId("memory-row-move"))
+    expect(onMove).toHaveBeenCalledWith("m1")
+    await openRowMenu()
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy text" }))
+    expect(onCopy).toHaveBeenCalledWith(expect.any(String))
+  })
+})

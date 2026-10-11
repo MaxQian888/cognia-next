@@ -14,6 +14,8 @@ const mockSinkUpsert = jest.fn()
 const mockRecordMemoryConflictGovernance = jest.fn()
 const mockReportGovernanceProjectionFailure = jest.fn()
 const mockRestoreRevision = jest.fn()
+const mockRestoreArchived = jest.fn()
+const mockMoveNamespace = jest.fn()
 
 jest.mock("@/lib/memory/api/store-memory", () => ({
   storeMemoryCore: (...args: unknown[]) => mockStore(...args),
@@ -27,6 +29,8 @@ jest.mock("@/lib/db/memories", () => ({
   recordRetrievalFeedback: (...args: unknown[]) => mockFeedback(...args),
   listMemories: (...args: unknown[]) => mockList(...args),
   restoreMemoryRevision: (...args: unknown[]) => mockRestoreRevision(...args),
+  restoreArchivedMemory: (...args: unknown[]) => mockRestoreArchived(...args),
+  moveMemoryToNamespace: (...args: unknown[]) => mockMoveNamespace(...args),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({ memory: {} })) }))
 jest.mock("@/lib/db/memory-governance", () => ({
@@ -587,5 +591,134 @@ describe("manageMemory restore-revision", () => {
       manageMemory({ kind: "restore-revision", id: "m1", revisionId: "snap1" })
     ).resolves.toEqual({ ok: false, reason: "disabled" })
     expect(mockRestoreRevision).not.toHaveBeenCalled()
+  })
+})
+
+describe("manageMemory restore (un-archive)", () => {
+  beforeEach(() => {
+    mockGet.mockResolvedValue({
+      id: "m1",
+      text: "archived fact",
+      version: 2,
+      status: "invalidated",
+      vectorDocId: "vec-m1",
+    })
+    mockRestoreArchived.mockResolvedValue({
+      ok: true,
+      memory: { id: "m1", text: "archived fact", version: 2, status: "active" },
+    })
+  })
+
+  it("restores the row, re-indexes it and audits the restore", async () => {
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: true,
+      memoryId: "m1",
+    })
+    expect(mockRestoreArchived).toHaveBeenCalledWith("m1")
+    expect(mockSinkUpsert).toHaveBeenCalledWith("vec-m1", "archived fact")
+    expect(mockAudit).toHaveBeenCalledWith({ action: "restored", memoryId: "m1", reason: "user" })
+  })
+
+  it("treats an already-active row as done, with no side effects", async () => {
+    mockRestoreArchived.mockResolvedValueOnce({ ok: false, reason: "already_active" })
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: true,
+      memoryId: "m1",
+    })
+    expect(mockSinkUpsert).not.toHaveBeenCalled()
+    expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("never embeds a restored text that would leak PII, but still restores it", async () => {
+    mockRestoreArchived.mockResolvedValueOnce({
+      ok: true,
+      memory: { id: "m1", text: "mail me at someone@example.com", version: 2, status: "active" },
+    })
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toMatchObject({ ok: true })
+    expect(mockSinkUpsert).not.toHaveBeenCalled()
+    expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "restored" }))
+  })
+
+  it("notes a vector failure without failing the restore", async () => {
+    mockSinkUpsert.mockRejectedValueOnce(new Error("embedder down"))
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toMatchObject({ ok: true })
+    expect(mockNoteVectorFailure).toHaveBeenCalled()
+  })
+
+  it("maps a snapshot or vanished row to not_found", async () => {
+    mockRestoreArchived.mockResolvedValueOnce({ ok: false, reason: "not_found" })
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+    mockGet.mockResolvedValueOnce(undefined)
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: false,
+      reason: "not_found",
+    })
+  })
+
+  it("refuses in temporary mode and while memory is disabled", async () => {
+    getSettingsMock.mockResolvedValueOnce({ memory: { temporary: true } })
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: false,
+      reason: "temporary",
+    })
+    getSettingsMock.mockResolvedValueOnce({ memory: { enabled: false } })
+    await expect(manageMemory({ kind: "restore", id: "m1" })).resolves.toEqual({
+      ok: false,
+      reason: "disabled",
+    })
+    expect(mockRestoreArchived).not.toHaveBeenCalled()
+  })
+})
+
+describe("manageMemory relocate", () => {
+  beforeEach(() => {
+    mockGet.mockResolvedValue({ id: "m1", text: "fact", version: 1, scope: "character" })
+    mockMoveNamespace.mockImplementation(async (id: string, target: { scope: string }) => ({
+      id,
+      scope: target.scope,
+    }))
+  })
+
+  it("moves the row and audits from/to without the text", async () => {
+    await expect(
+      manageMemory({
+        kind: "relocate",
+        id: "m1",
+        target: { scope: "workspace", projectId: "p1" },
+      })
+    ).resolves.toEqual({ ok: true, memoryId: "m1" })
+    expect(mockMoveNamespace).toHaveBeenCalledWith("m1", { scope: "workspace", projectId: "p1" })
+    expect(mockAudit).toHaveBeenCalledWith({
+      action: "relocated",
+      memoryId: "m1",
+      reason: "user",
+      metadata: { from: "character", to: "workspace" },
+    })
+  })
+
+  it("refuses a target namespace without its id", async () => {
+    await expect(
+      manageMemory({ kind: "relocate", id: "m1", target: { scope: "agent", agentId: "  " } })
+    ).resolves.toEqual({ ok: false, reason: "scope_denied" })
+    expect(mockMoveNamespace).not.toHaveBeenCalled()
+  })
+
+  it("still moves while memory is disabled — nothing is embedded", async () => {
+    getSettingsMock.mockResolvedValueOnce({ memory: { enabled: false } })
+    await expect(
+      manageMemory({ kind: "relocate", id: "m1", target: { scope: "global" } })
+    ).resolves.toMatchObject({ ok: true })
+    expect(mockSinkUpsert).not.toHaveBeenCalled()
+  })
+
+  it("reports not_found when the row disappears before the move", async () => {
+    mockMoveNamespace.mockResolvedValueOnce(undefined)
+    await expect(
+      manageMemory({ kind: "relocate", id: "m1", target: { scope: "global" } })
+    ).resolves.toEqual({ ok: false, reason: "not_found" })
+    expect(mockAudit).not.toHaveBeenCalled()
   })
 })

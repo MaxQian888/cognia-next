@@ -29,6 +29,11 @@ export interface MemoryHealthPanelProps {
   onRefresh: () => void
   resolveMemory: (id: string) => Memory | undefined
   onOpenMemory: (id: string) => void
+  /**
+   * The rows are a paired client's synced copy of the host's store, which is
+   * capped and carries no vectors — so the findings are about that copy.
+   */
+  mirror?: boolean
 }
 
 export function MemoryHealthPanel({
@@ -37,6 +42,7 @@ export function MemoryHealthPanel({
   onRefresh,
   resolveMemory,
   onOpenMemory,
+  mirror = false,
 }: MemoryHealthPanelProps) {
   const t = useTranslations("memory.health")
   const findings = report?.findings ?? []
@@ -47,6 +53,11 @@ export function MemoryHealthPanel({
         <div className="min-w-0 space-y-0.5">
           <h2 className="text-sm font-medium">{t("title")}</h2>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
+          {mirror ? (
+            <p className="text-xs text-muted-foreground" data-testid="memory-health-mirror">
+              {t("mirrorNote")}
+            </p>
+          ) : null}
           {report ? (
             <p className="text-[11px] text-muted-foreground" data-testid="memory-health-meta">
               {t("scanned", { count: report.scanned })} ·{" "}

@@ -92,7 +92,7 @@ degrade to empty when memory is off; `store` throws a typed
 sensitivity tier as `rag:twin`. Settings toggles render automatically from
 `ALL_BRIDGE_SCOPES`.
 
-### 5. Companion RPC — five `/_rpc/memory_*` commands
+### 5. Companion RPC — six `/_rpc/memory_*` commands
 
 All route through the desktop_writes_bridge to
 `lib/companion/desktop-write-source.ts` arms (`sourceChannel: "rpc"`).
@@ -105,7 +105,8 @@ it would reuse cached results without updating that recency signal. The mobile p
 `memory_forget` through the durable `MOBILE_OUTBOUND_COMMANDS` queue, then
 optimistically updates its local mirror only after enqueue succeeds. The
 desktop remains authoritative and re-applies PII, governance, audit, and
-vector-lifecycle rules.
+vector-lifecycle rules. The sixth command, `memory_mutate`, carries the whole
+management vocabulary and is what every paired client now sends (§8).
 
 ### 6. `/memory` manage command
 
@@ -136,6 +137,55 @@ are retained for review but excluded from prompt injection. Capacity and stale
 memory maintenance run against the complete namespace rather than a whole scope.
 Recall shares an explicit token budget across semantic, episodic, and procedural
 memory and reports withheld/truncated counts to the chat runtime.
+
+### 8. One responsive console, writes routed to the host (2026-10-11 amendment)
+
+The console at `/memory` and the phone route (`/me/memory`) are two layout
+shells over one state hook, `hooks/memory/use-memory-console.ts`: the same
+tabs, quick views, facets, sorts, selection, URL `?id`, inspector, Undo and the
+single delete confirmation. They stay two components only because the phone
+route may not import the desktop console (the mobile route-boundary test); no
+rule is implemented twice. Below `lg` the desktop console's inspector is a
+controlled sheet, so a tablet or narrow Tauri window opens it instead of
+silently dropping it.
+
+Where a write lands is decided once, by
+`lib/memory/control-plane/routed-manage.ts:memoryWriteAuthority()`:
+
+- `"host"` when a remote host transport is active, or the runtime target is a
+  companion (a browser opened on a headless brain host, a desktop driving a
+  remote host, a paired phone);
+- `"local"` otherwise — Tauri desktop, standalone web, and a standalone
+  Capacitor phone with no host. It deliberately does not read
+  `isCompanionShell()`: an unpaired phone has nobody to send the write to.
+
+Every surface that changes memory (console, phone, conflict resolver, chat
+memory chips, sources part, the context workbench panel, Settings → Danger
+zone) calls `runMemoryCommand()` / `useMemoryCommand()`. On `"local"` that is
+`manageMemory()`. On `"host"` the command is PII-gated (`redactText` +
+`hasNoLeakingPii`) and queued as the outbound command `memory_mutate`
+`{ command, operationId }` (the queue's idempotency key is the operation id),
+and the local mirror is updated optimistically through
+`applyMirroredMemoryCommand` — commands the mirror cannot reproduce (create,
+restore-revision, retrieval feedback) wait for the host's row.
+
+The host runs `manageMemoryForCaller()`: it parses the command strictly
+(`command-wire.ts` never accepts an `actorId` or `commandId` from the wire),
+checks the caller's namespace grants on every row touched and on any
+destination namespace, narrows a `clear` to the rows the device may see,
+replays through the operation ledger (kind `"manage"`), and records the
+device as the actor. When the host answers, the outbound runner settles the
+operation (`remote-outcomes.ts`): success schedules one follow-up `memories`
+pull; a refusal rewinds the `memories` sync cursor (`rewindSyncTable`, which an
+in-flight pull cannot overwrite), re-pulls the canonical rows and tells the
+user why.
+
+The management vocabulary gained `restore` (an archived memory back to active,
+vectors re-upserted when PII-clean, audit `restored`) and `relocate` (move a
+memory to another namespace; branch and path restrictions survive only within
+the same workspace, audit `relocated` with from/to). Archive is immediate with
+Undo; delete is the only action that asks first, from every surface — the
+context workbench used to delete without asking.
 
 ## Consequences
 

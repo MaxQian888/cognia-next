@@ -24325,15 +24325,15 @@
   },
   "memory": {
     "add": {
-      "agentIdLabel": "Agent ID",
+      "agentIdLabel": "智能体",
       "branchLabel": "分支（可选）",
       "cancel": "取消",
-      "characterIdLabel": "角色 ID",
+      "characterIdLabel": "角色",
       "description": "手动保存一条耐久事实，并以显式来源设置可选的精细作用域。",
       "importanceLabel": "重要度",
       "pathPatternLabel": "路径前缀（可选）",
-      "projectIdLabel": "项目 ID",
-      "projectIdOptionalLabel": "项目 ID（可选）",
+      "projectIdLabel": "工作区",
+      "projectIdOptionalLabel": "工作区（可选）",
       "scopeLabel": "作用域",
       "submit": "新增记忆",
       "tagsLabel": "标签",
@@ -24345,24 +24345,14 @@
     },
     "bulk": {
       "archive": "归档",
-      "archiveConfirm": {
-        "cancel": "取消",
-        "confirm": "归档",
-        "description": "这会让 {count} 条记忆不再被召回。它们仍保留在归档中，可以恢复。",
-        "title": "归档所选记忆？"
-      },
       "clear": "清除选择",
       "delete": "删除",
-      "deleteConfirm": {
-        "cancel": "取消",
-        "confirm": "删除",
-        "description": "这将永久删除 {count} 条记忆，且无法撤销。",
-        "title": "删除所选记忆？"
-      },
       "partialFailure": "{succeeded} 项成功，{failed} 项失败。失败的记忆仍保持选中，可以重试。",
       "pin": "置顶",
+      "restore": "恢复",
       "selectAll": "全选",
       "selected": "已选 {count} 条",
+      "toolbarLabel": "已选记忆",
       "unpin": "取消置顶"
     },
     "conflicts": {
@@ -24395,6 +24385,8 @@
           "promoted": "标记为已核实",
           "recall-allowed": "允许召回",
           "recall-denied": "拒绝召回",
+          "relocated": "已移动",
+          "restored": "已恢复",
           "revised": "修改",
           "unpinned": "取消置顶"
         },
@@ -24430,17 +24422,13 @@
       "close": "关闭",
       "conflictGone": "冲突记忆已被删除。",
       "conflictsWith": "冲突对象",
-      "deleteConfirm": {
-        "cancel": "取消",
-        "confirm": "删除",
-        "description": "这将永久删除该记忆，且无法撤销。",
-        "title": "删除这条记忆？"
-      },
       "evidenceTitle": "证据记录",
       "fields": {
         "accessCount": "召回次数",
+        "agent": "智能体",
         "archivedAt": "归档于",
         "branchScope": "分支",
+        "character": "角色",
         "claimKind": "类别",
         "contamination": "上下文信任",
         "corroboration": "佐证",
@@ -24460,9 +24448,11 @@
         "scope": "作用域",
         "updated": "更新于",
         "validatedAt": "最近核实",
-        "version": "版本"
+        "version": "版本",
+        "workspace": "工作区"
       },
       "importanceLabel": "重要度",
+      "moveNamespace": "移动…",
       "next": "下一条记忆",
       "no": "否",
       "previous": "上一条记忆",
@@ -24481,6 +24471,11 @@
         "tags": "标签"
       },
       "source": "来源",
+      "status": {
+        "context": "上下文：{value}",
+        "evidence": "证据：{value}",
+        "review": "审核：{value}"
+      },
       "tagsLabel": "标签",
       "tagsPlaceholder": "用逗号分隔的标签",
       "textLabel": "内容",
@@ -24488,6 +24483,7 @@
     },
     "errors": {
       "disabled": "记忆功能已在设置中关闭",
+      "hostRefused": "主机未应用你的记忆更改：{reason}",
       "idempotency_key_reused": "该操作 ID 已被用于不同的请求",
       "mutation_failed": "记忆操作失败，请重试",
       "not_found": "这条记忆已不存在",
@@ -24520,6 +24516,10 @@
       "empty": {
         "description": "本机没有找到 Claude Code、Codex、OpenCode 或 Pi 的记忆文件。",
         "title": "未发现外部 Agent 记忆"
+      },
+      "hostOnly": {
+        "description": "外部智能体记忆保存在主机磁盘上。请在主机上打开记忆页面查看和编辑。",
+        "title": "位于主机"
       },
       "loadError": "无法读取该文件。",
       "loading": "加载中…",
@@ -24613,6 +24613,7 @@
           "title": "可能矛盾"
         }
       },
+      "mirrorNote": "检查对象是本设备的同步副本，可能不完整，且不含向量。",
       "open": "打开",
       "refresh": "重新检查",
       "scanned": "已检查 {count} 条记忆",
@@ -24642,17 +24643,41 @@
       },
       "window": "{from} – {to}"
     },
+    "host": {
+      "connecting": "正在连接主机…",
+      "description": "本设备显示的是已配对主机记忆的同步副本。更改会发送到主机，主机应用后才会在这里生效。召回设置以主机为准。",
+      "label": "主机记忆",
+      "offline": "离线。更改会在队列中等待，直到可以连接主机。",
+      "online": "已连接到主机。",
+      "title": "正在显示主机的记忆"
+    },
+    "move": {
+      "cancel": "取消",
+      "confirm": "移动",
+      "description": "选择谁可以召回这条记忆。它的历史和证据会一起移动。",
+      "effect": {
+        "agent": "该智能体私有，其他任何对象都无法读取。",
+        "character": "只在与该角色对话时召回。",
+        "global": "在所有对话中召回。",
+        "workspace": "只在该工作区的对话中召回。"
+      },
+      "scopeLabel": "范围",
+      "title": "移动记忆"
+    },
+    "namespace": {
+      "choose": "请选择…",
+      "customIdLabel": "{label} 的自定义 ID",
+      "customIdPlaceholder": "粘贴 ID",
+      "none": "无",
+      "otherId": "其他 ID…",
+      "unknownId": "{id}（未找到）"
+    },
     "panel": {
       "accessedRelative": "{time}使用",
       "add": "新增",
       "addFirst": "添加第一条记忆",
       "archive": "归档",
-      "archiveConfirm": {
-        "cancel": "取消",
-        "confirm": "归档",
-        "description": "它将不再被召回，但会保留在归档中，之后可以恢复。",
-        "title": "归档这条记忆？"
-      },
+      "archivedToast": "已归档 {count} 条记忆",
       "cancelEdit": "取消",
       "clearFiltered": "删除当前视图的全部记忆…",
       "clearFilteredConfirm": {
@@ -24662,14 +24687,21 @@
         "title": "删除 {count} 条记忆？"
       },
       "clearFilters": "清除筛选",
-      "clearTags": "清除标签",
       "clearedToast": "已删除 {count} 条记忆",
       "compacted": "已压缩",
       "copied": "已复制",
+      "copyFailed": "复制失败",
       "copyText": "复制内容",
       "createdRelative": "{time}添加",
       "delete": "删除",
+      "deleteConfirm": {
+        "cancel": "取消",
+        "confirm": "删除",
+        "description": "{count, plural, =1 {将永久删除这条记忆及其历史和证据，且无法撤销。} other {将永久删除 # 条记忆及其历史和证据，且无法撤销。}}",
+        "title": "{count, plural, =1 {删除这条记忆？} other {删除 # 条记忆？}}"
+      },
       "deleteForever": "永久删除",
+      "deletedToast": "已删除 {count} 条记忆",
       "detailTitle": "记忆详情",
       "display": {
         "comfortable": "宽松",
@@ -24685,8 +24717,12 @@
         "title": "暂无记忆"
       },
       "filter": {
+        "activeCount": "已启用 {count} 个筛选",
         "branches": "分支",
         "clear": "清除筛选",
+        "done": "完成",
+        "drawerHint": "缩小列表范围或调整排序。",
+        "drawerTitle": "筛选与排序",
         "freshness": "新鲜度",
         "label": "筛选",
         "noWorkspace": "无工作区",
@@ -24700,16 +24736,23 @@
       },
       "importanceValue": "重要度 {value}",
       "invalidated": "已归档",
+      "listLabel": "记忆",
       "moreActions": "更多操作",
       "moreTags": "+{count}",
+      "move": "移动到…",
+      "movedToast": "记忆已移动",
       "noResults": {
         "description": "没有记忆符合当前筛选条件。",
         "title": "没有匹配的记忆"
       },
+      "openRow": "打开记忆：{text}",
       "openSettings": "记忆设置",
       "piiRedacted": "已保存——其中的个人信息已先行脱敏。",
       "pin": "置顶",
+      "pinnedLabel": "已置顶",
       "provenanceLabel": "来源类型",
+      "restore": "恢复",
+      "restoredToast": "已恢复 {count} 条记忆",
       "retrieval": {
         "activeJobs": "{count, plural, =0 {无任务} other {# 个任务}}",
         "disabled": "召回已暂停",
@@ -24724,26 +24767,27 @@
       "searchLabel": "搜索记忆",
       "searchPlaceholder": "搜索记忆…",
       "selectRow": "选择记忆",
-      "showInvalidated": "显示已归档",
+      "selectRowNamed": "选择记忆：{text}",
       "sort": {
         "accessed": "最近使用",
         "created": "最近创建",
         "importance": "重要性",
         "recent": "最近更新"
       },
-      "sortLabel": "排序",
       "stats": {
         "active": "活跃"
       },
       "subtitle": "助手记住的关于你的内容。",
       "summary": "{active} 条活跃 · {pinned} 条置顶 · {conflicts} 条冲突 · 已建索引 {coverage}%",
+      "summaryMirror": "{active} 条有效 · {pinned} 条置顶 · {conflicts} 条冲突 · 同步自主机",
       "tabs": {
         "app": "应用记忆",
         "external": "外部 Agent 记忆",
         "health": "健康"
       },
-      "tagFilterLabel": "标签：",
+      "tabsLabel": "记忆分区",
       "title": "记忆",
+      "undo": "撤销",
       "unpin": "取消置顶",
       "viewSource": "查看来源",
       "views": {
@@ -24752,7 +24796,8 @@
         "conflicts": "冲突",
         "needsReview": "待审阅",
         "pinned": "置顶"
-      }
+      },
+      "viewsLabel": "记忆视图"
     },
     "projectKind": {
       "constraint": "约束",
@@ -24769,6 +24814,20 @@
       "inbound": "入站",
       "system": "系统",
       "user": "自动（对话）"
+    },
+    "queue": {
+      "clear": "清除记忆",
+      "create": "添加记忆",
+      "delete": "删除记忆",
+      "invalidate": "归档记忆",
+      "pin": "置顶记忆",
+      "relocate": "移动记忆",
+      "resolve-conflict": "解决记忆冲突",
+      "restore": "恢复记忆",
+      "restore-revision": "恢复较早的表述",
+      "retrieval-feedback": "评价召回的记忆",
+      "review": "审核记忆",
+      "update": "编辑记忆"
     },
     "scopes": {
       "agent": "Agent",
@@ -26355,16 +26414,10 @@
       "workspaceRow": "工作区"
     },
     "memory": {
-      "clearSearch": "清空搜索",
       "empty": "暂无记忆",
       "emptyDescription": "聊天时值得保留的关于你的事实会保存在这里。也可以在对话中输入 /remember。",
       "noMatches": "没有匹配的记忆",
-      "noMatchesDescription": "换个词试试，或清空搜索。",
-      "queueForgetLabel": "遗忘记忆",
-      "queueUpdateLabel": "更新记忆",
-      "searchAria": "搜索记忆",
-      "searchPlaceholder": "搜索记忆…",
-      "title": "记忆"
+      "noMatchesDescription": "换个词或筛选条件试试。"
     },
     "messageActions": {
       "bookmark": "收藏",
@@ -49453,6 +49506,7 @@
         "backupFirst": "先备份",
         "clear": "清除记忆",
         "clearFailed": "无法清除记忆",
+        "clearQueued": "清除请求已发送到主机。",
         "cleared": "已清除 {count} 条记忆",
         "collapse": "收起",
         "confirm": {

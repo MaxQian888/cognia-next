@@ -4594,7 +4594,8 @@ fn wave41_destructive_writes_are_control_gated() {
 // ── Long-term memory command classification (ADR-0069) ──────────────────
 // memory_list is a pure read; memory_search is NOT read-only (it bumps
 // lastAccessedAt/accessCount, so idempotency-caching it would freeze the
-// recency signal); the three writes are control-gated.
+// recency signal); the writes (including the console's `memory_mutate`) are
+// control-gated.
 
 #[test]
 fn memory_commands_are_classified_correctly() {
@@ -4603,7 +4604,12 @@ fn memory_commands_are_classified_correctly() {
         !READ_ONLY_COMMANDS.contains(&"memory_search"),
         "memory_search mutates access recency — must not be idempotency-cached"
     );
-    for gated in ["memory_store", "memory_update", "memory_forget"] {
+    for gated in [
+        "memory_store",
+        "memory_update",
+        "memory_forget",
+        "memory_mutate",
+    ] {
         assert!(is_control_command(gated), "{gated} should be control-gated");
     }
     for ungated in ["memory_search", "memory_list"] {
@@ -4626,6 +4632,7 @@ fn memory_commands_bind_the_verified_caller() {
         "memory_store",
         "memory_update",
         "memory_forget",
+        "memory_mutate",
     ] {
         assert!(
             CALLER_DEVICE_ID_COMMANDS.contains(&name),

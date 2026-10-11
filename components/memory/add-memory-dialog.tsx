@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { MemoryNamespacePicker } from "@/components/memory/memory-namespace-picker"
 import {
   Select,
   SelectContent,
@@ -201,28 +202,28 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
               </Select>
             </div>
             {scope === "workspace" ? (
-              <NamespaceInput
-                id="add-mem-project"
+              <MemoryNamespacePicker
+                kind="workspace"
                 label={t("projectIdLabel")}
                 value={projectId}
                 onChange={setProjectId}
-                required
+                testId="add-mem-project"
               />
             ) : scope === "character" ? (
-              <NamespaceInput
-                id="add-mem-character"
+              <MemoryNamespacePicker
+                kind="character"
                 label={t("characterIdLabel")}
                 value={characterId}
                 onChange={setCharacterId}
-                required
+                testId="add-mem-character"
               />
             ) : scope === "agent" ? (
-              <NamespaceInput
-                id="add-mem-agent"
+              <MemoryNamespacePicker
+                kind="agent"
                 label={t("agentIdLabel")}
                 value={agentId}
                 onChange={setAgentId}
-                required
+                testId="add-mem-agent"
               />
             ) : null}
           </div>
@@ -236,11 +237,13 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
           {scope !== "global" ? (
             <div className="flex flex-col gap-3">
               {scope !== "workspace" ? (
-                <NamespaceInput
-                  id="add-mem-project-optional"
+                <MemoryNamespacePicker
+                  kind="workspace"
                   label={t("projectIdOptionalLabel")}
                   value={projectId}
                   onChange={setProjectId}
+                  allowNone
+                  testId="add-mem-project-optional"
                 />
               ) : null}
               <div className="grid grid-cols-2 gap-3">

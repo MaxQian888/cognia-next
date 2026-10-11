@@ -161,4 +161,14 @@ describe("MemoryHealthPanel", () => {
     expect(screen.getByText("(deleted)")).toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "Open" })).toHaveLength(1)
   })
+
+  it("says when it checked a paired device's synced copy", () => {
+    setup({ mirror: true })
+    expect(screen.getByTestId("memory-health-mirror")).toHaveTextContent("synced copy")
+  })
+
+  it("says nothing about a copy on the store's owner", () => {
+    setup()
+    expect(screen.queryByTestId("memory-health-mirror")).toBeNull()
+  })
 })

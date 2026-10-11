@@ -12515,6 +12515,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "memory_mutate",
+      "resource": "memory",
+      "verb": "mutate",
+      "arm": "memory_mutate",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "memory_search",
       "resource": "memory",
       "verb": "search",

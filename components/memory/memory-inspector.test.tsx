@@ -117,7 +117,15 @@ describe("MemoryInspector", () => {
 
   it("labels a pending_instruction review state", () => {
     setup({ memory: mem({ reviewStatus: "pending_instruction" }) })
-    expect(screen.getByTestId("memory-inspector-review").textContent).toBe("Awaiting review")
+    // Each status badge names the question it answers.
+    expect(screen.getByTestId("memory-inspector-review").textContent).toBe(
+      "Review: Awaiting review"
+    )
+  })
+
+  it("labels the context badge instead of a bare value", () => {
+    setup({ memory: mem({ contaminationState: "unknown" }) })
+    expect(screen.getByTestId("memory-inspector-context").textContent).toBe("Context: Unknown")
   })
 
   it("hands the pin callback the desired state", async () => {
@@ -141,21 +149,41 @@ describe("MemoryInspector", () => {
     })
   })
 
-  it("confirms before archiving", async () => {
+  it("archives at once — the console's toast carries the undo", async () => {
     const { onArchive } = setup()
     await userEvent.click(screen.getByTestId("memory-inspector-archive"))
-    expect(onArchive).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole("button", { name: "Archive" }))
     expect(onArchive).toHaveBeenCalledWith("m1")
   })
 
-  it("keeps permanent delete behind the overflow menu and a confirmation", async () => {
+  it("requests a permanent delete from the overflow menu; the console confirms it", async () => {
     const { onDelete } = setup()
     await userEvent.click(screen.getByRole("button", { name: "More actions" }))
     await userEvent.click(screen.getByTestId("memory-inspector-delete"))
-    expect(onDelete).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalledWith("m1")
+  })
+
+  it("offers restore on an archived memory", async () => {
+    const onRestore = jest.fn()
+    setup({ memory: mem({ status: "invalidated", invalidatedAt: NOW }), onRestore })
+    await userEvent.click(screen.getByTestId("memory-inspector-restore"))
+    expect(onRestore).toHaveBeenCalledWith("m1")
+  })
+
+  it("opens the move dialog for a live memory but not an archived one", async () => {
+    const onMove = jest.fn()
+    setup({ onMove })
+    await userEvent.click(screen.getByTestId("memory-inspector-move"))
+    expect(onMove).toHaveBeenCalledWith("m1")
+  })
+
+  it("names the namespace by its workspace rather than its id, and falls back to the id", () => {
+    setup({ memory: mem({ scope: "workspace", projectId: "ghost-project" }) })
+    expect(screen.getByText("ghost-project")).toBeInTheDocument()
+  })
+
+  it("opens straight into the editor when asked", () => {
+    setup({ initialEditing: true })
+    expect(screen.getByRole("textbox", { name: "Text" })).toBeInTheDocument()
   })
 
   it("hides archive on an already-archived memory", () => {

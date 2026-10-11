@@ -3,7 +3,7 @@
 /**
  * Compact memory panel for the Context Workbench.
  *
- * Shows a searchable, scrollable list of memories with inline pin/delete actions,
+ * Shows a searchable, scrollable list of memories with inline pin/archive actions,
  * optimized for the narrow/wide workbench widths. For the full management page
  * (detail sidebar, bulk editing, conflict resolution), use `/memory`.
  */
@@ -15,7 +15,7 @@ import { BrainIcon, PlusIcon, SearchIcon, ExternalLinkIcon } from "lucide-react"
 import Link from "next/link"
 import type { Memory } from "@/types/memory/memory"
 import { listMemories } from "@/lib/db/memories"
-import { manageMemory } from "@/lib/memory/control-plane/manage"
+import { useMemoryCommand } from "@/hooks/memory/use-memory-command"
 import { filterAndSortMemories, type MemorySortKey } from "@/lib/memory/history-filter"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { MemoryRow } from "@/components/memory/memory-row"
 import { AddMemoryDialog, type AddMemoryInput } from "@/components/memory/add-memory-dialog"
+import { MemoryDeleteConfirm } from "@/components/memory/memory-delete-confirm"
 
 export interface MemoryWorkbenchPanelProps {
   /** Session id that provides scope context for newly added memories. */
@@ -58,31 +59,33 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
     [all, deferredQuery, sort]
   )
 
+  // Routed by who owns the store, with the same failure toasts as `/memory`.
+  const { run } = useMemoryCommand()
+  const [pendingDelete, setPendingDelete] = useState<readonly string[] | null>(null)
+
   // `MemoryRow` hands over the *desired* pinned state. Negating it here made
   // the pin button write back whatever the row already was, so pinning from
   // this panel silently did nothing.
-  const handlePin = useCallback((id: string, pinned: boolean) => {
-    void manageMemory({ kind: "pin", id, pinned })
-  }, [])
+  const handlePin = useCallback(
+    (id: string, pinned: boolean) => void run({ kind: "pin", id, pinned }),
+    [run]
+  )
 
-  const handleSave = useCallback((id: string, text: string) => {
-    void manageMemory({ kind: "update", id, patch: { text } })
-  }, [])
+  const handleSave = useCallback(
+    (id: string, text: string) => void run({ kind: "update", id, patch: { text } }),
+    [run]
+  )
 
-  // Archive, not hard-delete: the compact panel has no confirmation step, and
-  // `invalidate` keeps the row restorable from `/memory` → Archived.
-  const handleArchive = useCallback((id: string) => {
-    void manageMemory({ kind: "invalidate", id })
-  }, [])
+  // Archive keeps the row restorable from `/memory` → Archived.
+  const handleArchive = useCallback((id: string) => void run({ kind: "invalidate", id }), [run])
 
-  const handleDelete = useCallback((id: string) => {
-    void manageMemory({ kind: "delete", id })
-  }, [])
+  // Permanent, so confirmed — the row menu used to delete on a single click.
+  const handleDelete = useCallback((id: string) => setPendingDelete([id]), [])
 
-  const handleCreate = useCallback(async (input: AddMemoryInput) => {
-    const result = await manageMemory({ kind: "create", ...input })
-    return result.ok
-  }, [])
+  const handleCreate = useCallback(
+    (input: AddMemoryInput) => run({ kind: "create", ...input }),
+    [run]
+  )
 
   return (
     <div className="flex h-full flex-col">
@@ -164,6 +167,15 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
       </div>
 
       <AddMemoryDialog open={addOpen} onOpenChange={setAddOpen} onCreate={handleCreate} />
+      <MemoryDeleteConfirm
+        ids={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const ids = pendingDelete ?? []
+          setPendingDelete(null)
+          for (const id of ids) void run({ kind: "delete", id })
+        }}
+      />
     </div>
   )
 }

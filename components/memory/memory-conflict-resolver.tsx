@@ -6,7 +6,8 @@
  * `reviewStatus: "conflict"` pairs (linked via `conflictWithIds`) and excludes
  * both from recall; until now the only tooling was jumping between the two
  * rows by hand. This card shows the pair side-by-side and resolves it in one
- * click through `manageMemory({ kind: "resolve-conflict" })`, which writes the
+ * click through a `resolve-conflict` command (`useMemoryCommand`, so a paired
+ * device resolves on its host), which writes the
  * audit trail: keep A / keep B (loser soft-invalidated with a superseded
  * link), keep both (conflict edges cleared, both verified), or a hand-written
  * merge (PII-gated text onto the kept row).
@@ -27,7 +28,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { manageMemory } from "@/lib/memory/control-plane/manage"
+import { useMemoryCommand } from "@/hooks/memory/use-memory-command"
+import type { ManageMemoryCommand } from "@/lib/memory/control-plane/manage"
 import { cn } from "@/lib/utils"
 import type { Memory } from "@/types/memory/memory"
 
@@ -50,7 +52,7 @@ export function MemoryConflictResolver({
   onResolved,
 }: MemoryConflictResolverProps) {
   const t = useTranslations("memory.conflicts")
-  const tErrors = useTranslations("memory.errors")
+  const { run: runCommand } = useMemoryCommand()
   const [merging, setMerging] = useState(false)
   const [mergedText, setMergedText] = useState(memory.text)
   const [busy, setBusy] = useState(false)
@@ -58,22 +60,15 @@ export function MemoryConflictResolver({
   const otherId = memory.conflictWithIds?.[0]
   const other = otherId ? resolveMemory(otherId) : undefined
 
-  // A rejected command already toasted; a *thrown* one used to leave the dialog
-  // stuck in its busy state with no feedback at all, which is what a Dexie
-  // failure or an empty merge draft produces.
-  const run = async (command: Parameters<typeof manageMemory>[0], keptId: string) => {
+  // `useMemoryCommand` toasts a rejected or thrown command, so the dialog only
+  // has to leave its busy state and stay open for another try.
+  const run = async (command: ManageMemoryCommand, keptId: string, announce = true) => {
     setBusy(true)
     try {
-      const result = await manageMemory(command)
-      if (!result.ok) {
-        toast.error(tErrors(result.reason))
-        return
-      }
-      toast.success(t("resolvedToast"))
+      if (!(await runCommand(command))) return
+      if (announce) toast.success(t("resolvedToast"))
       onResolved?.(keptId)
       onOpenChange(false)
-    } catch {
-      toast.error(tErrors("mutation_failed"))
     } finally {
       setBusy(false)
     }
@@ -185,26 +180,9 @@ export function MemoryConflictResolver({
             <DialogFooter>
               <Button
                 disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    const result = await manageMemory({
-                      kind: "review",
-                      id: memory.id,
-                      status: "verified",
-                    })
-                    if (!result.ok) {
-                      toast.error(tErrors(result.reason))
-                      return
-                    }
-                    onResolved?.(memory.id)
-                    onOpenChange(false)
-                  } catch {
-                    toast.error(tErrors("mutation_failed"))
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
+                onClick={() =>
+                  void run({ kind: "review", id: memory.id, status: "verified" }, memory.id, false)
+                }
               >
                 {t("clearStaleConflict")}
               </Button>

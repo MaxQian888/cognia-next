@@ -71,6 +71,13 @@ describe("MemoryToolbar", () => {
     expect(screen.getByTestId("memory-view-all").getAttribute("aria-selected")).toBe("true")
   })
 
+  it("groups the quick views in one tab list that scrolls instead of pushing the menus off", () => {
+    setup()
+    const chips = screen.getByRole("tablist", { name: "Memory views" })
+    expect(chips.className).toContain("overflow-x-auto")
+    expect(screen.getByTestId("memory-display-menu")).toBeInTheDocument()
+  })
+
   it("reports a view change", async () => {
     const { onViewChange } = setup()
     await userEvent.click(screen.getByTestId("memory-view-conflicts"))

@@ -3415,6 +3415,66 @@
         }
       ]
     },
+    "MemoryMutateResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "x-cognia-wire-source": "lib/memory/control-plane/manage.ts ManageMemoryResult, the ok:true arm (memoryId is absent on clear; clearedCount only on clear).",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "memoryId": {
+              "type": "string"
+            },
+            "piiRedacted": {
+              "type": "boolean"
+            },
+            "clearedCount": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "x-cognia-wire-source": "lib/memory/control-plane/manage.ts ManageMemoryResult, the ok:false arm. A refusal is a normal answer the console shows, not an error response.",
+          "required": ["ok", "reason"],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "partial_failure",
+                "not_found",
+                "disabled",
+                "temporary",
+                "pii_blocked",
+                "policy_denied",
+                "scope_denied",
+                "idempotency_key_reused",
+                "unauthorized_namespace"
+              ]
+            },
+            "clearedCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failedIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "MemorySearchResult": {
       "oneOf": [
         {
@@ -13183,6 +13243,9 @@
     },
     "memory_list": {
       "$ref": "#/$defs/MemoryListResult"
+    },
+    "memory_mutate": {
+      "$ref": "#/$defs/MemoryMutateResult"
     },
     "memory_search": {
       "$ref": "#/$defs/MemorySearchResult"

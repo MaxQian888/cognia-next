@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "42629809aaa0b842c3968089d51f2e0b2ed421a19c06052bf012cc25d8fb7b47";
+pub const CATALOG_HASH: &str = "4dbfe7af4e3f2eeda5ff7097a7ef0ba821cbf8e16a6a3db77b32d856a414b6fd";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -760,6 +760,7 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "memory_append", arm: "memory_append", resource: "memory", verb: "append", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "memory_forget", arm: "memory_forget", resource: "memory", verb: "forget", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "workspace.write", risk: CommandRisk::High, approval: CommandApproval::Interactive, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "memory_list", arm: "memory_list", resource: "memory", verb: "list", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "host.observe", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::PageToken, long_running: false },
+    WireCommand { name: "memory_mutate", arm: "memory_mutate", resource: "memory", verb: "mutate", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "workspace.write", risk: CommandRisk::High, approval: CommandApproval::Interactive, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "memory_search", arm: "memory_search", resource: "memory", verb: "search", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "workspace.write", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "memory_store", arm: "memory_store", resource: "memory", verb: "upsert", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "workspace.write", risk: CommandRisk::High, approval: CommandApproval::Interactive, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "memory_update", arm: "memory_update", resource: "memory", verb: "update", target: CommandTarget::Execution, operation: CommandOperation::Write, capability: "workspace.write", risk: CommandRisk::High, approval: CommandApproval::Interactive, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
@@ -2329,6 +2330,7 @@ pub static RENAMED_COMMANDS: &[(&str, &str)] = &[
     ("memory_append", "memory.append"),
     ("memory_forget", "memory.forget"),
     ("memory_list", "memory.list"),
+    ("memory_mutate", "memory.mutate"),
     ("memory_search", "memory.search"),
     ("memory_store", "memory.upsert"),
     ("memory_update", "memory.update"),

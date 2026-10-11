@@ -1,14 +1,14 @@
 {
   "add": {
-    "agentIdLabel": "Agent ID",
+    "agentIdLabel": "Agent",
     "branchLabel": "Branch (optional)",
     "cancel": "Cancel",
-    "characterIdLabel": "Character ID",
+    "characterIdLabel": "Character",
     "description": "Manually save a durable fact with explicit provenance and an optional narrow scope.",
     "importanceLabel": "Importance",
     "pathPatternLabel": "Path prefix (optional)",
-    "projectIdLabel": "Project ID",
-    "projectIdOptionalLabel": "Project ID (optional)",
+    "projectIdLabel": "Workspace",
+    "projectIdOptionalLabel": "Workspace (optional)",
     "scopeLabel": "Scope",
     "submit": "Add memory",
     "tagsLabel": "Tags",
@@ -21,24 +21,14 @@
   "bulk": {
     "partialFailure": "{succeeded} succeeded; {failed} failed. Failed memories remain selected for retry.",
     "archive": "Archive",
-    "archiveConfirm": {
-      "cancel": "Cancel",
-      "confirm": "Archive",
-      "description": "This removes {count} memories from recall. They stay in the archive and can be restored.",
-      "title": "Archive selected memories?"
-    },
     "clear": "Clear selection",
     "delete": "Delete",
-    "deleteConfirm": {
-      "cancel": "Cancel",
-      "confirm": "Delete",
-      "description": "This permanently removes {count} memories. This can't be undone.",
-      "title": "Delete selected memories?"
-    },
     "pin": "Pin",
     "selectAll": "Select all",
     "selected": "{count} selected",
-    "unpin": "Unpin"
+    "unpin": "Unpin",
+    "restore": "Restore",
+    "toolbarLabel": "Selected memories"
   },
   "conflicts": {
     "clearStaleConflict": "Mark as verified",
@@ -71,7 +61,9 @@
         "recall-allowed": "Recall allowed",
         "recall-denied": "Recall denied",
         "revised": "Revised",
-        "unpinned": "Unpinned"
+        "unpinned": "Unpinned",
+        "restored": "Restored",
+        "relocated": "Moved"
       },
       "audit": "Audit",
       "empty": "Nothing recorded yet.",
@@ -105,12 +97,6 @@
     "close": "Close",
     "conflictGone": "The conflicting memory was deleted.",
     "conflictsWith": "Conflicts with",
-    "deleteConfirm": {
-      "cancel": "Cancel",
-      "confirm": "Delete",
-      "description": "This permanently removes the memory. This can't be undone.",
-      "title": "Delete this memory?"
-    },
     "evidenceTitle": "Evidence records",
     "fields": {
       "accessCount": "Recalled",
@@ -135,7 +121,10 @@
       "version": "Version",
       "corroboration": "Corroboration",
       "corroborationValue": "{percent}% · {sessions, plural, =0 {no conversations yet} one {# conversation} other {# conversations}}",
-      "corroborationUnknown": "Not measured yet"
+      "corroborationUnknown": "Not measured yet",
+      "workspace": "Workspace",
+      "character": "Character",
+      "agent": "Agent"
     },
     "importanceLabel": "Importance",
     "next": "Next memory",
@@ -159,7 +148,13 @@
     "tagsLabel": "Tags",
     "tagsPlaceholder": "comma, separated, tags",
     "textLabel": "Text",
-    "yes": "Yes"
+    "yes": "Yes",
+    "status": {
+      "review": "Review: {value}",
+      "evidence": "Evidence: {value}",
+      "context": "Context: {value}"
+    },
+    "moveNamespace": "Move…"
   },
   "errors": {
     "partial_failure": "Some memories could not be deleted. Retry the failed items.",
@@ -171,7 +166,8 @@
     "policy_denied": "A memory policy blocked this change",
     "scope_denied": "That scope isn't allowed for this memory",
     "temporary": "Memory is in temporary mode",
-    "unauthorized_namespace": "This caller isn't allowed to access that memory namespace"
+    "unauthorized_namespace": "This caller isn't allowed to access that memory namespace",
+    "hostRefused": "The host didn't apply your memory change: {reason}"
   },
   "external": {
     "agents": {
@@ -219,6 +215,10 @@
       "saveFailed": "Could not save this file",
       "saved": "Saved",
       "savedWithBackup": "Saved — previous version kept as {backup}"
+    },
+    "hostOnly": {
+      "title": "On the host",
+      "description": "External agent memory lives on the host's disk. Open Memory on the host to see and edit it."
     }
   },
   "freshness": {
@@ -246,12 +246,6 @@
     "add": "Add",
     "addFirst": "Add your first memory",
     "archive": "Archive",
-    "archiveConfirm": {
-      "cancel": "Cancel",
-      "confirm": "Archive",
-      "description": "It stops being recalled but stays in the archive, and you can restore it later.",
-      "title": "Archive this memory?"
-    },
     "cancelEdit": "Cancel",
     "clearFiltered": "Delete everything in this view…",
     "clearFilteredConfirm": {
@@ -261,7 +255,6 @@
       "title": "Delete {count, plural, one {# memory} other {# memories}}?"
     },
     "clearFilters": "Clear filters",
-    "clearTags": "Clear tags",
     "clearedToast": "{count, plural, one {# memory deleted} other {# memories deleted}}",
     "copied": "Copied",
     "copyText": "Copy text",
@@ -293,7 +286,11 @@
       "provenances": "Source",
       "scopes": "Scope",
       "tags": "Tags",
-      "types": "Type"
+      "types": "Type",
+      "drawerTitle": "Filter & sort",
+      "drawerHint": "Narrow the list or change its order.",
+      "activeCount": "{count, plural, =1 {# filter on} other {# filters on}}",
+      "done": "Done"
     },
     "importanceValue": "Importance {value}",
     "invalidated": "archived",
@@ -321,14 +318,12 @@
     "searchLabel": "Search memories",
     "searchPlaceholder": "Search memories…",
     "selectRow": "Select memory",
-    "showInvalidated": "Show archived",
     "sort": {
       "accessed": "Recently used",
       "created": "Recently created",
       "importance": "Importance",
       "recent": "Recently updated"
     },
-    "sortLabel": "Sort",
     "stats": {
       "active": "Active"
     },
@@ -339,7 +334,6 @@
       "external": "External agent memory",
       "health": "Health"
     },
-    "tagFilterLabel": "Tags:",
     "title": "Memory",
     "unpin": "Unpin",
     "viewSource": "View source",
@@ -350,7 +344,28 @@
       "needsReview": "Needs review",
       "pinned": "Pinned"
     },
-    "compacted": "compacted"
+    "compacted": "compacted",
+    "restore": "Restore",
+    "move": "Move to…",
+    "pinnedLabel": "Pinned",
+    "copyFailed": "Couldn't copy",
+    "restoredToast": "{count, plural, =1 {Restored # memory} other {Restored # memories}}",
+    "archivedToast": "{count, plural, =1 {Archived # memory} other {Archived # memories}}",
+    "deletedToast": "{count, plural, =1 {Deleted # memory} other {Deleted # memories}}",
+    "undo": "Undo",
+    "movedToast": "Memory moved",
+    "viewsLabel": "Memory views",
+    "tabsLabel": "Memory sections",
+    "listLabel": "Memories",
+    "openRow": "Open memory: {text}",
+    "selectRowNamed": "Select memory: {text}",
+    "summaryMirror": "{active} active · {pinned} pinned · {conflicts} in conflict · synced from host",
+    "deleteConfirm": {
+      "title": "{count, plural, =1 {Delete this memory?} other {Delete # memories?}}",
+      "description": "{count, plural, =1 {This permanently removes the memory, its history and evidence. This can't be undone.} other {This permanently removes # memories, their history and evidence. This can't be undone.}}",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    }
   },
   "projectKind": {
     "constraint": "Constraint",
@@ -455,6 +470,50 @@
         "title": "Possible contradiction",
         "description": "Two memories about the same subject (similarity {similarity}) that are not duplicates. The newer one is listed first."
       }
-    }
+    },
+    "mirrorNote": "Checked against this device's synced copy, which can be partial and has no vectors."
+  },
+  "host": {
+    "label": "Host memory",
+    "title": "Showing your host's memory",
+    "description": "This device shows a synced copy of the paired host's memory. Changes are sent to the host and appear here once it applies them. Recall settings live on the host.",
+    "online": "Connected to the host.",
+    "connecting": "Connecting to the host…",
+    "offline": "Offline. Changes wait in the queue until the host is reachable."
+  },
+  "move": {
+    "title": "Move memory",
+    "description": "Choose who can recall this memory. Its history and evidence move with it.",
+    "scopeLabel": "Scope",
+    "effect": {
+      "global": "Recalled in every conversation.",
+      "workspace": "Recalled only in this workspace's conversations.",
+      "character": "Recalled only when chatting with this character.",
+      "agent": "Private to this agent. Nothing else can read it."
+    },
+    "cancel": "Cancel",
+    "confirm": "Move"
+  },
+  "namespace": {
+    "choose": "Choose…",
+    "none": "None",
+    "unknownId": "{id} (not found)",
+    "otherId": "Other ID…",
+    "customIdLabel": "Custom ID for {label}",
+    "customIdPlaceholder": "Paste an ID"
+  },
+  "queue": {
+    "create": "Add memory",
+    "update": "Edit memory",
+    "pin": "Pin memory",
+    "review": "Review memory",
+    "retrieval-feedback": "Rate a recalled memory",
+    "delete": "Delete memory",
+    "restore": "Restore memory",
+    "invalidate": "Archive memory",
+    "restore-revision": "Restore an earlier wording",
+    "relocate": "Move memory",
+    "resolve-conflict": "Resolve a memory conflict",
+    "clear": "Clear memories"
   }
 }
