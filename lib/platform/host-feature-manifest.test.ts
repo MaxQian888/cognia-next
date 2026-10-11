@@ -41,9 +41,10 @@ describe("host feature manifest", () => {
       version: 1,
       operations: [...FILES_LIBRARY_REMOTE_HOST_OPERATIONS],
     })
-    expect(FILES_LIBRARY_REMOTE_HOST_OPERATIONS).toHaveLength(22)
+    expect(FILES_LIBRARY_REMOTE_HOST_OPERATIONS).toHaveLength(23)
     for (const operation of [
       "files_library_list",
+      "files_library_read_chunk",
       "files_library_trash",
       "files_library_upload_commit",
     ]) {
