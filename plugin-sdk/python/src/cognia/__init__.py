@@ -136,6 +136,7 @@ from .bot import (
 from .modes import Mode, define_mode
 from .plugin import Plugin
 from .runtime import (
+    HostCallError,
     Runtime,
     contribution,
     emit,
@@ -205,6 +206,7 @@ __all__ = [
     "contribution",
     "emit",
     "get_config",
+    "HostCallError",
     "log",
     "on_config_changed",
     # runtime

@@ -1,16 +1,38 @@
 # `@cognia/plugin-sdk` (Python)
 
-Author-facing Python SDK for Cognia plugins. It is the standalone reference
-implementation of the contract the embedded Tauri Python host
-(`src-tauri/src/plugin_api/python/host.py`) speaks over its NDJSON stdio
-protocol — so a plugin written against this SDK behaves identically whether it
-runs under the host or directly with `python`.
+Author-facing Python SDK for Cognia plugins: a standalone reference
+implementation of the protocol the desktop app's Python host
+(`crates/cognia-plugin-runtime/src/python/host.py`) speaks over NDJSON stdio,
+plus typed helpers for writing manifests. Use it to type-check, run and test a
+plugin without the app.
+
+**Under the app, a plugin does not get this package.** Before importing the
+plugin's `pythonMain`, the host installs its own small `cognia` module, so only
+the names below exist at run time. A plugin that imports anything else from
+`cognia` (a `define_*` helper, `PluginHook`, `Plugin`, a `*Def` dataclass) runs
+here and fails with an `ImportError` in the app.
+
+| Available under the host          | What it is                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `tool`, `hook`                    | Register a tool or a hook handler (hook names are plain strings, e.g. `"onCommand"`)           |
+| `progress`, `log`                 | Report progress (`pct` is 0-100) and log a line                                                |
+| `get_config`, `on_config_changed` | The user's `configSchema` values, and a listener for changes                                   |
+| `contribution`, `emit`            | Python-backed contributions and their event channel                                            |
+| `ctx`                             | The `ctx.*` host APIs open to Python (each call is a coroutine; `ctx.run_sync` from sync code) |
+| `HostCallError`                   | What a failed `ctx` call raises                                                                |
+
+Everything else here is for **authoring and tests**: build manifest entries in
+a script and paste or write the JSON into `plugin.json`, validate what the
+plugin publishes, or drive the plugin offline with `Runtime`. The SDK's
+`tool`, `hook`, `progress`, `log`, `get_config`, `on_config_changed`,
+`contribution`, `emit` and `ctx` behave like the host's, which is what makes
+offline tests meaningful.
 
 Stdlib only; targets Python ≥ 3.9.
 
-Most author-facing helpers are re-exported from the package root, including the
+Most authoring helpers are re-exported from the package root, including the
 typed manifest entry mirrors. Import from `cognia.types` when you want the
-module namespace, or from `cognia` for concise plugin authoring.
+module namespace, or from `cognia` for brevity, in build scripts and tests.
 
 ## Layout
 
@@ -34,9 +56,10 @@ module namespace, or from `cognia` for concise plugin authoring.
 
 ## Module-style plugin
 
+What ships as `pythonMain` uses only the run-time names:
+
 ```python
 from cognia import tool, hook, get_config, progress
-from cognia import PluginHook, ToolRouteDef, WorkspaceBackendDef
 
 @tool(description="Greet someone using the configured greeting.")
 def greet(name: str):
@@ -49,20 +72,37 @@ def countdown(start: int = 3):
         yield f"{i}... "
     yield "liftoff!"
 
-@hook(PluginHook.ON_MESSAGE_SEND.value)
-def stamp(payload):
-    return payload
+@hook("onCommand")
+async def on_command(invocation):
+    if invocation.get("command") != "greet":
+        return {"handled": False}
+    return {"handled": True, "message": greet("world")}
+```
 
-workspace_backend = WorkspaceBackendDef(
-    id="e2b",
-    label="E2B",
-    entry="workspace.py",
-    export="create_backend",
-)
-tool_route = ToolRouteDef(tool_name="greet", utterances=["say hello", "greet user"])
+## Authoring helpers
+
+Manifest entries are built in a script (or a test), never imported by the
+plugin itself:
+
+```python
+# scripts/manifest_entries.py — run with the SDK installed, not by the host
+import json
+from cognia import ToolRouteDef, WorkspaceBackendDef, define_glance_module
+
+entries = {
+    "workspaceBackends": [
+        WorkspaceBackendDef(id="e2b", label="E2B", entry="workspace.py", export="create_backend").to_dict()
+    ],
+    "toolRoutes": [ToolRouteDef(tool_name="greet", utterances=["say hello", "greet user"]).to_dict()],
+    "glanceModules": [define_glance_module("status", "Status", icon="Activity").to_dict()],
+}
+print(json.dumps(entries, indent=2))
 ```
 
 ## Class-style plugin
+
+`Plugin` runs on the SDK's `Runtime` only: the app's host does not provide it,
+so ship module-style code. Class style suits tools you exercise offline.
 
 ```python
 from cognia import Plugin

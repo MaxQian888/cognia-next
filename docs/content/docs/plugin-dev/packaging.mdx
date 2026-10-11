@@ -39,7 +39,7 @@ The CLI auto-degrades on a non-TTY (CI, redirected stdout, `docker exec` without
 
 ## Scaffold
 
-Two starters ship with the CLI:
+Six starters ship inside the CLI binary, so scaffolding works offline:
 
 ```bash
 # Frontend TypeScript plugin (the default; esbuild + jest pre-wired)
@@ -58,13 +58,18 @@ cognia plugin new my-wasm-plugin --kind wasm
 
 What you get:
 
-| Kind     | Layout                                                                                                                                              |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore`                                                               |
-| **ts**   | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
-| **glance** | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json` (one `glanceModules` entry and its commands), `src/index.ts`, `src/index.test.ts`, `src/__stubs__/`, vendored `types/`, `README.md`, `.gitignore` |
+| Kind | Layout |
+| --- | --- |
+| **ts** | `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, `jest.config.cjs`, `plugin.json` (a tool, a slash command, a quick action, settings, a workflow node and trigger), `src/index.ts`, `src/index.test.ts`, `src/panel.tsx` + `src/panel.test.tsx` + `src/panel.css` (a UI slot), `src/__stubs__/` (Jest stand-ins for `@cognia/*`), vendored `types/`, `README.md`, `.gitignore` |
+| **glance** | `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, `jest.config.cjs`, `plugin.json` (one `glanceModules` entry and its commands), `src/index.ts`, `src/index.test.ts`, `src/__stubs__/`, vendored `types/`, `README.md`, `.gitignore` |
+| **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore` |
+| **python** | `plugin.json` (a tool and an A2UI context panel), `main.py`, `README.md`, `.gitignore` |
+| **hybrid** | `plugin.json`, `frontend/index.js`, `backend/main.py`, `styles.css`, `README.md`, `.gitignore` |
+| **vscode-extension** | `plugin.json`, `package.json`, `extension/out/extension.js`, `styles.css`, `README.md`, `.gitignore` |
 
-Run the CLI's printed next-steps to get a green build on either kind.
+No `@cognia/*` package is published, so the TypeScript kinds vendor the SDK's declarations into `types/` and resolve `@cognia/plugin-sdk` / `@cognia/plugin-ui` through `tsconfig.json` `paths`; the build keeps both external and the host supplies them at runtime. Refresh them with `cognia plugin sync-types`. `package.json` lists only published packages.
+
+Run the CLI's printed next steps to get a green build on any kind.
 
 ### Interactive wizard
 
@@ -80,7 +85,7 @@ $ cognia plugin new
   ? Generate a signing keypair now and embed the public key? › Y/n
 ```
 
-Each answer can also be supplied up front via the equivalent flag — when **all** flags are passed, the wizard never runs:
+Each answer can also be supplied up front via the equivalent flag; a field passed as a flag is never asked. `--yes` skips the wizard and takes the defaults:
 
 | Field         | Flag                  | Default when missing on TTY        | Default when missing on non-TTY      |
 | ------------- | --------------------- | ---------------------------------- | ------------------------------------ |
@@ -89,7 +94,7 @@ Each answer can also be supplied up front via the equivalent flag — when **all
 | Description   | `--description "..."` | _prompt_                           | `A cognia <kind> plugin`             |
 | Author name   | `--author "..."`      | _prompt, defaults to git config_   | git config `user.name` or `Anonymous`|
 | Author email  | `--author-email "..."`| _prompt — optional_                | omitted                              |
-| With keygen   | `--with-keygen=Y\|N`  | _prompt, default Yes_              | `false`                              |
+| With keygen   | `--with-keygen true\|false` | _prompt, default Yes_        | `false`                              |
 
 When `--with-keygen` runs, the CLI generates an Ed25519 keypair under `<plugin>/.cognia/` and embeds the public key into `plugin.json`'s `author.publicKey` field — equivalent to running `cognia plugin keygen` separately and then pasting the value in by hand.
 

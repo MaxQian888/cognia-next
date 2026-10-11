@@ -36,10 +36,12 @@ struct WizardAnswers {
 /// Behavior:
 ///   * Every flag explicitly passed wins — the wizard never asks again
 ///     for a field the caller already provided.
-///   * Missing fields on a TTY trigger an interactive prompt (5–6 steps).
-///   * Missing fields on a non-TTY: `name` is required (bail with hint),
-///     the rest fall back to sensible defaults (kind=wasm, description=
-///     empty placeholder, author=current user, no keygen).
+///   * Missing fields on a TTY (without `--yes`) trigger an interactive
+///     prompt (up to 6 steps).
+///   * Missing fields on a non-TTY or with `--yes`: `name` is required (bail
+///     with hint), the rest fall back to defaults (kind=ts, description=
+///     "A cognia <kind> plugin", author=`git config user.name` or
+///     "Anonymous", no keygen).
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     name: Option<String>,
