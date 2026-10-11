@@ -20,6 +20,7 @@ function makeSnapshot(): GlanceSnapshotV1 {
     config: DEFAULT_GLANCE_PANEL_SETTINGS,
     workspace: null,
     when: {} as GlanceSnapshotV1["when"],
+    actions: [],
     // Every slice is null so each default module renders its loading line.
     fleet: null,
     usage: null,

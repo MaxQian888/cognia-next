@@ -18380,6 +18380,22 @@
     }
   },
   "glance": {
+    "editor": {
+      "add": "添加模块",
+      "addEmpty": "所有模块都已显示。",
+      "addModule": "添加{module}",
+      "addShort": "添加",
+      "custom": "自定义",
+      "hide": "隐藏{module}",
+      "presetHint": "预设会替换模块及其顺序和尺寸，宽度、高度与选项保持不变。",
+      "presetLabel": "预设：{preset}",
+      "presets": "预设",
+      "reorder": "调整{module}的顺序",
+      "shown": "已显示",
+      "shownEmpty": "没有显示任何模块，可在下方添加。",
+      "shownHint": "拖动以调整顺序",
+      "size": "{module}的尺寸"
+    },
     "errors": {
       "commandUnavailable": "该命令暂不可用。",
       "deliveryFailed": "Cognia 主窗口未响应。",
@@ -18561,6 +18577,16 @@
       "balanced": "均衡",
       "minimal": "极简",
       "usageFirst": "用量优先"
+    },
+    "sizes": {
+      "compact": "紧凑",
+      "expanded": "展开",
+      "short": {
+        "compact": "小",
+        "expanded": "大",
+        "standard": "中"
+      },
+      "standard": "标准"
     }
   },
   "globalSearch": {
@@ -52302,6 +52328,13 @@
           "standard": "标准 · {px}px",
           "wide": "宽 · {px}px"
         }
+      },
+      "modules": {
+        "delegate": "显示委托栏",
+        "delegateHint": "隐藏后，委托操作会移到快捷操作中。",
+        "description": "面板显示哪些模块、以什么顺序和尺寸显示。编辑时预览会同步更新。",
+        "previewCaption": "使用你当前数据的预览",
+        "title": "模块"
       }
     },
     "usageCost": {
@@ -57493,6 +57526,23 @@
       "optionsLabel": "委派选项"
     },
     "dismiss": "关闭面板",
+    "edit": {
+      "delegate": "委托栏",
+      "done": "完成",
+      "hint": "拖动模块调整顺序，选择尺寸或隐藏。修改立即生效。",
+      "start": "编辑",
+      "width": "宽度",
+      "widths": {
+        "narrow": "窄（{px} px）",
+        "standard": "标准（{px} px）",
+        "wide": "宽（{px} px）"
+      },
+      "widthsShort": {
+        "narrow": "窄",
+        "standard": "中",
+        "wide": "宽"
+      }
+    },
     "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
     "errors": {
       "badTarget": "「{value}」不是有效的目标。",
@@ -57513,7 +57563,8 @@
     "openSettings": "打开设置",
     "quick": {
       "edit": "编辑动作",
-      "label": "快捷"
+      "label": "快捷",
+      "loading": "正在读取操作…"
     },
     "refresh": "刷新",
     "resize": "拖动以调整面板最大高度",

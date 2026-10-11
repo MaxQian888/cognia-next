@@ -74,6 +74,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { useGlanceActivity } from "./use-glance-activity"
 import { useGlanceAgenda } from "./use-glance-agenda"
 import { useGlanceQuota } from "./use-glance-quota"
+import { resolveTrayPanelActions } from "@/lib/tray-panel/catalogue"
+import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
+import type { TrayPanelAction } from "@/lib/tray-panel/types"
+
 import { GLANCE_TICK_MS, useGlanceSources } from "./use-glance-sources"
 
 const useLiveQueryMock = useLiveQuery as unknown as jest.Mock
@@ -715,6 +719,69 @@ describe("useGlanceSources", () => {
       trayMock.mockReturnValue({ running: true, marker: "tray", usage: { stale: false } })
       const { result } = render(true)
       expect(result.current.body.when).toEqual({ running: true, marker: "tray", usage: null })
+    })
+  })
+
+  describe("actions", () => {
+    const custom: TrayPanelAction = {
+      id: "mine",
+      label: "Mine",
+      fields: [],
+      trigger: { kind: "manual" },
+      effect: { kind: "navigate", path: "/x" },
+    }
+
+    it("carries the shipped catalogue when settings store none", () => {
+      const { result } = render(true)
+      expect(result.current.body.actions).toEqual(DEFAULT_TRAY_PANEL_ACTIONS)
+    })
+
+    it("carries the shipped catalogue when settings are not loaded", () => {
+      settingsState.settings = null
+      const { result } = render(true)
+      expect(result.current.body.actions).toEqual(DEFAULT_TRAY_PANEL_ACTIONS)
+    })
+
+    it("resolves the stored catalogue, backfilling built-ins and dropping malformed entries", () => {
+      const stored = [custom, { id: "", label: "bad" }, { ...custom }]
+      settingsState.settings = {
+        trayPanelLayout: layoutWith(ALL_MODULES),
+        trayPanelActions: stored,
+      }
+      const { result } = render(true)
+      expect(result.current.body.actions).toEqual(resolveTrayPanelActions(stored))
+      const ids = result.current.body.actions.map((a) => a.id)
+      expect(ids.filter((id) => id === "mine")).toHaveLength(1)
+      expect(ids).toContain("trayPanel.delegate")
+    })
+
+    it("is carried while inactive too, since a consumer needs it before anything else", () => {
+      settingsState.settings = {
+        trayPanelLayout: layoutWith(ALL_MODULES),
+        trayPanelActions: [custom],
+      }
+      const { result } = render(false)
+      expect(result.current.body.actions.map((a) => a.id)).toContain("mine")
+    })
+  })
+
+  describe("passive", () => {
+    it("is not passive by default", () => {
+      render(true)
+      expect(quotaMock.mock.calls.at(-1)![2]).toEqual({ passive: false })
+    })
+
+    it("forwards passive: true to the quota hook as its third argument", () => {
+      renderHook(() => useGlanceSources(true, { passive: true }))
+      const call = quotaMock.mock.calls.at(-1)!
+      expect(call[0]).toBe(true)
+      expect(call[1]).toBe(NOW)
+      expect(call[2]).toEqual({ passive: true })
+    })
+
+    it("forwards an explicit passive: false", () => {
+      renderHook(() => useGlanceSources(true, { passive: false }))
+      expect(quotaMock.mock.calls.at(-1)![2]).toEqual({ passive: false })
     })
   })
 

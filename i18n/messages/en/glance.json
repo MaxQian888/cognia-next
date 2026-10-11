@@ -1,4 +1,20 @@
 {
+  "editor": {
+    "add": "Add modules",
+    "addEmpty": "Every module is shown.",
+    "addModule": "Add {module}",
+    "addShort": "Add",
+    "custom": "Custom",
+    "hide": "Hide {module}",
+    "presetHint": "A preset replaces the modules, their order and sizes. Width, height and options stay.",
+    "presetLabel": "Preset: {preset}",
+    "presets": "Presets",
+    "reorder": "Reorder {module}",
+    "shown": "Shown",
+    "shownEmpty": "Nothing is shown — add a module below.",
+    "shownHint": "Drag to reorder",
+    "size": "Size of {module}"
+  },
   "errors": {
     "commandUnavailable": "That command isn't available right now.",
     "deliveryFailed": "Cognia's main window didn't respond.",
@@ -180,5 +196,15 @@
     "balanced": "Balanced",
     "minimal": "Minimal",
     "usageFirst": "Usage first"
+  },
+  "sizes": {
+    "compact": "Compact",
+    "expanded": "Expanded",
+    "short": {
+      "compact": "S",
+      "expanded": "L",
+      "standard": "M"
+    },
+    "standard": "Standard"
   }
 }

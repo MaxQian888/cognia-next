@@ -27,10 +27,6 @@ jest.mock("@/lib/tauri/tray-panel", () => ({
   runNativeTrayAction: jest.fn().mockResolvedValue(true),
   sendTrayPanelRequest: jest.fn().mockResolvedValue(true),
 }))
-jest.mock("@/lib/tauri/store", () => ({
-  getPref: jest.fn().mockResolvedValue(null),
-  setPref: jest.fn().mockResolvedValue(undefined),
-}))
 jest.mock("@/hooks/glance/use-glance-consumer", () => ({ useGlanceConsumer: jest.fn() }))
 
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -46,7 +42,6 @@ import {
   runNativeTrayAction,
   sendTrayPanelRequest,
 } from "@/lib/tauri/tray-panel"
-import { __resetTrayPanelStoreForTesting, useTrayPanelStore } from "@/lib/tray-panel/store"
 import type { TrayPanelAction } from "@/lib/tray-panel/types"
 import { GLANCE_MAX_HEIGHT_MAX, GLANCE_WIDTH_PX } from "@/types/glance/layout"
 
@@ -70,6 +65,9 @@ const onResultMock = onTrayPanelResult as jest.Mock
 let visibilityHandler: ((shown: boolean) => void) | undefined
 let resultHandler: ((result: { ok: boolean; error?: string }) => void) | undefined
 let glanceSnapshot: GlanceSnapshotV1 | null
+/** The catalogue the snapshot carries; `null` keeps the snapshot's own. */
+let catalogue: TrayPanelAction[] | null
+let receivedCount: number
 let glanceSend: jest.Mock<Promise<string | null>, [unknown]>
 
 const delegate: TrayPanelAction = {
@@ -115,16 +113,32 @@ function snapshotWith(patch: Partial<GlanceSnapshotV1> = {}): GlanceSnapshotV1 {
 }
 
 /**
- * Seed the catalogue. `hydrate` is stubbed out alongside it: the view calls it
- * on mount, and the real one would read the (empty) pref store and replace
- * these fixtures with the shipped defaults.
+ * Seed the catalogue the main window publishes. It rides in the snapshot, so
+ * seeding it implies a snapshot has arrived.
  */
 function setActions(actions: TrayPanelAction[]) {
-  useTrayPanelStore.setState({ actions, hydrated: true, hydrate: async () => {} })
+  catalogue = actions
+}
+
+// One snapshot object per distinct input, like the real consumer's state: a
+// fresh object every render would make every memo in the view churn.
+let cached: {
+  base: GlanceSnapshotV1 | null
+  actions: TrayPanelAction[] | null
+  out: GlanceSnapshotV1 | null
+} | null = null
+function currentSnapshot(): GlanceSnapshotV1 | null {
+  if (cached && cached.base === glanceSnapshot && cached.actions === catalogue) return cached.out
+  const base = glanceSnapshot ?? (catalogue ? snapshotWith() : null)
+  const out = base && catalogue ? { ...base, actions: catalogue } : base
+  cached = { base: glanceSnapshot, actions: catalogue, out }
+  return out
 }
 
 beforeEach(() => {
-  __resetTrayPanelStoreForTesting()
+  catalogue = null
+  cached = null
+  receivedCount = 0
   sendRequestMock.mockClear().mockResolvedValue(true)
   runNativeMock.mockClear().mockResolvedValue(true)
   closeMock.mockClear().mockResolvedValue(true)
@@ -142,9 +156,14 @@ beforeEach(() => {
   })
   glanceSnapshot = null
   glanceSend = jest.fn().mockResolvedValue(null)
-  consumerMock
-    .mockReset()
-    .mockImplementation(() => ({ snapshot: glanceSnapshot, send: glanceSend }))
+  consumerMock.mockReset().mockImplementation(() => {
+    const snapshot = currentSnapshot()
+    return {
+      snapshot,
+      receivedCount: snapshot ? Math.max(1, receivedCount) : receivedCount,
+      send: glanceSend,
+    }
+  })
   // The view measures itself; jsdom has no ResizeObserver.
   global.ResizeObserver = class {
     observe() {}
@@ -251,7 +270,6 @@ describe("TrayPanelView", () => {
   })
 
   it("says it is connecting until the first snapshot, then how fresh it is", async () => {
-    setActions([openApp])
     const { rerender } = render(<TrayPanelView />)
     expect(await screen.findByTestId("tray-panel-updated")).toHaveTextContent("footer.connecting")
 
@@ -735,28 +753,33 @@ describe("TrayPanelView", () => {
     expect(await screen.findByText("empty")).toBeInTheDocument()
   })
 
-  it("reloads persisted actions whenever the reused panel window is shown", async () => {
+  it("renders the catalogue the newest snapshot carries", async () => {
     const updated: TrayPanelAction = { ...openApp, id: "updated", label: "Updated action" }
-    const hydrate = jest
-      .fn<Promise<void>, []>()
-      .mockResolvedValueOnce()
-      .mockImplementationOnce(async () => {
-        useTrayPanelStore.setState({ actions: [updated], hydrated: true })
-      })
-    useTrayPanelStore.setState({ actions: [openApp], hydrated: true, hydrate })
-    render(<TrayPanelView />)
-
-    await waitFor(() => expect(hydrate).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(visibilityHandler).toBeDefined())
+    setActions([openApp])
+    const { rerender } = render(<TrayPanelView />)
     expect(await screen.findByTestId("tray-panel-action-openApp")).toBeInTheDocument()
 
-    await act(async () => {
-      visibilityHandler?.(true)
-    })
-
-    await waitFor(() => expect(hydrate).toHaveBeenCalledTimes(2))
-    expect(await screen.findByTestId("tray-panel-action-updated")).toBeInTheDocument()
+    setActions([updated])
+    rerender(<TrayPanelView />)
+    expect(screen.getByTestId("tray-panel-action-updated")).toBeInTheDocument()
     expect(screen.queryByTestId("tray-panel-action-openApp")).not.toBeInTheDocument()
+  })
+
+  it("says the actions are loading, and offers no delegate bar, before the first snapshot", async () => {
+    render(<TrayPanelView />)
+    expect(await screen.findByText("quick.loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("tray-panel-primary")).not.toBeInTheDocument()
+    expect(screen.queryByText("empty")).not.toBeInTheDocument()
+  })
+
+  it("moves the primary action into the quick actions while the delegate bar is hidden", async () => {
+    glanceSnapshot = snapshotWith({
+      config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, showDelegate: false },
+    })
+    setActions([delegate, openApp])
+    render(<TrayPanelView />)
+    expect(await screen.findByTestId("tray-panel-action-delegate")).toBeInTheDocument()
+    expect(screen.queryByTestId("tray-panel-primary")).not.toBeInTheDocument()
   })
 
   it("clears a glance failure on the next reveal", async () => {
@@ -768,11 +791,25 @@ describe("TrayPanelView", () => {
     await user.click(await screen.findByTestId("tray-panel-status"))
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.timeout")
 
+    act(() => visibilityHandler?.(false))
     await act(async () => visibilityHandler?.(true))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("runs an open-triggered action once on every panel reveal", async () => {
+  it("does not treat the first show event after mounting as a second reveal", async () => {
+    const user = userEvent.setup()
+    glanceSnapshot = snapshotWith({ fleet: fleet(1, 0) })
+    glanceSend.mockResolvedValue("errors.timeout")
+    setActions([openApp])
+    render(<TrayPanelView />)
+    await user.click(await screen.findByTestId("tray-panel-status"))
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+
+    await act(async () => visibilityHandler?.(true))
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+  })
+
+  describe("open-triggered actions", () => {
     const openCommand: TrayPanelAction = {
       id: "refresh",
       label: "Refresh",
@@ -784,30 +821,169 @@ describe("TrayPanelView", () => {
       ...openCommand,
       effect: { kind: "command", commandId: "refresh-updated" },
     }
-    const hydrate = jest
-      .fn<Promise<void>, []>()
-      .mockResolvedValueOnce()
-      .mockImplementationOnce(async () => {
-        useTrayPanelStore.setState({ actions: [updatedCommand], hydrated: true })
+
+    it("waits for the first snapshot, then runs once", async () => {
+      const { rerender } = render(<TrayPanelView />)
+      await act(async () => {})
+      expect(sendRequestMock).not.toHaveBeenCalled()
+
+      setActions([openCommand])
+      rerender(<TrayPanelView />)
+      await waitFor(() => expect(sendRequestMock).toHaveBeenCalledTimes(1))
+
+      receivedCount = 2
+      setActions([updatedCommand])
+      rerender(<TrayPanelView />)
+      await act(async () => {})
+      expect(sendRequestMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("runs again on every reveal, against the snapshot that arrives after it", async () => {
+      setActions([openCommand])
+      receivedCount = 1
+      const { rerender } = render(<TrayPanelView />)
+      await waitFor(() => expect(sendRequestMock).toHaveBeenCalledTimes(1))
+      expect(sendRequestMock.mock.calls[0][0].effect).toEqual({
+        kind: "command",
+        commandId: "refresh",
       })
-    useTrayPanelStore.setState({ actions: [openCommand], hydrated: true, hydrate })
-    render(<TrayPanelView />)
 
-    await waitFor(() => expect(sendRequestMock).toHaveBeenCalledTimes(1))
-    expect(sendRequestMock.mock.calls[0][0].effect).toEqual({
-      kind: "command",
-      commandId: "refresh",
+      act(() => visibilityHandler?.(false))
+      act(() => visibilityHandler?.(true))
+      await act(async () => {})
+      // The snapshot held from before the reveal may predate a settings change.
+      expect(sendRequestMock).toHaveBeenCalledTimes(1)
+
+      receivedCount = 2
+      setActions([updatedCommand])
+      rerender(<TrayPanelView />)
+      await waitFor(() => expect(sendRequestMock).toHaveBeenCalledTimes(2))
+      expect(sendRequestMock.mock.calls[1][0].effect).toEqual({
+        kind: "command",
+        commandId: "refresh-updated",
+      })
     })
-    await waitFor(() => expect(visibilityHandler).toBeDefined())
+  })
 
-    act(() => {
-      visibilityHandler?.(true)
+  describe("edit mode", () => {
+    it("cannot be entered before the first snapshot", async () => {
+      render(<TrayPanelView />)
+      expect(await screen.findByTestId("tray-panel-edit")).toBeDisabled()
     })
 
-    await waitFor(() => expect(sendRequestMock).toHaveBeenCalledTimes(2))
-    expect(sendRequestMock.mock.calls[1][0].effect).toEqual({
-      kind: "command",
-      commandId: "refresh-updated",
+    it("swaps the stack and the delegate bar for the editor until Done", async () => {
+      const user = userEvent.setup()
+      setActions([delegate, openApp])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+
+      expect(screen.getByTestId("tray-panel-edit-mode")).toBeInTheDocument()
+      expect(screen.queryByTestId("tray-panel-primary")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("tray-panel-actions")).not.toBeInTheDocument()
+
+      await user.click(screen.getByTestId("tray-panel-edit-done"))
+      expect(screen.queryByTestId("tray-panel-edit-mode")).not.toBeInTheDocument()
+      expect(screen.getByTestId("tray-panel-primary")).toBeInTheDocument()
+    })
+
+    it("sends a hidden module as the new layout and shows it at once", async () => {
+      const user = userEvent.setup()
+      setActions([openApp])
+      const { container } = render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+      await user.click(screen.getByRole("button", { name: /^hide:.*modules\.fleet\.label/ }))
+
+      const sent = glanceSend.mock.calls.at(-1)?.[0] as {
+        kind: string
+        entries: { id: string; hidden: boolean }[]
+      }
+      expect(sent.kind).toBe("set-layout")
+      expect(sent.entries.find((e) => e.id === "fleet")?.hidden).toBe(true)
+      expect(screen.queryByTestId("glance-editor-row-fleet")).not.toBeInTheDocument()
+
+      await user.click(screen.getByTestId("tray-panel-edit-done"))
+      // Back on the stored config until the confirming snapshot lands.
+      expect(container.querySelector('[data-glance-module="fleet"]')).toBeInTheDocument()
+    })
+
+    it("drops a failed edit back to the stored layout", async () => {
+      const user = userEvent.setup()
+      glanceSend.mockResolvedValue("errors.requestFailed")
+      setActions([openApp])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+      await user.click(screen.getByRole("button", { name: /^hide:.*modules\.fleet\.label/ }))
+
+      await waitFor(() => expect(screen.getByTestId("glance-editor-row-fleet")).toBeInTheDocument())
+      expect(screen.getByRole("alert")).toHaveTextContent("errors.requestFailed")
+    })
+
+    it("hides the delegate bar and changes the width from the editor", async () => {
+      const user = userEvent.setup()
+      setActions([delegate, openApp])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+
+      await user.click(screen.getByRole("switch", { name: "delegate" }))
+      expect(glanceSend).toHaveBeenCalledWith({ kind: "set-delegate-visible", visible: false })
+
+      await user.click(screen.getByRole("radio", { name: /^widths\.wide/ }))
+      expect(glanceSend).toHaveBeenCalledWith({ kind: "set-width", width: "wide" })
+      expect(screen.getByTestId("tray-panel-card")).toHaveAttribute("data-width", "wide")
+    })
+
+    it("leaves edit mode on Escape without closing the panel", async () => {
+      const user = userEvent.setup()
+      setActions([openApp])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+      await user.keyboard("{Escape}")
+      expect(screen.queryByTestId("tray-panel-edit-mode")).not.toBeInTheDocument()
+      expect(closeMock).not.toHaveBeenCalled()
+    })
+
+    it("ignores chords while editing", async () => {
+      const user = userEvent.setup()
+      setActions([{ ...openApp, trigger: { kind: "hotkey", chord: "mod+n" } }])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+      await user.keyboard("{Meta>}n{/Meta}")
+      expect(runNativeMock).not.toHaveBeenCalled()
+    })
+
+    it("closes the editor on the next reveal", async () => {
+      const user = userEvent.setup()
+      setActions([openApp])
+      render(<TrayPanelView />)
+      await user.click(await screen.findByTestId("tray-panel-edit"))
+      act(() => visibilityHandler?.(false))
+      await act(async () => visibilityHandler?.(true))
+      expect(screen.queryByTestId("tray-panel-edit-mode")).not.toBeInTheDocument()
+    })
+  })
+
+  describe("preset switch", () => {
+    it("names the current preset and applies another", async () => {
+      const user = userEvent.setup()
+      setActions([openApp])
+      render(<TrayPanelView />)
+      const trigger = await screen.findByRole("button", { name: /editor\.presetLabel/ })
+      expect(trigger).toHaveTextContent("presets.balanced")
+
+      await user.click(trigger)
+      await user.click(await screen.findByRole("menuitem", { name: /presets\.minimal/ }))
+      expect(glanceSend).toHaveBeenCalledWith({ kind: "apply-preset", preset: "minimal" })
+    })
+
+    it("says Custom once the layout was edited", async () => {
+      glanceSnapshot = snapshotWith({
+        config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, preset: "custom" },
+      })
+      setActions([openApp])
+      render(<TrayPanelView />)
+      expect(await screen.findByRole("button", { name: /editor\.presetLabel/ })).toHaveTextContent(
+        "editor.custom"
+      )
     })
   })
 

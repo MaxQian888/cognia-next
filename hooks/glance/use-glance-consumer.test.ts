@@ -42,6 +42,7 @@ function snapshot(epoch: number, revision: number): GlanceSnapshotV1 {
     activity: null,
     recents: null,
     pet: null,
+    actions: [],
   }
 }
 
@@ -233,6 +234,34 @@ describe("useGlanceConsumer", () => {
 
       act(() => snapshotHandler(snapshot(1, 6)))
       expect(result.current.snapshot?.revision).toBe(6)
+    })
+
+    it("starts receivedCount at 0", async () => {
+      const { result } = renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
+      await flush()
+      expect(result.current.receivedCount).toBe(0)
+    })
+
+    it("counts only snapshots that were newer than the one held", async () => {
+      const { result } = renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
+      await flush()
+
+      act(() => snapshotHandler(snapshot(1, 5)))
+      expect(result.current.receivedCount).toBe(1)
+
+      // Older, equal and invalid snapshots are not "received".
+      act(() => snapshotHandler(snapshot(1, 4)))
+      act(() => snapshotHandler(snapshot(1, 5)))
+      act(() => snapshotHandler({ version: 2 }))
+      act(() => snapshotHandler(null))
+      expect(result.current.receivedCount).toBe(1)
+
+      act(() => snapshotHandler(snapshot(1, 6)))
+      expect(result.current.receivedCount).toBe(2)
+
+      // A new epoch is newer whatever its revision.
+      act(() => snapshotHandler(snapshot(2, 1)))
+      expect(result.current.receivedCount).toBe(3)
     })
 
     it("accepts a new epoch even with a lower revision", async () => {

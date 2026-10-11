@@ -7,6 +7,7 @@ import {
   openTriggeredActions,
   resolveAction,
   resolvePrimaryAction,
+  splitPanelActions,
   validateActionDraft,
   visibleActions,
 } from "./resolve"
@@ -305,6 +306,55 @@ describe("selection helpers", () => {
   it("matches a hotkey case-insensitively", () => {
     expect(actionForChord(list, snapshot(), "mod+1")?.id).toBe("hot")
     expect(actionForChord(list, snapshot(), "mod+2")).toBeNull()
+  })
+})
+
+describe("splitPanelActions", () => {
+  const list: TrayPanelAction[] = [
+    action({ id: "hidden", hidden: true }),
+    action({ id: "gated", when: "automation.running" }),
+    action({ id: "primary", trigger: { kind: "submit" } }),
+    action({ id: "second-primary", trigger: { kind: "submit" } }),
+    action({ id: "hot", trigger: { kind: "hotkey", chord: "mod+1" } }),
+    action({ id: "onopen", trigger: { kind: "open" } }),
+    action({ id: "plain" }),
+  ]
+  const ids = (actions: TrayPanelAction[]) => actions.map((a) => a.id)
+
+  it("takes the first visible submit action as the delegate and leaves it out of quick", () => {
+    const { delegate, quick } = splitPanelActions(list, snapshot(), true)
+    expect(delegate?.id).toBe("primary")
+    expect(ids(quick)).toEqual(["second-primary", "hot", "plain"])
+  })
+
+  it("has no delegate with the bar off, and the primary action joins quick in order", () => {
+    const { delegate, quick } = splitPanelActions(list, snapshot(), false)
+    expect(delegate).toBeNull()
+    expect(ids(quick)).toEqual(["primary", "second-primary", "hot", "plain"])
+  })
+
+  it("never lists open-triggered actions in quick", () => {
+    expect(ids(splitPanelActions(list, snapshot(), true).quick)).not.toContain("onopen")
+    expect(ids(splitPanelActions(list, snapshot(), false).quick)).not.toContain("onopen")
+  })
+
+  it("leaves hidden and unsatisfied when-gated actions out", () => {
+    for (const showDelegate of [true, false]) {
+      const quick = ids(splitPanelActions(list, snapshot(), showDelegate).quick)
+      expect(quick).not.toContain("hidden")
+      expect(quick).not.toContain("gated")
+    }
+  })
+
+  it("lists a when-gated action once its predicate holds", () => {
+    const snap = { ...snapshot(), automation: { running: true, armed: true } }
+    expect(ids(splitPanelActions(list, snap, true).quick)).toContain("gated")
+  })
+
+  it("has no delegate when there is no visible submit action, whatever the switch says", () => {
+    const noPrimary = list.filter((a) => a.trigger.kind !== "submit")
+    expect(splitPanelActions(noPrimary, snapshot(), true).delegate).toBeNull()
+    expect(ids(splitPanelActions(noPrimary, snapshot(), true).quick)).toEqual(["hot", "plain"])
   })
 })
 

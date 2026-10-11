@@ -1,8 +1,19 @@
-import { GLANCE_MAX_HEIGHT_MAX, GLANCE_MAX_HEIGHT_MIN } from "@/types/glance/layout"
+import {
+  GLANCE_MAX_HEIGHT_MAX,
+  GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MODULE_IDS,
+  GLANCE_PRESET_IDS,
+} from "@/types/glance/layout"
 
 import { GLANCE_PET_COMMANDS, parseGlanceRequest } from "./requests"
 
 const base = { requestId: "req-1", consumer: "tray-panel" }
+
+const editorEntries = GLANCE_MODULE_IDS.map((id, index) => ({
+  id,
+  size: "compact",
+  hidden: index % 2 === 1,
+}))
 
 const valid: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
   ["refresh", { kind: "refresh" }, { kind: "refresh" }],
@@ -119,6 +130,31 @@ const valid: Array<[string, Record<string, unknown>, Record<string, unknown>]> =
     { kind: "set-width", width: "standard" },
   ],
   ["set-width wide", { kind: "set-width", width: "wide" }, { kind: "set-width", width: "wide" }],
+  [
+    "set-layout with every module",
+    { kind: "set-layout", entries: editorEntries },
+    { kind: "set-layout", entries: editorEntries },
+  ],
+  [
+    "set-layout with a partial list",
+    { kind: "set-layout", entries: [{ id: "fleet", size: "expanded", hidden: false }] },
+    { kind: "set-layout", entries: [{ id: "fleet", size: "expanded", hidden: false }] },
+  ],
+  ...GLANCE_PRESET_IDS.map((preset): [string, Record<string, unknown>, Record<string, unknown>] => [
+    `apply-preset ${preset}`,
+    { kind: "apply-preset", preset },
+    { kind: "apply-preset", preset },
+  ]),
+  [
+    "set-delegate-visible true",
+    { kind: "set-delegate-visible", visible: true },
+    { kind: "set-delegate-visible", visible: true },
+  ],
+  [
+    "set-delegate-visible false",
+    { kind: "set-delegate-visible", visible: false },
+    { kind: "set-delegate-visible", visible: false },
+  ],
   ...GLANCE_PET_COMMANDS.map(
     (command): [string, Record<string, unknown>, Record<string, unknown>] => [
       `pet-care ${command}`,
@@ -240,6 +276,97 @@ describe("parseGlanceRequest", () => {
       reject({ kind: "pet-care", command: "feed" })
       reject({ kind: "pet-care" })
       reject({ kind: "pet-care", command: "toString" })
+    })
+  })
+
+  describe("layout requests", () => {
+    const reject = (body: Record<string, unknown>) =>
+      expect(parseGlanceRequest({ ...base, ...body })).toBeNull()
+    const entry = (over: Record<string, unknown> = {}) => ({
+      id: "fleet",
+      size: "standard",
+      hidden: false,
+      ...over,
+    })
+
+    it("rejects a set-layout whose entries are not an array", () => {
+      reject({ kind: "set-layout" })
+      reject({ kind: "set-layout", entries: "fleet" })
+      reject({ kind: "set-layout", entries: { 0: entry() } })
+      reject({ kind: "set-layout", entries: null })
+    })
+
+    it("rejects an empty entry list", () => {
+      reject({ kind: "set-layout", entries: [] })
+    })
+
+    it("rejects more entries than there are modules", () => {
+      const tooMany = [...editorEntries, entry({ id: "fleet" })]
+      expect(tooMany.length).toBe(GLANCE_MODULE_IDS.length + 1)
+      reject({ kind: "set-layout", entries: tooMany })
+    })
+
+    it("rejects a duplicate module id", () => {
+      reject({ kind: "set-layout", entries: [entry(), entry({ size: "compact" })] })
+    })
+
+    it("rejects an unknown module id", () => {
+      reject({ kind: "set-layout", entries: [entry({ id: "weather" })] })
+      reject({ kind: "set-layout", entries: [entry({ id: 1 })] })
+      reject({ kind: "set-layout", entries: [entry({ id: "toString" })] })
+    })
+
+    it("rejects an unknown or missing size", () => {
+      reject({ kind: "set-layout", entries: [entry({ size: "huge" })] })
+      reject({ kind: "set-layout", entries: [entry({ size: undefined })] })
+    })
+
+    it("rejects a non-boolean hidden", () => {
+      reject({ kind: "set-layout", entries: [entry({ hidden: "false" })] })
+      reject({ kind: "set-layout", entries: [entry({ hidden: 0 })] })
+      reject({ kind: "set-layout", entries: [entry({ hidden: undefined })] })
+    })
+
+    it("rejects a non-object item anywhere in the list", () => {
+      reject({ kind: "set-layout", entries: [null] })
+      reject({ kind: "set-layout", entries: ["fleet"] })
+      reject({ kind: "set-layout", entries: [entry(), 3] })
+    })
+
+    it("strips keys an editor never produces from each entry", () => {
+      const out = parseGlanceRequest({
+        ...base,
+        kind: "set-layout",
+        entries: [entry({ evil: true, order: 4 })],
+      })
+      expect(out).toEqual({
+        ...base,
+        kind: "set-layout",
+        entries: [{ id: "fleet", size: "standard", hidden: false }],
+      })
+    })
+
+    it("keeps the order the editor sent", () => {
+      const out = parseGlanceRequest({
+        ...base,
+        kind: "set-layout",
+        entries: [entry({ id: "usage" }), entry({ id: "fleet" })],
+      })
+      expect(out).toMatchObject({ entries: [{ id: "usage" }, { id: "fleet" }] })
+    })
+
+    it("rejects the custom preset and unknown presets on apply-preset", () => {
+      reject({ kind: "apply-preset", preset: "custom" })
+      reject({ kind: "apply-preset", preset: "everything" })
+      reject({ kind: "apply-preset", preset: 1 })
+      reject({ kind: "apply-preset" })
+    })
+
+    it("accepts only a boolean for set-delegate-visible", () => {
+      reject({ kind: "set-delegate-visible" })
+      reject({ kind: "set-delegate-visible", visible: "true" })
+      reject({ kind: "set-delegate-visible", visible: 1 })
+      reject({ kind: "set-delegate-visible", visible: null })
     })
   })
 

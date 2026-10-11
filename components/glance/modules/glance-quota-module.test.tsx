@@ -60,6 +60,7 @@ function makeSnapshot(quota: GlanceQuotaSlice | null, scope: GlanceScope): Glanc
     config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, scope },
     workspace: null,
     when: {} as GlanceSnapshotV1["when"],
+    actions: [],
     fleet: null,
     usage: null,
     quota,

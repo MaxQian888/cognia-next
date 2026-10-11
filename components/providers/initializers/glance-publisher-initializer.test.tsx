@@ -2,7 +2,7 @@ import { act, render } from "@testing-library/react"
 
 import type { UseGlanceSourcesResult } from "@/hooks/glance/use-glance-sources"
 import type { GlanceRequest } from "@/lib/glance/requests"
-import { normalizeGlancePanelSettings } from "@/lib/glance/presets"
+import { layoutFromPreset, normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { GLANCE_SNAPSHOT_VERSION } from "@/lib/glance/snapshot"
 import type { GlanceSubscription } from "@/lib/tauri/glance"
 
@@ -429,6 +429,125 @@ describe("executeGlanceRequest", () => {
       })
     })
 
+    describe("set-layout", () => {
+      const stored = {
+        version: 1,
+        preset: "minimal",
+        width: "wide",
+        maxHeight: 420,
+        scope: "workspace",
+        showDelegate: false,
+        autofocusDelegate: true,
+        options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1y" } },
+      }
+
+      it("saves the edited entries as a custom layout and resolves null", async () => {
+        settingsState.settings = { trayPanelLayout: stored }
+        const entries = [
+          { id: "usage", size: "expanded", hidden: false },
+          { id: "fleet", size: "compact", hidden: false },
+          { id: "pet", size: "standard", hidden: true },
+        ]
+        await expect(run(request({ kind: "set-layout", entries }))).resolves.toBeNull()
+        expect(settingsState.save).toHaveBeenCalledTimes(1)
+        const saved = settingsState.save.mock.calls[0][0].trayPanelLayout
+        expect(saved.preset).toBe("custom")
+        expect(saved.entries.slice(0, 3)).toEqual(entries)
+        // Modules the editor did not name are repaired in, hidden.
+        expect(saved.entries.map((e: { id: string }) => e.id).sort()).toEqual(
+          layoutFromPreset("balanced")
+            .map((e) => e.id)
+            .sort()
+        )
+        expect(saved.entries.slice(3).every((e: { hidden: boolean }) => e.hidden)).toBe(true)
+      })
+
+      it("keeps width, height, scope, delegate switches and options", async () => {
+        settingsState.settings = { trayPanelLayout: stored }
+        await run(
+          request({
+            kind: "set-layout",
+            entries: [{ id: "fleet", size: "standard", hidden: false }],
+          })
+        )
+        expect(settingsState.save.mock.calls[0][0].trayPanelLayout).toMatchObject({
+          width: "wide",
+          maxHeight: 420,
+          scope: "workspace",
+          showDelegate: false,
+          autofocusDelegate: true,
+          options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1y" } },
+        })
+      })
+
+      it("degrades a size the module does not support", async () => {
+        await run(
+          request({
+            kind: "set-layout",
+            entries: [{ id: "agenda", size: "expanded", hidden: false }],
+          })
+        )
+        const saved = settingsState.save.mock.calls[0][0].trayPanelLayout
+        expect(saved.entries[0]).toEqual({ id: "agenda", size: "standard", hidden: false })
+      })
+    })
+
+    describe("apply-preset", () => {
+      it("saves the preset's id and entries, keeping width, height and options", async () => {
+        settingsState.settings = {
+          trayPanelLayout: {
+            version: 1,
+            preset: "custom",
+            width: "narrow",
+            maxHeight: 300,
+            showDelegate: false,
+            options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1m" } },
+          },
+        }
+        await expect(
+          run(request({ kind: "apply-preset", preset: "usage-first" }))
+        ).resolves.toBeNull()
+        expect(settingsState.save).toHaveBeenCalledTimes(1)
+        const saved = settingsState.save.mock.calls[0][0].trayPanelLayout
+        expect(saved.preset).toBe("usage-first")
+        expect(saved.entries).toEqual(layoutFromPreset("usage-first"))
+        expect(saved).toMatchObject({
+          width: "narrow",
+          maxHeight: 300,
+          showDelegate: false,
+          options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1m" } },
+        })
+      })
+
+      it("returns a custom layout to a preset when settings hold nothing yet", async () => {
+        await run(request({ kind: "apply-preset", preset: "minimal" }))
+        expect(settingsState.save).toHaveBeenCalledWith({
+          trayPanelLayout: {
+            ...normalizeGlancePanelSettings(undefined),
+            preset: "minimal",
+            entries: layoutFromPreset("minimal"),
+          },
+        })
+      })
+    })
+
+    describe("set-delegate-visible", () => {
+      it.each([true, false])("saves showDelegate %s and keeps the rest", async (visible) => {
+        settingsState.settings = {
+          trayPanelLayout: {
+            version: 1,
+            preset: "agent-ops",
+            width: "wide",
+            showDelegate: !visible,
+          },
+        }
+        await expect(run(request({ kind: "set-delegate-visible", visible }))).resolves.toBeNull()
+        const saved = settingsState.save.mock.calls[0][0].trayPanelLayout
+        expect(saved).toMatchObject({ showDelegate: visible, preset: "agent-ops", width: "wide" })
+        expect(saved.entries).toEqual(normalizeGlancePanelSettings({ preset: "agent-ops" }).entries)
+      })
+    })
+
     it("propagates a failed save", async () => {
       settingsState.save.mockRejectedValue(new Error("disk full"))
       await expect(run(request({ kind: "set-width", width: "wide" }))).rejects.toThrow("disk full")
@@ -767,6 +886,48 @@ describe("GlancePublisherInitializer", () => {
       const again = sendSnapshotMock.mock.calls.at(-1)![1]
       expect(again.epoch).toBe(first.epoch)
       expect(again.revision).toBeGreaterThan(first.revision)
+    })
+
+    it("does not replay the old snapshot to a consumer that appears after the lease ended", async () => {
+      await mount()
+      subscribe(TRAY)
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      const old = sendSnapshotMock.mock.calls[0][1]
+
+      // The last consumer hides: the snapshot built for it is now stale.
+      subscribe({ ...TRAY, visible: false })
+      expect(lastActiveFlag()).toBe(false)
+      sendSnapshotMock.mockClear()
+
+      // A new consumer announces: it must not be answered with what predates
+      // whatever changed while nobody was looking.
+      subscribe(DOCK)
+      expect(sendSnapshotMock).not.toHaveBeenCalled()
+      expect(lastActiveFlag()).toBe(true)
+
+      await advance(GLANCE_PUSH_DEBOUNCE_MS - 1)
+      expect(sendSnapshotMock).not.toHaveBeenCalled()
+      await advance(1)
+      expect(sendSnapshotMock).toHaveBeenCalledTimes(1)
+      const [label, fresh] = sendSnapshotMock.mock.calls[0]
+      expect(label).toBe("dock")
+      expect(fresh.epoch).toBe(old.epoch)
+      expect(fresh.revision).toBeGreaterThan(old.revision)
+    })
+
+    it("pushes a freshly built body, not the one from before the lease ended", async () => {
+      await mount()
+      subscribe(TRAY)
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      subscribe({ ...TRAY, visible: false })
+      // Settings change while nobody is looking.
+      act(() => setSources(makeSources({}, "changed-while-hidden")))
+      sendSnapshotMock.mockClear()
+      subscribe(TRAY)
+      expect(sendSnapshotMock).not.toHaveBeenCalled()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      expect(sendSnapshotMock).toHaveBeenCalledTimes(1)
+      expect(sendSnapshotMock.mock.calls[0][1]).toMatchObject({ marker: "changed-while-hidden" })
     })
 
     it("stops the prune sweep on unmount", async () => {

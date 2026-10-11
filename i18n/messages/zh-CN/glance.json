@@ -1,4 +1,20 @@
 {
+  "editor": {
+    "add": "添加模块",
+    "addEmpty": "所有模块都已显示。",
+    "addModule": "添加{module}",
+    "addShort": "添加",
+    "custom": "自定义",
+    "hide": "隐藏{module}",
+    "presetHint": "预设会替换模块及其顺序和尺寸，宽度、高度与选项保持不变。",
+    "presetLabel": "预设：{preset}",
+    "presets": "预设",
+    "reorder": "调整{module}的顺序",
+    "shown": "已显示",
+    "shownEmpty": "没有显示任何模块，可在下方添加。",
+    "shownHint": "拖动以调整顺序",
+    "size": "{module}的尺寸"
+  },
   "errors": {
     "commandUnavailable": "该命令暂不可用。",
     "deliveryFailed": "Cognia 主窗口未响应。",
@@ -180,5 +196,15 @@
     "balanced": "均衡",
     "minimal": "极简",
     "usageFirst": "用量优先"
+  },
+  "sizes": {
+    "compact": "紧凑",
+    "expanded": "展开",
+    "short": {
+      "compact": "小",
+      "expanded": "大",
+      "standard": "中"
+    },
+    "standard": "标准"
   }
 }

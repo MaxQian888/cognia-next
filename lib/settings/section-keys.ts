@@ -100,6 +100,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "browserUserChromeBrowser",
     // ADR-0225: the tray panel settings sit in the Desktop section.
     "trayPanelLayout",
+    "trayPanelActions",
   ],
   // The WebRTC card lives in this section too, and its five keys were missing
   // from every section — so "reset this section" skipped them and the

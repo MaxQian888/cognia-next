@@ -1,0 +1,326 @@
+import {
+  GLANCE_MODULE_IDS,
+  type GlanceLayoutEntry,
+  type GlanceModuleId,
+  type GlancePanelSettings,
+} from "@/types/glance/layout"
+
+import {
+  hideEntry,
+  moveVisible,
+  reorderVisible,
+  resizeEntry,
+  showEntry,
+  withEditedEntries,
+  withPreset,
+} from "./layout-edit"
+import { DEFAULT_GLANCE_PANEL_SETTINGS, layoutFromPreset } from "./presets"
+
+const ids = (entries: readonly GlanceLayoutEntry[]) => entries.map((e) => e.id)
+const visibleIds = (entries: readonly GlanceLayoutEntry[]) =>
+  entries.filter((e) => !e.hidden).map((e) => e.id)
+const hiddenIds = (entries: readonly GlanceLayoutEntry[]) =>
+  entries.filter((e) => e.hidden).map((e) => e.id)
+
+/** Every module exactly once, visible entries ahead of hidden ones. */
+function expectWellFormed(entries: readonly GlanceLayoutEntry[]) {
+  expect([...ids(entries)].sort()).toEqual([...GLANCE_MODULE_IDS].sort())
+  const firstHidden = entries.findIndex((e) => e.hidden)
+  if (firstHidden >= 0) expect(entries.slice(firstHidden).every((e) => e.hidden)).toBe(true)
+}
+
+// balanced: fleet usage quota agenda activity quick | recents pet (hidden)
+const balanced = () => layoutFromPreset("balanced")
+const ALL: readonly GlanceModuleId[] = GLANCE_MODULE_IDS
+
+describe("reorderVisible", () => {
+  it("orders the visible entries as asked and keeps hidden ones after, in order", () => {
+    const out = reorderVisible(balanced(), [
+      "quick",
+      "fleet",
+      "usage",
+      "quota",
+      "agenda",
+      "activity",
+    ])
+    expect(visibleIds(out)).toEqual(["quick", "fleet", "usage", "quota", "agenda", "activity"])
+    expect(hiddenIds(out)).toEqual(["recents", "pet"])
+    expect(ids(out).slice(-2)).toEqual(["recents", "pet"])
+    expectWellFormed(out)
+  })
+
+  it("ignores unknown and hidden ids", () => {
+    const out = reorderVisible(balanced(), [
+      "pet",
+      "usage",
+      "nope" as GlanceModuleId,
+      "recents",
+      "fleet",
+    ])
+    // pet and recents are hidden and stay hidden; usage and fleet lead.
+    expect(visibleIds(out).slice(0, 2)).toEqual(["usage", "fleet"])
+    expect(hiddenIds(out)).toEqual(["recents", "pet"])
+    expectWellFormed(out)
+  })
+
+  it("appends visible entries the caller omitted, in their previous relative order", () => {
+    const out = reorderVisible(balanced(), ["activity", "usage"])
+    expect(visibleIds(out)).toEqual(["activity", "usage", "fleet", "quota", "agenda", "quick"])
+    expectWellFormed(out)
+  })
+
+  it("uses a repeated id once", () => {
+    const out = reorderVisible(balanced(), ["usage", "usage", "fleet"])
+    expect(visibleIds(out).slice(0, 2)).toEqual(["usage", "fleet"])
+    expectWellFormed(out)
+  })
+
+  it("is the identity for the current order and for an empty list", () => {
+    const entries = balanced()
+    expect(reorderVisible(entries, visibleIds(entries))).toEqual(entries)
+    expect(reorderVisible(entries, [])).toEqual(entries)
+  })
+
+  it("keeps sizes and never mutates its input", () => {
+    const entries = balanced()
+    const before = JSON.parse(JSON.stringify(entries))
+    const out = reorderVisible(entries, ["quick"])
+    expect(entries).toEqual(before)
+    expect(out.find((e) => e.id === "agenda")?.size).toBe("compact")
+  })
+})
+
+describe("moveVisible", () => {
+  it("moves an entry one place down and up", () => {
+    const down = moveVisible(balanced(), "fleet", 1)
+    expect(visibleIds(down)).toEqual(["usage", "fleet", "quota", "agenda", "activity", "quick"])
+    const up = moveVisible(balanced(), "quota", -1)
+    expect(visibleIds(up)).toEqual(["fleet", "quota", "usage", "agenda", "activity", "quick"])
+    expectWellFormed(down)
+    expectWellFormed(up)
+  })
+
+  it("moves by more than one place", () => {
+    const out = moveVisible(balanced(), "fleet", 3)
+    expect(visibleIds(out)).toEqual(["usage", "quota", "agenda", "fleet", "activity", "quick"])
+  })
+
+  it("clamps at both ends", () => {
+    const entries = balanced()
+    expect(moveVisible(entries, "fleet", -1)).toEqual(entries)
+    expect(moveVisible(entries, "quick", 1)).toEqual(entries)
+    expect(visibleIds(moveVisible(entries, "fleet", 99))).toEqual([
+      "usage",
+      "quota",
+      "agenda",
+      "activity",
+      "quick",
+      "fleet",
+    ])
+    expect(visibleIds(moveVisible(entries, "quick", -99))[0]).toBe("quick")
+  })
+
+  it("leaves the order alone for a zero move", () => {
+    const entries = balanced()
+    expect(moveVisible(entries, "usage", 0)).toEqual(entries)
+  })
+
+  it("returns a visible-first copy for an unknown or hidden id", () => {
+    const shuffled: GlanceLayoutEntry[] = [
+      { id: "pet", size: "compact", hidden: true },
+      { id: "fleet", size: "standard", hidden: false },
+      { id: "usage", size: "standard", hidden: false },
+    ]
+    const unknown = moveVisible(shuffled, "nope" as GlanceModuleId, 1)
+    expect(ids(unknown)).toEqual(["fleet", "usage", "pet"])
+    // A hidden entry is not part of the movable stack.
+    expect(ids(moveVisible(shuffled, "pet", -1))).toEqual(["fleet", "usage", "pet"])
+    expect(shuffled[0].id).toBe("pet")
+  })
+})
+
+describe("resizeEntry", () => {
+  it("changes one entry's size and nothing else", () => {
+    const out = resizeEntry(balanced(), "agenda", "standard")
+    expect(out.find((e) => e.id === "agenda")?.size).toBe("standard")
+    expect(out.filter((e) => e.id !== "agenda")).toEqual(
+      balanced().filter((e) => e.id !== "agenda")
+    )
+    expectWellFormed(out)
+  })
+
+  it("degrades a size the module lacks: agenda has no expanded", () => {
+    const out = resizeEntry(balanced(), "agenda", "expanded")
+    expect(out.find((e) => e.id === "agenda")?.size).toBe("standard")
+  })
+
+  it("keeps a hidden entry hidden", () => {
+    const out = resizeEntry(balanced(), "pet", "standard")
+    expect(out.find((e) => e.id === "pet")).toEqual({ id: "pet", size: "standard", hidden: true })
+    expectWellFormed(out)
+  })
+
+  it("is a no-op for an unknown id", () => {
+    expect(resizeEntry(balanced(), "nope" as GlanceModuleId, "expanded")).toEqual(balanced())
+  })
+})
+
+describe("hideEntry", () => {
+  it("moves the entry to the head of the hidden group", () => {
+    const out = hideEntry(balanced(), "usage")
+    expect(visibleIds(out)).toEqual(["fleet", "quota", "agenda", "activity", "quick"])
+    expect(hiddenIds(out)).toEqual(["usage", "recents", "pet"])
+    expect(out.find((e) => e.id === "usage")?.hidden).toBe(true)
+    expectWellFormed(out)
+  })
+
+  it("keeps the size so showing it again undoes the hide", () => {
+    const hidden = hideEntry(balanced(), "agenda")
+    expect(hidden.find((e) => e.id === "agenda")?.size).toBe("compact")
+  })
+
+  it("is a no-op for an already hidden entry", () => {
+    const entries = balanced()
+    expect(hideEntry(entries, "pet")).toEqual(entries)
+  })
+
+  it("is a no-op for an unknown id", () => {
+    expect(hideEntry(balanced(), "nope" as GlanceModuleId)).toEqual(balanced())
+  })
+
+  it("can hide everything, keeping each module once", () => {
+    let entries = balanced()
+    for (const id of ALL) entries = hideEntry(entries, id)
+    expect(visibleIds(entries)).toEqual([])
+    expectWellFormed(entries)
+  })
+})
+
+describe("showEntry", () => {
+  it("appends the entry at the end of the visible stack", () => {
+    const out = showEntry(balanced(), "pet", ALL)
+    expect(visibleIds(out)).toEqual([
+      "fleet",
+      "usage",
+      "quota",
+      "agenda",
+      "activity",
+      "quick",
+      "pet",
+    ])
+    expect(hiddenIds(out)).toEqual(["recents"])
+    expectWellFormed(out)
+  })
+
+  it("keeps the remaining hidden entries in order", () => {
+    const out = showEntry(balanced(), "recents", ALL)
+    expect(hiddenIds(out)).toEqual(["pet"])
+  })
+
+  it("refuses an id the platform does not offer", () => {
+    const entries = balanced()
+    const mobile = ALL.filter((id) => id !== "pet")
+    expect(showEntry(entries, "pet", mobile)).toEqual(entries)
+  })
+
+  it("refuses an already visible entry", () => {
+    const entries = balanced()
+    expect(showEntry(entries, "fleet", ALL)).toEqual(entries)
+  })
+
+  it("refuses an unknown id", () => {
+    const entries = balanced()
+    expect(showEntry(entries, "nope" as GlanceModuleId, ALL)).toEqual(entries)
+  })
+
+  it("hide then show puts the entry last, visible again", () => {
+    const out = showEntry(hideEntry(balanced(), "usage"), "usage", ALL)
+    expect(visibleIds(out).at(-1)).toBe("usage")
+    expectWellFormed(out)
+  })
+})
+
+describe("withEditedEntries", () => {
+  const settings: GlancePanelSettings = {
+    ...DEFAULT_GLANCE_PANEL_SETTINGS,
+    preset: "minimal",
+    width: "wide",
+    maxHeight: 500,
+    scope: "workspace",
+    showDelegate: false,
+    autofocusDelegate: true,
+  }
+
+  it("makes the layout custom with the new entries", () => {
+    const entries = hideEntry(balanced(), "usage")
+    const out = withEditedEntries(settings, entries)
+    expect(out.preset).toBe("custom")
+    expect(out.entries).toEqual(entries)
+  })
+
+  it("normalizes the entries: missing modules come back hidden, sizes degrade", () => {
+    const out = withEditedEntries(settings, [
+      { id: "agenda", size: "expanded", hidden: false },
+      { id: "fleet", size: "compact", hidden: false },
+    ])
+    expect(out.entries.slice(0, 2)).toEqual([
+      { id: "agenda", size: "standard", hidden: false },
+      { id: "fleet", size: "compact", hidden: false },
+    ])
+    expectWellFormed(out.entries)
+    expect(out.entries.slice(2).every((e) => e.hidden)).toBe(true)
+  })
+
+  it("keeps every other setting and does not mutate the input", () => {
+    const before = JSON.parse(JSON.stringify(settings))
+    const out = withEditedEntries(settings, balanced())
+    expect(out).toMatchObject({
+      version: 1,
+      width: "wide",
+      maxHeight: 500,
+      scope: "workspace",
+      showDelegate: false,
+      autofocusDelegate: true,
+      options: settings.options,
+    })
+    expect(settings).toEqual(before)
+  })
+})
+
+describe("withPreset", () => {
+  const custom: GlancePanelSettings = {
+    ...DEFAULT_GLANCE_PANEL_SETTINGS,
+    preset: "custom",
+    entries: hideEntry(balanced(), "fleet"),
+    width: "narrow",
+    maxHeight: 320,
+    showDelegate: false,
+    options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1y" } },
+  }
+
+  it.each(["balanced", "usage-first", "agent-ops", "minimal"] as const)(
+    "applies %s: its id and its entries",
+    (preset) => {
+      const out = withPreset(custom, preset)
+      expect(out.preset).toBe(preset)
+      expect(out.entries).toEqual(layoutFromPreset(preset))
+      expectWellFormed(out.entries)
+    }
+  )
+
+  it("keeps width, max height and options (and the rest)", () => {
+    const out = withPreset(custom, "minimal")
+    expect(out).toMatchObject({
+      width: "narrow",
+      maxHeight: 320,
+      showDelegate: false,
+      options: custom.options,
+    })
+  })
+
+  it("does not mutate the input", () => {
+    const before = JSON.parse(JSON.stringify(custom))
+    withPreset(custom, "usage-first")
+    expect(custom).toEqual(before)
+  })
+})

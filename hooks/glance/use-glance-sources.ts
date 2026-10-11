@@ -7,9 +7,9 @@
  * `active` is "some consumer is visible right now". Each slice runs only when
  * the consumer is visible AND its module is visible in the layout, so a closed
  * panel computes nothing and a panel without the activity module never reads a
- * year of the usage ledger. The layout itself, the active workspace and the
- * `when` state are always read: they are cheap, and a consumer that becomes
- * visible needs them before anything else.
+ * year of the usage ledger. The layout itself, the action catalogue, the
+ * active workspace and the `when` state are always read: they are cheap, and a
+ * consumer that becomes visible needs them before anything else.
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
@@ -26,6 +26,7 @@ import { buildRecentsSlice, type RecentSessionInput } from "@/lib/glance/build-r
 import { buildUsageSlice } from "@/lib/glance/build-usage"
 import { normalizeGlancePanelSettings, visibleModuleIds } from "@/lib/glance/presets"
 import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
+import { resolveTrayPanelActions } from "@/lib/tray-panel/catalogue"
 import {
   getIslandProjection,
   getIslandProjectionServerSnapshot,
@@ -77,9 +78,23 @@ function useGlanceNow(active: boolean): number {
   return now
 }
 
-export function useGlanceSources(active: boolean): UseGlanceSourcesResult {
+export interface UseGlanceSourcesOptions {
+  /**
+   * Read what is already known without triggering remote work: no quota
+   * refreshes, no login discovery. For the settings editor's live preview,
+   * which must not fire network requests just because Settings is open.
+   */
+  passive?: boolean
+}
+
+export function useGlanceSources(
+  active: boolean,
+  { passive = false }: UseGlanceSourcesOptions = {}
+): UseGlanceSourcesResult {
   const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
   const config = useMemo(() => normalizeGlancePanelSettings(storedLayout), [storedLayout])
+  const storedActions = useSettingsStore((s) => s.settings?.trayPanelActions)
+  const actions = useMemo(() => resolveTrayPanelActions(storedActions), [storedActions])
   const visible = useMemo(() => new Set(visibleModuleIds(config.entries)), [config.entries])
   const on = (id: GlanceModuleId) => active && visible.has(id)
   const now = useGlanceNow(active)
@@ -141,7 +156,7 @@ export function useGlanceSources(active: boolean): UseGlanceSourcesResult {
     sessionFilter,
   })
 
-  const quota = useGlanceQuota(on("quota"), now)
+  const quota = useGlanceQuota(on("quota"), now, { passive })
   const agenda = useGlanceAgenda(on("agenda"), now)
   const activity = useGlanceActivity(
     on("activity"),
@@ -187,6 +202,7 @@ export function useGlanceSources(active: boolean): UseGlanceSourcesResult {
       config,
       workspace,
       when,
+      actions,
       fleet: fleetOn ? buildFleetSlice(island, now) : null,
       usage: usageOn
         ? buildUsageSlice({
@@ -208,6 +224,7 @@ export function useGlanceSources(active: boolean): UseGlanceSourcesResult {
       config,
       workspace,
       when,
+      actions,
       fleetOn,
       island,
       usageOn,

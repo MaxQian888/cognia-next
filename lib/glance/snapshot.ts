@@ -13,6 +13,7 @@
  * how old each part is rather than pretending the whole object is fresh.
  */
 
+import type { TrayPanelAction } from "@/lib/tray-panel/types"
 import type { TrayStateSnapshot } from "@/lib/tray/types"
 import type {
   GlanceActivityRange,
@@ -232,6 +233,13 @@ export interface GlanceSnapshotV1 {
   /** App state the quick actions' `when` expressions read. Usage is omitted. */
   when: TrayStateSnapshot
   /**
+   * The tray action catalogue, resolved (`resolveTrayPanelActions`): what the
+   * quick actions module and the delegate bar render and run. Desktop-host
+   * configuration the user authored, not session content. A remote consumer
+   * (a paired phone, phase 3) never receives it.
+   */
+  actions: TrayPanelAction[]
+  /**
    * Slices for the VISIBLE modules only. A hidden module's slice is null, and
    * the publisher does not compute it.
    */
@@ -266,6 +274,7 @@ export function isGlanceSnapshot(value: unknown): value is GlanceSnapshotV1 {
     typeof v.config === "object" &&
     v.config !== null &&
     typeof v.when === "object" &&
-    v.when !== null
+    v.when !== null &&
+    Array.isArray(v.actions)
   )
 }

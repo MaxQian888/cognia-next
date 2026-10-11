@@ -32,6 +32,23 @@
     "optionsLabel": "委派选项"
   },
   "dismiss": "关闭面板",
+  "edit": {
+    "delegate": "委托栏",
+    "done": "完成",
+    "hint": "拖动模块调整顺序，选择尺寸或隐藏。修改立即生效。",
+    "start": "编辑",
+    "width": "宽度",
+    "widths": {
+      "narrow": "窄（{px} px）",
+      "standard": "标准（{px} px）",
+      "wide": "宽（{px} px）"
+    },
+    "widthsShort": {
+      "narrow": "窄",
+      "standard": "中",
+      "wide": "宽"
+    }
+  },
   "empty": "暂无操作 — 可在「设置 › 桌面」中添加。",
   "errors": {
     "badTarget": "「{value}」不是有效的目标。",
@@ -52,7 +69,8 @@
   "openSettings": "打开设置",
   "quick": {
     "edit": "编辑动作",
-    "label": "快捷"
+    "label": "快捷",
+    "loading": "正在读取操作…"
   },
   "refresh": "刷新",
   "resize": "拖动以调整面板最大高度",

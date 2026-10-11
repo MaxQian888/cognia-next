@@ -28,6 +28,11 @@ export const GLANCE_REQUEST_TIMEOUT_MS = 15_000
 
 export interface UseGlanceConsumerResult {
   snapshot: GlanceSnapshotV1 | null
+  /**
+   * How many newer snapshots have arrived since mount. A consumer that needs
+   * "the first snapshot after X" records this at X and waits for it to grow.
+   */
+  receivedCount: number
   /** Resolves to null on success, a `glance.errors.*` key otherwise. */
   send: (body: GlanceRequestBody) => Promise<string | null>
 }
@@ -38,6 +43,8 @@ export function useGlanceConsumer(
   visible: boolean
 ): UseGlanceConsumerResult {
   const [snapshot, setSnapshot] = useState<GlanceSnapshotV1 | null>(null)
+  const [receivedCount, setReceivedCount] = useState(0)
+  const latestRef = useRef<GlanceSnapshotV1 | null>(null)
   const pending = useRef(
     new Map<
       string,
@@ -52,7 +59,10 @@ export function useGlanceConsumer(
     const track = (off: () => void) => (disposed ? off() : offs.push(off))
     void onGlanceSnapshot((payload) => {
       if (disposed || !isGlanceSnapshot(payload)) return
-      setSnapshot((current) => (isNewerSnapshot(current, payload) ? payload : current))
+      if (!isNewerSnapshot(latestRef.current, payload)) return
+      latestRef.current = payload
+      setSnapshot(payload)
+      setReceivedCount((count) => count + 1)
     }).then(track)
     void onGlanceResult((result) => {
       const entry = pending.current.get(result.requestId)
@@ -108,5 +118,5 @@ export function useGlanceConsumer(
     [consumer]
   )
 
-  return { snapshot, send }
+  return { snapshot, receivedCount, send }
 }

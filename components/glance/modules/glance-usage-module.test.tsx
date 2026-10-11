@@ -55,6 +55,7 @@ function makeSnapshot(usage: GlanceUsageSlice | null): GlanceSnapshotV1 {
     config: DEFAULT_GLANCE_PANEL_SETTINGS,
     workspace: null,
     when: {} as GlanceSnapshotV1["when"],
+    actions: [],
     fleet: null,
     usage,
     quota: null,

@@ -52,6 +52,8 @@ export const GLANCE_PRESET_IDS: readonly GlancePresetId[] = [
 /** The panel's three widths, in logical px of the panel body. */
 export type GlanceWidthStep = "narrow" | "standard" | "wide"
 
+export const GLANCE_WIDTH_STEPS: readonly GlanceWidthStep[] = ["narrow", "standard", "wide"]
+
 export const GLANCE_WIDTH_PX: Readonly<Record<GlanceWidthStep, number>> = {
   narrow: 320,
   standard: 380,
@@ -99,6 +101,11 @@ export interface GlancePanelSettings {
   /** Logical px. Clamped to [GLANCE_MAX_HEIGHT_MIN, GLANCE_MAX_HEIGHT_MAX]. */
   maxHeight: number
   scope: GlanceScope
+  /**
+   * Show the delegate bar under the stack. Hidden, the primary action joins
+   * the quick actions instead, so it stays one click away.
+   */
+  showDelegate: boolean
   /** Move keyboard focus to the delegate bar whenever the panel opens. */
   autofocusDelegate: boolean
   options: GlanceModuleOptions

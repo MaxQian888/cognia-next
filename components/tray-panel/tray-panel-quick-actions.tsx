@@ -8,6 +8,9 @@
  * form in place in both, and runs from there, exactly as the list always did;
  * an action without inputs runs on click. The catalogue is edited in Settings ›
  * Desktop, which the module links to.
+ *
+ * The catalogue arrives with the glance snapshot; `null` means it has not yet,
+ * which reads as loading rather than as "you have no actions".
  */
 
 import { createContext, useContext, type ReactNode } from "react"
@@ -27,13 +30,13 @@ import type { GlanceModuleSize } from "@/types/glance/layout"
 import { TrayPanelFieldControl } from "./tray-panel-field-control"
 import { useTrayPanelRunner } from "./tray-panel-runner"
 
-const ActionsContext = createContext<readonly TrayPanelAction[]>([])
+const ActionsContext = createContext<readonly TrayPanelAction[] | null>(null)
 
 export function TrayPanelQuickActionsProvider({
   actions,
   children,
 }: {
-  actions: readonly TrayPanelAction[]
+  actions: readonly TrayPanelAction[] | null
   children: ReactNode
 }) {
   return <ActionsContext.Provider value={actions}>{children}</ActionsContext.Provider>
@@ -86,12 +89,20 @@ export function TrayPanelQuickActions({ size }: { size: GlanceModuleSize }) {
     }
     void runner.run(action)
   }
-  const expanded = actions.find((a) => a.id === runner.expandedId && a.fields.length > 0)
+  const expanded = actions?.find((a) => a.id === runner.expandedId && a.fields.length > 0)
   const editLink = (
     <GlanceLinkButton onClick={() => route({ kind: "open-owner", owner: "tray-actions" })}>
       {t("quick.edit")}
     </GlanceLinkButton>
   )
+
+  if (actions === null) {
+    return (
+      <GlanceSection moduleId="quick" title={title}>
+        <p className="py-1 text-[12px] text-muted-foreground">{t("quick.loading")}</p>
+      </GlanceSection>
+    )
+  }
 
   if (actions.length === 0) {
     return (

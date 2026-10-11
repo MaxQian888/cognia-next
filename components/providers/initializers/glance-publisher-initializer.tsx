@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { useGlanceSources, type UseGlanceSourcesResult } from "@/hooks/glance/use-glance-sources"
+import { withEditedEntries, withPreset } from "@/lib/glance/layout-edit"
 import { glanceOwnerHref } from "@/lib/glance/owner-routes"
 import { normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { parseGlanceRequest, type GlanceRequest } from "@/lib/glance/requests"
@@ -166,6 +167,15 @@ export async function executeGlanceRequest(
     case "set-width":
       await patchLayout((c) => ({ ...c, width: request.width }))
       return null
+    case "set-layout":
+      await patchLayout((c) => withEditedEntries(c, request.entries))
+      return null
+    case "apply-preset":
+      await patchLayout((c) => withPreset(c, request.preset))
+      return null
+    case "set-delegate-visible":
+      await patchLayout((c) => ({ ...c, showDelegate: request.visible }))
+      return null
     case "pet-care":
       if (!getCommand(request.command)) return "errors.commandUnavailable"
       await executeCommand(request.command)
@@ -191,7 +201,15 @@ export function GlancePublisherInitializer() {
 
   // Build the snapshot on every source change and push it, coalesced.
   useEffect(() => {
-    if (!active) return
+    if (!active) {
+      // Built while someone was looking; stale the moment nobody is. Dropping
+      // it means the next consumer to appear is answered by a fresh build,
+      // never by a snapshot that predates settings changed in between (the
+      // panel arms its open-triggered actions on the first snapshot it
+      // receives after a reveal).
+      latest.current = null
+      return
+    }
     if (epoch.current === 0) epoch.current = Date.now()
     revision.current += 1
     latest.current = {

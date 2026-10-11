@@ -283,6 +283,32 @@ export function resolvePrimaryAction(
   return visibleActions(actions, snapshot).find((a) => a.trigger.kind === "submit") ?? null
 }
 
+export interface PanelActionGroups {
+  /** The delegate bar's action, when the bar is shown. */
+  delegate: TrayPanelAction | null
+  /** What the quick actions module lists. */
+  quick: TrayPanelAction[]
+}
+
+/**
+ * Split the visible catalogue between the delegate bar and the quick actions
+ * (ADR-0225 §2). With the bar hidden (`showDelegate` off) the primary action
+ * joins the quick actions, so hiding the bar never makes it unreachable.
+ * `open`-triggered actions run on reveal and are listed nowhere.
+ */
+export function splitPanelActions(
+  actions: readonly TrayPanelAction[],
+  snapshot: TrayStateSnapshot,
+  showDelegate: boolean
+): PanelActionGroups {
+  const primary = resolvePrimaryAction(actions, snapshot)
+  const delegate = showDelegate ? primary : null
+  const quick = visibleActions(actions, snapshot).filter(
+    (a) => a.id !== delegate?.id && a.trigger.kind !== "open"
+  )
+  return { delegate, quick }
+}
+
 /** Visible actions that run automatically when the panel opens. */
 export function openTriggeredActions(
   actions: readonly TrayPanelAction[],

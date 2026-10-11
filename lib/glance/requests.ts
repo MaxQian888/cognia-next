@@ -4,7 +4,7 @@
  * The consumer renders and asks; the main window validates and decides. Every
  * request kind here is either a route to an owner surface or a light action
  * that ADR-0225 §1 allows on a glance surface (refresh, retry, enable a quota
- * source, change a panel option, a pet care command). None approves, stops or
+ * source, change a panel option or the layout, a pet care command). None approves, stops or
  * answers anything: those stay in Agent Fleet. Delegating and running the
  * user's quick actions keep their existing path (`tray-panel://run`).
  */
@@ -13,7 +13,15 @@ import {
   GLANCE_ACTIVITY_RANGES,
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MODULE_IDS,
+  GLANCE_MODULE_SIZES,
+  GLANCE_PRESET_IDS,
+  GLANCE_WIDTH_STEPS,
   type GlanceActivityRange,
+  type GlanceLayoutEntry,
+  type GlanceModuleId,
+  type GlanceModuleSize,
+  type GlancePresetId,
   type GlanceScope,
   type GlanceUsageScope,
   type GlanceWidthStep,
@@ -53,6 +61,11 @@ export type GlanceRequestBody =
   | { kind: "set-max-height"; maxHeight: number }
   | { kind: "set-width"; width: GlanceWidthStep }
   | { kind: "pet-care"; command: GlancePetCommand }
+  /** The in-place editor's new entry list (makes the layout `custom`). */
+  | { kind: "set-layout"; entries: GlanceLayoutEntry[] }
+  /** Reset the layout to a built-in preset. */
+  | { kind: "apply-preset"; preset: GlancePresetId }
+  | { kind: "set-delegate-visible"; visible: boolean }
 
 export type GlanceRequest = GlanceRequestBody & {
   requestId: string
@@ -80,7 +93,6 @@ const OWNERS: readonly GlanceOwnerSurface[] = [
 ]
 
 const FLEET_FILTERS: readonly GlanceFleetFilter[] = ["working", "awaiting", "failed"]
-const WIDTHS: readonly GlanceWidthStep[] = ["narrow", "standard", "wide"]
 
 const ID_MAX = 512
 
@@ -90,6 +102,30 @@ function isId(value: unknown): value is string {
 
 function isOptionalId(value: unknown): boolean {
   return value === undefined || isId(value)
+}
+
+/**
+ * An entry list exactly as the editor produces it: every known module at most
+ * once, each with a known size and a boolean `hidden`. Repairs (missing
+ * modules, unsupported sizes) are the normalizer's job on write; anything
+ * beyond that is not an editor's output and is refused.
+ */
+function parseEntries(value: unknown): GlanceLayoutEntry[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > GLANCE_MODULE_IDS.length) {
+    return null
+  }
+  const seen = new Set<string>()
+  const out: GlanceLayoutEntry[] = []
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return null
+    const e = item as Record<string, unknown>
+    if (!GLANCE_MODULE_IDS.includes(e.id as GlanceModuleId) || seen.has(e.id as string)) return null
+    if (!GLANCE_MODULE_SIZES.includes(e.size as GlanceModuleSize)) return null
+    if (typeof e.hidden !== "boolean") return null
+    seen.add(e.id as string)
+    out.push({ id: e.id as GlanceModuleId, size: e.size as GlanceModuleSize, hidden: e.hidden })
+  }
+  return out
 }
 
 /**
@@ -154,12 +190,24 @@ export function parseGlanceRequest(value: unknown): GlanceRequest | null {
         ? { ...base, kind: "set-max-height", maxHeight: Math.round(v.maxHeight) }
         : null
     case "set-width":
-      return WIDTHS.includes(v.width as GlanceWidthStep)
+      return GLANCE_WIDTH_STEPS.includes(v.width as GlanceWidthStep)
         ? { ...base, kind: "set-width", width: v.width as GlanceWidthStep }
         : null
     case "pet-care":
       return (GLANCE_PET_COMMANDS as readonly string[]).includes(v.command as string)
         ? { ...base, kind: "pet-care", command: v.command as GlancePetCommand }
+        : null
+    case "set-layout": {
+      const entries = parseEntries(v.entries)
+      return entries ? { ...base, kind: "set-layout", entries } : null
+    }
+    case "apply-preset":
+      return GLANCE_PRESET_IDS.includes(v.preset as GlancePresetId)
+        ? { ...base, kind: "apply-preset", preset: v.preset as GlancePresetId }
+        : null
+    case "set-delegate-visible":
+      return typeof v.visible === "boolean"
+        ? { ...base, kind: "set-delegate-visible", visible: v.visible }
         : null
     default:
       return null

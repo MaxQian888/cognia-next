@@ -43,10 +43,10 @@ function Harness({
   actions,
   children,
 }: {
-  actions: readonly TrayPanelAction[]
+  actions: readonly TrayPanelAction[] | null
   children: ReactNode
 }) {
-  const runner = useTrayPanelRunnerState(actions)
+  const runner = useTrayPanelRunnerState(actions ?? [])
   return (
     <TrayPanelRunnerProvider runner={runner}>
       <TrayPanelQuickActionsProvider actions={actions}>{children}</TrayPanelQuickActionsProvider>
@@ -54,7 +54,7 @@ function Harness({
   )
 }
 
-function renderModule(size: GlanceModuleSize, actions: readonly TrayPanelAction[]) {
+function renderModule(size: GlanceModuleSize, actions: readonly TrayPanelAction[] | null) {
   const route = jest.fn()
   const glance: GlanceContextValue = {
     snapshot: placeholderSnapshot(),
@@ -82,6 +82,26 @@ beforeEach(() => {
 })
 
 describe("TrayPanelQuickActions", () => {
+  describe("before the catalogue has arrived (actions = null)", () => {
+    it.each(["compact", "standard"] as const)(
+      "reads as loading at %s, not as an empty catalogue",
+      (size) => {
+        renderModule(size, null)
+        expect(screen.getByText("Reading actions…")).toBeInTheDocument()
+        expect(
+          screen.queryByText("No actions yet — add one in Settings › Desktop.")
+        ).not.toBeInTheDocument()
+        expect(screen.queryByRole("button", { name: "Edit actions" })).not.toBeInTheDocument()
+        expect(screen.queryByRole("toolbar")).not.toBeInTheDocument()
+      }
+    )
+
+    it("shows the module title while loading", () => {
+      renderModule("standard", null)
+      expect(screen.getByRole("region", { name: "Quick" })).toBeInTheDocument()
+    })
+  })
+
   it.each(["compact", "standard"] as const)(
     "shows the empty state at %s with an edit link",
     async (size) => {

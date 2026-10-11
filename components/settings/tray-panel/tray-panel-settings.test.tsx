@@ -17,12 +17,19 @@ jest.mock("@/lib/tauri/store", () => ({
   getPref: jest.fn().mockResolvedValue(null),
   setPref: jest.fn().mockResolvedValue(undefined),
 }))
+// The preview runs the glance source hooks (stores, live queries); it has its
+// own test, so a stub keeps this one about the settings editor.
+jest.mock("./tray-panel-preview", () => ({
+  TrayPanelPreview: () =>
+    jest
+      .requireActual<typeof import("react")>("react")
+      .createElement("div", { "data-testid": "tray-panel-preview-stub" }),
+}))
 
 import { isTauri } from "@/lib/tauri"
 import { getTrayPanelConfig, openTrayPanel, setTrayLeftClickAction } from "@/lib/tauri/tray-panel"
 import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
-import { __resetTrayPanelStoreForTesting, useTrayPanelStore } from "@/lib/tray-panel/store"
-import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
+import { DEFAULT_GLANCE_PANEL_SETTINGS, layoutFromPreset } from "@/lib/glance/presets"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GlancePanelSettings } from "@/types/glance/layout"
 import type { TrayPanelAction } from "@/lib/tray-panel/types"
@@ -43,25 +50,48 @@ const custom = (id: string, patch: Partial<TrayPanelAction> = {}): TrayPanelActi
   ...patch,
 })
 
-function seed(actions: TrayPanelAction[]) {
-  // `hydrate` is stubbed alongside the fixtures: the real one reads the (empty)
-  // pref store on mount and would replace them with the shipped defaults.
-  useTrayPanelStore.setState({ actions, hydrated: true, hydrate: async () => {} })
-}
+const saveSettingsMock = jest.fn(async (_patch: Record<string, unknown>) => {})
 
-const saveSettingsMock = jest.fn(async () => {})
+// Seeding never drops the shipped built-ins: `resolveTrayPanelActions` folds
+// any missing one back in, which would move the fixtures around.
+let storedLayout: Partial<GlancePanelSettings> | undefined
 
-function seedLayout(layout: Partial<GlancePanelSettings> | undefined) {
+function seedSettings(
+  actions: TrayPanelAction[] | undefined,
+  layout: Partial<GlancePanelSettings> | undefined = storedLayout
+) {
+  storedLayout = layout
   useSettingsStore.setState({
-    settings: { trayPanelLayout: layout } as never,
+    settings: { trayPanelActions: actions, trayPanelLayout: layout } as never,
     save: saveSettingsMock as never,
   })
 }
 
+/** The shipped catalogue plus the given custom actions, at the end. */
+function seed(...customs: TrayPanelAction[]) {
+  seedSettings([...DEFAULT_TRAY_PANEL_ACTIONS, ...customs])
+}
+
+function seedLayout(layout: Partial<GlancePanelSettings> | undefined) {
+  seedSettings(undefined, layout)
+}
+
+/** The catalogue of the latest `{ trayPanelActions }` write. */
+function savedActions(): TrayPanelAction[] {
+  const call = saveSettingsMock.mock.calls.findLast((c) => "trayPanelActions" in (c[0] as object))
+  return (call?.[0] as { trayPanelActions: TrayPanelAction[] }).trayPanelActions
+}
+
+/** The layout of the latest `{ trayPanelLayout }` write. */
+function savedLayout(): GlancePanelSettings {
+  const call = saveSettingsMock.mock.calls.findLast((c) => "trayPanelLayout" in (c[0] as object))
+  return (call?.[0] as { trayPanelLayout: GlancePanelSettings }).trayPanelLayout
+}
+
 beforeEach(() => {
-  __resetTrayPanelStoreForTesting()
   saveSettingsMock.mockClear()
-  seedLayout(undefined)
+  storedLayout = undefined
+  seedSettings(undefined, undefined)
   isTauriMock.mockReset().mockReturnValue(true)
   getConfigMock.mockReset().mockResolvedValue({ leftClick: "panel", width: 380, height: 460 })
   setLeftClickMock.mockReset().mockResolvedValue(true)
@@ -80,7 +110,7 @@ describe("TrayPanelSettings", () => {
   })
 
   it("uses the card-free settings primitives, not a Card wrapper", () => {
-    seed([custom("a")])
+    seed(custom("a"))
     const { container } = render(<TrayPanelSettings />)
     // `SettingsStack` declares the container query every field measures
     // against; a Card-based rewrite would lose it.
@@ -90,7 +120,7 @@ describe("TrayPanelSettings", () => {
 
   it("shows the persisted left-click preference", async () => {
     getConfigMock.mockResolvedValue({ leftClick: "none", width: 380, height: 460 })
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
     await waitFor(() =>
@@ -102,7 +132,7 @@ describe("TrayPanelSettings", () => {
 
   it("persists a changed left-click preference natively", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
     await user.click(screen.getByRole("combobox", { name: "behavior.leftClick" }))
@@ -113,7 +143,7 @@ describe("TrayPanelSettings", () => {
 
   it("opens the panel from the preview button", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
     await user.click(screen.getByRole("button", { name: /behavior.previewAction/ }))
@@ -121,30 +151,96 @@ describe("TrayPanelSettings", () => {
   })
 
   it("lists every action with its trigger and effect summary", () => {
-    seed([custom("a", { effect: { kind: "slash", command: "clear" } })])
+    seed(custom("a", { effect: { kind: "slash", command: "clear" } }))
     render(<TrayPanelSettings />)
 
+    const row = screen.getByTestId("tray-panel-row-a")
+    expect(within(row).getByText("editor.triggers.manual")).toBeInTheDocument()
+    expect(within(row).getByText("/clear")).toBeInTheDocument()
+  })
+
+  it("lists the shipped catalogue when none is stored", () => {
+    render(<TrayPanelSettings />)
+    for (const action of DEFAULT_TRAY_PANEL_ACTIONS) {
+      expect(screen.getByTestId(`tray-panel-row-${action.id}`)).toBeInTheDocument()
+    }
+  })
+
+  it("folds a built-in missing from the stored catalogue back into the list", () => {
+    seedSettings([custom("a")])
+    render(<TrayPanelSettings />)
     expect(screen.getByTestId("tray-panel-row-a")).toBeInTheDocument()
-    expect(screen.getByText("editor.triggers.manual")).toBeInTheDocument()
-    expect(screen.getByText("/clear")).toBeInTheDocument()
+    expect(screen.getByTestId("tray-panel-row-trayPanel.delegate")).toBeInTheDocument()
+  })
+
+  it("writes the whole catalogue back to settings on an edit", async () => {
+    const user = userEvent.setup()
+    seed(custom("a"))
+    render(<TrayPanelSettings />)
+    await user.click(
+      within(screen.getByTestId("tray-panel-row-a")).getByRole("button", { name: "actions.hide" })
+    )
+    expect(saveSettingsMock).toHaveBeenCalledTimes(1)
+    expect(savedActions()).toHaveLength(DEFAULT_TRAY_PANEL_ACTIONS.length + 1)
+  })
+
+  it("shows a hidden action as hidden and offers to show it again", async () => {
+    const user = userEvent.setup()
+    seedSettings([...DEFAULT_TRAY_PANEL_ACTIONS, custom("a", { hidden: true })])
+    render(<TrayPanelSettings />)
+    const row = screen.getByTestId("tray-panel-row-a")
+    expect(row).toHaveClass("opacity-50")
+    await user.click(within(row).getByRole("button", { name: "actions.show" }))
+    expect(savedActions().find((x) => x.id === "a")?.hidden).toBe(false)
+  })
+
+  it("hides a built-in instead of deleting it", () => {
+    seed(custom("a"))
+    render(<TrayPanelSettings />)
+    expect(
+      within(screen.getByTestId("tray-panel-row-trayPanel.settings")).getByRole("button", {
+        name: "actions.remove",
+      })
+    ).toBeDisabled()
+  })
+
+  it("saves an action edited through the editor", async () => {
+    const user = userEvent.setup()
+    seed(custom("a"))
+    render(<TrayPanelSettings />)
+    await user.click(
+      within(screen.getByTestId("tray-panel-row-a")).getByRole("button", { name: "actions.edit" })
+    )
+    const label = await screen.findByLabelText("label", { selector: "#tp-label" })
+    await user.clear(label)
+    await user.type(label, "Renamed")
+    await user.click(await screen.findByRole("button", { name: "save" }))
+    expect(savedActions().find((x) => x.id === "a")?.label).toBe("Renamed")
   })
 
   it("reorders an action", async () => {
     const user = userEvent.setup()
-    seed([custom("a"), custom("b")])
+    seed(custom("a"), custom("b"))
     render(<TrayPanelSettings />)
 
     const row = screen.getByTestId("tray-panel-row-b")
     await user.click(within(row).getByRole("button", { name: "actions.moveUp" }))
-    expect(useTrayPanelStore.getState().actions.map((x) => x.id)).toEqual(["b", "a"])
+    expect(saveSettingsMock).toHaveBeenCalledTimes(1)
+    expect(savedActions().map((x) => x.id)).toEqual([
+      ...DEFAULT_TRAY_PANEL_ACTIONS.map((x) => x.id),
+      "b",
+      "a",
+    ])
   })
 
   it("disables the move buttons at the ends", () => {
-    seed([custom("a"), custom("b")])
+    seed(custom("a"), custom("b"))
     render(<TrayPanelSettings />)
 
     expect(
-      within(screen.getByTestId("tray-panel-row-a")).getByRole("button", { name: "actions.moveUp" })
+      within(screen.getByTestId("tray-panel-row-trayPanel.delegate")).getByRole("button", {
+        name: "actions.moveUp",
+      })
     ).toBeDisabled()
     expect(
       within(screen.getByTestId("tray-panel-row-b")).getByRole("button", {
@@ -155,34 +251,44 @@ describe("TrayPanelSettings", () => {
 
   it("toggles an action's visibility", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
-    await user.click(screen.getByRole("button", { name: "actions.hide" }))
-    expect(useTrayPanelStore.getState().actions[0].hidden).toBe(true)
+    await user.click(
+      within(screen.getByTestId("tray-panel-row-a")).getByRole("button", { name: "actions.hide" })
+    )
+    expect(savedActions().find((x) => x.id === "a")?.hidden).toBe(true)
   })
 
   it("removes a custom action", async () => {
     const user = userEvent.setup()
-    seed([custom("a"), custom("b")])
+    seed(custom("a"), custom("b"))
     render(<TrayPanelSettings />)
 
     const row = screen.getByTestId("tray-panel-row-a")
     await user.click(within(row).getByRole("button", { name: "actions.remove" }))
-    expect(useTrayPanelStore.getState().actions.map((x) => x.id)).toEqual(["b"])
+    expect(savedActions().map((x) => x.id)).toEqual([
+      ...DEFAULT_TRAY_PANEL_ACTIONS.map((x) => x.id),
+      "b",
+    ])
   })
 
   it("refuses to delete a built-in", () => {
-    seed([custom("a", { builtIn: true })])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
-    expect(screen.getByRole("button", { name: "actions.remove" })).toBeDisabled()
-    expect(screen.getByText("actions.builtIn")).toBeInTheDocument()
+    const row = screen.getByTestId("tray-panel-row-trayPanel.newChat")
+    expect(within(row).getByRole("button", { name: "actions.remove" })).toBeDisabled()
+    expect(within(row).getByText("actions.builtIn")).toBeInTheDocument()
+    // A custom action is removable and carries no built-in badge.
+    const customRow = screen.getByTestId("tray-panel-row-a")
+    expect(within(customRow).getByRole("button", { name: "actions.remove" })).toBeEnabled()
+    expect(within(customRow).queryByText("actions.builtIn")).not.toBeInTheDocument()
   })
 
   it("adds a new action through the editor", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
     await user.click(screen.getByRole("button", { name: /actions.add/ }))
@@ -192,25 +298,173 @@ describe("TrayPanelSettings", () => {
 
   it("opens the editor for an existing action", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
-    await user.click(screen.getByRole("button", { name: "actions.edit" }))
+    await user.click(
+      within(screen.getByTestId("tray-panel-row-a")).getByRole("button", { name: "actions.edit" })
+    )
     expect(await screen.findByLabelText("label", { selector: "#tp-label" })).toHaveValue("a")
   })
 
   it("restores the shipped catalogue", async () => {
     const user = userEvent.setup()
-    seed([custom("a")])
+    seed(custom("a"))
     render(<TrayPanelSettings />)
 
     await user.click(screen.getByRole("button", { name: /actions.reset/ }))
-    expect(useTrayPanelStore.getState().actions).toEqual(DEFAULT_TRAY_PANEL_ACTIONS)
+    expect(saveSettingsMock).toHaveBeenCalledWith({ trayPanelActions: DEFAULT_TRAY_PANEL_ACTIONS })
+  })
+
+  describe("modules", () => {
+    const row = (id: string) => screen.getByTestId(`glance-editor-row-${id}`)
+
+    it("renders the layout editor with the preview beside it", () => {
+      render(<TrayPanelSettings />)
+      expect(screen.getByText("modules.title")).toBeInTheDocument()
+      expect(screen.getByTestId("glance-layout-editor")).toBeInTheDocument()
+      expect(screen.getByTestId("tray-panel-preview-stub")).toBeInTheDocument()
+      // Desktop modules, quick included, in the shipped balanced order.
+      expect(
+        screen
+          .getAllByTestId(/^glance-editor-row-/)
+          .map((el) => el.getAttribute("data-testid")?.replace("glance-editor-row-", ""))
+      ).toEqual(["fleet", "usage", "quota", "agenda", "activity", "quick"])
+    })
+
+    it("hides a module and saves the layout as custom", async () => {
+      const user = userEvent.setup()
+      render(<TrayPanelSettings />)
+      await user.click(
+        within(row("usage")).getByRole("button", { name: 'hide:{"module":"modules.usage.label"}' })
+      )
+      expect(saveSettingsMock).toHaveBeenCalledTimes(1)
+      const saved = savedLayout()
+      expect(saved).toEqual({
+        ...DEFAULT_GLANCE_PANEL_SETTINGS,
+        preset: "custom",
+        entries: [
+          { id: "fleet", size: "standard", hidden: false },
+          { id: "quota", size: "standard", hidden: false },
+          { id: "agenda", size: "compact", hidden: false },
+          { id: "activity", size: "standard", hidden: false },
+          { id: "quick", size: "compact", hidden: false },
+          { id: "usage", size: "standard", hidden: true },
+          { id: "recents", size: "compact", hidden: true },
+          { id: "pet", size: "compact", hidden: true },
+        ],
+      })
+    })
+
+    it("saves a size change as custom", async () => {
+      const user = userEvent.setup()
+      render(<TrayPanelSettings />)
+      await user.click(within(row("fleet")).getByRole("radio", { name: "expanded" }))
+      const saved = savedLayout()
+      expect(saved.preset).toBe("custom")
+      expect(saved.entries[0]).toEqual({ id: "fleet", size: "expanded", hidden: false })
+    })
+
+    it("adds a hidden module back and saves it as shown", async () => {
+      const user = userEvent.setup()
+      render(<TrayPanelSettings />)
+      await user.click(
+        screen.getByRole("button", { name: 'addModule:{"module":"modules.recents.label"}' })
+      )
+      const saved = savedLayout()
+      expect(saved.preset).toBe("custom")
+      expect(saved.entries.filter((e) => !e.hidden).map((e) => e.id)).toEqual([
+        "fleet",
+        "usage",
+        "quota",
+        "agenda",
+        "activity",
+        "quick",
+        "recents",
+      ])
+    })
+
+    it("keeps width, height, scope and options through a layout edit", async () => {
+      const user = userEvent.setup()
+      seedLayout({
+        ...DEFAULT_GLANCE_PANEL_SETTINGS,
+        width: "wide",
+        maxHeight: 500,
+        scope: "workspace",
+      })
+      render(<TrayPanelSettings />)
+      await user.click(
+        within(row("fleet")).getByRole("button", { name: 'hide:{"module":"modules.fleet.label"}' })
+      )
+      expect(savedLayout()).toEqual(
+        expect.objectContaining({ width: "wide", maxHeight: 500, scope: "workspace" })
+      )
+    })
+
+    it("shows the current preset on the preset menu", () => {
+      render(<TrayPanelSettings />)
+      expect(
+        screen.getByRole("button", { name: 'editor.presetLabel:{"preset":"presets.balanced"}' })
+      ).toBeInTheDocument()
+    })
+
+    it("shows Custom for an edited layout", () => {
+      seedLayout({ ...DEFAULT_GLANCE_PANEL_SETTINGS, preset: "custom" })
+      render(<TrayPanelSettings />)
+      expect(
+        screen.getByRole("button", { name: 'editor.presetLabel:{"preset":"editor.custom"}' })
+      ).toBeInTheDocument()
+    })
+
+    it("applies a preset: its id and its entries, keeping the panel options", async () => {
+      const user = userEvent.setup()
+      seedLayout({ ...DEFAULT_GLANCE_PANEL_SETTINGS, preset: "custom", width: "narrow" })
+      render(<TrayPanelSettings />)
+      await user.click(
+        screen.getByRole("button", { name: 'editor.presetLabel:{"preset":"editor.custom"}' })
+      )
+      await user.click(await screen.findByRole("menuitem", { name: "presets.usageFirst" }))
+      expect(saveSettingsMock).toHaveBeenCalledTimes(1)
+      expect(savedLayout()).toEqual({
+        ...DEFAULT_GLANCE_PANEL_SETTINGS,
+        width: "narrow",
+        preset: "usage-first",
+        entries: layoutFromPreset("usage-first"),
+      })
+    })
+
+    it("saves the delegate switch", async () => {
+      const user = userEvent.setup()
+      render(<TrayPanelSettings />)
+      const toggle = screen.getByRole("switch", { name: "modules.delegate" })
+      expect(toggle).toBeChecked()
+      await user.click(toggle)
+      expect(savedLayout()).toEqual(expect.objectContaining({ showDelegate: false }))
+    })
+
+    it("does not mark the layout custom for a delegate change", async () => {
+      const user = userEvent.setup()
+      render(<TrayPanelSettings />)
+      await user.click(screen.getByRole("switch", { name: "modules.delegate" }))
+      expect(savedLayout().preset).toBe("balanced")
+    })
+
+    it("disables the autofocus switch while the delegate bar is hidden", () => {
+      seedLayout({ ...DEFAULT_GLANCE_PANEL_SETTINGS, showDelegate: false, autofocusDelegate: true })
+      render(<TrayPanelSettings />)
+      expect(screen.getByRole("switch", { name: "modules.delegate" })).not.toBeChecked()
+      expect(screen.getByRole("switch", { name: "layout.autofocus" })).toBeDisabled()
+    })
+
+    it("enables the autofocus switch while the delegate bar is shown", () => {
+      render(<TrayPanelSettings />)
+      expect(screen.getByRole("switch", { name: "layout.autofocus" })).toBeEnabled()
+    })
   })
 
   describe("panel layout", () => {
     it("shows the shipped layout when none is stored", () => {
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       expect(screen.getByRole("combobox", { name: "layout.width" })).toHaveTextContent(
         'layout.widthOptions.standard:{"px":380}'
@@ -232,7 +486,7 @@ describe("TrayPanelSettings", () => {
         maxHeight: 99999,
         scope: "workspace",
       })
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       expect(screen.getByRole("combobox", { name: "layout.width" })).toHaveTextContent(
         "layout.widthOptions.wide"
@@ -245,7 +499,7 @@ describe("TrayPanelSettings", () => {
 
     it("saves a width change into the whole layout", async () => {
       const user = userEvent.setup()
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       await user.click(screen.getByRole("combobox", { name: "layout.width" }))
       await user.click(await screen.findByRole("option", { name: /layout\.widthOptions\.narrow/ }))
@@ -256,7 +510,7 @@ describe("TrayPanelSettings", () => {
 
     it("saves the scope", async () => {
       const user = userEvent.setup()
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       await user.click(screen.getByRole("combobox", { name: "layout.scope" }))
       await user.click(await screen.findByRole("option", { name: "layout.scopeOptions.workspace" }))
@@ -267,7 +521,7 @@ describe("TrayPanelSettings", () => {
 
     it("saves the autofocus switch", async () => {
       const user = userEvent.setup()
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       await user.click(screen.getByRole("switch", { name: "layout.autofocus" }))
       expect(saveSettingsMock).toHaveBeenCalledWith({
@@ -277,7 +531,7 @@ describe("TrayPanelSettings", () => {
 
     it("moves the max height locally and writes once on commit", async () => {
       const user = userEvent.setup()
-      seed([custom("a")])
+      seed(custom("a"))
       render(<TrayPanelSettings />)
       const slider = screen.getByRole("slider", { name: "layout.maxHeight" })
       slider.focus()

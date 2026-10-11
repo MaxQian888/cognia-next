@@ -9,10 +9,12 @@
  * floating boxes, and it sizes off `@container/settings-stack` so it works
  * full-width and inside a narrow detail pane alike.
  *
- * Two things live here: what a tray click does (persisted natively, because
- * the click handler runs with no renderer involved), and the action catalogue
- * (persisted in the shared Tauri store, so the panel window sees edits on its
- * next open).
+ * What lives here: what a tray click does (persisted natively, because the
+ * click handler runs with no renderer involved); the panel's modules with a
+ * live preview, and its size and defaults (ADR-0225 §12); and the action
+ * catalogue. Modules, layout and actions are all in `AppSettings`, and the
+ * panel window receives them in the glance snapshot, so an edit here repaints
+ * an open panel at once.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -29,8 +31,13 @@ import {
   TrashIcon,
   MousePointerClickIcon,
   LayoutPanelTopIcon,
+  LayoutListIcon,
   PanelsTopLeftIcon,
 } from "lucide-react"
+
+import { GlanceLayoutEditor } from "@/components/glance/glance-layout-editor"
+import { GlancePresetMenu } from "@/components/glance/glance-preset-menu"
+import { useTrayPanelActions } from "@/hooks/tray-panel/use-tray-panel-actions"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,7 +56,9 @@ import {
   SettingsStack,
 } from "@/components/settings/common/settings-block"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
+import { withEditedEntries, withPreset } from "@/lib/glance/layout-edit"
 import { clampMaxHeight, normalizeGlancePanelSettings } from "@/lib/glance/presets"
+import { glanceModulesFor } from "@/lib/glance/registry"
 import { isTauri } from "@/lib/tauri"
 import {
   DEFAULT_TRAY_PANEL_CONFIG,
@@ -59,7 +68,6 @@ import {
 } from "@/lib/tauri/tray-panel"
 import { resolveLabel } from "@/lib/tray-panel/defaults"
 import { describeEffect } from "@/lib/tray-panel/resolve"
-import { useTrayPanelStore } from "@/lib/tray-panel/store"
 import type { TrayLeftClickAction, TrayPanelAction } from "@/lib/tray-panel/types"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
@@ -67,27 +75,30 @@ import {
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
   GLANCE_WIDTH_PX,
+  GLANCE_WIDTH_STEPS,
   type GlancePanelSettings,
   type GlanceScope,
   type GlanceWidthStep,
 } from "@/types/glance/layout"
 
 import { TrayPanelActionEditor, blankAction } from "./tray-panel-action-editor"
+import { TrayPanelPreview } from "./tray-panel-preview"
 
 const LEFT_CLICK_ACTIONS: TrayLeftClickAction[] = ["panel", "toggle-window", "none"]
-const WIDTH_STEPS: GlanceWidthStep[] = ["narrow", "standard", "wide"]
+const DESKTOP_MODULES = glanceModulesFor("desktop")
 const SCOPES: GlanceScope[] = ["all", "workspace"]
 
 export function TrayPanelSettings() {
   const t = useTranslations("settings.trayPanel")
   const tRoot = useTranslations()
 
-  const actions = useTrayPanelStore((s) => s.actions)
-  const hydrate = useTrayPanelStore((s) => s.hydrate)
-  const upsertAction = useTrayPanelStore((s) => s.upsertAction)
-  const removeAction = useTrayPanelStore((s) => s.removeAction)
-  const moveAction = useTrayPanelStore((s) => s.moveAction)
-  const reset = useTrayPanelStore((s) => s.reset)
+  const {
+    actions,
+    upsert: upsertAction,
+    remove: removeAction,
+    move: moveAction,
+    reset,
+  } = useTrayPanelActions()
 
   const [leftClick, setLeftClick] = useState<TrayLeftClickAction>(
     DEFAULT_TRAY_PANEL_CONFIG.leftClick
@@ -100,17 +111,16 @@ export function TrayPanelSettings() {
   const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
   const saveSettings = useSettingsStore((s) => s.save)
   const layout = useMemo(() => normalizeGlancePanelSettings(storedLayout), [storedLayout])
+  const saveLayout = useCallback(
+    (next: GlancePanelSettings) => void saveSettings({ trayPanelLayout: next }),
+    [saveSettings]
+  )
   const patchLayout = useCallback(
-    (patch: Partial<GlancePanelSettings>) =>
-      void saveSettings({ trayPanelLayout: { ...layout, ...patch } }),
-    [layout, saveSettings]
+    (patch: Partial<GlancePanelSettings>) => saveLayout({ ...layout, ...patch }),
+    [layout, saveLayout]
   )
   // The slider moves locally and commits on release, so a drag is one write.
   const [draftHeight, setDraftHeight] = useState<number | null>(null)
-
-  useEffect(() => {
-    void hydrate()
-  }, [hydrate])
 
   useEffect(() => {
     let cancelled = false
@@ -177,6 +187,43 @@ export function TrayPanelSettings() {
       </SettingsBlock>
 
       <SettingsBlock
+        icon={<LayoutListIcon />}
+        title={t("modules.title")}
+        description={t("modules.description")}
+        settingId="tray-panel-modules"
+        action={
+          <GlancePresetMenu
+            preset={layout.preset}
+            onApply={(preset) => saveLayout(withPreset(layout, preset))}
+            align="end"
+            className="h-8 border px-2.5 text-sm"
+          />
+        }
+      >
+        <div className="grid gap-6 @md/settings-stack:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0 space-y-4">
+            <GlanceLayoutEditor
+              entries={layout.entries}
+              onChange={(entries) => saveLayout(withEditedEntries(layout, entries))}
+              available={DESKTOP_MODULES}
+            />
+            <SettingsField
+              htmlFor="tray-panel-delegate"
+              label={t("modules.delegate")}
+              description={t("modules.delegateHint")}
+            >
+              <Switch
+                id="tray-panel-delegate"
+                checked={layout.showDelegate}
+                onCheckedChange={(checked) => patchLayout({ showDelegate: checked })}
+              />
+            </SettingsField>
+          </div>
+          <TrayPanelPreview />
+        </div>
+      </SettingsBlock>
+
+      <SettingsBlock
         icon={<PanelsTopLeftIcon />}
         title={t("layout.title")}
         description={t("layout.description")}
@@ -195,7 +242,7 @@ export function TrayPanelSettings() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {WIDTH_STEPS.map((step) => (
+              {GLANCE_WIDTH_STEPS.map((step) => (
                 <SelectItem key={step} value={step}>
                   {t(`layout.widthOptions.${step}`, { px: GLANCE_WIDTH_PX[step] })}
                 </SelectItem>
@@ -259,6 +306,7 @@ export function TrayPanelSettings() {
           <Switch
             id="tray-panel-autofocus"
             checked={layout.autofocusDelegate}
+            disabled={!layout.showDelegate}
             onCheckedChange={(checked) => patchLayout({ autofocusDelegate: checked })}
           />
         </SettingsField>

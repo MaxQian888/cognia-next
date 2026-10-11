@@ -12,13 +12,16 @@
  *
  * The state the panel renders (and its actions' `when` expressions read) no
  * longer comes from here: it is the Glance snapshot, published by
- * `GlancePublisherInitializer` (ADR-0225).
+ * `GlancePublisherInitializer` (ADR-0225). This initializer also performs the
+ * one-time import of the action catalogue from the Tauri store into settings
+ * (ADR-0225 §10), since it is the main-window owner of the panel's actions.
  */
 
 import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { loggers } from "@cognia/logging"
 
 import { startNewSession } from "@/lib/chat/start-session"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
@@ -26,10 +29,14 @@ import { handleTrayUsageCommand } from "@/lib/tray/dispatcher"
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import { isTauri } from "@/lib/tauri"
+import { deletePref, getPref } from "@/lib/tauri/store"
 import { onTrayPanelRequest, sendTrayPanelResult } from "@/lib/tauri/tray-panel"
+import { migrateTrayPanelActions } from "@/lib/tray-panel/migrate-actions"
 import type { TrayPanelResolvedEffect, TrayPanelRunRequest } from "@/lib/tray-panel/types"
 import { useChatStore } from "@/stores/chat"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
+import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 
 /**
@@ -66,6 +73,27 @@ async function delegate(
 
 export function TrayPanelInitializer() {
   const router = useRouter()
+  const settingsLoaded = useSettingsStore((s) => s.loaded && !s.loadFailed)
+
+  // One-time import of the action catalogue into settings. Only once settings
+  // really loaded: a failed load falls back to defaults in memory, and saving
+  // into that would write a catalogue over a database we could not read.
+  const migrated = useRef(false)
+  useEffect(() => {
+    if (!settingsLoaded || migrated.current || !isTauri() || !isMainAppWindow()) return
+    migrated.current = true
+    void migrateTrayPanelActions({
+      current: useSettingsStore.getState().settings?.trayPanelActions,
+      readPref: getPref,
+      deletePref,
+      save: (actions) => useSettingsStore.getState().save({ trayPanelActions: actions }),
+    }).catch((error: unknown) => {
+      // Retried on the next settings load or launch: the pref is only deleted
+      // after the save landed.
+      migrated.current = false
+      loggers.tray.warn("tray panel action import failed", { error: String(error) })
+    })
+  }, [settingsLoaded])
   const t = useTranslations("trayPanel")
   // The translator isn't a stable reference, so it rides in a ref rather than
   // in the effect deps — depending on it would tear down and rebuild every

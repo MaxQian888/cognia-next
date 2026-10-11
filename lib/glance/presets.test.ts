@@ -188,6 +188,7 @@ describe("normalizeGlancePanelSettings", () => {
       width: "standard",
       maxHeight: GLANCE_MAX_HEIGHT_DEFAULT,
       scope: "all",
+      showDelegate: true,
       autofocusDelegate: false,
       options: DEFAULT_GLANCE_MODULE_OPTIONS,
     })
@@ -250,6 +251,22 @@ describe("normalizeGlancePanelSettings", () => {
   it("keeps an explicitly empty entry list with every module hidden", () => {
     const out = normalizeGlancePanelSettings({ entries: [] })
     expect(out.entries.every((e) => e.hidden)).toBe(true)
+  })
+
+  describe("showDelegate", () => {
+    it("is shown by default, including for layouts stored before the switch existed", () => {
+      expect(DEFAULT_GLANCE_PANEL_SETTINGS.showDelegate).toBe(true)
+      expect(normalizeGlancePanelSettings({}).showDelegate).toBe(true)
+      expect(normalizeGlancePanelSettings({ preset: "minimal" }).showDelegate).toBe(true)
+    })
+
+    it("stays true unless explicitly false", () => {
+      expect(normalizeGlancePanelSettings({ showDelegate: true }).showDelegate).toBe(true)
+      expect(normalizeGlancePanelSettings({ showDelegate: false }).showDelegate).toBe(false)
+      for (const showDelegate of ["false", 0, null, "no"]) {
+        expect(normalizeGlancePanelSettings({ showDelegate }).showDelegate).toBe(true)
+      }
+    })
   })
 
   it("always stamps version 1", () => {

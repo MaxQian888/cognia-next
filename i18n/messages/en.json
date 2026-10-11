@@ -18380,6 +18380,22 @@
     }
   },
   "glance": {
+    "editor": {
+      "add": "Add modules",
+      "addEmpty": "Every module is shown.",
+      "addModule": "Add {module}",
+      "addShort": "Add",
+      "custom": "Custom",
+      "hide": "Hide {module}",
+      "presetHint": "A preset replaces the modules, their order and sizes. Width, height and options stay.",
+      "presetLabel": "Preset: {preset}",
+      "presets": "Presets",
+      "reorder": "Reorder {module}",
+      "shown": "Shown",
+      "shownEmpty": "Nothing is shown — add a module below.",
+      "shownHint": "Drag to reorder",
+      "size": "Size of {module}"
+    },
     "errors": {
       "commandUnavailable": "That command isn't available right now.",
       "deliveryFailed": "Cognia's main window didn't respond.",
@@ -18561,6 +18577,16 @@
       "balanced": "Balanced",
       "minimal": "Minimal",
       "usageFirst": "Usage first"
+    },
+    "sizes": {
+      "compact": "Compact",
+      "expanded": "Expanded",
+      "short": {
+        "compact": "S",
+        "expanded": "L",
+        "standard": "M"
+      },
+      "standard": "Standard"
     }
   },
   "globalSearch": {
@@ -52302,6 +52328,13 @@
           "standard": "Standard · {px}px",
           "wide": "Wide · {px}px"
         }
+      },
+      "modules": {
+        "delegate": "Show the delegate bar",
+        "delegateHint": "Hidden, the delegate action moves into the quick actions.",
+        "description": "Which modules the panel shows, in what order and size. The preview updates as you edit.",
+        "previewCaption": "Preview with your current data",
+        "title": "Modules"
       }
     },
     "usageCost": {
@@ -57493,6 +57526,23 @@
       "optionsLabel": "Delegate options"
     },
     "dismiss": "Close panel",
+    "edit": {
+      "delegate": "Delegate bar",
+      "done": "Done",
+      "hint": "Drag modules to reorder, pick a size, or hide them. Changes apply right away.",
+      "start": "Edit",
+      "width": "Width",
+      "widths": {
+        "narrow": "Narrow ({px} px)",
+        "standard": "Standard ({px} px)",
+        "wide": "Wide ({px} px)"
+      },
+      "widthsShort": {
+        "narrow": "S",
+        "standard": "M",
+        "wide": "L"
+      }
+    },
     "empty": "No actions yet — add one in Settings › Desktop.",
     "errors": {
       "badTarget": "\"{value}\" is not a valid destination.",
@@ -57513,7 +57563,8 @@
     "openSettings": "Open settings",
     "quick": {
       "edit": "Edit actions",
-      "label": "Quick"
+      "label": "Quick",
+      "loading": "Reading actions…"
     },
     "refresh": "Refresh",
     "resize": "Drag to change the panel's maximum height",

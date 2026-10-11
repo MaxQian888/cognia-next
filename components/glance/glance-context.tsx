@@ -11,11 +11,12 @@
 
 import { createContext, useContext } from "react"
 
+import type { GlancePlatform } from "@/lib/glance/registry"
 import type { GlanceRequestBody } from "@/lib/glance/requests"
 import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import type { GlanceWidthStep } from "@/types/glance/layout"
 
-export type GlancePlatform = "desktop" | "mobile"
+export type { GlancePlatform }
 
 export interface GlanceContextValue {
   snapshot: GlanceSnapshotV1

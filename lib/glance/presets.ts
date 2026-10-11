@@ -18,6 +18,7 @@ import {
   GLANCE_MODULE_IDS,
   GLANCE_MODULE_SIZES,
   GLANCE_PRESET_IDS,
+  GLANCE_WIDTH_STEPS,
   type GlanceLayoutEntry,
   type GlanceModuleId,
   type GlanceModuleOptions,
@@ -86,6 +87,7 @@ export const DEFAULT_GLANCE_PANEL_SETTINGS: GlancePanelSettings = {
   width: "standard",
   maxHeight: GLANCE_MAX_HEIGHT_DEFAULT,
   scope: "all",
+  showDelegate: true,
   autofocusDelegate: false,
   options: DEFAULT_GLANCE_MODULE_OPTIONS,
 }
@@ -141,8 +143,6 @@ function normalizeOptions(raw: unknown): GlanceModuleOptions {
   }
 }
 
-const WIDTH_STEPS: readonly GlanceWidthStep[] = ["narrow", "standard", "wide"]
-
 /** Read whatever is stored into a valid settings object. Never throws. */
 export function normalizeGlancePanelSettings(raw: unknown): GlancePanelSettings {
   if (!isRecord(raw)) return DEFAULT_GLANCE_PANEL_SETTINGS
@@ -158,11 +158,14 @@ export function normalizeGlancePanelSettings(raw: unknown): GlancePanelSettings 
     entries:
       raw.entries === undefined ? layoutFromPreset("balanced") : normalizeEntries(raw.entries),
     width:
-      typeof raw.width === "string" && (WIDTH_STEPS as readonly string[]).includes(raw.width)
+      typeof raw.width === "string" && (GLANCE_WIDTH_STEPS as readonly string[]).includes(raw.width)
         ? (raw.width as GlanceWidthStep)
         : DEFAULT_GLANCE_PANEL_SETTINGS.width,
     maxHeight: clampMaxHeight(raw.maxHeight),
     scope: raw.scope === "workspace" ? "workspace" : "all",
+    // Shown unless explicitly turned off: layouts stored before the switch
+    // existed keep the bar they had.
+    showDelegate: raw.showDelegate !== false,
     autofocusDelegate: raw.autofocusDelegate === true,
     options: normalizeOptions(raw.options),
   }

@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -22,6 +22,36 @@ jest.mock("@/lib/tauri/tray-panel", () => ({
   sendTrayPanelResult: jest.fn().mockResolvedValue(true),
 }))
 jest.mock("@/lib/tauri/safe-unlisten", () => ({ safeUnlisten: jest.fn() }))
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => true),
+}))
+jest.mock("@/lib/tauri/store", () => ({
+  getPref: jest.fn(),
+  deletePref: jest.fn(),
+}))
+jest.mock("@cognia/logging", () => {
+  const actual = jest.requireActual("@cognia/logging")
+  const tray = { warn: jest.fn() }
+  return {
+    ...actual,
+    loggers: new Proxy(actual.loggers, {
+      get: (target, key) =>
+        key === "tray" ? tray : (target as Record<string | symbol, unknown>)[key],
+    }),
+  }
+})
+jest.mock("@/stores/settings", () => {
+  const { create } = jest.requireActual("zustand") as typeof import("zustand")
+  return {
+    useSettingsStore: create(() => ({
+      loaded: false,
+      loadFailed: false,
+      settings: {} as Record<string, unknown> | null,
+      save: jest.fn(),
+    })),
+  }
+})
 
 const setActiveSession = jest.fn()
 const setSelectedGuild = jest.fn()
@@ -37,12 +67,17 @@ jest.mock("@/stores/ui", () => ({
   useUIStore: { getState: jest.fn() },
 }))
 
+import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
 import { startNewSession } from "@/lib/chat/start-session"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { isMainAppWindow } from "@/lib/pet/window-role"
+import { isTauri } from "@/lib/tauri"
+import { deletePref, getPref } from "@/lib/tauri/store"
 import { onTrayPanelRequest, sendTrayPanelResult } from "@/lib/tauri/tray-panel"
+import { TRAY_PANEL_ACTIONS_PREF } from "@/lib/tray-panel/defaults"
+import { useSettingsStore } from "@/stores/settings"
 import { useChatStore } from "@/stores/chat"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { useUIStore } from "@/stores/ui"
@@ -58,6 +93,14 @@ const executeCommandMock = executeCommand as jest.Mock
 const getCommandMock = getCommand as jest.Mock
 const isMainAppWindowMock = isMainAppWindow as jest.Mock
 const toastErrorMock = toast.error as jest.Mock
+const isTauriMock = isTauri as jest.Mock
+const getPrefMock = getPref as jest.Mock
+const deletePrefMock = deletePref as jest.Mock
+const warnMock = (loggers as unknown as { tray: { warn: jest.Mock } }).tray.warn
+const settingsStore = useSettingsStore as unknown as {
+  getState: () => { save: jest.Mock }
+  setState: (patch: Record<string, unknown>) => void
+}
 
 /** Capture the handler the initializer registers, then drive it directly. */
 let requestHandler: ((request: TrayPanelRunRequest) => void) | undefined
@@ -87,6 +130,12 @@ beforeEach(() => {
   })
   ;(useComposerIntentStore.getState as jest.Mock).mockReturnValue({ stage })
   ;(useUIStore.getState as jest.Mock).mockReturnValue({ setSelectedGuild })
+  isTauriMock.mockReturnValue(true)
+  getPrefMock.mockReset().mockResolvedValue(null)
+  deletePrefMock.mockReset().mockResolvedValue(undefined)
+  warnMock.mockClear()
+  settingsStore.getState().save.mockReset().mockResolvedValue(undefined)
+  settingsStore.setState({ loaded: false, loadFailed: false, settings: {} })
 })
 
 async function mountAndWait() {
@@ -204,7 +253,138 @@ describe("TrayPanelInitializer", () => {
     await mountAndWait()
     expect(onRequestMock).toHaveBeenCalledTimes(1)
   })
+})
 
+describe("TrayPanelInitializer: action catalogue import", () => {
+  const stored = [
+    {
+      id: "mine",
+      label: "Mine",
+      fields: [],
+      trigger: { kind: "manual" },
+      effect: { kind: "navigate", path: "/x" },
+    },
+  ]
+  const save = () => settingsStore.getState().save
+  const loadSettings = (patch: Record<string, unknown> = {}) =>
+    act(() => settingsStore.setState({ loaded: true, loadFailed: false, ...patch }))
+
+  it("imports the stored catalogue into settings once they loaded, then drops the pref", async () => {
+    getPrefMock.mockResolvedValue(stored)
+    loadSettings()
+    render(<TrayPanelInitializer />)
+
+    await waitFor(() => expect(deletePrefMock).toHaveBeenCalledTimes(1))
+    expect(getPrefMock).toHaveBeenCalledWith(TRAY_PANEL_ACTIONS_PREF)
+    expect(save()).toHaveBeenCalledTimes(1)
+    expect(save()).toHaveBeenCalledWith({ trayPanelActions: stored })
+    expect(deletePrefMock).toHaveBeenCalledWith(TRAY_PANEL_ACTIONS_PREF)
+    // The pref is deleted only after the catalogue is in settings.
+    expect(save().mock.invocationCallOrder[0]).toBeLessThan(
+      deletePrefMock.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("waits for settings to load", async () => {
+    getPrefMock.mockResolvedValue(stored)
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(onRequestMock).toHaveBeenCalled())
+    expect(getPrefMock).not.toHaveBeenCalled()
+
+    loadSettings()
+    await waitFor(() => expect(save()).toHaveBeenCalledWith({ trayPanelActions: stored }))
+  })
+
+  it("does not run when settings failed to load", async () => {
+    // A failed load falls back to defaults in memory; saving into that would
+    // write a catalogue over a database that could not be read.
+    getPrefMock.mockResolvedValue(stored)
+    loadSettings({ loadFailed: true })
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(onRequestMock).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(getPrefMock).not.toHaveBeenCalled()
+    expect(save()).not.toHaveBeenCalled()
+    expect(deletePrefMock).not.toHaveBeenCalled()
+  })
+
+  it("does not run outside Tauri", async () => {
+    isTauriMock.mockReturnValue(false)
+    loadSettings()
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(onRequestMock).toHaveBeenCalled())
+    expect(getPrefMock).not.toHaveBeenCalled()
+  })
+
+  it("does not run in a secondary window", async () => {
+    isMainAppWindowMock.mockReturnValue(false)
+    loadSettings()
+    render(<TrayPanelInitializer />)
+    await Promise.resolve()
+    expect(getPrefMock).not.toHaveBeenCalled()
+    expect(save()).not.toHaveBeenCalled()
+  })
+
+  it("runs once per mount, not on every settings load", async () => {
+    getPrefMock.mockResolvedValue(stored)
+    loadSettings()
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(deletePrefMock).toHaveBeenCalledTimes(1))
+
+    act(() => settingsStore.setState({ loaded: false }))
+    loadSettings()
+    await Promise.resolve()
+    expect(getPrefMock).toHaveBeenCalledTimes(1)
+    expect(save()).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a catalogue settings already hold and only drops the pref", async () => {
+    getPrefMock.mockResolvedValue(stored)
+    loadSettings({ settings: { trayPanelActions: [] } })
+    render(<TrayPanelInitializer />)
+
+    await waitFor(() => expect(deletePrefMock).toHaveBeenCalledWith(TRAY_PANEL_ACTIONS_PREF))
+    expect(save()).not.toHaveBeenCalled()
+  })
+
+  it("does nothing when there is no pref", async () => {
+    loadSettings()
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(getPrefMock).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(save()).not.toHaveBeenCalled()
+    expect(deletePrefMock).not.toHaveBeenCalled()
+  })
+
+  it("logs a rejected save, keeps the pref, and retries on the next settings load", async () => {
+    getPrefMock.mockResolvedValue(stored)
+    save().mockRejectedValueOnce(new Error("disk full"))
+    loadSettings()
+    render(<TrayPanelInitializer />)
+
+    await waitFor(() => expect(warnMock).toHaveBeenCalledTimes(1))
+    expect(warnMock).toHaveBeenCalledWith(
+      "tray panel action import failed",
+      expect.objectContaining({ error: expect.stringContaining("disk full") })
+    )
+    expect(deletePrefMock).not.toHaveBeenCalled()
+
+    act(() => settingsStore.setState({ loaded: false }))
+    loadSettings()
+    await waitFor(() => expect(deletePrefMock).toHaveBeenCalledTimes(1))
+    expect(save()).toHaveBeenCalledTimes(2)
+  })
+
+  it("logs a failing pref read without crashing", async () => {
+    getPrefMock.mockRejectedValue(new Error("store unavailable"))
+    loadSettings()
+    render(<TrayPanelInitializer />)
+    await waitFor(() => expect(warnMock).toHaveBeenCalledTimes(1))
+    expect(deletePrefMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("TrayPanelInitializer: render", () => {
   it("renders nothing", async () => {
     const { container } = render(<TrayPanelInitializer />)
     expect(container).toBeEmptyDOMElement()

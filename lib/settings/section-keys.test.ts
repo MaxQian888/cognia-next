@@ -127,6 +127,14 @@ describe("section-keys", () => {
       expect(keyToSection("trayPanelLayout")).toBe("desktop")
     })
 
+    it("desktop owns the tray panel action catalogue (ADR-0225 §10)", () => {
+      expect(SECTION_OWNED_KEYS.desktop).toContain("trayPanelActions")
+      expect(keyToSection("trayPanelActions")).toBe("desktop")
+      expect(resetKeysForSection("desktop")).toEqual(
+        expect.arrayContaining(["trayPanelLayout", "trayPanelActions"])
+      )
+    })
+
     it("those keys are canonical DEFAULTS keys, so the completeness guard covers them", () => {
       // Before ADR-0127 none of these were in DEFAULTS, so the guard passed
       // while reset / review / transfer silently skipped them.

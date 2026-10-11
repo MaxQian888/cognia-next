@@ -5,7 +5,7 @@ description: 点击桌面托盘图标打开的速览面板 —— 由模块组�
 
 # 托盘面板
 
-<Status variant="beta">Beta · 桌面端 · ADR-0225 第一阶段</Status>
+<Status variant="beta">Beta · 桌面端 · ADR-0225 第一、二阶段</Status>
 
 <TLDR>
   左键点击托盘图标，会打开一个置顶的小窗口：页头放工作区范围切换和总体状态胶囊，中间是一列**速览模块**，
@@ -21,7 +21,7 @@ description: 点击桌面托盘图标打开的速览面板 —— 由模块组�
 | 页头     | 标题、范围切换（全部 / 当前工作区）、状态胶囊（自动化 › 待处理 › 运行中 › 空闲）、刷新、设置、关闭 |
 | 速览栈   | 已存布局中可见的模块，按顺序排列。面板达到最大高度后滚动                                   |
 | 委托栏   | 主托盘操作，呈现为一行可增高的输入框，其余字段放在选项菜单里                               |
-| 页脚     | 打开 Cognia，以及快照的新鲜度（「12 秒前更新」/「连接中…」）                              |
+| 页脚     | 编辑、预设切换、打开 Cognia，以及快照的新鲜度（「12 秒前更新」/「连接中…」）              |
 | 调整手柄 | 拖动，或按 ↑ / ↓ 以 40 px 步进，设置最大高度（240–860 px）                                |
 
 窗口随内容自适应：`ResizeObserver` 让原生窗口贴合卡片尺寸，左上角位置保持不动。各区块在同一个容器里用细线分隔，
@@ -45,6 +45,17 @@ description: 点击桌面托盘图标打开的速览面板 —— 由模块组�
 预设（`balanced`、`usage-first`、`agent-ops`、`minimal`）位于 `lib/glance/presets.ts`。
 已存布局只能通过 `normalizeGlancePanelSettings` 读取：未知 id 丢弃，重复项保留第一个，缺失的模块以隐藏状态补在末尾，越界高度会被钳制。
 
+## 编辑
+
+页脚的**编辑**会就地把速览栈换成布局编辑器：按住模块的拖动手柄（或按空格后用 ↑ / ↓）调整顺序，选择尺寸、隐藏模块，或把隐藏的模块加回来。
+列表下方还有两个面板专属开关：委托栏与宽度档位。按 Esc 或**完成**退出编辑模式，面板保持打开。每次修改都会立即显示，
+并作为请求发出（`set-layout`、`set-delegate-visible`、`set-width`）；请求失败时面板回到已存布局并说明原因。
+
+任何修改都会让布局变成**自定义**。编辑旁的预设切换会把模块及其顺序和尺寸重置为某个内置预设（`apply-preset`），
+宽度、高度、范围与模块选项保持不变。隐藏委托栏后，主操作会移到快捷操作中，依然一键可达。
+
+编辑器是 `components/glance/glance-layout-editor.tsx`，它能做的每种修改都是 `lib/glance/layout-edit.ts` 中的纯函数，与设置页编辑器共用。
+
 ## 数据流
 
 ```
@@ -63,6 +74,8 @@ send(request) ───── glance://request ────▶ executeGlanceRequ
 - **租约。** 面板隐藏时结束租约；过期租约每 10 秒清理一次。没有存活的租约时，发布端不做任何计算。
 - **顺序。** 快照带 `epoch`（每次发布端启动生成）和 `revision`，消费端只接受更新的快照。
 - **不含内容。** 切片只携带计数、标签和 id，从不携带提示词、提问或权限请求的内容。名称在离开主窗口前会先脱敏并截断。
+- **操作目录。** 快捷操作与委托栏同样来自快照（`actions`），由 `AppSettings.trayPanelActions` 解析而来。第一份快照到达前，
+  快捷操作显示加载中，委托栏不出现。`open` 触发的操作每次显示面板只运行一次，时机是显示之后到达的第一份快照，因此总是使用最新目录。
 - **请求。** `parseGlanceRequest` 严格校验每个请求。路由类请求在主窗口接手后关闭面板；轻量请求（范围、用量口径、花费显示、
   活跃度区间、尺寸、额度刷新 / 启用、宠物照料）不关闭面板。15 秒内没有回应的请求按超时处理，转圈不会一直挂着。
 
@@ -76,14 +89,30 @@ send(request) ───── glance://request ────▶ executeGlanceRequ
 
 ## 设置
 
-设置 › 桌面 › 托盘面板 › **面板布局** 可以设置宽度档位（320 / 380 / 460 px）、最大高度、默认范围，以及打开时委托栏是否自动获得焦点。
-布局存为 `AppSettings.trayPanelLayout`（同步类别 `desktop-only`），因此无需 Dexie 迁移即可随备份保存；面板打开时，下一份快照就会按新设置重绘。
+设置 › 桌面 › 托盘面板 提供完整编辑器：
+
+- **模块**：与编辑模式相同的布局编辑器、预设切换、委托栏开关，旁边是实时预览。预览用本窗口自己的数据渲染真实模块，
+  宽度与最大高度和设置一致。它以被动方式构建（不刷新额度、不探测登录），并且是 `inert` 的，只是一幅画面，不是第二个面板。
+- **面板布局**：宽度档位（320 / 380 / 460 px）、最大高度、默认范围，以及打开时委托栏是否自动获得焦点。
+- **操作**：操作目录编辑器。
+
+布局存为 `AppSettings.trayPanelLayout`，目录存为 `AppSettings.trayPanelActions`，同步类别都是 `desktop-only`，
+因此无需 Dexie 迁移即可随备份与账号同步保存；面板打开时，下一份快照就会按新设置重绘。
+
+### 迁移
+
+ADR-0225 之前，目录保存在 Tauri store 的 `trayPanel.actions.v1` 下，因为面板窗口直接读取它。`TrayPanelInitializer`
+在设置加载完成后（加载失败时不会）把它一次性导入设置，并且只在保存成功后才删除该 pref，因此中断的导入会再次执行。
+如果设置里已经有目录（从另一台桌面同步而来），以设置为准并丢弃 pref。`resolveTrayPanelActions`（`lib/tray-panel/catalogue.ts`）
+会修复读到的内容：丢弃格式错误或重复的条目，改写已退役的原生效果，并补回新版本新增的内置操作。
 
 ## 代码位置
 
 | 关注点                   | 路径                                                              |
 | ------------------------ | ----------------------------------------------------------------- |
 | 布局类型与预设           | `types/glance/layout.ts`、`lib/glance/{registry,presets}.ts`      |
+| 布局修改与编辑器         | `lib/glance/layout-edit.ts`、`components/glance/glance-{layout-editor,preset-menu}.tsx` |
+| 操作目录                 | `lib/tray-panel/{catalogue,migrate-actions}.ts`、`hooks/tray-panel/use-tray-panel-actions.ts` |
 | 快照与切片构建           | `lib/glance/snapshot.ts`、`lib/glance/build-*.ts`                 |
 | 请求、租约、归属路由     | `lib/glance/{requests,subscriptions,owner-routes}.ts`             |
 | 传输                     | `lib/tauri/glance.ts`                                             |
@@ -95,5 +124,5 @@ send(request) ───── glance://request ────▶ executeGlanceRequ
 
 ## 尚未包含
 
-第一阶段交付了注册表、快照、桌面面板、Fleet 路由和额度状态。就地编辑与预设选择（第二阶段）、移动端首页与速览抽屉（第三阶段），
-以及插件模块扩展点、菜单栏标题与 Capacity Dock 数据源（第四阶段），按 ADR-0225 的交付计划推进。
+第一阶段交付了注册表、快照、桌面面板、Fleet 路由和额度状态；第二阶段交付了就地编辑、预设、带实时预览的设置编辑器与目录迁移。
+移动端首页与速览抽屉（第三阶段），以及插件模块扩展点、菜单栏标题与 Capacity Dock 数据源（第四阶段），按 ADR-0225 的交付计划推进。

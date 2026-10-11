@@ -200,6 +200,7 @@ export const SETTINGS_SYNC = {
   statusBarLayout: { category: "desktop-only" },
   mobileHomeLayout: { category: "desktop-only" },
   trayPanelLayout: { category: "desktop-only" },
+  trayPanelActions: { category: "desktop-only" },
   mobileTabLayout: { category: "desktop-only" },
   mobileWorkflowView: { category: "desktop-only" },
   discoverLayout: { category: "desktop-only" },

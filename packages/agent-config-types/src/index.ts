@@ -5146,6 +5146,15 @@ export interface AppSettings {
    */
   trayPanelLayout?: import("@/types/glance/layout").GlancePanelSettings
   /**
+   * The tray panel's action catalogue (quick actions and the delegate bar's
+   * primary action). Imported once from the Tauri store pref
+   * `trayPanel.actions.v1` (`lib/tray-panel/migrate-actions.ts`); `undefined`
+   * means the shipped catalogue. Read through `resolveTrayPanelActions`
+   * (`lib/tray-panel/catalogue.ts`), never raw. The panel window receives it
+   * in the glance snapshot.
+   */
+  trayPanelActions?: import("@/lib/tray-panel/types").TrayPanelAction[]
+  /**
    * Customization of the mobile bottom tab bar: tab order, hidden tabs, and the
    * launch landing tab. Lives in settings JSON (same pattern as `sidebarLayout`)
    * — no Dexie migration. See `@/types/shell/mobile-tabs` for the model.

@@ -117,5 +117,12 @@
       "standard": "标准 · {px}px",
       "wide": "宽 · {px}px"
     }
+  },
+  "modules": {
+    "delegate": "显示委托栏",
+    "delegateHint": "隐藏后，委托操作会移到快捷操作中。",
+    "description": "面板显示哪些模块、以什么顺序和尺寸显示。编辑时预览会同步更新。",
+    "previewCaption": "使用你当前数据的预览",
+    "title": "模块"
   }
 }

@@ -451,6 +451,56 @@ describe("useGlanceQuota", () => {
     })
   })
 
+  describe("passive", () => {
+    function renderPassive(enabled: boolean) {
+      return renderHook(({ on }: { on: boolean }) => useGlanceQuota(on, NOW, { passive: true }), {
+        initialProps: { on: enabled },
+      })
+    }
+
+    it("still lists the vault but never refreshes configured sources on enable", async () => {
+      settingsState.settings = { limitsQueryEnabledAccounts: ["anthropic:acc1"] }
+      seedVault([{ provider: "anthropic", accounts: [summary({ id: "acc1", label: "Work" })] }])
+      const { result } = renderPassive(true)
+      await flush()
+      expect(listProviderIdsMock).toHaveBeenCalledTimes(1)
+      expect(listAccountsMock).toHaveBeenCalledWith("anthropic")
+      expect(refreshConfigured).not.toHaveBeenCalled()
+      expect(result.current.slice?.sources[0]).toMatchObject({
+        key: "anthropic:acc1",
+        accountLabel: "Work",
+      })
+    })
+
+    it("re-lists the vault on a subscription change without refreshing", async () => {
+      renderPassive(true)
+      await flush()
+      listProviderIdsMock.mockClear()
+      act(() => changeListener?.())
+      await flush()
+      expect(subscribeChangedMock).toHaveBeenCalledTimes(1)
+      expect(listProviderIdsMock).toHaveBeenCalledTimes(1)
+      expect(refreshConfigured).not.toHaveBeenCalled()
+    })
+
+    it("never probes for local logins, not even after the discovery interval", async () => {
+      renderPassive(true)
+      await flush()
+      await act(async () => {
+        jest.advanceTimersByTime(GLANCE_DISCOVERY_INTERVAL_MS * 2)
+      })
+      await flush()
+      expect(discoverAnthropicMock).not.toHaveBeenCalled()
+      expect(discoverCodexMock).not.toHaveBeenCalled()
+    })
+
+    it("gives nothing to offer for discovery", async () => {
+      const { result } = renderPassive(true)
+      await flush()
+      expect(result.current.slice?.sources.filter((s) => s.state === "discovered")).toEqual([])
+    })
+  })
+
   describe("discovery", () => {
     it("discovers both providers when the vault is empty and surfaces the finds", async () => {
       discoverAnthropicMock.mockResolvedValue({ found: true })

@@ -29,6 +29,7 @@ describe("isGlanceSnapshot", () => {
     generatedAt: 3,
     config: {},
     when: {},
+    actions: [],
   }
 
   it("accepts the structural minimum", () => {
@@ -52,6 +53,10 @@ describe("isGlanceSnapshot", () => {
     ["missing config", { config: undefined }],
     ["null when", { when: null }],
     ["missing when", { when: undefined }],
+    ["missing actions", { actions: undefined }],
+    ["null actions", { actions: null }],
+    ["object actions", { actions: {} }],
+    ["string actions", { actions: "trayPanel.delegate" }],
   ])("rejects %s", (_name, patch) => {
     expect(isGlanceSnapshot({ ...valid, ...patch })).toBe(false)
   })

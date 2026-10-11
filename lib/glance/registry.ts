@@ -9,7 +9,14 @@
  * this file stays pure and importable from anywhere.
  */
 
-import type { GlanceModuleId, GlanceModuleSize } from "@/types/glance/layout"
+import {
+  GLANCE_MODULE_IDS,
+  type GlanceModuleId,
+  type GlanceModuleSize,
+} from "@/types/glance/layout"
+
+/** Where a glance surface renders. */
+export type GlancePlatform = "desktop" | "mobile"
 
 /** Where a module's subject is owned. Resolved to a route by the publisher. */
 export type GlanceOwnerSurface =
@@ -39,7 +46,14 @@ export interface GlanceModuleDefinition {
   owner: GlanceOwnerSurface
   /** Narrowed by the header's workspace filter (§8). */
   scopeable: boolean
+  /**
+   * Surfaces that can render it. `quick` runs the desktop tray's own action
+   * catalogue, which a phone does not have.
+   */
+  platforms: readonly GlancePlatform[]
 }
+
+const EVERYWHERE: readonly GlancePlatform[] = ["desktop", "mobile"]
 
 export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinition>> = {
   fleet: {
@@ -50,6 +64,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "fleet",
     owner: "fleet",
     scopeable: false,
+    platforms: EVERYWHERE,
   },
   usage: {
     id: "usage",
@@ -59,6 +74,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "usage",
     owner: "usage",
     scopeable: true,
+    platforms: EVERYWHERE,
   },
   quota: {
     id: "quota",
@@ -68,6 +84,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "quota",
     owner: "subscription",
     scopeable: false,
+    platforms: EVERYWHERE,
   },
   agenda: {
     id: "agenda",
@@ -77,6 +94,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "agenda",
     owner: "scheduler",
     scopeable: false,
+    platforms: EVERYWHERE,
   },
   activity: {
     id: "activity",
@@ -86,6 +104,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "activity",
     owner: "usage",
     scopeable: true,
+    platforms: EVERYWHERE,
   },
   quick: {
     id: "quick",
@@ -95,6 +114,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "actions",
     owner: "tray-actions",
     scopeable: false,
+    platforms: ["desktop"],
   },
   recents: {
     id: "recents",
@@ -104,6 +124,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "recents",
     owner: "conversations",
     scopeable: true,
+    platforms: EVERYWHERE,
   },
   pet: {
     id: "pet",
@@ -113,6 +134,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "pet",
     owner: "pet",
     scopeable: false,
+    platforms: EVERYWHERE,
   },
 }
 
@@ -121,6 +143,11 @@ export function glanceModule(id: string): GlanceModuleDefinition | null {
   return Object.prototype.hasOwnProperty.call(GLANCE_MODULES, id)
     ? GLANCE_MODULES[id as GlanceModuleId]
     : null
+}
+
+/** The modules a platform can show, in catalogue order. */
+export function glanceModulesFor(platform: GlancePlatform): GlanceModuleId[] {
+  return GLANCE_MODULE_IDS.filter((id) => GLANCE_MODULES[id].platforms.includes(platform))
 }
 
 /** Whether `size` is one the module renders. */

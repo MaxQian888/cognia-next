@@ -53,6 +53,7 @@ function makeSnapshot(activity: GlanceActivitySlice | null): GlanceSnapshotV1 {
     config: DEFAULT_GLANCE_PANEL_SETTINGS,
     workspace: null,
     when: {} as GlanceSnapshotV1["when"],
+    actions: [],
     fleet: null,
     usage: null,
     quota: null,

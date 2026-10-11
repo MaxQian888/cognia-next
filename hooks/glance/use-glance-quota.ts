@@ -117,7 +117,16 @@ export interface UseGlanceQuotaResult {
   enable: (provider: string, accountId: string) => Promise<boolean>
 }
 
-export function useGlanceQuota(enabled: boolean, now: number): UseGlanceQuotaResult {
+export interface UseGlanceQuotaOptions {
+  /** Read the table and the vault only: no refreshes, no discovery. */
+  passive?: boolean
+}
+
+export function useGlanceQuota(
+  enabled: boolean,
+  now: number,
+  { passive = false }: UseGlanceQuotaOptions = {}
+): UseGlanceQuotaResult {
   const enabledAccounts = useSettingsStore((s) => s.settings?.limitsQueryEnabledAccounts)
   const customSources = useSettingsStore((s) => s.settings?.customLimitsSources)
   const { refresh: refreshConfigured, refreshing } = useAllConfiguredLimits()
@@ -157,16 +166,16 @@ export function useGlanceQuota(enabled: boolean, now: number): UseGlanceQuotaRes
       )
     }
     loadVault()
-    void refreshConfigured()
+    if (!passive) void refreshConfigured()
     const unsubscribe = subscribeSubscriptionChanged(() => {
       loadVault()
-      void refreshConfigured()
+      if (!passive) void refreshConfigured()
     })
     return () => {
       disposed = true
       unsubscribe()
     }
-  }, [enabled, refreshConfigured])
+  }, [enabled, passive, refreshConfigured])
 
   // Discovery, gated: only providers the vault has nothing for, at most every
   // 10 minutes, never with a keychain prompt. The vault is read through a ref
@@ -180,7 +189,7 @@ export function useGlanceQuota(enabled: boolean, now: number): UseGlanceQuotaRes
     vaultProvidersRef.current = vaultProviders
   }, [vaultProviders])
   useEffect(() => {
-    if (!enabled || !isTauri()) return
+    if (!enabled || passive || !isTauri()) return
     let cancelled = false
     const probe = async () => {
       if (Date.now() - lastDiscoveryAt.current < GLANCE_DISCOVERY_INTERVAL_MS) return
@@ -206,7 +215,7 @@ export function useGlanceQuota(enabled: boolean, now: number): UseGlanceQuotaRes
       // An interrupted probe never landed, so the next enable probes again.
       lastDiscoveryAt.current = 0
     }
-  }, [enabled])
+  }, [enabled, passive])
 
   const markRefreshing = useCallback((key: string, on: boolean) => {
     setRefreshingKeys((prev) => {

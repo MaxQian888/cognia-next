@@ -32,6 +32,23 @@
     "optionsLabel": "Delegate options"
   },
   "dismiss": "Close panel",
+  "edit": {
+    "delegate": "Delegate bar",
+    "done": "Done",
+    "hint": "Drag modules to reorder, pick a size, or hide them. Changes apply right away.",
+    "start": "Edit",
+    "width": "Width",
+    "widths": {
+      "narrow": "Narrow ({px} px)",
+      "standard": "Standard ({px} px)",
+      "wide": "Wide ({px} px)"
+    },
+    "widthsShort": {
+      "narrow": "S",
+      "standard": "M",
+      "wide": "L"
+    }
+  },
   "empty": "No actions yet — add one in Settings › Desktop.",
   "errors": {
     "badTarget": "\"{value}\" is not a valid destination.",
@@ -52,7 +69,8 @@
   "openSettings": "Open settings",
   "quick": {
     "edit": "Edit actions",
-    "label": "Quick"
+    "label": "Quick",
+    "loading": "Reading actions…"
   },
   "refresh": "Refresh",
   "resize": "Drag to change the panel's maximum height",

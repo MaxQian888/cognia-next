@@ -117,5 +117,12 @@
       "standard": "Standard · {px}px",
       "wide": "Wide · {px}px"
     }
+  },
+  "modules": {
+    "delegate": "Show the delegate bar",
+    "delegateHint": "Hidden, the delegate action moves into the quick actions.",
+    "description": "Which modules the panel shows, in what order and size. The preview updates as you edit.",
+    "previewCaption": "Preview with your current data",
+    "title": "Modules"
   }
 }

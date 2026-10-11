@@ -7,16 +7,24 @@
  *
  * Layout, top to bottom: a header (workspace scope, overall status, refresh,
  * settings, close), the glance stack (scrolls past the user's max height), the
- * delegate bar, and a footer. One container; sections separated by hairlines.
+ * delegate bar, and a footer (Edit, preset switch, open app, freshness). One
+ * container; sections separated by hairlines. Edit swaps the stack for the
+ * layout editor in place (ADR-0225 §12); every edit is a glance request, so
+ * the main window stays the only writer of the layout.
  *
  * The panel runs nothing itself and owns no data. Everything it shows is the
  * Glance snapshot the main window publishes (`useGlanceConsumer`); everything
  * it does is either a glance request (routes and light actions) or a resolved
  * tray action handed to the main window over `tray-panel://run`.
  *
- * Transient state is reset on every `tray-panel://shown`, because the window
- * survives a dismissal for cheap re-show and each click should open a fresh
- * panel.
+ * The action catalogue arrives in the snapshot too (ADR-0225 §10). Until the
+ * first snapshot lands the quick actions say they are loading and the
+ * delegate bar is absent, rather than offering a catalogue that may not be
+ * the user's.
+ *
+ * Transient state is reset on every reveal (a hidden → shown transition),
+ * because the window survives a dismissal for cheap re-show and each click
+ * should open a fresh panel.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -25,12 +33,14 @@ import {
   CheckIcon,
   ChevronDownIcon,
   MonitorIcon,
+  PencilIcon,
   RefreshCwIcon,
   SettingsIcon,
   XIcon,
 } from "lucide-react"
 
 import { GlanceProvider, type GlanceContextValue } from "@/components/glance/glance-context"
+import { GlancePresetMenu } from "@/components/glance/glance-preset-menu"
 import { GlanceDot } from "@/components/glance/glance-primitives"
 import { GlanceStack } from "@/components/glance/glance-stack"
 import { Button } from "@/components/ui/button"
@@ -43,6 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useGlanceConsumer } from "@/hooks/glance/use-glance-consumer"
+import { withEditedEntries, withPreset } from "@/lib/glance/layout-edit"
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import type { GlanceRequestBody } from "@/lib/glance/requests"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
@@ -57,10 +68,8 @@ import {
   actionForChord,
   chordFromEvent,
   openTriggeredActions,
-  resolvePrimaryAction,
-  visibleActions,
+  splitPanelActions,
 } from "@/lib/tray-panel/resolve"
-import { useTrayPanelStore } from "@/lib/tray-panel/store"
 import type { TrayPanelAction } from "@/lib/tray-panel/types"
 import { defaultSnapshot } from "@/lib/tray/sync"
 import { cn } from "@/lib/utils"
@@ -68,10 +77,15 @@ import {
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
   GLANCE_WIDTH_PX,
+  type GlanceLayoutEntry,
+  type GlancePanelSettings,
+  type GlancePresetId,
   type GlanceScope,
+  type GlanceWidthStep,
 } from "@/types/glance/layout"
 
 import { TrayPanelDelegateBar } from "./tray-panel-delegate-bar"
+import { TrayPanelEditMode } from "./tray-panel-edit-mode"
 import { TrayPanelQuickActions, TrayPanelQuickActionsProvider } from "./tray-panel-quick-actions"
 import { TrayPanelRunnerProvider, useTrayPanelRunnerState } from "./tray-panel-runner"
 
@@ -80,6 +94,9 @@ const SHADOW_MARGIN = 16
 
 export const TRAY_PANEL_CONSUMER = "tray-panel"
 export const TRAY_PANEL_WINDOW_LABEL = "tray-panel"
+
+/** One stable empty catalogue while the first snapshot is on its way. */
+const NO_ACTIONS: readonly TrayPanelAction[] = []
 
 /** Used until the first snapshot lands: the shipped layout, every slice loading. */
 export function placeholderSnapshot(): GlanceSnapshotV1 {
@@ -91,6 +108,7 @@ export function placeholderSnapshot(): GlanceSnapshotV1 {
     config: DEFAULT_GLANCE_PANEL_SETTINGS,
     workspace: null,
     when: defaultSnapshot(),
+    actions: [],
     fleet: null,
     usage: null,
     quota: null,
@@ -130,30 +148,31 @@ export function TrayPanelView() {
   const format = useFormatter()
   const cardRef = useRef<HTMLDivElement>(null)
 
-  const actions = useTrayPanelStore((s) => s.actions)
-  const hydrate = useTrayPanelStore((s) => s.hydrate)
-  useEffect(() => {
-    void hydrate()
-  }, [hydrate])
-
   const [visible, setVisible] = useState(true)
-  const { snapshot: received, send } = useGlanceConsumer(
-    TRAY_PANEL_CONSUMER,
-    TRAY_PANEL_WINDOW_LABEL,
-    visible
-  )
+  const visibleRef = useRef(true)
+  const {
+    snapshot: received,
+    receivedCount,
+    send,
+  } = useGlanceConsumer(TRAY_PANEL_CONSUMER, TRAY_PANEL_WINDOW_LABEL, visible)
+  const receivedCountRef = useRef(receivedCount)
+  useEffect(() => {
+    receivedCountRef.current = receivedCount
+  }, [receivedCount])
   const [placeholder] = useState(placeholderSnapshot)
   const snapshot = received ?? placeholder
-  const config = snapshot.config
+  const actionsKnown = received !== null
+  const actions = received?.actions ?? NO_ACTIONS
 
-  const visible_ = useMemo(() => visibleActions(actions, snapshot.when), [actions, snapshot.when])
-  const primary = useMemo(
-    () => resolvePrimaryAction(actions, snapshot.when),
-    [actions, snapshot.when]
-  )
-  const secondary = useMemo(
-    () => visible_.filter((a) => a.id !== primary?.id && a.trigger.kind !== "open"),
-    [visible_, primary]
+  // Edit mode shows the user's edits at once; each is also sent, and the
+  // snapshot that follows confirms it. The draft wins until Done.
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<GlancePanelSettings | null>(null)
+  const config = editing && draft ? draft : snapshot.config
+
+  const { delegate, quick } = useMemo(
+    () => splitPanelActions(actions, snapshot.when, config.showDelegate),
+    [actions, snapshot.when, config.showDelegate]
   )
 
   const runner = useTrayPanelRunnerState(actions)
@@ -161,7 +180,10 @@ export function TrayPanelView() {
   const [glanceFailure, setGlanceFailure] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [revealNonce, setRevealNonce] = useState(0)
-  const firedForRef = useRef<string | null>(null)
+  // The snapshot count at the latest reveal: open-triggered actions wait for
+  // a snapshot newer than that, so they run against the current catalogue.
+  const [armedAt, setArmedAt] = useState(0)
+  const firedForReveal = useRef<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   // A clock for relative labels, ticking only while the panel is on screen.
@@ -195,17 +217,19 @@ export function TrayPanelView() {
     let off: (() => void) | undefined
     void onTrayPanelVisibility((shown) => {
       if (disposed) return
+      const wasVisible = visibleRef.current
+      visibleRef.current = shown
       setVisible(shown)
-      if (!shown) return
+      // Only a hidden → shown transition is a reveal. Rust also announces the
+      // very first show, which this webview may hear after mounting: that is
+      // the same reveal as the mount, not a second one.
+      if (!shown || wasVisible) return
       reset()
       setGlanceFailure(null)
-      void hydrate().then(() => {
-        if (disposed) return
-        // Keep the previous reveal key armed until hydration settles, or the
-        // pre-hydration catalogue's open actions would run.
-        firedForRef.current = null
-        setRevealNonce((value) => value + 1)
-      })
+      setEditing(false)
+      setDraft(null)
+      setArmedAt(receivedCountRef.current)
+      setRevealNonce((value) => value + 1)
     }).then((dispose) => {
       if (disposed) dispose()
       else off = dispose
@@ -214,7 +238,7 @@ export function TrayPanelView() {
       disposed = true
       off?.()
     }
-  }, [hydrate, reset])
+  }, [reset])
 
   // The main window reports tray-action failures back, so the panel can say
   // what went wrong instead of silently dismissing.
@@ -239,14 +263,13 @@ export function TrayPanelView() {
     [actions, snapshot.when]
   )
   useEffect(() => {
+    if (receivedCount <= armedAt || firedForReveal.current === revealNonce) return
+    firedForReveal.current = revealNonce
     if (openActions.length === 0) return
-    const key = openActions.map((a) => a.id).join("|")
-    if (firedForRef.current === key) return
-    firedForRef.current = key
     queueMicrotask(() => {
       for (const action of openActions) void run(action)
     })
-  }, [openActions, revealNonce, run])
+  }, [openActions, receivedCount, armedAt, revealNonce, run])
 
   /** Route to an owner surface: the panel steps aside once the main window took it. */
   const route = useCallback(
@@ -274,16 +297,49 @@ export function TrayPanelView() {
     setRefreshing(false)
   }, [sendLight])
 
+  /** Apply an edit locally and send it; a failed send drops back to what is stored. */
+  const edit = useCallback(
+    (next: GlancePanelSettings, body: GlanceRequestBody) => {
+      setDraft(next)
+      void sendLight(body).then((errorKey) => {
+        if (errorKey) setDraft(null)
+      })
+    },
+    [sendLight]
+  )
+  const editEntries = (entries: GlanceLayoutEntry[]) =>
+    edit(withEditedEntries(config, entries), { kind: "set-layout", entries })
+  const applyPreset = (preset: GlancePresetId) => {
+    const next = withPreset(config, preset)
+    if (editing) edit(next, { kind: "apply-preset", preset })
+    else void sendLight({ kind: "apply-preset", preset })
+  }
+  const setDelegateVisible = (shown: boolean) =>
+    edit({ ...config, showDelegate: shown }, { kind: "set-delegate-visible", visible: shown })
+  const setWidth = (width: GlanceWidthStep) =>
+    edit({ ...config, width }, { kind: "set-width", width })
+  const finishEditing = useCallback(() => {
+    setEditing(false)
+    setDraft(null)
+  }, [])
+
   // Escape dismisses; arrows walk the rows; → / ← open and close an
   // expandable row; a bound chord runs its action. Blur dismissal is native.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A control that handled the key itself (a menu, a drag in the editor
+      // cancelling on Escape) owns it.
+      if (e.defaultPrevented) return
       const target = e.target as HTMLElement | null
       const typing = target?.tagName === "TEXTAREA" || target?.tagName === "INPUT"
       if (e.key === "Escape") {
-        void closeTrayPanel()
+        // In edit mode Escape leaves the editor; the panel stays open.
+        if (editing) finishEditing()
+        else void closeTrayPanel()
         return
       }
+      // The editor's rows reorder with the arrows; no row walking or chords there.
+      if (editing) return
       const card = cardRef.current
       if (card && !typing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
         const targets = navTargets(card)
@@ -320,7 +376,7 @@ export function TrayPanelView() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [actions, snapshot.when, run])
+  }, [actions, snapshot.when, run, editing, finishEditing])
 
   // Max height: the stored value, or the live value while the edge is dragged.
   const [dragHeight, setDragHeight] = useState<number | null>(null)
@@ -546,17 +602,26 @@ export function TrayPanelView() {
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
               data-testid="tray-panel-body"
             >
-              <TrayPanelQuickActionsProvider actions={secondary}>
-                <GlanceStack
-                  entries={config.entries}
-                  renderers={{ quick: TrayPanelQuickActions }}
+              {editing ? (
+                <TrayPanelEditMode
+                  config={config}
+                  onEntries={editEntries}
+                  onDelegateVisible={setDelegateVisible}
+                  onWidth={setWidth}
                 />
-              </TrayPanelQuickActionsProvider>
+              ) : (
+                <TrayPanelQuickActionsProvider actions={actionsKnown ? quick : null}>
+                  <GlanceStack
+                    entries={config.entries}
+                    renderers={{ quick: TrayPanelQuickActions }}
+                  />
+                </TrayPanelQuickActionsProvider>
+              )}
             </div>
 
-            {primary ? (
+            {delegate && !editing ? (
               <TrayPanelDelegateBar
-                action={primary}
+                action={delegate}
                 autoFocus={config.autofocusDelegate}
                 revealNonce={revealNonce}
               />
@@ -569,16 +634,49 @@ export function TrayPanelView() {
             ) : null}
 
             <footer className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-1 text-[11.5px] text-muted-foreground">
+              {editing ? (
+                <button
+                  type="button"
+                  data-testid="tray-panel-edit-done"
+                  onClick={finishEditing}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  <CheckIcon aria-hidden className="size-3" />
+                  {t("edit.done")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="tray-panel-edit"
+                  disabled={!received}
+                  onClick={() => setEditing(true)}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+                >
+                  <PencilIcon aria-hidden className="size-3" />
+                  {t("edit.start")}
+                </button>
+              )}
+              <GlancePresetMenu
+                preset={config.preset}
+                onApply={applyPreset}
+                disabled={!received}
+                side="top"
+              />
               <button
                 type="button"
                 onClick={() => void run(openApp)}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                aria-label={t("footer.openApp")}
+                title={t("footer.openApp")}
+                className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <MonitorIcon aria-hidden className="size-3" />
-                {t("footer.openApp")}
+                {/* At the narrow width the footer keeps Edit and the preset readable; the icon carries the name. */}
+                <span aria-hidden className={cn(config.width === "narrow" && "hidden")}>
+                  {t("footer.openApp")}
+                </span>
               </button>
-              <span className="flex-1" />
-              <span className="tabular-nums" data-testid="tray-panel-updated">
+              <span className="min-w-0 flex-1" />
+              <span className="min-w-0 truncate tabular-nums" data-testid="tray-panel-updated">
                 {received
                   ? t("footer.updated", {
                       when: format.relativeTime(new Date(snapshot.generatedAt), now),
