@@ -35878,18 +35878,30 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "How many items to answer. Absent means the command's default."
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The nextPageToken of the previous page, handed back unchanged."
+          }
+        },
         "additionalProperties": false
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "description": "Secrets on this host by kind and name, with when and by which paired device each was set. Never a value.",
+        "description": "One page of the secrets on this host by kind and name, with when and by which paired device each was set (ADR-0175 B3). Never a value.",
         "required": [
-          "entries"
+          "items"
         ],
         "properties": {
-          "entries": {
+          "items": {
             "type": "array",
             "items": {
               "type": "object",
@@ -35930,6 +35942,10 @@
               },
               "additionalProperties": false
             }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
           }
         },
         "additionalProperties": false
@@ -75959,5 +75975,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "3bc2ed90a1b8256d18bb215732c9c674351f801932180d947f9f970f08c50399"
+  "catalogHash": "223526d8b1f6c5dfec0b6078801b90457c8594bb04bb0d9c029ca2f78ed396cd"
 }

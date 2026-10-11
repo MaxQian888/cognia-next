@@ -5793,7 +5793,7 @@
       "approval": "none",
       "idempotency": "structural",
       "transports": ["http", "websocket", "webrtc"],
-      "pagination": "none",
+      "pagination": "page-token",
       "longRunning": false,
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"

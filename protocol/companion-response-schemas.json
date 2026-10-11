@@ -13029,10 +13029,10 @@
     },
     "host_secret_list": {
       "type": "object",
-      "description": "Secrets on this host by kind and name, with when and by which paired device each was set. Never a value.",
-      "required": ["entries"],
+      "description": "One page of the secrets on this host by kind and name, with when and by which paired device each was set (ADR-0175 B3). Never a value.",
+      "required": ["items"],
       "properties": {
-        "entries": {
+        "items": {
           "type": "array",
           "items": {
             "type": "object",
@@ -13053,6 +13053,10 @@
             },
             "additionalProperties": false
           }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
         }
       },
       "additionalProperties": false

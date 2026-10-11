@@ -1052,6 +1052,8 @@ pub(super) async fn dispatch(
         // this host's own runtime. Writes are `approval: interactive`, so the
         // admin lease was checked before this arm ran.
         "host_secret_list" => {
+            // The store answers its whole (sorted) list; the page walks it.
+            let page = page_request(&args)?;
             let tenant = secret_tenant(tenant_id);
             let (swept, entries) = tokio::task::spawn_blocking(move || {
                 let swept = sweep_revoked_writers(&tenant);
@@ -1061,7 +1063,9 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             announce_sweep(swept, host);
-            Ok(json!({ "entries": entries }))
+            super::super::paging::Page::slice_all(entries, &page, 100)
+                .map_err(paging_error)
+                .and_then(to_json)
         }
 
         "host_provider_credential_set" | "host_git_credential_set" => {

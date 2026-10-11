@@ -34,14 +34,34 @@ afterEach(() => closeManagementChannel(HOST))
 describe("host secrets over the management channel", () => {
   it("lists names and writers, and tolerates an empty answer", async () => {
     call.mockResolvedValueOnce({
-      entries: [{ kind: "provider", name: "deepseek", setAt: 1, setBy: { deviceId: "d" } }],
+      items: [{ kind: "provider", name: "deepseek", setAt: 1, setBy: { deviceId: "d" } }],
     })
     await expect(listHostSecrets(HOST, deps())).resolves.toEqual([
       { kind: "provider", name: "deepseek", setAt: 1, setBy: { deviceId: "d" } },
     ])
-    expect(call).toHaveBeenCalledWith("host_secret_list", {})
+    expect(call).toHaveBeenCalledWith("host_secret_list", { pageSize: 1000 })
     call.mockResolvedValueOnce(null)
     await expect(listHostSecrets(HOST, deps())).resolves.toEqual([])
+  })
+
+  it("walks every page, handing each token back unchanged", async () => {
+    call
+      .mockResolvedValueOnce({ items: [{ kind: "git", name: "github.com" }], nextPageToken: "p2" })
+      .mockResolvedValueOnce({ items: [{ kind: "provider", name: "deepseek" }] })
+    await expect(listHostSecrets(HOST, deps())).resolves.toEqual([
+      { kind: "git", name: "github.com" },
+      { kind: "provider", name: "deepseek" },
+    ])
+    expect(call).toHaveBeenNthCalledWith(1, "host_secret_list", { pageSize: 1000 })
+    expect(call).toHaveBeenNthCalledWith(2, "host_secret_list", {
+      pageSize: 1000,
+      pageToken: "p2",
+    })
+  })
+
+  it("refuses a walk that never ends rather than show part of the list", async () => {
+    call.mockResolvedValue({ items: [{ kind: "git", name: "github.com" }], nextPageToken: "same" })
+    await expect(listHostSecrets(HOST, deps())).rejects.toThrow("Incomplete collection")
   })
 
   it("asks for one lease covering the panel's writes, not the list", async () => {

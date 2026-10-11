@@ -18,6 +18,7 @@ import {
   type ManagementChannelDeps,
 } from "@/lib/remote-host/management-channel"
 import { issueHostAdminLease, type HostAdminLease } from "@/lib/tauri/admin-lease"
+import { collectPages, type Page } from "@/lib/tauri/companion-paging"
 
 export type HostSecretKind = "provider" | "git" | "connector"
 
@@ -48,19 +49,36 @@ export function isManagedHere(kind: HostSecretKind): kind is "provider" | "git" 
   return kind === "provider" || kind === "git"
 }
 
+/** The most a page holds (the contract's ceiling), so a host answers in one page. */
+const HOST_SECRET_PAGE_SIZE = 1000
+
+/**
+ * Every secret on the host. The list pages by token (ADR-0175 B3); the panel
+ * shows all of them, so the walk must finish: a list cut short would hide a
+ * secret the person came here to remove.
+ */
 export function listHostSecrets(
   hostId: string,
   deps: HostSecretDeps = {}
 ): Promise<HostSecretEntry[]> {
   return withManagementChannel(
     hostId,
-    async (lease) => {
-      const answer = await lease.transport.call<{ entries?: HostSecretEntry[] }>(
-        "host_secret_list",
-        {}
-      )
-      return Array.isArray(answer?.entries) ? answer.entries : []
-    },
+    (lease) =>
+      collectPages(
+        async (pageToken) => {
+          const answer = await lease.transport.call<Partial<Page<HostSecretEntry>> | null>(
+            "host_secret_list",
+            { pageSize: HOST_SECRET_PAGE_SIZE, ...(pageToken ? { pageToken } : {}) }
+          )
+          return {
+            items: Array.isArray(answer?.items) ? answer.items : [],
+            ...(typeof answer?.nextPageToken === "string"
+              ? { nextPageToken: answer.nextPageToken }
+              : {}),
+          }
+        },
+        { requireComplete: true }
+      ),
     deps.channel
   )
 }

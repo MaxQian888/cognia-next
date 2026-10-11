@@ -2080,7 +2080,7 @@ async fn host_secret_arms_seal_attribute_and_never_return_values() {
     let listed = device("host_secret_list", json!({})).await.expect("list");
     let text = listed.to_string();
     assert!(!text.contains("sk-hs-secret") && !text.contains("ghp_hs"), "{text}");
-    let provider = listed["entries"]
+    let provider = listed["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -2089,6 +2089,23 @@ async fn host_secret_arms_seal_attribute_and_never_return_values() {
     assert_eq!(provider["kind"], "provider");
     assert_eq!(provider["setBy"]["deviceId"], "hs-phone");
     assert!(provider["setAt"].is_i64());
+
+    // The list pages by token (ADR-0175 B3): one entry a page walks to the
+    // second and stops, and every entry of the whole list is on some page.
+    let total = listed["items"].as_array().unwrap().len();
+    assert!(total >= 2, "{listed}");
+    let first = device("host_secret_list", json!({ "pageSize": 1 })).await.expect("page 1");
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    let mut walked = first["items"].as_array().unwrap().clone();
+    let mut token = first["nextPageToken"].as_str().map(str::to_owned);
+    while let Some(next) = token {
+        let page = device("host_secret_list", json!({ "pageSize": 1, "pageToken": next }))
+            .await
+            .expect("next page");
+        walked.extend(page["items"].as_array().unwrap().iter().cloned());
+        token = page["nextPageToken"].as_str().map(str::to_owned);
+    }
+    assert_eq!(json!(walked), listed["items"]);
 
     let loaded = dispatch(
         "host_provider_credentials_load",
