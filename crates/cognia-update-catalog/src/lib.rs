@@ -22,6 +22,8 @@
 //! Nothing here does I/O or reads the clock: callers pass `now`.
 
 pub mod host_release;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod verify;
 
 pub use host_release::{

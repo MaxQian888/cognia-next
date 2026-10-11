@@ -3409,6 +3409,12 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
             ts: { type: "integer", format: "int64" },
             rssBytes: { type: "integer", minimum: 0 },
             lastFlushAt: { type: "integer", format: "int64" },
+            activeRuns: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "Runs the brain is executing; the server's own pongs omit it. A host updates only when this is 0 (ADR-0224 A10).",
+            },
           },
         }),
         BridgeTokenRefreshFrame: message("BridgeTokenRefreshFrame", {

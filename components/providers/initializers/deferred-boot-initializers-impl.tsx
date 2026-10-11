@@ -11,6 +11,7 @@ import { ProviderOAuthRefreshInitializer } from "./provider-oauth-refresh-initia
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { SessionPowerInitializer } from "./session-power-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
+import { HostUpdateChannelInitializer } from "./host-update-channel-initializer"
 import { RemoteHostLivenessInitializer } from "./remote-host-liveness-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
@@ -79,6 +80,12 @@ export function DeferredBootInitializersImpl() {
         alive. Order-independent; desktop-gated inside.
       */}
       <RemoteHostLivenessInitializer />
+      {/*
+        Pushes this device's release channel to its always-on hosts when one
+        is paired and when the channel changes (ADR-0224 A10). Desktop-gated
+        inside.
+      */}
+      <HostUpdateChannelInitializer />
       <GatewayProvider />
       {/* No ordering dependency: a registration-only dispatch table. */}
       <ExecutionControlInitializer />

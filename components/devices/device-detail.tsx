@@ -54,6 +54,7 @@ import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-action
 
 import { AlwaysOnSection } from "./always-on/always-on-section"
 import { HostSecretsSection } from "./host-secrets/host-secrets-section"
+import { HostUpdatesSection } from "./host-updates/host-updates-section"
 import { DeviceHero, DeviceStatSummary } from "./device-hero"
 import { DeviceSection } from "./device-section"
 import { DeviceSectionNav, type DeviceSectionNavItem } from "./device-section-nav"
@@ -84,6 +85,7 @@ export function deviceSectionAnchor(id: string): string {
 const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   "always-on": "alwaysOn.title",
   "host-secrets": "hostSecrets.title",
+  "host-updates": "hostUpdates.title",
   ssh: "ssh.title",
   files: "files.title",
   access: "access.title",
@@ -133,6 +135,8 @@ function PlannedSection({
       return <AlwaysOnSection row={row} />
     case "host-secrets":
       return <HostSecretsSection row={row} />
+    case "host-updates":
+      return <HostUpdatesSection row={row} />
     case "ssh":
       // Full width because of what it holds: the identity record, the
       // forwarding rules and three controls. In half a pane that is a 700px

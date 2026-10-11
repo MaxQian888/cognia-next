@@ -117,6 +117,15 @@ pub fn validate(device_id: &str, operation: &str, token: Option<&str>) -> Result
     Ok(())
 }
 
+/// Unexpired leases held by any device. A host does not update itself while
+/// one is live: someone is in the middle of administering it.
+pub fn live_count() -> usize {
+    let now = now_ms();
+    let mut leases = LEASES.lock();
+    leases.retain(|_, lease| lease.expires_at > now);
+    leases.len()
+}
+
 pub fn revoke_device(device_id: &str) {
     LEASES
         .lock()
@@ -148,6 +157,15 @@ mod tests {
         assert!(validate("device-a", "external_bridge_start", Some(&lease.token)).is_err());
         revoke_device("device-a");
         assert!(validate("device-a", "skills_install_atomic", Some(&lease.token)).is_err());
+    }
+
+    #[test]
+    fn a_live_lease_is_counted_until_it_is_revoked() {
+        let lease = issue("device-count", vec!["*".into()], Some(60), true).unwrap();
+        // Other tests share the store, so only this lease's presence is pinned.
+        assert!(live_count() >= 1);
+        revoke_device("device-count");
+        assert!(validate("device-count", "x", Some(&lease.token)).is_err());
     }
 
     #[test]

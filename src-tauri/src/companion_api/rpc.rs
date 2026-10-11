@@ -290,6 +290,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "companion_push_notification",
     "companion_create_owner_invitation",
     "companion_server_status",
+    // ADR-0224 A10 — the host's own updates.
+    "host_update_status",
+    "host_update_refresh",
+    "host_update_configure",
+    "host_update_install",
     // ADR-0153 — the approver side of the lease. Neither is step-up gated: a
     // lease is what they grant, so requiring one to reach them is a loop.
     "host_consent_pending",
@@ -1608,6 +1613,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "companion_browser_access_get",
     "companion_push_status",
     "companion_server_status",
+    // ADR-0224 A10: the host's update state, and a fresh look at the catalog.
+    "host_update_status",
+    "host_update_refresh",
     // Runtime environments — every read is a projection of stored state.
     "environment_catalog_list",
     "environment_catalog_get",

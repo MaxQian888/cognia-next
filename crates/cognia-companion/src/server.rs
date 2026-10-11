@@ -128,6 +128,11 @@ pub fn begin_draining() {
     DRAINING.store(true, Ordering::SeqCst);
 }
 
+/// Mutating requests the companion API is handling right now.
+pub fn active_mutations() -> usize {
+    ACTIVE_MUTATIONS.load(Ordering::SeqCst)
+}
+
 pub fn is_accepting_writes() -> bool {
     !DRAINING.load(Ordering::SeqCst) && !WRITES_PAUSED.load(Ordering::SeqCst)
 }

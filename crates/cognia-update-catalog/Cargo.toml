@@ -25,5 +25,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 
+[features]
+# Sign catalogs with the conformance fixture's keys, for other crates' tests.
+test-support = []
+
 [lints]
 workspace = true

@@ -3379,6 +3379,19 @@ describe("host contract verdict (ADR-0175)", () => {
     expect(transport.getPlaneHealth().rpc).toBe("incompatible")
   })
 
+  it("still reaches an incompatible Host's own update commands, which are how it gets compatible", async () => {
+    recordHostContract(MOCK_CONFIG.deviceId, { contractVersion: COMPANION_CONTRACT_VERSION - 1 })
+    fetchSpy.mockResolvedValue(mockResponse({ phase: "available" }, 200))
+    transport = new CompanionTransport()
+    await expect(transport.call("host_update_status")).resolves.toEqual({ phase: "available" })
+    await expect(transport.call("host_update_install")).resolves.toEqual({ phase: "available" })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    // Everything else is still refused.
+    await expect(transport.call("claude_sidecar_status")).rejects.toMatchObject({
+      code: "contract_incompatible",
+    })
+  })
+
   it("treats a Host that names no contract version as an older, incompatible Host", async () => {
     recordHostContract(MOCK_CONFIG.deviceId, {})
     transport = new CompanionTransport()

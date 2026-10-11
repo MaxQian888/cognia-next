@@ -14326,7 +14326,11 @@
         "hostBehind": "This host serves command contract v{host}, and this app was built for v{app}. Update the host to the same release as this app.",
         "hostUnversioned": "This host predates command contract versions, and this app was built for v{app}. Update the host to the same release as this app.",
         "updateApp": "Update this app",
-        "updateHost": "Update the host"
+        "updateFailed": "The host did not take the update: {error}",
+        "updateHost": "Update the host",
+        "updateHostNow": "Update the host now",
+        "updateRequested": "The host will update as soon as nothing is running on it.",
+        "updateUnsupported": "This host is from before self-update. Update it by hand once; after that it updates itself."
       }
     },
     "hostRole": {
@@ -14385,6 +14389,56 @@
     },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
+    "hostUpdates": {
+      "actionFailed": "The host did not take that: {error}",
+      "autoUpdate": "Update automatically",
+      "autoUpdateHint": "When nothing is running, the host installs new releases itself and goes back to the old version if the new one does not come up healthy.",
+      "channel": "Release channel",
+      "channelHint": "Follows this device's Update Center unless changed here.",
+      "channels": {
+        "beta": "Beta",
+        "stable": "Stable"
+      },
+      "checkNow": "Check now",
+      "installRequested": "The host will update as soon as it can.",
+      "lastChecked": "Last checked {when}",
+      "lastError": "The last check failed: {error}",
+      "loading": "Reading the host's update state…",
+      "outcome": {
+        "installed": "Updated from {from} to {to} {when}.",
+        "rolled-back": "Version {to} was rolled back to {from} {when}: {reason}"
+      },
+      "phase": {
+        "available": "Version {version} is available.",
+        "checking": "Checking for updates…",
+        "downloading": "Downloading version {version}…",
+        "idle": "Up to date.",
+        "installing": "Installing version {version}…",
+        "restarting": "Restarting into version {version}…",
+        "trial": "Checking that version {version} is healthy. It goes back to {from} if not.",
+        "waiting-for-idle": "Version {version} will install once the host is idle."
+      },
+      "title": "Host updates",
+      "unmanaged": {
+        "desktop-app": "This host is the Cognia desktop app. It updates from its own Update Center.",
+        "no-deploy-agent": "This Compose host has no deploy agent to activate a new image. Install the agent next to it to update it from here.",
+        "not-a-service": "This host is not running as its OS service, so nothing would start it again after an update. Start it with `cognia-server service install`.",
+        "not-installed": "This host runs from an unpacked archive, so it cannot replace itself. Run `cognia-server service install` again on the host to move it into its install home."
+      },
+      "unreachable": "Could not reach the host: {error}",
+      "unsupported": "This host is from before self-update. Update it by hand once; after that it updates itself.",
+      "updateNow": "Update now",
+      "version": "Running version",
+      "waitingFor": {
+        "activeRuns": "{count, plural, one {# run} other {# runs}} in progress",
+        "adminLeases": "someone is administering it",
+        "jobs": "{count, plural, one {# background job} other {# background jobs}}",
+        "label": "Waiting for: {reasons}",
+        "mutations": "{count, plural, one {# change being saved} other {# changes being saved}}",
+        "unknownRuns": "its brain has not reported recently",
+        "workerSlots": "{count, plural, one {# remote worker turn} other {# remote worker turns}}"
+      }
+    },
     "justNow": "just now",
     "kind": {
       "local": "This device",
@@ -58990,7 +59044,8 @@
       "reload-extension": "Reload extension",
       "restart-desktop": "Restart now",
       "review-permissions": "Review and install",
-      "run-package-manager": "Show command"
+      "run-package-manager": "Show command",
+      "update-host": "Update the host"
     },
     "allCurrent": "Everything is up to date.",
     "ambiguousSource": "Cognia could not tell which package manager installed the CLI. Pick the one you used.",
@@ -59031,17 +59086,20 @@
     "groupHint": {
       "apps-and-runtimes": "The Cognia app on this device, plus the command-line agent.",
       "extensions": "Installed and updated by your browser, not by Cognia.",
+      "hosts": "Hosts paired with this app. Each host installs its own update, checks it, and goes back to the old version if the check fails.",
       "plugins-and-content": "Plugins, skills, and character packs installed into this app."
     },
     "groups": {
       "apps-and-runtimes": "Apps and runtimes",
       "extensions": "Browser extensions",
+      "hosts": "Always-on hosts",
       "plugins-and-content": "Plugins and content"
     },
     "installedBy": {
       "app-store": "Installed by the App Store",
       "browser-store": "Installed by your browser",
       "character-pack-runtime": "Installed by Cognia",
+      "cognia-host": "Installed by the host itself",
       "google-play": "Installed by Google Play",
       "package-manager": "Installed by your package manager",
       "plugin-runtime": "Installed by Cognia",
@@ -59055,6 +59113,7 @@
       "character-pack": "Character pack",
       "cli": "Command-line agent",
       "desktop": "Cognia desktop",
+      "host-server": "Always-on host",
       "mobile-android": "Cognia for Android",
       "mobile-ios": "Cognia for iOS",
       "plugin": "Plugin",
@@ -59097,6 +59156,7 @@
     "state": {
       "available": "Update available",
       "awaiting-consent": "Needs your approval",
+      "awaiting-host": "The host is installing it",
       "awaiting-reload": "Waiting on a reload",
       "awaiting-restart": "Restart to finish",
       "awaiting-store": "Waiting on the store",

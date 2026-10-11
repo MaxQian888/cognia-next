@@ -536,6 +536,14 @@ pub fn project_worker_load(tenant_id: &str, loads: Vec<WorkerLoadProjection>) {
     }
 }
 
+/// Slots the connected remote workers report busy, across every tenant.
+pub fn busy_worker_slots() -> u32 {
+    WORKERS
+        .read()
+        .values()
+        .fold(0u32, |sum, worker| sum.saturating_add(worker.used_slots))
+}
+
 fn clamp_worker_load(manifest: &Value, used_slots: u32) -> u32 {
     used_slots.min(
         manifest

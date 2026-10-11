@@ -1,15 +1,19 @@
 //! The always-on server host's own service (ADR-0224 A1).
 //!
 //! A host install is a directory with a fixed layout (see [`HostLayout`]): the
-//! `cognia-server` front door, the brain, its sidecars and a pinned Node. The
-//! service runs `cognia-server serve` from that directory against a data dir,
-//! with the master key in a 0600 file the service account owns, or, for a Linux
-//! system service, in a root-only file handed over as a systemd credential.
+//! `cognia-server` front door, the brain, its sidecars and a pinned Node.
+//! Installing the service copies it into the data dir's install home
+//! (`install/versions/<version>`, with `install/current` pointing at it; see
+//! [`crate::install_home`]) and runs `cognia-server serve` through `current`, so
+//! the host can later swap in a new version itself (ADR-0224 A10). The master
+//! key lives in a 0600 file the service account owns, or, for a Linux system
+//! service, in a root-only file handed over as a systemd credential.
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use crate::install_home::InstallHome;
 use crate::{RestartPolicy, ServicePlatform, ServiceScope, ServiceSpec};
 
 /// launchd label of the server host.
@@ -109,6 +113,7 @@ impl MasterKeyPlacement {
 /// Everything that varies between server host installs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerServiceOptions {
+    /// The layout the service runs: its install home's `current`.
     pub layout: HostLayout,
     pub data_dir: PathBuf,
     pub port: u16,
@@ -157,6 +162,9 @@ pub fn server_service_spec(opts: &ServerServiceOptions, platform: ServicePlatfor
         ),
         ("NODE_ENV".to_string(), "production".to_string()),
         ("PATH".to_string(), service_path(&opts.layout, platform)),
+        // The service manager starts it again after an update swaps
+        // `current`; without one, the host does not update itself.
+        ("COGNIA_SERVICE_MANAGED".to_string(), "1".to_string()),
     ]);
     if let Some(url) = &opts.public_url {
         env.insert("COGNIA_PUBLIC_URL".to_string(), url.clone());
@@ -327,6 +335,29 @@ pub fn chown(_path: &Path, _uid: u32, _gid: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Hand a whole tree to `uid:gid`, links included, without following them.
+#[cfg(unix)]
+pub fn chown_tree(root: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    std::os::unix::fs::lchown(root, Some(uid), Some(gid))
+        .map_err(|error| format!("chown {}: {error}", root.display()))?;
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| format!("stat {}: {error}", root.display()))?;
+    if metadata.is_dir() {
+        let entries =
+            std::fs::read_dir(root).map_err(|error| format!("read {}: {error}", root.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("read {}: {error}", root.display()))?;
+            chown_tree(&entry.path(), uid, gid)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn chown_tree(_root: &Path, _uid: u32, _gid: u32) -> Result<(), String> {
+    Ok(())
+}
+
 /// The ancestors of `dir` strictly below `home` that do not exist yet, i.e.
 /// the parents `create_dir_all(dir)` will create inside that home.
 fn missing_dirs_below(dir: &Path, home: &Path, exists: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
@@ -365,6 +396,8 @@ pub struct InstallReport {
     pub master_key_root_only: bool,
     /// The installed `cognia-server`, which need not be on `PATH`.
     pub server_binary: PathBuf,
+    /// The release the install home now runs.
+    pub installed_version: String,
     pub run_as: Option<String>,
     pub notes: Vec<String>,
 }
@@ -402,6 +435,10 @@ impl InstallEnvironment<'_> {
 /// A fully resolved install, before anything is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedInstall {
+    /// The install directory being installed (an unpacked archive).
+    pub source: HostLayout,
+    /// Where it is copied to and run from.
+    pub home: InstallHome,
     pub options: ServerServiceOptions,
     pub spec: ServiceSpec,
     /// Owner of the data dir and a file master key in the system scope.
@@ -482,9 +519,10 @@ pub fn resolve_install(
         .data_dir
         .clone()
         .unwrap_or_else(|| default_data_dir(env.platform, &home));
+    let install_home = InstallHome::in_data_dir(&data_dir);
     let options = ServerServiceOptions {
         master_key: MasterKeyPlacement::default_for(env.platform, request.scope, &data_dir),
-        layout,
+        layout: install_home.current_layout(),
         data_dir,
         port: request.port,
         public_url: request.public_url.clone(),
@@ -495,6 +533,8 @@ pub fn resolve_install(
     };
     let spec = server_service_spec(&options, env.platform);
     Ok(ResolvedInstall {
+        source: layout,
+        home: install_home,
         options,
         spec,
         owner,
@@ -538,6 +578,14 @@ pub fn install_server_service(
     };
     let created = ensure_master_key_file(opts.master_key.path(), key_owner)
         .map_err(ServiceError::Invalid)?;
+    let installed_version = resolved
+        .home
+        .adopt(&resolved.source.root)
+        .map_err(|error| ServiceError::Invalid(error.to_string()))?;
+    // The service account updates its own install later.
+    if let Some((uid, gid)) = resolved.owner {
+        chown_tree(resolved.home.root(), uid, gid).map_err(ServiceError::Invalid)?;
+    }
     let plan = crate::install(&resolved.spec, request.scope, env.platform, env.ctx, io)?;
     Ok(InstallReport {
         definition_path: plan.definition_path,
@@ -546,6 +594,7 @@ pub fn install_server_service(
         master_key_created: created == MasterKeyFile::Created,
         master_key_root_only: matches!(opts.master_key, MasterKeyPlacement::SystemdCredential(_)),
         server_binary: opts.layout.server_binary(),
+        installed_version,
         run_as: opts.run_as.clone(),
         notes: plan.notes,
     })
@@ -744,7 +793,16 @@ mod tests {
             PathBuf::from("/Users/max/Library/Application Support/cognia-server")
         );
         assert_eq!(resolved.spec.env["HOME"], "/Users/max");
-        assert_eq!(resolved.options.layout.root, PathBuf::from("/opt/cognia"));
+        // The archive is copied into the data dir's install home and run
+        // through `current`, so the host can swap versions itself.
+        assert_eq!(resolved.source.root, PathBuf::from("/opt/cognia"));
+        let data = PathBuf::from("/Users/max/Library/Application Support/cognia-server");
+        assert_eq!(resolved.options.layout.root, data.join("install/current"));
+        assert_eq!(
+            resolved.spec.program,
+            data.join("install/current/bin/cognia-server")
+        );
+        assert_eq!(resolved.spec.env["COGNIA_SERVICE_MANAGED"], "1");
     }
 
     #[test]
@@ -833,12 +891,20 @@ mod tests {
             uid: 501,
         };
         let everything = |_: &Path| true;
+        let unpacked = dir.path().join("cognia-host-1.4.0-darwin-arm64");
+        crate::test_support::write_install(&unpacked, "1.4.0", "darwin-arm64");
         let mut req = request(ServiceScope::User);
         req.data_dir = Some(dir.path().join("data"));
+        req.install_root = Some(unpacked.clone());
         let io = RecordingIo::default();
         let report = install_server_service(&req, &env(&ctx, &everything, &account, false), &io)
             .unwrap();
         assert!(report.master_key_created);
+        assert_eq!(report.installed_version, "1.4.0");
+        let home = InstallHome::in_data_dir(&dir.path().join("data"));
+        assert_eq!(home.current_version().as_deref(), Some("1.4.0"));
+        assert_eq!(report.server_binary, home.current_layout().server_binary());
+        assert!(report.server_binary.exists(), "the service runs the copy");
         assert!(is_master_key(&std::fs::read_to_string(&report.master_key).unwrap()));
         assert!(dir.path().join("data").join("logs").is_dir());
         assert_eq!(

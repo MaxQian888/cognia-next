@@ -1,9 +1,11 @@
-import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
+import { COMPANION_CONTRACT_VERSION, getCommandDescriptor } from "./command-descriptors"
 import {
+  VERSION_INDEPENDENT_COMMANDS,
   __resetHostContractsForTests,
   contractIncompatibleError,
   forgetHostContract,
   hostContractVerdict,
+  isVersionIndependentCommand,
   judgeHostContract,
   onHostBrainChange,
   onHostContractChange,
@@ -128,5 +130,24 @@ describe("companion contract verdict (ADR-0175)", () => {
         ["dev-1", null],
       ])
     })
+  })
+})
+
+describe("version-independent commands (ADR-0224 A10)", () => {
+  it("are only the Host's own owner-gated update commands", () => {
+    expect([...VERSION_INDEPENDENT_COMMANDS].sort()).toEqual([
+      "host_update_configure",
+      "host_update_install",
+      "host_update_refresh",
+      "host_update_status",
+    ])
+    for (const name of VERSION_INDEPENDENT_COMMANDS) {
+      expect(getCommandDescriptor(name)).toMatchObject({
+        target: "host-admin",
+        capability: "host.admin",
+      })
+    }
+    expect(isVersionIndependentCommand("host_update_install")).toBe(true)
+    expect(isVersionIndependentCommand("claude_sidecar_status")).toBe(false)
   })
 })

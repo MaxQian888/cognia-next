@@ -55,7 +55,7 @@ describe("bridge protocol golden fixtures", () => {
     })
     expect(respond).toEqual(fixtures.frames.respondSyncPull)
 
-    const pong = buildPong(1751400000000, 123456789, 1751399990000)
+    const pong = buildPong(1751400000000, 123456789, 1751399990000, 2)
     expect(pong).toEqual(fixtures.frames.pong)
   })
 

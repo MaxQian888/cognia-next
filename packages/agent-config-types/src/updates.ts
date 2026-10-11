@@ -24,6 +24,14 @@ export type UpdateAssetKind =
   | "plugin"
   | "skill"
   | "character-pack"
+  /**
+   * An always-on host's install (ADR-0224 A10): its server and brain, shipped
+   * and swapped as one unit, so the Update Center shows one row per host. In
+   * the signed catalog the release is a `host-server` entry (the archive or
+   * image) paired with a `host-brain` entry of the same version, a
+   * catalog-only kind (`CatalogEntryKind` in `lib/updates/catalog-types.ts`).
+   */
+  | "host-server"
 
 export const UPDATE_ASSET_KINDS: readonly UpdateAssetKind[] = [
   "desktop",
@@ -35,6 +43,7 @@ export const UPDATE_ASSET_KINDS: readonly UpdateAssetKind[] = [
   "plugin",
   "skill",
   "character-pack",
+  "host-server",
 ]
 
 /** Who performs the installation. Never assume it is Cognia. */
@@ -47,6 +56,11 @@ export type UpdateExecutor =
   | "plugin-runtime"
   | "skill-runtime"
   | "character-pack-runtime"
+  /**
+   * The always-on host installs its own update. Another device can only ask
+   * it to, over the host's management channel, so this is not in-app.
+   */
+  | "cognia-host"
 
 export const UPDATE_EXECUTORS: readonly UpdateExecutor[] = [
   "tauri",
@@ -57,6 +71,7 @@ export const UPDATE_EXECUTORS: readonly UpdateExecutor[] = [
   "plugin-runtime",
   "skill-runtime",
   "character-pack-runtime",
+  "cognia-host",
 ]
 
 /**
@@ -90,6 +105,8 @@ export type UpdateState =
   | "awaiting-store"
   | "awaiting-reload"
   | "awaiting-restart"
+  /** An always-on host was asked to update and is doing it itself. */
+  | "awaiting-host"
   | "installing"
   | "verified"
   | "failed"
@@ -105,6 +122,7 @@ export const UPDATE_STATES: readonly UpdateState[] = [
   "awaiting-store",
   "awaiting-reload",
   "awaiting-restart",
+  "awaiting-host",
   "installing",
   "verified",
   "failed",
@@ -116,6 +134,7 @@ export const RESTING_UPDATE_STATES: readonly UpdateState[] = [
   "current",
   "available",
   "deferred",
+  "awaiting-host",
   "verified",
   "failed",
   "cancelled",
@@ -194,6 +213,11 @@ export interface UpdateCandidate {
   /** Where a store or registry executor should send the user. */
   externalUrl?: string
   /**
+   * The asset's own name where its kind is not enough to tell rows apart:
+   * which paired host, which plugin.
+   */
+  displayName?: string
+  /**
    * Action offered for this specific candidate, overriding the executor
    * default. macOS desktop uses it to hand off to a signed, notarized DMG
    * rather than claiming an in-app install it deliberately does not perform.
@@ -266,6 +290,8 @@ export type UpdateAction =
   | "restart-desktop"
   | "review-permissions"
   | "open-pack-diff"
+  /** Ask the host to install the update itself (it swaps, checks, rolls back). */
+  | "update-host"
 
 export const UPDATE_ACTIONS: readonly UpdateAction[] = [
   "install-in-app",
@@ -275,6 +301,7 @@ export const UPDATE_ACTIONS: readonly UpdateAction[] = [
   "restart-desktop",
   "review-permissions",
   "open-pack-diff",
+  "update-host",
 ]
 
 /** The action each executor offers when a candidate is ready to apply. */
@@ -287,13 +314,15 @@ export const EXECUTOR_PRIMARY_ACTION: Record<UpdateExecutor, UpdateAction> = {
   "plugin-runtime": "install-in-app",
   "skill-runtime": "install-in-app",
   "character-pack-runtime": "open-pack-diff",
+  "cognia-host": "update-host",
 }
 
 /** Display grouping used by the Update Center. */
-export type UpdateGroup = "apps-and-runtimes" | "extensions" | "plugins-and-content"
+export type UpdateGroup = "apps-and-runtimes" | "hosts" | "extensions" | "plugins-and-content"
 
 export const UPDATE_GROUP_ORDER: readonly UpdateGroup[] = [
   "apps-and-runtimes",
+  "hosts",
   "extensions",
   "plugins-and-content",
 ]
@@ -308,6 +337,7 @@ export const ASSET_KIND_GROUP: Record<UpdateAssetKind, UpdateGroup> = {
   plugin: "plugins-and-content",
   skill: "plugins-and-content",
   "character-pack": "plugins-and-content",
+  "host-server": "hosts",
 }
 
 /** Persisted Update Center preferences. */
@@ -371,7 +401,16 @@ export const UPDATE_STATE_TRANSITIONS: Record<UpdateState, readonly UpdateState[
   "awaiting-store": ["checking", "verified", "current", "available", "deferred", "failed"],
   "awaiting-reload": ["checking", "verified", "current", "available", "deferred", "failed"],
   "awaiting-restart": ["verified", "failed", "checking", "available", "current"],
-  installing: ["awaiting-restart", "awaiting-reload", "verified", "failed", "cancelled"],
+  // The host reports back on the next check: updated, still going, or failed.
+  "awaiting-host": ["checking", "verified", "current", "available", "deferred", "failed"],
+  installing: [
+    "awaiting-restart",
+    "awaiting-reload",
+    "awaiting-host",
+    "verified",
+    "failed",
+    "cancelled",
+  ],
   verified: ["checking", "current", "available"],
   failed: ["checking", "available", "deferred", "cancelled", "installing", "downloading"],
   cancelled: ["checking", "available", "deferred", "current"],

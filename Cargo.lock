@@ -2055,6 +2055,7 @@ dependencies = [
  "cognia-fleet",
  "cognia-gateway",
  "cognia-headless-contract",
+ "cognia-host-service",
  "cognia-mcp-server",
  "cognia-net",
  "cognia-observability",
@@ -2066,6 +2067,7 @@ dependencies = [
  "cognia-signaling-core",
  "cognia-tenant-auth",
  "cognia-terminal",
+ "cognia-update-catalog",
  "flate2",
  "futures-util",
  "hex",
@@ -2625,9 +2627,14 @@ dependencies = [
 name = "cognia-host-service"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "hex",
  "libc",
  "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
 ]

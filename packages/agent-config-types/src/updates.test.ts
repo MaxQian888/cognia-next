@@ -38,6 +38,13 @@ describe("update vocabulary", () => {
     }
   })
 
+  it("files an always-on host as one row, installed by the host itself", () => {
+    expect(ASSET_KIND_GROUP["host-server"]).toBe("hosts")
+    // Another device can only ask the host to update; it never installs it.
+    expect(isInAppExecutor("cognia-host")).toBe(false)
+    expect(EXECUTOR_PRIMARY_ACTION["cognia-host"]).toBe("update-host")
+  })
+
   it("keys snapshots by kind and asset", () => {
     expect(updateSnapshotKey("plugin", "acme.tool")).toBe("plugin:acme.tool")
   })

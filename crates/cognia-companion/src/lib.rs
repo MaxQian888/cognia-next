@@ -82,6 +82,7 @@ pub mod gateway_brain;
 pub mod healthz;
 pub mod host;
 pub mod host_consent;
+pub mod host_update;
 pub use cognia_companion_security::host_identity;
 pub use cognia_companion_security::idempotency;
 pub use cognia_companion_security::jwt;

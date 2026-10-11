@@ -86,6 +86,9 @@ Install as a LaunchDaemon that starts at boot, running as your account:
 
   sudo ./bin/cognia-server service install
 
+This copies the host into its data dir's install home, where it updates itself
+later; this unpacked directory is not needed afterwards.
+
 Then pair your phone or desktop over the relay (no public domain needed):
 
   COGNIA_DATA_DIR="$HOME/Library/Application Support/cognia-server" ./bin/cognia-server pair

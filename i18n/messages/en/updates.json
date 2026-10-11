@@ -9,11 +9,13 @@
   "nothingHere": "Nothing here can be updated on this device.",
   "groups": {
     "apps-and-runtimes": "Apps and runtimes",
+    "hosts": "Always-on hosts",
     "extensions": "Browser extensions",
     "plugins-and-content": "Plugins and content"
   },
   "groupHint": {
     "apps-and-runtimes": "The Cognia app on this device, plus the command-line agent.",
+    "hosts": "Hosts paired with this app. Each host installs its own update, checks it, and goes back to the old version if the check fails.",
     "extensions": "Installed and updated by your browser, not by Cognia.",
     "plugins-and-content": "Plugins, skills, and character packs installed into this app."
   },
@@ -26,7 +28,8 @@
     "cli": "Command-line agent",
     "plugin": "Plugin",
     "skill": "Skill",
-    "character-pack": "Character pack"
+    "character-pack": "Character pack",
+    "host-server": "Always-on host"
   },
   "installedBy": {
     "tauri": "Installed by Cognia",
@@ -36,7 +39,8 @@
     "package-manager": "Installed by your package manager",
     "plugin-runtime": "Installed by Cognia",
     "skill-runtime": "Installed by Cognia",
-    "character-pack-runtime": "Installed by Cognia"
+    "character-pack-runtime": "Installed by Cognia",
+    "cognia-host": "Installed by the host itself"
   },
   "state": {
     "current": "Up to date",
@@ -48,6 +52,7 @@
     "awaiting-store": "Waiting on the store",
     "awaiting-reload": "Waiting on a reload",
     "awaiting-restart": "Restart to finish",
+    "awaiting-host": "The host is installing it",
     "installing": "Installing",
     "verified": "Updated",
     "failed": "Update failed",
@@ -60,7 +65,8 @@
     "run-package-manager": "Show command",
     "restart-desktop": "Restart now",
     "review-permissions": "Review and install",
-    "open-pack-diff": "Review changes"
+    "open-pack-diff": "Review changes",
+    "update-host": "Update the host"
   },
   "versionChange": "{from} to {to}",
   "newVersion": "Version {version}",

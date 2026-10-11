@@ -18,12 +18,14 @@ import { loggers } from "@/lib/logging"
 import { isNativeMobile } from "@/lib/platform/detect"
 import { detectOsFamily } from "@/lib/platform/os"
 import { isTauri } from "@/lib/tauri"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import type { UpdateAdapter } from "./adapter"
 import { createBrowserExtensionAdapter } from "./adapters/browser-extension-adapter"
 import { createCharacterPackAdapter } from "./adapters/character-pack-adapter"
 import { createCliAdapter } from "./adapters/cli-adapter"
+import { createHostAdapter } from "./adapters/host-adapter"
 import { createDesktopAdapter } from "./adapters/desktop-adapter"
 import { createMobileAdapter } from "./adapters/mobile-adapter"
 import { createPluginAdapter } from "./adapters/plugin-adapter"
@@ -85,6 +87,18 @@ export function productionAdapters(): UpdateAdapter[] {
       },
     }),
     createPluginAdapter({ isSupported: () => !isNativeMobile() }),
+    // ADR-0224 A10: each paired always-on host reports and installs its own.
+    createHostAdapter({
+      listHosts: () =>
+        useRemoteHostStore
+          .getState()
+          .hosts.filter((host) => host.alwaysOn === true && host.connectionState !== "revoked")
+          .map((host) => ({ id: host.id, label: host.label })),
+      readStatus: (hostId) =>
+        import("@/lib/remote-host/host-update").then((m) => m.readHostUpdateStatus(hostId)),
+      install: (hostId) =>
+        import("@/lib/remote-host/host-update").then((m) => m.installHostUpdate(hostId)),
+    }),
     createSkillAdapter({
       isSupported: () => true,
       checkAll: async () => {

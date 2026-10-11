@@ -23,9 +23,9 @@ sit behind a home router with no public domain and no open port.
 
 <Callout title="Status">
   This page covers installing, pairing and keeping the host's data safe. Moving existing bots,
-  schedules and connectors from the desktop to the host, per-item ownership, container-per-task
-  execution and automatic updates are being built (ADR-0224 phase A); until then, create what should
-  run around the clock directly on the host.
+  schedules and connectors from the desktop to the host, per-item ownership and container-per-task
+  execution are being built (ADR-0224 phase A); until then, create what should run around the clock
+  directly on the host.
 </Callout>
 
 ## Linux with Docker Compose
@@ -67,7 +67,10 @@ sudo /opt/cognia-host/bin/cognia-server service install
 This installs a LaunchDaemon (`/Library/LaunchDaemons/com.cognia.server.plist`) that
 starts at boot without anyone logging in and runs as **your** account, not root. It
 creates the data dir (`~/Library/Application Support/cognia-server`) and a master key
-in it, and prints the pairing command. Useful flags:
+in it, copies the unpacked directory into the data dir's install home
+(`install/versions/<version>`, run through `install/current`) so the host can replace
+it when it updates, and prints the pairing command. The unpacked copy is no longer
+needed afterwards. Useful flags:
 
 | Flag             | Default                 | Meaning                                             |
 | ---------------- | ----------------------- | --------------------------------------------------- |
@@ -223,6 +226,37 @@ secrets it set on the host are deleted with it.
 
 Pushing credentials, changing a Bot installation and arming its triggers from a paired
 device now ask for the same approval.
+
+## Updates
+
+The host updates itself. It follows the release channel of its owner's desktop (the
+desktop sends its Update Center channel when it pairs and whenever it changes), checks
+the signed release catalog, and when a release is out for it:
+
+1. **Waits until nothing would be cut off**: no run in progress, no background job, no
+   remote worker turn, no change being saved, and nobody administering it.
+2. **Swaps its server and brain together.** The new version is downloaded, checked
+   against the signed catalog, unpacked beside the running one, and switched in; the
+   service starts it.
+3. **Proves the new version or goes back.** The new version must come up and accept its
+   own brain within ten minutes. If it does not, or it keeps exiting, the host switches
+   back to the version it came from and reports why.
+
+Open the host in **Devices** and use **Host updates** to see where it is, what it is
+waiting for and how the last update ended; to change its channel or turn automatic
+updates off; or to check and update now. When the host and this app disagree on their
+command contract, the notice under the host's name says which one to update, and for a
+host it updates it in one click: the host's own update commands stay reachable across
+the mismatch.
+
+A host installed before self-update has to be updated by hand once. A host started
+outside its OS service, or run from the unpacked archive, says so in **Host updates**;
+running `cognia-server service install` again fixes both. A Compose host cannot replace
+its own container, and says so until a deploy agent is set up next to it.
+
+The host trusts only releases signed by the keys its build ships with
+(`COGNIA_UPDATE_TRUST_ROOT`), and asks the update service at `COGNIA_UPDATE_URL`
+(default `https://update.cognia.cn`).
 
 ## What unattended runs may do
 

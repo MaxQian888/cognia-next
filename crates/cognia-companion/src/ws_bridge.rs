@@ -168,7 +168,8 @@ pub enum BridgeFrame {
     },
     /// Keepalive (either direction).
     Ping { v: u32, ts: i64 },
-    /// Keepalive reply; the brain's pongs carry its RSS gauge.
+    /// Keepalive reply; the brain's pongs carry its RSS gauge and how many
+    /// runs it is executing (ADR-0224 A10: a host updates only when idle).
     Pong {
         v: u32,
         ts: i64,
@@ -176,6 +177,12 @@ pub enum BridgeFrame {
         rss_bytes: u64,
         #[serde(rename = "lastFlushAt", default)]
         last_flush_at: i64,
+        #[serde(
+            rename = "activeRuns",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        active_runs: Option<u32>,
     },
     /// server → brain: a re-minted service token (12h refresh, R8).
     TokenRefresh { v: u32, token: String },
@@ -392,6 +399,37 @@ fn record_refusal(refusal: BrainRefusal) {
 /// Latest RSS gauge from the brain's pong frames (0 = unknown).
 static BRAIN_RSS_BYTES: AtomicU64 = AtomicU64::new(0);
 static BRAIN_LAST_FLUSH_AT: AtomicI64 = AtomicI64::new(0);
+/// Runs the brain reported executing; negative while it has reported none.
+static BRAIN_ACTIVE_RUNS: AtomicI64 = AtomicI64::new(-1);
+/// When it last reported them (epoch ms).
+static BRAIN_ACTIVITY_AT: AtomicI64 = AtomicI64::new(0);
+
+/// What the connected brain last said it was doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrainActivity {
+    pub active_runs: u32,
+    pub reported_at_ms: i64,
+}
+
+/// The brain's last activity report, `None` while no brain is connected or it
+/// has not reported yet. Reports arrive with each heartbeat pong.
+pub fn brain_activity() -> Option<BrainActivity> {
+    let runs = BRAIN_ACTIVE_RUNS.load(Ordering::SeqCst);
+    (runs >= 0).then(|| BrainActivity {
+        active_runs: runs as u32,
+        reported_at_ms: BRAIN_ACTIVITY_AT.load(Ordering::SeqCst),
+    })
+}
+
+/// How often the server pings the brain, so a reader can tell a stale report.
+pub const BRAIN_HEARTBEAT: Duration = Duration::from_secs(HEARTBEAT_SECS);
+
+fn reset_brain_gauges() {
+    BRAIN_RSS_BYTES.store(0, Ordering::SeqCst);
+    BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
+    BRAIN_ACTIVE_RUNS.store(-1, Ordering::SeqCst);
+    BRAIN_ACTIVITY_AT.store(0, Ordering::SeqCst);
+}
 
 /// Install a new connection as the process-wide socket bridge, closing any
 /// previous connection. Returns after the swap.
@@ -438,8 +476,7 @@ fn clear_socket_bridge_if(conn_id: u64) {
     };
     if cleared {
         let _ = READY.0.send(false);
-        BRAIN_RSS_BYTES.store(0, Ordering::SeqCst);
-        BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
+        reset_brain_gauges();
     }
 }
 
@@ -522,6 +559,11 @@ fn brain_announces(wanted: &str) -> bool {
                 .any(|capability| capability == wanted)
         })
         .unwrap_or(true)
+}
+
+/// Whether a brain is connected and accepted right now.
+pub fn bridge_ready() -> bool {
+    *READY.1.borrow()
 }
 
 /// Subscribe to bridge readiness transitions (R8 brain supervisor probe).
@@ -964,10 +1006,15 @@ fn handle_brain_frame(
         BridgeFrame::Pong {
             rss_bytes,
             last_flush_at,
+            active_runs,
             ..
         } => {
             BRAIN_RSS_BYTES.store(rss_bytes, Ordering::SeqCst);
             BRAIN_LAST_FLUSH_AT.store(last_flush_at, Ordering::SeqCst);
+            if let Some(runs) = active_runs {
+                BRAIN_ACTIVE_RUNS.store(i64::from(runs), Ordering::SeqCst);
+                BRAIN_ACTIVITY_AT.store(now_ms(), Ordering::SeqCst);
+            }
         }
         BridgeFrame::Ping { ts, .. } => {
             let _ = transport.send_frame(&BridgeFrame::Pong {
@@ -975,6 +1022,7 @@ fn handle_brain_frame(
                 ts,
                 rss_bytes: 0,
                 last_flush_at: 0,
+                active_runs: None,
             });
         }
         BridgeFrame::WorkerFrame {
@@ -1360,8 +1408,18 @@ pub mod test_support {
     pub fn clear_socket_for_testing() {
         SOCKET_BRIDGE.write().take();
         let _ = READY.0.send(false);
-        BRAIN_RSS_BYTES.store(0, Ordering::SeqCst);
-        BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
+        super::reset_brain_gauges();
+    }
+
+    /// Pretend the brain reported `runs` active runs just now.
+    pub fn report_activity_for_testing(runs: Option<u32>) {
+        match runs {
+            Some(runs) => {
+                super::BRAIN_ACTIVE_RUNS.store(i64::from(runs), Ordering::SeqCst);
+                super::BRAIN_ACTIVITY_AT.store(super::now_ms(), Ordering::SeqCst);
+            }
+            None => super::reset_brain_gauges(),
+        }
     }
 }
 
@@ -2000,8 +2058,9 @@ mod tests {
         handshake(&mut ws).await;
         wait_connected().await;
 
+        assert_eq!(brain_activity(), None, "no report before the first pong");
         let pong = serde_json::to_string(&json!({
-            "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 123, "rssBytes": 987654321_u64, "lastFlushAt": 456
+            "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 123, "rssBytes": 987654321_u64, "lastFlushAt": 456, "activeRuns": 2
         }))
         .unwrap();
         ws.send(WsMessage::Text(pong.into())).await.unwrap();
@@ -2015,11 +2074,13 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(seen, "pong rssBytes must land in the gauge");
+        assert_eq!(brain_activity().map(|a| a.active_runs), Some(2));
 
-        // Disconnect resets the gauge.
+        // Disconnect resets the gauges: an absent brain reports nothing.
         ws.close(None).await.ok();
         wait_disconnected().await;
         assert_eq!(brain_rss_bytes(), 0);
+        assert_eq!(brain_activity(), None);
     }
 
     // ── resolve_bridge_transport ordering ─────────────────────────────────────

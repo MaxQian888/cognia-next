@@ -118,6 +118,8 @@ export interface BridgeClientOptions {
   onWorkerDetach?: (worker: { connectionId: string; hostRef: string; reason: string }) => void
   /** RSS gauge for pong frames. */
   rss?: () => { rssBytes: number; lastFlushAt: number }
+  /** Runs executing now, for pong frames (the host's idle check). */
+  activeRuns?: () => number
   log?: (level: "info" | "warn" | "error", message: string) => void
 }
 
@@ -435,8 +437,11 @@ export class BridgeClient implements RuntimeBridge {
         }
         case "ping": {
           const rss = this.opts.rss?.() ?? { rssBytes: 0, lastFlushAt: 0 }
+          const activeRuns = Math.max(0, Math.trunc(this.opts.activeRuns?.() ?? 0))
           try {
-            socket.send(serializeBridgeFrame(buildPong(this.now(), rss.rssBytes, rss.lastFlushAt)))
+            socket.send(
+              serializeBridgeFrame(buildPong(this.now(), rss.rssBytes, rss.lastFlushAt, activeRuns))
+            )
           } catch {
             // socket raced shut; the close handler reconnects.
           }

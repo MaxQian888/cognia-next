@@ -92460,6 +92460,1219 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/host_update_configure:
+    post:
+      operationId: internalRpcHostUpdateConfigure
+      tags:
+        - headless-rpc
+      summary: host_update_configure (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: string
+                  enum:
+                    - stable
+                    - beta
+                autoUpdate:
+                  type: boolean
+                auto_update:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: companion_api::host_update::HostUpdateStatus
+                description: An always-on host's own update state (ADR-0224 A10).
+                required:
+                  - install
+                  - currentVersion
+                  - channel
+                  - autoUpdate
+                  - phase
+                  - installRequested
+                properties:
+                  install:
+                    type: string
+                    enum:
+                      - native
+                      - compose
+                      - unmanaged
+                  unmanagedReason:
+                    type: string
+                    enum:
+                      - desktop-app
+                      - not-installed
+                      - not-a-service
+                      - no-deploy-agent
+                  currentVersion:
+                    type: string
+                  target:
+                    type: string
+                  channel:
+                    type: string
+                    enum:
+                      - stable
+                      - beta
+                  autoUpdate:
+                    type: boolean
+                  channelSetBy:
+                    type: string
+                  phase:
+                    type: string
+                    enum:
+                      - idle
+                      - checking
+                      - available
+                      - waiting-for-idle
+                      - downloading
+                      - installing
+                      - restarting
+                      - trial
+                  available:
+                    type: object
+                    required:
+                      - version
+                      - criticality
+                    properties:
+                      version:
+                        type: string
+                      criticality:
+                        type: string
+                      releasedAt:
+                        type: string
+                      releaseNotes:
+                        type: string
+                    additionalProperties: false
+                  installRequested:
+                    type: boolean
+                  waitingFor:
+                    type: object
+                    required:
+                      - jobs
+                      - workerSlots
+                      - mutations
+                      - adminLeases
+                    properties:
+                      activeRuns:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: Runs the brain reports; null when a connected brain has not reported recently.
+                      jobs:
+                        type: integer
+                        minimum: 0
+                      workerSlots:
+                        type: integer
+                        minimum: 0
+                      mutations:
+                        type: integer
+                        minimum: 0
+                      adminLeases:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                  lastCheckedAt:
+                    type: integer
+                    format: int64
+                  lastError:
+                    type: string
+                  lastOutcome:
+                    type: object
+                    required:
+                      - attemptId
+                      - from
+                      - to
+                      - result
+                      - atMs
+                    properties:
+                      attemptId:
+                        type: string
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      result:
+                        type: string
+                        enum:
+                          - installed
+                          - rolled-back
+                      reason:
+                        type: string
+                      atMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                  trial:
+                    type: object
+                    required:
+                      - from
+                      - to
+                      - deadlineMs
+                    properties:
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      deadlineMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/host_update_install:
+    post:
+      operationId: internalRpcHostUpdateInstall
+      tags:
+        - headless-rpc
+      summary: host_update_install (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: companion_api::host_update::HostUpdateStatus
+                description: An always-on host's own update state (ADR-0224 A10).
+                required:
+                  - install
+                  - currentVersion
+                  - channel
+                  - autoUpdate
+                  - phase
+                  - installRequested
+                properties:
+                  install:
+                    type: string
+                    enum:
+                      - native
+                      - compose
+                      - unmanaged
+                  unmanagedReason:
+                    type: string
+                    enum:
+                      - desktop-app
+                      - not-installed
+                      - not-a-service
+                      - no-deploy-agent
+                  currentVersion:
+                    type: string
+                  target:
+                    type: string
+                  channel:
+                    type: string
+                    enum:
+                      - stable
+                      - beta
+                  autoUpdate:
+                    type: boolean
+                  channelSetBy:
+                    type: string
+                  phase:
+                    type: string
+                    enum:
+                      - idle
+                      - checking
+                      - available
+                      - waiting-for-idle
+                      - downloading
+                      - installing
+                      - restarting
+                      - trial
+                  available:
+                    type: object
+                    required:
+                      - version
+                      - criticality
+                    properties:
+                      version:
+                        type: string
+                      criticality:
+                        type: string
+                      releasedAt:
+                        type: string
+                      releaseNotes:
+                        type: string
+                    additionalProperties: false
+                  installRequested:
+                    type: boolean
+                  waitingFor:
+                    type: object
+                    required:
+                      - jobs
+                      - workerSlots
+                      - mutations
+                      - adminLeases
+                    properties:
+                      activeRuns:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: Runs the brain reports; null when a connected brain has not reported recently.
+                      jobs:
+                        type: integer
+                        minimum: 0
+                      workerSlots:
+                        type: integer
+                        minimum: 0
+                      mutations:
+                        type: integer
+                        minimum: 0
+                      adminLeases:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                  lastCheckedAt:
+                    type: integer
+                    format: int64
+                  lastError:
+                    type: string
+                  lastOutcome:
+                    type: object
+                    required:
+                      - attemptId
+                      - from
+                      - to
+                      - result
+                      - atMs
+                    properties:
+                      attemptId:
+                        type: string
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      result:
+                        type: string
+                        enum:
+                          - installed
+                          - rolled-back
+                      reason:
+                        type: string
+                      atMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                  trial:
+                    type: object
+                    required:
+                      - from
+                      - to
+                      - deadlineMs
+                    properties:
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      deadlineMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/host_update_refresh:
+    post:
+      operationId: internalRpcHostUpdateRefresh
+      tags:
+        - headless-rpc
+      summary: host_update_refresh (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: companion_api::host_update::HostUpdateStatus
+                description: An always-on host's own update state (ADR-0224 A10).
+                required:
+                  - install
+                  - currentVersion
+                  - channel
+                  - autoUpdate
+                  - phase
+                  - installRequested
+                properties:
+                  install:
+                    type: string
+                    enum:
+                      - native
+                      - compose
+                      - unmanaged
+                  unmanagedReason:
+                    type: string
+                    enum:
+                      - desktop-app
+                      - not-installed
+                      - not-a-service
+                      - no-deploy-agent
+                  currentVersion:
+                    type: string
+                  target:
+                    type: string
+                  channel:
+                    type: string
+                    enum:
+                      - stable
+                      - beta
+                  autoUpdate:
+                    type: boolean
+                  channelSetBy:
+                    type: string
+                  phase:
+                    type: string
+                    enum:
+                      - idle
+                      - checking
+                      - available
+                      - waiting-for-idle
+                      - downloading
+                      - installing
+                      - restarting
+                      - trial
+                  available:
+                    type: object
+                    required:
+                      - version
+                      - criticality
+                    properties:
+                      version:
+                        type: string
+                      criticality:
+                        type: string
+                      releasedAt:
+                        type: string
+                      releaseNotes:
+                        type: string
+                    additionalProperties: false
+                  installRequested:
+                    type: boolean
+                  waitingFor:
+                    type: object
+                    required:
+                      - jobs
+                      - workerSlots
+                      - mutations
+                      - adminLeases
+                    properties:
+                      activeRuns:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: Runs the brain reports; null when a connected brain has not reported recently.
+                      jobs:
+                        type: integer
+                        minimum: 0
+                      workerSlots:
+                        type: integer
+                        minimum: 0
+                      mutations:
+                        type: integer
+                        minimum: 0
+                      adminLeases:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                  lastCheckedAt:
+                    type: integer
+                    format: int64
+                  lastError:
+                    type: string
+                  lastOutcome:
+                    type: object
+                    required:
+                      - attemptId
+                      - from
+                      - to
+                      - result
+                      - atMs
+                    properties:
+                      attemptId:
+                        type: string
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      result:
+                        type: string
+                        enum:
+                          - installed
+                          - rolled-back
+                      reason:
+                        type: string
+                      atMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                  trial:
+                    type: object
+                    required:
+                      - from
+                      - to
+                      - deadlineMs
+                    properties:
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      deadlineMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/host_update_status:
+    post:
+      operationId: internalRpcHostUpdateStatus
+      tags:
+        - headless-rpc
+      summary: host_update_status (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: companion_api::host_update::HostUpdateStatus
+                description: An always-on host's own update state (ADR-0224 A10).
+                required:
+                  - install
+                  - currentVersion
+                  - channel
+                  - autoUpdate
+                  - phase
+                  - installRequested
+                properties:
+                  install:
+                    type: string
+                    enum:
+                      - native
+                      - compose
+                      - unmanaged
+                  unmanagedReason:
+                    type: string
+                    enum:
+                      - desktop-app
+                      - not-installed
+                      - not-a-service
+                      - no-deploy-agent
+                  currentVersion:
+                    type: string
+                  target:
+                    type: string
+                  channel:
+                    type: string
+                    enum:
+                      - stable
+                      - beta
+                  autoUpdate:
+                    type: boolean
+                  channelSetBy:
+                    type: string
+                  phase:
+                    type: string
+                    enum:
+                      - idle
+                      - checking
+                      - available
+                      - waiting-for-idle
+                      - downloading
+                      - installing
+                      - restarting
+                      - trial
+                  available:
+                    type: object
+                    required:
+                      - version
+                      - criticality
+                    properties:
+                      version:
+                        type: string
+                      criticality:
+                        type: string
+                      releasedAt:
+                        type: string
+                      releaseNotes:
+                        type: string
+                    additionalProperties: false
+                  installRequested:
+                    type: boolean
+                  waitingFor:
+                    type: object
+                    required:
+                      - jobs
+                      - workerSlots
+                      - mutations
+                      - adminLeases
+                    properties:
+                      activeRuns:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: Runs the brain reports; null when a connected brain has not reported recently.
+                      jobs:
+                        type: integer
+                        minimum: 0
+                      workerSlots:
+                        type: integer
+                        minimum: 0
+                      mutations:
+                        type: integer
+                        minimum: 0
+                      adminLeases:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                  lastCheckedAt:
+                    type: integer
+                    format: int64
+                  lastError:
+                    type: string
+                  lastOutcome:
+                    type: object
+                    required:
+                      - attemptId
+                      - from
+                      - to
+                      - result
+                      - atMs
+                    properties:
+                      attemptId:
+                        type: string
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      result:
+                        type: string
+                        enum:
+                          - installed
+                          - rolled-back
+                      reason:
+                        type: string
+                      atMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                  trial:
+                    type: object
+                    required:
+                      - from
+                      - to
+                      - deadlineMs
+                    properties:
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      deadlineMs:
+                        type: integer
+                        format: int64
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/integration_github_account_connect_from_secret:
     post:
       operationId: internalRpcIntegrationGithubAccountConnectFromSecret
@@ -176552,6 +177765,10 @@ components:
           - host_state_snapshot
           - host_state_status
           - host_state_submit
+          - host_update_configure
+          - host_update_install
+          - host_update_refresh
+          - host_update_status
           - integration_github_account_connect_from_secret
           - integration_ingress_ack
           - integration_ingress_deadletter
@@ -177189,10 +178406,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 823
-  generatedRequestSchemaCount: 823
+  internalCommandCount: 827
+  generatedRequestSchemaCount: 827
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 823
+  contractRequestSchemaCount: 827
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 823
+  generatedResponseSchemaCount: 827
   loopbackOnly: true

@@ -93,6 +93,13 @@ impl JobSupervisor {
         self.exit_listeners.lock().push(listener);
     }
 
+    /// Background jobs running on this host now. An unreadable store counts
+    /// as busy: a host updates itself only when it knows nothing is running
+    /// (ADR-0224 A10).
+    pub fn running_count(&self) -> usize {
+        self.store.count_running(None).unwrap_or(usize::MAX)
+    }
+
     /// Enforce the per-owner and global concurrency caps.
     fn check_capacity(&self, owner: &JobOwner) -> Result<()> {
         if self.store.count_running(None)? >= MAX_JOBS_GLOBAL {
@@ -634,6 +641,18 @@ mod tests {
 
         let slice = sup.read(&rec.id, 0, 4096).unwrap();
         assert!(slice.data.contains("hello"), "got {:?}", slice.data);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn running_count_follows_jobs_until_they_settle() {
+        let dir = TempDir::new().unwrap();
+        let sup = supervisor(&dir);
+        assert_eq!(sup.running_count(), 0);
+        let rec = sup.spawn(sh("sleep 0.3", session("s1"))).await.unwrap();
+        assert_eq!(sup.running_count(), 1);
+        await_settled(&sup, &rec.id).await;
+        assert_eq!(sup.running_count(), 0);
     }
 
     #[cfg(unix)]

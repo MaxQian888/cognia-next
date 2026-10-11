@@ -78,10 +78,19 @@ export interface CatalogSnapshotPayload {
   targetsVersion: number
 }
 
+/**
+ * Kinds a catalog entry can have: every Update Center kind, plus `host-brain`,
+ * the brain half of an always-on host release. A host release is a
+ * `host-server` entry (the artifact) paired with a `host-brain` entry of the
+ * same version naming the same contract; the host acts only on a matched pair
+ * (ADR-0224 A10, `crates/cognia-update-catalog`).
+ */
+export type CatalogEntryKind = UpdateAssetKind | "host-brain"
+
 /** One published release for one asset on one channel. */
 export interface CatalogEntry {
   assetId: string
-  kind: UpdateAssetKind
+  kind: CatalogEntryKind
   executor: UpdateExecutor
   version: string
   channel: UpdateChannel
@@ -102,6 +111,15 @@ export interface CatalogEntry {
   signature?: string
   /** Explicitly pulled. Overrides rollout, including a manual check. */
   revoked?: boolean
+  /** Host archives: sha256 of the archive, pinned by the targets signature. */
+  sha256?: string
+  /** Host images: the repository, without a tag or digest. */
+  image?: string
+  /** Host images: the `sha256:` manifest digest. */
+  digest?: string
+  /** Host releases: the command contract both halves serve. */
+  contractVersion?: number
+  catalogHash?: string
 }
 
 export interface CatalogTargetsPayload {

@@ -36732,6 +36732,864 @@
       "outputTyped": true
     },
     {
+      "name": "host_update_configure",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "host_update_configure (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "autoUpdate": {
+            "type": "boolean"
+          },
+          "auto_update": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
+        "description": "An always-on host's own update state (ADR-0224 A10).",
+        "required": [
+          "install",
+          "currentVersion",
+          "channel",
+          "autoUpdate",
+          "phase",
+          "installRequested"
+        ],
+        "properties": {
+          "install": {
+            "type": "string",
+            "enum": [
+              "native",
+              "compose",
+              "unmanaged"
+            ]
+          },
+          "unmanagedReason": {
+            "type": "string",
+            "enum": [
+              "desktop-app",
+              "not-installed",
+              "not-a-service",
+              "no-deploy-agent"
+            ]
+          },
+          "currentVersion": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "autoUpdate": {
+            "type": "boolean"
+          },
+          "channelSetBy": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "checking",
+              "available",
+              "waiting-for-idle",
+              "downloading",
+              "installing",
+              "restarting",
+              "trial"
+            ]
+          },
+          "available": {
+            "type": "object",
+            "required": [
+              "version",
+              "criticality"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "criticality": {
+                "type": "string"
+              },
+              "releasedAt": {
+                "type": "string"
+              },
+              "releaseNotes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "installRequested": {
+            "type": "boolean"
+          },
+          "waitingFor": {
+            "type": "object",
+            "required": [
+              "jobs",
+              "workerSlots",
+              "mutations",
+              "adminLeases"
+            ],
+            "properties": {
+              "activeRuns": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Runs the brain reports; null when a connected brain has not reported recently."
+              },
+              "jobs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "workerSlots": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mutations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "adminLeases": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lastCheckedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastOutcome": {
+            "type": "object",
+            "required": [
+              "attemptId",
+              "from",
+              "to",
+              "result",
+              "atMs"
+            ],
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "installed",
+                  "rolled-back"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "atMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          "trial": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "deadlineMs"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "deadlineMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_update_install",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "host_update_install (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
+        "description": "An always-on host's own update state (ADR-0224 A10).",
+        "required": [
+          "install",
+          "currentVersion",
+          "channel",
+          "autoUpdate",
+          "phase",
+          "installRequested"
+        ],
+        "properties": {
+          "install": {
+            "type": "string",
+            "enum": [
+              "native",
+              "compose",
+              "unmanaged"
+            ]
+          },
+          "unmanagedReason": {
+            "type": "string",
+            "enum": [
+              "desktop-app",
+              "not-installed",
+              "not-a-service",
+              "no-deploy-agent"
+            ]
+          },
+          "currentVersion": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "autoUpdate": {
+            "type": "boolean"
+          },
+          "channelSetBy": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "checking",
+              "available",
+              "waiting-for-idle",
+              "downloading",
+              "installing",
+              "restarting",
+              "trial"
+            ]
+          },
+          "available": {
+            "type": "object",
+            "required": [
+              "version",
+              "criticality"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "criticality": {
+                "type": "string"
+              },
+              "releasedAt": {
+                "type": "string"
+              },
+              "releaseNotes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "installRequested": {
+            "type": "boolean"
+          },
+          "waitingFor": {
+            "type": "object",
+            "required": [
+              "jobs",
+              "workerSlots",
+              "mutations",
+              "adminLeases"
+            ],
+            "properties": {
+              "activeRuns": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Runs the brain reports; null when a connected brain has not reported recently."
+              },
+              "jobs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "workerSlots": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mutations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "adminLeases": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lastCheckedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastOutcome": {
+            "type": "object",
+            "required": [
+              "attemptId",
+              "from",
+              "to",
+              "result",
+              "atMs"
+            ],
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "installed",
+                  "rolled-back"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "atMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          "trial": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "deadlineMs"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "deadlineMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_update_refresh",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_update_refresh (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
+        "description": "An always-on host's own update state (ADR-0224 A10).",
+        "required": [
+          "install",
+          "currentVersion",
+          "channel",
+          "autoUpdate",
+          "phase",
+          "installRequested"
+        ],
+        "properties": {
+          "install": {
+            "type": "string",
+            "enum": [
+              "native",
+              "compose",
+              "unmanaged"
+            ]
+          },
+          "unmanagedReason": {
+            "type": "string",
+            "enum": [
+              "desktop-app",
+              "not-installed",
+              "not-a-service",
+              "no-deploy-agent"
+            ]
+          },
+          "currentVersion": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "autoUpdate": {
+            "type": "boolean"
+          },
+          "channelSetBy": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "checking",
+              "available",
+              "waiting-for-idle",
+              "downloading",
+              "installing",
+              "restarting",
+              "trial"
+            ]
+          },
+          "available": {
+            "type": "object",
+            "required": [
+              "version",
+              "criticality"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "criticality": {
+                "type": "string"
+              },
+              "releasedAt": {
+                "type": "string"
+              },
+              "releaseNotes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "installRequested": {
+            "type": "boolean"
+          },
+          "waitingFor": {
+            "type": "object",
+            "required": [
+              "jobs",
+              "workerSlots",
+              "mutations",
+              "adminLeases"
+            ],
+            "properties": {
+              "activeRuns": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Runs the brain reports; null when a connected brain has not reported recently."
+              },
+              "jobs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "workerSlots": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mutations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "adminLeases": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lastCheckedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastOutcome": {
+            "type": "object",
+            "required": [
+              "attemptId",
+              "from",
+              "to",
+              "result",
+              "atMs"
+            ],
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "installed",
+                  "rolled-back"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "atMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          "trial": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "deadlineMs"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "deadlineMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_update_status",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_update_status (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
+        "description": "An always-on host's own update state (ADR-0224 A10).",
+        "required": [
+          "install",
+          "currentVersion",
+          "channel",
+          "autoUpdate",
+          "phase",
+          "installRequested"
+        ],
+        "properties": {
+          "install": {
+            "type": "string",
+            "enum": [
+              "native",
+              "compose",
+              "unmanaged"
+            ]
+          },
+          "unmanagedReason": {
+            "type": "string",
+            "enum": [
+              "desktop-app",
+              "not-installed",
+              "not-a-service",
+              "no-deploy-agent"
+            ]
+          },
+          "currentVersion": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "autoUpdate": {
+            "type": "boolean"
+          },
+          "channelSetBy": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "checking",
+              "available",
+              "waiting-for-idle",
+              "downloading",
+              "installing",
+              "restarting",
+              "trial"
+            ]
+          },
+          "available": {
+            "type": "object",
+            "required": [
+              "version",
+              "criticality"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "criticality": {
+                "type": "string"
+              },
+              "releasedAt": {
+                "type": "string"
+              },
+              "releaseNotes": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "installRequested": {
+            "type": "boolean"
+          },
+          "waitingFor": {
+            "type": "object",
+            "required": [
+              "jobs",
+              "workerSlots",
+              "mutations",
+              "adminLeases"
+            ],
+            "properties": {
+              "activeRuns": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Runs the brain reports; null when a connected brain has not reported recently."
+              },
+              "jobs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "workerSlots": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mutations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "adminLeases": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lastCheckedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastOutcome": {
+            "type": "object",
+            "required": [
+              "attemptId",
+              "from",
+              "to",
+              "result",
+              "atMs"
+            ],
+            "properties": {
+              "attemptId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "installed",
+                  "rolled-back"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "atMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          "trial": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "deadlineMs"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "deadlineMs": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "integration_github_account_connect_from_secret",
       "category": "connectors",
       "resource": "integration",
@@ -77006,5 +77864,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af"
+  "catalogHash": "9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7"
 }

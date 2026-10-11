@@ -3,7 +3,7 @@ info:
   title: Cognia Headless Service Event and Bridge API
   version: "3"
   description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
-  x-cognia-catalog-hash: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af
+  x-cognia-catalog-hash: 9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7
 servers:
   loopback:
     host: 127.0.0.1:{port}
@@ -285,7 +285,7 @@ components:
               type: string
           catalogHash:
             type: string
-            const: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af
+            const: 9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7
           contractVersion:
             type: integer
             const: 3
@@ -318,7 +318,7 @@ components:
             type: string
           catalogHash:
             type: string
-            const: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af
+            const: 9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7
           contractVersion:
             type: integer
             const: 3
@@ -354,7 +354,7 @@ components:
             const: 3
           catalogHash:
             type: string
-            const: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af
+            const: 9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7
           contractVersion:
             type: integer
             const: 3
@@ -445,6 +445,12 @@ components:
           lastFlushAt:
             type: integer
             format: int64
+          activeRuns:
+            type: integer
+            minimum: 0
+            description:
+              Runs the brain is executing; the server's own pongs omit it. A host updates only when this is 0 (ADR-0224
+              A10).
         additionalProperties: false
     BridgeTokenRefreshFrame:
       name: BridgeTokenRefreshFrame

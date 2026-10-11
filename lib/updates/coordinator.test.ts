@@ -232,6 +232,31 @@ describe("consent", () => {
     )
   })
 
+  it("names a host's row for the host, asks first, and rests while the host installs", async () => {
+    const host = (assetId: string, displayName: string) =>
+      candidate({ assetId, displayName, kind: "host-server", executor: "cognia-host" })
+    const adapter = stubAdapter({
+      kind: "host-server",
+      executor: "cognia-host",
+      candidates: [host("mini", "Mac mini"), host("nas", "NAS")],
+      result: { state: "awaiting-host" },
+    })
+    const { coordinator } = makeCoordinator([adapter])
+    const items = await coordinator.check({ manual: true })
+    expect(items.map((item) => [item.key, item.displayName, item.action])).toEqual([
+      ["host-server:mini", "Mac mini", "update-host"],
+      ["host-server:nas", "NAS", "update-host"],
+    ])
+    // Another device cannot install a host; it asks the host, after a confirm.
+    expect((await coordinator.apply("host-server:mini", { consented: false })).state).toBe(
+      "awaiting-consent"
+    )
+    expect((await coordinator.apply("host-server:mini", { consented: true })).state).toBe(
+      "awaiting-host"
+    )
+    expect(adapter.applyCalls.map((c) => c.assetId)).toEqual(["mini"])
+  })
+
   it("background-downloads only the first-party desktop package", async () => {
     const adapter = stubAdapter({ candidates: [candidate()] })
     const { coordinator, settings } = makeCoordinator([adapter])

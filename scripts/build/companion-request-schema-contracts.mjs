@@ -485,6 +485,14 @@ const schemas = {
   external_bridge_relay_disable: emptyRequest,
   host_capabilities: emptyRequest,
   host_feature_manifest: emptyRequest,
+  // ADR-0224 A10: an always-on host's own updates, from its owner's device.
+  host_update_status: emptyRequest,
+  host_update_refresh: emptyRequest,
+  host_update_configure: z.object({
+    channel: z.enum(["stable", "beta"]).optional(),
+    autoUpdate: z.boolean().optional(),
+  }),
+  host_update_install: emptyRequest,
   integration_ingress_nack: z.object({
     route_id: z.string().min(1).describe("Also accepted as routeId."),
     delivery_id: z.string().min(1).describe("Also accepted as deliveryId."),

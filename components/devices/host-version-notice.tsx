@@ -10,22 +10,56 @@
  * last handshake persisted on the host (`lib/remote-host/host-version.ts`),
  * and why: a host behind this app, ahead of it, or half-updated (its own
  * server refusing its own brain). When it is this app, it links to the
- * Update Center.
+ * Update Center; when it is the host, one click asks the host to update
+ * itself over its management channel, which stays reachable across a
+ * contract mismatch for exactly this.
  */
 
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { ArrowUpCircleIcon } from "lucide-react"
+import { useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import type { DeviceRow } from "@/lib/devices/types"
+import {
+  HostUpdateUnsupportedError,
+  installHostUpdate,
+  type HostUpdateStatus,
+} from "@/lib/remote-host/host-update"
 
 export const APP_UPDATES_HREF = "/settings?section=updates"
 
-export function HostVersionNotice({ row }: { row: DeviceRow }) {
+export function HostVersionNotice({
+  row,
+  install = installHostUpdate,
+}: {
+  row: DeviceRow
+  /** Ask the host to update; injectable for tests. */
+  install?: (hostId: string) => Promise<HostUpdateStatus>
+}) {
   const t = useTranslations("devices.host.version")
+  const [requesting, setRequesting] = useState(false)
   const version = row.kind === "remote-host" ? row.hostVersion : undefined
   if (!version || version.advice === "none" || row.connectionState === "revoked") return null
+  const hostId = row.hostId
+
+  const updateHost = async (id: string) => {
+    setRequesting(true)
+    try {
+      await install(id)
+      toast.success(t("updateRequested"))
+    } catch (error) {
+      toast.error(
+        error instanceof HostUpdateUnsupportedError
+          ? t("updateUnsupported")
+          : t("updateFailed", { error: error instanceof Error ? error.message : String(error) })
+      )
+    } finally {
+      setRequesting(false)
+    }
+  }
 
   const refusal = version.brainRefusal
   const detail = refusal
@@ -56,6 +90,16 @@ export function HostVersionNotice({ row }: { row: DeviceRow }) {
           <Link href={APP_UPDATES_HREF} data-testid="host-version-update-app">
             {t("checkAppUpdates")}
           </Link>
+        </Button>
+      ) : hostId ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={requesting}
+          onClick={() => void updateHost(hostId)}
+          data-testid="host-version-update-host"
+        >
+          {t("updateHostNow")}
         </Button>
       ) : null}
     </div>

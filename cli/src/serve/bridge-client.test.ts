@@ -136,6 +136,7 @@ function makeClient(
     onStateChange: (state) => states.push(state),
     onTokenRefresh: (token) => refreshed.push(token),
     rss: () => ({ rssBytes: 123456789, lastFlushAt: 1751399990000 }),
+    activeRuns: () => 2,
     ...overrides,
   })
   return { client, sockets, urls, states, scheduled, refreshed }
@@ -323,7 +324,7 @@ describe("BridgeClient", () => {
     expect(logs.join("\n")).not.toContain("secret-value")
   })
 
-  it("answers pings with a pong carrying the RSS gauge", async () => {
+  it("answers pings with a pong carrying the RSS gauge and the runs in flight", async () => {
     const h = makeClient()
     await handshake(h)
     h.sockets[0].serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 42 })
@@ -333,7 +334,15 @@ describe("BridgeClient", () => {
       ts: 1751400000000,
       rssBytes: 123456789,
       lastFlushAt: 1751399990000,
+      activeRuns: 2,
     })
+  })
+
+  it("reports no runs, never a negative or fractional count", async () => {
+    const h = makeClient({ activeRuns: () => -3.7 })
+    await handshake(h)
+    h.sockets[0].serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 42 })
+    expect(h.sockets[0].lastSent()).toMatchObject({ activeRuns: 0 })
   })
 
   it("token_refresh updates the token used by the next reconnect", async () => {

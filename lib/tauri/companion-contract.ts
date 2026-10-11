@@ -37,6 +37,26 @@ export interface HostContractIdentity {
 export type HostContractListener = (deviceId: string, verdict: HostContractVerdict) => void
 
 /**
+ * Commands a client may send to a Host on another contract (ADR-0224 A10).
+ *
+ * A contract mismatch is exactly when "update the Host" is needed, so the
+ * Host's own update commands stay reachable across it. Their request and
+ * response shapes are frozen: a breaking change needs new names, never a new
+ * meaning for these. A Host too old to have them answers `unknown_command`,
+ * which the UI reports as a Host that must be updated by hand.
+ */
+export const VERSION_INDEPENDENT_COMMANDS: ReadonlySet<string> = new Set([
+  "host_update_status",
+  "host_update_refresh",
+  "host_update_configure",
+  "host_update_install",
+])
+
+export function isVersionIndependentCommand(name: string): boolean {
+  return VERSION_INDEPENDENT_COMMANDS.has(name)
+}
+
+/**
  * The Host's own server refused its brain: the two come from different builds
  * (ADR-0224 A10). The Host reports it in the device token while it lasts.
  * Independent of the contract verdict, which is about this app and the Host.

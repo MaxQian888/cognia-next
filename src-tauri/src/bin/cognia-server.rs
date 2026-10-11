@@ -2117,6 +2117,106 @@ fn agent_session_store_path(data_dir: &Path) -> PathBuf {
     data_dir.join("cognia").join("agent-sessions.sqlite")
 }
 
+/// How this host is installed, for its updater (ADR-0224 A10).
+fn detect_host_install() -> app_lib::companion_api::host_update::HostInstall {
+    use app_lib::companion_api::host_update;
+    let exe = std::env::current_exe().ok();
+    let image_target = std::env::var(host_update::HOST_TARGET_ENV).ok();
+    host_update::HostInstall::detect(&host_update::DetectInput {
+        current_exe: exe.as_deref(),
+        service_managed: std::env::var(host_update::SERVICE_MANAGED_ENV)
+            .is_ok_and(|value| value == "1"),
+        image_target: image_target.as_deref(),
+        compiled_version: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+/// A pending update decides, before anything starts, whether this process is
+/// a new version on trial or a failed one that must hand back to the old.
+fn boot_host_update(
+    install: &app_lib::companion_api::host_update::HostInstall,
+) -> Result<Option<cognia_host_service::install_home::PendingUpdate>, String> {
+    use app_lib::companion_api::host_update::InstallKind;
+    use cognia_host_service::install_home::BootDecision;
+    let InstallKind::Native(home) = &install.kind else {
+        return Ok(None);
+    };
+    match home.boot(&install.version, chrono::Utc::now().timestamp_millis()) {
+        Ok(BootDecision::Steady) => Ok(None),
+        Ok(BootDecision::Trial(pending)) => {
+            log::info!(
+                "host update: {} → {} on trial (boot {})",
+                pending.from,
+                pending.to,
+                pending.boots
+            );
+            Ok(Some(pending))
+        }
+        Ok(BootDecision::RolledBack(outcome)) => Err(format!(
+            "host update: {} was rolled back to {} ({}); restarting into it",
+            outcome.to,
+            outcome.from,
+            outcome.reason.unwrap_or_default()
+        )),
+        Err(error) => {
+            log::warn!("host update: could not read the pending update: {error}");
+            Ok(None)
+        }
+    }
+}
+
+/// Start this host's updater: automatic checks on the owner's channel, and
+/// installs once idle. `restart` asks `run_serve` to shut down so the service
+/// manager starts the swapped-in version.
+fn start_host_updater(
+    data_dir: &Path,
+    install: app_lib::companion_api::host_update::HostInstall,
+    trial: Option<cognia_host_service::install_home::PendingUpdate>,
+    restart: tokio::sync::watch::Sender<bool>,
+) {
+    use app_lib::companion_api::host_update::{
+        self, idle::LiveIdleProbe, network::HttpUpdateNetwork, updater, HostUpdater,
+        HostUpdaterDeps, InstallKind,
+    };
+    let base_url = std::env::var(host_update::UPDATE_URL_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| host_update::network::DEFAULT_UPDATE_URL.to_owned());
+    let home = match &install.kind {
+        InstallKind::Native(home) => Some(home.clone()),
+        InstallKind::Unmanaged(_) => None,
+    };
+    let updater = HostUpdater::new(
+        data_dir,
+        install,
+        host_update::trust_root(),
+        HostUpdaterDeps {
+            network: Arc::new(HttpUpdateNetwork::new(base_url)),
+            idle: Arc::new(LiveIdleProbe::new(Arc::new(|| {
+                cognia_jobs::host::supervisor()
+                    .map(|jobs| u32::try_from(jobs.running_count()).unwrap_or(u32::MAX))
+                    .unwrap_or(0)
+            }))),
+            writes: Arc::new(updater::LiveWriteGate),
+            restart: Arc::new(move || {
+                let _ = restart.send(true);
+            }),
+            clock: Arc::new(|| chrono::Utc::now().timestamp_millis()),
+        },
+    );
+    host_update::install(Arc::clone(&updater));
+    if let (Some(pending), Some(home)) = (trial, home) {
+        tokio::spawn(Arc::clone(&updater).supervise_trial(
+            home,
+            pending,
+            Arc::new(updater::LiveTrialHealth),
+            std::time::Duration::from_secs(2),
+            updater::TRIAL_SETTLE,
+        ));
+    }
+    tokio::spawn(updater.run());
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
@@ -2126,6 +2226,11 @@ async fn run_serve(
     browser_listener_port: Option<u16>,
     mdns_requested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // ADR-0224 A10: before anything starts, settle a pending update.
+    let host_install = detect_host_install();
+    let host_update_trial = boot_host_update(&host_install)?;
+    let (restart_for_update, mut restart_requested) = tokio::sync::watch::channel(false);
+
     // Config validation BEFORE anything is installed: a typo'd Lark base
     // would otherwise only surface as a 503 to a user inside a Feishu client.
     report_lark_env(
@@ -2608,15 +2713,33 @@ async fn run_serve(
             );
         }
     }
+    start_host_updater(
+        &data_dir,
+        host_install,
+        host_update_trial,
+        restart_for_update,
+    );
     log::info!("press Ctrl-C (or send SIGTERM) to stop.");
 
-    // Block until SIGINT / SIGTERM (Ctrl-C on Windows), then trigger graceful
+    // Block until SIGINT / SIGTERM (Ctrl-C on Windows), or until the updater
+    // swapped in a new version (ADR-0224 A10), then trigger graceful
     // shutdown: brain + sidecar first (children), then the HTTP listener.
     // `SIGTERM` matters more than Ctrl-C here — it is what systemd, Docker and
     // `kill <pid>` send, and with no handler the kernel default hard-kills the
-    // process mid-drain, orphaning the brain and sidecar children.
-    app_lib::shutdown::wait_for_signal().await;
-    log::info!("shutting down…");
+    // process mid-drain, orphaning the brain and sidecar children. After an
+    // update the service manager starts `current` again.
+    let restarting = tokio::select! {
+        () = app_lib::shutdown::wait_for_signal() => false,
+        _ = restart_requested.wait_for(|restart| *restart) => true,
+    };
+    log::info!(
+        "{}",
+        if restarting {
+            "restarting into the updated host…"
+        } else {
+            "shutting down…"
+        }
+    );
     // Withdraw the advertisement first so no scanner offers a Host that is
     // already refusing connections.
     mdns.stop();

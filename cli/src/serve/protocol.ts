@@ -83,6 +83,11 @@ export interface PongFrame {
   ts: number
   rssBytes: number
   lastFlushAt: number
+  /**
+   * Runs the brain is executing. The server updates the host only when
+   * nothing is running (ADR-0224 A10); its own pongs leave this out.
+   */
+  activeRuns?: number
 }
 
 export interface TokenRefreshFrame {
@@ -220,8 +225,13 @@ export function buildRespond(command: string, payload: Record<string, unknown>):
   return { v: BRIDGE_PROTOCOL_VERSION, type: "respond", command, payload }
 }
 
-export function buildPong(ts: number, rssBytes: number, lastFlushAt: number): PongFrame {
-  return { v: BRIDGE_PROTOCOL_VERSION, type: "pong", ts, rssBytes, lastFlushAt }
+export function buildPong(
+  ts: number,
+  rssBytes: number,
+  lastFlushAt: number,
+  activeRuns: number
+): PongFrame {
+  return { v: BRIDGE_PROTOCOL_VERSION, type: "pong", ts, rssBytes, lastFlushAt, activeRuns }
 }
 
 export function buildWorkerFrame(connectionId: string, frame: string): WorkerFrame {

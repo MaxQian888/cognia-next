@@ -1,7 +1,18 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
 
 import type { DeviceRow } from "@/lib/devices/types"
 import type { HostVersionState } from "@/lib/remote-host/host-version"
+import { HostUpdateUnsupportedError, type HostUpdateStatus } from "@/lib/remote-host/host-update"
 
 import { APP_UPDATES_HREF, HostVersionNotice } from "./host-version-notice"
 
@@ -42,6 +53,36 @@ describe("HostVersionNotice", () => {
     expect(notice).toHaveTextContent(/v2/)
     expect(notice).toHaveTextContent(/v3/)
     expect(screen.queryByTestId("host-version-update-app")).toBeNull()
+    // A host the store cannot name has no channel to ask over.
+    expect(screen.queryByTestId("host-version-update-host")).toBeNull()
+  })
+
+  it("asks the host to update itself in one click", async () => {
+    const install = jest.fn(async () => ({}) as HostUpdateStatus)
+    render(<HostVersionNotice row={row(state({}), { hostId: "mini" })} install={install} />)
+    await userEvent.click(screen.getByTestId("host-version-update-host"))
+    expect(install).toHaveBeenCalledWith("mini")
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it("says when the host is too old to update itself, or refused", async () => {
+    const tooOld = jest.fn(async () => {
+      throw new HostUpdateUnsupportedError()
+    })
+    const { unmount } = render(
+      <HostVersionNotice row={row(state({}), { hostId: "mini" })} install={tooOld} />
+    )
+    await userEvent.click(screen.getByTestId("host-version-update-host"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    expect(String(toastError.mock.calls[0][0])).toMatch(/by hand/)
+    unmount()
+    const refused = jest.fn(async () => {
+      throw new Error("this host is up to date")
+    })
+    render(<HostVersionNotice row={row(state({}), { hostId: "mini" })} install={refused} />)
+    await userEvent.click(screen.getByTestId("host-version-update-host"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(2))
+    expect(String(toastError.mock.calls[1][0])).toMatch(/up to date/)
   })
 
   it("names a host from before contract versions", () => {

@@ -420,7 +420,11 @@
       "hostUnversioned": "This host predates command contract versions, and this app was built for v{app}. Update the host to the same release as this app.",
       "hostAhead": "This host serves command contract v{host}, newer than this app (v{app}). Update this app to the same release as the host.",
       "halfUpdated": "This host's server ({server}) and brain ({brain}) come from different builds, so it cannot run work. Update the host so both come from one release.",
-      "checkAppUpdates": "Check for app updates"
+      "checkAppUpdates": "Check for app updates",
+      "updateHostNow": "Update the host now",
+      "updateRequested": "The host will update as soon as nothing is running on it.",
+      "updateUnsupported": "This host is from before self-update. Update it by hand once; after that it updates itself.",
+      "updateFailed": "The host did not take the update: {error}"
     },
     "managePairing": "Manage paired Host",
     "moreAria": "More actions for {label}"
@@ -677,5 +681,55 @@
       "save": "Seal on {host}",
       "saving": "Sealing…"
     }
+  },
+  "hostUpdates": {
+    "title": "Host updates",
+    "loading": "Reading the host's update state…",
+    "unsupported": "This host is from before self-update. Update it by hand once; after that it updates itself.",
+    "unreachable": "Could not reach the host: {error}",
+    "version": "Running version",
+    "channel": "Release channel",
+    "channelHint": "Follows this device's Update Center unless changed here.",
+    "channels": {
+      "stable": "Stable",
+      "beta": "Beta"
+    },
+    "autoUpdate": "Update automatically",
+    "autoUpdateHint": "When nothing is running, the host installs new releases itself and goes back to the old version if the new one does not come up healthy.",
+    "checkNow": "Check now",
+    "updateNow": "Update now",
+    "phase": {
+      "idle": "Up to date.",
+      "checking": "Checking for updates…",
+      "available": "Version {version} is available.",
+      "waiting-for-idle": "Version {version} will install once the host is idle.",
+      "downloading": "Downloading version {version}…",
+      "installing": "Installing version {version}…",
+      "restarting": "Restarting into version {version}…",
+      "trial": "Checking that version {version} is healthy. It goes back to {from} if not."
+    },
+    "waitingFor": {
+      "activeRuns": "{count, plural, one {# run} other {# runs}} in progress",
+      "unknownRuns": "its brain has not reported recently",
+      "jobs": "{count, plural, one {# background job} other {# background jobs}}",
+      "workerSlots": "{count, plural, one {# remote worker turn} other {# remote worker turns}}",
+      "mutations": "{count, plural, one {# change being saved} other {# changes being saved}}",
+      "adminLeases": "someone is administering it",
+      "label": "Waiting for: {reasons}"
+    },
+    "unmanaged": {
+      "desktop-app": "This host is the Cognia desktop app. It updates from its own Update Center.",
+      "not-installed": "This host runs from an unpacked archive, so it cannot replace itself. Run `cognia-server service install` again on the host to move it into its install home.",
+      "not-a-service": "This host is not running as its OS service, so nothing would start it again after an update. Start it with `cognia-server service install`.",
+      "no-deploy-agent": "This Compose host has no deploy agent to activate a new image. Install the agent next to it to update it from here."
+    },
+    "outcome": {
+      "installed": "Updated from {from} to {to} {when}.",
+      "rolled-back": "Version {to} was rolled back to {from} {when}: {reason}"
+    },
+    "lastChecked": "Last checked {when}",
+    "lastError": "The last check failed: {error}",
+    "installRequested": "The host will update as soon as it can.",
+    "actionFailed": "The host did not take that: {error}"
   }
 }

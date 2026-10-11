@@ -305,6 +305,16 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 4. **Brain and server mismatch.** Trace and fix the supervisor's behavior after a bridge refusal: it must report the state, not loop.
 5. Tests: update decision, rollback, verdict persistence and UI states.
 
+**Outcome (A10a df5403721, A10b df79c3f28, A10c).**
+
+- **Brain refusal (item 4).** The server sends `hello_refused` naming both sides and records the refusal for `/readyz`, `/healthz`, metrics, `service status` and the device token; the brain exits 78 and the supervisor parks until the brain entry file changes. It no longer loops.
+- **Exact-version UX (item 3).** The contract verdict and the brain report fold into a persisted `HostVersionState` on the host record. The device console says "update the host" (one click, over the management channel) or "update this app" (to the Update Center). A new host build id is adopted, not treated as a mismatch.
+- **Kinds and signing (item 1).** A host release is a `host-server` entry (the archive's sha256, or the Compose image's digest per variant) paired with a catalog-only `host-brain` entry naming the same contract. The offline signer is `scripts/release/update-catalog.mjs`; the Rust verifier is `crates/cognia-update-catalog`; one fixture pins both, plus the TS client. The update Worker gained `/v1/rollout` (a kill switch that can hold a release back, never substitute one) and a digest column. `images.yml` publishes the server image digest.
+  - Deviation: the plan put client adapters in A10b. They need the host's management commands, so they landed in A10c, one Update Center row per paired always-on host (`awaiting-host` while it installs).
+  - Deviation: artifacts carry no detached signature; their digests sit in the signed targets document.
+- **Native self-update (item 2).** Install home with `versions/` and a `current` symlink, trial and rollback, idle gate (brain runs in the pong, jobs, worker turns, in-flight writes, admin leases), owner-pushed channel, auto-update on by default, host panel chapter **Host updates**.
+- **Compose (item 2).** Next as A10d: the deploy agent has no local entry point (it only runs controller-signed operations), so it gains a standalone host mode that verifies the signed catalog itself and activates the server digest with rollback.
+
 ### A11 — Code supply
 
 1. **Project repository remote** on the project model, filled from the checkout (`lib/sandbox/run-environment.ts:612`).

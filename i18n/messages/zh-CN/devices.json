@@ -420,7 +420,11 @@
       "hostUnversioned": "此主机早于命令契约版本机制，而此应用基于 v{app} 构建。请把主机更新到与此应用相同的版本。",
       "hostAhead": "此主机提供的命令契约为 v{host}，比此应用（v{app}）更新。请把此应用更新到与主机相同的版本。",
       "halfUpdated": "此主机的服务端（{server}）与 brain（{brain}）来自不同构建，因此无法运行任务。请更新主机，让两者来自同一版本。",
-      "checkAppUpdates": "检查应用更新"
+      "checkAppUpdates": "检查应用更新",
+      "updateHostNow": "立即更新主机",
+      "updateRequested": "主机上没有任务运行时会立即更新。",
+      "updateUnsupported": "这台主机早于自更新功能。请手动更新一次，之后它会自行更新。",
+      "updateFailed": "主机未接受更新：{error}"
     },
     "managePairing": "管理已配对的 Host",
     "moreAria": "{label} 的更多操作"
@@ -677,5 +681,55 @@
       "save": "密封保存到 {host}",
       "saving": "正在密封保存…"
     }
+  },
+  "hostUpdates": {
+    "title": "主机更新",
+    "loading": "正在读取主机的更新状态…",
+    "unsupported": "这台主机早于自更新功能。请手动更新一次，之后它会自行更新。",
+    "unreachable": "无法连接主机：{error}",
+    "version": "当前版本",
+    "channel": "发布通道",
+    "channelHint": "默认跟随本设备的更新中心，可在此单独修改。",
+    "channels": {
+      "stable": "稳定版",
+      "beta": "测试版"
+    },
+    "autoUpdate": "自动更新",
+    "autoUpdateHint": "没有任务运行时，主机会自行安装新版本；新版本未能正常启动时会退回旧版本。",
+    "checkNow": "立即检查",
+    "updateNow": "立即更新",
+    "phase": {
+      "idle": "已是最新版本。",
+      "checking": "正在检查更新…",
+      "available": "可更新到 {version} 版本。",
+      "waiting-for-idle": "主机空闲后将安装 {version} 版本。",
+      "downloading": "正在下载 {version} 版本…",
+      "installing": "正在安装 {version} 版本…",
+      "restarting": "正在重启到 {version} 版本…",
+      "trial": "正在确认 {version} 版本是否正常，不正常将退回 {from}。"
+    },
+    "waitingFor": {
+      "activeRuns": "{count} 个任务正在运行",
+      "unknownRuns": "它的大脑近期没有上报状态",
+      "jobs": "{count} 个后台作业",
+      "workerSlots": "{count} 个远程工作机轮次",
+      "mutations": "{count} 项更改正在保存",
+      "adminLeases": "有人正在管理它",
+      "label": "正在等待：{reasons}"
+    },
+    "unmanaged": {
+      "desktop-app": "这台主机是 Cognia 桌面应用，它通过自己的更新中心更新。",
+      "not-installed": "这台主机从解压的归档直接运行，无法替换自身。请在主机上重新运行 `cognia-server service install`，将其移入安装目录。",
+      "not-a-service": "这台主机没有作为系统服务运行，更新后没有程序会重新启动它。请用 `cognia-server service install` 启动。",
+      "no-deploy-agent": "这台 Compose 主机没有部署代理来启用新镜像。在它旁边安装代理后即可从这里更新。"
+    },
+    "outcome": {
+      "installed": "已于{when}从 {from} 更新到 {to}。",
+      "rolled-back": "{to} 版本已于{when}退回 {from}：{reason}"
+    },
+    "lastChecked": "上次检查：{when}",
+    "lastError": "上次检查失败：{error}",
+    "installRequested": "主机会尽快完成更新。",
+    "actionFailed": "主机未接受该操作：{error}"
   }
 }

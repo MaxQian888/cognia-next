@@ -437,6 +437,7 @@ export class UpdateCoordinator {
     for (const candidate of candidates) {
       const row = this.ensureRow(candidate.kind, candidate.assetId, candidate.executor)
       seen.add(row.key)
+      if (candidate.displayName) row.displayName = candidate.displayName
       row.currentVersion = candidate.currentVersion
       row.lastCheckedAt = now
       row.snapshot = {

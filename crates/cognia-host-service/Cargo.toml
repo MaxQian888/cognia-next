@@ -16,8 +16,13 @@ name = "cognia_host_service"
 path = "src/lib.rs"
 
 [dependencies]
+flate2.workspace = true
 hex.workspace = true
 rand.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
 thiserror.workspace = true
 
 [target."cfg(unix)".dependencies]
@@ -25,6 +30,10 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+# Build host installs and archives, for other crates' tests.
+test-support = []
 
 [lints]
 workspace = true

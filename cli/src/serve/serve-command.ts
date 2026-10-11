@@ -28,6 +28,7 @@ import path from "node:path"
 // scheduler database); the async installer below adds the window/storage shims.
 import "../db/install-indexeddb"
 
+import { getExecutionBroker } from "@/lib/execution/broker"
 import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
 import {
   installRemoteWorkerRuntime,
@@ -214,6 +215,8 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     onWorkerFrame: (connectionId, frame) => workerPool.receive(connectionId, frame),
     onWorkerDetach: ({ connectionId, reason }) => workerPool.detach(connectionId, reason),
     rss: () => durability.rss(),
+    // Every agent run and chat turn holds an execution-broker lease.
+    activeRuns: () => getExecutionBroker().countRunning(),
     log: (level, message) => {
       if (level === "error") out.error(`serve: ${message}\n`)
       else out.write(`serve: ${message}\n`)

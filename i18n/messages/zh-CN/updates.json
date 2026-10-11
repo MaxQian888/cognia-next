@@ -9,11 +9,13 @@
   "nothingHere": "此设备上没有可更新的项目。",
   "groups": {
     "apps-and-runtimes": "应用与运行时",
+    "hosts": "常驻主机",
     "extensions": "浏览器扩展",
     "plugins-and-content": "插件与内容"
   },
   "groupHint": {
     "apps-and-runtimes": "本设备上的 Cognia 应用，以及命令行 Agent。",
+    "hosts": "与此应用配对的主机。每台主机自行安装更新、完成检查，检查失败时退回旧版本。",
     "extensions": "由浏览器安装和更新，Cognia 不负责安装。",
     "plugins-and-content": "安装在本应用中的插件、技能与角色包。"
   },
@@ -26,7 +28,8 @@
     "cli": "命令行 Agent",
     "plugin": "插件",
     "skill": "技能",
-    "character-pack": "角色包"
+    "character-pack": "角色包",
+    "host-server": "常驻主机"
   },
   "installedBy": {
     "tauri": "由 Cognia 安装",
@@ -36,7 +39,8 @@
     "package-manager": "由包管理器安装",
     "plugin-runtime": "由 Cognia 安装",
     "skill-runtime": "由 Cognia 安装",
-    "character-pack-runtime": "由 Cognia 安装"
+    "character-pack-runtime": "由 Cognia 安装",
+    "cognia-host": "由主机自行安装"
   },
   "state": {
     "current": "已是最新",
@@ -48,6 +52,7 @@
     "awaiting-store": "等待商店处理",
     "awaiting-reload": "等待重新加载",
     "awaiting-restart": "重启后生效",
+    "awaiting-host": "主机正在安装",
     "installing": "安装中",
     "verified": "已更新",
     "failed": "更新失败",
@@ -60,7 +65,8 @@
     "run-package-manager": "查看命令",
     "restart-desktop": "立即重启",
     "review-permissions": "查看并安装",
-    "open-pack-diff": "查看变更"
+    "open-pack-diff": "查看变更",
+    "update-host": "更新主机"
   },
   "versionChange": "{from} → {to}",
   "newVersion": "版本 {version}",

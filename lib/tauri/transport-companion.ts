@@ -13,6 +13,7 @@ import {
 import {
   contractIncompatibleError,
   hostContractVerdict,
+  isVersionIndependentCommand,
   onHostContractChange,
   recordHostContract,
 } from "./companion-contract"
@@ -964,9 +965,10 @@ export class CompanionTransport implements Transport {
 
     // The device handshake already judged this Host's contract (ADR-0175).
     // An incompatible Host gets one named refusal here, before any transport
-    // is chosen, instead of a different failure per command.
+    // is chosen, instead of a different failure per command. The Host's own
+    // update commands are the exception: they are how it gets compatible.
     const verdict = hostContractVerdict(config.deviceId)
-    if (verdict.state === "incompatible") {
+    if (verdict.state === "incompatible" && !isVersionIndependentCommand(name)) {
       this.setPlaneHealth({ rpc: "incompatible" })
       return Promise.reject(new CompanionError(contractIncompatibleError(verdict)))
     }

@@ -602,6 +602,10 @@ mod tests {
         ("companion_push_notification", OutputShape::Declared(RootType::Object)),
         ("companion_create_owner_invitation", OutputShape::Declared(RootType::Object)),
         ("companion_server_status", OutputShape::Declared(RootType::Object)),
+        ("host_update_status", OutputShape::Declared(RootType::Object)),
+        ("host_update_refresh", OutputShape::Declared(RootType::Object)),
+        ("host_update_configure", OutputShape::Declared(RootType::Object)),
+        ("host_update_install", OutputShape::Declared(RootType::Object)),
 
         // ── source_control (rpc/source_control.rs) ───────────────────────────
         ("git_is_repo", OutputShape::Scalar(ScalarShape::Bool)),

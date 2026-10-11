@@ -35,7 +35,27 @@ pub(super) const COMMANDS: &[&str] = &[
     "companion_push_notification",
     "companion_create_owner_invitation",
     "companion_server_status",
+    "host_update_status",
+    "host_update_refresh",
+    "host_update_configure",
+    "host_update_install",
 ];
+
+/// This host's updater (ADR-0224 A10); the desktop app has none.
+fn host_updater(
+    name: &str,
+) -> Result<Arc<crate::companion_api::host_update::HostUpdater>, (StatusCode, Json<RpcError>)> {
+    crate::companion_api::host_update::installed()
+        .ok_or_else(|| RpcError::headless_host_required(name))
+}
+
+/// An update the host would not start, with the reason it gave.
+fn update_refused(message: String) -> (StatusCode, Json<RpcError>) {
+    (
+        StatusCode::CONFLICT,
+        Json(RpcError::new("host_update_refused", message)),
+    )
+}
 
 /// The signaling hub, or the structured error a caller can act on.
 fn hub(
@@ -316,6 +336,37 @@ pub(super) async fn dispatch(
                 bound_port: (port > 0).then_some(port),
             })
         }
+
+        // ── Self-update (ADR-0224 A10) ─────────────────────────────────────
+        "host_update_status" => Ok(crate::companion_api::host_update::status_value(env!(
+            "CARGO_PKG_VERSION"
+        ))),
+
+        "host_update_refresh" => host_updater(name)?
+            .check(true)
+            .await
+            .map_err(update_refused)
+            .and_then(to_json),
+
+        "host_update_configure" => {
+            let channel: Option<String> = optional(&args, "channel")?;
+            let auto_update: Option<bool> = optional_aliased(&args, "auto_update", "autoUpdate")?;
+            host_updater(name)?
+                .configure(channel.as_deref(), auto_update, Some(device_id))
+                .map_err(|message| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(RpcError::new("invalid_argument", message)),
+                    )
+                })
+                .and_then(to_json)
+        }
+
+        "host_update_install" => host_updater(name)?
+            .request_install()
+            .await
+            .map_err(update_refused)
+            .and_then(to_json),
 
         _ => Err(RpcError::unknown_command(name)),
     }

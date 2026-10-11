@@ -1,6 +1,166 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "HostUpdateIdleReport": {
+      "type": "object",
+      "required": ["jobs", "workerSlots", "mutations", "adminLeases"],
+      "properties": {
+        "activeRuns": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Runs the brain reports; null when a connected brain has not reported recently."
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workerSlots": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mutations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adminLeases": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostUpdateOutcome": {
+      "type": "object",
+      "required": ["attemptId", "from", "to", "result", "atMs"],
+      "properties": {
+        "attemptId": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string",
+          "enum": ["installed", "rolled-back"]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "atMs": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostUpdateStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
+      "description": "An always-on host's own update state (ADR-0224 A10).",
+      "required": [
+        "install",
+        "currentVersion",
+        "channel",
+        "autoUpdate",
+        "phase",
+        "installRequested"
+      ],
+      "properties": {
+        "install": {
+          "type": "string",
+          "enum": ["native", "compose", "unmanaged"]
+        },
+        "unmanagedReason": {
+          "type": "string",
+          "enum": ["desktop-app", "not-installed", "not-a-service", "no-deploy-agent"]
+        },
+        "currentVersion": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string",
+          "enum": ["stable", "beta"]
+        },
+        "autoUpdate": {
+          "type": "boolean"
+        },
+        "channelSetBy": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "checking",
+            "available",
+            "waiting-for-idle",
+            "downloading",
+            "installing",
+            "restarting",
+            "trial"
+          ]
+        },
+        "available": {
+          "type": "object",
+          "required": ["version", "criticality"],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "criticality": {
+              "type": "string"
+            },
+            "releasedAt": {
+              "type": "string"
+            },
+            "releaseNotes": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "installRequested": {
+          "type": "boolean"
+        },
+        "waitingFor": {
+          "$ref": "#/$defs/HostUpdateIdleReport"
+        },
+        "lastCheckedAt": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "lastOutcome": {
+          "$ref": "#/$defs/HostUpdateOutcome"
+        },
+        "trial": {
+          "type": "object",
+          "required": ["from", "to", "deadlineMs"],
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "deadlineMs": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "IssueBulkOutcome": {
       "type": "object",
       "required": ["applied", "skipped", "failed"],
@@ -11357,6 +11517,18 @@
     }
   },
   "commands": {
+    "host_update_configure": {
+      "$ref": "#/$defs/HostUpdateStatus"
+    },
+    "host_update_install": {
+      "$ref": "#/$defs/HostUpdateStatus"
+    },
+    "host_update_refresh": {
+      "$ref": "#/$defs/HostUpdateStatus"
+    },
+    "host_update_status": {
+      "$ref": "#/$defs/HostUpdateStatus"
+    },
     "companion_signaling_status": {
       "$ref": "#/$defs/SignalingStatus"
     },

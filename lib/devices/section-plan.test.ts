@@ -123,6 +123,7 @@ describe("planDeviceSections", () => {
     expect(ids(plan.sections)).toEqual([
       "always-on",
       "host-secrets",
+      "host-updates",
       "workspaces",
       "routing",
       "identity",
@@ -145,6 +146,8 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("always-on")
     // Nor can its secrets be managed: they go over a channel named by that id.
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-secrets")
+    // Nor its updates, for the same reason.
+    expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-updates")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
   })

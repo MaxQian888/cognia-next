@@ -703,7 +703,8 @@
             "provider": {}
           }
         },
-        "state": {}
+        "state": {},
+        "update": {}
       }
     },
     "integration": {
