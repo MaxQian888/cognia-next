@@ -109,6 +109,15 @@ export interface PluginGlanceModuleData {
 }
 
 /**
+ * The `onGlanceVisibilityChange` hook's payload: one of the plugin's own
+ * modules, by local id, and whether some glance surface shows it now.
+ */
+export interface PluginGlanceVisibilityEvent {
+  moduleId: string
+  visible: boolean
+}
+
+/**
  * Glance API surfaced via `ctx.glance`. Available only when the plugin
  * declares the `"glance"` capability; otherwise a warn-once no-op.
  *
@@ -144,7 +153,9 @@ export interface PluginGlanceAPI {
    * Hear when a module comes into or goes out of view on any glance surface
    * (the tray panel, a phone drawer). The handler is called at once with the
    * current state, so a plugin can start or stop the work behind a module
-   * without a second read. Returns a disposer.
+   * without a second read. Returns a disposer. Python plugins, which cannot
+   * hand the host a callback, declare the `onGlanceVisibilityChange` hook
+   * instead.
    */
   onVisibilityChange: (moduleId: string, handler: (visible: boolean) => void) => () => void
 }

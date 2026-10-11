@@ -15,6 +15,11 @@ jest.mock("@/lib/plugin/commands/registry", () => ({
   getCommand: (id: string) => (busCommands.has(id) ? { id } : undefined),
   executeCommand: (id: string) => executeCommand(id),
 }))
+const slashHandler = jest.fn()
+let slashCommands: Record<string, { source?: string; pluginId?: string; handler: jest.Mock }> = {}
+jest.mock("@/lib/slash-commands/registry", () => ({
+  getSlashCommand: (id: string) => slashCommands[id],
+}))
 
 import { runGlancePluginAction, runPluginCommand } from "./plugin-actions"
 import { GlancePluginModuleRegistry } from "./plugin-registry"
@@ -25,6 +30,8 @@ beforeEach(() => {
   managerCommands = {}
   managerThrows = false
   busCommands.clear()
+  slashHandler.mockReset()
+  slashCommands = {}
 })
 
 describe("runPluginCommand", () => {
@@ -34,6 +41,22 @@ describe("runPluginCommand", () => {
     await expect(runPluginCommand("com.ci.open")).resolves.toBe(true)
     expect(pluginCommand.execute).toHaveBeenCalled()
     expect(executeCommand).not.toHaveBeenCalled()
+  })
+
+  it("runs a runtime slash command (ctx.commands) before the bus, with no arguments", async () => {
+    slashCommands["com.ci.open"] = { source: "plugin", pluginId: "com.ci", handler: slashHandler }
+    busCommands.add("com.ci.open")
+    await expect(runPluginCommand("com.ci.open", "com.ci")).resolves.toBe(true)
+    expect(slashHandler).toHaveBeenCalledWith("")
+    expect(executeCommand).not.toHaveBeenCalled()
+  })
+
+  it("ignores a slash command another plugin or the app registered under the id", async () => {
+    slashCommands["com.ci.open"] = { source: "plugin", pluginId: "com.evil", handler: slashHandler }
+    await expect(runPluginCommand("com.ci.open", "com.ci")).resolves.toBe(false)
+    slashCommands["com.ci.open"] = { source: "builtin", handler: slashHandler }
+    await expect(runPluginCommand("com.ci.open", "com.ci")).resolves.toBe(false)
+    expect(slashHandler).not.toHaveBeenCalled()
   })
 
   it("falls back to the command bus", async () => {
@@ -71,7 +94,7 @@ describe("runGlancePluginAction", () => {
     await expect(
       runGlancePluginAction("plugin:com.ci:status", "open", { registry, runCommand })
     ).resolves.toBeNull()
-    expect(runCommand).toHaveBeenCalledWith("com.ci.open-ci")
+    expect(runCommand).toHaveBeenCalledWith("com.ci.open-ci", "com.ci")
   })
 
   it("refuses an action the plugin did not publish", async () => {

@@ -95,6 +95,52 @@ describe("cognia-python-demo manifest", () => {
     if (declaresIntercept) expect(source).toContain("OPTIONAL, HIGH-RISK EXAMPLE")
   })
 
+  it("declares a desktop glance module whose strings ship in both locales", () => {
+    // ADR-0225 §6: Python declares the module in the manifest (it cannot call
+    // ctx.glance.register) and publishes with ctx.glance.update.
+    expect(manifest.capabilities).toContain("glance")
+    expect(manifest.glanceModules).toEqual([
+      expect.objectContaining({
+        id: "runtime",
+        titleKey: "glance.title",
+        platforms: ["desktop"],
+      }),
+    ])
+    const en = manifest.i18n?.locales?.en ?? {}
+    const zh = manifest.i18n?.locales?.["zh-CN"] ?? {}
+    for (const key of [
+      "glance.title",
+      "glance.python",
+      "glance.uptime",
+      "glance.updated",
+      "glance.summary",
+      "glance.refresh",
+    ]) {
+      expect(en[key]).toBeTruthy()
+      expect(zh[key]).toBeTruthy()
+    }
+  })
+
+  it("keeps main.py's glance ids in step with the manifest", () => {
+    // The module id `update` targets and the command its Refresh button names
+    // must be the declared ones: the host throws for an undeclared module, and
+    // runs only `<pluginId>.<command>` for a declared command.
+    const source = readFileSync(join(__dirname, "main.py"), "utf8")
+    const moduleId = manifest.glanceModules?.[0]?.id
+    const commandId = manifest.commands?.[0]?.id
+    expect(manifest.capabilities).toContain("commands")
+    expect(source).toContain(`GLANCE_MODULE = "${moduleId}"`)
+    expect(source).toContain(`GLANCE_REFRESH_COMMAND = "${commandId}"`)
+    expect(source).toContain('@hook("onGlanceVisibilityChange")')
+    expect(source).toContain('@hook("onCommand")')
+  })
+
+  it("passes validation without a glance or command diagnostic", () => {
+    const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+    const codes = (result.diagnostics ?? []).map((diagnostic) => diagnostic.code)
+    expect(codes.filter((code) => code.includes("glance") || code.includes("commands"))).toEqual([])
+  })
+
   it("answers only its own surfaces' actions", () => {
     // `onA2UIAction` is a broadcast; the demo namespaces its action and
     // filters on the manifest's surface prefix.

@@ -20,6 +20,7 @@ export const BUILDER_ONLY_EXTERNALS = ["react-dom"]
 export const BUILD_SCRIPT_SURFACES = [
   { path: "crates/cognia-plugin-template-ts/package.json", kind: "build-script" },
   { path: "scripts/plugin/build-frontend-plugins.mjs", kind: "shared-array" },
+  { path: "crates/cognia-plugin-template-glance/package.json", kind: "build-script" },
 ]
 export const NO_BUILD_SCRIPT_SURFACES = [
   "crates/cognia-plugin-template-vscode-extension/package.json",

@@ -1,0 +1,84 @@
+{
+  "id": "cognia-plugin-template-glance",
+  "name": "Cognia Plugin Template Glance",
+  "version": "0.1.0",
+  "description": "Glance module plugin template — a counter module for the tray panel and the phone's Glance drawer, with buttons that run the plugin's own commands. Replace this manifest with your own plugin's metadata.",
+  "type": "frontend",
+  "capabilities": ["glance", "commands"],
+  "main": "dist/index.js",
+  "author": {
+    "name": "Your Name"
+  },
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    }
+  },
+  "glanceModules": [
+    {
+      "id": "counter",
+      "title": "Counter",
+      "titleKey": "glance.title",
+      "icon": "Hash",
+      "sizes": ["compact", "standard"],
+      "platforms": ["desktop", "mobile"]
+    }
+  ],
+  "commands": [
+    {
+      "id": "template-glance-increment",
+      "name": "Increment the counter",
+      "description": "Add one to the template's glance counter.",
+      "descriptionKey": "command.increment",
+      "icon": "Plus"
+    },
+    {
+      "id": "template-glance-reset",
+      "name": "Reset the counter",
+      "description": "Set the template's glance counter back to zero.",
+      "descriptionKey": "command.reset",
+      "icon": "RotateCcw"
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "glance.title": "Counter",
+        "summary": "Count: {count}",
+        "stat.count": "Count",
+        "stat.changed": "Changed",
+        "stat.never": "Never",
+        "empty": "Nothing counted yet",
+        "action.increment": "Add one",
+        "action.reset": "Reset",
+        "command.increment": "Add one to the template's glance counter.",
+        "command.reset": "Set the template's glance counter back to zero."
+      },
+      "zh-CN": {
+        "glance.title": "计数",
+        "summary": "计数：{count}",
+        "stat.count": "计数",
+        "stat.changed": "更新于",
+        "stat.never": "从未",
+        "empty": "还没有计数",
+        "action.increment": "加一",
+        "action.reset": "重置",
+        "command.increment": "给模板的速览计数加一。",
+        "command.reset": "把模板的速览计数归零。"
+      }
+    }
+  }
+}

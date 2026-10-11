@@ -53,7 +53,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.shortcuts` | `context.ts:1390` | Rust 全局快捷键 | 否 | `register:1394`、`registerMany:1430` |
 | `ctx.contextMenu` | `context.ts:1447` | Rust 右键菜单 | 否 | `register:1451`、`registerMany:1493` |
 | `ctx.tray` | `tray-api.ts:29` | lib/tray/registry + Rust | 能力受控（`"tray"` 否则为空操作 `:14`） | `register` |
-| `ctx.glance` | `glance-api.ts:52` | lib/glance/plugin-registry（ADR-0225 §6） | 能力受控（`"glance"` 否则为仅警告一次的空操作 `:57`） | `register`、`update`、`onVisibilityChange` |
+| `ctx.glance` | `glance-api.ts:52` | lib/glance/plugin-registry（ADR-0225 §6） | 能力受控（`"glance"` 否则为仅警告一次的空操作 `:57`） | `register`、`update`、`onVisibilityChange`；Python 只有 `update`，可见性通过 `onGlanceVisibilityChange` 钩子获得 |
 | `ctx.window` | `context.ts:1505` | Rust window 命令 | 否 | `create:1549`、`getMain:1556`、`focus:1558` |
 | `ctx.secrets` | `context.ts:1578` | Rust keyring 网关 | 否 | store/get/delete/has（`:1580-1587`） |
 | `ctx.scheduler` | `context.ts:2846`（`createSchedulerAPI`） | 本地 `TaskScheduler` + `schedulerDb`，仅限插件自己的 `type: "plugin"` 任务 | `scheduler` 清单能力（否则为拒绝代理） | `createTask`、`runTaskNow`、`cancelExecution`、`emitEvent`、`onExecution`、`getStatistics`、`previewTrigger`、`registerHandler`；见[调度器 API](../../plugin-dev/scheduler) |

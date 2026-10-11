@@ -171,3 +171,11 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 - **标题中的额度显示为已用 %。** §11 写的是「最低剩余额度 %」。面板以已用 % 显示额度，因此标题的额度字段取最高的已用比例，口径一致（用户的选择）。标题字段保存在 `TrayDisplayPrefs.titleFields`，位于 设置 › 桌面 › 托盘 中读数模式旁，而非托盘面板的设置（§12），并且按桌面区分。字段出现之前保存的标题会迁移为其原指标对应的那一个数字。Windows 不提供标题选项，并说明原因。
 - **预算读数原本没有数字。** 托盘的用量数据源从未把花费预算并入其速览，所以 `budget` 指标让图标角标与悬浮提示一直为空。现在每次速览构建都并入同一个 `usageGlanceBudget`。
 
+## 修订：Python 插件模块
+
+§6 把插件模块留给了 JavaScript 运行时，因为 `ctx.glance.register` 和 `ctx.glance.onVisibilityChange` 要把回调交给宿主，而回调无法跨越 Python 插件的 stdio 边界。现在 Python 插件也能贡献模块：
+
+- 在 `manifest.glanceModules` 中**声明**（本来就与运行时无关），用 `ctx.glance.update` **发布**，该方法现已对 `python` 运行时开放。
+- **可见性**通过新的规范钩子 `onGlanceVisibilityChange`（`{ moduleId, visible }`）送达，它是回调的孪生：只发给模块所属的插件；插件开始监听或模块被声明时先给一次当前状态，之后每次翻转再通知。它在一处依据注册表对账（`lib/plugin/messaging/glance-visibility-hook-source.ts`），所以钩子晚于清单模块注册的 Python 插件也能收到第一次状态。
+- SDK 的 `cognia.glance` 用于生成清单条目并在测试中检查发布的数据；插件实际运行时使用的是宿主自己的 `cognia` 模块，它只提供 `ctx`，所以插件发布的是普通字典。
+- 参考实现：`plugins/cognia-glance-example`（TypeScript，需手动开启）和 `plugins/cognia-python-demo` 中的模块；`cognia plugin new --kind glance` 可生成一个骨架。

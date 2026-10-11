@@ -15,6 +15,10 @@ documentation for plugin authors:
                            from sync *and* async tools
   * ``ctx.i18n.t``       — user-facing strings from ``plugin.json``
                            ``i18n.locales`` (see ``_panel_labels``)
+  * glance module        — a tray-panel module declared in ``glanceModules``,
+                           fed with ``ctx.glance.update`` only while the
+                           ``onGlanceVisibilityChange`` hook says it is on
+                           screen, with a button answered by ``onCommand``
 
 Stdlib only; no pythonDependencies, so it loads on any Python >= 3.9.
 
@@ -24,6 +28,7 @@ unless your plugin genuinely needs to read and rewrite every outgoing message.
 """
 
 import asyncio
+import platform
 import time
 
 import cognia
@@ -75,6 +80,10 @@ sequenceDiagram
     Host-->>Plugin: onA2UIAction (clicks)
 ```
 """
+
+
+#: When the plugin process started; the glance module shows the uptime.
+STARTED_AT = time.monotonic()
 
 
 def on_startup():
@@ -317,3 +326,138 @@ def demo_panel_action(payload):
         data = payload.get("data") or {}
         cognia.log(f"python demo panel: section {data.get('nodeId')}")
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Glance module (ADR-0225 §6)
+#
+# plugin.json declares the module (`glanceModules`); Python cannot call
+# `ctx.glance.register` or `ctx.glance.onVisibilityChange`, which hand the
+# host a callback. The host instead tells the plugin through the
+# `onGlanceVisibilityChange` hook, once with the current state and then on
+# every change, and the plugin publishes plain dicts with
+# `ctx.glance.update` while the module is on screen.
+# ---------------------------------------------------------------------------
+
+#: The module's local id in `glanceModules`.
+GLANCE_MODULE = "runtime"
+#: The manifest command its Refresh button runs (`<pluginId>.<command>`).
+GLANCE_REFRESH_COMMAND = "python-demo-glance-refresh"
+#: Seconds between refreshes while the module is visible.
+GLANCE_REFRESH_SECONDS = 30
+
+#: The module's strings and their English defaults (plugin.json has en + zh-CN).
+GLANCE_LABELS = {
+    "glance.python": "Python",
+    "glance.uptime": "Up",
+    "glance.updated": "Updated",
+    "glance.refresh": "Refresh",
+}
+
+#: The refresh loop running while the module is visible, if any.
+_glance_task = None
+
+
+def format_uptime(seconds):
+    """`42s`, `5m`, `3h 20m`, `2d 4h`: short enough for a 24-character value."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if hours else f"{days}d"
+
+
+def build_glance_data(labels, summary, uptime, updated):
+    """The module data, in the camelCase shape `ctx.glance.update` takes."""
+    return {
+        "summary": summary,
+        "stats": [
+            {"label": labels["glance.python"], "value": platform.python_version()},
+            {"label": labels["glance.uptime"], "value": uptime, "tone": "ok"},
+            {"label": labels["glance.updated"], "value": updated, "tone": "muted"},
+        ],
+        "actions": [
+            {
+                "id": "refresh",
+                "label": labels["glance.refresh"],
+                "icon": "RefreshCw",
+                "command": GLANCE_REFRESH_COMMAND,
+            }
+        ],
+    }
+
+
+async def _translate(key, fallback, params=None):
+    try:
+        value = await (
+            cognia.ctx.i18n.t(key, params) if params is not None else cognia.ctx.i18n.t(key)
+        )
+    except Exception:  # noqa: BLE001 — a missing translation is not a failure
+        return fallback
+    return value if isinstance(value, str) and value and value != key else fallback
+
+
+async def publish_glance():
+    """Publish the module once, in the app's language."""
+    uptime = format_uptime(time.monotonic() - STARTED_AT)
+    version = platform.python_version()
+    keys = list(GLANCE_LABELS)
+    values = await asyncio.gather(*[_translate(key, GLANCE_LABELS[key]) for key in keys])
+    labels = dict(zip(keys, values))
+    summary = await _translate(
+        "glance.summary",
+        f"Python {version} · up {uptime}",
+        {"version": version, "uptime": uptime},
+    )
+    await cognia.ctx.glance.update(
+        GLANCE_MODULE,
+        build_glance_data(labels, summary, uptime, time.strftime("%H:%M:%S")),
+    )
+
+
+async def _refresh_while_visible():
+    while True:
+        try:
+            await publish_glance()
+        except Exception as error:  # noqa: BLE001 — keep refreshing; say why it failed
+            cognia.log(f"python demo glance publish failed: {error}")
+        await asyncio.sleep(GLANCE_REFRESH_SECONDS)
+
+
+@hook("onGlanceVisibilityChange")
+async def on_glance_visibility(event):
+    """Start refreshing when the module is on screen, stop when it is not.
+
+    The host sends only this plugin's modules, but a plugin with several
+    checks `moduleId`. The task runs on the host's event loop, which outlives
+    this call.
+    """
+    global _glance_task
+    if not isinstance(event, dict) or event.get("moduleId") != GLANCE_MODULE:
+        return None
+    if event.get("visible"):
+        if _glance_task is None or _glance_task.done():
+            _glance_task = asyncio.get_running_loop().create_task(_refresh_while_visible())
+    elif _glance_task is not None:
+        _glance_task.cancel()
+        _glance_task = None
+    return None
+
+
+@hook("onCommand")
+async def on_command(invocation):
+    """Answer the module's Refresh button (and `/python-demo-glance-refresh`).
+
+    The commands bridge hands one invocation dict; a command this plugin does
+    not own is declined so the next plugin can answer it.
+    """
+    if not isinstance(invocation, dict) or invocation.get("command") != GLANCE_REFRESH_COMMAND:
+        return {"handled": False}
+    await publish_glance()
+    return {"handled": True}

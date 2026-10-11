@@ -4,10 +4,10 @@
   "nameKey": "manifest.name",
   "version": "0.1.0",
   "icon": "assets/icon.png",
-  "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, and a declarative A2UI context panel.",
+  "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, a declarative A2UI context panel, and a tray-panel glance module.",
   "descriptionKey": "manifest.description",
   "type": "python",
-  "capabilities": ["python", "hooks", "context-panel"],
+  "capabilities": ["python", "hooks", "context-panel", "glance", "commands"],
   "pythonMain": "main.py",
   "contextPanels": [
     {
@@ -22,6 +22,25 @@
       "icon": "Braces"
     }
   ],
+  "glanceModules": [
+    {
+      "id": "runtime",
+      "title": "Python runtime",
+      "titleKey": "glance.title",
+      "icon": "Terminal",
+      "sizes": ["compact", "standard"],
+      "platforms": ["desktop"]
+    }
+  ],
+  "commands": [
+    {
+      "id": "python-demo-glance-refresh",
+      "name": "Refresh the Python runtime glance",
+      "description": "Publish the Python demo's glance module again.",
+      "descriptionKey": "command.glanceRefresh",
+      "icon": "RefreshCw"
+    }
+  ],
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -33,25 +52,39 @@
     "locales": {
       "en": {
         "manifest.name": "Python Demo",
-        "manifest.description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, and a declarative A2UI context panel.",
+        "manifest.description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, a declarative A2UI context panel, and a tray-panel glance module.",
         "panel.demo": "Python demo",
         "panel.title": "Python demo",
         "panel.heading": "Python demo panel",
         "panel.intro": "This panel is **declarative**: plugin.json names a surface and a build tool, and the host renders the A2UI components that tool pushes — no JavaScript module, no webview.",
         "panel.outline.runtime": "Runtime",
         "panel.outline.frames": "Frames",
-        "panel.outline.environments": "Environments"
+        "panel.outline.environments": "Environments",
+        "glance.title": "Python runtime",
+        "glance.python": "Python",
+        "glance.uptime": "Up",
+        "glance.updated": "Updated",
+        "glance.summary": "Python {version} · up {uptime}",
+        "glance.refresh": "Refresh",
+        "command.glanceRefresh": "Publish the Python demo's glance module again."
       },
       "zh-CN": {
         "manifest.name": "Python 示例",
-        "manifest.description": "Python 运行时的官方参考插件：工具、流式输出、钩子、生命周期、配置，以及声明式 A2UI 上下文面板。",
+        "manifest.description": "Python 运行时的官方参考插件：工具、流式输出、钩子、生命周期、配置、声明式 A2UI 上下文面板，以及托盘面板速览模块。",
         "panel.demo": "Python 示例",
         "panel.title": "Python 示例",
         "panel.heading": "Python 示例面板",
         "panel.intro": "这个面板是**声明式**的：plugin.json 声明一个 surface 和一个构建工具，宿主渲染该工具推送的 A2UI 组件——没有 JavaScript 模块，也没有 webview。",
         "panel.outline.runtime": "运行时",
         "panel.outline.frames": "帧",
-        "panel.outline.environments": "环境"
+        "panel.outline.environments": "环境",
+        "glance.title": "Python 运行时",
+        "glance.python": "Python",
+        "glance.uptime": "已运行",
+        "glance.updated": "更新于",
+        "glance.summary": "Python {version} · 已运行 {uptime}",
+        "glance.refresh": "刷新",
+        "command.glanceRefresh": "重新发布 Python 示例的速览模块。"
       }
     }
   },

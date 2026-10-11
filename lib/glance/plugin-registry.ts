@@ -54,6 +54,7 @@ export class GlancePluginModuleRegistry {
   private readonly visible = new Set<GlancePluginEntryId>()
   private readonly visibilityHandlers = new Map<GlancePluginEntryId, Set<VisibilityHandler>>()
   private readonly listeners = new Set<Listener>()
+  private readonly visibilityListeners = new Set<Listener>()
   private version = 0
   private catalogCache: GlancePluginModuleEntry[] | null = null
 
@@ -167,6 +168,7 @@ export class GlancePluginModuleRegistry {
         }
       }
     }
+    for (const listener of this.visibilityListeners) listener()
   }
 
   isVisible(entryId: GlancePluginEntryId): boolean {
@@ -199,6 +201,18 @@ export class GlancePluginModuleRegistry {
   }
 
   getVersion = (): number => this.version
+
+  /**
+   * Hear that some module's visibility flipped (read the new state with
+   * `isVisible`). Visibility is not a catalog or data change, so `subscribe`
+   * does not report it; the `onGlanceVisibilityChange` hook source needs both.
+   */
+  subscribeVisibility = (listener: Listener): (() => void) => {
+    this.visibilityListeners.add(listener)
+    return () => {
+      this.visibilityListeners.delete(listener)
+    }
+  }
 
   private countFor(pluginId: string): number {
     let count = 0

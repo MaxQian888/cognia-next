@@ -1,0 +1,96 @@
+{
+  "id": "cognia-glance-example",
+  "name": "Focus Timer (example)",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "icon": "assets/icon.png",
+  "description": "Example plugin (opt-in): a 25-minute focus timer as a tray-panel glance module, showing how a plugin declares a module, publishes its data only while it is on screen, and runs its own commands from the module's buttons.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": ["glance", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "glanceModules": [
+    {
+      "id": "focus",
+      "title": "Focus timer",
+      "titleKey": "glance.title",
+      "icon": "Timer",
+      "sizes": ["compact", "standard"],
+      "platforms": ["desktop", "mobile"]
+    }
+  ],
+  "commands": [
+    {
+      "id": "focus-toggle",
+      "name": "Start or pause the focus timer",
+      "description": "Start a 25-minute focus session, or pause or resume the current one.",
+      "descriptionKey": "command.toggle",
+      "icon": "Timer"
+    },
+    {
+      "id": "focus-reset",
+      "name": "Reset the focus timer",
+      "description": "Abandon the current focus session.",
+      "descriptionKey": "command.reset",
+      "icon": "RotateCcw"
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Focus Timer (example)",
+        "manifest.description": "Example plugin (opt-in): a 25-minute focus timer as a tray-panel glance module, showing how a plugin declares a module, publishes its data only while it is on screen, and runs its own commands from the module's buttons.",
+        "glance.title": "Focus timer",
+        "summary.running": "Focusing · {minutes} min left",
+        "summary.paused": "Paused · {minutes} min left",
+        "summary.idle": "Ready · {count} done today",
+        "stat.left": "Left",
+        "stat.minutes": "{minutes} min",
+        "stat.done": "Done today",
+        "action.start": "Start",
+        "action.pause": "Pause",
+        "action.resume": "Resume",
+        "action.reset": "Reset",
+        "command.toggle": "Start a 25-minute focus session, or pause or resume the current one.",
+        "command.reset": "Abandon the current focus session."
+      },
+      "zh-CN": {
+        "manifest.name": "专注计时（示例）",
+        "manifest.description": "示例插件（需手动开启）：以托盘面板速览模块呈现的 25 分钟专注计时，演示插件如何声明模块、只在模块显示时发布数据，以及从模块按钮运行自己的命令。",
+        "glance.title": "专注计时",
+        "summary.running": "专注中 · 剩余 {minutes} 分钟",
+        "summary.paused": "已暂停 · 剩余 {minutes} 分钟",
+        "summary.idle": "就绪 · 今日已完成 {count} 次",
+        "stat.left": "剩余",
+        "stat.minutes": "{minutes} 分钟",
+        "stat.done": "今日完成",
+        "action.start": "开始",
+        "action.pause": "暂停",
+        "action.resume": "继续",
+        "action.reset": "重置",
+        "command.toggle": "开始一次 25 分钟的专注，或暂停、继续当前这次。",
+        "command.reset": "放弃当前这次专注。"
+      }
+    }
+  }
+}

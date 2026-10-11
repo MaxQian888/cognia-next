@@ -76,6 +76,19 @@ describe("routePythonHostRequest", () => {
     expect(listSlashCommands).toHaveBeenCalledWith()
   })
 
+  it("routes ctx.glance.update so a python plugin can publish its glance module", async () => {
+    // ADR-0225 §6: the module is declared in the manifest; the data crosses
+    // the pipe as one plain object and the guarded API sanitizes it.
+    const update = jest.fn()
+    const data = { summary: "2 failing", stats: [{ label: "Failing", value: "2" }] }
+    const outcome = await routePythonHostRequest(
+      frame("glance.update", { args: ["builds", data] }),
+      { getContext: () => contextWith({ glance: { update } }) }
+    )
+    expect(outcome).toEqual({ ok: true, result: null })
+    expect(update).toHaveBeenCalledWith("builds", data)
+  })
+
   it("preserves the namespace as `this` so guarded APIs keep their closure", async () => {
     const namespace = {
       secret: "kept",

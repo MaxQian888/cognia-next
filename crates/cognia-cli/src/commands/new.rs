@@ -221,6 +221,7 @@ fn collect_answers(
         None if interactive => {
             let items = [
                 "ts    (TypeScript frontend)",
+                "glance (TypeScript tray-panel glance module)",
                 "wasm  (Rust + cargo-component)",
                 "python (Python SDK entrypoint)",
                 "hybrid (Frontend + Python entries)",
@@ -232,14 +233,15 @@ fn collect_answers(
                     "Template kind",
                     &items,
                     0,
-                    "--kind ts|wasm|python|hybrid|vscode-extension",
+                    "--kind ts|glance|wasm|python|hybrid|vscode-extension",
                 )
                 .map_err(|e| anyhow!("{e}"))?;
             match idx {
                 0 => TemplateKind::Ts,
-                1 => TemplateKind::Wasm,
-                2 => TemplateKind::Python,
-                3 => TemplateKind::Hybrid,
+                1 => TemplateKind::Glance,
+                2 => TemplateKind::Wasm,
+                3 => TemplateKind::Python,
+                4 => TemplateKind::Hybrid,
                 _ => TemplateKind::VscodeExtension,
             }
         }
@@ -318,6 +320,7 @@ fn kind_label(kind: TemplateKind) -> &'static str {
     match kind {
         TemplateKind::Wasm => "WASM",
         TemplateKind::Ts => "frontend TypeScript",
+        TemplateKind::Glance => "glance module",
         TemplateKind::Python => "Python",
         TemplateKind::Hybrid => "hybrid",
         TemplateKind::VscodeExtension => "VS Code extension",
@@ -479,6 +482,7 @@ fn template_kind_name(kind: TemplateKind) -> &'static str {
     match kind {
         TemplateKind::Wasm => "wasm",
         TemplateKind::Ts => "ts",
+        TemplateKind::Glance => "glance",
         TemplateKind::Python => "python",
         TemplateKind::Hybrid => "hybrid",
         TemplateKind::VscodeExtension => "vscode-extension",
@@ -489,6 +493,7 @@ fn manifest_plugin_type(kind: TemplateKind) -> &'static str {
     match kind {
         TemplateKind::Wasm => "wasm",
         TemplateKind::Ts => "frontend",
+        TemplateKind::Glance => "frontend",
         TemplateKind::Python => "python",
         TemplateKind::Hybrid => "hybrid",
         TemplateKind::VscodeExtension => "vscode-extension",
@@ -648,6 +653,39 @@ mod tests {
         let source = std::fs::read_to_string(target.join("src/index.ts")).unwrap();
         assert!(source.contains("@cognia/plugin-sdk"));
         assert!(!target.join("src/__shims__").exists());
+    }
+
+    #[test]
+    fn new_stamps_glance_template_when_kind_glance() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("hello-glance");
+        stamp(
+            "hello-glance".into(),
+            Some(target.clone()),
+            TemplateKind::Glance,
+        )
+        .unwrap();
+        for relpath in [
+            "package.json",
+            "tsconfig.json",
+            "jest.config.cjs",
+            "plugin.json",
+            "src/index.ts",
+            "src/index.test.ts",
+            "src/__stubs__/plugin-sdk.ts",
+            "types/cognia-plugin-sdk.d.ts",
+            "README.md",
+        ] {
+            assert!(target.join(relpath).exists(), "missing: {relpath}");
+        }
+        let pkg = std::fs::read_to_string(target.join("package.json")).unwrap();
+        assert!(pkg.contains(r#""name": "hello-glance""#));
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        assert!(manifest.contains(r#""id": "hello-glance""#));
+        assert!(manifest.contains(r#""name": "Hello Glance""#));
+        assert!(manifest.contains(r#""type": "frontend""#));
+        assert_eq!(manifest_plugin_type(TemplateKind::Glance), "frontend");
+        assert_eq!(template_kind_name(TemplateKind::Glance), "glance");
     }
 
     #[test]

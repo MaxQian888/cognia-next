@@ -116,7 +116,7 @@ scripts/release-sync-keys.mjs       # 3-copy release-key sync (--check in CI)
 
 | 命令 | 作用 | 模块 | 是否与应用通信？ |
 | --- | --- | --- | --- |
-| `new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | 拓印一个起步项目（TTY 上为交互式 wizard） | `cmd_new.rs` + `template.rs` | 否 |
+| `new [name] [--dir DIR] [--kind ts\|glance\|wasm\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | 拓印一个起步项目（TTY 上为交互式 wizard） | `cmd_new.rs` + `template.rs` | 否 |
 | `lint [--path .] [--json]` | 60 个诊断码的 manifest 校验；出错时 exit 1 | `cmd_lint.rs` | 否 |
 | `build [--path .] [--out P] [--skip-build] [--json]` | Lint → cargo-component / esbuild / existing-entry 打包 → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | 否 |
 | `info <bundle.zip\|directory> [--detailed] [--json]` | Manifest、文件表、bundle 签名状态或目录 `not-applicable`、`cognia:api-version` | `cmd_info.rs` | 否 |

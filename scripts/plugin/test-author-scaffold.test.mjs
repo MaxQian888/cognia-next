@@ -22,35 +22,50 @@ test("scaffold acceptance covers generation, install, typecheck, test, build, li
   }
 })
 
+/** The TypeScript templates `test-author-scaffold.mjs` installs and builds, by Rust module. */
+const TS_TEMPLATES = [
+  { dir: "cognia-plugin-template-ts", module: "ts" },
+  { dir: "cognia-plugin-template-glance", module: "glance" },
+]
+
+test("the acceptance run covers every TypeScript template kind", () => {
+  const source = readFileSync(new URL("./test-author-scaffold.mjs", import.meta.url), "utf8")
+  assert.match(source, /const KINDS = \["ts", "glance"\]/)
+})
+
 test("standalone scaffold declares its native build policy and Rust embeds it", () => {
-  const policy = readFileSync(
-    new URL("../../crates/cognia-plugin-template-ts/pnpm-workspace.yaml", import.meta.url),
-    "utf8"
-  )
-  const workspace = parse(policy)
-  assert.deepEqual(workspace.packages, ["."])
-  for (const dependency of ["esbuild", "unrs-resolver", "@parcel/watcher"])
-    assert.equal(workspace.allowBuilds[dependency], true)
   const generator = readFileSync(
     new URL("../../crates/cognia-cli/src/engine/template.rs", import.meta.url),
     "utf8"
   )
+  for (const { dir, module } of TS_TEMPLATES) {
+    const policy = readFileSync(
+      new URL(`../../crates/${dir}/pnpm-workspace.yaml`, import.meta.url),
+      "utf8"
+    )
+    const workspace = parse(policy)
+    assert.deepEqual(workspace.packages, ["."])
+    for (const dependency of ["esbuild", "unrs-resolver", "@parcel/watcher"])
+      assert.equal(workspace.allowBuilds[dependency], true)
+    assert.ok(generator.includes(`content: ${module}::PNPM_WORKSPACE.into()`))
+  }
   assert.ok(generator.includes('rel_path: PathBuf::from("pnpm-workspace.yaml")'))
-  assert.ok(generator.includes("content: ts::PNPM_WORKSPACE.into()"))
 })
 
 test("scaffold installs the public dependencies its vendored declarations expose", () => {
-  const manifest = JSON.parse(
-    readFileSync(
-      new URL("../../crates/cognia-plugin-template-ts/package.json", import.meta.url),
-      "utf8"
+  for (const { dir } of TS_TEMPLATES) {
+    const manifest = JSON.parse(
+      readFileSync(new URL(`../../crates/${dir}/package.json`, import.meta.url), "utf8")
     )
-  )
-  const dependencies = {
-    ...manifest.dependencies,
-    ...manifest.devDependencies,
-    ...manifest.peerDependencies,
+    assertDeclaresVendoredImports(dir, {
+      ...manifest.dependencies,
+      ...manifest.devDependencies,
+      ...manifest.peerDependencies,
+    })
   }
+})
+
+function assertDeclaresVendoredImports(dir, dependencies) {
   const bundle = JSON.parse(
     readFileSync(
       new URL("../../crates/cognia-cli/assets/author-types.json", import.meta.url),
@@ -69,10 +84,10 @@ test("scaffold installs the public dependencies its vendored declarations expose
       const name = specifier.startsWith("@")
         ? specifier.split("/").slice(0, 2).join("/")
         : specifier.split("/")[0]
-      assert.ok(dependencies[name], `${file} imports undeclared ${name}`)
+      assert.ok(dependencies[name], `${dir}: ${file} imports undeclared ${name}`)
     }
   }
-})
+}
 
 // ACP's generated experimental protocol names changed in later minor releases.
 // Vendored declarations must use the same protocol contract as their source.
@@ -87,6 +102,8 @@ test("scaffold pins ACP to the canonical host protocol declaration version", () 
   assert.match(expected, /^\d+\.\d+\.\d+$/)
   assert.equal(host.dependencies["@agentclientprotocol/sdk"], expected)
   assert.equal(template.dependencies["@agentclientprotocol/sdk"], expected)
+  const glance = readManifest("../../crates/cognia-plugin-template-glance/package.json")
+  assert.equal(glance.dependencies["@agentclientprotocol/sdk"], expected)
   assert.equal(sdk.peerDependencies["@agentclientprotocol/sdk"], expected)
   const lock = parse(readFileSync(new URL("../../pnpm-lock.yaml", import.meta.url), "utf8"))
   const resolution = lock.importers["packages/plugin-sdk"].dependencies["@agentclientprotocol/sdk"]

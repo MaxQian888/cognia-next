@@ -1835,6 +1835,47 @@ fn plugin_new_with_python_kind_succeeds() {
 }
 
 #[test]
+fn plugin_new_with_glance_kind_succeeds_and_lints_clean() {
+    let parent = tempfile::tempdir().unwrap();
+    let target = parent.path().join("smoke-glance");
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "new",
+        "smoke-glance",
+        "--dir",
+        target.to_str().unwrap(),
+        "--kind",
+        "glance",
+        "--author",
+        "Smoke Tester",
+        "--description",
+        "smoke",
+        "--with-keygen",
+        "false",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    for relpath in [
+        "plugin.json",
+        "package.json",
+        "src/index.ts",
+        "src/index.test.ts",
+        "types/cognia-plugin-sdk.d.ts",
+    ] {
+        assert!(target.join(relpath).exists(), "missing: {relpath}");
+    }
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(target.join("plugin.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["id"], "smoke-glance");
+    assert_eq!(manifest["type"], "frontend");
+    assert_eq!(manifest["glanceModules"][0]["id"], "counter");
+    // The scaffold's manifest passes the same lint an author runs next.
+    let (code, stdout, stderr) =
+        run_cognia(&["plugin", "lint", "--path", target.to_str().unwrap()]);
+    assert_eq!(code, Some(0), "lint stdout: {stdout}\nstderr: {stderr}");
+}
+
+#[test]
 fn plugin_new_with_hybrid_kind_succeeds() {
     let parent = tempfile::tempdir().unwrap();
     let target = parent.path().join("smoke-hybrid");

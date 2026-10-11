@@ -41,16 +41,16 @@ flowchart TD
 | Input | Flag | TTY wizard | Non-TTY default |
 | --- | --- | --- | --- |
 | name | positional | prompted (CWD basename suggested if valid) | **required** — bails with hint (`cmd_new.rs:123`) |
-| kind | `--kind wasm\|ts\|python\|hybrid\|vscode-extension` (`vscode` alias accepted) | select, 0 = wasm | `wasm` (`cmd_new.rs:134`) |
+| kind | `--kind ts\|glance\|wasm\|python\|hybrid\|vscode-extension` (`vscode` alias accepted) | select, 0 = ts | `ts` |
 | dir | `--dir <path>` | — | `./<name>` (`cmd_new.rs:324`) |
 | description | `--description` | prompted with suggestion | `"A cognia {kind} plugin"` (`cmd_new.rs:165`) |
 | author | `--author` | `git config user.name` as default (`cmd_new.rs:177-188`) | `"Anonymous"` |
 | author email | `--author-email` | optional prompt | `None` |
 | keygen | `--with-keygen true\|false` | confirm, default **true** | `false` (`cmd_new.rs:208`) |
 
-`TemplateKind::parse` (`template.rs:23-34`) also accepts `typescript` / `frontend` as aliases for
-`ts`, `py` as an alias for `python`, and `vscode` / `vs-code` as aliases for
-`vscode-extension`.
+`TemplateKind::parse` also accepts `typescript` / `frontend` as aliases for
+`ts`, `glance-module` for `glance`, `py` as an alias for `python`, and `vscode` / `vs-code` as
+aliases for `vscode-extension`.
 
 ### Name validation
 
@@ -70,7 +70,8 @@ plugin name must be lowercase alphanumeric plus -_. (got `…`)  (cmd_new.rs:382
 ## Templates are embedded sibling sources
 
 The template sources live as sibling directories — `crates/cognia-plugin-template/` (WASM),
-`crates/cognia-plugin-template-ts/` (TypeScript), `crates/cognia-plugin-template-python/`,
+`crates/cognia-plugin-template-ts/` (TypeScript), `crates/cognia-plugin-template-glance/`
+(glance module), `crates/cognia-plugin-template-python/`,
 `crates/cognia-plugin-template-hybrid/`, and
 `crates/cognia-plugin-template-vscode-extension/` — and are pulled into the binary with
 `include_str!` (`template.rs:38-104`). The CLI ships no template directory; scaffolds work
@@ -97,6 +98,7 @@ mutates, and pretty-prints the JSON.
 | --- | --- |
 | WASM (6 files — `template.rs:113-137`) | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore` |
 | TypeScript (10 files — `template.rs:139-186`) | `package.json`, `tsconfig.json`, `jest.config.cjs`, `src/index.ts`, `src/index.test.ts`, shims, `plugin.json`, `README.md`, `.gitignore` |
+| Glance module | `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__stubs__/plugin-sdk.ts`, `README.md`, `.gitignore`, plus the vendored `types/` |
 | Python (4 files — `template.rs:188-204`) | `plugin.json`, `main.py`, `README.md`, `.gitignore` |
 | Hybrid (6 files — `template.rs:206-230`) | `plugin.json`, `frontend/index.js`, `backend/main.py`, `styles.css`, `README.md`, `.gitignore` |
 | VS Code extension (6 files — `template.rs:232-267`) | `plugin.json`, `package.json`, `extension/out/extension.js`, `styles.css`, `README.md`, `.gitignore` |
@@ -140,6 +142,23 @@ Host modules (`@/types/plugin/index`, `@/lib/chat/slash-command-registry`) are m
 `src/__shims__/` copies in both `tsconfig.json` `paths` and `jest.config.cjs`
 `moduleNameMapper`, so the scaffold type-checks and its jest tests pass before the plugin ever
 meets a running cognia.
+
+### Glance module scaffold highlights
+
+A TypeScript frontend plugin whose one contribution is a tray-panel glance module (ADR-0225 §6).
+`plugin.json` declares `capabilities: ["glance", "commands"]`, one `glanceModules` entry (a
+counter, titled from the manifest's own `i18n.locales` in English and Chinese) and the two
+commands its buttons run. `src/index.ts` publishes with `ctx.glance.update`, republishes on
+`ctx.glance.onVisibilityChange` and locale changes, answers the buttons in `hooks.onCommand`, and
+keeps the count in `ctx.storage`. There is no React panel: the host draws the module. The
+template's `package.json` lists the same published packages as the TypeScript template, because
+the vendored SDK declarations import them; a unit test (`template.rs`) pins that every package
+those declarations import is declared, and `pnpm sdk:scaffold:test` installs, type-checks, tests,
+builds and lints both TypeScript kinds.
+
+`cognia plugin lint` skips the vendored `types/` bundle (marked by
+`types/cognia-plugin-sdk.d.ts`), whose internal `@cognia/provider-types` references are the SDK's
+own shape, the same rule `scripts/plugin/check-author-imports.mjs` applies in CI.
 
 ### Python scaffold highlights
 

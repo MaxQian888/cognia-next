@@ -742,6 +742,13 @@ export const CANONICAL_HOOK_POINTS = [
   // re-gated through the PII redaction line (fail-closed) before it is applied.
   "onConnectorInbound",
   "onConnectorOutbound",
+  // ADR-0225 §6: one of the plugin's own glance modules came into or went
+  // out of view on a glance surface. Delivered only to the module's plugin,
+  // once with the current state when the plugin starts listening, then on
+  // every change. Fired from one registry subscription
+  // (`lib/plugin/messaging/glance-visibility-hook-source.ts`); the Python
+  // twin of `ctx.glance.onVisibilityChange`.
+  "onGlanceVisibilityChange",
 ] as const
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]

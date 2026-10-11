@@ -508,6 +508,7 @@ the host renderer / consumer exists, not just the registry:
 | `wallpapers`       | Appearance → **Wallpaper** tab (plugin entries merged + "Plugin" badge) | `cognia-appearance-demo` (declarative)  |
 | `densityPresets`   | Resolved by name via `applyDensityPresetVars` (e.g. from a theme pack) | `cognia-appearance-demo` (declarative)  |
 | `scheduledTasks`   | Real `ScheduledTask` Dexie row created on enable                      | `cognia-scheduling-demo` (declarative)  |
+| `glanceModules`    | Tray panel and phone Glance drawer (host-rendered data, ADR-0225)     | `cognia-glance-example` (frontend), `cognia-python-demo` (Python) |
 | `configComponent`  | Rendered in the plugin settings panel (falls back to the schema form) | bridge unit tests (`config-component-bridge`) |
 | `modalMounts`      | Lazy declared-modal registry → `ctx.modal.openById`                   | bridge unit tests (`modal-mount-bridge`) |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply` (default-off flag)                      | bridge unit tests (`chat-middleware-bridge`) |

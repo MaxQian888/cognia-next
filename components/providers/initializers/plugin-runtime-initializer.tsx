@@ -7,6 +7,7 @@ import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { installPluginRuntimeLogBridge } from "@/lib/plugin/devtools/plugin-log-bridge"
 import { installExternalAgentConfigHookSource } from "@/lib/plugin/messaging/external-agent-config-hook-source"
+import { installGlanceVisibilityHookSource } from "@/lib/plugin/messaging/glance-visibility-hook-source"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
@@ -111,6 +112,15 @@ export function PluginRuntimeInitializer({
   useEffect(() => {
     if (!shouldRun) return
     return installExternalAgentConfigHookSource()
+  }, [shouldRun])
+
+  // `onGlanceVisibilityChange`, the hook twin of `ctx.glance.onVisibilityChange`
+  // for Python plugins, is reconciled from the glance module registry in one
+  // place, so a plugin hears its modules' current state once it listens
+  // (ADR-0225 §6).
+  useEffect(() => {
+    if (!shouldRun) return
+    return installGlanceVisibilityHookSource()
   }, [shouldRun])
 
   useEffect(() => {

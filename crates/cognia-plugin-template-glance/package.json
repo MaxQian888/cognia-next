@@ -1,0 +1,40 @@
+{
+  "name": "cognia-plugin-template-glance",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "description": "Cognia glance module plugin template",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:react --external:react/jsx-runtime --external:react/jsx-dev-runtime --external:@cognia/plugin-sdk \"--external:@cognia/plugin-sdk/*\" --external:@cognia/plugin-ui --external:lucide-react --log-level=info",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@xyflow/react": "^12.12.0",
+    "ai": "^7.0.128",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "dexie": "^4.4.6",
+    "lucide-react": "^1.48.0",
+    "radix-ui": "^1.6.7",
+    "react-hook-form": "^7.89.0",
+    "sonner": "^2.0.8",
+    "valibot": "^1.5.0",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.14",
+    "typescript": "^6.0.3"
+  }
+}

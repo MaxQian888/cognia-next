@@ -53,6 +53,7 @@ import { loggers } from "../core/logger"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getHookPointPermission } from "@/lib/plugin/contracts/plugin-points"
 import type { ExternalAgentChangeEvent } from "@/lib/plugin/api/external-agents-changes"
+import type { PluginGlanceVisibilityEvent } from "@/types/plugin/plugin-glance"
 import type {
   PluginHooksAll,
   HookSandboxExecutionResult,
@@ -1868,6 +1869,17 @@ export class PluginEventHooks {
   async dispatchExternalAgentConfigChange(event: ExternalAgentChangeEvent) {
     return this.executeHook("onExternalAgentConfigChange", (hooks) =>
       hooks.onExternalAgentConfigChange?.({ ...event })
+    )
+  }
+
+  /**
+   * ADR-0225 §6. Fired only by
+   * `lib/plugin/messaging/glance-visibility-hook-source.ts`, and delivered
+   * only to `pluginId`: a module's visibility is its own plugin's business.
+   */
+  async dispatchGlanceVisibilityChange(pluginId: string, event: PluginGlanceVisibilityEvent) {
+    return this.executeHook("onGlanceVisibilityChange", (hooks, owner) =>
+      owner === pluginId ? hooks.onGlanceVisibilityChange?.({ ...event }) : undefined
     )
   }
 

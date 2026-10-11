@@ -128,7 +128,7 @@ suppress it.
 
 | Command | What it does | Module | Talks to app? |
 | --- | --- | --- | --- |
-| `new [name] [--dir DIR] [--kind wasm\|ts\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | Stamp a starter project (interactive wizard on TTY) | `cmd_new.rs` + `template.rs` | no |
+| `new [name] [--dir DIR] [--kind ts\|glance\|wasm\|python\|hybrid\|vscode-extension] [--author NAME] [--author-email EMAIL] [--description TEXT] [--with-keygen true\|false] [--json]` | Stamp a starter project (interactive wizard on TTY) | `cmd_new.rs` + `template.rs` | no |
 | `lint [--path .] [--json]` | 60-code manifest validation; exit 1 on errors | `cmd_lint.rs` | no |
 | `build [--path .] [--out P] [--skip-build] [--json]` | Lint → cargo-component / esbuild / existing-entry packaging → zip | `cmd_build.rs` / `build_ts.rs` / `packaging.rs` | no |
 | `info <bundle.zip\|directory> [--detailed] [--json]` | Manifest, file table, bundle signature status or directory `not-applicable`, `cognia:api-version` | `cmd_info.rs` | no |

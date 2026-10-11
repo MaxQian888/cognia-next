@@ -3220,6 +3220,10 @@ describe("python host-call parity (ADR-0145)", () => {
         "externalAgents",
         "fs",
         "git",
+        // ADR-0225 §6: a python plugin declares its glance modules in the
+        // manifest and publishes with ctx.glance.update; visibility arrives
+        // through the onGlanceVisibilityChange hook.
+        "glance",
         "i18n",
         "integrations",
         "logger",

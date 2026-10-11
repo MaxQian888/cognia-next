@@ -7,6 +7,7 @@
 import type { PluginHooks, PluginMessage, PluginCanvasDocument } from "./plugin"
 import type { Project, KnowledgeFile, ChatMode } from "./_compat"
 import type { Artifact } from "../artifact/artifact"
+import type { PluginGlanceVisibilityEvent } from "./plugin-glance"
 
 // =============================================================================
 // Project Hooks
@@ -900,6 +901,16 @@ export interface PluginHooksAll extends PluginHooks {
   onExternalAgentConfigChange?: (
     event: import("@/lib/plugin/api/external-agents-changes").ExternalAgentChangeEvent
   ) => void | Promise<void>
+
+  /**
+   * One of this plugin's glance modules came into or went out of view on a
+   * glance surface (the tray panel, a phone's Glance drawer; ADR-0225 §6).
+   * Delivered only to the module's own plugin: once with the current state
+   * when the plugin starts listening (or the module is declared), then on
+   * every change. The Python twin of `ctx.glance.onVisibilityChange`; a
+   * TypeScript plugin may use either.
+   */
+  onGlanceVisibilityChange?: (event: PluginGlanceVisibilityEvent) => void | Promise<void>
 
   // Code Execution / Sandbox hooks
   onCodeExecutionStart?: (language: string, code: string, sandboxId?: string) => void

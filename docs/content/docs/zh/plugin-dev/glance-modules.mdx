@@ -16,11 +16,15 @@ description: 以数据的形式向桌面托盘面板和手机 Glance 抽屉贡�
 | --- | --- | --- | --- |
 | `glanceModules` | 在清单中声明模块，激活前即可见 | `glance` 能力 | 任意（清单） |
 | `ctx.glance.register` | 在运行时声明模块 | `glance` 能力 | frontend、hybrid |
-| `ctx.glance.update` | 发布模块的数据 | `glance` 能力 | frontend、hybrid |
+| `ctx.glance.update` | 发布模块的数据 | `glance` 能力 | frontend、hybrid、python |
 | `ctx.glance.onVisibilityChange` | 得知模块何时显示在屏幕上 | `glance` 能力 | frontend、hybrid |
+| `onGlanceVisibilityChange` 钩子 | 得知模块何时显示在屏幕上 | `glance` 能力 | 任意（钩子） |
 
 不需要额外的权限。
 没有 `glance` 能力时，每个 `ctx.glance` 调用都是只警告一次的空操作。
+
+仓库内有两个可运行的参考插件：`plugins/cognia-glance-example`（专注计时，TypeScript；在“插件”里启用即可试用该模块），以及 `plugins/cognia-python-demo` 中的速览模块（Python）。
+`cognia plugin new my-plugin --kind glance` 可以生成一个带一个模块、对应命令和测试的插件骨架。
 
 ## 声明模块
 
@@ -177,9 +181,53 @@ interface PluginGlanceModuleData {
 ### 动作运行你自己的命令
 
 动作的 `command` 是**你的插件**的某个命令 id，不带插件前缀。
-宿主运行 `<pluginId>.<command>`：清单 `commands[]` 中的条目，或你用 `ctx.commands` 注册的命令。
+宿主运行 `<pluginId>.<command>`：清单 `commands[]` 中的条目（由你的 `onCommand` 钩子应答），或你用 `ctx.commands.registerSlashCommand` 注册的斜杠命令。
+两者都不带参数、也没有聊天会话地运行，和从命令面板调用一样。
 模块不能运行其他插件或应用本身的命令。
 带 `action` 的行在点击时运行该动作；动作也会显示为按钮。
+
+## 在 Python 中使用
+
+Python 插件在清单里声明模块，通过钩子得知可见性，再用 `ctx.glance.update` 发布数据。
+`ctx.glance.register` 和 `ctx.glance.onVisibilityChange` 在 Python 中不可用：它们要把回调交给宿主，而回调无法跨越插件的 stdio 边界。
+
+```json title="plugin.json"
+{
+  "type": "python",
+  "capabilities": ["python", "hooks", "glance", "commands"],
+  "glanceModules": [{ "id": "queue", "title": "Queue", "icon": "ListTodo" }],
+  "commands": [{ "id": "drainQueue", "name": "Drain queue" }]
+}
+```
+
+```python title="main.py"
+import cognia
+from cognia import hook
+
+@hook("onGlanceVisibilityChange")
+async def on_glance_visibility(event):
+    # {"moduleId": "queue", "visible": True}；只会收到本插件自己的模块。
+    if event.get("moduleId") == "queue" and event.get("visible"):
+        jobs = count_jobs()
+        await cognia.ctx.glance.update("queue", {
+            "summary": f"{jobs} queued",
+            "stats": [{"label": "Queued", "value": str(jobs), "tone": "warn" if jobs else "ok"}],
+            "actions": [{"id": "drain", "label": "Drain", "icon": "Play", "command": "drainQueue"}],
+        })
+
+@hook("onCommand")
+async def on_command(invocation):
+    if invocation.get("command") != "drainQueue":
+        return {"handled": False}
+    drain()
+    return {"handled": True}
+```
+
+插件加载时（或模块被声明时），钩子会先带着当前状态到达一次，之后每次变化再到达，而且只针对你自己的模块。
+要在模块可见期间保持数据新鲜，就在收到 `True` 时启动一个任务，收到 `False` 时取消它。
+
+在宿主中运行时，`cognia` 是宿主自己的模块：请按上面的 camelCase 结构发布普通字典。
+SDK 里的 `cognia.glance` 用于编写和测试：`define_glance_module` 生成清单条目，`validate_glance_data` 在单元测试里检查你发布的内容就是宿主会保留的内容。
 
 ## 尺寸
 

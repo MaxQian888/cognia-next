@@ -40,7 +40,6 @@ JS_RUNTIME_ONLY: dict[str, str] = {
     "chat-importer": "carries detect() and async parse() functions for the host chat-import pipeline",
     "uri-handler": "carries a handle() deep-link function",
     "tray-item": "carries an onClick() function (PluginTrayItemInput)",
-    "glance-module": "a module is only useful fed by ctx.glance.update, which has no Python counterpart",
     "balance-adapter": "runtime adapter object with fetch methods",
     "limits-source": "runtime adapter object with fetch methods",
     "provider-operation-adapter": "carries an async handler() the host executor dispatches to",
@@ -77,6 +76,8 @@ PYTHON_MIRRORS: dict[str, str] = {
     "session-importer": "SessionImporterDef",
     "link-matcher": "LinkMatcherDef",
     "subscription-provider": "define_subscription_provider",
+    # glance module declaration (ADR-0225 §6); data goes through ctx.glance.update
+    "glance-module": "define_glance_module",
     # external-agent (merged into cognia)
     "external-agent-preset": "define_external_agent_preset",
     "external-agent-adapter": "define_external_agent_adapter",

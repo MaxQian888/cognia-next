@@ -171,3 +171,11 @@ Phase 4 settled five points the sections above left open or got wrong:
 - **The title shows quota as used %.** §11 said "lowest remaining quota %". The panel shows quota as used %, so the title's quota field is the highest used share, the same convention (the user's choice). Title fields live in `TrayDisplayPrefs.titleFields`, next to the readout mode in Settings › Desktop › Tray rather than in the tray panel's settings (§12), and stay per desktop. A title stored before fields existed migrates to the one number its metric named. Windows offers no title option and says why.
 - **The budget readout had no number.** The tray's usage feed never folded the cost budget into its glance, so the `budget` metric left the icon badge and the tooltip blank. Every glance build now folds the same `usageGlanceBudget`.
 
+## Amendment: Python plugin modules
+
+§6 left plugin modules to the JavaScript runtimes, because `ctx.glance.register` and `ctx.glance.onVisibilityChange` hand the host a callback, which cannot cross a Python plugin's stdio boundary. Python plugins now contribute modules too:
+
+- **Declare** in `manifest.glanceModules` (already runtime-agnostic), **publish** with `ctx.glance.update`, now open to the `python` runtime.
+- **Visibility** arrives through a new canonical hook, `onGlanceVisibilityChange` (`{ moduleId, visible }`), the twin of the callback: delivered only to the module's own plugin, once with the current state when the plugin starts listening or the module is declared, then on every flip. It is reconciled from the registry in one place (`lib/plugin/messaging/glance-visibility-hook-source.ts`), so a Python plugin, whose hooks register after its manifest modules, still hears the first state.
+- The SDK's `cognia.glance` builds manifest entries and checks published data in tests; the host's own `cognia` module, which a plugin runs against, carries only `ctx`, so plugins publish plain dicts.
+- References: `plugins/cognia-glance-example` (TypeScript, opt-in) and the module in `plugins/cognia-python-demo`; `cognia plugin new --kind glance` scaffolds one.

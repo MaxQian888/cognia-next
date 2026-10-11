@@ -7,9 +7,12 @@
  * a consumer cannot run anything the plugin did not offer, nor another
  * plugin's or the app's commands.
  *
- * Plugin commands live in two places. Manifest commands are registered in the
- * plugin manager's registry; commands a plugin adds at runtime may sit on the
- * app's command bus. Both are tried, in that order.
+ * Plugin commands live in three places. Manifest commands are registered in
+ * the plugin manager's registry; `ctx.commands.registerSlashCommand` puts a
+ * runtime command in the slash-command registry (stamped with its plugin);
+ * a command may also sit on the app's command bus. They are tried in that
+ * order. A slash command runs with no arguments and no chat session, like a
+ * palette invocation.
  */
 
 import { parsePluginEntryId, type GlancePluginEntryId } from "@/types/glance/layout"
@@ -17,8 +20,15 @@ import { parsePluginEntryId, type GlancePluginEntryId } from "@/types/glance/lay
 import { glancePluginCommandId } from "./plugin-data"
 import { glancePluginModules, type GlancePluginModuleRegistry } from "./plugin-registry"
 
-/** Run a plugin command by its full id. Resolves false when no such command exists. */
-export async function runPluginCommand(commandId: string): Promise<boolean> {
+/**
+ * Run a plugin command by its full id. Resolves false when no such command
+ * exists. With `ownerPluginId`, a slash command counts only when that plugin
+ * registered it.
+ */
+export async function runPluginCommand(
+  commandId: string,
+  ownerPluginId?: string
+): Promise<boolean> {
   const { getPluginManager } = await import("@/lib/plugin/core/manager")
   let manifestCommand: { execute: () => void | Promise<void> } | undefined
   try {
@@ -31,6 +41,16 @@ export async function runPluginCommand(commandId: string): Promise<boolean> {
     await manifestCommand.execute()
     return true
   }
+  const { getSlashCommand } = await import("@/lib/slash-commands/registry")
+  const slash = getSlashCommand(commandId)
+  if (
+    slash &&
+    slash.source === "plugin" &&
+    (ownerPluginId === undefined || slash.pluginId === ownerPluginId)
+  ) {
+    await slash.handler("")
+    return true
+  }
   const bus = await import("@/lib/plugin/commands/registry")
   if (!bus.getCommand(commandId)) return false
   await bus.executeCommand(commandId)
@@ -39,7 +59,7 @@ export async function runPluginCommand(commandId: string): Promise<boolean> {
 
 export interface GlancePluginActionDeps {
   registry?: GlancePluginModuleRegistry
-  runCommand?: (commandId: string) => Promise<boolean>
+  runCommand?: (commandId: string, ownerPluginId: string) => Promise<boolean>
 }
 
 /**
@@ -58,7 +78,10 @@ export async function runGlancePluginAction(
   const action = registry.dataOf(entryId)?.data.actions?.find((a) => a.id === actionId)
   if (!action) return "errors.commandUnavailable"
   try {
-    const ran = await runCommand(glancePluginCommandId(parsed.pluginId, action.command))
+    const ran = await runCommand(
+      glancePluginCommandId(parsed.pluginId, action.command),
+      parsed.pluginId
+    )
     return ran ? null : "errors.commandUnavailable"
   } catch {
     return "errors.requestFailed"

@@ -64,7 +64,7 @@ describe("plugin interface catalog", () => {
     expect(getPluginApiMethodContract("glance.register")).toMatchObject({
       requiredPermissions: [],
       resourceEffect: { kind: "returned-disposer" },
-      namespace: { authorPath: "ctx.glance", runtimes: ["frontend", "hybrid"] },
+      namespace: { authorPath: "ctx.glance", runtimes: ["frontend", "hybrid", "python"] },
     })
     expect(getPluginApiMethodContract("glance.onVisibilityChange")).toMatchObject({
       resourceEffect: { kind: "returned-disposer" },

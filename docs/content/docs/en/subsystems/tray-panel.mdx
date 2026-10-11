@@ -68,10 +68,15 @@ expanded. A plugin never ships React into a glance surface. Authoring is covered
   resolved in the main window, where the plugin's i18n bundle lives) and the data of the visible
   plugin entries only. The editor's add list offers every catalogue module.
 - **On screen.** Each build reports which plugin entries it shows; `ctx.glance.onVisibilityChange`
-  tells the plugin, so it can stop computing while nothing shows its module.
+  tells the plugin, so it can stop computing while nothing shows its module. A Python plugin, which
+  cannot hand the host a callback, hears the same thing through the `onGlanceVisibilityChange` hook,
+  reconciled from the registry by `lib/plugin/messaging/glance-visibility-hook-source.ts` (current
+  state once when the plugin listens, then every flip, only to the module's own plugin), and
+  publishes with `ctx.glance.update`.
 - **Actions.** A click sends `plugin-action` with the entry and the action id, never a command. The
   main window looks the command up in what the plugin published and runs that plugin's own
-  `<pluginId>.<command>` (`lib/glance/plugin-actions.ts`).
+  `<pluginId>.<command>` (`lib/glance/plugin-actions.ts`): a manifest command, a slash command the
+  plugin registered with `ctx.commands`, or one on the command bus.
 - **Plugin off.** A layout keeps a plugin's entries while it is disabled or uninstalled; the stack
   skips them and the editor lists a shown one as "Plugin off", removable. Applying a preset drops
   plugin entries; the add list keeps offering the modules.

@@ -8,6 +8,7 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
 export const HOST_INTEGRATION_TEST_PRAGMA = "@cognia-host-integration-test"
 const AUTHOR_ROOTS = [
   "crates/cognia-plugin-template-ts",
+  "crates/cognia-plugin-template-glance",
   "crates/cognia-plugin-template-hybrid",
   "crates/cognia-plugin-template-vscode-extension",
   // Deep Research is the reference in-tree plugin for the public SDK: it is a
@@ -16,6 +17,9 @@ const AUTHOR_ROOTS = [
   // that true — the templates prove the boundary is expressible, this proves it
   // survives a plugin big enough to be tempted across it.
   "plugins/deep-research",
+  // The glance module reference (ADR-0225 §6): an example authors copy from,
+  // so it must stay on the public SDK too.
+  "plugins/cognia-glance-example",
 ]
 
 /**

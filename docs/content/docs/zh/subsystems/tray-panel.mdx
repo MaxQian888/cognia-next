@@ -59,8 +59,10 @@ compact 为一行（摘要或第一项统计），standard 为统计条、前三
 - **快照。** `GlanceSnapshotV1.plugins` 携带当前平台的模块目录（标题在主窗口里解析，插件的语言包在那里），以及可见插件条目的数据。
   编辑器的添加列表会提供目录中的每个模块。
 - **是否在屏幕上。** 每次构建都会报告它显示了哪些插件条目；`ctx.glance.onVisibilityChange` 通知插件，没人显示时插件可以停止计算。
+  Python 插件无法把回调交给宿主，它通过 `onGlanceVisibilityChange` 钩子得到同样的信息：由
+  `lib/plugin/messaging/glance-visibility-hook-source.ts` 依据注册表对账（插件开始监听时先给一次当前状态，之后每次翻转都通知，且只发给模块所属的插件），再用 `ctx.glance.update` 发布数据。
 - **动作。** 点击只发送 `plugin-action`（条目与动作 id），从不发送命令。主窗口在插件发布的数据里查到对应命令，
-  只运行该插件自己的 `<pluginId>.<command>`（`lib/glance/plugin-actions.ts`）。
+  只运行该插件自己的 `<pluginId>.<command>`（`lib/glance/plugin-actions.ts`）：清单命令、插件用 `ctx.commands` 注册的斜杠命令，或命令总线上的命令。
 - **插件关闭时。** 插件被禁用或卸载后，布局仍保留它的条目；速览列表跳过它们，编辑器把显示中的条目标为「插件已关闭」，可以移除。
   应用预设会移除插件条目，添加列表仍会继续提供这些模块。
 

@@ -210,7 +210,23 @@ pub fn find_forbidden_imports(source: &str) -> Vec<ForbiddenImport> {
     found
 }
 
-fn collect_source_files(root: &Path, files: &mut Vec<PathBuf>) {
+/// `types/cognia-plugin-sdk.d.ts` marks the VENDORED author-type bundle that
+/// `cognia plugin new` / `sync-types` write, because no `@cognia/*` package is
+/// published. Its references to `@cognia/provider-types` resolve to sibling
+/// files in the same bundle through the project's tsconfig `paths`; the author
+/// did not write them and can only change them by regenerating the bundle, so
+/// gating them would fail every fresh scaffold for the SDK's own shape.
+/// `isVendoredAuthorTypes` in `scripts/plugin/check-author-imports.mjs` is the
+/// same rule.
+fn vendored_author_types_dir(plugin_root: &Path) -> Option<PathBuf> {
+    let types = plugin_root.join("types");
+    types
+        .join("cognia-plugin-sdk.d.ts")
+        .is_file()
+        .then_some(types)
+}
+
+fn collect_source_files(root: &Path, skip: Option<&Path>, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
@@ -221,8 +237,11 @@ fn collect_source_files(root: &Path, files: &mut Vec<PathBuf>) {
             continue;
         }
         let path = entry.path();
+        if skip.is_some_and(|skip| path == skip) {
+            continue;
+        }
         if path.is_dir() {
-            collect_source_files(&path, files);
+            collect_source_files(&path, skip, files);
         } else if path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -239,7 +258,8 @@ fn collect_source_files(root: &Path, files: &mut Vec<PathBuf>) {
 /// would bury the import diagnostics the author can act on.
 pub fn scan_author_imports(root: &Path) -> Vec<Diagnostic> {
     let mut files = Vec::new();
-    collect_source_files(root, &mut files);
+    let vendored = vendored_author_types_dir(root);
+    collect_source_files(root, vendored.as_deref(), &mut files);
     files.sort();
 
     let mut diagnostics = Vec::new();
@@ -458,5 +478,35 @@ mod tests {
         assert!(diagnostics
             .iter()
             .all(|d| d.code == "source.import.host_private"));
+    }
+
+    #[test]
+    fn scan_skips_the_vendored_author_types_but_not_an_authors_own_types_dir() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-source-imports-vendored-{}",
+            std::process::id()
+        ));
+        let types = dir.join("types");
+        std::fs::create_dir_all(types.join("provider-core")).unwrap();
+        std::fs::write(
+            types.join("provider-core/index.d.ts"),
+            "import type { Provider } from \"@cognia/provider-types\"\n",
+        )
+        .unwrap();
+
+        // Without the bundle marker, `types/` is the author's own source.
+        let own = scan_author_imports(&dir);
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].code, "source.import.host_package");
+
+        // With it, the bundle `cognia plugin new` vendored is not author source,
+        // while the author's src/ is still gated.
+        std::fs::write(types.join("cognia-plugin-sdk.d.ts"), "export {}\n").unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/index.ts"), "import x from \"@/lib/x\"\n").unwrap();
+        let diagnostics = scan_author_imports(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].field, "src/index.ts");
     }
 }

@@ -387,6 +387,7 @@ ctx.contextPanels.setPinned(true) // 让自动 reveal 变成角标排队
 | `wallpapers`       | 外观 → **壁纸** tab（插件项合并 + "Plugin" 徽章）              | `cognia-appearance-demo`（声明式）        |
 | `densityPresets`   | 通过 `applyDensityPresetVars` 按名解析（如来自主题包）         | `cognia-appearance-demo`（声明式）        |
 | `scheduledTasks`   | 启用时创建真实的 `ScheduledTask` Dexie 行                      | `cognia-scheduling-demo`（声明式）        |
+| `glanceModules`    | 托盘面板与手机速览抽屉（宿主渲染的数据，ADR-0225）             | `cognia-glance-example`（前端）、`cognia-python-demo`（Python） |
 | `configComponent`  | 在插件设置面板渲染（失败回退到 schema 表单）                   | bridge 单测（`config-component-bridge`）  |
 | `modalMounts`      | 懒加载的声明式 modal 注册表 → `ctx.modal.openById`            | bridge 单测（`modal-mount-bridge`）       |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply`（默认关闭开关）                  | bridge 单测（`chat-middleware-bridge`）   |

@@ -30,6 +30,7 @@ module namespace, or from `cognia` for concise plugin authoring.
 | `cognia.workflow`            | `define_workflow_template`, `define_scheduled_task`, `define_configuration`                                                                                                                       |
 | `cognia.appearance`          | `define_theme`, `define_theme_pack`, `define_font_contribution`, `define_wallpaper`                                                                                                               |
 | `cognia.pet`                 | `define_pet_item`, `define_pet_achievement`                                                                                                                                                       |
+| `cognia.glance`              | `define_glance_module`, `glance_modules_manifest`, `validate_glance_data` (authoring + tests; publish with `ctx.glance.update`)                                                                   |
 
 ## Module-style plugin
 

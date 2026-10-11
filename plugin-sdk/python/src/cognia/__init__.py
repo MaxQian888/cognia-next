@@ -112,6 +112,12 @@ from .pet import (
     define_pet_achievement,
     define_pet_item,
 )
+from .glance import (
+    GlanceModule,
+    define_glance_module,
+    glance_modules_manifest,
+    validate_glance_data,
+)
 from .pi_package import (
     PI_PACKAGE_ENV_PREFIX,
     PiPackage,
@@ -305,6 +311,11 @@ __all__ = [
     "define_pet_item",
     "PetAchievement",
     "define_pet_achievement",
+    # glance module manifest mirror + published-data check (ADR-0225 §6)
+    "GlanceModule",
+    "define_glance_module",
+    "glance_modules_manifest",
+    "validate_glance_data",
     # pi-package manifest mirror (ADR-0210)
     "PI_PACKAGE_ENV_PREFIX",
     "PiPackage",

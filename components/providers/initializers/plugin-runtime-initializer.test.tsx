@@ -39,6 +39,12 @@ jest.mock("@/lib/plugin/messaging/external-agent-config-hook-source", () => ({
   installExternalAgentConfigHookSource: () => mockInstallExternalAgentConfigHookSource(),
 }))
 
+const mockGlanceHookTeardown = jest.fn()
+const mockInstallGlanceVisibilityHookSource = jest.fn(() => mockGlanceHookTeardown)
+jest.mock("@/lib/plugin/messaging/glance-visibility-hook-source", () => ({
+  installGlanceVisibilityHookSource: () => mockInstallGlanceVisibilityHookSource(),
+}))
+
 const mockMarkBootCapabilityReady = jest.fn()
 const mockMarkBootCapabilityFailed = jest.fn()
 let mockPluginRuntimeRequested = true
@@ -215,6 +221,22 @@ describe("PluginRuntimeInitializer", () => {
     render(<PluginRuntimeInitializer />)
 
     expect(mockInstallExternalAgentConfigHookSource).not.toHaveBeenCalled()
+  })
+
+  it("installs the glance visibility hook feed with the runtime and removes it on unmount", () => {
+    const { unmount } = render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallGlanceVisibilityHookSource).toHaveBeenCalledTimes(1)
+    expect(mockGlanceHookTeardown).not.toHaveBeenCalled()
+    unmount()
+    expect(mockGlanceHookTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not install the glance visibility hook feed when the runtime is not requested", () => {
+    mockPluginRuntimeRequested = false
+    render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallGlanceVisibilityHookSource).not.toHaveBeenCalled()
   })
 
   it("reinstalls character-pack warning refresh wiring after a StrictMode replay", () => {

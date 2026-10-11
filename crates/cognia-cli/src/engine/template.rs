@@ -1,8 +1,9 @@
 //! Bundled plugin templates — files emitted by `cognia plugin new`.
 //!
 //! Stored as `include_str!` blobs so the CLI binary is self-contained
-//! (no separate templates directory shipped alongside it). Three kinds
+//! (no separate templates directory shipped alongside it). Six kinds
 //! ship today: `wasm` (Rust + cargo-component), `ts` (TypeScript frontend),
+//! `glance` (TypeScript frontend contributing a tray-panel glance module),
 //! `python` (Python SDK entrypoint), `hybrid` (frontend + Python), and
 //! `vscode-extension` (Node sidecar VS Code extension entrypoint).
 
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 pub enum TemplateKind {
     Wasm,
     Ts,
+    Glance,
     Python,
     Hybrid,
     VscodeExtension,
@@ -24,9 +26,10 @@ impl TemplateKind {
     /// invariants. Test-only today (only the `.gitignore` invariant iterates
     /// it); un-gate when a production caller needs it.
     #[cfg(test)]
-    const ALL: [TemplateKind; 5] = [
+    const ALL: [TemplateKind; 6] = [
         Self::Wasm,
         Self::Ts,
+        Self::Glance,
         Self::Python,
         Self::Hybrid,
         Self::VscodeExtension,
@@ -36,11 +39,12 @@ impl TemplateKind {
         match s {
             "wasm" => Ok(Self::Wasm),
             "ts" | "typescript" | "frontend" => Ok(Self::Ts),
+            "glance" | "glance-module" => Ok(Self::Glance),
             "py" | "python" => Ok(Self::Python),
             "hybrid" => Ok(Self::Hybrid),
             "vscode" | "vs-code" | "vscode-extension" => Ok(Self::VscodeExtension),
             other => bail!(
-                "unknown template kind \"{other}\" — expected wasm, ts, python, hybrid, or vscode-extension"
+                "unknown template kind \"{other}\" — expected wasm, ts, glance, python, hybrid, or vscode-extension"
             ),
         }
     }
@@ -85,6 +89,31 @@ pub mod ts {
         include_str!("../../../cognia-plugin-template-ts/src/__stubs__/plugin-ui.tsx");
     pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template-ts/.gitignore");
     pub const README: &str = include_str!("../../../cognia-plugin-template-ts/README.md");
+}
+
+// ── Glance module template files ───────────────────────────────────────────
+// A TypeScript frontend plugin whose one contribution is a tray-panel glance
+// module (ADR-0225 §6): data published with `ctx.glance.update`, buttons bound
+// to its own manifest commands. No UI of its own, so no React panel.
+pub mod glance {
+    pub const PNPM_WORKSPACE: &str =
+        include_str!("../../../cognia-plugin-template-glance/pnpm-workspace.yaml");
+    pub const PACKAGE_JSON: &str =
+        include_str!("../../../cognia-plugin-template-glance/package.json");
+    pub const TSCONFIG_JSON: &str =
+        include_str!("../../../cognia-plugin-template-glance/tsconfig.json");
+    pub const JEST_CONFIG: &str =
+        include_str!("../../../cognia-plugin-template-glance/jest.config.cjs");
+    pub const PLUGIN_JSON: &str =
+        include_str!("../../../cognia-plugin-template-glance/plugin.json");
+    pub const SRC_INDEX_TS: &str =
+        include_str!("../../../cognia-plugin-template-glance/src/index.ts");
+    pub const SRC_INDEX_TEST_TS: &str =
+        include_str!("../../../cognia-plugin-template-glance/src/index.test.ts");
+    pub const SRC_STUB_SDK: &str =
+        include_str!("../../../cognia-plugin-template-glance/src/__stubs__/plugin-sdk.ts");
+    pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template-glance/.gitignore");
+    pub const README: &str = include_str!("../../../cognia-plugin-template-glance/README.md");
 }
 
 // ── Python template files ──────────────────────────────────────────────────
@@ -258,6 +287,52 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
             files.extend(author_type_files());
             files
         }
+        TemplateKind::Glance => {
+            let mut files = vec![
+                TemplateFile {
+                    rel_path: PathBuf::from("package.json"),
+                    content: substitute_glance_name(glance::PACKAGE_JSON, plugin_name),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("pnpm-workspace.yaml"),
+                    content: glance::PNPM_WORKSPACE.into(),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("tsconfig.json"),
+                    content: glance::TSCONFIG_JSON.into(),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("jest.config.cjs"),
+                    content: glance::JEST_CONFIG.into(),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("plugin.json"),
+                    content: substitute_glance_name(glance::PLUGIN_JSON, plugin_name),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("src").join("index.ts"),
+                    content: substitute_glance_name(glance::SRC_INDEX_TS, plugin_name),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("src").join("index.test.ts"),
+                    content: substitute_glance_name(glance::SRC_INDEX_TEST_TS, plugin_name),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("src").join("__stubs__").join("plugin-sdk.ts"),
+                    content: glance::SRC_STUB_SDK.into(),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from(".gitignore"),
+                    content: glance::GITIGNORE.into(),
+                },
+                TemplateFile {
+                    rel_path: PathBuf::from("README.md"),
+                    content: glance::README.into(),
+                },
+            ];
+            files.extend(author_type_files());
+            files
+        }
         TemplateKind::Python => vec![
             TemplateFile {
                 rel_path: PathBuf::from("plugin.json"),
@@ -360,6 +435,15 @@ pub fn next_steps(kind: TemplateKind, target_dir: &Path) -> Vec<String> {
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
+        TemplateKind::Glance => vec![
+            cd,
+            "pnpm install   # (or npm install / yarn install)".into(),
+            "pnpm test      # the template's jest tests should all pass".into(),
+            "cognia plugin doctor".into(),
+            "cognia plugin lint".into(),
+            "cognia plugin build".into(),
+            "# installed and enabled: tray panel → Edit → add the module".into(),
+        ],
         TemplateKind::Python => vec![
             cd,
             "python -m py_compile main.py".into(),
@@ -406,6 +490,12 @@ fn substitute_ts_name(content: &str, target_name: &str) -> String {
     content
         .replace("cognia-plugin-template-ts", target_name)
         .replace("Cognia Plugin Template TS", &humanize(target_name))
+}
+
+fn substitute_glance_name(content: &str, target_name: &str) -> String {
+    content
+        .replace("cognia-plugin-template-glance", target_name)
+        .replace("Cognia Plugin Template Glance", &humanize(target_name))
 }
 
 fn substitute_python_name(content: &str, target_name: &str) -> String {
@@ -468,6 +558,11 @@ mod tests {
         assert_eq!(TemplateKind::parse("ts").unwrap(), TemplateKind::Ts);
         assert_eq!(TemplateKind::parse("typescript").unwrap(), TemplateKind::Ts);
         assert_eq!(TemplateKind::parse("frontend").unwrap(), TemplateKind::Ts);
+        assert_eq!(TemplateKind::parse("glance").unwrap(), TemplateKind::Glance);
+        assert_eq!(
+            TemplateKind::parse("glance-module").unwrap(),
+            TemplateKind::Glance
+        );
         assert_eq!(TemplateKind::parse("python").unwrap(), TemplateKind::Python);
         assert_eq!(TemplateKind::parse("py").unwrap(), TemplateKind::Python);
         assert_eq!(TemplateKind::parse("hybrid").unwrap(), TemplateKind::Hybrid);
@@ -687,6 +782,175 @@ mod tests {
             manifest["commands"][0]["id"].as_str(),
             "the quick action must dispatch a command the manifest declares"
         );
+    }
+
+    #[test]
+    fn glance_template_wires_the_module_its_manifest_declares() {
+        let source = glance::SRC_INDEX_TS;
+        for call in [
+            "ctx.glance.update",
+            "ctx.glance.onVisibilityChange",
+            "ctx.i18n.t",
+            "ctx.i18n.onLocaleChange",
+            "ctx.storage.get",
+            "ctx.storage.set",
+            "ctx.lifecycle.onDispose",
+            "onCommand",
+        ] {
+            assert!(
+                source.contains(call),
+                "glance template should demonstrate {call}"
+            );
+        }
+        let manifest: serde_json::Value = serde_json::from_str(glance::PLUGIN_JSON).unwrap();
+        // The id `update` publishes to must be the declared module, and every
+        // button must name a declared command: the host throws for an
+        // undeclared module and runs only `<pluginId>.<command>`.
+        let module_id = manifest["glanceModules"][0]["id"].as_str().unwrap();
+        assert!(source.contains(&format!("MODULE_ID = \"{module_id}\"")));
+        for command in manifest["commands"].as_array().unwrap() {
+            let id = command["id"].as_str().unwrap();
+            assert!(
+                source.contains(&format!("\"{id}\"")),
+                "src/index.ts never names command {id}"
+            );
+        }
+        // Every key the source translates ships in both locales.
+        let locales = &manifest["i18n"]["locales"];
+        let en = locales["en"].as_object().unwrap();
+        let zh = locales["zh-CN"].as_object().unwrap();
+        assert_eq!(
+            en.keys().collect::<Vec<_>>(),
+            zh.keys().collect::<Vec<_>>(),
+            "en and zh-CN must carry the same keys"
+        );
+        assert!(en.contains_key(manifest["glanceModules"][0]["titleKey"].as_str().unwrap()));
+        for key in [
+            "summary",
+            "stat.count",
+            "stat.changed",
+            "stat.never",
+            "empty",
+            "action.increment",
+            "action.reset",
+        ] {
+            assert!(source.contains(&format!("\"{key}\"")), "source never uses {key}");
+            assert!(en.contains_key(key), "en is missing {key}");
+        }
+        // No startup event: an enabled plugin activates, and a declared module
+        // is offered without one.
+        assert!(manifest.get("activationEvents").is_none());
+    }
+
+    #[test]
+    fn glance_template_uses_only_the_public_sdk() {
+        let source = glance::SRC_INDEX_TS;
+        assert!(source.contains("@cognia/plugin-sdk"));
+        for forbidden in ["@/lib", "@/types", "plugin-sdk/host", "react"] {
+            assert!(
+                !source.contains(&format!("from \"{forbidden}")),
+                "glance template must not import {forbidden}"
+            );
+        }
+        for unresolvable in [r#""@cognia/plugin-sdk": "^"#, r#""@cognia/plugin-ui": "^"#] {
+            assert!(
+                !glance::PACKAGE_JSON.contains(unresolvable),
+                "template must not depend on the unpublished {unresolvable}"
+            );
+        }
+        assert!(glance::PACKAGE_JSON.contains("--external:@cognia/plugin-sdk"));
+        assert!(!glance::TSCONFIG_JSON.contains("skipLibCheck"));
+        assert!(glance::TSCONFIG_JSON.contains(r#""module": "NodeNext""#));
+        assert!(glance::TSCONFIG_JSON
+            .contains(r#""@cognia/plugin-sdk": ["./types/cognia-plugin-sdk.d.ts"]"#));
+        // The vendored SDK declarations need the same published peers the
+        // TypeScript template lists, or `tsc` cannot resolve them.
+        let glance_pkg: serde_json::Value = serde_json::from_str(glance::PACKAGE_JSON).unwrap();
+        let ts_pkg: serde_json::Value = serde_json::from_str(ts::PACKAGE_JSON).unwrap();
+        assert_eq!(glance_pkg["dependencies"], ts_pkg["dependencies"]);
+        // The stub must carry every SDK value the source imports at runtime.
+        for value in ["definePlugin", "definePluginManifest"] {
+            assert!(glance::SRC_STUB_SDK.contains(&format!("export function {value}")));
+        }
+    }
+
+    /// The bare packages the vendored declarations import, by package name
+    /// (`@scope/name` or `name`). Only statement lines count (`import …`,
+    /// `export … from`, or the `} from '…'` closing a multi-line import): the
+    /// declarations also quote module-like prose in their doc comments.
+    fn vendored_type_imports() -> std::collections::BTreeSet<String> {
+        let mut packages = std::collections::BTreeSet::new();
+        for file in author_type_files() {
+            for line in file.content.lines() {
+                let line = line.trim_start();
+                if !(line.starts_with("import ")
+                    || line.starts_with("export ")
+                    || line.starts_with('}'))
+                {
+                    continue;
+                }
+                let Some(at) = line.rfind(" from ") else { continue };
+                let rest = &line[at + 6..];
+                let Some(quote) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') else {
+                    continue;
+                };
+                let Some(end) = rest[1..].find(quote) else { continue };
+                let specifier = &rest[1..1 + end];
+                if specifier.starts_with('.') || specifier.starts_with("@cognia/") {
+                    continue;
+                }
+                let mut parts = specifier.split('/');
+                let first = parts.next().unwrap_or_default();
+                let name = if first.starts_with('@') {
+                    format!("{first}/{}", parts.next().unwrap_or_default())
+                } else {
+                    first.to_string()
+                };
+                packages.insert(name);
+            }
+        }
+        packages
+    }
+
+    /// No `@cognia/*` package is published, so the scaffold vendors their
+    /// declarations; every published package THOSE import has to be a real
+    /// dependency of the scaffold, or a fresh project fails `tsc` (it did:
+    /// `valibot` was missing from the TypeScript template).
+    #[test]
+    fn ts_scaffolds_depend_on_every_package_the_vendored_types_import() {
+        let imports = vendored_type_imports();
+        assert!(imports.contains("react") && imports.contains("zod"));
+        for (kind, package_json) in [
+            (TemplateKind::Ts, ts::PACKAGE_JSON),
+            (TemplateKind::Glance, glance::PACKAGE_JSON),
+        ] {
+            let package: serde_json::Value = serde_json::from_str(package_json).unwrap();
+            for name in &imports {
+                let declared = ["dependencies", "devDependencies", "peerDependencies"]
+                    .iter()
+                    .any(|block| package[*block].get(name).is_some());
+                assert!(
+                    declared,
+                    "{kind:?} scaffold's vendored types import {name}, which its package.json does not declare"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn glance_scaffold_substitutes_the_name_and_vendors_the_declarations() {
+        let files = files_for(TemplateKind::Glance, "my-glance");
+        let manifest = &find_file(&files, "plugin.json").content;
+        assert!(manifest.contains(r#""id": "my-glance""#));
+        assert!(manifest.contains(r#""name": "My Glance""#));
+        assert!(!manifest.contains("cognia-plugin-template-glance"));
+        assert!(find_file(&files, "package.json")
+            .content
+            .contains(r#""name": "my-glance""#));
+        assert!(has_file(&files, "types/cognia-plugin-sdk.d.ts"));
+        // A glance module is data: no panel, no stylesheet.
+        assert!(!has_file(&files, "src/panel.tsx"));
+        assert!(!manifest.contains("styles"));
     }
 
     #[test]

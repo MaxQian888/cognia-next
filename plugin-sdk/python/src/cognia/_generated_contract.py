@@ -3136,6 +3136,13 @@ PLUGIN_POINT_CONTRACTS = [
         "introducedIn": "0.1.0",
     },
     {
+        "id": "onGlanceVisibilityChange",
+        "kind": "hook",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.1.0",
+    },
+    {
         "id": "agent.context.prepare",
         "kind": "interceptor",
         "stability": "experimental",
@@ -10071,6 +10078,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",

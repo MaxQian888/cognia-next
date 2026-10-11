@@ -2,7 +2,7 @@
 //!
 //! Subcommands:
 //!
-//!   cognia plugin new [name] [--dir DIR] [--kind wasm|ts|python|hybrid|vscode-extension]
+//!   cognia plugin new [name] [--dir DIR] [--kind wasm|ts|glance|python|hybrid|vscode-extension]
 //!     [--author NAME] [--author-email EMAIL] [--description TEXT]
 //!     [--with-keygen true|false] [--json]
 //!     Stamp a starter project (Rust WASM by default; TypeScript, Python, hybrid, and

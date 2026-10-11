@@ -1,0 +1,7 @@
+# The generated plugin is an independent workspace with an explicit native build policy.
+packages:
+  - .
+allowBuilds:
+  "@parcel/watcher": true
+  esbuild: true
+  unrs-resolver: true

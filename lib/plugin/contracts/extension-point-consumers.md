@@ -297,6 +297,12 @@ under the synthetic owner `__host:canvas__` (cap 30/sec, refill 30/sec).
 | `onExternalAgentToolCall`          | same                      |
 | `onExternalAgentError`             | same                      |
 
+### Glance (1)
+
+| Hook                       | Dispatched by                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `onGlanceVisibilityChange` | `lib/plugin/messaging/glance-visibility-hook-source.ts` (registry subscription; delivered only to the module's own plugin, ADR-0225 §6) |
+
 ### Code execution (3)
 
 | Hook                      | Dispatched by                                                                |

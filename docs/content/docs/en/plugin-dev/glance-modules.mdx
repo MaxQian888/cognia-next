@@ -16,11 +16,15 @@ So you declare the module and publish what it shows; the host renders it with th
 | --- | --- | --- | --- |
 | `glanceModules` | Declare modules in the manifest, visible before activation | The `glance` capability | any (manifest) |
 | `ctx.glance.register` | Declare a module at runtime | The `glance` capability | frontend, hybrid |
-| `ctx.glance.update` | Publish a module's data | The `glance` capability | frontend, hybrid |
+| `ctx.glance.update` | Publish a module's data | The `glance` capability | frontend, hybrid, python |
 | `ctx.glance.onVisibilityChange` | Learn when a module is on screen | The `glance` capability | frontend, hybrid |
+| `onGlanceVisibilityChange` hook | Learn when a module is on screen | The `glance` capability | any (hook) |
 
 There is no extra permission.
 Without the `glance` capability every `ctx.glance` call is a no-op that warns once.
+
+Two in-tree plugins are working references: `plugins/cognia-glance-example` (a focus timer, TypeScript; enable it under Plugins to try the module) and the glance module in `plugins/cognia-python-demo` (Python).
+`cognia plugin new my-plugin --kind glance` scaffolds a plugin with one module, its commands and tests.
 
 ## Declare the module
 
@@ -177,9 +181,53 @@ A row whose `action` does not name one of the published actions loses the pointe
 ### Actions run your own commands
 
 An action's `command` is one of **your plugin's** command ids, without the plugin prefix.
-The host runs `<pluginId>.<command>`: a manifest `commands[]` entry, or a command you registered with `ctx.commands`.
+The host runs `<pluginId>.<command>`: a manifest `commands[]` entry (answered by your `onCommand` hook), or a slash command you registered with `ctx.commands.registerSlashCommand`.
+Either runs with no arguments and no chat session, like a command palette invocation.
 A module cannot run another plugin's commands or the app's.
 A row with an `action` runs that action when clicked; actions also appear as buttons.
+
+## From Python
+
+A Python plugin declares its modules in the manifest, hears visibility through a hook and publishes with `ctx.glance.update`.
+`ctx.glance.register` and `ctx.glance.onVisibilityChange` are not available from Python: they hand the host a callback, which cannot cross the plugin's stdio boundary.
+
+```json title="plugin.json"
+{
+  "type": "python",
+  "capabilities": ["python", "hooks", "glance", "commands"],
+  "glanceModules": [{ "id": "queue", "title": "Queue", "icon": "ListTodo" }],
+  "commands": [{ "id": "drainQueue", "name": "Drain queue" }]
+}
+```
+
+```python title="main.py"
+import cognia
+from cognia import hook
+
+@hook("onGlanceVisibilityChange")
+async def on_glance_visibility(event):
+    # {"moduleId": "queue", "visible": True}; only this plugin's own modules.
+    if event.get("moduleId") == "queue" and event.get("visible"):
+        jobs = count_jobs()
+        await cognia.ctx.glance.update("queue", {
+            "summary": f"{jobs} queued",
+            "stats": [{"label": "Queued", "value": str(jobs), "tone": "warn" if jobs else "ok"}],
+            "actions": [{"id": "drain", "label": "Drain", "icon": "Play", "command": "drainQueue"}],
+        })
+
+@hook("onCommand")
+async def on_command(invocation):
+    if invocation.get("command") != "drainQueue":
+        return {"handled": False}
+    drain()
+    return {"handled": True}
+```
+
+The hook arrives once with the current state when the plugin loads (or a module is declared), then on every change, and only for your own modules.
+To keep a module fresh while it is visible, start a task on `True` and cancel it on `False`.
+
+Under the host, `cognia` is the host's own module: publish plain dicts in the camelCase shape above.
+The SDK's `cognia.glance` is for authoring and tests: `define_glance_module` builds manifest entries, and `validate_glance_data` checks in a unit test that what you publish is what the host keeps.
 
 ## Sizes
 

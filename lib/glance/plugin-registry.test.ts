@@ -146,5 +146,26 @@ describe("GlancePluginModuleRegistry", () => {
       registry.setOnScreen("b", [id])
       expect(good).toHaveBeenLastCalledWith(true)
     })
+
+    it("reports flips to visibility subscribers, apart from catalog subscribers", () => {
+      const id = registry.register("p", { id: "m", title: "M" })
+      const flips = jest.fn()
+      const catalog = jest.fn()
+      const off = registry.subscribeVisibility(flips)
+      registry.subscribe(catalog)
+
+      registry.setOnScreen("b", [id])
+      expect(flips).toHaveBeenCalledTimes(1)
+      expect(catalog).not.toHaveBeenCalled()
+
+      // No flip, no report.
+      registry.setOnScreen("c", [id])
+      expect(flips).toHaveBeenCalledTimes(1)
+
+      off()
+      registry.setOnScreen("b", null)
+      registry.setOnScreen("c", null)
+      expect(flips).toHaveBeenCalledTimes(1)
+    })
   })
 })

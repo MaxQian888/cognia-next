@@ -845,6 +845,28 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
   })
 
+  describe("Glance visibility dispatcher", () => {
+    it("delivers onGlanceVisibilityChange only to the module's own plugin", async () => {
+      const own = jest.fn()
+      const other = jest.fn()
+      resetPermissionGuard()
+      seedPlugins({
+        plugins: {
+          "com.ci": { status: "enabled", hooks: { onGlanceVisibilityChange: own } },
+          "com.other": { status: "enabled", hooks: { onGlanceVisibilityChange: other } },
+        },
+      })
+
+      await eventHooks.dispatchGlanceVisibilityChange("com.ci", {
+        moduleId: "builds",
+        visible: true,
+      })
+
+      expect(own).toHaveBeenCalledWith({ moduleId: "builds", visible: true })
+      expect(other).not.toHaveBeenCalled()
+    })
+  })
+
   describe("Pet dispatchers", () => {
     function withHooks(hooks: Record<string, unknown>, permissions: string[] = ["pet:read"]) {
       resetPermissionGuard()

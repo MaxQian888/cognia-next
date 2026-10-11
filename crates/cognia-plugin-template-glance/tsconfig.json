@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "isolatedModules": true,
+    // The vendored SDK declarations mention React component types, so JSX
+    // stays configured even though this plugin renders nothing itself: a
+    // glance module is data, drawn by the host.
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "jest"],
+    // The `@cognia/*` packages are not published to any registry, so they are
+    // vendored into `types/` by `cognia plugin new` (refresh with `cognia
+    // plugin sync-types`). Runtime resolution is unaffected: `build` marks the
+    // SDK external and the host hands out its own already-evaluated instance;
+    // these entries exist purely so `tsc` can see the declarations.
+    // provider-types / provider-core appear because the SDK's public type
+    // surface reaches into them; they are not meant to be imported directly.
+    "paths": {
+      "@cognia/plugin-sdk": ["./types/cognia-plugin-sdk.d.ts"],
+      "@cognia/plugin-ui": ["./types/cognia-plugin-ui.d.ts"],
+      "@cognia/provider-types": ["./types/provider-types/index.d.ts"],
+      "@cognia/provider-types/*": ["./types/provider-types/*.d.ts"],
+      "@cognia/provider-core": ["./types/provider-core/index.d.ts"],
+      "@cognia/provider-core/*": ["./types/provider-core/*.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

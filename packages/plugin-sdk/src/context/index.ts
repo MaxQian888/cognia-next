@@ -116,6 +116,7 @@ export type {
   PluginGlanceRow,
   PluginGlanceStat,
   PluginGlanceTone,
+  PluginGlanceVisibilityEvent,
 } from "@/types/plugin/plugin-glance"
 export type { PluginAgentGuardrailsAPI } from "@/types/plugin/plugin-agent-guardrails"
 export type {

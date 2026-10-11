@@ -53,7 +53,7 @@ Defined inline in `context.ts`.
 | `ctx.shortcuts` | `context.ts:1390` | Rust global shortcuts | no | `register:1394`, `registerMany:1430` |
 | `ctx.contextMenu` | `context.ts:1447` | Rust context-menu | no | `register:1451`, `registerMany:1493` |
 | `ctx.tray` | `tray-api.ts:29` | lib/tray/registry + Rust | capability-gated (`"tray"` else no-op `:14`) | `register` |
-| `ctx.glance` | `glance-api.ts:52` | lib/glance/plugin-registry (ADR-0225 §6) | capability-gated (`"glance"` else warn-once no-op `:57`) | `register`, `update`, `onVisibilityChange` |
+| `ctx.glance` | `glance-api.ts:52` | lib/glance/plugin-registry (ADR-0225 §6) | capability-gated (`"glance"` else warn-once no-op `:57`) | `register`, `update`, `onVisibilityChange`; Python: `update` only, visibility through the `onGlanceVisibilityChange` hook |
 | `ctx.window` | `context.ts:1505` | Rust window cmds | no | `create:1549`, `getMain:1556`, `focus:1558` |
 | `ctx.secrets` | `context.ts:1578` | Rust keyring gateway | no | store/get/delete/has (`:1580-1587`) |
 | `ctx.scheduler` | `context.ts:2846` (`createSchedulerAPI`) | local `TaskScheduler` + `schedulerDb`, own `type: "plugin"` tasks only | `scheduler` manifest capability (denied proxy otherwise) | `createTask`, `runTaskNow`, `cancelExecution`, `emitEvent`, `onExecution`, `getStatistics`, `previewTrigger`, `registerHandler`; see [Scheduler APIs](../../plugin-dev/scheduler) |

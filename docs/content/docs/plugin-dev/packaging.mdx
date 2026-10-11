@@ -42,14 +42,19 @@ The CLI auto-degrades on a non-TTY (CI, redirected stdout, `docker exec` without
 Two starters ship with the CLI:
 
 ```bash
-# Rust + cargo-component WASM plugin
-cognia plugin new my-wasm-plugin
+# Frontend TypeScript plugin (the default; esbuild + jest pre-wired)
+cognia plugin new my-ts-plugin
 # or
-cognia plugin new my-wasm-plugin --kind wasm
-
-# Frontend TypeScript plugin (esbuild + jest pre-wired)
 cognia plugin new my-ts-plugin --kind ts
+
+# A tray-panel glance module (frontend TypeScript, no UI of its own)
+cognia plugin new my-glance-plugin --kind glance
+
+# Rust + cargo-component WASM plugin
+cognia plugin new my-wasm-plugin --kind wasm
 ```
+
+`--kind` also takes `python`, `hybrid` and `vscode-extension`.
 
 What you get:
 
@@ -57,6 +62,7 @@ What you get:
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore`                                                               |
 | **ts**   | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
+| **glance** | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json` (one `glanceModules` entry and its commands), `src/index.ts`, `src/index.test.ts`, `src/__stubs__/`, vendored `types/`, `README.md`, `.gitignore` |
 
 Run the CLI's printed next-steps to get a green build on either kind.
 
@@ -67,8 +73,8 @@ Omitting `<name>` on a TTY drops into an interactive wizard that fills in the sa
 ```text
 $ cognia plugin new
   ? Plugin name       › my-plugin              # default: current directory's basename
-  ? Template kind     › ● wasm   ○ ts          # default: wasm
-  ? Short description › A cognia WASM plugin
+  ? Template kind     › ● ts   ○ glance   ○ wasm   ○ python   ○ hybrid   ○ vscode-extension   # default: ts
+  ? Short description › A cognia frontend TypeScript plugin
   ? Author name       › Max Qian               # default: git config user.name
   ? Author email      ›                        # optional — blank to skip
   ? Generate a signing keypair now and embed the public key? › Y/n
@@ -79,7 +85,7 @@ Each answer can also be supplied up front via the equivalent flag — when **all
 | Field         | Flag                  | Default when missing on TTY        | Default when missing on non-TTY      |
 | ------------- | --------------------- | ---------------------------------- | ------------------------------------ |
 | Name          | _positional_          | _prompt_                           | error — required                     |
-| Kind          | `--kind wasm\|ts`     | _prompt_                           | `wasm`                               |
+| Kind          | `--kind ts\|glance\|wasm\|python\|hybrid\|vscode-extension` | _prompt_ | `ts` |
 | Description   | `--description "..."` | _prompt_                           | `A cognia <kind> plugin`             |
 | Author name   | `--author "..."`      | _prompt, defaults to git config_   | git config `user.name` or `Anonymous`|
 | Author email  | `--author-email "..."`| _prompt — optional_                | omitted                              |

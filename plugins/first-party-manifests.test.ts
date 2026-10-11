@@ -112,6 +112,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // Unbundled template: an installed copy only ever reads plugin.json, so the
   // packs are declared there (not only on the TS module manifest).
   "cognia-character-seeds": [],
+  "cognia-glance-example": [],
   "cognia-goal-insights": [],
   // Python tools are `@tool` functions the host discovers at load, so the
   // plugin tags itself `python` rather than `tools` (which gates `tools[]`).

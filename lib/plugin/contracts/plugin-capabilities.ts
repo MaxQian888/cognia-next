@@ -1565,30 +1565,37 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // `ctx.glance.update`, rendered by the host with its own components. No
     // new permission: the capability gates it, like `tray`. The manifest field
     // is optional because a plugin may declare every module at runtime.
-    // Python has no `ctx.glance` (publishing data is a frontend/hybrid
-    // runtime call); the generated contract still knows the capability and
-    // its manifest field, so Python tooling validates the declaration.
+    // Python declares its modules in the manifest, publishes with
+    // `ctx.glance.update` and hears visibility through the
+    // `onGlanceVisibilityChange` hook (`register` and `onVisibilityChange`
+    // hand the host a callback, which cannot cross the stdio boundary);
+    // `cognia.glance` builds the declaration and the data.
     id: "glance",
     support: "supported",
     manifestFields: ["glanceModules"],
     manifestFieldsOptional: true,
     runtimeBinding:
-      "ctx.glance.register/update/onVisibilityChange + declarative manifest.glanceModules[] → lib/glance/plugin-registry.ts → GlanceSnapshotV1",
+      "ctx.glance.register/update/onVisibilityChange (Python: update + the onGlanceVisibilityChange hook) + declarative manifest.glanceModules[] → lib/glance/plugin-registry.ts → GlanceSnapshotV1",
     hostBindings: [
       "lib/plugin/api/glance-api.ts",
       "lib/plugin/contracts/capability-bridge-map.ts",
       "lib/glance/plugin-registry.ts",
       "lib/glance/plugin-data.ts",
+      "lib/plugin/messaging/glance-visibility-hook-source.ts",
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/define/define-glance-module.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: ["plugin-sdk/python/src/cognia/_generated_contract.py"],
+    pythonSdk: [
+      "plugin-sdk/python/src/cognia/glance.py",
+      "plugin-sdk/python/src/cognia/_generated_contract.py",
+    ],
     docs: "docs/content/docs/en/plugin-dev/glance-modules.mdx",
     requiredTests: [
       "lib/plugin/api/glance-api.test.ts",
       "lib/glance/plugin-registry.test.ts",
+      "lib/plugin/messaging/glance-visibility-hook-source.test.ts",
       "packages/plugin-sdk/src/define/define-glance-module.test.ts",
     ],
   },

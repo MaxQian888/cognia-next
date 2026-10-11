@@ -847,6 +847,12 @@ class PluginHook(Enum):
     ON_TEAM_DELEGATION_COMPLETE = "onTeamDelegationComplete"
     ON_CONNECTOR_INBOUND = "onConnectorInbound"
     ON_CONNECTOR_OUTBOUND = "onConnectorOutbound"
+    # ADR-0225 §6: payload {"moduleId": str, "visible": bool} for one of this
+    # plugin's own glance modules. Sent once with the current state when the
+    # plugin loads (or the module is declared), then on every change. Publish
+    # with ``ctx.glance.update`` while visible; stop the work behind it while
+    # hidden.
+    ON_GLANCE_VISIBILITY_CHANGE = "onGlanceVisibilityChange"
 
 
 class _SubscriptionProviderRequired(typing.TypedDict):

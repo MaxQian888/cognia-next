@@ -626,9 +626,10 @@ pub(crate) enum PluginCommand {
         /// Directory to create. Defaults to ./<name>.
         #[arg(long)]
         dir: Option<PathBuf>,
-        /// Template kind: `ts` (default, frontend TypeScript), `wasm` (Rust +
-        /// cargo-component), `python`, `hybrid`, or `vscode-extension`
-        /// (`vscode` alias accepted).
+        /// Template kind: `ts` (default, frontend TypeScript), `glance`
+        /// (frontend TypeScript contributing a tray-panel glance module),
+        /// `wasm` (Rust + cargo-component), `python`, `hybrid`, or
+        /// `vscode-extension` (`vscode` alias accepted).
         #[arg(long)]
         kind: Option<String>,
         /// Author display name (recorded in plugin.json `author.name`).
