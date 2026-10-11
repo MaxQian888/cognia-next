@@ -2,6 +2,11 @@
 
 FROM registry.k8s.io/kubectl:v1.34.1 AS kubectl
 
+# Standalone host mode (`host-updates`, ADR-0224 A10) drives `docker compose`
+# on the host's own daemon. Both are static binaries, so they run on the
+# Debian runtime below unchanged.
+FROM docker:29-cli AS docker-cli
+
 # Tracks the `rust-toolchain.toml` pin: the build runs `--locked` against the
 # shared root Cargo.lock, whose floor is the workspace channel, not this
 # crate's own `rust-version`.
@@ -19,6 +24,8 @@ RUN apt-get update \
     && install -d -o 10001 -g 10001 /var/lib/cognia-agent/state /var/lib/cognia-agent/credentials
 COPY --from=builder /src/target/release/cognia-deploy-agent /usr/local/bin/cognia-deploy-agent
 COPY --from=kubectl /bin/kubectl /usr/local/bin/kubectl
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/cognia-deploy-agent"]
 CMD ["--config", "/etc/cognia/deploy-agent.yaml", "run"]

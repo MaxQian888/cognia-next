@@ -14421,7 +14421,7 @@
       "title": "主机更新",
       "unmanaged": {
         "desktop-app": "这台主机是 Cognia 桌面应用，它通过自己的更新中心更新。",
-        "no-deploy-agent": "这台 Compose 主机没有部署代理来启用新镜像。在它旁边安装代理后即可从这里更新。",
+        "no-deploy-agent": "这台 Compose 主机启动时没有带上更新代理。把 compose.host-updates.yaml 加入它的 Compose 文件后即可从这里更新。",
         "not-a-service": "这台主机没有作为系统服务运行，更新后没有程序会重新启动它。请用 `cognia-server service install` 启动。",
         "not-installed": "这台主机从解压的归档直接运行，无法替换自身。请在主机上重新运行 `cognia-server service install`，将其移入安装目录。"
       },

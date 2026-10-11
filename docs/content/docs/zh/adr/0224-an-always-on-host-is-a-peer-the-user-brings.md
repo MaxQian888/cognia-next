@@ -81,6 +81,7 @@ description: "用户自带的机器（VPS、NAS、家里的 Mac mini）运行 he
   - **Worker 只能扣住发布，不能推出发布。** host 还会询问更新 Worker 的 `/v1/rollout` 接口，该版本是否已对它所在的分桶放量，这让 `pause` 和 `abort` 成为紧急开关。只有当回答中的版本和 digest 与已校验的目录一致时才算数。
   - **签名在离线环境完成。** `scripts/release/update-catalog.mjs` 生成各角色密钥、签署目录，并拒绝签署 host 会拒绝的发布。密钥从不进入 CI 或 Worker。
   - **原生 host 通过切换符号链接更新。** `service install` 把归档复制到数据目录的安装区（`install/versions/<版本>`，经 `install/current` 运行），该目录归服务账号所有。更新时把新版本暂存在运行版本旁边，标记为待定，用一次重命名把 `current` 指过去并重启。新进程处于试运行：其大脑持续被接受后才确认，若大脑被拒、超过十分钟期限，或连续三次启动都没走到那一步，就把 `current` 退回（`cognia_host_service::install_home`、`cognia_companion::host_update`）。
+  - **Compose host 从旁边替换。** 容器无法替换自己的镜像，因此由 `cognia-deploy-agent host-updates`（部署代理的独立主机模式，`compose.host-updates.yaml`）持有 Docker 套接字，并在一个只与服务器共享的套接字上监听。服务器只发送通道、分桶和期望的版本，从不发送镜像；代理运行同一套目录与发布节奏检查（`cognia_update_catalog::client`），拉取该摘要，把它作为 `COGNIA_SERVER_IMAGE` 固定在项目的 `.env` 中，用 Compose 记录在服务器容器上的文件只重建服务器，并以同样方式证明新版本（就绪 30 秒即确认；大脑被拒或超过十分钟则退回旧摘要）。被攻破的服务器最多只能请求目录已签名、且 Worker 正在推送的版本。
   - **空闲靠计数，而非假设。** 没有单一标志表示 host 是否忙碌，因此更新器汇总大脑在心跳中上报的运行数、运行中的作业、远程工作机轮次、进行中的写入和有效的管理租约，并在切换期间暂停写入。
   - **主人经管理通道控制。** `host_update_status`、`host_update_refresh`、`host_update_configure` 和 `host_update_install` 是仅限主人的主机管理命令。它们是契约拒绝的唯一例外（其余一切仍遵循 ADR-0175）：契约不一致时恰恰最需要让 host 更新，因此这些命令的形状被冻结。主人的桌面在配对新 host 以及通道变化时推送其更新中心通道，而不是每次启动都推送，因此在主机面板中设置的通道会保留。
 - **版本保持完全一致（ADR-0175 不变）。** 不协商版本区间。不一致时以明确的「请更新 host / 请更新 App」状态呈现，并提供一键更新，而不是让调用被拒绝。

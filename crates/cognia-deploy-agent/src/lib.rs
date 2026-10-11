@@ -5,6 +5,8 @@ mod config;
 mod driver;
 mod enroll;
 mod executor;
+#[cfg(unix)]
+pub mod host_updates;
 
 /// Ensure a process-wide rustls `CryptoProvider` exists.
 ///

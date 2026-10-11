@@ -22,6 +22,7 @@ pub mod install_home;
 pub mod server;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+pub mod update_agent;
 
 /// Where a service runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

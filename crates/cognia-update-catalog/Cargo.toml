@@ -1,7 +1,9 @@
 # The signed update catalog, verified the way every Cognia client verifies it
 # (ADR-0224 A10): the Rust twin of `lib/updates/catalog-verify.ts`, plus the
-# rule that picks the release an always-on host may install. Pure: no I/O, no
-# clock, no HTTP. The host updater (`cognia-host-service`) fetches and acts.
+# rule that picks the release an always-on host may install. Pure by default:
+# no I/O, no clock, no HTTP. The `client` feature adds the update Worker client
+# and the one check both the host updater (`cognia-companion`) and a Compose
+# host's deploy agent (`cognia-deploy-agent host-updates`) run.
 [package]
 name = "cognia-update-catalog"
 version = "0.1.0"
@@ -24,8 +26,22 @@ hex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+# `client` only.
+async-trait = { workspace = true, optional = true }
+cognia-net = { path = "../cognia-net", optional = true }
+futures-util = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["rustls-no-provider", "stream"], optional = true }
+tokio = { workspace = true, features = ["fs", "io-util"], optional = true }
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+parking_lot.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
+# The update Worker client and the host release check.
+client = ["dep:async-trait", "dep:cognia-net", "dep:futures-util", "dep:reqwest", "dep:tokio", "dep:url"]
 # Sign catalogs with the conformance fixture's keys, for other crates' tests.
 test-support = []
 

@@ -2311,6 +2311,8 @@ dependencies = [
  "chrono",
  "clap",
  "cognia-deployment",
+ "cognia-host-service",
+ "cognia-update-catalog",
  "ed25519-dalek 3.0.0",
  "futures-util",
  "parking_lot",
@@ -2637,6 +2639,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -3444,14 +3447,22 @@ dependencies = [
 name = "cognia-update-catalog"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.23.1",
  "chrono",
  "cognia-canonical-json",
+ "cognia-net",
  "ed25519-dalek 3.0.0",
+ "futures-util",
  "hex",
+ "parking_lot",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "url",
 ]
 
 [[package]]

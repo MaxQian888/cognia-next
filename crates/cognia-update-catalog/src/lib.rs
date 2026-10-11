@@ -19,8 +19,15 @@
 //!   contract; an unpaired or split release is never offered, which is the
 //!   catalog-level twin of the half-updated host A10a refuses at runtime.
 //!
-//! Nothing here does I/O or reads the clock: callers pass `now`.
+//! * [`client`] (feature `client`) is the update Worker as a host talks to
+//!   it, and [`client::check_host_release`], the one check a host and its
+//!   Compose deploy agent both run.
+//!
+//! Outside `client`, nothing here does I/O or reads the clock: callers pass
+//! `now`.
 
+#[cfg(feature = "client")]
+pub mod client;
 pub mod host_release;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

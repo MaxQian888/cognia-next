@@ -7,12 +7,10 @@
 //! channel reaches it through the `host_update_*` host-admin commands.
 
 pub mod idle;
-pub mod network;
 pub mod settings;
 pub mod updater;
-
-#[cfg(test)]
-mod tests;
+/// The update Worker client, shared with a Compose host's deploy agent.
+pub use cognia_update_catalog::client as network;
 
 use std::sync::Arc;
 
@@ -20,32 +18,17 @@ use once_cell::sync::OnceCell;
 use serde_json::Value;
 
 pub use updater::{
-    DetectInput, HostInstall, HostUpdateStatus, HostUpdater, HostUpdaterDeps, InstallKind,
-    UnmanagedReason, UpdatePhase,
+    ComposeAgent, DetectInput, HostInstall, HostUpdateStatus, HostUpdater, HostUpdaterDeps,
+    InstallKind, SocketAgent, UnmanagedReason, UpdateAgent, UpdatePhase,
 };
 
-/// Read at runtime first, so an operator can pin the root a build trusts.
-pub const TRUST_ROOT_ENV: &str = "COGNIA_UPDATE_TRUST_ROOT";
-/// The update Worker a host asks; defaults to [`network::DEFAULT_UPDATE_URL`].
-pub const UPDATE_URL_ENV: &str = "COGNIA_UPDATE_URL";
+pub use network::{trust_root, TRUST_ROOT_ENV, UPDATE_URL_ENV};
 /// Set in the service definition: the OS service started this process.
 pub const SERVICE_MANAGED_ENV: &str = "COGNIA_SERVICE_MANAGED";
 /// Set by the server image: `oci-<variant>-<arch>`.
 pub const HOST_TARGET_ENV: &str = "COGNIA_HOST_TARGET";
-
-/// The root this host trusts: `COGNIA_UPDATE_TRUST_ROOT` at runtime, else the
-/// one compiled in from the same variable at build time. `None` turns
-/// updates off (reported as such); nothing is installed on unverified
-/// metadata.
-pub fn trust_root() -> Option<cognia_update_catalog::RootPayload> {
-    std::env::var(TRUST_ROOT_ENV)
-        .ok()
-        .and_then(|raw| cognia_update_catalog::parse_trust_root(&raw))
-        .or_else(|| {
-            option_env!("COGNIA_UPDATE_TRUST_ROOT")
-                .and_then(cognia_update_catalog::parse_trust_root)
-        })
-}
+/// Set by the Compose overlay: where this host's deploy agent listens.
+pub use cognia_host_service::update_agent::SOCKET_ENV as UPDATE_AGENT_SOCKET_ENV;
 
 static UPDATER: OnceCell<Arc<HostUpdater>> = OnceCell::new();
 
@@ -56,6 +39,14 @@ pub fn install(updater: Arc<HostUpdater>) {
 
 pub fn installed() -> Option<Arc<HostUpdater>> {
     UPDATER.get().cloned()
+}
+
+/// [`status_value`] after asking a Compose host's deploy agent where it is.
+pub async fn status_value_live(desktop_version: &str) -> Value {
+    if let Some(updater) = installed() {
+        updater.refresh_agent().await;
+    }
+    status_value(desktop_version)
 }
 
 /// `host_update_status` for this process: the updater's, or, where none runs
@@ -72,5 +63,21 @@ pub fn status_value(desktop_version: &str) -> Value {
             "phase": UpdatePhase::Idle,
             "installRequested": false,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn the_desktop_app_reports_that_it_updates_elsewhere() {
+        // No updater is installed in the desktop app (nor in this test process).
+        for status in [
+            super::status_value("0.9.0"),
+            super::status_value_live("0.9.0").await,
+        ] {
+            assert_eq!(status["install"], "unmanaged");
+            assert_eq!(status["unmanagedReason"], "desktop-app");
+            assert_eq!(status["currentVersion"], "0.9.0");
+        }
     }
 }

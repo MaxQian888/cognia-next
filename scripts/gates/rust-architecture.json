@@ -83,6 +83,7 @@
     "cognia-companion-contract -> cognia-headless-contract",
     "cognia-companion-contract -> cognia-problem",
     "cognia-update-catalog -> cognia-canonical-json",
+    "cognia-update-catalog -> cognia-net",
     "cognia-ccswitch -> cognia-subscription",
     "cognia-mcp-server -> cognia-automation",
     "cognia-plugin-runtime -> cognia-terminal",

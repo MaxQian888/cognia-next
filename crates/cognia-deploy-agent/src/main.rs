@@ -23,6 +23,62 @@ struct Args {
 enum Command {
     Run,
     Enroll(Box<EnrollArgs>),
+    /// Standalone host mode: update one always-on Compose host (ADR-0224 A10).
+    #[cfg(unix)]
+    HostUpdates(HostUpdatesArgs),
+}
+
+#[cfg(unix)]
+#[derive(ClapArgs)]
+struct HostUpdatesArgs {
+    #[command(subcommand)]
+    action: HostUpdatesAction,
+    /// The Compose project the server runs in (`COGNIA_INSTANCE`).
+    #[arg(long, env = "COGNIA_HOST_UPDATES_PROJECT", default_value = "cognia")]
+    project: String,
+    /// The server's Compose service.
+    #[arg(
+        long,
+        env = "COGNIA_HOST_UPDATES_SERVICE",
+        default_value = "cognia-server"
+    )]
+    service: String,
+    /// Where the server asks; a volume only the two containers share.
+    #[arg(long, env = "COGNIA_HOST_UPDATES_SOCKET", default_value = cognia_host_service::update_agent::DEFAULT_SOCKET_PATH)]
+    socket: PathBuf,
+    /// The swap in progress and the catalog trust state.
+    #[arg(
+        long,
+        env = "COGNIA_HOST_UPDATES_STATE_DIR",
+        default_value = "/var/lib/cognia-host-updates"
+    )]
+    state_dir: PathBuf,
+    #[arg(long, env = "COGNIA_HOST_UPDATES_DOCKER", default_value = "docker")]
+    docker: PathBuf,
+    /// `/readyz` as seen from inside the server container.
+    #[arg(
+        long,
+        env = "COGNIA_HOST_UPDATES_READY_URL",
+        default_value = "https://localhost:27890/readyz"
+    )]
+    ready_url: String,
+    /// Peers allowed on the socket; the server image runs as 10001.
+    #[arg(
+        long = "allowed-uid",
+        env = "COGNIA_HOST_UPDATES_ALLOWED_UIDS",
+        value_delimiter = ',',
+        default_value = "10001"
+    )]
+    allowed_uids: Vec<u32>,
+}
+
+#[cfg(unix)]
+#[derive(Subcommand)]
+enum HostUpdatesAction {
+    /// Serve the server's update requests, finishing any swap in progress.
+    Run,
+    /// Pin the image the server runs now in the project's env file.
+    Adopt,
 }
 
 #[derive(ClapArgs)]
@@ -60,6 +116,10 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
 
     let args = Args::parse();
+    #[cfg(unix)]
+    if let Some(Command::HostUpdates(args)) = args.command {
+        return run_host_updates(args).await;
+    }
     if let Some(Command::Enroll(args)) = args.command {
         let EnrollArgs {
             controller_url,
@@ -100,6 +160,55 @@ async fn main() -> anyhow::Result<()> {
     AgentRuntime::new(config, executor).run().await
 }
 
+#[cfg(unix)]
+async fn run_host_updates(args: HostUpdatesArgs) -> anyhow::Result<()> {
+    use cognia_deploy_agent::host_updates::{
+        socket, DockerCli, HostUpdateAgent, StateFile, Timing,
+    };
+    use cognia_update_catalog::client::{self, HttpUpdateNetwork};
+
+    let root = client::trust_root();
+    if root.is_none() {
+        tracing::warn!(
+            "no update trust root (COGNIA_UPDATE_TRUST_ROOT); this agent will refuse every update"
+        );
+    }
+    let agent = HostUpdateAgent::new(
+        Arc::new(DockerCli::new(
+            args.docker,
+            args.project,
+            args.service,
+            args.ready_url,
+        )),
+        Arc::new(HttpUpdateNetwork::new(client::update_url())),
+        root,
+        StateFile::new(args.state_dir),
+        Timing::default(),
+        Arc::new(|| chrono::Utc::now().timestamp_millis()),
+    );
+    match args.action {
+        HostUpdatesAction::Adopt => {
+            let report = agent.adopt().await.map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        HostUpdatesAction::Run => {
+            let listener = socket::bind(&args.socket).map_err(anyhow::Error::msg)?;
+            tracing::info!(socket = %args.socket.display(), "host updates listening");
+            let resuming = Arc::clone(&agent);
+            tokio::spawn(async move {
+                resuming.resume().await;
+            });
+            tokio::select! {
+                result = socket::serve(agent, listener, Arc::new(args.allowed_uids)) => {
+                    result.map_err(anyhow::Error::msg)
+                }
+                _ = tokio::signal::ctrl_c() => Ok(()),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +237,40 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_updates_defaults_fit_the_compose_overlay() {
+        let args = Args::try_parse_from(["cognia-deploy-agent", "host-updates", "run"])
+            .expect("host-updates arguments");
+        let Some(Command::HostUpdates(args)) = args.command else {
+            panic!("host-updates subcommand");
+        };
+        assert!(matches!(args.action, HostUpdatesAction::Run));
+        assert_eq!(args.service, "cognia-server");
+        assert_eq!(
+            args.socket,
+            PathBuf::from(cognia_host_service::update_agent::DEFAULT_SOCKET_PATH)
+        );
+        assert_eq!(args.allowed_uids, vec![10001]);
+
+        let args = Args::try_parse_from([
+            "cognia-deploy-agent",
+            "host-updates",
+            "--project",
+            "home",
+            "--allowed-uid",
+            "10001,10002",
+            "adopt",
+        ])
+        .expect("adopt arguments");
+        let Some(Command::HostUpdates(args)) = args.command else {
+            panic!("host-updates subcommand");
+        };
+        assert!(matches!(args.action, HostUpdatesAction::Adopt));
+        assert_eq!(args.project, "home");
+        assert_eq!(args.allowed_uids, vec![10001, 10002]);
     }
 
     #[test]

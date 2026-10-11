@@ -2122,11 +2122,15 @@ fn detect_host_install() -> app_lib::companion_api::host_update::HostInstall {
     use app_lib::companion_api::host_update;
     let exe = std::env::current_exe().ok();
     let image_target = std::env::var(host_update::HOST_TARGET_ENV).ok();
+    let agent_socket = std::env::var_os(host_update::UPDATE_AGENT_SOCKET_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     host_update::HostInstall::detect(&host_update::DetectInput {
         current_exe: exe.as_deref(),
         service_managed: std::env::var(host_update::SERVICE_MANAGED_ENV)
             .is_ok_and(|value| value == "1"),
         image_target: image_target.as_deref(),
+        update_agent_socket: agent_socket.as_deref(),
         compiled_version: env!("CARGO_PKG_VERSION"),
     })
 }
@@ -2178,13 +2182,10 @@ fn start_host_updater(
         self, idle::LiveIdleProbe, network::HttpUpdateNetwork, updater, HostUpdater,
         HostUpdaterDeps, InstallKind,
     };
-    let base_url = std::env::var(host_update::UPDATE_URL_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| host_update::network::DEFAULT_UPDATE_URL.to_owned());
+    let base_url = host_update::network::update_url();
     let home = match &install.kind {
         InstallKind::Native(home) => Some(home.clone()),
-        InstallKind::Unmanaged(_) => None,
+        InstallKind::Compose(_) | InstallKind::Unmanaged(_) => None,
     };
     let updater = HostUpdater::new(
         data_dir,

@@ -3413,7 +3413,7 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
               type: "integer",
               minimum: 0,
               description:
-                "Runs the brain is executing; the server's own pongs omit it. A host updates only when this is 0 (ADR-0224 A10).",
+                "Runs executing in the brain; a host updates only at 0 (ADR-0224 A10).",
             },
           },
         }),

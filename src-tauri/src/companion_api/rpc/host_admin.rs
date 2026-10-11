@@ -338,9 +338,10 @@ pub(super) async fn dispatch(
         }
 
         // ── Self-update (ADR-0224 A10) ─────────────────────────────────────
-        "host_update_status" => Ok(crate::companion_api::host_update::status_value(env!(
+        "host_update_status" => Ok(crate::companion_api::host_update::status_value_live(env!(
             "CARGO_PKG_VERSION"
-        ))),
+        ))
+        .await),
 
         "host_update_refresh" => host_updater(name)?
             .check(true)

@@ -24,12 +24,15 @@ serde_json.workspace = true
 sha2.workspace = true
 tar.workspace = true
 thiserror.workspace = true
+# The Compose deploy agent's socket (`update_agent`).
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
 
 [target."cfg(unix)".dependencies]
 libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 
 [features]
 # Build host installs and archives, for other crates' tests.

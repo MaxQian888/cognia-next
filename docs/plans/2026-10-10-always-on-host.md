@@ -305,7 +305,7 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 4. **Brain and server mismatch.** Trace and fix the supervisor's behavior after a bridge refusal: it must report the state, not loop.
 5. Tests: update decision, rollback, verdict persistence and UI states.
 
-**Outcome (A10a df5403721, A10b df79c3f28, A10c).**
+**Outcome (A10a df5403721, A10b df79c3f28, A10c af8a37c12, A10d).**
 
 - **Brain refusal (item 4).** The server sends `hello_refused` naming both sides and records the refusal for `/readyz`, `/healthz`, metrics, `service status` and the device token; the brain exits 78 and the supervisor parks until the brain entry file changes. It no longer loops.
 - **Exact-version UX (item 3).** The contract verdict and the brain report fold into a persisted `HostVersionState` on the host record. The device console says "update the host" (one click, over the management channel) or "update this app" (to the Update Center). A new host build id is adopted, not treated as a mismatch.
@@ -313,7 +313,11 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
   - Deviation: the plan put client adapters in A10b. They need the host's management commands, so they landed in A10c, one Update Center row per paired always-on host (`awaiting-host` while it installs).
   - Deviation: artifacts carry no detached signature; their digests sit in the signed targets document.
 - **Native self-update (item 2).** Install home with `versions/` and a `current` symlink, trial and rollback, idle gate (brain runs in the pong, jobs, worker turns, in-flight writes, admin leases), owner-pushed channel, auto-update on by default, host panel chapter **Host updates**.
-- **Compose (item 2).** Next as A10d: the deploy agent has no local entry point (it only runs controller-signed operations), so it gains a standalone host mode that verifies the signed catalog itself and activates the server digest with rollback.
+- **Compose (item 2), A10d.** The deploy agent had no local entry point (it only runs controller-signed operations), so it gained a standalone host mode, `cognia-deploy-agent host-updates run|adopt`, shipped as `deploy/compose/compose.host-updates.yaml`.
+  - The server holds writes and asks over a Unix socket (`cognia_host_service::update_agent`, peer uid checked), sending only channel, bucket and expected version.
+  - The agent runs the same check as the host (`cognia_update_catalog::client::check_host_release`, moved out of `cognia-companion`), pulls the digest, pins it as `COGNIA_SERVER_IMAGE` in `.env`, recreates the server from the files Compose recorded on it, and proves it through `/readyz` (ready 30 s, else roll back to the old digest on a refused brain or at ten minutes).
+  - Deviation: no separate agent-owned compose override. The pin lives in the `.env` line Compose already reads, so an operator's own `up` keeps the installed version.
+  - The server image now sets `COGNIA_HOST_TARGET` (`oci-<variant>-<arch>`), and the agent image carries the static docker CLI and compose plugin.
 
 ### A11 — Code supply
 

@@ -71,3 +71,35 @@ pub fn write_archive(
     let sha = sha256_file(&archive).expect("sha");
     (archive, sha)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_test_install_carries_a_manifest_that_verifies() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_install(tmp.path(), "1.4.0", "darwin-arm64");
+        let manifest = HostManifest::read(tmp.path()).unwrap();
+        assert_eq!(
+            (manifest.version.as_str(), manifest.target.as_str()),
+            ("1.4.0", "darwin-arm64")
+        );
+        assert_eq!(manifest.catalog_hash.as_deref(), Some(TEST_CATALOG_HASH));
+        manifest.verify_files(tmp.path()).unwrap();
+    }
+
+    #[test]
+    fn an_archive_names_its_sha_and_carries_the_edit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (archive, sha) = write_archive(tmp.path(), "1.5.0", "darwin-arm64", |root| {
+            std::fs::write(root.join("extra.txt"), "edited").unwrap();
+        });
+        assert!(archive.ends_with("cognia-host-1.5.0-darwin-arm64.tar.gz"));
+        assert_eq!(sha256_file(&archive).unwrap(), sha);
+        assert!(tmp
+            .path()
+            .join("src-1.5.0/cognia-host-1.5.0-darwin-arm64/extra.txt")
+            .is_file());
+    }
+}

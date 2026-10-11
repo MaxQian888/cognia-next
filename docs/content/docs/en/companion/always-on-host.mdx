@@ -38,15 +38,22 @@ cp .env.example .env
 #   docker buildx imagetools inspect ghcr.io/maxqian888/cognia-agent-bundle:latest \
 #     --format '{{.Name}}@{{.Manifest.Digest}}'
 
-export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml
+export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml:compose.host-updates.yaml
+echo "COGNIA_COMPOSE_DIR=$PWD" >> .env                         # where the update agent finds these files
 docker compose --profile server run --rm cognia-server init   # writes /data/master.key once
 docker compose --profile server up -d --wait
+docker compose --profile server run --rm host-updates host-updates adopt   # pins the running image
 docker compose exec cognia-server cognia-server pair
 ```
 
 `init` creates the master key inside the data volume. It never replaces an existing
 key. The container restarts on its own (`restart: unless-stopped`) and starts again
-with Docker when the machine boots.
+with Docker when the machine boots. Put the same `COMPOSE_FILE` line in `.env` too, so
+every later `docker compose` command starts the host with the same files.
+
+`compose.host-updates.yaml` lets the host update itself (see [Updates](#updates)).
+`adopt` pins the image the server runs now by its digest in `.env`, so the host stays
+on that exact build until an update replaces it.
 
 `docker-compose.t2.yml` is what makes the host run work in containers (see
 [Where the host runs work](#where-the-host-runs-work)). The server reaches Docker only
@@ -249,10 +256,21 @@ command contract, the notice under the host's name says which one to update, and
 host it updates it in one click: the host's own update commands stay reachable across
 the mismatch.
 
+A container cannot replace its own image, so on a Compose host the swap happens beside
+it. The `host-updates` service in `compose.host-updates.yaml` is Cognia's deploy agent in
+standalone host mode: it holds the Docker socket the server never sees and listens on a
+socket only the server shares. When the server finds an update and is idle, it stops
+taking writes and asks. The agent checks the signed catalog and the rollout itself (the
+server only says which version it expects), pulls the new image by digest, pins it as
+`COGNIA_SERVER_IMAGE` in `.env`, and recreates only `cognia-server`. If the new server
+does not become ready within ten minutes, or refuses its brain, the agent pins the old
+digest again and recreates it. See `deploy/compose/README.md` for what the agent may
+touch.
+
 A host installed before self-update has to be updated by hand once. A host started
 outside its OS service, or run from the unpacked archive, says so in **Host updates**;
-running `cognia-server service install` again fixes both. A Compose host cannot replace
-its own container, and says so until a deploy agent is set up next to it.
+running `cognia-server service install` again fixes both. A Compose host started without
+`compose.host-updates.yaml` says it has no deploy agent.
 
 The host trusts only releases signed by the keys its build ships with
 (`COGNIA_UPDATE_TRUST_ROOT`), and asks the update service at `COGNIA_UPDATE_URL`

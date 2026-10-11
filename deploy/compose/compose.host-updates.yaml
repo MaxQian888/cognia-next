@@ -1,0 +1,65 @@
+# Self-updates for an always-on Compose host (ADR-0224 A10).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+#     -f compose.host-updates.yaml --profile server up -d
+#
+# A container cannot replace its own image, so the swap happens beside it:
+# `cognia-deploy-agent host-updates` holds the Docker socket the server never
+# sees and listens on a Unix socket only the two of them mount. When the
+# server finds an update and nothing is running, it holds writes and asks.
+# The agent checks the signed catalog and the rollout gate itself, pulls the
+# release by digest, pins it as COGNIA_SERVER_IMAGE in this directory's .env,
+# recreates only cognia-server, and rolls back if the new version does not
+# prove itself (a refused brain, or /readyz not ready within ten minutes).
+#
+# Requirements:
+#   - COGNIA_COMPOSE_DIR in .env: the absolute path of this directory. The
+#     agent runs `docker compose` with the same files the server was started
+#     with, so it needs them (and .env) at the same path.
+#   - The compose files must take the server image from COGNIA_SERVER_IMAGE
+#     (the shipped ones do); the agent refuses otherwise.
+#   - Pin the running image once: `docker compose ... run --rm host-updates
+#     host-updates adopt`. Keep this overlay in every later `docker compose`
+#     command (or in COMPOSE_FILE) so the server keeps its socket.
+
+services:
+  host-updates:
+    profiles: [server]
+    image: ${COGNIA_DEPLOY_AGENT_IMAGE:-ghcr.io/maxqian888/cognia-deploy-agent:latest}
+    command: ["host-updates", "run"]
+    environment:
+      COGNIA_HOST_UPDATES_PROJECT: ${COGNIA_INSTANCE:-cognia}
+      COGNIA_HOST_UPDATES_SOCKET: /run/cognia-host-updates/agent.sock
+      COGNIA_HOST_UPDATES_STATE_DIR: /var/lib/cognia-host-updates
+      # Docker's client config and anything else under HOME stays in the
+      # state volume; the root filesystem is read-only.
+      HOME: /var/lib/cognia-host-updates
+      # Empty means the root and the Worker compiled into the agent.
+      COGNIA_UPDATE_TRUST_ROOT: ${COGNIA_UPDATE_TRUST_ROOT:-}
+      COGNIA_UPDATE_URL: ${COGNIA_UPDATE_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${COGNIA_COMPOSE_DIR:?set COGNIA_COMPOSE_DIR to the absolute path of deploy/compose}:${COGNIA_COMPOSE_DIR}
+      - host_updates_state:/var/lib/cognia-host-updates
+      - host_updates_socket:/run/cognia-host-updates
+    # Root for the Docker socket's owner permission, as the docker proxy is.
+    # Of root's capabilities it keeps only the two that rewrite the
+    # operator's .env line in place and hand the file back to its owner.
+    user: "0:0"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  cognia-server:
+    environment:
+      COGNIA_HOST_UPDATE_SOCKET: /run/cognia-host-updates/agent.sock
+    volumes:
+      - host_updates_socket:/run/cognia-host-updates
+
+volumes:
+  host_updates_state:
+  host_updates_socket:

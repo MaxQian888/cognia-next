@@ -22,6 +22,9 @@ base64.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 cognia-deployment = { path = "../cognia-deployment" }
+# Standalone host mode (ADR-0224 A10): the socket protocol and the catalog check.
+cognia-host-service = { path = "../cognia-host-service" }
+cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client"] }
 ed25519-dalek.workspace = true
 futures-util = "0.3"
 parking_lot.workspace = true
@@ -33,14 +36,16 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml = "0.9"
 thiserror.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { workspace = true, features = ["connect", "rustls-tls-native-roots"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 url = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client", "test-support"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

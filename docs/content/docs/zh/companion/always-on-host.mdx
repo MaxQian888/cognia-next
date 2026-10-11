@@ -36,14 +36,20 @@ cp .env.example .env
 #   docker buildx imagetools inspect ghcr.io/maxqian888/cognia-agent-bundle:latest \
 #     --format '{{.Name}}@{{.Manifest.Digest}}'
 
-export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml
+export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml:compose.host-updates.yaml
+echo "COGNIA_COMPOSE_DIR=$PWD" >> .env                         # 更新代理在这里找到这些文件
 docker compose --profile server run --rm cognia-server init   # 一次性写入 /data/master.key
 docker compose --profile server up -d --wait
+docker compose --profile server run --rm host-updates host-updates adopt   # 固定当前运行的镜像
 docker compose exec cognia-server cognia-server pair
 ```
 
 `init` 在数据卷里创建主密钥，永远不会替换已有的密钥。容器会自动重启
-（`restart: unless-stopped`），机器开机后随 Docker 一起启动。
+（`restart: unless-stopped`），机器开机后随 Docker 一起启动。把同样的 `COMPOSE_FILE`
+一行也写进 `.env`，之后每条 `docker compose` 命令都会用同一组文件启动 host。
+
+`compose.host-updates.yaml` 让 host 能够自行更新（见[更新](#更新)）。`adopt` 把服务器当前运行的
+镜像按摘要固定在 `.env` 中，在更新替换它之前，host 一直运行这个确切的构建。
 
 `docker-compose.t2.yml` 让 host 在容器里执行任务（见[host 在哪里执行任务](#host-在哪里执行任务)）。
 服务器只能通过 Cognia 自己的代理访问 Docker，只能创建和运行自己的加固容器。
@@ -206,9 +212,17 @@ host 会自行更新。它跟随主人桌面的发布通道（桌面在配对时
 host 名称下的提示会说明该更新哪一方；若该更新的是 host，一键即可更新：host 自己的更新命令
 在契约不一致时依然可达。
 
+容器无法替换自己的镜像，所以 Compose host 的替换在它旁边完成。`compose.host-updates.yaml`
+中的 `host-updates` 服务是 Cognia 部署代理的独立主机模式：它持有服务器永远接触不到的 Docker
+套接字，并在一个只与服务器共享的套接字上监听。服务器发现更新且空闲时，会停止接收写入并发出请求。
+代理自己检查签名目录和发布节奏（服务器只说明它期望的版本），按摘要拉取新镜像，把它作为
+`COGNIA_SERVER_IMAGE` 固定在 `.env` 中，然后只重建 `cognia-server`。如果新服务器十分钟内没有就绪，
+或拒绝了自己的大脑，代理会重新固定旧摘要并重建它。代理可以改动哪些内容，见
+`deploy/compose/README.md`。
+
 在自更新功能之前安装的 host 需要手动更新一次。在系统服务之外启动的 host，或直接从解压目录运行的
-host，会在 **主机更新** 中说明；重新运行 `cognia-server service install` 即可解决。Compose host
-无法替换自己的容器，在旁边配置部署代理之前会一直这样提示。
+host，会在 **主机更新** 中说明；重新运行 `cognia-server service install` 即可解决。未使用
+`compose.host-updates.yaml` 启动的 Compose host 会说明它没有部署代理。
 
 host 只信任其构建自带密钥（`COGNIA_UPDATE_TRUST_ROOT`）签名的版本，并向 `COGNIA_UPDATE_URL`
 （默认 `https://update.cognia.cn`）的更新服务查询。

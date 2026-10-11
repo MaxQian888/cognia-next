@@ -76,7 +76,7 @@ cognia-sidecar = { path = "../cognia-sidecar" }
 cognia-signaling-core = { path = "../../services/signaling-server/core" }
 cognia-tenant-auth = { path = "../cognia-tenant-auth" }
 cognia-terminal = { path = "../cognia-terminal" }
-cognia-update-catalog = { path = "../cognia-update-catalog" }
+cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client"] }
 tauri = { workspace = true, optional = true }
 
 aes-gcm = { workspace = true, features = ["aes"] }
@@ -125,7 +125,7 @@ cognia-fleet = { path = "../cognia-fleet", features = ["test-support"] }
 # The scripted brain `gateway_brain`'s tests install into a real gateway.
 cognia-gateway = { path = "../cognia-gateway", features = ["test-support"] }
 cognia-host-service = { path = "../cognia-host-service", features = ["test-support"] }
-cognia-update-catalog = { path = "../cognia-update-catalog", features = ["test-support"] }
+cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client", "test-support"] }
 cognia-power = { path = "../cognia-power", features = ["test-support"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 # A paused clock for the pairing-room readiness wait (ADR-0224 A2).

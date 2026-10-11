@@ -14421,7 +14421,7 @@
       "title": "Host updates",
       "unmanaged": {
         "desktop-app": "This host is the Cognia desktop app. It updates from its own Update Center.",
-        "no-deploy-agent": "This Compose host has no deploy agent to activate a new image. Install the agent next to it to update it from here.",
+        "no-deploy-agent": "This Compose host was started without its update agent. Add compose.host-updates.yaml to its Compose files to update it from here.",
         "not-a-service": "This host is not running as its OS service, so nothing would start it again after an update. Start it with `cognia-server service install`.",
         "not-installed": "This host runs from an unpacked archive, so it cannot replace itself. Run `cognia-server service install` again on the host to move it into its install home."
       },

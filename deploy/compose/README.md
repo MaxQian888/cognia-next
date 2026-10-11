@@ -332,6 +332,68 @@ it: Windows will not send a password to a plain-HTTP WebDAV address.
 SFTPGo is AGPL-3.0. It runs here as the unmodified upstream image, as its own
 service, and is never bundled into the desktop app.
 
+## Self-updates (`compose.host-updates.yaml`)
+
+An always-on host updates itself (ADR-0224 A10), but a container cannot
+replace its own image. This overlay runs `cognia-deploy-agent host-updates`
+beside the server. It is the deploy agent's standalone host mode: no Ops
+Controller and no enrollment, just this one stack.
+
+```bash
+# .env: COGNIA_COMPOSE_DIR=/absolute/path/to/deploy/compose
+docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+  -f compose.host-updates.yaml --profile server up -d --wait
+docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+  -f compose.host-updates.yaml --profile server run --rm host-updates host-updates adopt
+```
+
+`adopt` pins the image the server runs now, by its registry digest, as
+`COGNIA_SERVER_IMAGE` in `.env`. Keep the overlay in every later command (set
+`COMPOSE_FILE` in `.env`), or a plain `up` recreates the server without its
+socket.
+
+How an update runs:
+
+1. The server finds a release for its channel and platform
+   (`COGNIA_HOST_TARGET`, set by the image), waits until nothing is running,
+   stops taking writes, and asks the agent over
+   `/run/cognia-host-updates/agent.sock`. It sends its channel, rollout
+   bucket and the version it expects, never an image.
+2. The agent checks the signed catalog and the update Worker's rollout gate
+   itself, refuses if it finds another version, and confirms that the Compose
+   files take the server image from `COGNIA_SERVER_IMAGE`. Then it pulls
+   `repository@digest`.
+3. It pins the digest in `.env` and runs
+   `docker compose up -d --no-deps --wait cognia-server`. It uses the files,
+   working directory and env files Compose recorded on the server container,
+   with a cleared environment, so nothing but your own files decides the
+   result.
+4. It probes `/readyz` from inside the new container. Ready for 30 seconds
+   commits the update. A refused brain (a server and brain from different
+   builds), or not ready within ten minutes, rolls back: the old digest is
+   pinned again and the server recreated. **Host updates** on the owner's
+   device shows the outcome.
+
+What the agent may touch, and why it is safe to leave running:
+
+- **The Docker socket** (hence root, with every capability dropped except
+  `CHOWN` and `DAC_OVERRIDE`, which rewrite the `.env` line and hand the file
+  back to its owner). It recreates only the server service.
+- **One line of `.env`**: `COGNIA_SERVER_IMAGE`. Every other byte is kept, as
+  are the file's owner and mode. The env file must live in this directory.
+- **Its socket** is on a volume only it and the server mount. The agent checks
+  each caller's uid (`COGNIA_HOST_UPDATES_ALLOWED_UIDS`, default the server
+  image's 10001). A caller can at most ask for a release the catalog signs and
+  the Worker is rolling for this host.
+- **Its state** (`host_updates_state`): the swap in progress, so an agent
+  restarted mid-update finishes or rolls back, and the catalog's trust state.
+
+It trusts the root compiled into its build (`COGNIA_UPDATE_TRUST_ROOT` pins
+another) and asks `COGNIA_UPDATE_URL` (default `https://update.cognia.cn`).
+Watch it with `docker compose logs -f host-updates`. A Compose file that
+hard-codes the server image cannot be updated this way, and the agent says so
+instead of swapping anything.
+
 ## Seccomp profile (`seccomp/cognia-userns.json`)
 
 The `cognia-server` service runs under a tuned seccomp profile so the ADR-0028

@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cognia_update_catalog::{RootPayload, TrustState};
+use cognia_update_catalog::client::TrustFile;
 use serde::{Deserialize, Serialize};
 
 /// `<data dir>/updates`.
@@ -89,17 +89,9 @@ impl SettingsStore {
         write_json(&self.dir.join(SETTINGS_FILE), settings)
     }
 
-    /// The trust state to verify the next catalog with: the one saved after
-    /// the last verified catalog, unless the shipped root is newer (a build
-    /// that ships a rotated root starts from it).
-    pub fn load_trust(&self, shipped: &RootPayload) -> TrustState {
-        read_json::<TrustState>(&self.dir.join(TRUST_FILE))
-            .filter(|saved| saved.root.version >= shipped.version)
-            .unwrap_or_else(|| TrustState::new(shipped.clone()))
-    }
-
-    pub fn save_trust(&self, trust: &TrustState) -> Result<(), String> {
-        write_json(&self.dir.join(TRUST_FILE), trust)
+    /// Where this host keeps the trust state it verifies catalogs with.
+    pub fn trust(&self) -> TrustFile {
+        TrustFile::new(self.dir.join(TRUST_FILE))
     }
 }
 
@@ -119,17 +111,6 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn root(version: u64) -> RootPayload {
-        serde_json::from_value(serde_json::json!({
-            "_type": "root",
-            "version": version,
-            "expires": "2036-01-01T00:00:00Z",
-            "keys": {},
-            "roles": {},
-        }))
-        .unwrap()
-    }
 
     #[test]
     fn a_host_starts_on_stable_with_updates_on_and_keeps_its_bucket() {
@@ -161,17 +142,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.load().channel, "stable");
-    }
-
-    #[test]
-    fn saved_trust_wins_unless_the_build_ships_a_newer_root() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = SettingsStore::new(tmp.path());
-        assert_eq!(store.load_trust(&root(1)).root.version, 1);
-        let mut advanced = TrustState::new(root(2));
-        advanced.seen_versions.targets = Some(7);
-        store.save_trust(&advanced).unwrap();
-        assert_eq!(store.load_trust(&root(1)), advanced);
-        assert_eq!(store.load_trust(&root(3)).root.version, 3);
     }
 }
