@@ -1,0 +1,35 @@
+[package]
+name = "cognia-docker-proxy"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "The always-on host's Docker API proxy: body-inspecting, Cognia-labelled containers and volumes only (ADR-0224 A8)."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_docker_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-docker-proxy"
+path = "src/main.rs"
+
+[dependencies]
+bytes.workspace = true
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+url.workspace = true
+
+[dev-dependencies]
+# The label constants are pinned against the backend that stamps them.
+cognia-external-agent = { path = "../cognia-external-agent" }
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -2342,6 +2342,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-docker-proxy"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "cognia-external-agent",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "cognia-elevated-setup"
 version = "0.1.0"
 dependencies = [

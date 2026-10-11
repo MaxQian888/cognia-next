@@ -55,6 +55,8 @@ export const ROOT_CONTEXT_RUST_DOCKERFILES = [
   "Dockerfile.collab-server",
   "Dockerfile.deploy-agent",
   "Dockerfile.ops-controller",
+  // ADR-0224 A8: the always-on host's Docker API proxy.
+  "Dockerfile.docker-proxy",
   // ADR-0183: builds the static cognia-sandboxd from the workspace.
   "deploy/bundle/Dockerfile",
 ]

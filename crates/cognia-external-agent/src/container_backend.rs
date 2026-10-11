@@ -8,9 +8,10 @@
 //! transparent to the TS `acp-client`, exactly like a local process.
 //!
 //! The backend never talks to the raw Docker socket in the T2 topology: the
-//! compose override points `DOCKER_HOST` at a tecnativa socket-proxy that
-//! allows only container lifecycle + images (see
-//! `deploy/compose/docker-compose.t2.yml`).
+//! compose override points `DOCKER_HOST` at `cognia-docker-proxy` (ADR-0224
+//! A8), which reads request bodies and admits only this deployment's labelled
+//! containers, the workspaces and bundle volumes, and exec into its own
+//! containers (see `deploy/compose/docker-compose.t2.yml`).
 //!
 //! Layering (Windows-testable ≥90% without a daemon):
 //!
@@ -194,8 +195,7 @@ impl RunnerHostSettings {
             _ => 2.0,
         };
         let pids: i64 = parse_env_number(RUNNER_PIDS_ENV, 512)?;
-        let network_mode =
-            std::env::var(RUNNER_NETWORK_ENV).unwrap_or_else(|_| "bridge".to_string());
+        let network_mode = runner_network_mode(std::env::var(RUNNER_NETWORK_ENV).ok())?;
         Ok(Self {
             workspaces_dir,
             workspaces_volume,
@@ -246,6 +246,23 @@ fn resolve_workspace_mount(
             host_dir: cwd.to_string(),
         }),
     }
+}
+
+/// `COGNIA_RUNNER_NETWORK`, refusing a network that joins the host's or
+/// another container's namespace: a runner on the host network reaches every
+/// service bound to the host's loopback.
+fn runner_network_mode(raw: Option<String>) -> Result<String, String> {
+    let mode = raw
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "bridge".to_string());
+    let lower = mode.to_ascii_lowercase();
+    if lower == "host" || lower.starts_with("container:") {
+        return Err(format!(
+            "{RUNNER_NETWORK_ENV}={mode} is not allowed: a runner must not share the host's or another container's network"
+        ));
+    }
+    Ok(mode)
 }
 
 fn parse_env_number(key: &str, default: i64) -> Result<i64, String> {
@@ -2835,6 +2852,28 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use super::runner_network_mode;
+
+    #[test]
+    fn runner_network_refuses_the_host_and_container_namespaces() {
+        assert_eq!(runner_network_mode(None).as_deref(), Ok("bridge"));
+        assert_eq!(
+            runner_network_mode(Some(" ".into())).as_deref(),
+            Ok("bridge")
+        );
+        assert_eq!(
+            runner_network_mode(Some("none".into())).as_deref(),
+            Ok("none")
+        );
+        assert_eq!(
+            runner_network_mode(Some("cognia_egress".into())).as_deref(),
+            Ok("cognia_egress")
+        );
+        assert!(runner_network_mode(Some("host".into())).is_err());
+        assert!(runner_network_mode(Some("HOST".into())).is_err());
+        assert!(runner_network_mode(Some("container:abc".into())).is_err());
+    }
+
     use super::test_support::FakeContainerApi;
     use super::*;
     use crate::exec_backend::test_support::RecordingAgentEmitter;

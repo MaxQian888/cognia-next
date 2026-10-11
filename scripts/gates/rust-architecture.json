@@ -65,6 +65,7 @@
     "cognia-cli": "service",
     "cognia-collab-server": "service",
     "cognia-ops-controller": "service",
+    "cognia-docker-proxy": "service",
     "cognia-deploy-agent": "service",
     "cognia-sandbox-runner": "service",
     "cognia-elevated-setup": "service",

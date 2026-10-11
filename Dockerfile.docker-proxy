@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+# The always-on host's Docker API proxy (ADR-0224 A8). Tracks the
+# `rust-toolchain.toml` pin: the build runs `--locked` against the shared root
+# Cargo.lock, whose floor is the workspace channel, not this crate's own
+# `rust-version`.
+FROM rust:1.96.1-bookworm AS builder
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p cognia-docker-proxy
+
+FROM debian:bookworm-slim AS runtime
+COPY --from=builder /src/target/release/cognia-docker-proxy /usr/local/bin/cognia-docker-proxy
+# Root, because the daemon socket is `root:docker 0660` and the docker group's
+# id differs per host. Compose drops every capability, mounts the root
+# filesystem read-only and sets no-new-privileges: uid 0 keeps only the
+# socket's owner permission, which is the one thing this process needs.
+EXPOSE 2375
+ENTRYPOINT ["/usr/local/bin/cognia-docker-proxy"]

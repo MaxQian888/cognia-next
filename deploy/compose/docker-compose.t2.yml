@@ -1,48 +1,58 @@
-# T2 topology override (ADR-0059 D5/D9): split execution plane.
+# T2 topology override (ADR-0059 D5/D9): split execution plane. This is also
+# the always-on host's composition (ADR-0224 A8): work runs in containers
+# from the sandbox pool, not in the server's own process.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.t2.yml \
 #     --profile server up -d
 #
 # cognia-server + the brain stay in the main container (the bridge couples
-# them tightly); external agents move to per-workspace cognia-runner
-# containers spawned via ExecBackend::Container (R13, feature
-# `container-exec`). The backend creates ONE runner container per agent —
-# the agent binary is the container's PID 1, attached over stdio; there is
-# no warm pool and no `docker exec` (see external_agent/container_backend.rs).
+# them tightly). External agents run in per-agent cognia-runner containers
+# (ExecBackend::Container, feature `container-exec`) or, with the sandbox
+# pool on, in the project's own image with the agent bundle injected
+# (ADR-0183); built-in agent turns run their shell tools in a per-task pool
+# container. The pool execs into its own containers: the retained workspace
+# runtime's agent connection, the port relay and the service bridge.
 #
-# The backend talks to Docker through a locked-down socket proxy — never the
-# raw socket: only container lifecycle + image pull are reachable, so a
-# compromised server process cannot mount the host or escalate via the
-# Docker API surface.
+# The server never touches the raw Docker socket. It reaches the daemon
+# through cognia-docker-proxy (crates/cognia-docker-proxy), which reads
+# request bodies, not just URLs:
+#   - a container is created only with this deployment's labels
+#     (cognia.owner, cognia.deployment = COGNIA_INSTANCE);
+#   - it mounts only the workspaces volume and this deployment's agent bundle
+#     volumes (plus tmpfs), never a host path;
+#   - no privileged mode, no host network, PID, IPC, UTS, user or cgroup
+#     namespace, no devices, only the five capabilities the agent supervisor
+#     adds back, no unconfined security profile;
+#   - start/stop/exec/remove reach only containers carrying those labels, and
+#     lists only ever show them;
+#   - image builds, networks, swarm, secrets and archive uploads are refused.
+# Devcontainer builds (ADR-0186) need the build API and so do not run through
+# this proxy. Rootless Docker is recommended for the daemon itself.
 
 services:
-  docker-socket-proxy:
+  docker-proxy:
     profiles: [server]
-    image: tecnativa/docker-socket-proxy:0.3
+    image: ${COGNIA_DOCKER_PROXY_IMAGE:-ghcr.io/maxqian888/cognia-docker-proxy:latest}
     environment:
-      # Default-deny; allow exactly what ExecBackend::Container needs.
-      CONTAINERS: "1" # create/attach/start/wait/kill/remove runners
-      IMAGES: "1" # auto-pull the runner image on first spawn
-      POST: "1" # mutating verbs for the two above
-      # Runtime environment sandboxes (ADR-0183) need two more, and only
-      # while the sandbox pool is on. Granting them with the pool off costs
-      # nothing that matters: `/info` is read-only, and the volume API here is
-      # scoped to named volumes, not to the host filesystem.
-      INFO: "1" # /info — which OCI runtimes exist, to attest the gVisor tier
-      VOLUMES: "1" # the named volumes the agent bundle is staged into
-      # Exec stays denied: neither backend uses the exec API (one container
-      # per agent, agent as PID 1 — not exec-into-warm-runner). BUILD stays
-      # denied too; devcontainer builds are the build service of ADR-0186 and
-      # run in their own sandbox, not through this proxy.
-      EXEC: "0"
-      # Everything else (networks, swarm, secrets) stays denied.
+      COGNIA_DOCKER_PROXY_LISTEN: tcp://0.0.0.0:2375
+      COGNIA_DOCKER_PROXY_UPSTREAM: unix:///var/run/docker.sock
+      # Both must match cognia-server's: they are the labels and the volume
+      # the proxy admits.
+      COGNIA_DEPLOYMENT_ID: ${COGNIA_INSTANCE:-cognia}
+      COGNIA_WORKSPACES_VOLUME: ${COGNIA_INSTANCE:-cognia}_workspaces
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Root only for the socket's owner permission (see Dockerfile.docker-proxy);
+    # everything else a root process could use is taken away.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   cognia-server:
     depends_on:
-      docker-socket-proxy:
+      docker-proxy:
         condition: service_started
     environment:
       COGNIA_EXEC_BACKEND: container
@@ -54,9 +64,13 @@ services:
       COGNIA_AGENT_BUNDLE_RETAINED_IMAGES: ${COGNIA_AGENT_BUNDLE_RETAINED_IMAGES:-}
       # The deployment switch for runtime environment sandboxes when no
       # baseline file is mounted (docker-compose.runtime-environment.yml).
-      # Blank reads as unset, which is off: the runners above work unchanged.
-      COGNIA_SANDBOX_POOL_ENABLED: ${COGNIA_SANDBOX_POOL_ENABLED:-}
-      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # On by default (ADR-0224 A8): dispatched work runs in a container per
+      # task. Sandboxes start only once COGNIA_AGENT_BUNDLE_IMAGE names a
+      # digest-pinned bundle; until then a run that does not require
+      # isolation falls back to the server process. Set it to false to keep
+      # every run in the server process.
+      COGNIA_SANDBOX_POOL_ENABLED: ${COGNIA_SANDBOX_POOL_ENABLED:-true}
+      DOCKER_HOST: tcp://docker-proxy:2375
       # Workspaces live on a named volume shared with the runners. BOTH vars
       # matter: COGNIA_WORKSPACES_DIR is where cognia-server sees the tree;
       # COGNIA_WORKSPACES_VOLUME tells the backend to mount runner workspaces

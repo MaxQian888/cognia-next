@@ -178,12 +178,26 @@ docker compose -f docker-compose.yml -f docker-compose.t2.yml \
 
 What it adds:
 
-- **`docker-socket-proxy`** — the backend never touches the raw Docker
-  socket; the proxy allows container lifecycle + image pull
-  (`CONTAINERS`/`IMAGES`/`POST`), plus the read-only `/info` and the named
-  volume API that runtime environment sandboxes use (`INFO`/`VOLUMES`, see
-  below). `EXEC` and `BUILD` stay denied — the backend runs one container per
-  agent with the agent as PID 1, it never uses the exec API.
+- **`docker-proxy`** (`cognia-docker-proxy`, ADR-0224 A8) — the server never
+  touches the raw Docker socket. Unlike a URL-prefix filter, the proxy reads
+  request bodies: a container is created only with this deployment's labels
+  (`cognia.owner`, `cognia.deployment=${COGNIA_INSTANCE}`), mounts only the
+  workspaces volume and this deployment's agent bundle volumes, and never
+  asks for privileged mode, host network / PID / IPC / UTS / user / cgroup
+  namespaces, devices, extra capabilities beyond the five the agent
+  supervisor adds back, or an unconfined security profile. Start, stop,
+  exec and remove reach only containers carrying those labels; lists only
+  show them. Exec is allowed into those containers (the sandbox pool's
+  workspace runtime, port relay and service bridge need it). Image builds,
+  networks, swarm, secrets and archive uploads are refused, so devcontainer
+  builds (ADR-0186) do not run through it. Rootless Docker is recommended.
+- **Sandbox pool on by default** — `COGNIA_SANDBOX_POOL_ENABLED` defaults to
+  `true` here: dispatched work (Bots, scheduled tasks, phone turns, agent
+  teams, plugin agents) runs in a container per task. Containers start only
+  once `COGNIA_AGENT_BUNDLE_IMAGE` names a digest-pinned bundle (see
+  [Runtime environments](#runtime-environments-docker-compose-runtime-environmentyml));
+  until then a run that does not require isolation falls back to the server
+  process. Set the variable to `false` to keep every run there.
 - **`cognia_workspaces` volume** — shared between cognia-server (mounted at
   `/workspaces`) and the runners (each gets a volume-subpath mount of ONLY
   its own workspace). `COGNIA_WORKSPACES_VOLUME` must name the volume
@@ -201,7 +215,7 @@ Optional per-runner knobs (read by `container_backend.rs`, all env on the
 `cognia-server` service): `COGNIA_RUNNER_SECCOMP` (profile JSON path),
 `COGNIA_RUNNER_MEMORY_MB` (default 2048), `COGNIA_RUNNER_CPUS` (default 2),
 `COGNIA_RUNNER_PIDS` (default 512), `COGNIA_RUNNER_NETWORK` (default
-`bridge`).
+`bridge`; `host` and `container:<id>` are refused).
 
 Known limit: the fleet agent-monitor hook ingress is loopback-gated, so T2
 runner agents (separate containers, separate loopback) are not visible to

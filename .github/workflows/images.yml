@@ -13,6 +13,7 @@ name: Images
 #   ghcr.io/<owner>/cognia-web           deploy/compose/Dockerfile.web (static export + Caddy)
 #   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
 #   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
+#   ghcr.io/<owner>/cognia-docker-proxy  Dockerfile.docker-proxy (ADR-0224 A8)
 #
 # Publish happens on version tags (and manual dispatch with push=true).
 # PRs touching the container inputs get a compile check instead:
@@ -43,6 +44,7 @@ on:
       - "Dockerfile.deploy-agent"
       - "Dockerfile.ops-controller"
       - "Dockerfile.collab-server"
+      - "Dockerfile.docker-proxy"
       - ".dockerignore"
       - "deploy/runner/**"
       # The agent bundle: its Dockerfile, pins, npm lock and smoke script, the
@@ -141,6 +143,10 @@ jobs:
           - name: cognia-ops-controller
             context: .
             file: Dockerfile.ops-controller
+          # ADR-0224 A8: the always-on host's body-inspecting Docker API proxy.
+          - name: cognia-docker-proxy
+            context: .
+            file: Dockerfile.docker-proxy
           # Same-origin Web front door: Next.js static export served by Caddy.
           # Root context so the export sees the whole workspace; .dockerignore
           # keeps node_modules/out/target off the daemon.
