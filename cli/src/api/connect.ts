@@ -7,19 +7,25 @@
  * common first failure, so it is worth more than a 401.
  */
 
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
+
 import { CompanionWorkerTransport } from "../worker/companion-worker-transport"
 import type { CliFailure } from "../cli/errors"
 import { detectDesktop, type HandoffClientDeps } from "../handoff/client"
 import type { HostResolution, ResolvedHost } from "../host/resolve"
+import { relayCommandChannel } from "./relay-transport"
 import {
   deviceTransport,
   internalTransport,
+  withRelayFallback,
   type HostTransport,
   type TransportFetch,
 } from "./transport"
 
 export interface ConnectDeps {
   fetchImpl?: TransportFetch
+  /** Injected so tests never join a real relay room. */
+  relayChannel?: typeof relayCommandChannel
   /** Injected so tests never look for a real desktop. */
   detect?: (deps?: HandoffClientDeps) => Promise<{ baseUrl: string } | null>
 }
@@ -109,14 +115,34 @@ export function connectResolvedHost(
         },
       })
     }
+    const relay = record.relay
+    const deviceId = record.deviceId
     return deviceTransport({
       endpoint,
       tenantId,
-      deviceId: record.deviceId,
+      deviceId,
       privateKeyJwk: record.devicePrivateKeyJwk as JsonWebKey,
       ...(record.serverFingerprint ? { serverFingerprint: record.serverFingerprint } : {}),
       fetchImpl: pinnedFetch(record.serverFingerprint, deps.fetchImpl),
-    }).then((transport) => ({ ok: true as const, transport }))
+    }).then((transport) => ({
+      ok: true as const,
+      // ADR-0224 A4: a host paired through the relay is often reachable only
+      // through it, so commands fall back to the CLI's own relay room.
+      transport: relay
+        ? withRelayFallback(
+            transport,
+            (deps.relayChannel ?? relayCommandChannel)({
+              deviceId,
+              route: {
+                rendezvousId: relay.rendezvousId,
+                roomDescriptor: relay.roomDescriptor as unknown as RoomDescriptor,
+                signalingPrivateKeyJwk: relay.signalingPrivateKeyJwk as JsonWebKey,
+                ...(relay.signalingUrl ? { signalingUrl: relay.signalingUrl } : {}),
+              },
+            })
+          )
+        : transport,
+    }))
   }
 
   const serviceToken = host.serviceToken?.value

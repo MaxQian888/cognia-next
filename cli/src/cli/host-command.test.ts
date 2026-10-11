@@ -1,6 +1,6 @@
 import { parseArgv } from "./args"
 import { EXIT_OK, EXIT_FAILURE, EXIT_USAGE } from "./errors"
-import { hostCommand, HOST_HELP, type HostCommandDeps } from "./host-command"
+import { hostCommand, HOST_HELP, relayLoginNote, type HostCommandDeps } from "./host-command"
 import type { OutputSink } from "./output"
 import { parseHostsFile, type HostsFs } from "../host/store"
 
@@ -297,6 +297,12 @@ describe("host login", () => {
               deviceId: "dev_9",
               devicePrivateKeyJwk: { kty: "EC", d: "PRIVATE" },
               serverVersion: "1",
+              // The CLI's own relay room (ADR-0224 A4), separate from the
+              // one-shot pairing room the invitation carried.
+              rendezvousId: "dev-room",
+              signalingRoomDescriptor: { v: 2, roomId: "dev-room", mobileSigningKey: "m" },
+              signalingPrivateKeyJwk: { kty: "EC", d: "SIGNALSECRET" },
+              signalingUrl: "wss://relay.example/signaling",
             }) as never,
         },
       },
@@ -312,10 +318,23 @@ describe("host login", () => {
       tenantId: "tnt_1",
       serverFingerprint: "ab".repeat(32),
     })
+    expect(stored.hosts.home?.relay).toEqual({
+      rendezvousId: "dev-room",
+      roomDescriptor: { v: 2, roomId: "dev-room", mobileSigningKey: "m" },
+      signalingPrivateKeyJwk: { kty: "EC", d: "SIGNALSECRET" },
+      signalingUrl: "wss://relay.example/signaling",
+    })
     expect(d.out.stdout).toContain('"path":"relay"')
-    expect(d.out.stdout).toContain("paired through the relay")
+    expect(d.out.stdout).toContain("this CLI's relay room")
+    expect(d.out.stdout).toContain('"signalingPrivateKey":"(set)"')
     expect(d.out.stdout).not.toContain("PRIVATE")
+    expect(d.out.stdout).not.toContain("SIGNALSECRET")
     expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("says plainly when an older host gave the CLI no relay room", () => {
+    expect(relayLoginNote("https://h:1", false)).toContain("gave the CLI no relay room")
+    expect(relayLoginNote("https://h:1", true)).toContain("relay room on the host")
   })
 
   it("hands the pinned direct fetcher to a pairing-code login", async () => {

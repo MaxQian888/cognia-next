@@ -1,9 +1,13 @@
 import {
+  deviceTransport,
   DEVICE_RPC_PREFIX,
   INTERNAL_RPC_PREFIX,
   classifyStatus,
   internalTransport,
   operationPath,
+  withRelayFallback,
+  type CommandOutcome,
+  type HostTransport,
   type TransportFetch,
 } from "./transport"
 
@@ -234,5 +238,148 @@ describe("operationPath", () => {
 describe("device wire constants", () => {
   it("names the paired-device RPC prefix the host actually mounts", () => {
     expect(DEVICE_RPC_PREFIX).toBe("/api/_rpc")
+  })
+})
+
+describe("withRelayFallback (ADR-0224 A4)", () => {
+  const unreachable: CommandOutcome = { ok: false, cause: "network", message: "ECONNREFUSED" }
+
+  function directReturning(...outcomes: CommandOutcome[]): HostTransport {
+    const execute = jest.fn()
+    for (const outcome of outcomes) execute.mockResolvedValueOnce(outcome)
+    return {
+      wire: "http",
+      label: "Cognia Host (https://h:1, device d)",
+      execute,
+      request: jest.fn().mockResolvedValue(unreachable),
+      close: jest.fn(),
+    }
+  }
+
+  function relayReturning(...outcomes: CommandOutcome[]) {
+    const execute = jest.fn()
+    for (const outcome of outcomes) execute.mockResolvedValueOnce(outcome)
+    return { execute, close: jest.fn() }
+  }
+
+  it("uses the address while it answers, and never joins the relay", async () => {
+    const direct = directReturning({ ok: true, result: 1 })
+    const relay = relayReturning()
+    const transport = withRelayFallback(direct, relay)
+    await expect(transport.execute("x")).resolves.toEqual({ ok: true, result: 1 })
+    expect(relay.execute).not.toHaveBeenCalled()
+    expect(transport.label).toContain("relay fallback")
+  })
+
+  it("does not fall back on a host that answered and refused", async () => {
+    const refused: CommandOutcome = { ok: false, cause: "auth", message: "nope", status: 401 }
+    const relay = relayReturning()
+    await expect(withRelayFallback(directReturning(refused), relay).execute("x")).resolves.toBe(
+      refused
+    )
+    expect(relay.execute).not.toHaveBeenCalled()
+  })
+
+  it("falls back when the address does not answer, then goes to the relay first", async () => {
+    const direct = directReturning(unreachable)
+    const relay = relayReturning({ ok: true, result: "a" }, { ok: true, result: "b" })
+    const transport = withRelayFallback(direct, relay)
+    await expect(transport.execute("x", { a: 1 }, { idempotencyKey: "k" })).resolves.toEqual({
+      ok: true,
+      result: "a",
+    })
+    expect(relay.execute).toHaveBeenCalledWith("x", { a: 1 }, { idempotencyKey: "k" })
+    await expect(transport.execute("y")).resolves.toEqual({ ok: true, result: "b" })
+    expect(direct.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it("says why when neither route answers", async () => {
+    const transport = withRelayFallback(
+      directReturning(unreachable),
+      relayReturning({ ok: false, cause: "network", message: "room did not open" })
+    )
+    const outcome = await transport.execute("x")
+    expect(outcome).toMatchObject({
+      ok: false,
+      cause: "network",
+      message: "the host answered neither on its address nor through its relay room",
+      details: ["direct: ECONNREFUSED", "relay: room did not open"],
+    })
+  })
+
+  it("goes back to the address when the relay stops answering", async () => {
+    const direct = directReturning(unreachable, { ok: true, result: "direct" })
+    const relay = relayReturning({ ok: true, result: "relay" }, unreachable)
+    const transport = withRelayFallback(direct, relay)
+    await transport.execute("x")
+    await expect(transport.execute("y")).resolves.toEqual({ ok: true, result: "direct" })
+  })
+
+  it("keeps raw routes direct and says they have no relay form", async () => {
+    const direct = directReturning()
+    const transport = withRelayFallback(direct, relayReturning())
+    const outcome = await transport.request("GET", "/api/devices")
+    expect(outcome).toMatchObject({ ok: false, cause: "network" })
+    expect(!outcome.ok && outcome.details?.join(" ")).toContain("no relay form")
+  })
+
+  it("closes both routes", () => {
+    const direct = directReturning()
+    const relay = relayReturning()
+    withRelayFallback(direct, relay).close?.()
+    expect(direct.close).toHaveBeenCalled()
+    expect(relay.close).toHaveBeenCalled()
+  })
+})
+
+describe("deviceTransport token exchange failures", () => {
+  let privateKeyJwk: JsonWebKey
+  beforeAll(async () => {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ])
+    privateKeyJwk = await crypto.subtle.exportKey("jwk", pair.privateKey)
+  })
+
+  /**
+   * ADR-0224 A4. The token exchange is the first request a device makes, so a
+   * dead address fails there. Reporting that as "auth" hid it from the relay
+   * fallback, which only steps in when the host was not reached at all.
+   */
+  it("reports an exchange that never reached the host as a network failure", async () => {
+    const transport = await deviceTransport({
+      endpoint: "https://h:1",
+      tenantId: "t",
+      deviceId: "d",
+      privateKeyJwk,
+      fetchImpl: async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:1")
+      },
+    })
+    await expect(transport.execute("x")).resolves.toMatchObject({
+      ok: false,
+      cause: "network",
+      message: "connect ECONNREFUSED 127.0.0.1:1",
+    })
+  })
+
+  it("reports the host refusing the device as an auth failure", async () => {
+    const transport = await deviceTransport({
+      endpoint: "https://h:1",
+      tenantId: "t",
+      deviceId: "d",
+      privateKeyJwk,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ code: "device_revoked", detail: "device revoked" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+    })
+    await expect(transport.execute("x")).resolves.toMatchObject({
+      ok: false,
+      cause: "auth",
+      status: 401,
+    })
   })
 })

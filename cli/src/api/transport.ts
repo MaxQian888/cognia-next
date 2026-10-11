@@ -15,7 +15,7 @@
  * (`cli/src/host/resolve.ts`), so this module stays a pure protocol layer.
  */
 
-import { createCompanionSession, signerFromJwk } from "@cognia/companion-client"
+import { CompanionApiError, createCompanionSession, signerFromJwk } from "@cognia/companion-client"
 
 import type { FailureCause } from "../cli/errors"
 
@@ -70,6 +70,11 @@ export interface HostTransport {
     body?: unknown,
     options?: RequestOptions
   ): Promise<CommandOutcome>
+  /**
+   * Release whatever the transport holds open beyond a single request, such
+   * as a relay room's socket, which would otherwise keep the process alive.
+   */
+  close?(): void
 }
 
 /** Injected so tests never open a socket, and so TLS pinning can wrap it. */
@@ -277,7 +282,14 @@ export async function deviceTransport(options: DeviceTransportOptions): Promise<
       authorization = await session.authorizationHeaders(method, routePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      return { ok: false, cause: "auth", message }
+      // The host refusing the device is an auth failure. The token exchange
+      // never reaching the host is not: that is the host being unreachable,
+      // which the relay fallback (ADR-0224 A4) has to be able to see.
+      if (error instanceof CompanionApiError) {
+        return { ok: false, cause: "auth", message, status: error.status, code: error.code }
+      }
+      if (/malformed/.test(message)) return { ok: false, cause: "auth", message }
+      return networkFailure(error)
     }
     const outcome = await httpCall({
       fetchImpl,
@@ -332,4 +344,76 @@ export async function deviceTransport(options: DeviceTransportOptions): Promise<
 export function operationPath(wire: HostWire, operationId: string): string {
   const prefix = wire === "internal" ? INTERNAL_OPERATION_PREFIX : DEVICE_OPERATION_PREFIX
   return `${prefix}/${encodeURIComponent(operationId)}`
+}
+
+/** The relay half `withRelayFallback` needs. See `./relay-transport.ts`. */
+export interface RelayCommandLane {
+  execute(
+    name: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions
+  ): Promise<CommandOutcome>
+  close(): void
+}
+
+/** Whether a direct failure means the host was not reached at all. */
+function unreachable(outcome: CommandOutcome): outcome is CommandFailure {
+  return !outcome.ok && outcome.cause === "network" && outcome.status === undefined
+}
+
+/**
+ * A device transport that falls back to the host's relay room when its
+ * address does not answer (ADR-0224 A4). Direct is tried first because it
+ * is the shorter path on a LAN or tunnel; once the relay has carried a
+ * command, later commands in the same process go there first, so a host that
+ * is only reachable through the relay does not cost a failed connection per
+ * command.
+ *
+ * Only commands fall back. `request` is the raw HTTP escape hatch, which has
+ * no relay form, so its failure says so instead of pretending.
+ */
+export function withRelayFallback(direct: HostTransport, relay: RelayCommandLane): HostTransport {
+  let relayFirst = false
+  return {
+    wire: direct.wire,
+    label: `${direct.label}, relay fallback`,
+    async execute(name, args = {}, options) {
+      if (relayFirst) {
+        const viaRelay = await relay.execute(name, args, options)
+        if (!unreachable(viaRelay)) return viaRelay
+        relayFirst = false
+      }
+      const viaDirect = await direct.execute(name, args, options)
+      if (!unreachable(viaDirect)) return viaDirect
+      const viaRelay = await relay.execute(name, args, options)
+      if (!unreachable(viaRelay)) {
+        relayFirst = true
+        return viaRelay
+      }
+      return {
+        ...viaDirect,
+        details: [
+          ...(viaDirect.details ?? []),
+          `direct: ${viaDirect.message}`,
+          `relay: ${viaRelay.message}`,
+        ],
+        message: "the host answered neither on its address nor through its relay room",
+      }
+    },
+    async request(method, routePath, body, options) {
+      const outcome = await direct.request(method, routePath, body, options)
+      if (!unreachable(outcome)) return outcome
+      return {
+        ...outcome,
+        details: [
+          ...(outcome.details ?? []),
+          "commands reach this host through its relay room, but raw HTTP routes have no relay form",
+        ],
+      }
+    },
+    close() {
+      direct.close?.()
+      relay.close()
+    },
+  }
 }

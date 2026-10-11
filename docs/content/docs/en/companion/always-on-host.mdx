@@ -130,6 +130,15 @@ Open Settings → Connectivity → Remote hosts, paste the invitation, and switc
 **Always-on host**. The desktop records it as an always-on host and keeps working on
 its own: it does not switch to it, and the list marks it **Always-on**.
 
+The desktop then checks on the host about once a minute over a separate connection of
+its own, without routing anything there, and over the relay when the host's address
+does not answer. **Devices** shows the host as **Always-on** with whether it is online,
+and its Presence card has **Last check** with the last answer (or why there was none)
+and a **Check now** button. The scheduler's timing authority reads the same answer,
+so it no longer takes schedules back from an always-on host that is simply not the one
+the desktop is driving. A host that stops answering is checked less often, up to every
+ten minutes.
+
 ### From the command line
 
 ```bash
@@ -137,9 +146,11 @@ cognia-agent host login home --invitation 'cgnp4|…'
 ```
 
 The CLI reaches the host directly when it can, and otherwise pairs through the relay
-room in the invitation. Its later commands are sent to the host's address, so after a
-relay pairing it says so: use it where that address is reachable (same network, a VPN
-or tunnel), or pair with `--endpoint` set to the host's public URL.
+room in the invitation. Pairing also gives the CLI a relay room of its own on the host
+(kept in `hosts.json` with the device key; `host show` prints it redacted). Commands
+try the host's address first and go through that room when the address does not
+answer, so a host behind a home router stays usable from anywhere. Raw `api request`
+routes and `--wait` have no relay form and still need the address to be reachable.
 
 ## Keep the master key safe
 

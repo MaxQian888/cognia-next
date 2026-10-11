@@ -50,6 +50,42 @@ describe("loginHost", () => {
     })
   })
 
+  it("keeps the CLI's own relay room, so commands can reach a relay-only host (ADR-0224 A4)", async () => {
+    const result = await loginHost({
+      endpoint: "https://h",
+      invitation: "CODE",
+      fetchConfig: async () => CONFIG as never,
+      register: async () =>
+        paired({
+          rendezvousId: "room-9",
+          signalingRoomDescriptor: { v: 2, roomId: "room-9" },
+          signalingPrivateKeyJwk: { kty: "EC", d: "sig" },
+          signalingUrl: "wss://relay.example/signaling",
+        }) as never,
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      record: {
+        relay: {
+          rendezvousId: "room-9",
+          roomDescriptor: { roomId: "room-9" },
+          signalingPrivateKeyJwk: { d: "sig" },
+          signalingUrl: "wss://relay.example/signaling",
+        },
+      },
+    })
+  })
+
+  it("records no relay room when an older host gave none", async () => {
+    const result = await loginHost({
+      endpoint: "https://h",
+      invitation: "CODE",
+      fetchConfig: async () => CONFIG as never,
+      register: async () => paired() as never,
+    })
+    expect(result.ok && result.record.relay).toBeFalsy()
+  })
+
   it("keeps the fingerprint the operator supplied when the host returns none", async () => {
     const result = await loginHost({
       endpoint: "https://h",

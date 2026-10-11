@@ -227,51 +227,57 @@ async function runCall(
 
   const opened = await openTransport(reparsed, deps)
   if ("failure" in opened) return emitFailure(out, opened.failure)
+  const runOpenedCommand = async (transport: HostTransport): Promise<number> => {
+    const refusal = preflight({ entry, transport, body: built.body })
+    if (refusal) return emitFailure(out, refusal)
 
-  const refusal = preflight({ entry, transport: opened.transport, body: built.body })
-  if (refusal) return emitFailure(out, refusal)
+    if (options.debug) {
+      out.error(
+        `[debug] ${transport.label} ${entry.name} ${JSON.stringify(built.body).slice(0, 2000)}`
+      )
+    }
 
-  if (options.debug) {
-    out.error(
-      `[debug] ${opened.transport.label} ${entry.name} ${JSON.stringify(built.body).slice(0, 2000)}`
-    )
-  }
-
-  const result = await invokeCommand({
-    entry,
-    body: built.body,
-    transport: opened.transport,
-    timeoutMs: options.timeoutMs,
-    wait: reparsed.flags.wait === true,
-    ...(stringFlag(reparsed, "idempotency-key")
-      ? { idempotencyKey: stringFlag(reparsed, "idempotency-key") }
-      : {}),
-    ...(deps.sleep ? { sleep: deps.sleep } : {}),
-  })
-
-  if (!result.outcome.ok) {
-    return emitFailure(out, {
-      error: `${entry.name} failed`,
-      details: [result.outcome.message],
-      cause: result.outcome.cause,
-      fix: failureFix(entry, result.outcome.code),
-      inspect: [`cognia-agent api describe ${entry.name}`],
-      diagnostics: {
-        ...(result.outcome.status ? { status: result.outcome.status } : {}),
-        ...(result.outcome.code ? { code: result.outcome.code } : {}),
-        ...(result.outcome.requestId ? { requestId: result.outcome.requestId } : {}),
-        wire: opened.transport.wire,
-      },
+    const result = await invokeCommand({
+      entry,
+      body: built.body,
+      transport: transport,
+      timeoutMs: options.timeoutMs,
+      wait: reparsed.flags.wait === true,
+      ...(stringFlag(reparsed, "idempotency-key")
+        ? { idempotencyKey: stringFlag(reparsed, "idempotency-key") }
+        : {}),
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
     })
-  }
 
-  if (result.outcome.accepted && !result.waited) {
-    out.error(
-      `[accepted] ${entry.name} is running as operation ${result.operationId ?? "(no id)"}. Add --wait to follow it.`
-    )
+    if (!result.outcome.ok) {
+      return emitFailure(out, {
+        error: `${entry.name} failed`,
+        details: [result.outcome.message, ...(result.outcome.details ?? [])],
+        cause: result.outcome.cause,
+        fix: failureFix(entry, result.outcome.code),
+        inspect: [`cognia-agent api describe ${entry.name}`],
+        diagnostics: {
+          ...(result.outcome.status ? { status: result.outcome.status } : {}),
+          ...(result.outcome.code ? { code: result.outcome.code } : {}),
+          ...(result.outcome.requestId ? { requestId: result.outcome.requestId } : {}),
+          wire: transport.wire,
+        },
+      })
+    }
+
+    if (result.outcome.accepted && !result.waited) {
+      out.error(
+        `[accepted] ${entry.name} is running as operation ${result.operationId ?? "(no id)"}. Add --wait to follow it.`
+      )
+    }
+    emitResult(out, result.outcome.result, options, entry.name)
+    return EXIT_OK
   }
-  emitResult(out, result.outcome.result, options, entry.name)
-  return EXIT_OK
+  try {
+    return await runOpenedCommand(opened.transport)
+  } finally {
+    opened.transport.close?.()
+  }
 }
 
 async function runRequest(
@@ -299,13 +305,13 @@ async function runRequest(
 
   if (options.debug) out.error(`[debug] ${opened.transport.label} ${method} ${routePath}`)
 
-  const outcome = await opened.transport.request(method, routePath, data.value, {
-    timeoutMs: options.timeoutMs,
-  })
+  const outcome = await opened.transport
+    .request(method, routePath, data.value, { timeoutMs: options.timeoutMs })
+    .finally(() => opened.transport.close?.())
   if (!outcome.ok) {
     return emitFailure(out, {
       error: `${method.toUpperCase()} ${routePath} failed`,
-      details: [outcome.message],
+      details: [outcome.message, ...(outcome.details ?? [])],
       cause: outcome.cause,
       fix: ["cognia-agent host show", "check the route against protocol/companion-api-routes.json"],
       diagnostics: {

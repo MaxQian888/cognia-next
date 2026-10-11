@@ -74,6 +74,51 @@ describe("parseHostsFile", () => {
     expect(file.hosts.x.kind).toBe("headless")
   })
 
+  it("carries a relay room through, and drops one that does not name itself", () => {
+    const relay = {
+      rendezvousId: "room-1",
+      roomDescriptor: { v: 2, roomId: "room-1" },
+      signalingPrivateKeyJwk: { kty: "EC", d: "sig" },
+      signalingUrl: "wss://relay.example/signaling",
+    }
+    const file = parseHostsFile(
+      JSON.stringify({
+        hosts: {
+          good: { kind: "device", endpoint: "https://h", deviceId: "d", relay },
+          mismatched: {
+            kind: "device",
+            endpoint: "https://h",
+            deviceId: "d",
+            relay: { ...relay, roomDescriptor: { roomId: "other" } },
+          },
+          keyless: {
+            kind: "device",
+            endpoint: "https://h",
+            deviceId: "d",
+            relay: { ...relay, signalingPrivateKeyJwk: undefined },
+          },
+        },
+      })
+    )
+    expect(file.hosts.good?.relay).toEqual(relay)
+    expect(file.hosts.mismatched?.relay).toBeUndefined()
+    expect(file.hosts.keyless?.relay).toBeUndefined()
+  })
+
+  it("redacts the relay room's signing key like the device key", () => {
+    const redacted = redactHost({
+      kind: "device",
+      endpoint: "https://h",
+      relay: {
+        rendezvousId: "room-1",
+        roomDescriptor: { roomId: "room-1" },
+        signalingPrivateKeyJwk: { d: "SECRET" },
+      },
+    })
+    expect(redacted.relay).toEqual({ rendezvousId: "room-1", signalingPrivateKey: "(set)" })
+    expect(JSON.stringify(redacted)).not.toContain("SECRET")
+  })
+
   it("carries the device identity through", () => {
     const file = parseHostsFile(
       JSON.stringify({

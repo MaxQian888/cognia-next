@@ -92,14 +92,23 @@ export interface HostCommandDeps {
 }
 
 /**
- * Said after a relay pairing: the device is enrolled, but this CLI calls the
- * host on its address, which did not answer from here.
+ * Said after a relay pairing. With a relay room of its own the CLI keeps
+ * working from here (ADR-0224 A4); without one (an older host) it can only
+ * use the address, which did not answer.
  */
-export function relayLoginNote(endpoint: string): string {
+export function relayLoginNote(endpoint: string, hasRelayRoom: boolean): string {
+  if (hasRelayRoom) {
+    return (
+      `paired through the relay: ${endpoint} did not answer from this machine, so commands ` +
+      `try it first and then go through this CLI's relay room on the host. Raw ` +
+      `\`api request\` routes and --wait need the address to be reachable.`
+    )
+  }
   return (
-    `paired through the relay: ${endpoint} did not answer from this machine, and commands ` +
-    `against this host are sent there. Use them where that address is reachable (same ` +
-    `network, a VPN or tunnel), or pair again with --endpoint set to the host's public URL.`
+    `paired through the relay: ${endpoint} did not answer from this machine, and this host ` +
+    `gave the CLI no relay room, so commands are sent to that address. Use them where it is ` +
+    `reachable (same network, a VPN or tunnel), or pair again with --endpoint set to the ` +
+    `host's public URL.`
   )
 }
 
@@ -194,7 +203,11 @@ export async function hostCommand(args: ParsedArgs, deps: HostCommandDeps = {}):
             active: updated.active,
             file,
             path: paired.path,
-            ...(paired.path === "relay" ? { note: relayLoginNote(paired.record.endpoint) } : {}),
+            ...(paired.path === "relay"
+              ? {
+                  note: relayLoginNote(paired.record.endpoint, paired.record.relay !== undefined),
+                }
+              : {}),
             ...redactHost(paired.record),
           },
           options,

@@ -113,6 +113,24 @@ export async function loginHost(input: LoginInput): Promise<LoginResult> {
           ? { serverFingerprint: paired.serverFingerprint ?? input.serverFingerprint }
           : {}),
         ...(paired.serverVersion ? { serverVersion: paired.serverVersion } : {}),
+        // The CLI's own relay room (ADR-0224 A4). Kept so commands still reach
+        // a host only the relay can: one paired from another network.
+        ...(paired.rendezvousId && paired.signalingRoomDescriptor && paired.signalingPrivateKeyJwk
+          ? {
+              relay: {
+                rendezvousId: paired.rendezvousId,
+                roomDescriptor: paired.signalingRoomDescriptor as unknown as Record<
+                  string,
+                  unknown
+                >,
+                signalingPrivateKeyJwk: paired.signalingPrivateKeyJwk as unknown as Record<
+                  string,
+                  unknown
+                >,
+                ...(paired.signalingUrl ? { signalingUrl: paired.signalingUrl } : {}),
+              },
+            }
+          : {}),
       },
     }
   } catch (error) {

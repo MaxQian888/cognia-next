@@ -49,6 +49,36 @@ export interface HostRecord {
   /** Diagnostics only. */
   serverVersion?: string
   label?: string
+  /**
+   * `device` only. The CLI's own relay room on the host, from registration
+   * (ADR-0224 A4): commands fall back to it when the host's address does not
+   * answer. `signalingPrivateKeyJwk` is a secret like the device key.
+   */
+  relay?: HostRelayRecord
+}
+
+export interface HostRelayRecord {
+  /** Absent means the public signaling service. */
+  signalingUrl?: string
+  rendezvousId: string
+  roomDescriptor: Record<string, unknown>
+  signalingPrivateKeyJwk: Record<string, unknown>
+}
+
+function coerceRelay(value: unknown): HostRelayRecord | null {
+  if (typeof value !== "object" || value === null) return null
+  const record = value as Record<string, unknown>
+  const { rendezvousId, roomDescriptor, signalingPrivateKeyJwk, signalingUrl } = record
+  if (typeof rendezvousId !== "string" || rendezvousId.length === 0) return null
+  if (typeof roomDescriptor !== "object" || roomDescriptor === null) return null
+  if ((roomDescriptor as { roomId?: unknown }).roomId !== rendezvousId) return null
+  if (typeof signalingPrivateKeyJwk !== "object" || signalingPrivateKeyJwk === null) return null
+  return {
+    rendezvousId,
+    roomDescriptor: roomDescriptor as Record<string, unknown>,
+    signalingPrivateKeyJwk: signalingPrivateKeyJwk as Record<string, unknown>,
+    ...(typeof signalingUrl === "string" && signalingUrl.length > 0 ? { signalingUrl } : {}),
+  }
 }
 
 export interface HostsFile {
@@ -127,6 +157,8 @@ function coerceHost(value: unknown): HostRecord | null {
   if (typeof record.devicePrivateKeyJwk === "object" && record.devicePrivateKeyJwk !== null) {
     host.devicePrivateKeyJwk = record.devicePrivateKeyJwk as Record<string, unknown>
   }
+  const relay = coerceRelay(record.relay)
+  if (relay) host.relay = relay
   return host
 }
 
@@ -202,10 +234,19 @@ export function activateHost(file: HostsFile, name: string): MutateResult {
 
 /** Everything except the secrets, for `host list` and `host show`. */
 export function redactHost(record: HostRecord): Record<string, unknown> {
-  const { serviceToken, devicePrivateKeyJwk, ...rest } = record
+  const { serviceToken, devicePrivateKeyJwk, relay, ...rest } = record
   return {
     ...rest,
     ...(serviceToken ? { serviceToken: "(set)" } : {}),
     ...(devicePrivateKeyJwk ? { devicePrivateKey: "(set)" } : {}),
+    ...(relay
+      ? {
+          relay: {
+            rendezvousId: relay.rendezvousId,
+            ...(relay.signalingUrl ? { signalingUrl: relay.signalingUrl } : {}),
+            signalingPrivateKey: "(set)",
+          },
+        }
+      : {}),
   }
 }

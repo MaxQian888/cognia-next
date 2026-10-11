@@ -122,6 +122,35 @@ describe("connectResolvedHost", () => {
     expect(transport.label).toContain("dev_1")
   })
 
+  it("falls back to the CLI's relay room when the record has one (ADR-0224 A4)", async () => {
+    const relayChannel = jest.fn(() => ({ execute: jest.fn(), close: jest.fn() }))
+    const result = await connectResolvedHost(
+      deviceHost({
+        record: {
+          ...deviceHost().record!,
+          relay: {
+            rendezvousId: "room-1",
+            roomDescriptor: { v: 2, roomId: "room-1" },
+            signalingPrivateKeyJwk: { kty: "EC", d: "sig" },
+          },
+        },
+      }),
+      { relayChannel: relayChannel as never }
+    )
+    expect(result.ok).toBe(true)
+    const transport = (result as { transport: { label: string; close?: () => void } }).transport
+    expect(transport.label).toContain("relay fallback")
+    expect(relayChannel).toHaveBeenCalledWith({
+      deviceId: "dev_1",
+      route: {
+        rendezvousId: "room-1",
+        roomDescriptor: { v: 2, roomId: "room-1" },
+        signalingPrivateKeyJwk: { kty: "EC", d: "sig" },
+      },
+    })
+    expect(transport.close).toBeDefined()
+  })
+
   it("sends the operator to login when a device host has no identity", async () => {
     const result = await connectResolvedHost(deviceHost({ record: undefined }))
     const failure = (result as { failure: { cause: string; fix: string[] } }).failure

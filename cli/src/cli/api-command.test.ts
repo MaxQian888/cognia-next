@@ -392,3 +392,41 @@ describe("api request", () => {
     expect(d.out.stderr[0]).toContain("Diagnostics: status=404")
   })
 })
+
+describe("transport lifetime (ADR-0224 A4)", () => {
+  /**
+   * A relay room holds a socket open; a CLI that never closed it would sit
+   * there after printing its answer.
+   */
+  it("closes the transport after a command, whether it succeeded or failed", async () => {
+    const ok = transport("internal", [{ ok: true, result: {} }])
+    const closeOk = jest.fn()
+    await run(
+      ["api", "call", "adapter_update_policy", "--id", "b"],
+      deps({ ...ok, close: closeOk })
+    )
+    expect(closeOk).toHaveBeenCalledTimes(1)
+
+    const failed = transport("internal", [
+      {
+        ok: false,
+        cause: "network",
+        message: "the host answered neither on its address nor through its relay room",
+        details: ["direct: ECONNREFUSED", "relay: room did not open"],
+      },
+    ])
+    const closeFailed = jest.fn()
+    const d = deps({ ...failed, close: closeFailed })
+    expect(await run(["api", "call", "adapter_update_policy", "--id", "b"], d)).toBe(EXIT_FAILURE)
+    expect(closeFailed).toHaveBeenCalledTimes(1)
+    // Both routes' reasons reach the operator.
+    expect(d.out.stderr.join("\n")).toContain("relay: room did not open")
+  })
+
+  it("closes the transport after a raw request", async () => {
+    const host = transport("internal", [{ ok: true, result: {} }])
+    const close = jest.fn()
+    await run(["api", "request", "GET", "/api/devices"], deps({ ...host, close }))
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+})
