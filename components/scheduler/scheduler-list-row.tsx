@@ -18,6 +18,7 @@
 import { memo } from "react"
 import { useTranslations } from "next-intl"
 
+import { RunsOnHostBadge } from "@/components/remote-host/runs-on-host-badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
@@ -163,6 +164,7 @@ function SchedulerListRowImpl({
             <ItemStatusDot status={item.status} />
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
             <AuthoredByBadge source={item.createdBySource} />
+            <RunsOnHostBadge owner={item.owner} link={false} className="shrink-0" />
           </span>
           {showIdentity ? (
             <span

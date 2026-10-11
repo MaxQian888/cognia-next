@@ -15,12 +15,17 @@
  * `needs_setup`, so the switch settles back off rather than showing an on
  * state the row denies. That is why the checked state is derived from
  * `row.status` and never held locally.
+ *
+ * A placeholder for an installation a paired host runs (ADR-0224) shows where
+ * it runs instead: switching or uninstalling it here would act on a copy that
+ * never runs, so both are off, and the host's device page takes it back.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Trash2Icon } from "lucide-react"
 
+import { RunsOnHostBadge } from "@/components/remote-host/runs-on-host-badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -45,6 +50,16 @@ export function BotLifecycleControls({ row, onUninstalled }: BotLifecycleControl
   const [confirming, setConfirming] = useState(false)
 
   const busy = actions.pending.has(`enabled:${row.id}`)
+  if (row.owner) {
+    return (
+      <div className="flex flex-wrap items-center gap-3" data-testid="bot-lifecycle-controls">
+        <RunsOnHostBadge owner={row.owner} />
+        <span className="text-xs text-muted-foreground">
+          {t("lifecycle.placeholder", { host: row.owner.hostLabel })}
+        </span>
+      </div>
+    )
+  }
   // An orphan has no definition to re-derive a status against, so the write
   // refuses one. Uninstall is the exception and stays enabled: for an orphan it
   // is the only remaining action.

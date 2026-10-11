@@ -29,6 +29,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
+import { RunsOnHostBadge } from "@/components/remote-host/runs-on-host-badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -166,6 +167,7 @@ export function ItemHero({
               {item.name}
             </h2>
             <ItemStatusBadge status={item.status} />
+            <RunsOnHostBadge owner={item.owner} />
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
             <span>{t(`kindFilter.${item.kind}`)}</span>

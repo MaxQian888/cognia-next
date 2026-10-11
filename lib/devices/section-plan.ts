@@ -25,6 +25,7 @@ import { dispatchTargetRef } from "./build-device-rows"
 import type { DeviceKind, DeviceRow } from "./types"
 
 export type DeviceSectionId =
+  | "always-on"
   | "ssh"
   | "files"
   | "access"
@@ -73,6 +74,7 @@ export interface DeviceSectionPlan {
 export const NOT_APPLICABLE_SECTION_ID = "not-applicable"
 
 const WIDE: Record<DeviceSectionId, boolean> = {
+  "always-on": true,
   ssh: true,
   files: true,
   access: true,
@@ -98,8 +100,9 @@ const WIDE: Record<DeviceSectionId, boolean> = {
  *    thing about it.
  *  * `paired-device` What the phone may do here, then whether it can be
  *    reached at all, then who it is.
- *  * `remote-host` Its worktrees and whether it owns timing. Connecting lives
- *    in the masthead, so the first card is already about using it.
+ *  * `remote-host` The always-on work it runs for this device, then its
+ *    worktrees and whether it owns timing. Connecting lives in the masthead,
+ *    so the first card is already about using it.
  *  * `worker` Nothing to configure: who it is and what it has been sent.
  *  * `ssh-host` The connection record and the files are the whole machine.
  */
@@ -127,6 +130,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "placement",
   ],
   "remote-host": [
+    "always-on",
     "workspaces",
     "routing",
     "shell-tiers",
@@ -154,6 +158,9 @@ export function canOwnTiming(row: DeviceRow): boolean {
 
 function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
   switch (id) {
+    case "always-on":
+      // Moving work names the host by its store id; a `/pair` host has none.
+      return row.kind === "remote-host" && Boolean(row.hostId)
     case "ssh":
     case "files":
       return row.kind === "ssh-host"

@@ -43,6 +43,7 @@
       "fieldTransport": "传输",
       "fieldType": "类型",
       "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。",
+      "placeholder": "此连接在 {host} 上运行，本设备上的副本只是不运行的占位。要在本设备修改，请先在 {host} 的设备页面将其收回。",
       "sections": {
         "behavior": "行为",
         "connection": "连接",

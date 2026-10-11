@@ -106,6 +106,7 @@
     "enabledLabel": "Enabled",
     "installed": "{name} installed",
     "notInstallable": "That Bot cannot be installed while its handler is missing.",
+    "placeholder": "Runs on {host}. To change it here, take it back from {host}'s device page first.",
     "status": {
       "disabled": "Bot disabled",
       "enabled": "Bot enabled",

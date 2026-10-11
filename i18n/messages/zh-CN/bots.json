@@ -106,6 +106,7 @@
     "enabledLabel": "已启用",
     "installed": "已安装 {name}",
     "notInstallable": "处理函数缺失期间无法安装这个 Bot。",
+    "placeholder": "在 {host} 上运行。要在本设备修改，请先在 {host} 的设备页面将其收回。",
     "status": {
       "disabled": "Bot 已停用",
       "enabled": "Bot 已启用",

@@ -25,6 +25,7 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { MonitorOffIcon, PackagePlusIcon } from "lucide-react"
 
+import { PlaceNewItemDialog, RunsOnField } from "@/components/remote-host/new-item-placement"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +46,7 @@ import {
   useBotLifecycleActions,
   useBotLifecycleReadiness,
 } from "@/hooks/bots/use-bot-lifecycle-actions"
+import { usePlaceNewItem } from "@/hooks/remote-host/use-place-new-item"
 import {
   catalogEntryInstallable,
   filterBotCatalog,
@@ -154,6 +156,9 @@ export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotS
   const activeWorkspaceId = remote ? null : clientWorkspaceId
   const [search, setSearch] = useState("")
   const [scopeKind, setScopeKind] = useState<BotScopeKind>("account")
+  // A Bot installed here can go on to the always-on host (ADR-0224 A5). Not
+  // when this console already drives a paired host: the Bot is there already.
+  const placement = usePlaceNewItem()
 
   const visible = useMemo(() => filterBotCatalog(entries, search), [entries, search])
 
@@ -172,102 +177,111 @@ export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotS
     const installationId = await actions.install({ entry, scope })
     if (!installationId) return
     onInstalled?.(installationId)
+    if (!remote) {
+      placement.place({ ref: { kind: "bot-installation", id: installationId }, label: entry.name })
+    }
     // Closing on success is the honest end of the flow: the row now exists in
     // the list behind the sheet, and that is where setup continues.
     onOpenChange(false)
   }
 
   return (
-    <ResponsiveDetailSheet
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t("install.title")}
-      description={t("install.description")}
-    >
-      <div className="flex min-h-0 flex-col gap-3 px-4 pb-6" data-testid="install-bot-sheet">
-        {/* First, not between the search box and the list: it is why every
+    <>
+      <ResponsiveDetailSheet
+        open={open}
+        onOpenChange={onOpenChange}
+        title={t("install.title")}
+        description={t("install.description")}
+      >
+        <div className="flex min-h-0 flex-col gap-3 px-4 pb-6" data-testid="install-bot-sheet">
+          {/* First, not between the search box and the list: it is why every
             Install below is greyed out, and an 11px line mid-form read as a
             hint about search rather than the reason nothing can be installed. */}
-        {!readiness.can ? (
-          <Alert role="status" data-testid="bot-install-blocked">
-            <MonitorOffIcon className="size-4" aria-hidden="true" />
-            <AlertDescription className="text-xs">
-              {t(`write.reason.${readiness.availability.reason}`)}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+          {!readiness.can ? (
+            <Alert role="status" data-testid="bot-install-blocked">
+              <MonitorOffIcon className="size-4" aria-hidden="true" />
+              <AlertDescription className="text-xs">
+                {t(`write.reason.${readiness.availability.reason}`)}
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="bot-install-scope" className="text-xs">
-            {t("install.scopeLabel")}
-          </Label>
-          <Select value={scopeKind} onValueChange={(next) => setScopeKind(next as BotScopeKind)}>
-            <SelectTrigger id="bot-install-scope" className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {OFFERED_SCOPES.map((kind) => (
-                <SelectItem key={kind} value={kind} disabled={!USABLE_SCOPES.has(kind)}>
-                  {t(`scope.${kind}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p
-            className={cn(
-              "text-[11px] leading-snug",
-              scopeBlocked ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-            )}
-            data-testid="bot-install-scope-hint"
-          >
-            {scopeBlocked ? t("install.noWorkspace") : t(`install.scopeHint.${scopeKind}`)}
-          </p>
-        </div>
-
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t("install.searchPlaceholder")}
-          aria-label={t("install.searchAria")}
-          className="h-8"
-          data-testid="bot-catalog-search"
-        />
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {failed ? (
-            <p role="alert" className="text-sm text-destructive">
-              {t("syncFailed")}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="bot-install-scope" className="text-xs">
+              {t("install.scopeLabel")}
+            </Label>
+            <Select value={scopeKind} onValueChange={(next) => setScopeKind(next as BotScopeKind)}>
+              <SelectTrigger id="bot-install-scope" className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {OFFERED_SCOPES.map((kind) => (
+                  <SelectItem key={kind} value={kind} disabled={!USABLE_SCOPES.has(kind)}>
+                    {t(`scope.${kind}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p
+              className={cn(
+                "text-[11px] leading-snug",
+                scopeBlocked ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+              )}
+              data-testid="bot-install-scope-hint"
+            >
+              {scopeBlocked ? t("install.noWorkspace") : t(`install.scopeHint.${scopeKind}`)}
             </p>
-          ) : loading ? (
-            <div className="flex flex-col gap-1.5" data-testid="bot-catalog-loading">
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-            </div>
-          ) : visible.length === 0 ? (
-            <Empty className="border-none py-6">
-              <EmptyHeader>
-                <PackagePlusIcon className="size-5 text-muted-foreground" />
-                <EmptyTitle className="text-sm">{t("install.emptyTitle")}</EmptyTitle>
-                <EmptyDescription className="text-xs">
-                  {search.trim() ? t("install.emptyFiltered") : t("install.emptyBody")}
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ul data-testid="bot-catalog">
-              {visible.map((entry) => (
-                <CatalogRow
-                  key={entry.definitionId}
-                  entry={entry}
-                  busy={actions.pending.has(`install:${entry.definitionId}`)}
-                  canInstall={canInstall}
-                  onInstall={install}
-                />
-              ))}
-            </ul>
-          )}
+          </div>
+
+          {remote ? null : <RunsOnField placement={placement} idPrefix="bot-install" />}
+
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("install.searchPlaceholder")}
+            aria-label={t("install.searchAria")}
+            className="h-8"
+            data-testid="bot-catalog-search"
+          />
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {failed ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("syncFailed")}
+              </p>
+            ) : loading ? (
+              <div className="flex flex-col gap-1.5" data-testid="bot-catalog-loading">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+              </div>
+            ) : visible.length === 0 ? (
+              <Empty className="border-none py-6">
+                <EmptyHeader>
+                  <PackagePlusIcon className="size-5 text-muted-foreground" />
+                  <EmptyTitle className="text-sm">{t("install.emptyTitle")}</EmptyTitle>
+                  <EmptyDescription className="text-xs">
+                    {search.trim() ? t("install.emptyFiltered") : t("install.emptyBody")}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <ul data-testid="bot-catalog">
+                {visible.map((entry) => (
+                  <CatalogRow
+                    key={entry.definitionId}
+                    entry={entry}
+                    busy={actions.pending.has(`install:${entry.definitionId}`)}
+                    canInstall={canInstall}
+                    onInstall={install}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-      </div>
-    </ResponsiveDetailSheet>
+      </ResponsiveDetailSheet>
+      {/* Outside the sheet: it closes on install, and the move carries on. */}
+      <PlaceNewItemDialog placement={placement} />
+    </>
   )
 }

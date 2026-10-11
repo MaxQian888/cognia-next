@@ -152,6 +152,44 @@ try the host's address first and go through that room when the address does not
 answer, so a host behind a home router stays usable from anywhere. Raw `api request`
 routes and `--wait` have no relay form and still need the address to be reachable.
 
+## Move work to the host
+
+Scheduled tasks, Bots and connections run on whichever device owns them. Open the
+host in **Devices** and use its **Always-on work** section to move them there, so they
+keep running while your desktop sleeps. **Move work to …** asks the host about every
+item first and lists them in three groups:
+
+- **Ready to move.** Selected by default.
+- **Need plugins on the host.** The host lacks a plugin the item uses, or has another version of
+  it. The desktop app can send them: it packs the plugins as one signed cogpack and
+  the host installs it under its **own** plugin policy, so a host that refuses
+  unsigned or unknown publishers refuses this too. The host is then asked again.
+- **Stays on this device.** Items tied to this machine, each with the reason: a task that looks
+  after this device's own data, a desktop, file-watch or terminal trigger, a local
+  project folder, an OS-level schedule, a stdio MCP server, or something the host
+  cannot run.
+
+Moving an item copies it to the host paused, then stops the copy here, then starts it
+on the host. A connection takes its credentials (into the host's keychain) and its
+scheduled chat messages with it. The copy left here is a placeholder: it does not run,
+and its list row and detail say **Runs on** with the host's name.
+
+The host may first ask for a person to approve this device. The dialog shows the code
+to approve on the host, or from another device that administers it, and continues
+once you have.
+
+**Take back** reverses a move: the host's copy is removed and the item runs here again,
+as it was on the host. When the host cannot be reached you can still take an item
+back; it runs here at once, and the host's copy is removed the next time the host
+answers, so for a while it may run in both places. A move or take-back that was cut
+off (the app closed, the network dropped) is listed under **Stopped partway** with
+**Resume** or **Finish**, and picks up where it stopped.
+
+While an always-on host is online, creating a scheduled task, installing a Bot or
+adding a connection asks where it runs, with the host chosen. Keep it on **This
+device** to stay local; otherwise it is created here and moved straight away, and
+anything the host cannot take stays here with the reason shown.
+
 ## Keep the master key safe
 
 Everything the host stores encrypted (device identities, provider and connector

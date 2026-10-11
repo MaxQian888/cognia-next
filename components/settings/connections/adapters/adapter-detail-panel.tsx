@@ -12,6 +12,10 @@
  * follow-up work in the plan.
  *
  * The inner-tab selection is URL-state-backed via `useSelectedAdapter`.
+ *
+ * A placeholder for an instance a paired host runs (ADR-0224) has no enable
+ * switch: it never runs here, and its row cannot be changed until it is taken
+ * back. The header says where it runs instead, and links there.
  */
 
 import { useLiveQuery } from "dexie-react-hooks"
@@ -19,6 +23,8 @@ import { useTranslations } from "next-intl"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { RunsOnHostBadge } from "@/components/remote-host/runs-on-host-badge"
+import { isOwnedElsewhere } from "@/lib/placement/ownership"
 import { cn } from "@/lib/utils"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { getAdapterTransportLabelKey, getPlatformMeta } from "./platform-meta"
@@ -101,24 +107,40 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
           <Badge variant="secondary" className="shrink-0 text-xs">
             {row.defaultMode}
           </Badge>
-          <Switch
-            id={`detail-enabled-${row.id}`}
-            checked={row.enabled}
-            onCheckedChange={() => void updateAdapterInstance(row.id, { enabled: !row.enabled })}
-            aria-label={
-              row.enabled
-                ? t("disableAria", { name: row.displayName })
-                : t("enableAria", { name: row.displayName })
-            }
-            data-testid="adapter-detail-toggle"
-          />
-          <label
-            htmlFor={`detail-enabled-${row.id}`}
-            className="cursor-pointer text-xs text-muted-foreground"
-          >
-            {row.enabled ? t("enabled") : t("disabled")}
-          </label>
+          {isOwnedElsewhere(row.owner) ? (
+            <RunsOnHostBadge owner={row.owner} />
+          ) : (
+            <>
+              <Switch
+                id={`detail-enabled-${row.id}`}
+                checked={row.enabled}
+                onCheckedChange={() =>
+                  void updateAdapterInstance(row.id, { enabled: !row.enabled })
+                }
+                aria-label={
+                  row.enabled
+                    ? t("disableAria", { name: row.displayName })
+                    : t("enableAria", { name: row.displayName })
+                }
+                data-testid="adapter-detail-toggle"
+              />
+              <label
+                htmlFor={`detail-enabled-${row.id}`}
+                className="cursor-pointer text-xs text-muted-foreground"
+              >
+                {row.enabled ? t("enabled") : t("disabled")}
+              </label>
+            </>
+          )}
         </div>
+        {isOwnedElsewhere(row.owner) ? (
+          <p
+            className="w-full text-xs text-muted-foreground"
+            data-testid="adapter-detail-placeholder"
+          >
+            {t("detail.placeholder", { host: row.owner.hostLabel })}
+          </p>
+        ) : null}
       </div>
 
       {/* Inner tabs — body scrolls inside the pane, header stays pinned */}

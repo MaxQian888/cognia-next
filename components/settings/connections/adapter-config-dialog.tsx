@@ -45,6 +45,7 @@ import { MatrixConfigDialog } from "./forms/matrix-config"
 import { QQOfficialConfigDialog } from "./forms/qq-official-config"
 import { WechatOaConfigDialog } from "./forms/wechat-oa-config"
 import { DingTalkConfigDialog } from "./forms/dingtalk-config"
+import { CreatePlacementProvider } from "./forms/_shared/create-placement-slot"
 
 /** A platform with a bespoke, hand-written credential dialog. */
 export type ConfigurableKind =
@@ -117,6 +118,11 @@ export interface AdapterConfigDialogProps {
    * leaves this unset rather than passing a no-op.
    */
   onCreated?: (id: string) => void
+  /**
+   * Where a connection being created runs (ADR-0224 A5): drawn at the top of
+   * the create form, never when editing.
+   */
+  createPlacement?: React.ReactNode
 }
 
 export function AdapterConfigDialog({
@@ -124,6 +130,7 @@ export function AdapterConfigDialog({
   row,
   onOpenChange,
   onCreated,
+  createPlacement,
 }: AdapterConfigDialogProps) {
   // Anything without a bespoke dialog is a plugin contribution and gets the
   // schema-driven one. Deliberately NOT gated on `isPlatformKind`: a
@@ -144,7 +151,7 @@ export function AdapterConfigDialog({
   }
 
   return (
-    <>
+    <CreatePlacementProvider slot={row ? null : (createPlacement ?? null)}>
       {pluginKind && (
         <PluginConnectorConfigDialog
           key={pluginKind}
@@ -167,6 +174,6 @@ export function AdapterConfigDialog({
           />
         )
       })}
-    </>
+    </CreatePlacementProvider>
   )
 }

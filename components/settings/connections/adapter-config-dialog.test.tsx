@@ -26,8 +26,15 @@ jest.mock("@/components/settings/connections/forms/telegram-config", () => ({
   },
 }))
 jest.mock("@/components/settings/connections/forms/lark-config", () => ({
-  LarkConfigDialog: (p: { open: boolean }) =>
-    p.open ? <div data-testid="lark-config-dialog" /> : null,
+  // Draws the create placement the way AdapterFormSections does.
+  LarkConfigDialog: function MockLark(p: { open: boolean }) {
+    const slot = jest
+      .requireActual<
+        typeof import("@/components/settings/connections/forms/_shared/create-placement-slot")
+      >("@/components/settings/connections/forms/_shared/create-placement-slot")
+      .useCreatePlacementSlot()
+    return p.open ? <div data-testid="lark-config-dialog">{slot}</div> : null
+  },
 }))
 jest.mock("@/components/settings/connections/forms/discord-config", () => ({
   DiscordConfigDialog: (p: { open: boolean }) =>
@@ -133,6 +140,25 @@ it("forwards onCreated only when the caller supplies one", () => {
     "data-has-oncreated",
     "true"
   )
+})
+
+// Where a new connection runs (ADR-0224 A5): asked when creating, never when
+// editing one that already runs somewhere.
+it("hands the create form where the new connection runs, and the edit form nothing", () => {
+  const slot = <span data-testid="placement">runs on</span>
+  const { rerender } = render(
+    <AdapterConfigDialog kind="lark" row={null} onOpenChange={jest.fn()} createPlacement={slot} />
+  )
+  expect(screen.getByTestId("lark-config-dialog")).toContainElement(screen.getByTestId("placement"))
+  rerender(
+    <AdapterConfigDialog
+      kind="lark"
+      row={{ ...row, type: "lark" } as AdapterInstanceRow}
+      onOpenChange={jest.fn()}
+      createPlacement={slot}
+    />
+  )
+  expect(screen.queryByTestId("placement")).not.toBeInTheDocument()
 })
 
 describe("isConfigurableKind", () => {

@@ -48,6 +48,30 @@ describe("ItemHero", () => {
     expect(screen.queryByTestId("item-action-more")).not.toBeInTheDocument()
   })
 
+  it("says where a placeholder runs, links there, and offers nothing to do here", () => {
+    render(
+      <ItemHero
+        item={item({
+          owner: {
+            kind: "remote-host",
+            hostId: "h1",
+            hostLabel: "Mac mini",
+            remoteItemId: "t1",
+            operationId: "op",
+            movedAt: 1,
+          },
+          capabilities: { runNow: false, pause: false, edit: false, delete: false },
+        })}
+        actions={actions({ onEdit: jest.fn() })}
+      />
+    )
+    expect(screen.getByTestId("runs-on-host-badge").getAttribute("href")).toContain(
+      "deviceSection=always-on"
+    )
+    expect(screen.getByTestId("item-action-run")).toBeDisabled()
+    expect(screen.getByTestId("item-action-pause")).toBeDisabled()
+  })
+
   it("offers Resume on a paused item and waits while a run is in flight", () => {
     const a = actions()
     render(<ItemHero item={item({ status: "paused" })} actions={a} busy />)

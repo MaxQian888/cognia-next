@@ -175,6 +175,10 @@ describe("AddHostForm", () => {
     expect(activateHost).not.toHaveBeenCalled()
     expect(onPaired).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId("add-host-success")).toHaveTextContent("add.successAlwaysOn:Home NAS")
+    // The work an always-on host is for is one step away: its device page.
+    const moveWork = screen.getByTestId("add-host-move-work")
+    expect(moveWork).toHaveTextContent("add.moveWork:Home NAS")
+    expect(moveWork.getAttribute("href")).toContain("deviceSection=always-on")
   })
 
   it("can start with always-on chosen", () => {

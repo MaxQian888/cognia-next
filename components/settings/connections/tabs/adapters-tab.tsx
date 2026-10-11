@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BotIcon, MenuIcon, PlusIcon } from "lucide-react"
@@ -24,6 +24,8 @@ import { AddConnectorGrid } from "../adapters/add-connector-grid"
 import { usePendingPlatform, useSelectedAdapter } from "../adapters/use-selected-adapter"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
 import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
+import { PlaceNewItemDialog, RunsOnField } from "@/components/remote-host/new-item-placement"
+import { usePlaceNewItem } from "@/hooks/remote-host/use-place-new-item"
 
 // Built-in platform kinds with a bespoke configuration dialog under
 // `../forms/`; the dispatcher below picks one by `row.type`. Plugin-contributed
@@ -187,8 +189,31 @@ export function AdaptersTab() {
   }, [pendingPlatform, adapters, pluginKinds, clearPendingPlatform, setSelectedAdapterId])
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // A connection made here can go on to the always-on host (ADR-0224 A5).
+  // The move waits for the config dialog to close: some platforms keep it
+  // open after the create to finish signing in, and that belongs here first.
+  const placement = usePlaceNewItem()
+  const createdRef = useRef<string | null>(null)
+  const onCreated = (id: string) => {
+    setSelectedAdapterId(id)
+    createdRef.current = id
+  }
+
   const closeDialog = (open: boolean) => {
-    if (!open) setEditing(null)
+    if (open) return
+    setEditing(null)
+    const created = createdRef.current
+    createdRef.current = null
+    if (!created) return
+    void getDb()
+      .adapterInstances.get(created)
+      .then((row) => {
+        if (row)
+          placement.place({
+            ref: { kind: "connector-instance", id: row.id },
+            label: row.displayName,
+          })
+      })
   }
 
   const addButton = (
@@ -325,8 +350,14 @@ export function AdaptersTab() {
         kind={editing?.kind ?? null}
         row={editing?.row ?? null}
         onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
+        onCreated={onCreated}
+        createPlacement={
+          placement.target ? (
+            <RunsOnField placement={placement} idPrefix="connection-create" />
+          ) : null
+        }
       />
+      <PlaceNewItemDialog placement={placement} />
     </div>
   )
 }

@@ -490,5 +490,133 @@
     "always-on": "Always-on",
     "headless": "Headless server",
     "desktop": "Desktop"
+  },
+  "alwaysOn": {
+    "title": "Always-on work",
+    "meta": "{count, plural, =0 {nothing runs here} one {# item runs here} other {# items run here}}",
+    "description": "Scheduled tasks, Bots and connections {host} runs for this device. Each one moved there is kept here as a placeholder that does not run.",
+    "loading": "Reading what runs where…",
+    "movedHereTitle": "Runs on {host} for this device",
+    "movedHereEmpty": "Nothing from this device runs on {host} yet.",
+    "moveAction": "Move work to {host}…",
+    "takingBack": "Taking back…",
+    "unfinishedTitle": "Stopped partway",
+    "resume": "Resume",
+    "finish": "Finish",
+    "retry": "Retry",
+    "done": "“{label}” done.",
+    "failed": "“{label}” did not finish: {error}",
+    "direction": {
+      "move": "Moving",
+      "take-back": "Taking back"
+    },
+    "consent": {
+      "title": "{host} is waiting for approval",
+      "body": "Approve this device on {host}, or from another device that administers it, with this code. Then continue.",
+      "bodyNoCode": "Approve this device on {host}, or from another device that administers it. Then continue.",
+      "continue": "I approved it, continue"
+    },
+    "takeBack": {
+      "action": "Take back",
+      "awaitingHost": "“{label}” runs on this device again. {host} still has its copy; it is removed the next time {host} can be reached.",
+      "unreachableTitle": "{host} cannot be reached",
+      "unreachableBody": "You can take “{label}” back without {host}. It runs on this device from now on, but {host} keeps running its copy until it can be told to stop, so for a while it may run in both places.",
+      "keepOnHost": "Leave it on the host",
+      "anyway": "Take back anyway"
+    },
+    "move": {
+      "title": "Move work to {host}",
+      "description": "{host} checks every item before anything is sent. Items that move keep running there even when this device is off.",
+      "checking": "Asking {host} what it can take…",
+      "failedTitle": "Could not finish",
+      "nothingHere": "Nothing runs on this device that could move.",
+      "readyTitle": "Ready to move ({count})",
+      "needsPluginsTitle": "Need plugins on the host ({count})",
+      "sendPlugins": "{count, plural, one {Send # plugin to {host}} other {Send # plugins to {host}}}",
+      "sendPluginsHint": "Sent as one cogpack signed by this device. {host} installs it only if its own plugin policy accepts the signer.",
+      "sendPluginsDesktopOnly": "Plugins can only be sent from the desktop app, where their files are.",
+      "pluginsInstalled": "{count, plural, =0 {{host} installed no plugins.} one {{host} installed # plugin.} other {{host} installed # plugins.}}",
+      "pluginFailed": "{pluginId}: {error}",
+      "staysHereTitle": "Stays on this device ({count})",
+      "transfer": {
+        "packing": "Packing plugins for {host}…",
+        "uploading": "Sending plugins to {host}…",
+        "installing": "{host} is installing the plugins…"
+      },
+      "moving": "Moving {done} of {total} to {host}…",
+      "outcomeMoved": "now runs on {host}.",
+      "outcomeFailed": "did not move: {error}",
+      "close": "Done",
+      "cancel": "Cancel",
+      "confirm": "{count, plural, =0 {Move to {host}} one {Move # item to {host}} other {Move # items to {host}}}"
+    },
+    "kind": {
+      "scheduled-task": "Scheduled task",
+      "bot-installation": "Bot",
+      "connector-instance": "Connection"
+    },
+    "state": {
+      "prepared": "not started on the host",
+      "created": "created on the host, not yet switched over",
+      "fenced": "stopped here, not yet started on the host",
+      "completed": "done",
+      "awaitingHost": "waiting to reach the host",
+      "failed": "failed"
+    },
+    "reason": {
+      "osPromotion": "Runs from this computer's system scheduler.",
+      "taskTypeUnsupported": "{host} cannot run this kind of task ({taskType}).",
+      "machineMaintenance": "Looks after this device's own data.",
+      "localProcess": "Watches a process running on this device.",
+      "managedBy": "Belongs to a {manager} and moves with it.",
+      "localEvent": "Fires on {eventType}, which only this device emits.",
+      "desktopTrigger": "Triggered by desktop events ({triggerId}).",
+      "localPath": "Uses a path on this device: {path}",
+      "localProjectRoot": "Works in a project folder on this device: {path}",
+      "stdioMcp": "Uses the MCP server “{name}”, which runs as a process on this device.",
+      "keyringReference": "Reads a secret from this device's keychain ({ref}).",
+      "loopbackEndpoint": "Talks to a service on this device: {url}",
+      "webhookEndpoint": "Receives through this device's webhook address."
+    },
+    "reference": {
+      "workflow": "workflow",
+      "character": "agent",
+      "skill": "skill",
+      "agentTeam": "agent team",
+      "plan": "plan",
+      "conversation": "conversation",
+      "mcpServer": "MCP server",
+      "externalAgent": "external agent",
+      "workspace": "workspace",
+      "integrationAccount": "account",
+      "connectorInstance": "connection"
+    },
+    "blocker": {
+      "hostUnreachable": "{host} could not be asked: {detail}",
+      "hostTooOld": "{host} is too old to receive work. Update it first.",
+      "alreadyMoved": "Already runs on {host}.",
+      "pluginMissing": "Needs the plugin {pluginId} {version}, which {host} does not have.",
+      "pluginVersionMismatch": "Needs the plugin {pluginId} {version}; {host} has {hostVersion}.",
+      "botDefinitionMissing": "{host} has no Bot definition {definitionId} {version}.",
+      "referenceMissing": "Uses the {reference} “{id}”, which {host} does not have.",
+      "dependsOn": "Needs “{label}” to move first, or together with it.",
+      "idConflict": "{host} already has a different item with the id {id}.",
+      "secretUnreadable": "The secret {name} cannot be read on this device to send it."
+    },
+    "note": {
+      "conversationAddressRelearned": "Replies to {conversationKey} resume once that chat next writes to the Bot.",
+      "secretTransferred": "The secret {name} is copied into {host}'s keychain.",
+      "schedulesTravel": "{count, plural, one {Its scheduled message set up in a chat moves to {host} with it.} other {Its # scheduled messages set up in chats move to {host} with it.}}"
+    },
+    "badge": {
+      "label": "Runs on {host}",
+      "title": "This item runs on {host}; the copy here does not run. Open the host to take it back."
+    },
+    "place": {
+      "label": "Runs on",
+      "host": "{host} (always on)",
+      "here": "This device",
+      "hint": "{host} keeps it running when this device is off. Anything tied to this device stays here, and you see why."
+    }
   }
 }

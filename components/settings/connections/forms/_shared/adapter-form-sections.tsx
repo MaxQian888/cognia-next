@@ -25,6 +25,8 @@ import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 
+import { useCreatePlacementSlot } from "./create-placement-slot"
+
 export interface FormSection {
   /** Stable id; used for keyed rendering and aria-controls. */
   id: string
@@ -88,9 +90,16 @@ export function AdapterFormSections({
 }: AdapterFormSectionsProps) {
   const t = useTranslations("settings.connections.adapterFormSections")
   const resolvedSubmitLabel = submitLabel ?? t("save")
+  // Where a connection being created runs; null for every other use.
+  const placementSlot = useCreatePlacementSlot()
 
   return (
     <div className="flex flex-col gap-3">
+      {placementSlot ? (
+        <div className="rounded border bg-card px-4 py-3" data-testid="adapter-form-placement">
+          {placementSlot}
+        </div>
+      ) : null}
       {sections.map((section) => (
         <SectionBlock key={section.id} section={section} />
       ))}

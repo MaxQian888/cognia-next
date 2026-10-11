@@ -5573,6 +5573,7 @@
       "enabledLabel": "Enabled",
       "installed": "{name} installed",
       "notInstallable": "That Bot cannot be installed while its handler is missing.",
+      "placeholder": "Runs on {host}. To change it here, take it back from {host}'s device page first.",
       "status": {
         "disabled": "Bot disabled",
         "enabled": "Bot enabled",
@@ -14040,6 +14041,134 @@
       "paused": "Paused",
       "revoked": "Revoked",
       "unknown": "Unknown"
+    },
+    "alwaysOn": {
+      "badge": {
+        "label": "Runs on {host}",
+        "title": "This item runs on {host}; the copy here does not run. Open the host to take it back."
+      },
+      "blocker": {
+        "alreadyMoved": "Already runs on {host}.",
+        "botDefinitionMissing": "{host} has no Bot definition {definitionId} {version}.",
+        "dependsOn": "Needs “{label}” to move first, or together with it.",
+        "hostTooOld": "{host} is too old to receive work. Update it first.",
+        "hostUnreachable": "{host} could not be asked: {detail}",
+        "idConflict": "{host} already has a different item with the id {id}.",
+        "pluginMissing": "Needs the plugin {pluginId} {version}, which {host} does not have.",
+        "pluginVersionMismatch": "Needs the plugin {pluginId} {version}; {host} has {hostVersion}.",
+        "referenceMissing": "Uses the {reference} “{id}”, which {host} does not have.",
+        "secretUnreadable": "The secret {name} cannot be read on this device to send it."
+      },
+      "consent": {
+        "body": "Approve this device on {host}, or from another device that administers it, with this code. Then continue.",
+        "bodyNoCode": "Approve this device on {host}, or from another device that administers it. Then continue.",
+        "continue": "I approved it, continue",
+        "title": "{host} is waiting for approval"
+      },
+      "description": "Scheduled tasks, Bots and connections {host} runs for this device. Each one moved there is kept here as a placeholder that does not run.",
+      "direction": {
+        "move": "Moving",
+        "take-back": "Taking back"
+      },
+      "done": "“{label}” done.",
+      "failed": "“{label}” did not finish: {error}",
+      "finish": "Finish",
+      "kind": {
+        "bot-installation": "Bot",
+        "connector-instance": "Connection",
+        "scheduled-task": "Scheduled task"
+      },
+      "loading": "Reading what runs where…",
+      "meta": "{count, plural, =0 {nothing runs here} one {# item runs here} other {# items run here}}",
+      "move": {
+        "cancel": "Cancel",
+        "checking": "Asking {host} what it can take…",
+        "close": "Done",
+        "confirm": "{count, plural, =0 {Move to {host}} one {Move # item to {host}} other {Move # items to {host}}}",
+        "description": "{host} checks every item before anything is sent. Items that move keep running there even when this device is off.",
+        "failedTitle": "Could not finish",
+        "moving": "Moving {done} of {total} to {host}…",
+        "needsPluginsTitle": "Need plugins on the host ({count})",
+        "nothingHere": "Nothing runs on this device that could move.",
+        "outcomeFailed": "did not move: {error}",
+        "outcomeMoved": "now runs on {host}.",
+        "pluginFailed": "{pluginId}: {error}",
+        "pluginsInstalled": "{count, plural, =0 {{host} installed no plugins.} one {{host} installed # plugin.} other {{host} installed # plugins.}}",
+        "readyTitle": "Ready to move ({count})",
+        "sendPlugins": "{count, plural, one {Send # plugin to {host}} other {Send # plugins to {host}}}",
+        "sendPluginsDesktopOnly": "Plugins can only be sent from the desktop app, where their files are.",
+        "sendPluginsHint": "Sent as one cogpack signed by this device. {host} installs it only if its own plugin policy accepts the signer.",
+        "staysHereTitle": "Stays on this device ({count})",
+        "title": "Move work to {host}",
+        "transfer": {
+          "installing": "{host} is installing the plugins…",
+          "packing": "Packing plugins for {host}…",
+          "uploading": "Sending plugins to {host}…"
+        }
+      },
+      "moveAction": "Move work to {host}…",
+      "movedHereEmpty": "Nothing from this device runs on {host} yet.",
+      "movedHereTitle": "Runs on {host} for this device",
+      "note": {
+        "conversationAddressRelearned": "Replies to {conversationKey} resume once that chat next writes to the Bot.",
+        "schedulesTravel": "{count, plural, one {Its scheduled message set up in a chat moves to {host} with it.} other {Its # scheduled messages set up in chats move to {host} with it.}}",
+        "secretTransferred": "The secret {name} is copied into {host}'s keychain."
+      },
+      "place": {
+        "here": "This device",
+        "hint": "{host} keeps it running when this device is off. Anything tied to this device stays here, and you see why.",
+        "host": "{host} (always on)",
+        "label": "Runs on"
+      },
+      "reason": {
+        "desktopTrigger": "Triggered by desktop events ({triggerId}).",
+        "keyringReference": "Reads a secret from this device's keychain ({ref}).",
+        "localEvent": "Fires on {eventType}, which only this device emits.",
+        "localPath": "Uses a path on this device: {path}",
+        "localProcess": "Watches a process running on this device.",
+        "localProjectRoot": "Works in a project folder on this device: {path}",
+        "loopbackEndpoint": "Talks to a service on this device: {url}",
+        "machineMaintenance": "Looks after this device's own data.",
+        "managedBy": "Belongs to a {manager} and moves with it.",
+        "osPromotion": "Runs from this computer's system scheduler.",
+        "stdioMcp": "Uses the MCP server “{name}”, which runs as a process on this device.",
+        "taskTypeUnsupported": "{host} cannot run this kind of task ({taskType}).",
+        "webhookEndpoint": "Receives through this device's webhook address."
+      },
+      "reference": {
+        "agentTeam": "agent team",
+        "character": "agent",
+        "connectorInstance": "connection",
+        "conversation": "conversation",
+        "externalAgent": "external agent",
+        "integrationAccount": "account",
+        "mcpServer": "MCP server",
+        "plan": "plan",
+        "skill": "skill",
+        "workflow": "workflow",
+        "workspace": "workspace"
+      },
+      "resume": "Resume",
+      "retry": "Retry",
+      "state": {
+        "awaitingHost": "waiting to reach the host",
+        "completed": "done",
+        "created": "created on the host, not yet switched over",
+        "failed": "failed",
+        "fenced": "stopped here, not yet started on the host",
+        "prepared": "not started on the host"
+      },
+      "takeBack": {
+        "action": "Take back",
+        "anyway": "Take back anyway",
+        "awaitingHost": "“{label}” runs on this device again. {host} still has its copy; it is removed the next time {host} can be reached.",
+        "keepOnHost": "Leave it on the host",
+        "unreachableBody": "You can take “{label}” back without {host}. It runs on this device from now on, but {host} keeps running its copy until it can be told to stop, so for a while it may run in both places.",
+        "unreachableTitle": "{host} cannot be reached"
+      },
+      "takingBack": "Taking back…",
+      "title": "Always-on work",
+      "unfinishedTitle": "Stopped partway"
     },
     "attention": {
       "background": "In the background",
@@ -43464,6 +43593,7 @@
           "fieldTransport": "Transport",
           "fieldType": "Type",
           "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
+          "placeholder": "This connection runs on {host}; the copy here is a placeholder that does not run. Take it back from {host}'s device page to change it here.",
           "sections": {
             "behavior": "Behavior",
             "connection": "Connection",
@@ -50299,6 +50429,7 @@
           "probing": "Looking…",
           "title": "On this computer"
         },
+        "moveWork": "Move work to {label}…",
         "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
         "payloadLabel": "Pair payload or JWT",
         "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",

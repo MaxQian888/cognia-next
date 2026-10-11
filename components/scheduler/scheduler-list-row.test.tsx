@@ -71,6 +71,28 @@ describe("SchedulerListRow", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument()
   })
 
+  it("marks a placeholder with the host it runs on, without nesting a link in the row", () => {
+    render(
+      <SchedulerListRow
+        {...baseProps}
+        item={item({
+          owner: {
+            kind: "remote-host",
+            hostId: "h1",
+            hostLabel: "Mac mini",
+            remoteItemId: "t1",
+            operationId: "op",
+            movedAt: 1,
+          },
+        })}
+        signal={null}
+      />
+    )
+    const badge = screen.getByTestId("runs-on-host-badge")
+    expect(badge).toHaveTextContent("Runs on Mac mini")
+    expect(badge.closest("a")).toBeNull()
+  })
+
   it("replaces the trigger line with the attention signal", () => {
     const signal: AttentionSignal = {
       id: "consecutive-failures:app:t1",

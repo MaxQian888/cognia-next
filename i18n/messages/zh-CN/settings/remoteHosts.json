@@ -41,6 +41,7 @@
       "probing": "查找中…",
       "title": "这台电脑上"
     },
+    "moveWork": "将任务迁移到 {label}…",
     "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
     "payloadLabel": "配对载荷或 JWT",
     "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",

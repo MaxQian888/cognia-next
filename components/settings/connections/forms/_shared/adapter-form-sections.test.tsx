@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { AdapterFormSections, type FormSection } from "./adapter-form-sections"
+import { CreatePlacementProvider } from "./create-placement-slot"
 
 const messages = {
   settings: {
@@ -45,6 +46,21 @@ describe("AdapterFormSections", () => {
     expect(screen.getByText("Identity")).toBeInTheDocument()
     expect(screen.getByText("Delivery")).toBeInTheDocument()
     expect(screen.getByText("Advanced")).toBeInTheDocument()
+  })
+
+  it("leads with where a new connection runs, only inside a create dialog", () => {
+    const { rerender } = render(
+      withIntl(
+        <CreatePlacementProvider slot={<span>Runs on Mac mini</span>}>
+          <AdapterFormSections sections={makeSections()} onSubmit={() => undefined} dirty />
+        </CreatePlacementProvider>
+      )
+    )
+    expect(screen.getByTestId("adapter-form-placement")).toHaveTextContent("Runs on Mac mini")
+    rerender(
+      withIntl(<AdapterFormSections sections={makeSections()} onSubmit={() => undefined} dirty />)
+    )
+    expect(screen.queryByTestId("adapter-form-placement")).not.toBeInTheDocument()
   })
 
   it("opens sections marked defaultOpen and keeps others closed", () => {

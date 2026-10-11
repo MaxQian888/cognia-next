@@ -32,9 +32,36 @@ jest.mock("@/lib/connectors/plugin-connector-registry", () => {
   return { ...actual, listPluginConnectors: () => mockPluginConnectors() }
 })
 jest.mock("../forms/plugin-connector-config", () => ({
-  PluginConnectorConfigDialog: ({ kind }: { kind: string }) => (
-    <div data-testid="plugin-connector-dialog">{kind}</div>
-  ),
+  // Surfaces its create/close callbacks and the create placement it is given.
+  PluginConnectorConfigDialog: function MockPluginDialog({
+    kind,
+    onCreated,
+    onOpenChange,
+  }: {
+    kind: string
+    onCreated?: (id: string) => void
+    onOpenChange: (open: boolean) => void
+  }) {
+    const slot = jest
+      .requireActual<typeof import("../forms/_shared/create-placement-slot")>(
+        "../forms/_shared/create-placement-slot"
+      )
+      .useCreatePlacementSlot()
+    return (
+      <div data-testid="plugin-connector-dialog">
+        {kind}
+        <div data-testid="plugin-dialog-placement">{slot}</div>
+        <button data-testid="plugin-dialog-create" onClick={() => onCreated?.("px-new")} />
+        <button data-testid="plugin-dialog-close" onClick={() => onOpenChange(false)} />
+      </div>
+    )
+  },
+}))
+jest.mock("@/components/remote-host/new-item-placement", () => ({
+  ...jest.requireActual("@/components/remote-host/new-item-placement"),
+  // The move itself is MoveWorkDialog's to test; this shows what it was handed.
+  PlaceNewItemDialog: ({ placement }: { placement: { placing: { label: string } | null } }) =>
+    placement.placing ? <div data-testid="placing">{placement.placing.label}</div> : null,
 }))
 
 // Each AdapterListRow calls useAdapterHealth → useLiveQuery. Stub it to a
@@ -550,5 +577,59 @@ describe("AdaptersTab — ?platform= landing", () => {
     await waitFor(() => expect(mockClearPendingPlatform).toHaveBeenCalled())
     expect(screen.queryByTestId("add-connector-grid")).not.toBeInTheDocument()
     expect(mockSetSelectedAdapterId).not.toHaveBeenCalled()
+  })
+})
+
+describe("where a new connection runs (ADR-0224 A5)", () => {
+  const { useRemoteHostStore } = jest.requireActual<
+    typeof import("@/stores/remote-host/remote-host-store")
+  >("@/stores/remote-host/remote-host-store")
+  const { getDb } = jest.requireMock<{ getDb: jest.Mock }>("@/lib/db/schema")
+
+  beforeEach(() => {
+    mockPluginConnectors.mockReturnValue([
+      { pluginId: "acme-chat", type: "acme", def: { type: "acme", displayName: "Acme Chat" } },
+    ])
+    getDb.mockReturnValue({
+      adapterInstances: { get: async (id: string) => ({ id, displayName: "Acme prod" }) },
+    })
+    useRemoteHostStore.setState({
+      hosts: [
+        { id: "mini", label: "Mac mini", alwaysOn: true, lastProbe: { at: 1, ok: true } } as never,
+      ],
+    })
+  })
+  afterEach(() => useRemoteHostStore.setState({ hosts: [] }))
+
+  async function openCreate() {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    fireEvent.click(await screen.findByTestId("add-connector-card-acme"))
+    await screen.findByTestId("plugin-connector-dialog")
+  }
+
+  it("asks in the create form, and moves the connection once its dialog closes", async () => {
+    await openCreate()
+    expect(screen.getByTestId("plugin-dialog-placement")).toContainElement(
+      screen.getByTestId("runs-on-field")
+    )
+    fireEvent.click(screen.getByTestId("plugin-dialog-create"))
+    // Still open: a platform may be finishing its sign-in here.
+    expect(screen.queryByTestId("placing")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("plugin-dialog-close"))
+    expect(await screen.findByTestId("placing")).toHaveTextContent("Acme prod")
+  })
+
+  it("moves nothing when the dialog closes without creating", async () => {
+    await openCreate()
+    fireEvent.click(screen.getByTestId("plugin-dialog-close"))
+    await waitFor(() => expect(screen.queryByTestId("plugin-connector-dialog")).toBeNull())
+    expect(screen.queryByTestId("placing")).not.toBeInTheDocument()
+  })
+
+  it("asks nothing when no always-on host is up", async () => {
+    useRemoteHostStore.setState({ hosts: [] })
+    await openCreate()
+    expect(screen.queryByTestId("runs-on-field")).not.toBeInTheDocument()
   })
 })

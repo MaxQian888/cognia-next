@@ -172,6 +172,22 @@ describe("SchedulerDialogs", () => {
     expect(body).toContainElement(screen.getByTestId("task-form-stub"))
   })
 
+  it("shows where a new task runs above the form, only when the page passes the choice", () => {
+    const view = render(
+      <SchedulerDialogs
+        {...buildProps({
+          showCreateSheet: true,
+          createPlacement: <div data-testid="placement-slot" />,
+        })}
+      />
+    )
+    expect(screen.getByTestId("create-task-sheet-body")).toContainElement(
+      screen.getByTestId("placement-slot")
+    )
+    view.rerender(<SchedulerDialogs {...buildProps({ showCreateSheet: true })} />)
+    expect(screen.queryByTestId("placement-slot")).not.toBeInTheDocument()
+  })
+
   it("cancels the create sheet via the form's cancel callback", () => {
     const onShowCreateSheetChange = jest.fn()
     render(<SchedulerDialogs {...buildProps({ showCreateSheet: true, onShowCreateSheetChange })} />)

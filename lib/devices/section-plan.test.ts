@@ -121,6 +121,7 @@ describe("planDeviceSections", () => {
     // `presence` would sit alone above the wide capability matrix, so the
     // placement card, the only remaining half, is pulled up beside it.
     expect(ids(plan.sections)).toEqual([
+      "always-on",
       "workspaces",
       "routing",
       "identity",
@@ -139,6 +140,8 @@ describe("planDeviceSections", () => {
     const pairHost = row({ ref: "companion:x", kind: "remote-host", hostId: undefined })
     expect(canOwnTiming(pairHost)).toBe(false)
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("routing")
+    // Nor can always-on work be moved to it: a move names the host by its id.
+    expect(ids(planDeviceSections(pairHost).sections)).not.toContain("always-on")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
   })

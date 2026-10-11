@@ -70,6 +70,26 @@ describe("BotLifecycleControls", () => {
     expect(setEnabled).toHaveBeenCalledWith("boti_1", false)
   })
 
+  it("offers nothing to do on a placeholder, and says where it runs (ADR-0224)", () => {
+    render(
+      <BotLifecycleControls
+        row={row({
+          owner: {
+            kind: "remote-host",
+            hostId: "h1",
+            hostLabel: "Mac mini",
+            remoteItemId: "boti_op",
+            operationId: "op",
+            movedAt: 1,
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("runs-on-host-badge")).toHaveTextContent("Runs on Mac mini")
+    expect(screen.queryByTestId("bot-enabled-switch")).toBeNull()
+    expect(screen.queryByTestId("bot-uninstall")).toBeNull()
+  })
+
   it("keeps uninstall available on an orphan while the switch refuses", () => {
     // An orphan has no definition to re-derive a status against, and removal
     // is the only remaining action.

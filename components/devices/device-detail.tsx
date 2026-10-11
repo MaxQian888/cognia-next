@@ -52,6 +52,7 @@ import {
 import type { DeviceRow } from "@/lib/devices/types"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 
+import { AlwaysOnSection } from "./always-on/always-on-section"
 import { DeviceHero, DeviceStatSummary } from "./device-hero"
 import { DeviceSection } from "./device-section"
 import { DeviceSectionNav, type DeviceSectionNavItem } from "./device-section-nav"
@@ -80,6 +81,7 @@ export function deviceSectionAnchor(id: string): string {
  * section it lands on read the same.
  */
 const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
+  "always-on": "alwaysOn.title",
   ssh: "ssh.title",
   files: "files.title",
   access: "access.title",
@@ -125,6 +127,8 @@ function PlannedSection({
 }) {
   const t = useTranslations("devices")
   switch (id) {
+    case "always-on":
+      return <AlwaysOnSection row={row} />
     case "ssh":
       // Full width because of what it holds: the identity record, the
       // forwarding rules and three controls. In half a pane that is a 700px

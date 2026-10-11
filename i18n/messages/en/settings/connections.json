@@ -43,6 +43,7 @@
       "fieldTransport": "Transport",
       "fieldType": "Type",
       "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
+      "placeholder": "This connection runs on {host}; the copy here is a placeholder that does not run. Take it back from {host}'s device page to change it here.",
       "sections": {
         "behavior": "Behavior",
         "connection": "Connection",

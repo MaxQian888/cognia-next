@@ -490,5 +490,133 @@
     "always-on": "常驻 host",
     "headless": "Headless 服务器",
     "desktop": "桌面"
+  },
+  "alwaysOn": {
+    "title": "常驻任务",
+    "meta": "{count, plural, =0 {暂无运行项} other {# 项在此运行}}",
+    "description": "{host} 为本设备运行的定时任务、Bot 和连接。迁移过去的每一项都会在本设备保留一个不运行的占位。",
+    "loading": "正在读取各项的运行位置…",
+    "movedHereTitle": "在 {host} 上为本设备运行",
+    "movedHereEmpty": "本设备还没有任何内容在 {host} 上运行。",
+    "moveAction": "将任务迁移到 {host}…",
+    "takingBack": "正在收回…",
+    "unfinishedTitle": "中途停止的操作",
+    "resume": "继续",
+    "finish": "完成",
+    "retry": "重试",
+    "done": "“{label}”已完成。",
+    "failed": "“{label}”未完成：{error}",
+    "direction": {
+      "move": "迁移中",
+      "take-back": "收回中"
+    },
+    "consent": {
+      "title": "{host} 正在等待批准",
+      "body": "请在 {host} 上，或在管理它的其他设备上，用此代码批准本设备，然后继续。",
+      "bodyNoCode": "请在 {host} 上，或在管理它的其他设备上批准本设备，然后继续。",
+      "continue": "我已批准，继续"
+    },
+    "takeBack": {
+      "action": "收回",
+      "awaitingHost": "“{label}”已重新在本设备运行。{host} 上的副本仍在，会在下次连上 {host} 时删除。",
+      "unreachableTitle": "无法连接 {host}",
+      "unreachableBody": "可以在不经过 {host} 的情况下收回“{label}”。它会从现在起在本设备运行，但 {host} 在收到停止通知前会继续运行它的副本，因此一段时间内可能两边都在运行。",
+      "keepOnHost": "留在主机上",
+      "anyway": "仍然收回"
+    },
+    "move": {
+      "title": "将任务迁移到 {host}",
+      "description": "发送任何内容之前，{host} 会先检查每一项。迁移过去的项即使本设备关机也会继续运行。",
+      "checking": "正在询问 {host} 可以接收哪些项…",
+      "failedTitle": "未能完成",
+      "nothingHere": "本设备上没有可迁移的运行项。",
+      "readyTitle": "可以迁移（{count}）",
+      "needsPluginsTitle": "需要主机安装插件（{count}）",
+      "sendPlugins": "{count, plural, other {向 {host} 发送 # 个插件}}",
+      "sendPluginsHint": "以本设备签名的 cogpack 发送。仅当 {host} 自己的插件策略接受该签名者时才会安装。",
+      "sendPluginsDesktopOnly": "插件只能从桌面应用发送，插件文件在那里。",
+      "pluginsInstalled": "{count, plural, =0 {{host} 没有安装任何插件。} other {{host} 已安装 # 个插件。}}",
+      "pluginFailed": "{pluginId}：{error}",
+      "staysHereTitle": "留在本设备（{count}）",
+      "transfer": {
+        "packing": "正在为 {host} 打包插件…",
+        "uploading": "正在向 {host} 发送插件…",
+        "installing": "{host} 正在安装插件…"
+      },
+      "moving": "正在迁移到 {host}：{done}/{total}…",
+      "outcomeMoved": "现在在 {host} 上运行。",
+      "outcomeFailed": "未迁移：{error}",
+      "close": "完成",
+      "cancel": "取消",
+      "confirm": "{count, plural, =0 {迁移到 {host}} other {将 # 项迁移到 {host}}}"
+    },
+    "kind": {
+      "scheduled-task": "定时任务",
+      "bot-installation": "Bot",
+      "connector-instance": "连接"
+    },
+    "state": {
+      "prepared": "尚未在主机上开始",
+      "created": "已在主机上创建，尚未切换",
+      "fenced": "已在本设备停止，尚未在主机上启动",
+      "completed": "已完成",
+      "awaitingHost": "等待连接主机",
+      "failed": "失败"
+    },
+    "reason": {
+      "osPromotion": "由这台电脑的系统计划任务运行。",
+      "taskTypeUnsupported": "{host} 无法运行这类任务（{taskType}）。",
+      "machineMaintenance": "维护本设备自己的数据。",
+      "localProcess": "监视本设备上运行的进程。",
+      "managedBy": "属于某个{manager}，会随其一起迁移。",
+      "localEvent": "由 {eventType} 触发，只有本设备会发出该事件。",
+      "desktopTrigger": "由桌面事件触发（{triggerId}）。",
+      "localPath": "使用本设备上的路径：{path}",
+      "localProjectRoot": "在本设备上的项目文件夹中工作：{path}",
+      "stdioMcp": "使用 MCP 服务器“{name}”，它作为本设备上的进程运行。",
+      "keyringReference": "从本设备的钥匙串读取密钥（{ref}）。",
+      "loopbackEndpoint": "访问本设备上的服务：{url}",
+      "webhookEndpoint": "通过本设备的 Webhook 地址接收消息。"
+    },
+    "reference": {
+      "workflow": "工作流",
+      "character": "智能体",
+      "skill": "技能",
+      "agentTeam": "智能体团队",
+      "plan": "计划",
+      "conversation": "对话",
+      "mcpServer": "MCP 服务器",
+      "externalAgent": "外部智能体",
+      "workspace": "工作区",
+      "integrationAccount": "账号",
+      "connectorInstance": "连接"
+    },
+    "blocker": {
+      "hostUnreachable": "无法询问 {host}：{detail}",
+      "hostTooOld": "{host} 版本过旧，无法接收任务。请先更新。",
+      "alreadyMoved": "已在 {host} 上运行。",
+      "pluginMissing": "需要插件 {pluginId} {version}，{host} 上没有。",
+      "pluginVersionMismatch": "需要插件 {pluginId} {version}；{host} 上是 {hostVersion}。",
+      "botDefinitionMissing": "{host} 上没有 Bot 定义 {definitionId} {version}。",
+      "referenceMissing": "使用了{reference}“{id}”，{host} 上没有。",
+      "dependsOn": "需要先迁移“{label}”，或与它一起迁移。",
+      "idConflict": "{host} 上已有另一个 ID 为 {id} 的项。",
+      "secretUnreadable": "无法在本设备读取密钥 {name} 以发送。"
+    },
+    "note": {
+      "conversationAddressRelearned": "{conversationKey} 下次给 Bot 发消息后，回复才会恢复。",
+      "secretTransferred": "密钥 {name} 会复制到 {host} 的钥匙串。",
+      "schedulesTravel": "它在聊天中设置的 {count} 条定时消息会一起迁移到 {host}。"
+    },
+    "badge": {
+      "label": "在 {host} 上运行",
+      "title": "此项在 {host} 上运行，本设备上的副本不会运行。打开主机页面可将其收回。"
+    },
+    "place": {
+      "label": "运行位置",
+      "host": "{host}（常驻）",
+      "here": "本设备",
+      "hint": "本设备关机时，{host} 会继续运行它。与本设备绑定的内容会留在本设备，并说明原因。"
+    }
   }
 }

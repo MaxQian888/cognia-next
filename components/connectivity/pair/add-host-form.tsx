@@ -38,14 +38,18 @@
  */
 
 import { useCallback, useState, useSyncExternalStore } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 
 import { LoopbackDiscoveryPanel } from "@/components/settings/remote-hosts/loopback-discovery-panel"
 import { LanDiscoveryPanel } from "@/components/settings/remote-hosts/tabs/lan-discovery-panel"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
+import { remoteHostRef } from "@/lib/devices/build-device-rows"
+import { deviceConsoleHref } from "@/lib/devices/device-console-href"
 import { isNativeMobile, isTauri } from "@/lib/platform/detect"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
@@ -105,6 +109,8 @@ export function AddHostForm({
   const [connectAfter, setConnectAfter] = useState(true)
   const [alwaysOn, setAlwaysOn] = useState(defaultAlwaysOn)
   const [success, setSuccess] = useState<string | null>(null)
+  /** An always-on host just paired: the work it is for is one link away. */
+  const [pairedAlwaysOn, setPairedAlwaysOn] = useState<RemoteHost | null>(null)
 
   const lane = discoveryLane ?? (isTauri() ? "mdns" : "loopback")
 
@@ -133,6 +139,7 @@ export function AddHostForm({
           ? t("add.successAlwaysOn", { label: host.label })
           : t("add.success", { label: host.label })
       )
+      setPairedAlwaysOn(alwaysOn ? host : null)
       setLabel("")
       if (alwaysOn || !connectAfter) {
         onPaired?.(host)
@@ -218,6 +225,13 @@ export function AddHostForm({
         <p role="status" className="text-sm text-success" data-testid="add-host-success">
           {success}
         </p>
+      ) : null}
+      {pairedAlwaysOn ? (
+        <Button asChild size="sm" variant="secondary" data-testid="add-host-move-work">
+          <Link href={deviceConsoleHref(remoteHostRef(pairedAlwaysOn), "always-on")}>
+            {t("add.moveWork", { label: pairedAlwaysOn.label })}
+          </Link>
+        </Button>
       ) : null}
       {dialog}
     </div>

@@ -252,6 +252,26 @@ describe("AdapterDetailPanel — header", () => {
     expect(toggle).toHaveAttribute("aria-label", "Enable My Telegram Bot")
   })
 
+  it("shows where a placeholder runs instead of a switch (ADR-0224)", () => {
+    const placeholder = {
+      ...baseRow,
+      enabled: false,
+      owner: {
+        kind: "remote-host",
+        hostId: "h1",
+        hostLabel: "Mac mini",
+        remoteItemId: baseRow.id,
+        operationId: "op",
+        movedAt: 1,
+      },
+    }
+    mockUseLiveQuery.mockReturnValue(placeholder as unknown as ReturnType<typeof useLiveQuery>)
+    render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
+    expect(screen.queryByTestId("adapter-detail-toggle")).toBeNull()
+    expect(screen.getByTestId("runs-on-host-badge")).toHaveTextContent("Runs on Mac mini")
+    expect(screen.getByTestId("adapter-detail-placeholder")).toHaveTextContent("does not run")
+  })
+
   it("calls updateAdapterInstance with toggled enabled state when switch is clicked", async () => {
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
     fireEvent.click(screen.getByTestId("adapter-detail-toggle"))

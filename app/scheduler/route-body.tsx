@@ -36,6 +36,7 @@ import {
 } from "@/hooks/scheduler/use-unified-recent-runs"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { usePlaceNewItem } from "@/hooks/remote-host/use-place-new-item"
 import { AGENDA_DAYS, buildAgenda } from "@/lib/scheduler/agenda"
 import { deriveAttention, signalsForItem, type AttentionSignal } from "@/lib/scheduler/attention"
 import { orderListItems } from "@/lib/scheduler/list-order"
@@ -66,6 +67,7 @@ import {
   ExportTasksDialog,
   ImportTasksDialog,
 } from "@/components/scheduler"
+import { PlaceNewItemDialog, RunsOnField } from "@/components/remote-host/new-item-placement"
 import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
 import { DeleteItemDialog } from "@/components/scheduler/delete-item-dialog"
 import { ItemDetail } from "@/components/scheduler/detail/item-detail"
@@ -210,6 +212,10 @@ function SchedulerPageBody() {
   const maxTasksPerSource = useSchedulerStore((s) => s.permissionPolicy.maxTasksPerSource)
 
   const host = useSchedulerHostSummary()
+  // New tasks default to the always-on host (ADR-0224) when this page writes
+  // to this device's own schedule; a page already driving a host writes there.
+  const placement = usePlaceNewItem()
+  const placesNewTasks = host.target === "local" && !host.suspended
   const promotionAvailable = host.target === "local" && capabilities?.available === true
   const promotionUnavailableReason =
     host.target !== "local"
@@ -446,11 +452,14 @@ function SchedulerPageBody() {
         selection.selectItem(createdId)
         setJustCreatedId(createdId)
         toast.success(t("itemActions.created", { name: created.name }))
+        if (placesNewTasks) {
+          placement.place({ ref: { kind: "scheduled-task", id: created.id }, label: created.name })
+        }
       } finally {
         setIsSubmitting(false)
       }
     },
-    [createTask, selection, t]
+    [createTask, placement, placesNewTasks, selection, t]
   )
 
   const handleEditTask = useCallback(
@@ -926,6 +935,9 @@ function SchedulerPageBody() {
         showCreateSheet={showCreateSheet}
         createInitialValues={createDraft?.input}
         createDraftSummary={createDraft?.summary}
+        createPlacement={
+          placesNewTasks ? <RunsOnField placement={placement} idPrefix="task-create" /> : undefined
+        }
         onShowCreateSheetChange={(open) => {
           setShowCreateSheet(open)
           // Closing the sheet retires the hand-off; reopening it from the
@@ -1024,6 +1036,8 @@ function SchedulerPageBody() {
           return backfillTask(selectedAppTask.id, range)
         }}
       />
+
+      <PlaceNewItemDialog placement={placement} onChanged={refresh} />
 
       <DeleteItemDialog
         item={pendingDelete}

@@ -42,6 +42,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor, type TriggerPolicy } from "@/types/connectors/policy"
 
 import { AdapterForm, type JsonSchema } from "./adapter-form"
+import { useCreatePlacementSlot } from "./_shared/create-placement-slot"
 
 export interface PluginConnectorConfigDialogProps {
   open: boolean
@@ -61,6 +62,7 @@ export function PluginConnectorConfigDialog({
 }: PluginConnectorConfigDialogProps) {
   const t = useTranslations("settings.connections.pluginConnector")
   const isNew = row === null
+  const placementSlot = useCreatePlacementSlot()
   const reach = useConnectorControlReach()
   const registration = useMemo(() => getPluginConnector(kind), [kind])
 
@@ -150,6 +152,10 @@ export function PluginConnectorConfigDialog({
               : t("editTitle", { name: registration?.def.displayName ?? kind })}
           </DialogTitle>
         </DialogHeader>
+
+        {isNew && placementSlot ? (
+          <div data-testid="plugin-connector-placement">{placementSlot}</div>
+        ) : null}
 
         {/* A row whose plugin was disabled keeps its settings and stays
          * editable-looking; saying the implementation is gone beats a form

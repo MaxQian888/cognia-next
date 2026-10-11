@@ -41,6 +41,7 @@
       "probing": "Looking…",
       "title": "On this computer"
     },
+    "moveWork": "Move work to {label}…",
     "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
     "payloadLabel": "Pair payload or JWT",
     "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",

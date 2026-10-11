@@ -44,6 +44,7 @@ jest.mock("@/hooks/connectors/use-adapter-credentials", () => ({
 
 import { toast } from "sonner"
 import { PluginConnectorConfigDialog } from "./plugin-connector-config"
+import { CreatePlacementProvider } from "./_shared/create-placement-slot"
 
 const REGISTRATION = {
   pluginId: "acme-chat",
@@ -166,4 +167,26 @@ it("says so when no enabled plugin provides the kind any more", () => {
   open()
   expect(screen.getByTestId("plugin-connector-unregistered")).toBeInTheDocument()
   expect(screen.queryByTestId("plugin-connector-name")).toBeNull()
+})
+
+// Where a new connection runs (ADR-0224 A5): this dialog has its own layout,
+// so it draws the choice itself, and only while creating.
+it("asks where a new connection runs, and not when editing one", () => {
+  const { rerender } = render(
+    <CreatePlacementProvider slot={<span>Runs on Mac mini</span>}>
+      <PluginConnectorConfigDialog open onOpenChange={jest.fn()} kind="acme" row={null} />
+    </CreatePlacementProvider>
+  )
+  expect(screen.getByTestId("plugin-connector-placement")).toHaveTextContent("Runs on Mac mini")
+  rerender(
+    <CreatePlacementProvider slot={<span>Runs on Mac mini</span>}>
+      <PluginConnectorConfigDialog
+        open
+        onOpenChange={jest.fn()}
+        kind="acme"
+        row={{ id: "px-1", type: "acme", displayName: "Acme", settings: {} } as never}
+      />
+    </CreatePlacementProvider>
+  )
+  expect(screen.queryByTestId("plugin-connector-placement")).not.toBeInTheDocument()
 })

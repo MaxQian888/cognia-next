@@ -48,6 +48,11 @@ export interface SchedulerDialogsProps {
   createInitialValues?: Partial<CreateScheduledTaskInput>
   /** One line explaining where the pre-filled draft came from. */
   createDraftSummary?: string
+  /**
+   * Where the new task runs: the always-on host's choice (`RunsOnField`,
+   * ADR-0224), shown above the form. Absent when there is no choice to make.
+   */
+  createPlacement?: React.ReactNode
 
   // Edit task sheet
   showEditSheet: boolean
@@ -97,6 +102,7 @@ export function SchedulerDialogs({
   onShowCreateSheetChange,
   createInitialValues,
   createDraftSummary,
+  createPlacement,
   onCreateTask,
   isSubmitting,
   showEditSheet,
@@ -159,6 +165,7 @@ export function SchedulerDialogs({
                 <p data-testid="create-draft-summary">{createDraftSummary}</p>
               </Surface>
             )}
+            {createPlacement ? <div className="mb-4">{createPlacement}</div> : null}
             <TaskForm
               // Remount on a new draft OR on a change to the user's defaults:
               // TaskForm seeds its state once, so a second hand-off into an

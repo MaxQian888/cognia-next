@@ -30,7 +30,23 @@ jest.mock("@/stores/project/project-store", () => ({
     selector({ activeProjectId }),
 }))
 
+jest.mock("@/components/remote-host/new-item-placement", () => ({
+  ...jest.requireActual("@/components/remote-host/new-item-placement"),
+  // The move itself is MoveWorkDialog's to test; this shows what it was handed.
+  PlaceNewItemDialog: ({ placement }: { placement: { placing: { label: string } | null } }) =>
+    placement.placing ? <div data-testid="placing">{placement.placing.label}</div> : null,
+}))
+
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+
 import { InstallBotSheet } from "./install-bot-sheet"
+
+const alwaysOnHost = {
+  id: "mini",
+  label: "Mac mini",
+  alwaysOn: true,
+  lastProbe: { at: 1, ok: true },
+}
 
 function entry(over: Partial<BotCatalogEntry> = {}): BotCatalogEntry {
   return {
@@ -55,6 +71,7 @@ beforeEach(() => {
   readiness = { availability: { state: "available", reason: "local-host" }, can: true }
   catalog = { entries: [entry()], loading: false }
   activeProjectId = null
+  useRemoteHostStore.setState({ hosts: [] })
 })
 
 describe("InstallBotSheet", () => {
@@ -202,4 +219,34 @@ it("wraps long catalog versions and descriptions inside the installation row", (
   render(<InstallBotSheet open onOpenChange={jest.fn()} />)
   expect(screen.getByText(version)).toHaveClass("break-all")
   expect(screen.getByText(description)).toHaveClass("break-words")
+})
+
+describe("with an always-on host up", () => {
+  beforeEach(() => useRemoteHostStore.setState({ hosts: [alwaysOnHost as never] }))
+
+  it("offers the host by default and moves the new Bot there once installed", async () => {
+    const user = userEvent.setup()
+    render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+    expect(screen.getByTestId("runs-on-host")).toHaveAttribute("data-state", "checked")
+    await user.click(screen.getByTestId("bot-install-acme:digest"))
+    expect(screen.getByTestId("placing")).toHaveTextContent("Daily digest")
+  })
+
+  it("keeps the Bot here when the user chose this device", async () => {
+    const user = userEvent.setup()
+    render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+    await user.click(screen.getByTestId("runs-on-here"))
+    await user.click(screen.getByTestId("bot-install-acme:digest"))
+    expect(install).toHaveBeenCalled()
+    expect(screen.queryByTestId("placing")).not.toBeInTheDocument()
+  })
+
+  it("asks nothing while it drives a paired host, where the Bot already is", async () => {
+    catalog = { entries: [entry()], loading: false, remote: true }
+    const user = userEvent.setup()
+    render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+    expect(screen.queryByTestId("runs-on-field")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("bot-install-acme:digest"))
+    expect(screen.queryByTestId("placing")).not.toBeInTheDocument()
+  })
 })
