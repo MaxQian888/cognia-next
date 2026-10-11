@@ -3,9 +3,16 @@ import userEvent from "@testing-library/user-event"
 
 import { mobileLayoutFromPreset } from "@/lib/glance/mobile-layout"
 import { layoutFromPreset } from "@/lib/glance/presets"
-import type { GlanceLayoutEntry, GlanceMobileEntry, GlanceModuleId } from "@/types/glance/layout"
+import type {
+  GlanceEntryId,
+  GlanceLayoutEntry,
+  GlanceMobileEntry,
+  GlanceModuleId,
+} from "@/types/glance/layout"
 
-import { GlanceLayoutEditor } from "./glance-layout-editor"
+import type { GlancePluginCatalogEntry } from "@/lib/glance/snapshot"
+
+import { defaultPluginSize, GlanceLayoutEditor } from "./glance-layout-editor"
 
 // balanced: fleet, usage, quota, agenda, activity, quick shown; recents, pet hidden.
 const ENTRIES = layoutFromPreset("balanced")
@@ -35,7 +42,7 @@ function renderEditor(
   return { onChange, ...view }
 }
 
-function row(id: GlanceModuleId) {
+function row(id: string) {
   return screen.getByTestId(`glance-editor-row-${id}`)
 }
 
@@ -216,8 +223,7 @@ describe("GlanceLayoutEditor", () => {
 
     function renderMobile(onToggle = jest.fn()) {
       const onChange = jest.fn()
-      const isPinned = (id: GlanceModuleId) =>
-        MOBILE.find((entry) => entry.id === id)?.home === true
+      const isPinned = (id: GlanceEntryId) => MOBILE.find((entry) => entry.id === id)?.home === true
       render(
         <GlanceLayoutEditor
           entries={MOBILE}
@@ -404,5 +410,104 @@ describe("GlanceLayoutEditor", () => {
       await user.keyboard(" ")
       expect(onChange).not.toHaveBeenCalled()
     })
+  })
+
+  describe("plugin modules (ADR-0225 §6)", () => {
+    const CI: GlancePluginCatalogEntry = {
+      id: "plugin:com.ci:status",
+      pluginId: "com.ci",
+      title: "Build status",
+      icon: "GitBranch",
+      sizes: ["compact", "expanded"],
+      platforms: ["desktop", "mobile"],
+    }
+    const TODO: GlancePluginCatalogEntry = {
+      id: "plugin:com.todo:today",
+      pluginId: "com.todo",
+      title: "Today",
+      icon: null,
+      sizes: ["standard"],
+      platforms: ["desktop", "mobile"],
+    }
+
+    it("offers a running plugin module the layout has never placed, tagged as a plugin", () => {
+      renderEditor({ plugins: [CI] })
+      const item = screen.getByTestId("glance-editor-hidden-plugin:com.ci:status")
+      expect(item).toHaveTextContent("Build status")
+      expect(item).toHaveTextContent("Plugin")
+    })
+
+    it("adds it as a new shown entry at the end, at its default size", async () => {
+      const user = userEvent.setup()
+      const { onChange } = renderEditor({ plugins: [CI, TODO] })
+      await user.click(screen.getByRole("button", { name: "Add Today" }))
+      const next = onChange.mock.calls[0][0] as GlanceLayoutEntry[]
+      const shown = next.filter((e) => !e.hidden)
+      expect(shown.at(-1)).toEqual({ id: "plugin:com.todo:today", size: "standard", hidden: false })
+    })
+
+    it("builds the new entry with the caller's factory", async () => {
+      const user = userEvent.setup()
+      const makeEntry = jest.fn((id: string, size: string) => ({
+        id,
+        size,
+        hidden: false,
+        home: false,
+      }))
+      const { onChange } = renderEditor({
+        plugins: [CI],
+        makeEntry: makeEntry as never,
+      })
+      await user.click(screen.getByRole("button", { name: "Add Build status" }))
+      expect(makeEntry).toHaveBeenCalledWith("plugin:com.ci:status", "compact")
+      const added = (onChange.mock.calls[0][0] as GlanceMobileEntry[]).find((e) => e.id === CI.id)
+      expect(added).toEqual({ id: CI.id, size: "compact", hidden: false, home: false })
+    })
+
+    it("shows a placed plugin module with its own sizes and resizes within them", async () => {
+      const user = userEvent.setup()
+      const entries = [...ENTRIES, { id: CI.id, size: "compact" as const, hidden: false }]
+      const { onChange } = renderEditor({ plugins: [CI], entries })
+      const ciRow = row(CI.id)
+      expect(
+        within(ciRow)
+          .getAllByRole("radio")
+          .map((r) => r.getAttribute("aria-label"))
+      ).toEqual(["Compact", "Expanded"])
+      await user.click(within(ciRow).getByRole("radio", { name: "Expanded" }))
+      const next = onChange.mock.calls[0][0] as GlanceLayoutEntry[]
+      expect(next.find((e) => e.id === CI.id)?.size).toBe("expanded")
+    })
+
+    it("lists a shown entry whose plugin is off, labelled and removable, without sizes or a pin", async () => {
+      const user = userEvent.setup()
+      const entries = [...ENTRIES, { id: CI.id, size: "compact" as const, hidden: false }]
+      const { onChange } = renderEditor({
+        entries,
+        home: { isPinned: () => true, onToggle: jest.fn() },
+      })
+      const offRow = row(CI.id)
+      expect(offRow).toHaveTextContent("Plugin off — Plugin module")
+      expect(within(offRow).queryByRole("radio")).not.toBeInTheDocument()
+      expect(within(offRow).queryByRole("button", { name: /home screen/ })).not.toBeInTheDocument()
+      await user.click(within(offRow).getByRole("button", { name: /^Remove / }))
+      expect(
+        (onChange.mock.calls[0][0] as GlanceLayoutEntry[]).find((e) => e.id === CI.id)?.hidden
+      ).toBe(true)
+    })
+
+    it("does not offer a hidden entry whose plugin is off", () => {
+      const entries = [...ENTRIES, { id: CI.id, size: "compact" as const, hidden: true }]
+      renderEditor({ entries })
+      expect(screen.queryByTestId(`glance-editor-hidden-${CI.id}`)).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe("defaultPluginSize", () => {
+  it("starts at standard when the module has it, else its smallest", () => {
+    expect(defaultPluginSize(["compact", "standard", "expanded"])).toBe("standard")
+    expect(defaultPluginSize(["compact", "expanded"])).toBe("compact")
+    expect(defaultPluginSize([])).toBe("standard")
   })
 })

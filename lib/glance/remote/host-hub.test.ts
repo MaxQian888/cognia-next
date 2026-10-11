@@ -13,6 +13,7 @@ const T0 = 1_000_000
 
 const demand = (patch: Partial<GlanceRemoteDemand> = {}): GlanceRemoteDemand => ({
   modules: ["fleet", "usage"],
+  catalog: false,
   scope: "all",
   workspaceId: null,
   usage: { scope: "cognia", showSpend: false },

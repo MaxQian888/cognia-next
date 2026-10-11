@@ -16,7 +16,11 @@
     "size": "Size of {module}",
     "homePin": "Show {module} on the home screen",
     "homePinned": "On the home screen",
-    "homeUnpinned": "Not on the home screen"
+    "homeUnpinned": "Not on the home screen",
+    "pluginOff": "Plugin off — {module}",
+    "pluginOffHint": "Its plugin isn't running. The module comes back when the plugin does.",
+    "remove": "Remove {module}",
+    "pluginTag": "Plugin"
   },
   "errors": {
     "commandUnavailable": "That command isn't available right now.",
@@ -26,7 +30,8 @@
     "requestFailed": "Cognia couldn't do that.",
     "timeout": "Cognia's main window didn't answer in time.",
     "hostUnavailable": "Your desktop isn't sharing this right now.",
-    "hostUnreachable": "Couldn't reach your desktop."
+    "hostUnreachable": "Couldn't reach your desktop.",
+    "pluginUnavailable": "That plugin isn't running right now."
   },
   "modules": {
     "activity": {
@@ -263,5 +268,12 @@
     },
     "title": "Glance",
     "updated": "Updated {when}"
+  },
+  "plugin": {
+    "unnamed": "Plugin module",
+    "waiting": "Waiting for the plugin…",
+    "empty": "Nothing to show",
+    "moreRows": "{count, plural, one {# more} other {# more}}",
+    "desktopOnly": "Runs on your desktop"
   }
 }

@@ -36,6 +36,7 @@ import type { PetProfile } from "@/types/pet"
 
 import { onAutostartChanged } from "./autostart-control"
 import { useTrayStore } from "./store"
+import { titleNeedsQuota } from "./title-format"
 import { useTrayUsage } from "./usage"
 import type { TrayStateSnapshot } from "./types"
 
@@ -183,10 +184,15 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
   // enabled (menu section / tooltip suffix / taskbar mode) so idle installs
   // never poll provider usage endpoints; the hook itself no-ops outside Tauri.
   const display = useTrayStore((s) => s.display)
+  // A title only needs the quota feed when one of its fields is quota; its
+  // other fields have feeds of their own (`lib/tray/title.ts`).
   const usageEnabled =
     isTauri() &&
     isMainAppWindow() &&
-    (display.showUsageInMenu || display.showUsageInTooltip || display.taskbarUsageMode !== "off")
+    (display.showUsageInMenu ||
+      display.showUsageInTooltip ||
+      display.taskbarUsageMode === "iconBadge" ||
+      (display.taskbarUsageMode === "title" && titleNeedsQuota(display.titleFields)))
   const usageData = useTrayUsage(usageEnabled, display.usageRefreshMinutes, display)
   const usage = useMemo(
     () => (usageData ? { ...usageData, selectedKey: display.usageAccountKey } : null),

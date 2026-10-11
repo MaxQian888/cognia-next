@@ -16,7 +16,7 @@ import { ChevronRightIcon, CloudOffIcon, MonitorIcon } from "lucide-react"
 
 import { GLANCE_MODULES } from "@/lib/glance/registry"
 import { cn } from "@/lib/utils"
-import type { GlanceModuleId } from "@/types/glance/layout"
+import { isPluginEntryId, type GlanceEntryId } from "@/types/glance/layout"
 
 import { useGlance } from "./glance-context"
 
@@ -31,7 +31,7 @@ export function GlanceOriginTag({ moduleId }: { moduleId: string }) {
   const { originOf, now } = useGlance()
   const t = useTranslations("glance.origin")
   const format = useFormatter()
-  const origin = originOf?.(moduleId as GlanceModuleId) ?? null
+  const origin = originOf?.(moduleId as GlanceEntryId) ?? null
   if (!origin || origin.kind !== "host") return null
   const age = format.relativeTime(origin.at, Math.max(now, origin.at))
   const label = origin.host
@@ -62,7 +62,14 @@ export function GlanceOriginTag({ moduleId }: { moduleId: string }) {
  * the desktop is offline and nothing was received yet, or it does not serve
  * glance. One line, the module's title and the reason.
  */
-export function GlanceUnavailableModule({ moduleId }: { moduleId: GlanceModuleId }) {
+export function GlanceUnavailableModule({
+  moduleId,
+  title: givenTitle,
+}: {
+  moduleId: GlanceEntryId
+  /** A plugin module's title; first-party modules use their own label. */
+  title?: string
+}) {
   const { originOf, platform } = useGlance()
   const t = useTranslations("glance")
   const origin = originOf?.(moduleId) ?? null
@@ -70,7 +77,9 @@ export function GlanceUnavailableModule({ moduleId }: { moduleId: GlanceModuleId
     origin?.kind === "unavailable" && origin.reason === "host-unsupported"
       ? t("origin.unsupported")
       : t("origin.offline")
-  const title = t(GLANCE_MODULES[moduleId].labelKey)
+  const title =
+    givenTitle ??
+    (isPluginEntryId(moduleId) ? t("plugin.unnamed") : t(GLANCE_MODULES[moduleId].labelKey))
   return (
     <section
       data-glance-module={moduleId}

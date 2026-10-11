@@ -605,6 +605,7 @@ export function TrayPanelView() {
               {editing ? (
                 <TrayPanelEditMode
                   config={config}
+                  plugins={snapshot.plugins?.catalog}
                   onEntries={editEntries}
                   onDelegateVisible={setDelegateVisible}
                   onWidth={setWidth}

@@ -227,3 +227,65 @@ describe("phoneLocalConfig", () => {
     for (const e of config.entries) expect(e).not.toHaveProperty("home")
   })
 })
+
+describe("plugin entries on a phone (ADR-0225 §6)", () => {
+  const PLUGIN = "plugin:com.ci:status" as const
+  const PLUGINS: GlanceSnapshotV1["plugins"] = {
+    updatedAt: 1,
+    catalog: [
+      {
+        id: PLUGIN,
+        pluginId: "com.ci",
+        title: "CI",
+        icon: null,
+        sizes: ["compact"],
+        platforms: ["mobile"],
+      },
+    ],
+    modules: {},
+  }
+
+  it("labels a plugin module the desktop offers with the host", () => {
+    const origin = phoneOriginOf(
+      PLUGIN,
+      link({ remote: remote({ snapshot: snapshot("r", { plugins: PLUGINS }), receivedAt: 50 }) })
+    )
+    expect(origin).toEqual({ kind: "host", host: "Studio Mac", at: 50, live: true })
+  })
+
+  it("is not this phone's own when standalone", () => {
+    expect(phoneOriginOf(PLUGIN, link({ paired: false }))).toBeNull()
+  })
+
+  it("says the desktop is offline when it never offered the module", () => {
+    expect(
+      phoneOriginOf(PLUGIN, link({ remote: remote({ status: "offline", snapshot: null }) }))
+    ).toEqual({ kind: "unavailable", reason: "host-offline" })
+  })
+
+  it("takes the desktop's plugins when paired, never the phone's own", () => {
+    const local = snapshot("l", { plugins: { ...PLUGINS!, catalog: [] } })
+    expect(mergePhoneSnapshot(local, snapshot("r", { plugins: PLUGINS }), true).plugins).toBe(
+      PLUGINS
+    )
+    expect(mergePhoneSnapshot(local, null, true).plugins).toBeNull()
+    expect(mergePhoneSnapshot(local, snapshot("r", { plugins: PLUGINS }), false).plugins).toBe(
+      local.plugins
+    )
+  })
+
+  it("leaves plugin entries out of a paired phone's own build", () => {
+    const settings: GlanceMobileSettings = {
+      ...DEFAULT_GLANCE_MOBILE_SETTINGS,
+      entries: [
+        ...DEFAULT_GLANCE_MOBILE_SETTINGS.entries,
+        { id: PLUGIN, size: "compact", hidden: false, home: true },
+      ],
+    }
+    const needed = neededEntries(settings.entries, true)
+    const paired = phoneLocalConfig(settings, needed, true)
+    expect(paired.entries.find((e) => e.id === PLUGIN)?.hidden).toBe(true)
+    const standalone = phoneLocalConfig(settings, needed, false)
+    expect(standalone.entries.find((e) => e.id === PLUGIN)?.hidden).toBe(false)
+  })
+})

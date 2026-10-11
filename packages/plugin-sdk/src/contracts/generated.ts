@@ -1326,6 +1326,15 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.git.unstage": {
     kind: "none",
   },
+  "ctx.glance.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.glance.update": {
+    kind: "none",
+  },
+  "ctx.glance.onVisibilityChange": {
+    kind: "returned-disposer",
+  },
   "ctx.goals.clearSubgoals": {
     kind: "none",
   },

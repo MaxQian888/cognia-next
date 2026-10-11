@@ -9714,19 +9714,32 @@
           "properties": {
             "modules": {
               "type": "array",
-              "maxItems": 12,
+              "maxItems": 60,
               "items": {
-                "type": "string",
-                "enum": [
-                  "fleet",
-                  "usage",
-                  "quota",
-                  "agenda",
-                  "activity",
-                  "pet"
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "fleet",
+                      "usage",
+                      "quota",
+                      "agenda",
+                      "activity",
+                      "pet"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^plugin:[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                    "description": "A plugin module on the desktop (ADR-0225 §6), rendered read-only on the phone. At most 24."
+                  }
                 ]
               },
-              "description": "The host-sourced modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+              "description": "The host-sourced modules and desktop plugin modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+            },
+            "catalog": {
+              "type": "boolean",
+              "description": "The phone's layout editor is open and needs the desktop's plugin catalogue, even with nothing host-sourced on screen. Absent means false."
             },
             "scope": {
               "type": "string",

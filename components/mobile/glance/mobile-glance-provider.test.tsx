@@ -19,6 +19,7 @@ import { DEFAULT_GLANCE_MOBILE_SETTINGS } from "@/lib/glance/mobile-layout"
 import {
   MobileGlanceProvider,
   useMobileGlanceContext,
+  useRegisterGlanceEditor,
   useRegisterGlanceHome,
   type MobileGlanceContextValue,
   type MobileGlanceShellActions,
@@ -61,6 +62,11 @@ function Probe() {
 function Home() {
   useRegisterGlanceHome()
   return <div data-testid="home" />
+}
+
+function Editor() {
+  useRegisterGlanceEditor()
+  return <div data-testid="editor" />
 }
 
 beforeEach(() => {
@@ -135,6 +141,29 @@ describe("MobileGlanceProvider", () => {
       </MobileGlanceProvider>
     )
     expect(lastOptions().homeVisible).toBe(false)
+  })
+
+  it("tells the glance hook while a layout editor is mounted", () => {
+    const actions = makeActions()
+    const view = render(
+      <MobileGlanceProvider actions={actions}>
+        <Probe />
+      </MobileGlanceProvider>
+    )
+    expect(lastOptions().editorOpen).toBe(false)
+    view.rerender(
+      <MobileGlanceProvider actions={actions}>
+        <Probe />
+        <Editor />
+      </MobileGlanceProvider>
+    )
+    expect(lastOptions().editorOpen).toBe(true)
+    view.rerender(
+      <MobileGlanceProvider actions={actions}>
+        <Probe />
+      </MobileGlanceProvider>
+    )
+    expect(lastOptions().editorOpen).toBe(false)
   })
 
   it("lets registerHome be called directly, returning its unregister", () => {

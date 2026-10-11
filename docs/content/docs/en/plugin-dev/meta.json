@@ -4,6 +4,7 @@
     "author-sdk",
     "bots",
     "extension-points-v2",
+    "glance-modules",
     "inter-plugin-communication",
     "native-anthropic-tools",
     "pet",

@@ -4,10 +4,10 @@
  * The phone's glance, mounted once by the mobile shell (ADR-0225 §9).
  *
  * Owns the one `useMobileGlance` instance the home screen and the Glance
- * drawer share, whether the drawer is open, whether the home screen is on
- * screen (the home registers itself while mounted), and the doors the
- * modules need from the shell: start a chat, search, resume a conversation,
- * and open the layout editor.
+ * drawer share, whether the drawer is open, whether the home screen and the
+ * layout editor are on screen (each registers itself while mounted), and the
+ * doors the modules need from the shell: start a chat, search, resume a
+ * conversation, and open the layout editor.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
@@ -29,6 +29,8 @@ export interface MobileGlanceContextValue extends UseMobileGlanceResult {
   setDrawerOpen: (open: boolean) => void
   /** The home screen calls this while it is mounted. Returns the unregister. */
   registerHome: () => () => void
+  /** The layout editor calls this while it is mounted. Returns the unregister. */
+  registerEditor: () => () => void
 }
 
 const MobileGlanceContext = createContext<MobileGlanceContextValue | null>(null)
@@ -48,10 +50,15 @@ export function MobileGlanceProvider({ actions, children }: MobileGlanceProvider
   const router = useRouter()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [homeMounts, setHomeMounts] = useState(0)
+  const [editorMounts, setEditorMounts] = useState(0)
 
   const registerHome = useCallback(() => {
     setHomeMounts((n) => n + 1)
     return () => setHomeMounts((n) => n - 1)
+  }, [])
+  const registerEditor = useCallback(() => {
+    setEditorMounts((n) => n + 1)
+    return () => setEditorMounts((n) => n - 1)
   }, [])
 
   const navigate = useCallback((href: string) => router.push(href), [router])
@@ -64,6 +71,7 @@ export function MobileGlanceProvider({ actions, children }: MobileGlanceProvider
   const glance = useMobileGlance({
     drawerOpen,
     homeVisible: homeMounts > 0,
+    editorOpen: editorMounts > 0,
     navigate,
     openSession: actions.openSession,
     editShortcuts,
@@ -71,8 +79,8 @@ export function MobileGlanceProvider({ actions, children }: MobileGlanceProvider
   })
 
   const value = useMemo<MobileGlanceContextValue>(
-    () => ({ ...glance, actions, drawerOpen, setDrawerOpen, registerHome }),
-    [glance, actions, drawerOpen, registerHome]
+    () => ({ ...glance, actions, drawerOpen, setDrawerOpen, registerHome, registerEditor }),
+    [glance, actions, drawerOpen, registerHome, registerEditor]
   )
 
   return <MobileGlanceContext.Provider value={value}>{children}</MobileGlanceContext.Provider>
@@ -82,4 +90,13 @@ export function MobileGlanceProvider({ actions, children }: MobileGlanceProvider
 export function useRegisterGlanceHome(): void {
   const { registerHome } = useMobileGlanceContext()
   useEffect(() => registerHome(), [registerHome])
+}
+
+/**
+ * Mark the layout editor as on screen for as long as the caller is mounted:
+ * a paired phone then asks the desktop for its plugin catalogue.
+ */
+export function useRegisterGlanceEditor(): void {
+  const { registerEditor } = useMobileGlanceContext()
+  useEffect(() => registerEditor(), [registerEditor])
 }

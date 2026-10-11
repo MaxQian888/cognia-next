@@ -33,6 +33,7 @@ import { useRouter } from "next/navigation"
 import { useGlanceSources, type UseGlanceSourcesResult } from "@/hooks/glance/use-glance-sources"
 import { withEditedEntries, withPreset } from "@/lib/glance/layout-edit"
 import { glanceOwnerHref } from "@/lib/glance/owner-routes"
+import { runGlancePluginAction } from "@/lib/glance/plugin-actions"
 import { normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { parseGlanceRequest, type GlanceRequest } from "@/lib/glance/requests"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
@@ -214,6 +215,8 @@ export async function executeGlanceRequest(
       if (!getCommand(request.command)) return "errors.commandUnavailable"
       await executeCommand(request.command)
       return null
+    case "plugin-action":
+      return runGlancePluginAction(request.entryId, request.actionId)
   }
 }
 
@@ -237,10 +240,13 @@ export function GlancePublisherInitializer() {
     () => (remoteDemand ? glanceConfigForDemand(remoteDemand) : null),
     [remoteDemand]
   )
-  const remoteActive = remoteDemand !== null && remoteDemand.modules.length > 0
+  // A phone's editor asks for the plugin catalogue even with nothing on screen.
+  const remoteActive =
+    remoteDemand !== null && (remoteDemand.modules.length > 0 || remoteDemand.catalog)
   const remoteSources = useGlanceSources(remoteActive, {
     config: remoteConfig,
     workspaceId: remoteDemand?.workspaceId ?? null,
+    platform: "mobile",
   })
   const trayLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
 

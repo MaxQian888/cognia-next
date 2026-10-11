@@ -10,6 +10,7 @@ jest.mock("@/hooks/use-runtime-snapshot", () => ({ useRuntimeSnapshot: jest.fn()
 jest.mock("@/hooks/pet/use-document-visible", () => ({ useDocumentHidden: jest.fn() }))
 jest.mock("@/lib/pet/remote/client", () => ({ createPetRemoteClient: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ transport: { marker: "transport" } }))
+jest.mock("@/lib/glance/plugin-actions", () => ({ runGlancePluginAction: jest.fn() }))
 jest.mock("@/stores/settings", () => {
   const state = {
     settings: {} as Record<string, unknown> | null,
@@ -69,6 +70,7 @@ import * as phoneStoreModule from "@/lib/glance/remote/phone-store"
 import { glanceDemandOf } from "@/lib/glance/remote/demand"
 import { neededEntries, phoneLocalConfig } from "@/lib/glance/remote/phone-view"
 import { createPetRemoteClient } from "@/lib/pet/remote/client"
+import { runGlancePluginAction } from "@/lib/glance/plugin-actions"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -791,6 +793,123 @@ describe("useMobileGlance", () => {
         out = await result.current.save(DEFAULT_GLANCE_MOBILE_SETTINGS)
       })
       expect(out).toBe("errors.requestFailed")
+    })
+  })
+  describe("plugin modules (ADR-0225 §6)", () => {
+    const PLUGINS = {
+      updatedAt: NOW,
+      catalog: [
+        {
+          id: "plugin:com.ci:status",
+          pluginId: "com.ci",
+          title: "CI",
+          icon: null,
+          sizes: ["compact"],
+          platforms: ["mobile"],
+        },
+      ],
+      modules: {},
+    }
+    const runActionMock = runGlancePluginAction as jest.Mock
+
+    function renderEditor(editorOpen: boolean) {
+      return renderHook(
+        ({ open }: { open: boolean }) =>
+          useMobileGlance({
+            drawerOpen: false,
+            homeVisible: false,
+            editorOpen: open,
+            navigate,
+            openSession,
+            editShortcuts,
+            onRouted,
+          }),
+        { initialProps: { open: editorOpen } }
+      )
+    }
+
+    it("builds the phone's own slices for the mobile platform", () => {
+      render()
+      expect(sourcesMock.mock.calls.at(-1)?.[1].platform).toBe("mobile")
+    })
+
+    it("holds a lease for the desktop's plugin catalogue while a paired phone edits", () => {
+      runtimeMock.mockReturnValue(pairedRuntime())
+      const { rerender } = renderEditor(false)
+      expect(phoneStore.hold).not.toHaveBeenCalled()
+      rerender({ open: true })
+      expect(phoneStore.hold).toHaveBeenCalledWith(
+        expect.objectContaining({ modules: [], catalog: true })
+      )
+    })
+
+    it("never asks for a catalogue when standalone", () => {
+      renderEditor(true)
+      expect(phoneStore.hold).not.toHaveBeenCalled()
+    })
+
+    it("offers the desktop's catalogue when paired and its own when standalone", () => {
+      const body = { ...localBody(), plugins: { ...PLUGINS, catalog: [] } }
+      sourcesMock.mockImplementation(() => ({ body, quota, refreshUsage: jest.fn() }))
+      expect(render().result.current.pluginCatalog).toEqual([])
+
+      runtimeMock.mockReturnValue(pairedRuntime())
+      act(() =>
+        phoneInternals.__setState({
+          status: "live",
+          snapshot: { ...remoteSnapshot(), plugins: PLUGINS },
+          receivedAt: NOW,
+          hostLabel: "Mac",
+        })
+      )
+      expect(render().result.current.pluginCatalog).toEqual(PLUGINS.catalog)
+    })
+
+    it("runs a plugin action on a standalone phone and refuses it on a paired one", async () => {
+      runActionMock.mockResolvedValue(null)
+      const standalone = render()
+      await expect(
+        standalone.result.current.glance.send({
+          kind: "plugin-action",
+          entryId: "plugin:com.ci:status",
+          actionId: "open",
+        })
+      ).resolves.toBeNull()
+      expect(runActionMock).toHaveBeenCalledWith("plugin:com.ci:status", "open")
+
+      runActionMock.mockClear()
+      runtimeMock.mockReturnValue(pairedRuntime())
+      const paired = render()
+      await expect(
+        paired.result.current.glance.send({
+          kind: "plugin-action",
+          entryId: "plugin:com.ci:status",
+          actionId: "open",
+        })
+      ).resolves.toBe("errors.commandUnavailable")
+      expect(runActionMock).not.toHaveBeenCalled()
+    })
+
+    it("pins a plugin module that is running, and not one that is not", () => {
+      const settings = {
+        ...DEFAULT_GLANCE_MOBILE_SETTINGS,
+        entries: [
+          ...DEFAULT_GLANCE_MOBILE_SETTINGS.entries,
+          {
+            id: "plugin:com.ci:status" as const,
+            size: "compact" as const,
+            hidden: true,
+            home: false,
+          },
+        ],
+      }
+      const pinned = pinnedLayout(settings, "plugin:com.ci:status", true, ["plugin:com.ci:status"])
+      expect(pinned.entries.find((e) => e.id === "plugin:com.ci:status")).toMatchObject({
+        hidden: false,
+        home: true,
+      })
+      const refused = pinnedLayout(settings, "plugin:com.ci:status", true)
+      expect(refused.entries.find((e) => e.id === "plugin:com.ci:status")?.home).toBe(false)
     })
   })
 })

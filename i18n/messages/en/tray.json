@@ -56,6 +56,18 @@
     "awaitingApproval": "Waiting for approval",
     "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}"
   },
+  "title": {
+    "awaiting": "⚑{count}",
+    "budget": "B {pct}%",
+    "period": {
+      "1d": "1D",
+      "7d": "7D",
+      "30d": "30D"
+    },
+    "quota": "Q {pct}%",
+    "running": "▶{count}",
+    "usage": "{period} {value}"
+  },
   "toggleWindow": "Show / hide window",
   "trayPanelToggle": "Quick panel",
   "usage": {

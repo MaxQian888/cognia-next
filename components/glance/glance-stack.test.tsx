@@ -6,12 +6,12 @@ import { render, screen } from "@testing-library/react"
 
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceLayoutEntry, GlanceModuleId } from "@/types/glance/layout"
+import type { GlanceEntryId, GlanceLayoutEntry } from "@/types/glance/layout"
 
 import { GlanceProvider, type GlanceContextValue, type GlanceModuleOrigin } from "./glance-context"
 import { DEFAULT_GLANCE_RENDERERS, GlanceStack, type GlanceModuleRenderer } from "./glance-stack"
 
-function makeSnapshot(): GlanceSnapshotV1 {
+function makeSnapshot(plugins?: GlanceSnapshotV1["plugins"]): GlanceSnapshotV1 {
   return {
     version: GLANCE_SNAPSHOT_VERSION,
     epoch: 1,
@@ -29,16 +29,18 @@ function makeSnapshot(): GlanceSnapshotV1 {
     activity: null,
     recents: null,
     pet: null,
+    plugins,
   }
 }
 
 function renderStack(
   entries: readonly GlanceLayoutEntry[],
   renderers?: Parameters<typeof GlanceStack>[0]["renderers"],
-  originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
+  originOf?: (id: GlanceEntryId) => GlanceModuleOrigin | null,
+  plugins?: GlanceSnapshotV1["plugins"]
 ) {
   const value: GlanceContextValue = {
-    snapshot: makeSnapshot(),
+    snapshot: makeSnapshot(plugins),
     platform: "desktop",
     width: "standard",
     now: 5_000,
@@ -179,6 +181,63 @@ describe("GlanceStack", () => {
         () => ({ kind: "unavailable", reason: "host-offline" })
       )
       expect(container.querySelector("[data-glance-unavailable]")).toBeNull()
+    })
+  })
+
+  describe("plugin entries", () => {
+    const PLUGINS: GlanceSnapshotV1["plugins"] = {
+      updatedAt: 1_000,
+      catalog: [
+        {
+          id: "plugin:com.ci:status",
+          pluginId: "com.ci",
+          title: "Build status",
+          icon: null,
+          sizes: ["compact"],
+          platforms: ["desktop", "mobile"],
+        },
+      ],
+      modules: { "plugin:com.ci:status": { updatedAt: 1_000, data: { summary: "green" } } },
+    }
+
+    it("renders a plugin module from the catalogue at a size it declares", () => {
+      const { container } = renderStack(
+        [
+          { id: "fleet", size: "compact", hidden: false },
+          { id: "plugin:com.ci:status", size: "expanded", hidden: false },
+        ],
+        undefined,
+        undefined,
+        PLUGINS
+      )
+      expect(renderedModuleIds(container)).toEqual(["fleet", "plugin:com.ci:status"])
+      // `expanded` degrades to the only declared size: one line.
+      expect(screen.getByTestId("glance-plugin-summary-plugin:com.ci:status")).toHaveTextContent(
+        "green"
+      )
+    })
+
+    it("skips an entry whose plugin is off", () => {
+      const { container } = renderStack(
+        [{ id: "plugin:com.gone:x", size: "standard", hidden: false }],
+        undefined,
+        undefined,
+        PLUGINS
+      )
+      expect(renderedModuleIds(container)).toEqual([])
+    })
+
+    it("says in place when a paired phone's desktop cannot supply it", () => {
+      const { container } = renderStack(
+        [{ id: "plugin:com.ci:status", size: "compact", hidden: false }],
+        undefined,
+        () => ({ kind: "unavailable", reason: "host-offline" }),
+        null
+      )
+      expect(renderedModuleIds(container)).toEqual(["plugin:com.ci:status"])
+      expect(container.querySelector("[data-glance-unavailable]")).toHaveTextContent(
+        "Plugin module"
+      )
     })
   })
 })

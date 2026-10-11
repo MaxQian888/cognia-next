@@ -18519,9 +18519,13 @@
       "homePin": "Show {module} on the home screen",
       "homePinned": "On the home screen",
       "homeUnpinned": "Not on the home screen",
+      "pluginOff": "Plugin off — {module}",
+      "pluginOffHint": "Its plugin isn't running. The module comes back when the plugin does.",
+      "pluginTag": "Plugin",
       "presetHint": "A preset replaces the modules, their order and sizes. Width, height and options stay.",
       "presetLabel": "Preset: {preset}",
       "presets": "Presets",
+      "remove": "Remove {module}",
       "reorder": "Reorder {module}",
       "shown": "Shown",
       "shownEmpty": "Nothing is shown — add a module below.",
@@ -18533,6 +18537,7 @@
       "deliveryFailed": "Cognia's main window didn't respond.",
       "hostUnavailable": "Your desktop isn't sharing this right now.",
       "hostUnreachable": "Couldn't reach your desktop.",
+      "pluginUnavailable": "That plugin isn't running right now.",
       "quotaEnable": "Couldn't turn on quota for that account.",
       "quotaRefresh": "Couldn't refresh that quota source.",
       "requestFailed": "Cognia couldn't do that.",
@@ -18757,6 +18762,13 @@
       "fromHostOffline": "{host} offline · {age}",
       "offline": "Desktop offline — nothing received yet.",
       "unsupported": "Your desktop doesn't share this."
+    },
+    "plugin": {
+      "desktopOnly": "Runs on your desktop",
+      "empty": "Nothing to show",
+      "moreRows": "{count, plural, one {# more} other {# more}}",
+      "unnamed": "Plugin module",
+      "waiting": "Waiting for the plugin…"
     },
     "presets": {
       "agentOps": "Agent ops",
@@ -52353,16 +52365,48 @@
         "showUsageInMenu": "Show subscription usage in the tray menu",
         "showUsageInTooltip": "Show usage in the tray tooltip",
         "taskbarMode": "Usage in the taskbar",
-        "taskbarModeHint": "Icon badge draws the percent onto the tray icon; title shows text next to it (macOS / Linux).",
+        "taskbarModeHint": "Icon badge draws the number onto the tray icon; title shows the fields you pick next to it (macOS / Linux).",
         "taskbarModes": {
           "iconBadge": "Icon badge",
           "off": "Off",
           "title": "Title text"
         },
         "title": "Display",
+        "titleFields": {
+          "add": "Add field",
+          "empty": "No fields: the title stays blank.",
+          "hint": "Shown in order next to the tray icon. A field with nothing to report right now is left out.",
+          "kind": {
+            "awaiting": "Awaiting approval",
+            "budget": "Budget used",
+            "quota": "Quota used",
+            "running": "Running tasks",
+            "usage": "Usage"
+          },
+          "label": "Title fields",
+          "max": "Up to {max} fields",
+          "metric": {
+            "spend": "Spend",
+            "tokens": "Tokens"
+          },
+          "metricLabel": "What {field} counts",
+          "moveDown": "Move {field} down",
+          "moveUp": "Move {field} up",
+          "period": {
+            "1d": "Today",
+            "30d": "30 days",
+            "7d": "7 days"
+          },
+          "periodLabel": "Window for {field}",
+          "preview": "Now: {text}",
+          "previewEmpty": "Nothing to show right now",
+          "remove": "Remove {field}",
+          "usageName": "{metric} · {period}"
+        },
+        "titleUnsupported": "Windows has no menu-bar title. Use the icon badge to see a number next to the tray icon.",
         "tooltipBase": "Tooltip text",
         "usageMetric": "Taskbar number",
-        "usageMetricHint": "What the menu bar, tooltip and quick panel lead with.",
+        "usageMetricHint": "What the icon badge and the tooltip lead with. The title composes its own fields.",
         "usagePeriod": "Window",
         "usageScope": "Counted spend",
         "usageScopeHint": "All coding tools reads other agents' local session files. Their spend is shown separately and never affects your Cognia budget."
@@ -52555,7 +52599,7 @@
         "notDesktop": "The Capacity Dock is a desktop overlay window and is unavailable in this shell. The tray usage readout still works.",
         "waylandPositioning": "This Wayland session does not let applications place their own windows, so the Capacity Dock cannot run here. The tray usage readout still works."
       },
-      "description": "A thin rail pinned to a screen edge, showing live spend per provider.",
+      "description": "A thin rail pinned to a screen edge, showing live spend per provider or the plan quota left on each account.",
       "edge": "Screen edge",
       "edges": {
         "bottom": "Bottom",
@@ -52566,7 +52610,7 @@
       },
       "enabled": "Show the Capacity Dock",
       "gauge": "Gauge measures",
-      "gaugeHint": "Budget compares each provider to the day's total. Plan quota shows account headroom.",
+      "gaugeHint": "Budget compares each provider to the day's total. Plan quota shows every queried quota source by its tightest window, the share used.",
       "gauges": {
         "budget": "Share of today's spend",
         "quota": "Plan quota"
@@ -57636,6 +57680,18 @@
       "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}",
       "streaming": "Responding…"
     },
+    "title": {
+      "awaiting": "⚑{count}",
+      "budget": "B {pct}%",
+      "period": {
+        "1d": "1D",
+        "30d": "30D",
+        "7d": "7D"
+      },
+      "quota": "Q {pct}%",
+      "running": "▶{count}",
+      "usage": "{period} {value}"
+    },
     "toggleWindow": "Show / hide window",
     "trayPanelToggle": "Quick panel",
     "usage": {
@@ -58691,9 +58747,17 @@
     "detailPartial": "{provider} · {amount} · {count, plural, other {# unpriced}}",
     "drag": "Move the dock",
     "empty": "No spend yet today",
+    "emptyQuota": "No quota source is queried",
     "loading": "Reading usage…",
+    "loadingQuota": "Reading quota…",
     "openFull": "Open full usage",
+    "quotaDetail": "{provider} · {amount} used",
+    "quotaDetailReset": "{provider} · {amount} used · resets {when}",
+    "quotaError": "{provider} · the last query failed",
+    "quotaReading": "{provider} · reading…",
+    "quotaStale": "{provider} · {amount} used · out of date",
     "row": "{provider}: {amount}",
+    "sourceName": "{provider} · {account}",
     "title": "Capacity Dock"
   },
   "usageInsights": {

@@ -3,9 +3,11 @@ import {
   GLANCE_MAX_HEIGHT_DEFAULT,
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MAX_PLUGIN_ENTRIES,
   GLANCE_MODULE_IDS,
   GLANCE_PRESET_IDS,
   type GlanceLayoutEntry,
+  type GlanceModuleId,
 } from "@/types/glance/layout"
 
 import {
@@ -18,6 +20,7 @@ import {
   normalizeGlanceModuleOptions,
   normalizeGlancePanelSettings,
   visibleModuleIds,
+  visiblePluginEntryIds,
 } from "./presets"
 import { GLANCE_MODULES, supportsSize } from "./registry"
 
@@ -48,7 +51,7 @@ describe("layoutFromPreset", () => {
     "%s uses only sizes each module supports",
     (preset) => {
       for (const entry of layoutFromPreset(preset)) {
-        expect(supportsSize(entry.id, entry.size)).toBe(true)
+        expect(supportsSize(entry.id as GlanceModuleId, entry.size)).toBe(true)
       }
     }
   )
@@ -56,7 +59,8 @@ describe("layoutFromPreset", () => {
   it("hides unlisted modules at their smallest size", () => {
     const hidden = layoutFromPreset("minimal").filter((e) => e.hidden)
     expect(hidden.length).toBeGreaterThan(0)
-    for (const entry of hidden) expect(entry.size).toBe(GLANCE_MODULES[entry.id].sizes[0])
+    for (const entry of hidden)
+      expect(entry.size).toBe(GLANCE_MODULES[entry.id as GlanceModuleId].sizes[0])
   })
 
   it("returns a fresh array on every call", () => {
@@ -122,7 +126,7 @@ describe("normalizeEntries", () => {
     const appended = out.slice(1)
     expect(appended.map((e) => e.id)).toEqual(GLANCE_MODULE_IDS.filter((id) => id !== "pet"))
     expect(allHidden(appended)).toBe(true)
-    for (const e of appended) expect(e.size).toBe(GLANCE_MODULES[e.id].sizes[0])
+    for (const e of appended) expect(e.size).toBe(GLANCE_MODULES[e.id as GlanceModuleId].sizes[0])
   })
 
   it("returns every module hidden for an empty array", () => {
@@ -405,5 +409,44 @@ describe("normalizeGlanceModuleOptions", () => {
     expect(normalizeGlancePanelSettings({ options: raw }).options).toEqual(
       normalizeGlanceModuleOptions(raw)
     )
+  })
+})
+
+describe("plugin entries in a stored layout (ADR-0225 §6)", () => {
+  it("keeps well-formed plugin entries in place, whether or not their plugin runs", () => {
+    const entries = normalizeEntries([
+      { id: "fleet", size: "compact", hidden: false },
+      { id: "plugin:com.ci:status", size: "expanded", hidden: false },
+      { id: "plugin:com.ci:status", size: "compact", hidden: true },
+      { id: "plugin:bad id:x", size: "compact", hidden: false },
+      { id: "plugin:com.todo:today", size: "huge", hidden: true },
+    ])
+    expect(entries.slice(0, 3)).toEqual([
+      { id: "fleet", size: "compact", hidden: false },
+      { id: "plugin:com.ci:status", size: "expanded", hidden: false },
+      { id: "plugin:com.todo:today", size: "standard", hidden: true },
+    ])
+  })
+
+  it("keeps at most the layout's limit of plugin entries", () => {
+    const many = Array.from({ length: GLANCE_MAX_PLUGIN_ENTRIES + 5 }, (_, i) => ({
+      id: `plugin:p:m${i}`,
+      size: "standard",
+      hidden: false,
+    }))
+    const entries = normalizeEntries(many)
+    expect(entries.filter((e) => e.id.startsWith("plugin:"))).toHaveLength(
+      GLANCE_MAX_PLUGIN_ENTRIES
+    )
+  })
+
+  it("lists the visible plugin entries", () => {
+    expect(
+      visiblePluginEntryIds([
+        { id: "fleet", size: "compact", hidden: false },
+        { id: "plugin:a:b", size: "compact", hidden: false },
+        { id: "plugin:a:c", size: "compact", hidden: true },
+      ])
+    ).toEqual(["plugin:a:b"])
   })
 })

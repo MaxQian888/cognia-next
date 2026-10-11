@@ -8,6 +8,7 @@ import {
   projectHasCostCeiling,
   projectIdOfBudgetTarget,
   projectsWithCostCeiling,
+  usageGlanceBudget,
   worstCostBudgetVerdict,
   GLOBAL_BUDGET_TARGET,
   type CostBudgetPolicy,
@@ -201,5 +202,30 @@ describe("per-project scopes", () => {
     expect(projectHasCostCeiling(policy, "alpha")).toBe(true)
     expect(projectHasCostCeiling(policy, "beta")).toBe(false)
     expect(projectsWithCostCeiling(policy).sort()).toEqual(["alpha", "gamma"])
+  })
+})
+
+describe("usageGlanceBudget", () => {
+  it("is null without a verdict", () => {
+    expect(usageGlanceBudget(null)).toBeNull()
+  })
+
+  it("carries the worst verdict's ratio, target and period, blocked only when exceeded", () => {
+    const verdict = {
+      scopeKey: "day:*",
+      period: "day" as const,
+      target: "*",
+      usedUsd: 9,
+      limitUsd: 10,
+      ratio: 0.9,
+      level: "warning" as const,
+    }
+    expect(usageGlanceBudget(verdict)).toEqual({
+      ratio: 0.9,
+      target: "*",
+      period: "day",
+      blocked: false,
+    })
+    expect(usageGlanceBudget({ ...verdict, ratio: 1.2, level: "exceeded" })?.blocked).toBe(true)
   })
 })

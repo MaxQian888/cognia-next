@@ -16,7 +16,7 @@
         "media",
         "filespace"
       ],
-      "catalogHash": "cc65d61d15f163193d6aac4863be232abdf23ede698fe2771ce2949a89ebeb9c",
+      "catalogHash": "0c9c71725a8bc78ce042a5280784aff67d6bf7432996e92a7bb0a7725ac66a1e",
       "contractVersion": 3
     },
     "helloAck": {
@@ -25,7 +25,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "cc65d61d15f163193d6aac4863be232abdf23ede698fe2771ce2949a89ebeb9c",
+      "catalogHash": "0c9c71725a8bc78ce042a5280784aff67d6bf7432996e92a7bb0a7725ac66a1e",
       "contractVersion": 3
     },
     "eventSyncPull": {

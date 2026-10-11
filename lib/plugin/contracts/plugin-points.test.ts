@@ -560,6 +560,7 @@ describe("plugin point contracts", () => {
       { point: "lsp.server" },
       { point: "cli.tool", permission: "cli:execute" },
       { point: "tray.item" },
+      { point: "glance.module" },
       { point: "uri.handler" },
     ] as const
 

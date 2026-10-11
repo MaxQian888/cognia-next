@@ -20,7 +20,9 @@ import { useEffect, useMemo } from "react"
 
 import { subscribeSubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 import { useAllConfiguredLimits } from "@/lib/subscription/limits/hooks"
+import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 import { useUsageGlance } from "@/hooks/usage/use-usage-glance"
+import { usageGlanceBudget } from "@/lib/usage/cost-budget"
 import type { UsageGlanceQuery, UsageGlanceQuota } from "@/lib/usage/usage-glance"
 
 import { selectDisplayAccount, summarizeLimits } from "./usage-format"
@@ -83,10 +85,15 @@ export function useTrayUsage(
   // spend number. Leaving it on under the quota metric would make every
   // quota-configured install pay for a Dexie subscription it never reads.
   const glanceEnabled = enabled && glanceQuery.metric !== "quota"
+  // The budget metric reads the tightest budget folded into the glance; left
+  // out, it had nothing to show and the badge and tooltip stayed blank.
+  const budgetStatus = useCostBudgetStatus()
+  const budget = useMemo(() => usageGlanceBudget(budgetStatus.worst), [budgetStatus.worst])
   const { snapshot: glance } = useUsageGlance({
     query: glanceQuery,
     enabled: glanceEnabled,
     quota,
+    budget,
   })
 
   return useMemo(() => {

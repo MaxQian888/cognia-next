@@ -22,6 +22,7 @@ import { rasterizeAndRegisterTrayIcons } from "./icon-builder"
 import { subscribeTrayItems } from "./registry"
 import { useTrayStore } from "./store"
 import { useTrayStateSnapshot } from "./state-snapshot"
+import { useTrayTitle } from "./title"
 import { deriveTrayTooltip } from "./tooltip"
 import { usageShortText, usageTooltipFragment } from "./usage-format"
 import type { TrayStateSnapshot, TrayUsageMeterSummary } from "./types"
@@ -238,20 +239,21 @@ export function useSyncTrayToRust(): void {
     })
   }, [snapshot, tooltipKey, hydrated, t, display.showUsageInTooltip, display.usageMetric])
 
-  // Taskbar-adjacent usage readout, two OS surfaces:
+  // Taskbar-adjacent readout, two OS surfaces:
   //   - `title`: text next to the icon via `tray_set_title` (macOS menu bar,
-  //     Linux appindicator; a documented no-op on Windows).
+  //     Linux appindicator; a documented no-op on Windows). It composes the
+  //     fields the user picked (ADR-0225 §11): usage per window, running and
+  //     awaiting counts, quota, budget.
   //   - `iconBadge`: the readout rasterized onto the icon itself (works
   //     everywhere) — re-registers all four state icons so the badge
   //     survives idle/busy/error flips. Also owns the custom icon color.
   //
-  // Which NUMBER either surface shows is `display.usageMetric` (ADR-0165):
-  // quota reads the pinned account's meter, spend/tokens/budget read the
-  // glance projection. Windows has no tray title, so a Windows install that
-  // picks `title` still gets nothing there — the icon badge is the fallback
-  // the settings card steers it to.
+  // Which NUMBER the badge shows is `display.usageMetric` (ADR-0165): quota
+  // reads the pinned account's meter, spend/tokens/budget read the glance
+  // projection. Windows has no tray title, so the settings card offers the
+  // icon badge there instead of a title that would never appear.
   const short = usageShortText(snapshot.usage, display.usageMetric)
-  const titleText = display.taskbarUsageMode === "title" && short ? short.text : null
+  const titleText = useTrayTitle(display, snapshot.usage)
   useEffect(() => {
     if (!isTauri() || !hydrated) return
     if (lastPushedTitle.current === titleText) return

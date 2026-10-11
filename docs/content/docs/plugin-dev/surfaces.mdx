@@ -140,8 +140,9 @@ follow the user's theme, density and motion settings with no work from you.
 
 Manifest UI labels accept a fallback literal plus a plugin-local key:
 `views[].titleKey`, `viewsContainers[].titleKey`, `webviews[].titleKey`,
-`quickActions[].labelKey`, `trayItems[].labelKey`, `modalMounts[].labelKey`,
-`contextPanels[].labelKey` and `extensions[].labelKey`. Every declared locale
+`quickActions[].labelKey`, `trayItems[].labelKey`, `glanceModules[].titleKey`,
+`modalMounts[].labelKey`, `contextPanels[].labelKey` and
+`extensions[].labelKey`. Every declared locale
 must contain every referenced key. `ctx.i18n.t("actions.summarize")` reads the
 same `manifest.i18n.locales` registry the host uses, and
 `registerTranslations()` updates that shared registry at runtime.

@@ -14,16 +14,48 @@
     "showUsageInMenu": "在托盘菜单中显示订阅额度",
     "showUsageInTooltip": "在托盘悬浮提示中显示额度",
     "taskbarMode": "任务栏额度显示",
-    "taskbarModeHint": "图标角标把百分比绘制到托盘图标上；标题文字显示在图标旁（macOS / Linux）。",
+    "taskbarModeHint": "图标角标把数字绘制到托盘图标上；标题在图标旁显示你选择的字段（macOS / Linux）。",
     "taskbarModes": {
       "iconBadge": "图标角标",
       "off": "关闭",
       "title": "标题文字"
     },
     "title": "显示",
+    "titleFields": {
+      "label": "标题字段",
+      "hint": "按顺序显示在托盘图标旁。当前没有内容可报的字段会被省略。",
+      "kind": {
+        "usage": "用量",
+        "running": "运行中的任务",
+        "awaiting": "等待审批",
+        "quota": "额度已用",
+        "budget": "预算已用"
+      },
+      "usageName": "{metric} · {period}",
+      "period": {
+        "1d": "今天",
+        "7d": "7 天",
+        "30d": "30 天"
+      },
+      "metric": {
+        "tokens": "Token",
+        "spend": "花费"
+      },
+      "periodLabel": "{field} 的时间窗口",
+      "metricLabel": "{field} 统计什么",
+      "moveUp": "上移 {field}",
+      "moveDown": "下移 {field}",
+      "remove": "移除 {field}",
+      "add": "添加字段",
+      "max": "最多 {max} 个字段",
+      "empty": "没有字段：标题保持空白。",
+      "preview": "当前：{text}",
+      "previewEmpty": "当前没有可显示的内容"
+    },
+    "titleUnsupported": "Windows 没有菜单栏标题。可改用图标角标，在托盘图标上显示数字。",
     "tooltipBase": "悬浮提示文本",
     "usageMetric": "任务栏数值",
-    "usageMetricHint": "菜单栏、悬浮提示与快捷面板优先显示的内容。",
+    "usageMetricHint": "图标角标与悬浮提示优先显示的内容。标题由你选择的字段组成。",
     "usagePeriod": "统计区间",
     "usageScope": "统计范围",
     "usageScopeHint": "「全部编码工具」会读取其他 Agent 的本地会话文件。它们的花费单独展示，不会计入 Cognia 预算。"

@@ -3,8 +3,16 @@
   "detailPartial": "{provider} · {amount} · {count, plural, other {# 项无价格}}",
   "drag": "移动边栏",
   "empty": "今天还没有花费",
+  "emptyQuota": "没有正在查询的额度来源",
   "loading": "正在读取用量…",
+  "loadingQuota": "正在读取额度…",
   "openFull": "查看完整用量",
+  "quotaDetail": "{provider} · 已用 {amount}",
+  "quotaDetailReset": "{provider} · 已用 {amount} · {when}重置",
+  "quotaError": "{provider} · 上次查询失败",
+  "quotaReading": "{provider} · 读取中…",
+  "quotaStale": "{provider} · 已用 {amount} · 数据已过期",
   "row": "{provider}：{amount}",
+  "sourceName": "{provider} · {account}",
   "title": "用量边栏"
 }

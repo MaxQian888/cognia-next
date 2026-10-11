@@ -14,16 +14,48 @@
     "showUsageInMenu": "Show subscription usage in the tray menu",
     "showUsageInTooltip": "Show usage in the tray tooltip",
     "taskbarMode": "Usage in the taskbar",
-    "taskbarModeHint": "Icon badge draws the percent onto the tray icon; title shows text next to it (macOS / Linux).",
+    "taskbarModeHint": "Icon badge draws the number onto the tray icon; title shows the fields you pick next to it (macOS / Linux).",
     "taskbarModes": {
       "iconBadge": "Icon badge",
       "off": "Off",
       "title": "Title text"
     },
     "title": "Display",
+    "titleFields": {
+      "label": "Title fields",
+      "hint": "Shown in order next to the tray icon. A field with nothing to report right now is left out.",
+      "kind": {
+        "usage": "Usage",
+        "running": "Running tasks",
+        "awaiting": "Awaiting approval",
+        "quota": "Quota used",
+        "budget": "Budget used"
+      },
+      "usageName": "{metric} · {period}",
+      "period": {
+        "1d": "Today",
+        "7d": "7 days",
+        "30d": "30 days"
+      },
+      "metric": {
+        "tokens": "Tokens",
+        "spend": "Spend"
+      },
+      "periodLabel": "Window for {field}",
+      "metricLabel": "What {field} counts",
+      "moveUp": "Move {field} up",
+      "moveDown": "Move {field} down",
+      "remove": "Remove {field}",
+      "add": "Add field",
+      "max": "Up to {max} fields",
+      "empty": "No fields: the title stays blank.",
+      "preview": "Now: {text}",
+      "previewEmpty": "Nothing to show right now"
+    },
+    "titleUnsupported": "Windows has no menu-bar title. Use the icon badge to see a number next to the tray icon.",
     "tooltipBase": "Tooltip text",
     "usageMetric": "Taskbar number",
-    "usageMetricHint": "What the menu bar, tooltip and quick panel lead with.",
+    "usageMetricHint": "What the icon badge and the tooltip lead with. The title composes its own fields.",
     "usagePeriod": "Window",
     "usageScope": "Counted spend",
     "usageScopeHint": "All coding tools reads other agents' local session files. Their spend is shown separately and never affects your Cognia budget."

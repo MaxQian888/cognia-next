@@ -1559,6 +1559,40 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0225 §6. Data-only modules for the tray panel and the phone's Glance
+    // drawer: declared in `manifest.glanceModules[]` (the `glance` overlay
+    // capability) or at runtime with `ctx.glance.register`, fed with
+    // `ctx.glance.update`, rendered by the host with its own components. No
+    // new permission: the capability gates it, like `tray`. The manifest field
+    // is optional because a plugin may declare every module at runtime.
+    // Python has no `ctx.glance` (publishing data is a frontend/hybrid
+    // runtime call); the generated contract still knows the capability and
+    // its manifest field, so Python tooling validates the declaration.
+    id: "glance",
+    support: "supported",
+    manifestFields: ["glanceModules"],
+    manifestFieldsOptional: true,
+    runtimeBinding:
+      "ctx.glance.register/update/onVisibilityChange + declarative manifest.glanceModules[] → lib/glance/plugin-registry.ts → GlanceSnapshotV1",
+    hostBindings: [
+      "lib/plugin/api/glance-api.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/glance/plugin-registry.ts",
+      "lib/glance/plugin-data.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-glance-module.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/_generated_contract.py"],
+    docs: "docs/content/docs/en/plugin-dev/glance-modules.mdx",
+    requiredTests: [
+      "lib/plugin/api/glance-api.test.ts",
+      "lib/glance/plugin-registry.test.ts",
+      "packages/plugin-sdk/src/define/define-glance-module.test.ts",
+    ],
+  },
+  {
     // Computer Use automation. Gates `ctx.automation` (screenshot/click/type/…)
     // — a capability TAG (no manifest contribution field); the real surface is
     // the imperative `ctx.automation.*` API backed by the Rust automation

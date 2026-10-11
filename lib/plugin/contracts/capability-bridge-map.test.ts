@@ -1,4 +1,6 @@
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import { glancePluginModules } from "@/lib/glance/plugin-registry"
+import { pluginEntryId } from "@/types/glance/layout"
 /**
  * Drift guard for the overlay-registry capability map (PR-D).
  *
@@ -48,6 +50,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "workflow-template",
         "quick-action",
         "tray",
+        "glance",
         "view-container",
         "auth-provider",
         "pet-achievement",
@@ -58,7 +61,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(22)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(23)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {
@@ -120,7 +123,9 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
                   price: 5,
                   consumable: false,
                 }
-              : { id: `pr-d-test-${key}`, _testTag: true }
+              : key === "glance"
+                ? { id: `pr-d-test-${key}`, title: "Test" }
+                : { id: `pr-d-test-${key}`, _testTag: true }
       const ctx = { pluginId: `pr-d-test-plugin-${key}` }
       // Should not throw — registries are idempotent under PR-D's
       // contract.
@@ -275,4 +280,27 @@ it("namespaces declarative subscriptions on enable and removes only that plugin 
   expect(getSubscriptionProvider("subscription-plugin-a:example")).toBeUndefined()
   expect(getSubscriptionProvider("subscription-plugin-b:example")).toBeDefined()
   capability.unregisterAllByPlugin("subscription-plugin-b")
+})
+
+it("declares manifest glance modules and drops runtime ones with them on disable", () => {
+  const capability = OVERLAY_REGISTRY_CAPABILITIES.glance
+  capability.registerEntry({ id: "builds", title: "Builds" }, { pluginId: "glance-plugin-a" })
+  // A module the plugin declared at runtime through ctx.glance.register.
+  glancePluginModules.register("glance-plugin-a", { id: "deploys", title: "Deploys" })
+  capability.registerEntry({ id: "builds", title: "Builds" }, { pluginId: "glance-plugin-b" })
+
+  expect(glancePluginModules.get(pluginEntryId("glance-plugin-a", "builds"))?.def).toMatchObject({
+    id: "builds",
+    title: "Builds",
+    sizes: ["compact", "standard"],
+  })
+  expect(() =>
+    capability.registerEntry({ id: "no title" }, { pluginId: "glance-plugin-a" })
+  ).toThrow()
+
+  expect(capability.unregisterAllByPlugin("glance-plugin-a")).toBe(2)
+  expect(glancePluginModules.get(pluginEntryId("glance-plugin-a", "builds"))).toBeNull()
+  expect(glancePluginModules.get(pluginEntryId("glance-plugin-a", "deploys"))).toBeNull()
+  expect(glancePluginModules.get(pluginEntryId("glance-plugin-b", "builds"))).not.toBeNull()
+  capability.unregisterAllByPlugin("glance-plugin-b")
 })

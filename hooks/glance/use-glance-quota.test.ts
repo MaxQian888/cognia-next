@@ -501,6 +501,64 @@ describe("useGlanceQuota", () => {
     })
   })
 
+  describe("discover: false", () => {
+    it("refreshes on enable but never probes for local logins", async () => {
+      discoverAnthropicMock.mockResolvedValue({ found: true })
+      const { result } = renderHook(() => useGlanceQuota(true, NOW, { discover: false }))
+      await flush()
+      await act(async () => {
+        jest.advanceTimersByTime(GLANCE_DISCOVERY_INTERVAL_MS * 2)
+      })
+      await flush()
+      expect(refreshConfigured).toHaveBeenCalled()
+      expect(discoverAnthropicMock).not.toHaveBeenCalled()
+      expect(discoverCodexMock).not.toHaveBeenCalled()
+      expect(result.current.slice?.sources).toEqual([])
+    })
+  })
+
+  describe("pollMs", () => {
+    it("re-runs the throttled refresh on its interval while enabled", async () => {
+      const { rerender } = renderHook(
+        ({ on }: { on: boolean }) => useGlanceQuota(on, NOW, { pollMs: 60_000 }),
+        { initialProps: { on: true } }
+      )
+      await flush()
+      expect(refreshConfigured).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        jest.advanceTimersByTime(60_000)
+      })
+      expect(refreshConfigured).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        jest.advanceTimersByTime(120_000)
+      })
+      expect(refreshConfigured).toHaveBeenCalledTimes(4)
+      rerender({ on: false })
+      await act(async () => {
+        jest.advanceTimersByTime(300_000)
+      })
+      expect(refreshConfigured).toHaveBeenCalledTimes(4)
+    })
+
+    it("does not poll when passive", async () => {
+      renderHook(() => useGlanceQuota(true, NOW, { passive: true, pollMs: 60_000 }))
+      await flush()
+      await act(async () => {
+        jest.advanceTimersByTime(300_000)
+      })
+      expect(refreshConfigured).not.toHaveBeenCalled()
+    })
+
+    it("does not poll without an interval", async () => {
+      render(true)
+      await flush()
+      await act(async () => {
+        jest.advanceTimersByTime(GLANCE_DISCOVERY_INTERVAL_MS * 3)
+      })
+      expect(refreshConfigured).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe("discovery", () => {
     it("discovers both providers when the vault is empty and surfaces the finds", async () => {
       discoverAnthropicMock.mockResolvedValue({ found: true })

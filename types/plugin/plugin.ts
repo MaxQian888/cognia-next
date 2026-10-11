@@ -76,6 +76,7 @@ import type { PluginAuthProviderDef } from "./plugin-auth"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
 import type { PluginPiPackageDef } from "./plugin-pi-package"
+import type { PluginGlanceAPI, PluginManifestGlanceModuleDef } from "./plugin-glance"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
 import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
@@ -213,6 +214,7 @@ export type PluginCapability =
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
   | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
+  | "glance" // Contributes data-only modules to the tray panel and phone Glance drawer (ADR-0225 §6)
   | "lsp-server" // Contributes a Language Server (Phase B of LSP reuse)
   | "theme-pack" // Bundles colors + fonts + wallpapers + density into a single applyable pack
   | "fonts" // Contributes font families bundled in plugin assets (@font-face injection)
@@ -821,6 +823,13 @@ export interface PluginManifest {
    * dispatch target (`command` or `slash`).
    */
   trayItems?: PluginManifestTrayItemDef[]
+
+  /**
+   * Glance modules for the tray panel and the phone's Glance drawer
+   * (ADR-0225 §6), declared as data and rendered by the host. Requires the
+   * `"glance"` capability; publish their data with `ctx.glance.update`.
+   */
+  glanceModules?: PluginManifestGlanceModuleDef[]
 
   // Activation
   /** Activation events - when to load the plugin */
@@ -2527,6 +2536,15 @@ export interface PluginBaseContext {
    * otherwise the API is a no-op (every method returns a disposed handle).
    */
   tray: PluginTrayAPI
+
+  /**
+   * Glance API — declare modules for the tray panel and the phone's Glance
+   * drawer and publish their data (ADR-0225 §6). Modules are data the host
+   * renders with its own components; actions run the plugin's own commands;
+   * paired phones show them read-only. Available only when the plugin
+   * declares the `"glance"` capability; otherwise a warn-once no-op.
+   */
+  glance: PluginGlanceAPI
 
   /**
    * Quick Actions API — register actions surfaced in the command palette,

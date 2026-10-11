@@ -2996,6 +2996,153 @@ describe("Plugin Validation", () => {
       })
     })
 
+    describe("manifest.glanceModules", () => {
+      it("accepts localized glance modules with sizes and platforms", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["glance"]
+        manifest.glanceModules = [
+          {
+            id: "builds",
+            title: "Builds",
+            titleKey: "glance.builds",
+            icon: "Hammer",
+            sizes: ["compact", "standard", "expanded"],
+            platforms: ["desktop"],
+          },
+          { id: "deploys", title: "Deploys" },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "glance.builds": "Builds" },
+            "zh-CN": { "glance.builds": "构建" },
+          },
+        }
+
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+        expect(
+          (result.diagnostics ?? []).filter((d) => d.field.startsWith("glanceModules"))
+        ).toEqual([])
+      })
+
+      it("accepts the glance capability without a manifest field (runtime-only modules)", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["glance"]
+
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+        expect(result.diagnostics).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.capability.field_missing" }),
+          ])
+        )
+      })
+
+      it("rejects a non-array field and non-object items", () => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.capabilities = ["glance"]
+        manifest.glanceModules = { id: "builds" }
+        expect(validatePluginManifest(manifest).diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.glanceModules.invalid_type" }),
+          ])
+        )
+
+        manifest.glanceModules = ["builds"]
+        expect(validatePluginManifest(manifest).diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: "manifest.glanceModules.invalid_item",
+              field: "glanceModules[0]",
+            }),
+          ])
+        )
+      })
+
+      it("rejects bad ids, duplicates, missing titles, and unknown sizes or platforms", () => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.capabilities = ["glance"]
+        manifest.glanceModules = [
+          { id: "bad id!", title: "Bad" },
+          { id: "builds", title: "Builds" },
+          { id: "builds", title: "Again" },
+          { id: "untitled", title: "  " },
+          { id: "sized", title: "Sized", sizes: ["huge"] },
+          { id: "placed", title: "Placed", platforms: ["watch"] },
+          { id: "empty", title: "Empty", sizes: [] },
+          { id: "keyed", title: "Keyed", titleKey: 42 },
+        ]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: "manifest.glanceModules.id.invalid",
+              field: "glanceModules[0].id",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.id.duplicate",
+              field: "glanceModules[2].id",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.title.missing",
+              field: "glanceModules[3].title",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.sizes.invalid",
+              field: "glanceModules[4].sizes",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.platforms.invalid",
+              field: "glanceModules[5].platforms",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.sizes.invalid",
+              field: "glanceModules[6].sizes",
+            }),
+            expect.objectContaining({
+              code: "manifest.glanceModules.titleKey.invalid",
+              field: "glanceModules[7].titleKey",
+            }),
+          ])
+        )
+      })
+
+      it("caps the number of modules a plugin may declare", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["glance"]
+        manifest.glanceModules = Array.from({ length: 9 }, (_, i) => ({
+          id: `m${i}`,
+          title: `M${i}`,
+        }))
+
+        expect(validatePluginManifest(manifest).diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.glanceModules.too_many" }),
+          ])
+        )
+      })
+
+      it("checks glance module icons against lucide-react", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["glance"]
+        manifest.glanceModules = [
+          { id: "builds", title: "Builds", icon: "NotARealLucideIcon" as never },
+        ]
+
+        expect(validatePluginManifest(manifest).diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: "manifest.icon.invalid",
+              field: "glanceModules[0].icon",
+            }),
+          ])
+        )
+      })
+    })
+
     it("rejects unknown Lucide names across native manifest icon fields", () => {
       const manifest = createValidManifest()
       manifest.commands = [{ id: "run", name: "Run", icon: "NotARealLucideIcon" as never }]

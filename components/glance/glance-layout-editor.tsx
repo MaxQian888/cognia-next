@@ -10,6 +10,11 @@
  * It owns no state. Every interaction hands the caller a whole new entry list
  * built by `lib/glance/layout-edit.ts`; persisting it (and marking the layout
  * `custom`) is the caller's job.
+ *
+ * Plugin modules (ADR-0225 §6) come from the surface's plugin catalogue: the
+ * add list offers every one, sizes are the module's own, and an entry whose
+ * plugin is off stays listed (labelled, removable) so the user can see why
+ * nothing renders there.
  */
 
 import { createElement, useCallback, useId, useMemo, type CSSProperties } from "react"
@@ -35,11 +40,25 @@ import { CSS } from "@dnd-kit/utilities"
 import { useReorderAnnouncements } from "@/components/shell/nav-sortable"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
-import { hideEntry, reorderVisible, resizeEntry, showEntry } from "@/lib/glance/layout-edit"
+import {
+  addEntry,
+  hideEntry,
+  reorderVisible,
+  resizeEntry,
+  showEntry,
+} from "@/lib/glance/layout-edit"
 import { GLANCE_MODULES } from "@/lib/glance/registry"
+import type { GlancePluginCatalogEntry } from "@/lib/glance/snapshot"
 import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import { cn } from "@/lib/utils"
-import type { GlanceLayoutEntry, GlanceModuleId, GlanceModuleSize } from "@/types/glance/layout"
+import {
+  isPluginEntryId,
+  type GlanceEntryId,
+  type GlanceLayoutEntry,
+  type GlanceModuleId,
+  type GlanceModuleSize,
+  type GlancePluginEntryId,
+} from "@/types/glance/layout"
 
 export interface GlanceLayoutEditorProps<E extends GlanceLayoutEntry = GlanceLayoutEntry> {
   entries: readonly E[]
@@ -56,17 +75,35 @@ export interface GlanceLayoutEditorProps<E extends GlanceLayoutEntry = GlanceLay
    * caller turns a toggle into a new entry list (`pinEntryHome`).
    */
   home?: {
-    isPinned: (id: GlanceModuleId) => boolean
-    onToggle: (id: GlanceModuleId, home: boolean) => void
+    isPinned: (id: GlanceEntryId) => boolean
+    onToggle: (id: GlanceEntryId, home: boolean) => void
   }
+  /** The plugin modules this surface can show (the snapshot's plugin catalogue). */
+  plugins?: readonly GlancePluginCatalogEntry[]
+  /**
+   * The entry a plugin module gets the first time it is added. Defaults to a
+   * plain shown entry; a phone's layout passes one with its home pin off.
+   */
+  makeEntry?: (id: GlancePluginEntryId, size: GlanceModuleSize) => E
+}
+
+/** What the editor shows for one entry. */
+interface EntryView {
+  label: string
+  icon: string | null
+  sizes: readonly GlanceModuleSize[]
+  /** A plugin module. */
+  plugin: boolean
+  /** A plugin module whose plugin is not running. */
+  off: boolean
 }
 
 /**
  * A module's icon. `createElement` rather than a capitalized local: the icon
  * is looked up from data, not a component this file defines per render.
  */
-function moduleIcon(id: GlanceModuleId) {
-  const icon = resolveIcon(GLANCE_MODULES[id].icon)
+function moduleIcon(name: string | null) {
+  const icon = name ? resolveIcon(name) : resolveIcon("puzzle")
   return icon
     ? createElement(icon, {
         "aria-hidden": true,
@@ -77,6 +114,7 @@ function moduleIcon(id: GlanceModuleId) {
 
 interface RowProps {
   entry: GlanceLayoutEntry
+  view: EntryView
   label: string
   density: "compact" | "comfortable" | "touch"
   pinned: boolean | null
@@ -93,12 +131,11 @@ function iconButton(density: RowProps["density"]): string {
   )
 }
 
-function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }: RowProps) {
+function SortableRow({ entry, view, label, density, pinned, onPin, onResize, onHide }: RowProps) {
   const compact = density === "compact"
   const touch = density === "touch"
   const t = useTranslations("glance.editor")
   const tSizes = useTranslations("glance.sizes")
-  const def = GLANCE_MODULES[entry.id]
   const {
     attributes,
     listeners,
@@ -131,16 +168,23 @@ function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }:
       >
         <GripVerticalIcon aria-hidden className={touch ? "size-4" : "size-3.5"} />
       </button>
-      {moduleIcon(entry.id)}
+      {moduleIcon(view.icon)}
       <span
         className={cn(
           "min-w-0 flex-1 truncate",
-          compact ? "text-[12.5px]" : touch ? "text-[15px]" : "text-sm"
+          compact ? "text-[12.5px]" : touch ? "text-[15px]" : "text-sm",
+          view.off && "text-muted-foreground"
         )}
+        title={view.off ? t("pluginOffHint") : undefined}
       >
         {label}
       </span>
-      {def.sizes.length > 1 ? (
+      {view.plugin && !view.off ? (
+        <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">
+          {t("pluginTag")}
+        </span>
+      ) : null}
+      {view.sizes.length > 1 ? (
         <ToggleGroup
           type="single"
           size="sm"
@@ -154,7 +198,7 @@ function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }:
           }}
           className="shrink-0"
         >
-          {def.sizes.map((size) => (
+          {view.sizes.map((size) => (
             <ToggleGroupItem
               key={size}
               value={size}
@@ -173,7 +217,7 @@ function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }:
           ))}
         </ToggleGroup>
       ) : null}
-      {pinned !== null ? (
+      {pinned !== null && !view.off ? (
         <button
           type="button"
           aria-pressed={pinned}
@@ -188,8 +232,8 @@ function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }:
       ) : null}
       <button
         type="button"
-        aria-label={t("hide", { module: label })}
-        title={t("hide", { module: label })}
+        aria-label={t(view.off ? "remove" : "hide", { module: label })}
+        title={t(view.off ? "remove" : "hide", { module: label })}
         onClick={onHide}
         className={iconButton(density)}
       >
@@ -199,12 +243,16 @@ function SortableRow({ entry, label, density, pinned, onPin, onResize, onHide }:
   )
 }
 
+const NO_PLUGINS: readonly GlancePluginCatalogEntry[] = []
+
 export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEntry>({
   entries,
   onChange,
   available,
   density = "comfortable",
   home,
+  plugins = NO_PLUGINS,
+  makeEntry,
 }: GlanceLayoutEditorProps<E>) {
   const t = useTranslations("glance.editor")
   const tGlance = useTranslations("glance")
@@ -212,19 +260,67 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
   const touch = density === "touch"
   const headingId = useId()
 
-  const labelOf = useCallback(
-    (id: string) => tGlance(GLANCE_MODULES[id as GlanceModuleId].labelKey),
-    [tGlance]
+  const pluginById = useMemo(() => new Map(plugins.map((p) => [p.id, p])), [plugins])
+  // Everything an edit may show: this surface's first-party modules and the
+  // plugin modules running now.
+  const showable = useMemo<GlanceEntryId[]>(
+    () => [...available, ...plugins.map((p) => p.id)],
+    [available, plugins]
   )
+  const viewOf = useCallback(
+    (id: GlanceEntryId): EntryView => {
+      if (isPluginEntryId(id)) {
+        const def = pluginById.get(id)
+        return def
+          ? { label: def.title, icon: def.icon, sizes: def.sizes, plugin: true, off: false }
+          : {
+              label: t("pluginOff", { module: tGlance("plugin.unnamed") }),
+              icon: null,
+              sizes: [],
+              plugin: true,
+              off: true,
+            }
+      }
+      const def = GLANCE_MODULES[id as GlanceModuleId]
+      return {
+        label: tGlance(def.labelKey),
+        icon: def.icon,
+        sizes: def.sizes,
+        plugin: false,
+        off: false,
+      }
+    },
+    [pluginById, t, tGlance]
+  )
+  const labelOf = useCallback((id: string) => viewOf(id as GlanceEntryId).label, [viewOf])
+  // A visible plugin entry whose plugin is off stays listed, so the user can
+  // see it and remove it; a first-party module this surface lacks does not.
   const shown = useMemo(
-    () => entries.filter((e) => !e.hidden && available.includes(e.id)),
+    () => entries.filter((e) => !e.hidden && (isPluginEntryId(e.id) || available.includes(e.id))),
     [entries, available]
   )
-  const addable = useMemo(
-    () => entries.filter((e) => e.hidden && available.includes(e.id)),
-    [entries, available]
-  )
+  const addable = useMemo(() => {
+    const hidden = entries.filter((e) => e.hidden && showable.includes(e.id))
+    const placed = new Set(entries.map((e) => e.id))
+    const fresh = plugins
+      .filter((p) => !placed.has(p.id))
+      .map((p) => ({ id: p.id, size: defaultPluginSize(p.sizes), hidden: true }))
+    return [...hidden, ...fresh]
+  }, [entries, showable, plugins])
   const shownIds = useMemo(() => shown.map((e) => e.id), [shown])
+
+  const add = (entry: GlanceLayoutEntry) => {
+    if (entries.some((e) => e.id === entry.id)) {
+      onChange(showEntry(entries, entry.id, showable))
+      return
+    }
+    if (!isPluginEntryId(entry.id)) return
+    const make =
+      makeEntry ??
+      ((id: GlancePluginEntryId, size: GlanceModuleSize) =>
+        ({ id, size, hidden: false }) as unknown as E)
+    onChange(addEntry(entries, make(entry.id, entry.size), showable))
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -240,7 +336,7 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
       String(event.active.id),
       event.over ? String(event.over.id) : null
     )
-    if (next) onChange(reorderVisible(entries, next as GlanceModuleId[]))
+    if (next) onChange(reorderVisible(entries, next as GlanceEntryId[]))
   }
 
   const heading = cn(
@@ -268,18 +364,24 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
           >
             <SortableContext items={shownIds} strategy={verticalListSortingStrategy}>
               <ul className="divide-y divide-border/60">
-                {shown.map((entry) => (
-                  <SortableRow
-                    key={entry.id}
-                    entry={entry}
-                    label={labelOf(entry.id)}
-                    density={density}
-                    pinned={home ? home.isPinned(entry.id) : null}
-                    onPin={(pin) => home?.onToggle(entry.id, pin)}
-                    onResize={(size) => onChange(resizeEntry(entries, entry.id, size))}
-                    onHide={() => onChange(hideEntry(entries, entry.id))}
-                  />
-                ))}
+                {shown.map((entry) => {
+                  const view = viewOf(entry.id)
+                  return (
+                    <SortableRow
+                      key={entry.id}
+                      entry={entry}
+                      view={view}
+                      label={view.label}
+                      density={density}
+                      pinned={home ? home.isPinned(entry.id) : null}
+                      onPin={(pin) => home?.onToggle(entry.id, pin)}
+                      onResize={(size) =>
+                        onChange(resizeEntry(entries, entry.id, size, view.sizes))
+                      }
+                      onHide={() => onChange(hideEntry(entries, entry.id))}
+                    />
+                  )
+                })}
               </ul>
             </SortableContext>
           </DndContext>
@@ -295,7 +397,8 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
         ) : (
           <ul className="divide-y divide-border/60">
             {addable.map((entry) => {
-              const label = labelOf(entry.id)
+              const view = viewOf(entry.id)
+              const label = view.label
               return (
                 <li
                   key={entry.id}
@@ -306,7 +409,7 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
                   )}
                 >
                   <span aria-hidden className={cn("shrink-0", touch ? "size-10" : "size-6")} />
-                  {moduleIcon(entry.id)}
+                  {moduleIcon(view.icon)}
                   <span
                     className={cn(
                       "min-w-0 flex-1 truncate text-muted-foreground",
@@ -315,10 +418,15 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
                   >
                     {label}
                   </span>
+                  {view.plugin ? (
+                    <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">
+                      {t("pluginTag")}
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     aria-label={t("addModule", { module: label })}
-                    onClick={() => onChange(showEntry(entries, entry.id, available))}
+                    onClick={() => add(entry)}
                     className={cn(
                       "inline-flex shrink-0 items-center gap-1 rounded px-1.5 text-[var(--link)] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                       touch ? "h-10 px-3 text-[14px]" : "h-6 text-[12px]"
@@ -335,4 +443,9 @@ export function GlanceLayoutEditor<E extends GlanceLayoutEntry = GlanceLayoutEnt
       </section>
     </div>
   )
+}
+
+/** The size a plugin module starts at: standard when it has one, else its first. */
+export function defaultPluginSize(sizes: readonly GlanceModuleSize[]): GlanceModuleSize {
+  return sizes.includes("standard") ? "standard" : (sizes[0] ?? "standard")
 }

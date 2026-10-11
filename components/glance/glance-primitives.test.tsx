@@ -8,7 +8,7 @@ import userEvent from "@testing-library/user-event"
 
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceModuleId, GlanceWidthStep } from "@/types/glance/layout"
+import type { GlanceEntryId, GlanceWidthStep } from "@/types/glance/layout"
 
 import {
   GlanceProvider,
@@ -55,7 +55,7 @@ function renderGlance(
   options: {
     platform?: GlancePlatform
     width?: GlanceWidthStep
-    originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
+    originOf?: (id: GlanceEntryId) => GlanceModuleOrigin | null
   } = {}
 ) {
   const value: GlanceContextValue = {

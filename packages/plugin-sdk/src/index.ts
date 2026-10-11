@@ -339,6 +339,7 @@ export { defineProviderOperationAdapter } from "./define/define-provider-operati
 export { defineImRateSource } from "./define/define-im-rate-source"
 export { defineCompactionStrategy } from "./define/define-compaction-strategy"
 export { defineTrayItem } from "./define/define-tray-item"
+export { defineGlanceModule } from "./define/define-glance-module"
 
 // =============================================================================
 // Domain vocabularies. A plugin implementing one of these capabilities types

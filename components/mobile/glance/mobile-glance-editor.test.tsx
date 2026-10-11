@@ -5,7 +5,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("./mobile-glance-provider", () => ({ useMobileGlanceContext: jest.fn() }))
+const registerEditorMock = jest.fn()
+jest.mock("./mobile-glance-provider", () => ({
+  useMobileGlanceContext: jest.fn(),
+  useRegisterGlanceEditor: () => registerEditorMock(),
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
@@ -22,7 +26,7 @@ import {
 } from "@/lib/glance/mobile-layout"
 import { layoutFromPreset } from "@/lib/glance/presets"
 import { glanceModulesFor } from "@/lib/glance/registry"
-import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
+import type { GlancePluginCatalogEntry, GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import type { GlanceMobileSettings } from "@/types/glance/layout"
 
 import { MobileGlanceEditor } from "./mobile-glance-editor"
@@ -43,14 +47,16 @@ function setup({
   hostLayout = null,
   saveResult = null,
   settings = SETTINGS,
+  pluginCatalog = [],
 }: {
   paired?: boolean
   hostLayout?: GlanceSnapshotV1["hostLayout"] | null
   saveResult?: string | null
   settings?: GlanceMobileSettings
+  pluginCatalog?: GlancePluginCatalogEntry[]
 } = {}) {
   const save = jest.fn<Promise<string | null>, [GlanceMobileSettings]>(async () => saveResult)
-  useContextMock.mockReturnValue({ settings, save, paired, hostLayout })
+  useContextMock.mockReturnValue({ settings, save, paired, hostLayout, pluginCatalog })
   const view = render(<MobileGlanceEditor />)
   return { ...view, save, user: userEvent.setup() }
 }
@@ -183,6 +189,7 @@ describe("MobileGlanceEditor", () => {
       save: jest.fn(async () => null),
       paired: true,
       hostLayout: null,
+      pluginCatalog: [],
     })
     render(
       <>
@@ -197,5 +204,44 @@ describe("MobileGlanceEditor", () => {
       const hint = within(editor).getByTestId("mobile-glance-copy-hint")
       expect(button).toHaveAttribute("aria-describedby", hint.id)
     }
+  })
+
+  describe("plugin modules", () => {
+    const CI: GlancePluginCatalogEntry = {
+      id: "plugin:com.ci:status",
+      pluginId: "com.ci",
+      title: "CI",
+      icon: null,
+      sizes: ["compact"],
+      platforms: ["mobile"],
+    }
+
+    it("registers itself so a paired phone asks for the desktop's catalogue", () => {
+      registerEditorMock.mockClear()
+      setup()
+      expect(registerEditorMock).toHaveBeenCalled()
+    })
+
+    it("adds a catalogue module shown in the drawer and off the home screen", async () => {
+      const { save, user } = setup({ pluginCatalog: [CI] })
+      await user.click(screen.getByRole("button", { name: "Add CI" }))
+      const saved = save.mock.calls.at(-1)![0]
+      expect(saved.entries.find((e) => e.id === CI.id)).toEqual({
+        id: CI.id,
+        size: "compact",
+        hidden: false,
+        home: false,
+      })
+    })
+
+    it("pins a shown plugin module to the home screen", async () => {
+      const settings = withEditedMobileEntries(SETTINGS, [
+        ...SETTINGS.entries,
+        { id: CI.id, size: "compact", hidden: false, home: false },
+      ])
+      const { save, user } = setup({ settings, pluginCatalog: [CI] })
+      await user.click(screen.getByTestId(`glance-editor-home-${CI.id}`))
+      expect(save).toHaveBeenLastCalledWith(pinnedLayout(settings, CI.id, true, [CI.id]))
+    })
   })
 })

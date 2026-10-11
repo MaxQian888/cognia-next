@@ -56,6 +56,18 @@
     "awaitingApproval": "等待批准",
     "runningCount": "{count, plural, other {# 个会话进行中}}"
   },
+  "title": {
+    "awaiting": "⚑{count}",
+    "budget": "预算 {pct}%",
+    "period": {
+      "1d": "1天",
+      "7d": "7天",
+      "30d": "30天"
+    },
+    "quota": "额度 {pct}%",
+    "running": "▶{count}",
+    "usage": "{period} {value}"
+  },
   "toggleWindow": "显示 / 隐藏窗口",
   "trayPanelToggle": "快捷面板",
   "usage": {

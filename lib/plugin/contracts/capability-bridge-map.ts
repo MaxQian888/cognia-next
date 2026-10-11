@@ -44,6 +44,7 @@ import type {
   PluginSubagentDef,
   PluginAgentTeamTemplateDef,
   PluginManifestTrayItemDef,
+  PluginManifestGlanceModuleDef,
 } from "@/types/plugin"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
@@ -138,6 +139,7 @@ import {
 } from "@/lib/plugin/registries/pet-contribution-validation"
 import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
 import { registerTrayItem, unregisterTrayItemsByPlugin } from "@/lib/tray/registry"
+import { glancePluginModules } from "@/lib/glance/plugin-registry"
 import type { PluginPetAchievementDef, PluginPetItemDef } from "@/types/plugin/plugin-pet"
 import type { PluginPiPackageDef } from "@/types/plugin/plugin-pi-package"
 import {
@@ -458,6 +460,25 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       })
     },
     unregisterAllByPlugin: unregisterTrayItemsByPlugin,
+  }),
+  glance: defineOverlayCapability<PluginManifestGlanceModuleDef>({
+    // ADR-0225 §6. Data-only modules for the tray panel and the phone's
+    // Glance drawer. The registry sanitizes the declaration and throws for one
+    // that cannot be a module (the dispatch loop isolates it); data arrives
+    // later through `ctx.glance.update`. Disable drops the plugin's manifest
+    // AND runtime (`ctx.glance.register`) modules alike; the user's layout
+    // keeps their entries, so re-enabling puts them back in place.
+    manifestField: "glanceModules",
+    registerEntry: (def, ctx) => {
+      glancePluginModules.register(ctx.pluginId, def)
+    },
+    unregisterAllByPlugin: (pluginId) => {
+      const count = glancePluginModules
+        .catalog()
+        .filter((entry) => entry.pluginId === pluginId).length
+      glancePluginModules.unregisterAllByPlugin(pluginId)
+      return count
+    },
   }),
   "workflow-template": defineOverlayCapability<PluginWorkflowTemplateDef>({
     // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —

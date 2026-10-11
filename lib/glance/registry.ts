@@ -164,7 +164,18 @@ export function supportsSize(id: GlanceModuleId, size: GlanceModuleSize): boolea
  * `standard` rather than snapping all the way down to one line.
  */
 export function effectiveSize(id: GlanceModuleId, size: GlanceModuleSize): GlanceModuleSize {
-  const sizes = GLANCE_MODULES[id].sizes
+  return effectiveSizeIn(GLANCE_MODULES[id].sizes, size)
+}
+
+/**
+ * {@link effectiveSize} over any size list: a plugin module's declared sizes
+ * (ADR-0225 §6), which only the live catalogue knows.
+ */
+export function effectiveSizeIn(
+  sizes: readonly GlanceModuleSize[],
+  size: GlanceModuleSize
+): GlanceModuleSize {
+  if (sizes.length === 0) return size
   if (sizes.includes(size)) return size
   const order: GlanceModuleSize[] = ["compact", "standard", "expanded"]
   const want = order.indexOf(size)

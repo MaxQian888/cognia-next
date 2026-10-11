@@ -102,7 +102,7 @@ describe("lastLocalDays", () => {
 })
 
 function bucket(day: string, tokens: number, knownCostUsd = 0, turns = 1): UsageGlanceBucket {
-  return { day, tokens, knownCostUsd, turns }
+  return { day, tokens, knownCostUsd, turns, unpricedTurns: 0 }
 }
 
 function leader(id: string, tokens: number, knownCostUsd = 0): UsageGlanceLeader {

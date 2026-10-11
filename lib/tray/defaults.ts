@@ -7,6 +7,7 @@
 // will report for the corresponding ids; if the user rebinds via the
 // settings UI, the renderer will rewrite the field before the next push.
 
+import { DEFAULT_TRAY_TITLE_FIELDS } from "./title-format"
 import type { TrayDisplayPrefs, TrayMenuItem } from "./types"
 
 export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
@@ -237,6 +238,8 @@ export const DEFAULT_TRAY_DISPLAY: TrayDisplayPrefs = {
   showUsageInMenu: true,
   showUsageInTooltip: false,
   taskbarUsageMode: "off",
+  // Off by default (ADR-0165): these are what a title shows once turned on.
+  titleFields: [...DEFAULT_TRAY_TITLE_FIELDS],
   usageAccountKey: null,
   usageRefreshMinutes: 15,
   iconColor: "#000000",

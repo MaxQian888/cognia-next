@@ -153,7 +153,7 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 | --- | --- | --- |
 | Agent 与工作流 | `defineAgentTool`、`defineGuardrail`、`defineContextProvider`、`defineChatMiddleware`、`defineToolRoute`、`defineSkill`、`defineSubagent`、`defineAgentTeamTemplate`、`defineWorkflowTemplate`、`defineWorkflowNode`、`defineWorkflowTrigger` | Agent SDK 工具、守卫、上下文提供器、聊天中间件、语义工具路由、团队、子代理、工作流节点 / 触发器 / 模板 |
 | 运行时与集成 | `defineConnector`、`defineWorkspaceBackend`、`defineMcpServerPreset`、`defineNativeAnthropicTool`、`defineExternalAgentPreset`、`defineExternalAgentAdapter`、`defineRoutingStrategy`、`defineDeploymentFilter`、`defineProtocolAdapter`、`defineAuthProvider`、`defineUriHandler` | 连接器与工作区适配器、MCP / native-tool 覆盖、外部代理预设 / 适配器、provider-routing 扩展、认证与深链处理器 |
-| UI 与外壳 | `defineViewContainer`、`defineView`、`defineWebview`、`defineMessageRenderer`、`defineModalMount`、`defineTerminalCompletionProvider`、`defineQuickAction`、`defineTrayItem` | 侧栏容器、树 / 自定义视图、沙盒 webview、消息渲染器、模态挂载、终端补全、命令 / composer / tray 快捷动作 |
+| UI 与外壳 | `defineViewContainer`、`defineView`、`defineWebview`、`defineMessageRenderer`、`defineModalMount`、`defineTerminalCompletionProvider`、`defineQuickAction`、`defineTrayItem`、`defineGlanceModule` | 侧栏容器、树 / 自定义视图、沙盒 webview、消息渲染器、模态挂载、终端补全、命令 / composer / tray 快捷动作、托盘面板 / Glance 抽屉模块 |
 | 外观与资源 | `defineTheme`、`defineThemePack`、`defineDensityPreset`、`defineFontContribution`、`defineWallpaper` | 主题颜色、主题包、密度预设、插件字体、插件壁纸 |
 | 策略与用量 | `defineConfiguration`、`defineExporter`、`defineImporter`、`defineSharedMemoryAdapter`、`defineBalanceAdapter`、`defineLimitsSource`、`defineImRateSource`、`defineCompactionStrategy` | 配置 schema、导入 / 导出提供器、共享记忆后端、余额 / 限额 / IM 速率 / 压缩策略来源 |
 

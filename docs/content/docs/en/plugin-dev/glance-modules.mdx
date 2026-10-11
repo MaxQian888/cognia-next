@@ -1,0 +1,208 @@
+---
+title: Glance modules
+description: Contribute a module to the desktop tray panel and the phone's Glance drawer as data. Declare it in the manifest or at runtime, publish stats, rows and actions, and let the host render it.
+---
+
+# Glance modules
+
+The tray panel on the desktop and the Glance drawer on the phone are stacks of **glance modules** (ADR-0225).
+A plugin can add its own module through the `glance.module` point.
+
+A plugin module is **data**, never React.
+The tray panel is a separate webview, a paired phone may be rendering the desktop's snapshot, and the panel must look like one thing.
+So you declare the module and publish what it shows; the host renders it with the same components and visual language as its own modules, on desktop and on mobile.
+
+| Surface | What it does | Gate | Runtimes |
+| --- | --- | --- | --- |
+| `glanceModules` | Declare modules in the manifest, visible before activation | The `glance` capability | any (manifest) |
+| `ctx.glance.register` | Declare a module at runtime | The `glance` capability | frontend, hybrid |
+| `ctx.glance.update` | Publish a module's data | The `glance` capability | frontend, hybrid |
+| `ctx.glance.onVisibilityChange` | Learn when a module is on screen | The `glance` capability | frontend, hybrid |
+
+There is no extra permission.
+Without the `glance` capability every `ctx.glance` call is a no-op that warns once.
+
+## Declare the module
+
+```json title="plugin.json"
+{
+  "capabilities": ["glance"],
+  "glanceModules": [
+    {
+      "id": "builds",
+      "title": "Builds",
+      "titleKey": "glance.builds",
+      "icon": "Hammer",
+      "sizes": ["compact", "standard", "expanded"],
+      "platforms": ["desktop", "mobile"]
+    }
+  ],
+  "commands": [{ "id": "runBuild", "name": "Run build" }],
+  "i18n": {
+    "locales": {
+      "en": { "glance.builds": "Builds" },
+      "zh-CN": { "glance.builds": "构建" }
+    }
+  }
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `id` | Unique within the plugin. Letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters. |
+| `title` | Required fallback title, at most 48 characters. |
+| `titleKey` | Optional plugin i18n key, preferred over `title`. Every declared locale must contain it. |
+| `icon` | Optional exported `lucide-react` icon name, such as `"Hammer"`. |
+| `sizes` | Optional, any of `compact`, `standard`, `expanded`. Defaults to `compact` and `standard`. |
+| `platforms` | Optional, any of `desktop`, `mobile`. Defaults to both. |
+
+A plugin declares at most 8 modules.
+The manifest validator refuses a bad id, a duplicate id, a missing title, an unknown size or platform and an unknown icon, so you learn about a mistake at install time instead of the module never appearing.
+
+`glanceModules` is optional with the capability: a plugin may declare every module at runtime.
+
+The user adds a declared module to their layout from the panel's edit mode or the settings editor.
+Declaring a module never puts it on screen by itself.
+
+## Declare and publish at runtime
+
+```ts title="src/index.ts"
+import { defineGlanceModule, definePlugin } from "@cognia/plugin-sdk"
+
+const deploys = defineGlanceModule({ id: "deploys", title: "Deploys", icon: "Rocket" })
+
+export default definePlugin({
+  manifest,
+  activate(ctx) {
+    // A second module, declared at runtime; the manifest declared "builds".
+    ctx.glance.register(deploys)
+
+    let timer: ReturnType<typeof setInterval> | undefined
+    const publish = async () => {
+      const status = await fetchBuildStatus()
+      ctx.glance.update("builds", {
+        summary: `${status.passing} passing, ${status.failing} failing`,
+        stats: [
+          { label: "Passing", value: String(status.passing), tone: "ok" },
+          { label: "Failing", value: String(status.failing), tone: status.failing ? "crit" : "muted" },
+        ],
+        rows: status.recent.map((build) => ({
+          id: build.id,
+          label: build.branch,
+          value: build.duration,
+          hint: build.title,
+          tone: build.ok ? "ok" : "crit",
+          action: "rerun",
+        })),
+        actions: [{ id: "rerun", label: "Run build", icon: "Play", command: "runBuild" }],
+        empty: "No builds yet",
+      })
+    }
+
+    // Only compute while some glance surface shows the module.
+    ctx.glance.onVisibilityChange("builds", (visible) => {
+      if (visible && !timer) {
+        void publish()
+        timer = setInterval(publish, 60_000)
+      } else if (!visible && timer) {
+        clearInterval(timer)
+        timer = undefined
+      }
+    })
+    ctx.lifecycle.onDispose(() => clearInterval(timer))
+  },
+})
+```
+
+- `register(module)` declares a module and returns a disposer.
+  Re-declaring an id updates its title, icon, sizes and platforms and keeps its data.
+  When the manifest also declares the id, the disposer puts the manifest's declaration back.
+- `update(moduleId, data)` replaces what the module shows. `null` clears it back to the empty state.
+- `onVisibilityChange(moduleId, handler)` calls the handler at once with the current state, then on every change.
+  A module is visible while any glance surface (the tray panel, a phone's drawer) shows it.
+  Stop polling while it is hidden; the host's own modules follow the same rule.
+
+`register` throws for a declaration that cannot be a module (bad id, no title) or past the 8-module limit.
+`update` throws for a module the plugin has not declared.
+Both are author errors and reach you unchanged.
+
+## The data shape
+
+```ts
+interface PluginGlanceModuleData {
+  stats?: { label: string; value: string; tone?: PluginGlanceTone }[]
+  rows?: {
+    id: string
+    label: string
+    value?: string
+    hint?: string
+    tone?: PluginGlanceTone
+    action?: string // the id of one of `actions`
+  }[]
+  actions?: { id: string; label: string; icon?: string; command: string }[]
+  summary?: string // one line for the compact size; defaults to the first stat
+  empty?: string // shown when there are no stats and no rows
+}
+```
+
+The host sanitizes everything on the way in, because the data rides in the Glance snapshot to other windows and to paired phones.
+Unknown fields are dropped, whitespace is collapsed, and over-long strings are cut with an ellipsis.
+
+| Item | Limit |
+| --- | --- |
+| Stats | 4 |
+| Rows | 8 |
+| Actions | 3 |
+| Title, stat and row labels, action labels | 48 characters |
+| Stat and row values | 24 characters |
+| Row hints, `summary` | 80 characters |
+| `empty` | 120 characters |
+| Ids (module, row, action, command) | 64 characters, letters, digits, `.`, `_`, `-` |
+
+A stat needs both a label and a value, a row needs an id and a label, and an action needs an id, a label and a command; an item missing one is dropped.
+A row whose `action` does not name one of the published actions loses the pointer.
+
+### Tones
+
+`tone` colours a stat or a row with the host modules' own vocabulary.
+
+| Tone | Use it for |
+| --- | --- |
+| `default` | Ordinary values (the default) |
+| `ok` | Healthy, passing, done |
+| `warn` | Needs attention soon |
+| `crit` | Failing, blocked, over a limit |
+| `muted` | Secondary or inactive |
+
+### Actions run your own commands
+
+An action's `command` is one of **your plugin's** command ids, without the plugin prefix.
+The host runs `<pluginId>.<command>`: a manifest `commands[]` entry, or a command you registered with `ctx.commands`.
+A module cannot run another plugin's commands or the app's.
+A row with an `action` runs that action when clicked; actions also appear as buttons.
+
+## Sizes
+
+The user picks a size per module among the ones you declare.
+
+| Size | What renders |
+| --- | --- |
+| `compact` | One line: the title and the `summary`, or the first stat when there is no summary |
+| `standard` | The stats strip, up to 3 rows, and the actions |
+| `expanded` | The stats strip, every row, and the actions |
+
+Write the `summary` for the compact line, and order rows by importance so the first three carry the standard size.
+
+## Platforms and paired phones
+
+`platforms` decides where the module is offered: the desktop tray panel, the phone (its home and Glance drawer), or both.
+A desktop-only module is never offered on a phone.
+
+On a phone paired to the desktop, the drawer shows the desktop's snapshot.
+Your module is **read-only** there: it shows what the desktop plugin last published, labelled with the desktop's name and the reading's age, and its actions are shown disabled with a note that they run on the desktop.
+A paired phone shows only the desktop's plugin modules. A phone that is not paired runs its own plugins, and a plugin running there publishes for that phone like it would on the desktop.
+
+## Disable and uninstall
+
+Disabling the plugin removes its modules, both the manifest ones and the ones registered at runtime, and drops their data.
+The user's layout keeps the entries: they are simply not rendered while the module is unavailable, and re-enabling the plugin puts them back where the user placed them.

@@ -73,6 +73,11 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       usageMetric: "quota",
       usagePeriod: "today",
       usageScope: "cognia",
+      titleFields: [
+        { kind: "usage", period: "1d", metric: "tokens" },
+        { kind: "running" },
+        { kind: "awaiting" },
+      ],
     })
   })
 

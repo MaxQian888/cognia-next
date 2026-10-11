@@ -15,7 +15,7 @@ import type { GlancePlatform } from "@/lib/glance/registry"
 import type { GlanceModuleOrigin } from "@/lib/glance/remote/phone-view"
 import type { GlanceRequestBody } from "@/lib/glance/requests"
 import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceModuleId, GlanceWidthStep } from "@/types/glance/layout"
+import type { GlanceEntryId, GlanceWidthStep } from "@/types/glance/layout"
 
 export type { GlancePlatform, GlanceModuleOrigin }
 
@@ -41,7 +41,7 @@ export interface GlanceContextValue {
    * says in place when the desktop cannot supply one (ADR-0225 §9). Absent or
    * null means this device's own data.
    */
-  originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
+  originOf?: (id: GlanceEntryId) => GlanceModuleOrigin | null
 }
 
 const GlanceContext = createContext<GlanceContextValue | null>(null)

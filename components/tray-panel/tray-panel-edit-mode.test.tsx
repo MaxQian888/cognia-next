@@ -37,6 +37,34 @@ describe("TrayPanelEditMode", () => {
     ).toHaveTextContent("M")
   })
 
+  it("offers the snapshot's plugin modules for adding", async () => {
+    const user = userEvent.setup()
+    const props = { onEntries: jest.fn(), onDelegateVisible: jest.fn(), onWidth: jest.fn() }
+    render(
+      <TrayPanelEditMode
+        config={DEFAULT_GLANCE_PANEL_SETTINGS}
+        plugins={[
+          {
+            id: "plugin:com.ci:status",
+            pluginId: "com.ci",
+            title: "Build status",
+            icon: null,
+            sizes: ["compact"],
+            platforms: ["desktop"],
+          },
+        ]}
+        {...props}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "Add Build status" }))
+    const entries = props.onEntries.mock.calls[0][0] as GlanceLayoutEntry[]
+    expect(entries.find((e) => e.id === "plugin:com.ci:status")).toEqual({
+      id: "plugin:com.ci:status",
+      size: "compact",
+      hidden: false,
+    })
+  })
+
   it("offers a hidden quick module for adding", () => {
     setup({
       entries: DEFAULT_GLANCE_PANEL_SETTINGS.entries.map((e) =>

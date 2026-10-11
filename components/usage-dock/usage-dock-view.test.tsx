@@ -74,6 +74,7 @@ async function pushState(over: Record<string, unknown> = {}) {
   await act(async () => {
     handlers.state?.({
       glance: twoProviders,
+      quota: null,
       preferences: DEFAULT_USAGE_DOCK_PREFERENCES,
       ...over,
     })
@@ -199,6 +200,134 @@ describe("UsageDockView", () => {
     await act(async () => handlers.hover?.(true))
     await userEvent.click(screen.getByTestId("usage-dock-total"))
     expect(openFullMock).toHaveBeenCalled()
+  })
+
+  describe("quota mode", () => {
+    const quotaPrefs = { ...DEFAULT_USAGE_DOCK_PREFERENCES, gaugeMode: "quota" as const }
+    const win = (usedPct: number | null, over = {}) => ({
+      id: "five-hour",
+      labelKey: null,
+      label: "5h",
+      kind: "window",
+      usedPct,
+      resetAt: null,
+      remaining: null,
+      unit: null,
+      currency: null,
+      severity: "ok",
+      ...over,
+    })
+    const quota = {
+      updatedAt: 1,
+      refreshing: false,
+      sources: [
+        {
+          key: "anthropic:a",
+          provider: "anthropic",
+          accountId: "a",
+          accountLabel: "Work",
+          state: "ok",
+          windows: [win(40)],
+          fetchedAt: 1,
+          error: null,
+        },
+        {
+          key: "codex:b",
+          provider: "codex",
+          accountId: "b",
+          accountLabel: null,
+          state: "stale",
+          windows: [win(91, { severity: "crit" })],
+          fetchedAt: 1,
+          error: null,
+        },
+        {
+          key: "discovered:anthropic",
+          provider: "anthropic",
+          accountId: null,
+          accountLabel: null,
+          state: "discovered",
+          windows: [],
+          fetchedAt: null,
+          error: null,
+        },
+      ],
+    }
+
+    it("draws one row per queried source, tightest first, from the quota slice", async () => {
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.hover).toBeDefined())
+      await pushState({ quota, preferences: quotaPrefs })
+      await act(async () => handlers.hover?.(true))
+      const rows = screen.getAllByTestId(/^usage-dock-row-/)
+      expect(rows.map((r) => r.dataset.testid)).toEqual([
+        "usage-dock-row-codex:b",
+        "usage-dock-row-anthropic:a",
+      ])
+      expect(screen.getByTestId("usage-dock-row-anthropic:a")).toHaveAccessibleName(
+        "Claude · Work: 40%"
+      )
+      expect(screen.getByTestId("usage-dock-row-codex:b")).toHaveAttribute(
+        "data-quota-state",
+        "stale"
+      )
+    })
+
+    it("says a stale reading is out of date in its detail", async () => {
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.hover).toBeDefined())
+      await pushState({ quota, preferences: quotaPrefs })
+      await act(async () => handlers.hover?.(true))
+      await userEvent.click(screen.getByTestId("usage-dock-row-codex:b"))
+      expect(screen.getByTestId("usage-dock-detail")).toHaveTextContent(
+        "Codex · 91% used · out of date"
+      )
+      await userEvent.click(screen.getByTestId("usage-dock-row-anthropic:a"))
+      expect(screen.getByTestId("usage-dock-detail")).toHaveTextContent("Claude · Work · 40% used")
+    })
+
+    it("says when the tightest window resets", async () => {
+      const resetAt = Date.now() + 3 * 3_600_000 + 60_000
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.hover).toBeDefined())
+      await pushState({
+        quota: { ...quota, sources: [{ ...quota.sources[0], windows: [win(40, { resetAt })] }] },
+        preferences: quotaPrefs,
+      })
+      await act(async () => handlers.hover?.(true))
+      await userEvent.click(screen.getByTestId("usage-dock-row-anthropic:a"))
+      // The test formatter renders the instant, not "in 3 hours"; what matters
+      // is that the reset is named.
+      expect(screen.getByTestId("usage-dock-detail")).toHaveTextContent(
+        /^Claude · Work · 40% used · resets \S+/
+      )
+    })
+
+    it("collapses to the tightest source", async () => {
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.state).toBeDefined())
+      await pushState({ quota, preferences: quotaPrefs })
+      expect(screen.getByTestId("usage-dock-row-codex:b")).toBeInTheDocument()
+      expect(screen.queryByTestId("usage-dock-row-anthropic:a")).not.toBeInTheDocument()
+    })
+
+    it("says no source is queried instead of falling back to spend", async () => {
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.state).toBeDefined())
+      await pushState({
+        quota: { updatedAt: 1, refreshing: false, sources: [] },
+        preferences: quotaPrefs,
+      })
+      expect(screen.getByTestId("usage-dock-empty")).toHaveTextContent("No quota source is queried")
+      expect(screen.queryByTestId("usage-dock-row-anthropic")).not.toBeInTheDocument()
+    })
+
+    it("reads quota until the first slice arrives", async () => {
+      render(<UsageDockView />)
+      await waitFor(() => expect(handlers.state).toBeDefined())
+      await pushState({ quota: null, preferences: quotaPrefs })
+      expect(screen.getByTestId("usage-dock-empty")).toHaveTextContent("Reading quota…")
+    })
   })
 
   it("says the day is empty rather than drawing a zero gauge", async () => {

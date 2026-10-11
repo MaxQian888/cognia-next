@@ -5,6 +5,7 @@
 // row selection, orientation) can be tested in the node project without a
 // Tauri shim.
 
+import type { GlanceQuotaSlice, GlanceQuotaState } from "@/lib/glance/snapshot"
 import type { UsageGlanceSnapshotV1 } from "@/lib/usage/usage-glance"
 
 /** Mirrors the Rust `DockEdge`. `floating` means "not docked". */
@@ -12,7 +13,11 @@ export type DockEdge = "left" | "right" | "top" | "bottom" | "floating"
 
 export const DOCK_EDGES: readonly DockEdge[] = ["left", "right", "top", "bottom", "floating"]
 
-/** What the gauge on each row measures. */
+/**
+ * What the rail's rows are. `budget`: one row per provider, its share of the
+ * day's spend. `quota`: one row per enabled quota source, its tightest window
+ * (ADR-0225 §7, the same quota slice the tray panel renders).
+ */
 export type DockGaugeMode = "quota" | "budget"
 
 /** Maximum rows rendered by the expanded rail; Rust receives its measured size. */
@@ -93,19 +98,37 @@ export interface UsageDockGeometry {
 /** What the main window pushes to the dock window. */
 export interface UsageDockState {
   glance: UsageGlanceSnapshotV1 | null
+  /**
+   * The glance quota slice, built by the same builder as the tray panel's
+   * (ADR-0225 §7). Null outside `quota` mode, where the main window does not
+   * read quota for the dock at all.
+   */
+  quota: GlanceQuotaSlice | null
   preferences: UsageDockPreferencesV1
 }
 
 /** One rendered gauge. */
 export interface UsageDockRow {
+  /** Unique within the rail: the provider id (spend) or the quota source key. */
+  key: string
+  /** Provider id, translated by the renderer. */
   providerId: string
-  /** 0-1, or null when neither a budget nor a quota applies to this provider. */
+  /** The vault account's label, for quota rows. */
+  accountLabel: string | null
+  /** 0-1, or null when the row has no denominator or no reading. */
   ratio: number | null
   /** Already-formatted headline for the row. */
   label: string
   knownCostUsd: number
   unpricedTurns: number
   severity: "ok" | "warn" | "crit" | "exceeded" | "unknown"
+  /**
+   * Quota rows only: the source's state in the glance vocabulary, so a stale
+   * or failed reading says so instead of passing for current. Null for spend.
+   */
+  quotaState: GlanceQuotaState | null
+  /** Quota rows only: when the tightest window resets. */
+  resetAt: number | null
 }
 
 /** True when the rail runs vertically. */

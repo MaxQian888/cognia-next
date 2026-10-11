@@ -8,6 +8,17 @@ jest.mock("@/lib/subscription/limits/hooks", () => ({
 jest.mock("@/lib/subscription/core/subscription-events", () => ({
   subscribeSubscriptionChanged: jest.fn(() => () => {}),
 }))
+const budgetWorst: { current: unknown } = { current: null }
+jest.mock("@/hooks/usage/use-cost-budget-status", () => ({
+  useCostBudgetStatus: () => ({ worst: budgetWorst.current }),
+}))
+const glanceMock = jest.fn()
+jest.mock("@/hooks/usage/use-usage-glance", () => ({
+  useUsageGlance: (opts: unknown) => {
+    glanceMock(opts)
+    return { snapshot: null, refresh: jest.fn() }
+  },
+}))
 
 import { subscribeSubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 import { useAllConfiguredLimits } from "@/lib/subscription/limits/hooks"
@@ -23,6 +34,7 @@ const subscribeSubscriptionChangedMock = subscribeSubscriptionChanged as jest.Mo
 describe("useTrayUsage", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    budgetWorst.current = null
     subscribeSubscriptionChangedMock.mockReturnValue(() => {})
   })
 
@@ -99,5 +111,38 @@ describe("useTrayUsage", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("folds the tightest budget into the glance, so the budget metric has a number", () => {
+    mockLimits()
+    budgetWorst.current = {
+      scopeKey: "month:*",
+      period: "month",
+      target: "*",
+      usedUsd: 40,
+      limitUsd: 50,
+      ratio: 0.8,
+      level: "warning",
+    }
+    renderHook(() =>
+      useTrayUsage(true, 0, {
+        usageMetric: "budget",
+        usagePeriod: "today",
+        usageScope: "cognia",
+        usageAccountKey: null,
+      })
+    )
+    expect(glanceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        budget: { ratio: 0.8, target: "*", period: "month", blocked: false },
+      })
+    )
+  })
+
+  it("keeps the spend feed off under the quota metric", () => {
+    mockLimits()
+    renderHook(() => useTrayUsage(true, 0))
+    expect(glanceMock).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }))
   })
 })

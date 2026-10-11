@@ -1,6 +1,7 @@
 import {
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MAX_PLUGIN_ENTRIES,
   GLANCE_MODULE_IDS,
   GLANCE_PRESET_IDS,
 } from "@/types/glance/layout"
@@ -167,6 +168,28 @@ const valid: Array<[string, Record<string, unknown>, Record<string, unknown>]> =
       { kind: "pet-care", command },
     ]
   ),
+  [
+    "set-layout with a plugin module",
+    {
+      kind: "set-layout",
+      entries: [
+        { id: "fleet", size: "compact", hidden: false },
+        { id: "plugin:com.ci:status", size: "expanded", hidden: false },
+      ],
+    },
+    {
+      kind: "set-layout",
+      entries: [
+        { id: "fleet", size: "compact", hidden: false },
+        { id: "plugin:com.ci:status", size: "expanded", hidden: false },
+      ],
+    },
+  ],
+  [
+    "plugin-action",
+    { kind: "plugin-action", entryId: "plugin:com.ci:status", actionId: "open" },
+    { kind: "plugin-action", entryId: "plugin:com.ci:status", actionId: "open" },
+  ],
 ]
 
 describe("parseGlanceRequest", () => {
@@ -305,10 +328,32 @@ describe("parseGlanceRequest", () => {
       reject({ kind: "set-layout", entries: [] })
     })
 
-    it("rejects more entries than there are modules", () => {
+    it("rejects a repeated module even in a full list", () => {
       const tooMany = [...editorEntries, entry({ id: "fleet" })]
       expect(tooMany.length).toBe(GLANCE_MODULE_IDS.length + 1)
       reject({ kind: "set-layout", entries: tooMany })
+    })
+
+    it("rejects more plugin entries than a layout keeps", () => {
+      const plugins = Array.from({ length: GLANCE_MAX_PLUGIN_ENTRIES + 1 }, (_, i) =>
+        entry({ id: `plugin:p:m${i}` })
+      )
+      reject({ kind: "set-layout", entries: plugins })
+      expect(
+        parseGlanceRequest({ ...base, kind: "set-layout", entries: plugins.slice(1) })
+      ).not.toBeNull()
+    })
+
+    it("rejects a malformed plugin entry id", () => {
+      reject({ kind: "set-layout", entries: [entry({ id: "plugin:p" })] })
+      reject({ kind: "set-layout", entries: [entry({ id: "plugin:a b:c" })] })
+    })
+
+    it("rejects a plugin action without a plugin entry or a valid action id", () => {
+      reject({ kind: "plugin-action", entryId: "fleet", actionId: "open" })
+      reject({ kind: "plugin-action", entryId: "plugin:p:m", actionId: "bad id" })
+      reject({ kind: "plugin-action", entryId: "plugin:p:m" })
+      reject({ kind: "plugin-action", actionId: "open" })
     })
 
     it("rejects a duplicate module id", () => {

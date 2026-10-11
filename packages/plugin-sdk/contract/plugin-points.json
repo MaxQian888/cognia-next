@@ -2025,6 +2025,13 @@
       "introducedIn": "0.5.0"
     },
     {
+      "id": "glance.module",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0"
+    },
+    {
       "id": "uri.handler",
       "kind": "runtime",
       "stability": "stable",

@@ -42,6 +42,17 @@ describe("glanceDemandOf", () => {
     expect(demand.modules).toEqual(["quota", "activity"])
   })
 
+  it("asks for shown plugin entries, and for the catalogue only when told to", () => {
+    const plugin = { id: "plugin:com.ci:status" as const, size: "standard" as const, hidden: false }
+    const demand = glanceDemandOf(SETTINGS, [shown("recents"), plugin, shown("fleet")], null)
+    expect(demand.modules).toEqual(["plugin:com.ci:status", "fleet"])
+    expect(demand.catalog).toBe(false)
+    expect(glanceDemandOf(SETTINGS, [], null, { catalog: true })).toMatchObject({
+      modules: [],
+      catalog: true,
+    })
+  })
+
   it("has no modules when nothing host-sourced is needed", () => {
     expect(glanceDemandOf(SETTINGS, [shown("recents"), shown("quick")], null).modules).toEqual([])
     expect(glanceDemandOf(SETTINGS, [], "p1").modules).toEqual([])
@@ -76,6 +87,7 @@ describe("glanceDemandOf", () => {
 describe("glanceConfigForDemand", () => {
   const demand: GlanceRemoteDemand = {
     modules: ["usage", "pet"],
+    catalog: false,
     scope: "workspace",
     workspaceId: "p1",
     usage: { scope: "all-tools", showSpend: true },
@@ -87,7 +99,7 @@ describe("glanceConfigForDemand", () => {
     expect(config.entries.map((e) => e.id)).toEqual([...GLANCE_MODULE_IDS])
     for (const e of config.entries) {
       expect(e.hidden).toBe(!["usage", "pet"].includes(e.id))
-      expect(e.size).toBe(GLANCE_MODULES[e.id].sizes[0])
+      expect(e.size).toBe(GLANCE_MODULES[e.id as GlanceModuleId].sizes[0])
     }
   })
 
@@ -117,5 +129,24 @@ describe("glanceConfigForDemand", () => {
     const needed = [shown("fleet"), shown("recents"), shown("quota")]
     const config = glanceConfigForDemand(glanceDemandOf(SETTINGS, needed, null))
     expect(config.entries.filter((e) => !e.hidden).map((e) => e.id)).toEqual(["fleet", "quota"])
+  })
+})
+
+describe("glanceConfigForDemand plugin entries", () => {
+  it("shows the demanded plugin entries after the first-party ones", () => {
+    const config = glanceConfigForDemand({
+      modules: ["fleet", "plugin:com.ci:status"],
+      catalog: true,
+      scope: "all",
+      workspaceId: null,
+      usage: { scope: "cognia", showSpend: false },
+      activity: { range: "3m" },
+    })
+    expect(config.entries.at(-1)).toEqual({
+      id: "plugin:com.ci:status",
+      size: "standard",
+      hidden: false,
+    })
+    expect(config.entries.find((e) => e.id === "fleet")?.hidden).toBe(false)
   })
 })

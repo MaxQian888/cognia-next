@@ -1,11 +1,11 @@
 ---
 title: Tray Panel
-description: The desktop tray icon opens a glance surface — Fleet, usage, quota, agenda, activity, quick actions, recents and pet, assembled from modules — that summarizes and routes, fed by one snapshot the main window publishes. The same modules make up the phone's home screen and its Glance drawer.
+description: The desktop tray icon opens a glance surface — Fleet, usage, quota, agenda, activity, quick actions, recents, pet and plugin modules, assembled from modules — that summarizes and routes, fed by one snapshot the main window publishes. The same modules make up the phone's home screen and its Glance drawer; a composable menu-bar title and the Capacity Dock read the same sources.
 ---
 
 # Tray Panel
 
-<Status variant="beta">Beta · desktop and mobile · ADR-0225 phases 1–3</Status>
+<Status variant="beta">Beta · desktop and mobile · ADR-0225 phases 1–4</Status>
 
 <TLDR>
   Left-clicking the tray icon opens a small always-on-top window: a header with the workspace scope
@@ -45,10 +45,36 @@ owner surface it routes to. A size a module does not support degrades to the nea
 | `quick`    | compact · standard            | Desktop: the tray actions other than the primary. Phone: the layout's shortcut grid        | Settings › Desktop / the phone's layout editor |
 | `recents`  | compact · standard            | The last few conversations                                                                  | That conversation                            |
 | `pet`      | compact · standard            | Pet needs, and feed / play / pet / sleep / clean                                            | The pet page                                 |
+| `plugin:<plugin>:<id>` | as the plugin declares | The stats, rows and actions a plugin publishes (see [Plugin modules](#plugin-modules))   | The plugin's own commands                    |
 
 Presets (`balanced`, `usage-first`, `agent-ops`, `minimal`) live in `lib/glance/presets.ts`.
 `normalizeGlancePanelSettings` is the only reader of stored layouts: unknown ids drop, duplicates
 keep the first, missing modules are appended hidden, out-of-range heights clamp.
+
+## Plugin modules
+
+A plugin contributes a module as **data** through the `glance.module` point: it declares the module
+(`manifest.glanceModules[]` or `ctx.glance.register`) and publishes stats, rows and actions with
+`ctx.glance.update`. The host renders it with the same primitives as its own modules
+(`components/glance/modules/glance-plugin-module.tsx`): one line at compact size (the summary or the
+first stat), the stats strip with the first three rows and the actions at standard size, every row
+expanded. A plugin never ships React into a glance surface. Authoring is covered in
+[Glance modules](../plugin-dev/glance-modules).
+
+- **Registry.** `lib/glance/plugin-registry.ts` (one per renderer that runs plugins) holds the
+  declarations and the data, sanitized and capped on the way in (`lib/glance/plugin-data.ts`): at most
+  8 modules per plugin, 4 stats, 8 rows and 3 actions per module, short labels.
+- **Snapshot.** `GlanceSnapshotV1.plugins` carries the catalogue for the surface's platform (titles
+  resolved in the main window, where the plugin's i18n bundle lives) and the data of the visible
+  plugin entries only. The editor's add list offers every catalogue module.
+- **On screen.** Each build reports which plugin entries it shows; `ctx.glance.onVisibilityChange`
+  tells the plugin, so it can stop computing while nothing shows its module.
+- **Actions.** A click sends `plugin-action` with the entry and the action id, never a command. The
+  main window looks the command up in what the plugin published and runs that plugin's own
+  `<pluginId>.<command>` (`lib/glance/plugin-actions.ts`).
+- **Plugin off.** A layout keeps a plugin's entries while it is disabled or uninstalled; the stack
+  skips them and the editor lists a shown one as "Plugin off", removable. Applying a preset drops
+  plugin entries; the add list keeps offering the modules.
 
 ## Editing
 
@@ -193,6 +219,11 @@ enable a source ─── glance_quota_enable ─▶ (a desktop settings write)
 - **Not queued.** None of the three commands is in the offline outbound queue: a refresh replayed
   later would answer a moment that has passed.
 
+- **Plugin modules.** A paired phone shows the desktop's plugin modules, never its own: the demand
+  names their entries, and while the phone's layout editor is open it asks for the desktop's plugin
+  catalogue (`catalog`) even if nothing host-sourced is on screen. They are read-only there: actions
+  are shown disabled with "Runs on your desktop". A phone that is not paired runs its own plugins.
+
 ### Migration and copying
 
 Before ADR-0225 the home had its own model, `mobileHomeLayout` (a shortcut grid plus three section
@@ -204,6 +235,36 @@ activity's, recents stay recents. Nothing is written up front; the first edit st
 The layout is `shared` in settings sync, one per account. The phone's editor can copy the desktop's
 order, sizes and visibility (its own pins stay); Settings › Desktop › Tray panel can copy the phone's
 (pins and shortcuts stay on the phone).
+
+## Menu-bar title
+
+Settings › Desktop › Tray, under the menu-bar readout, offers **Title fields** once the readout is set
+to Title: an ordered list of up to six fields, rendered as one line next to the tray icon, for example
+`1D 103.3M · 7D 12.6B · ▶2 · ⚑1 · Q 82%`.
+
+| Field     | Shows                                                                          |
+| --------- | ------------------------------------------------------------------------------ |
+| Usage     | Tokens or spend over today, 7 or 30 local days, in the tray's counted scope    |
+| Running   | Fleet tasks working now                                                        |
+| Awaiting  | Fleet tasks waiting on an approval                                             |
+| Quota     | The highest used share among the quota windows (or the pinned subscription's) |
+| Budget    | The tightest cost budget's used share                                          |
+
+A field with nothing to say (no work, no reading, no turns in the window) is left out, and spend
+with unpriced turns reads "≥$x". The title stays off by default (ADR-0165) and its feeds run only
+while it is on and only for the fields it shows (`lib/tray/title.ts`, pure model and formatter in
+`lib/tray/title-format.ts`). A title stored before fields existed migrates to the one number its metric
+named. Windows has no menu-bar title: the option is disabled there and the card says to use the icon
+badge.
+
+## Capacity Dock
+
+The Capacity Dock's **Plan quota** mode draws one row per queried quota source, by its tightest
+window's used share, tightest first, from the same quota slice builder as the panel's quota module,
+so both agree on every state: a stale or failed reading keeps its last ratio but loses its colour and
+says so in the detail. The main window feeds it over the dock's own push (`usage-dock://state`,
+`quota` beside the spend projection) and refreshes on the shared five-minute throttle while the dock
+is up; budget mode reads no quota at all.
 
 ## Where it lives
 
@@ -223,11 +284,14 @@ order, sizes and visibility (its own pins stay); Settings › Desktop › Tray p
 | Phone layout and migration    | `types/glance/layout.ts`, `lib/glance/mobile-layout.ts`           |
 | Paired-phone channel          | `lib/glance/remote/` (commands, demand, host hub and dispatch, phone store and view) |
 | Phone surfaces                | `hooks/glance/use-mobile-glance.ts`, `components/mobile/glance/`   |
+| Plugin modules                | `lib/glance/plugin-{data,registry,actions}.ts`, `lib/glance/build-plugins.ts`, `components/glance/modules/glance-plugin-module.tsx`, `lib/plugin/api/glance-api.ts` |
+| Menu-bar title                | `lib/tray/title{,-format}.ts`, `components/settings/tray-title-fields-editor.tsx` |
+| Capacity Dock quota rows      | `lib/usage-dock/rows.ts`, `components/providers/initializers/usage-dock-initializer.tsx` |
 
-## Not yet
+## Delivery
 
 Phase 1 shipped the registry, the snapshot, the desktop panel, Fleet routing and the quota states;
 phase 2 in-place editing, presets, the settings editor with live preview and the catalogue
 migration; phase 3 the phone's home screen and Glance drawer, the paired-phone channel and source
-labels. The plugin module point, the composable menu-bar title and the Capacity Dock quota feed
-(phase 4) follow ADR-0225's delivery plan.
+labels; phase 4 the plugin module point, the composable menu-bar title and the Capacity Dock quota
+feed.

@@ -8,19 +8,21 @@
  * host's name and how old the reading is. When the desktop cannot supply one
  * (it is offline and nothing was received yet, or it does not serve glance at
  * all), the module says so in place instead of showing an empty reading.
+ * Plugin modules are the desktop's on a paired phone, rendered read-only.
  */
 
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type {
-  GlanceMobileEntry,
-  GlanceMobileSettings,
-  GlanceModuleId,
-  GlancePanelSettings,
+import {
+  isPluginEntryId,
+  type GlanceEntryId,
+  type GlanceMobileEntry,
+  type GlanceMobileSettings,
+  type GlancePanelSettings,
 } from "@/types/glance/layout"
 
 import type { GlancePhoneState } from "./phone-store"
-import { isGlanceHostModule, type GlanceHostModuleId } from "./types"
+import { isGlanceHostEntry, type GlanceHostModuleId } from "./types"
 
 export type GlanceModuleOrigin =
   /** Built on the desktop and received here. `live` is false once the lease dropped. */
@@ -40,15 +42,15 @@ export interface PhoneGlanceLink {
 }
 
 /** Where module `id`'s data comes from on this phone. Null means "this device", or still loading. */
-export function phoneOriginOf(
-  id: GlanceModuleId,
-  link: PhoneGlanceLink
-): GlanceModuleOrigin | null {
-  if (!link.paired || !isGlanceHostModule(id)) return null
+export function phoneOriginOf(id: GlanceEntryId, link: PhoneGlanceLink): GlanceModuleOrigin | null {
+  if (!link.paired || !isGlanceHostEntry(id)) return null
   if (link.supported === false || link.remote.status === "unsupported") {
     return { kind: "unavailable", reason: "host-unsupported" }
   }
-  const slice = link.remote.snapshot?.[id] ?? null
+  const remote = link.remote.snapshot
+  const slice = isPluginEntryId(id)
+    ? (remote?.plugins?.catalog.find((entry) => entry.id === id) ?? null)
+    : (remote?.[id] ?? null)
   if (slice !== null && link.remote.receivedAt !== null) {
     return {
       kind: "host",
@@ -78,6 +80,8 @@ export function mergePhoneSnapshot(
     agenda: take("agenda"),
     activity: take("activity"),
     pet: take("pet"),
+    // The desktop's plugins, never the phone's own: one source per module.
+    plugins: remote?.plugins ?? null,
   }
 }
 
@@ -101,7 +105,7 @@ export function phoneLocalConfig(
   paired: boolean
 ): GlancePanelSettings {
   const on = new Set(
-    needed.filter((entry) => !(paired && isGlanceHostModule(entry.id))).map((entry) => entry.id)
+    needed.filter((entry) => !(paired && isGlanceHostEntry(entry.id))).map((entry) => entry.id)
   )
   return {
     ...DEFAULT_GLANCE_PANEL_SETTINGS,

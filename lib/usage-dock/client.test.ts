@@ -76,7 +76,11 @@ describe("outside Tauri", () => {
     expect(await listUsageDockMonitors()).toEqual([])
     expect(await snapUsageDock(1, 2)).toBeNull()
     expect(
-      await sendUsageDockState({ glance: null, preferences: DEFAULT_USAGE_DOCK_PREFERENCES })
+      await sendUsageDockState({
+        glance: null,
+        quota: null,
+        preferences: DEFAULT_USAGE_DOCK_PREFERENCES,
+      })
     ).toBe(false)
     expect(await requestUsageDockState()).toBe(false)
     expect(await requestUsageDockOpenFull()).toBe(false)
@@ -127,7 +131,11 @@ describe("inside Tauri", () => {
   })
 
   it("pushes state to the dock window by label", async () => {
-    await sendUsageDockState({ glance: null, preferences: DEFAULT_USAGE_DOCK_PREFERENCES })
+    await sendUsageDockState({
+      glance: null,
+      quota: null,
+      preferences: DEFAULT_USAGE_DOCK_PREFERENCES,
+    })
     expect(emitToMock).toHaveBeenCalledWith(
       USAGE_DOCK_WINDOW_LABEL,
       USAGE_DOCK_STATE_EVENT,
@@ -138,7 +146,11 @@ describe("inside Tauri", () => {
   it("reports a closed dock as a normal outcome, not an error", async () => {
     emitToMock.mockRejectedValue(new Error("no window"))
     expect(
-      await sendUsageDockState({ glance: null, preferences: DEFAULT_USAGE_DOCK_PREFERENCES })
+      await sendUsageDockState({
+        glance: null,
+        quota: null,
+        preferences: DEFAULT_USAGE_DOCK_PREFERENCES,
+      })
     ).toBe(false)
   })
 

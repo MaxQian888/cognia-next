@@ -1,0 +1,208 @@
+---
+title: Glance 模块
+description: 以数据的形式向桌面托盘面板和手机 Glance 抽屉贡献一个模块。在清单或运行时声明它，发布统计、行和动作，由宿主负责渲染。
+---
+
+# Glance 模块
+
+桌面上的托盘面板和手机上的 Glance 抽屉都是一列 **glance 模块**（ADR-0225）。
+插件可以通过 `glance.module` 扩展点加入自己的模块。
+
+插件模块是**数据**，永远不是 React。
+托盘面板是独立的 webview，已配对的手机可能在渲染桌面端的快照，而面板必须看起来是一个整体。
+所以你声明模块并发布它要展示的内容；宿主用与自身模块相同的组件和视觉语言渲染它，桌面和移动端都一样。
+
+| 接口 | 作用 | 门禁 | 运行时 |
+| --- | --- | --- | --- |
+| `glanceModules` | 在清单中声明模块，激活前即可见 | `glance` 能力 | 任意（清单） |
+| `ctx.glance.register` | 在运行时声明模块 | `glance` 能力 | frontend、hybrid |
+| `ctx.glance.update` | 发布模块的数据 | `glance` 能力 | frontend、hybrid |
+| `ctx.glance.onVisibilityChange` | 得知模块何时显示在屏幕上 | `glance` 能力 | frontend、hybrid |
+
+不需要额外的权限。
+没有 `glance` 能力时，每个 `ctx.glance` 调用都是只警告一次的空操作。
+
+## 声明模块
+
+```json title="plugin.json"
+{
+  "capabilities": ["glance"],
+  "glanceModules": [
+    {
+      "id": "builds",
+      "title": "Builds",
+      "titleKey": "glance.builds",
+      "icon": "Hammer",
+      "sizes": ["compact", "standard", "expanded"],
+      "platforms": ["desktop", "mobile"]
+    }
+  ],
+  "commands": [{ "id": "runBuild", "name": "Run build" }],
+  "i18n": {
+    "locales": {
+      "en": { "glance.builds": "Builds" },
+      "zh-CN": { "glance.builds": "构建" }
+    }
+  }
+}
+```
+
+| 字段 | 规则 |
+| --- | --- |
+| `id` | 在插件内唯一。字母、数字、`.`、`_`、`-`，以字母或数字开头，最多 64 个字符。 |
+| `title` | 必填的回退标题，最多 48 个字符。 |
+| `titleKey` | 可选的插件 i18n 键，优先于 `title`。每个声明的语言都必须包含它。 |
+| `icon` | 可选，`lucide-react` 导出的图标名，例如 `"Hammer"`。 |
+| `sizes` | 可选，取值为 `compact`、`standard`、`expanded`。默认 `compact` 和 `standard`。 |
+| `platforms` | 可选，取值为 `desktop`、`mobile`。默认两者都有。 |
+
+一个插件最多声明 8 个模块。
+清单校验器会拒绝非法 id、重复 id、缺失标题、未知尺寸或平台以及未知图标，让你在安装时就发现错误，而不是模块始终不出现。
+
+声明了能力时 `glanceModules` 是可选的：插件可以在运行时声明全部模块。
+
+用户在面板的编辑模式或设置编辑器中把已声明的模块加入自己的布局。
+声明模块本身不会让它出现在屏幕上。
+
+## 在运行时声明和发布
+
+```ts title="src/index.ts"
+import { defineGlanceModule, definePlugin } from "@cognia/plugin-sdk"
+
+const deploys = defineGlanceModule({ id: "deploys", title: "Deploys", icon: "Rocket" })
+
+export default definePlugin({
+  manifest,
+  activate(ctx) {
+    // 第二个模块在运行时声明；"builds" 已由清单声明。
+    ctx.glance.register(deploys)
+
+    let timer: ReturnType<typeof setInterval> | undefined
+    const publish = async () => {
+      const status = await fetchBuildStatus()
+      ctx.glance.update("builds", {
+        summary: `${status.passing} passing, ${status.failing} failing`,
+        stats: [
+          { label: "Passing", value: String(status.passing), tone: "ok" },
+          { label: "Failing", value: String(status.failing), tone: status.failing ? "crit" : "muted" },
+        ],
+        rows: status.recent.map((build) => ({
+          id: build.id,
+          label: build.branch,
+          value: build.duration,
+          hint: build.title,
+          tone: build.ok ? "ok" : "crit",
+          action: "rerun",
+        })),
+        actions: [{ id: "rerun", label: "Run build", icon: "Play", command: "runBuild" }],
+        empty: "No builds yet",
+      })
+    }
+
+    // 只在有 glance 界面显示该模块时才计算。
+    ctx.glance.onVisibilityChange("builds", (visible) => {
+      if (visible && !timer) {
+        void publish()
+        timer = setInterval(publish, 60_000)
+      } else if (!visible && timer) {
+        clearInterval(timer)
+        timer = undefined
+      }
+    })
+    ctx.lifecycle.onDispose(() => clearInterval(timer))
+  },
+})
+```
+
+- `register(module)` 声明一个模块并返回一个释放函数。
+  重复声明同一 id 会更新标题、图标、尺寸和平台，并保留数据。
+  如果清单也声明了该 id，释放函数会恢复清单中的声明。
+- `update(moduleId, data)` 替换模块展示的内容。`null` 会清空数据，回到空状态。
+- `onVisibilityChange(moduleId, handler)` 会立即以当前状态调用一次处理函数，之后每次变化时再调用。
+  只要任一 glance 界面（托盘面板、手机抽屉）显示该模块，它就是可见的。
+  隐藏时请停止轮询；宿主自己的模块也遵循同样的规则。
+
+`register` 遇到无法成为模块的声明（非法 id、缺少标题）或超过 8 个模块的上限时会抛出异常。
+`update` 遇到插件尚未声明的模块时会抛出异常。
+两者都属于作者错误，会原样抛给你。
+
+## 数据结构
+
+```ts
+interface PluginGlanceModuleData {
+  stats?: { label: string; value: string; tone?: PluginGlanceTone }[]
+  rows?: {
+    id: string
+    label: string
+    value?: string
+    hint?: string
+    tone?: PluginGlanceTone
+    action?: string // `actions` 中某个动作的 id
+  }[]
+  actions?: { id: string; label: string; icon?: string; command: string }[]
+  summary?: string // compact 尺寸的一行摘要；默认取第一个统计项
+  empty?: string // 没有统计项也没有行时显示
+}
+```
+
+宿主会在数据进入时全部清洗一遍，因为数据会随 Glance 快照传到其他窗口和已配对的手机。
+未知字段会被丢弃，空白会被合并，过长的字符串会以省略号截断。
+
+| 项 | 上限 |
+| --- | --- |
+| 统计项 | 4 |
+| 行 | 8 |
+| 动作 | 3 |
+| 标题、统计和行的标签、动作标签 | 48 个字符 |
+| 统计和行的值 | 24 个字符 |
+| 行的提示、`summary` | 80 个字符 |
+| `empty` | 120 个字符 |
+| id（模块、行、动作、命令） | 64 个字符，字母、数字、`.`、`_`、`-` |
+
+统计项需要同时有标签和值，行需要 id 和标签，动作需要 id、标签和命令；缺少其一的条目会被丢弃。
+行的 `action` 如果不是已发布动作之一，这个指向会被去掉。
+
+### 色调
+
+`tone` 用宿主模块自己的词汇为统计项或行着色。
+
+| 色调 | 用途 |
+| --- | --- |
+| `default` | 普通值（默认） |
+| `ok` | 健康、通过、完成 |
+| `warn` | 需要尽快关注 |
+| `crit` | 失败、阻塞、超限 |
+| `muted` | 次要或未激活 |
+
+### 动作运行你自己的命令
+
+动作的 `command` 是**你的插件**的某个命令 id，不带插件前缀。
+宿主运行 `<pluginId>.<command>`：清单 `commands[]` 中的条目，或你用 `ctx.commands` 注册的命令。
+模块不能运行其他插件或应用本身的命令。
+带 `action` 的行在点击时运行该动作；动作也会显示为按钮。
+
+## 尺寸
+
+用户在你声明的尺寸中为每个模块选择一个。
+
+| 尺寸 | 渲染内容 |
+| --- | --- |
+| `compact` | 一行：标题加 `summary`，没有摘要时用第一个统计项 |
+| `standard` | 统计条、最多 3 行和动作 |
+| `expanded` | 统计条、全部行和动作 |
+
+为 compact 这一行写好 `summary`，并按重要性排序行，让前三行撑起 standard 尺寸。
+
+## 平台与已配对的手机
+
+`platforms` 决定模块在哪里提供：桌面托盘面板、手机（首页和 Glance 抽屉），或两者都有。
+仅限桌面的模块永远不会在手机上提供。
+
+在与桌面配对的手机上，抽屉显示的是桌面端的快照。
+你的模块在那里是**只读**的：它显示桌面插件最近一次发布的内容，标注桌面名称和数据时间，动作按钮显示为禁用，并注明需在桌面上操作。
+已配对的手机只显示桌面端的插件模块。未配对的手机运行自己的插件，运行在那里的插件会像在桌面上一样为该手机发布数据。
+
+## 禁用与卸载
+
+禁用插件会移除它的模块，包括清单声明的和运行时注册的，并丢弃它们的数据。
+用户的布局会保留这些条目：模块不可用时它们只是不渲染，重新启用插件后它们会回到用户放置的位置。

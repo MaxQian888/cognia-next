@@ -15,12 +15,19 @@
  * agenda (scheduled tasks, notifications) and the pet (its profile syncs, but
  * whether the pet is on is a desktop-only setting). Recents and the quick
  * module are built on the phone from synced rows and its own settings.
+ *
+ * Plugin modules (ADR-0225 §6) are the desktop's too: a paired phone renders
+ * the desktop's plugins, read-only. The demand names their entries, and asks
+ * for the desktop's plugin catalogue while the phone's editor is open.
  */
 
 import {
   GLANCE_ACTIVITY_RANGES,
+  GLANCE_MAX_PLUGIN_ENTRIES,
+  isPluginEntryId,
   type GlanceActivityRange,
-  type GlanceModuleId,
+  type GlanceEntryId,
+  type GlancePluginEntryId,
   type GlanceScope,
   type GlanceUsageScope,
 } from "@/types/glance/layout"
@@ -30,13 +37,26 @@ export const GLANCE_HOST_MODULES = ["fleet", "usage", "quota", "agenda", "activi
 
 export type GlanceHostModuleId = (typeof GLANCE_HOST_MODULES)[number]
 
-export function isGlanceHostModule(id: GlanceModuleId): id is GlanceHostModuleId {
+export function isGlanceHostModule(id: string): id is GlanceHostModuleId {
   return (GLANCE_HOST_MODULES as readonly string[]).includes(id)
 }
 
+/** What a paired phone asks the desktop for: a host-sourced module or a plugin module. */
+export type GlanceHostEntryId = GlanceHostModuleId | GlancePluginEntryId
+
+/** True for an entry a paired phone takes from the desktop. */
+export function isGlanceHostEntry(id: GlanceEntryId | string): id is GlanceHostEntryId {
+  return isGlanceHostModule(id) || isPluginEntryId(id)
+}
+
 export interface GlanceRemoteDemand {
-  /** Host-sourced modules the phone shows, deduplicated. */
-  modules: GlanceHostModuleId[]
+  /** Host-sourced modules and plugin entries the phone shows, deduplicated. */
+  modules: GlanceHostEntryId[]
+  /**
+   * The phone's layout editor is open and needs the desktop's plugin
+   * catalogue, even if nothing host-sourced is on screen.
+   */
+  catalog: boolean
   scope: GlanceScope
   /** The workspace the phone is filtering to, when `scope` is `workspace`. */
   workspaceId: string | null
@@ -111,15 +131,18 @@ export function parseGlanceDemand(raw: unknown): GlanceRemoteDemand | null {
   if (
     !isRecord(raw) ||
     !Array.isArray(raw.modules) ||
-    raw.modules.length > GLANCE_HOST_MODULES.length * 2
+    raw.modules.length > (GLANCE_HOST_MODULES.length + GLANCE_MAX_PLUGIN_ENTRIES) * 2
   )
     return null
-  const modules: GlanceHostModuleId[] = []
+  const modules: GlanceHostEntryId[] = []
+  let plugins = 0
   for (const id of raw.modules) {
-    if (typeof id !== "string" || !(GLANCE_HOST_MODULES as readonly string[]).includes(id))
-      return null
-    if (!modules.includes(id as GlanceHostModuleId)) modules.push(id as GlanceHostModuleId)
+    if (typeof id !== "string" || !isGlanceHostEntry(id)) return null
+    if (modules.includes(id)) continue
+    if (isPluginEntryId(id) && ++plugins > GLANCE_MAX_PLUGIN_ENTRIES) return null
+    modules.push(id)
   }
+  if (raw.catalog !== undefined && typeof raw.catalog !== "boolean") return null
   if (raw.scope !== "all" && raw.scope !== "workspace") return null
   if (raw.workspaceId !== null && !isId(raw.workspaceId)) return null
   if (!isRecord(raw.usage) || !isRecord(raw.activity)) return null
@@ -131,6 +154,7 @@ export function parseGlanceDemand(raw: unknown): GlanceRemoteDemand | null {
     return null
   return {
     modules,
+    catalog: raw.catalog === true,
     scope: raw.scope,
     workspaceId: raw.scope === "workspace" ? (raw.workspaceId as string | null) : null,
     usage: { scope: usageScope, showSpend: raw.usage.showSpend },
@@ -171,8 +195,9 @@ export function isGlanceSubscribeResponse(value: unknown): value is GlanceSubscr
 }
 
 /**
- * One demand for several phones. Modules are the union, in first-seen order;
- * options come from the newest announcement, since a single build can serve
+ * One demand for several phones. Modules are the union, in first-seen order,
+ * and the catalogue is asked for while any phone asks; options come from the
+ * newest announcement, since a single build can serve
  * only one activity range or usage scope. Every slice says which options it
  * was built for (`usage.scope`, `activity.range`), so a phone whose own
  * choice lost shows what it received rather than mislabelling it.
@@ -182,9 +207,9 @@ export function mergeGlanceDemands(
 ): GlanceRemoteDemand | null {
   if (demands.length === 0) return null
   const newest = demands.reduce((a, b) => (b.announcedAt > a.announcedAt ? b : a))
-  const modules: GlanceHostModuleId[] = []
+  const modules: GlanceHostEntryId[] = []
   for (const { demand } of demands) {
     for (const id of demand.modules) if (!modules.includes(id)) modules.push(id)
   }
-  return { ...newest.demand, modules }
+  return { ...newest.demand, modules, catalog: demands.some(({ demand }) => demand.catalog) }
 }

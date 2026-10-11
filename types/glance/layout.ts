@@ -9,7 +9,7 @@
  * `lib/glance/presets.ts`.
  */
 
-/** Every first-party glance module. Plugin modules arrive in phase 4. */
+/** Every first-party glance module. Plugin modules are {@link GlancePluginEntryId}s. */
 export type GlanceModuleId =
   "fleet" | "usage" | "quota" | "agenda" | "activity" | "quick" | "recents" | "pet"
 
@@ -32,9 +32,42 @@ export type GlanceModuleSize = "compact" | "standard" | "expanded"
 
 export const GLANCE_MODULE_SIZES: readonly GlanceModuleSize[] = ["compact", "standard", "expanded"]
 
+/**
+ * A plugin module's place in a layout (ADR-0225 §6): `plugin:<pluginId>:<id>`.
+ * A layout keeps the entry while the plugin is disabled or uninstalled, so
+ * turning it back on restores the module where the user put it; surfaces
+ * skip an entry whose module is not available right now.
+ */
+export type GlancePluginEntryId = `plugin:${string}`
+
+/** What a layout entry names: a first-party module or a plugin module. */
+export type GlanceEntryId = GlanceModuleId | GlancePluginEntryId
+
+const PLUGIN_ENTRY = /^plugin:([A-Za-z0-9][A-Za-z0-9._-]{0,127}):([A-Za-z0-9][A-Za-z0-9._-]{0,63})$/
+
+/** True for a well-formed plugin entry id. */
+export function isPluginEntryId(id: unknown): id is GlancePluginEntryId {
+  return typeof id === "string" && PLUGIN_ENTRY.test(id)
+}
+
+/** The entry id of one plugin module. */
+export function pluginEntryId(pluginId: string, moduleId: string): GlancePluginEntryId {
+  return `plugin:${pluginId}:${moduleId}`
+}
+
+/** The plugin and module a plugin entry id names, or null for anything else. */
+export function parsePluginEntryId(id: unknown): { pluginId: string; moduleId: string } | null {
+  if (typeof id !== "string") return null
+  const match = PLUGIN_ENTRY.exec(id)
+  return match ? { pluginId: match[1], moduleId: match[2] } : null
+}
+
+/** How many plugin entries one layout keeps. */
+export const GLANCE_MAX_PLUGIN_ENTRIES = 24
+
 /** One stack entry. Order in the array is render order. */
 export interface GlanceLayoutEntry {
-  id: GlanceModuleId
+  id: GlanceEntryId
   size: GlanceModuleSize
   hidden: boolean
 }

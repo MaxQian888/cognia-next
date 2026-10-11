@@ -33,7 +33,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { detectDesktopOsFamily } from "@/lib/platform/os"
 import { useTrayStore } from "@/lib/tray/store"
+import { useTrayTitle } from "@/lib/tray/title"
+import { titleNeedsUsage } from "@/lib/tray/title-format"
 import { useTrayUsage } from "@/lib/tray/usage"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { listTrayItems } from "@/lib/tray/registry"
@@ -47,6 +50,8 @@ import {
 } from "@/lib/usage/usage-glance"
 import { PERIOD_LABEL_KEYS } from "@/lib/usage/usage-glance-format"
 import type { TrayMenuItem, TrayActionPayload, TrayTaskbarUsageMode } from "@/lib/tray/types"
+
+import { TrayTitleFieldsEditor } from "./tray-title-fields-editor"
 
 type Direction = -1 | 1
 
@@ -124,12 +129,24 @@ function TrayDisplayCard() {
   // fetches once on open, so the picker isn't empty on first visit).
   const usage = useTrayUsage(true, 0, display)
   const accounts = usage?.accounts ?? []
+  // The title as it reads now, from the same hook the tray pushes with.
+  const titlePreview = useTrayTitle(
+    display,
+    usage ? { ...usage, selectedKey: display.usageAccountKey } : null
+  )
+  // Windows has no menu-bar title (`tray_set_title` is a no-op there): the
+  // option is offered disabled with the reason, never as a dead control.
+  const titleUnsupported = detectDesktopOsFamily() === "windows"
 
   const anyCompactSurface = display.showUsageInTooltip || display.taskbarUsageMode !== "off"
   // The window and the scope only mean something for a spend/token metric: a
   // plan's quota window belongs to the provider, and external spend can never
   // enter a quota reading at all.
   const spendMetric = display.usageMetric !== "quota"
+  // The counted scope also governs a title's usage fields, whatever the badge
+  // metric is.
+  const scopeApplies =
+    spendMetric || (display.taskbarUsageMode === "title" && titleNeedsUsage(display.titleFields))
 
   return (
     <div className="space-y-4 rounded-md border bg-card p-4">
@@ -170,13 +187,25 @@ function TrayDisplayCard() {
           </SelectTrigger>
           <SelectContent>
             {TASKBAR_MODES.map((mode) => (
-              <SelectItem key={mode} value={mode}>
+              <SelectItem key={mode} value={mode} disabled={mode === "title" && titleUnsupported}>
                 {t(`taskbarModes.${mode}`)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
+
+      {titleUnsupported ? (
+        <p className="text-xs text-muted-foreground" data-testid="tray-title-unsupported">
+          {t("titleUnsupported")}
+        </p>
+      ) : display.taskbarUsageMode === "title" ? (
+        <TrayTitleFieldsEditor
+          fields={display.titleFields}
+          onChange={(titleFields) => setDisplay({ titleFields })}
+          preview={titlePreview}
+        />
+      ) : null}
 
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -233,7 +262,7 @@ function TrayDisplayCard() {
         </div>
         <Select
           value={display.usageScope}
-          disabled={!spendMetric}
+          disabled={!scopeApplies}
           onValueChange={(v) => setDisplay({ usageScope: v as UsageGlanceScope })}
         >
           <SelectTrigger className="w-44" aria-label={t("usageScope")}>

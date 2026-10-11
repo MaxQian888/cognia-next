@@ -6,7 +6,8 @@
  * stored layout survive a catalogue change in either direction. Unknown ids
  * are dropped, ids a newer build added are appended hidden (opt-in, never
  * auto-shown), duplicates keep their first position, and an unsupported size
- * degrades to the nearest supported one.
+ * degrades to the nearest supported one. Plugin entries (ADR-0225 §6) are
+ * kept as they are: whether their plugin runs is a runtime question.
  */
 
 import {
@@ -15,15 +16,19 @@ import {
   GLANCE_MAX_HEIGHT_DEFAULT,
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MAX_PLUGIN_ENTRIES,
   GLANCE_MODULE_IDS,
   GLANCE_MODULE_SIZES,
   GLANCE_PRESET_IDS,
   GLANCE_WIDTH_STEPS,
+  isPluginEntryId,
+  type GlanceEntryId,
   type GlanceLayoutEntry,
   type GlanceModuleId,
   type GlanceModuleOptions,
   type GlanceModuleSize,
   type GlancePanelSettings,
+  type GlancePluginEntryId,
   type GlancePresetId,
   type GlanceWidthStep,
 } from "@/types/glance/layout"
@@ -96,13 +101,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-/** Repair an entry list against the current catalogue. */
+/**
+ * A stored size, as far as a layout can check it. A first-party module's size
+ * degrades to one it renders; a plugin module's declared sizes are known only
+ * to the live catalogue, so any valid size is kept and the renderer degrades it.
+ */
+export function storedEntrySize(id: GlanceEntryId, raw: unknown): GlanceModuleSize {
+  const valid =
+    typeof raw === "string" && (GLANCE_MODULE_SIZES as readonly string[]).includes(raw)
+      ? (raw as GlanceModuleSize)
+      : null
+  if (isPluginEntryId(id)) return valid ?? "standard"
+  return valid ? effectiveSize(id, valid) : GLANCE_MODULES[id].sizes[0]
+}
+
+/**
+ * Repair an entry list against the current catalogue. Plugin entries are kept
+ * (well-formed, deduplicated, bounded) whether or not their plugin runs right
+ * now, so a plugin turned off and on again finds its module where it was.
+ */
 export function normalizeEntries(raw: unknown): GlanceLayoutEntry[] {
   if (!Array.isArray(raw)) return layoutFromPreset("balanced")
-  const seen = new Set<GlanceModuleId>()
+  const seen = new Set<GlanceEntryId>()
   const out: GlanceLayoutEntry[] = []
+  let plugins = 0
   for (const item of raw) {
     if (!isRecord(item) || typeof item.id !== "string") continue
+    if (isPluginEntryId(item.id)) {
+      if (seen.has(item.id) || plugins >= GLANCE_MAX_PLUGIN_ENTRIES) continue
+      seen.add(item.id)
+      plugins += 1
+      out.push({
+        id: item.id,
+        size: storedEntrySize(item.id, item.size),
+        hidden: item.hidden === true,
+      })
+      continue
+    }
     const def = glanceModule(item.id)
     if (!def || seen.has(def.id)) continue
     seen.add(def.id)
@@ -173,6 +208,17 @@ export function normalizeGlancePanelSettings(raw: unknown): GlancePanelSettings 
 }
 
 /** The ids currently visible, in render order. */
-export function visibleModuleIds(entries: readonly GlanceLayoutEntry[]): GlanceModuleId[] {
+export function visibleModuleIds(entries: readonly GlanceLayoutEntry[]): GlanceEntryId[] {
   return entries.filter((entry) => !entry.hidden).map((entry) => entry.id)
+}
+
+/** The plugin entries currently visible, in render order. */
+export function visiblePluginEntryIds(
+  entries: readonly GlanceLayoutEntry[]
+): GlancePluginEntryId[] {
+  const out: GlancePluginEntryId[] = []
+  for (const entry of entries) {
+    if (!entry.hidden && isPluginEntryId(entry.id)) out.push(entry.id)
+  }
+  return out
 }

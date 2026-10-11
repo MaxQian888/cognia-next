@@ -1429,6 +1429,7 @@ export const CANONICAL_RUNTIME_POINTS = [
   "lsp.server",
   "cli.tool",
   "tray.item",
+  "glance.module",
   "uri.handler",
 ] as const
 
@@ -1515,6 +1516,10 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "lsp.server": "lib/plugin/lsp/lsp-registry.ts:registerPluginLspServers",
   "cli.tool": "lib/plugin/core/manager.ts:registerPluginContributions cliTools",
   "tray.item": "lib/plugin/api/tray-api.ts:register",
+  // ADR-0225 §6: data-only glance modules (manifest.glanceModules[] through
+  // the `glance` overlay capability, ctx.glance at runtime), rendered by the
+  // host from `lib/glance/plugin-registry.ts`.
+  "glance.module": "lib/plugin/api/glance-api.ts:createGlanceAPI",
   "uri.handler": "lib/plugin/uri/uri-handler-registry.ts:registerUriHandler",
 }
 

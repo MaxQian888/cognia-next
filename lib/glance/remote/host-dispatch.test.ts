@@ -15,6 +15,7 @@ const T0 = 2_000_000
 
 const DEMAND: GlanceRemoteDemand = {
   modules: ["fleet", "quota"],
+  catalog: false,
   scope: "all",
   workspaceId: null,
   usage: { scope: "cognia", showSpend: false },

@@ -10,6 +10,8 @@ import type {
   UsageGlanceSnapshotV1,
 } from "@/lib/usage/usage-glance"
 
+import type { TrayTitleField } from "./title-format"
+
 /**
  * Native window/app actions the tray can fire directly (Rust-handled).
  * Anything not in this list goes through the slash- or command-dispatch
@@ -239,6 +241,13 @@ export interface TrayDisplayPrefs {
    * `tray_set_title` (macOS menu bar; Linux appindicator; Windows no-op).
    */
   taskbarUsageMode: TrayTaskbarUsageMode
+  /**
+   * What the `title` readout shows, in order (ADR-0225 §11). `usageMetric`
+   * and `usagePeriod` keep governing the icon badge and the tooltip; the
+   * title composes its own fields. A blob stored before this field existed
+   * migrates to the one field its metric named (`legacyTitleFields`).
+   */
+  titleFields: TrayTitleField[]
   /** Pinned subscription (`TrayUsageAccount.key`) or `null` = worst across all. */
   usageAccountKey: string | null
   /** Auto-refresh cadence in minutes; `0` = manual refresh only. */

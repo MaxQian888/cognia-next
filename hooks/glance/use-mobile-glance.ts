@@ -14,7 +14,11 @@
  * A standalone phone builds every slice from its own data. A paired phone
  * builds recents itself and takes the rest from the desktop through
  * `glancePhoneStore`, which holds a lease only while one of those modules is
- * on screen and the app is in the foreground.
+ * on screen (or the layout editor needs the desktop's plugin catalogue) and
+ * the app is in the foreground.
+ *
+ * Plugin modules (ADR-0225 §6) are the phone's own plugins when standalone,
+ * run here; the desktop's when paired, read-only.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
@@ -23,6 +27,7 @@ import type { GlanceContextValue } from "@/components/glance/glance-context"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { pinEntryHome, withEditedMobileEntries, withMobilePreset } from "@/lib/glance/layout-edit"
+import { runGlancePluginAction } from "@/lib/glance/plugin-actions"
 import { normalizeGlanceMobileSettings } from "@/lib/glance/mobile-layout"
 import { glanceMobileOwnerHref } from "@/lib/glance/owner-routes"
 import { glanceModulesFor } from "@/lib/glance/registry"
@@ -37,11 +42,15 @@ import {
   type GlanceModuleOrigin,
 } from "@/lib/glance/remote/phone-view"
 import type { GlanceRequestBody, GlancePetCommand } from "@/lib/glance/requests"
-import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
+import {
+  GLANCE_SNAPSHOT_VERSION,
+  type GlancePluginCatalogEntry,
+  type GlanceSnapshotV1,
+} from "@/lib/glance/snapshot"
 import type { PetInteractionKind } from "@/lib/pet/access/limits"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
-import type { GlanceMobileSettings, GlanceModuleId } from "@/types/glance/layout"
+import type { GlanceEntryId, GlanceMobileSettings } from "@/types/glance/layout"
 
 import { useGlanceSources } from "./use-glance-sources"
 
@@ -60,6 +69,8 @@ const PET_REMOTE_OPERATION = "pet_act"
 export interface UseMobileGlanceOptions {
   drawerOpen: boolean
   homeVisible: boolean
+  /** The layout editor is on screen: a paired phone then needs the desktop's plugin catalogue. */
+  editorOpen?: boolean
   /** Navigate on the phone. */
   navigate: (href: string) => void
   /** Resume one conversation (the shell's own session switch). */
@@ -73,7 +84,7 @@ export interface UseMobileGlanceOptions {
 export interface UseMobileGlanceResult {
   settings: GlanceMobileSettings
   glance: GlanceContextValue
-  originOf: (id: GlanceModuleId) => GlanceModuleOrigin | null
+  originOf: (id: GlanceEntryId) => GlanceModuleOrigin | null
   remote: GlancePhoneState
   /** Renders a paired desktop's data. */
   paired: boolean
@@ -81,6 +92,11 @@ export interface UseMobileGlanceResult {
   supported: boolean | null
   /** The desktop's tray layout, when one was received, for "copy from desktop". */
   hostLayout: GlanceSnapshotV1["hostLayout"] | null
+  /**
+   * The plugin modules the editor can offer: the phone's own when standalone,
+   * the desktop's (as last received) when paired.
+   */
+  pluginCatalog: readonly GlancePluginCatalogEntry[]
   /** Persist a new layout. Resolves to null or a `glance.errors.*` key. */
   save: (next: GlanceMobileSettings) => Promise<string | null>
 }
@@ -88,6 +104,7 @@ export interface UseMobileGlanceResult {
 export function useMobileGlance({
   drawerOpen,
   homeVisible,
+  editorOpen = false,
   navigate,
   openSession,
   editShortcuts,
@@ -133,14 +150,19 @@ export function useMobileGlance({
     () => phoneLocalConfig(settings, needed, paired),
     [settings, needed, paired]
   )
-  const local = useGlanceSources(onScreen, { config: localConfig, workspaceId })
+  const local = useGlanceSources(onScreen, {
+    config: localConfig,
+    workspaceId,
+    platform: "mobile",
+  })
 
   // The desktop's build, while a host-sourced module is on screen.
+  const wantsCatalog = paired && editorOpen && !hidden
   const demand = useMemo(
-    () => glanceDemandOf(settings, needed, workspaceId),
-    [settings, needed, workspaceId]
+    () => glanceDemandOf(settings, needed, workspaceId, { catalog: wantsCatalog }),
+    [settings, needed, workspaceId, wantsCatalog]
   )
-  const wantsRemote = paired && supported === true && demand.modules.length > 0
+  const wantsRemote = paired && supported === true && (demand.modules.length > 0 || demand.catalog)
   const demandKey = JSON.stringify(demand)
   // Hold the lease for as long as anything needs it, and change its demand in
   // place (opening the drawer adds modules): re-holding on every demand change
@@ -173,7 +195,7 @@ export function useMobileGlance({
   )
 
   const link = useMemo(() => ({ paired, supported, remote }), [paired, supported, remote])
-  const originOf = useCallback((id: GlanceModuleId) => phoneOriginOf(id, link), [link])
+  const originOf = useCallback((id: GlanceEntryId) => phoneOriginOf(id, link), [link])
 
   const save = useCallback(
     async (next: GlanceMobileSettings): Promise<string | null> => {
@@ -278,6 +300,11 @@ export function useMobileGlance({
             return "errors.hostUnreachable"
           }
         }
+        case "plugin-action":
+          // The desktop's plugin modules are read-only here; the phone's own
+          // run on the phone.
+          if (paired) return "errors.commandUnavailable"
+          return runGlancePluginAction(body.entryId, body.actionId)
         // The tray panel's own geometry and delegate bar: a phone has neither.
         case "set-max-height":
         case "set-width":
@@ -285,7 +312,7 @@ export function useMobileGlance({
           return "errors.requestFailed"
       }
     },
-    [fromDesktop, local.quota, petRemote, route, save, settings]
+    [fromDesktop, local.quota, paired, petRemote, route, save, settings]
   )
 
   const glance = useMemo<GlanceContextValue>(
@@ -309,18 +336,25 @@ export function useMobileGlance({
     paired,
     supported,
     hostLayout: remote.snapshot?.hostLayout ?? null,
+    pluginCatalog: snapshot.plugins?.catalog ?? NO_PLUGINS,
     save,
   }
 }
 
-/** Pin or unpin one module on the phone's home screen, as a saved edit. */
+const NO_PLUGINS: readonly GlancePluginCatalogEntry[] = []
+
+/**
+ * Pin or unpin one module on the phone's home screen, as a saved edit.
+ * `plugins` are the plugin modules that can be pinned right now.
+ */
 export function pinnedLayout(
   settings: GlanceMobileSettings,
-  id: GlanceModuleId,
-  home: boolean
+  id: GlanceEntryId,
+  home: boolean,
+  plugins: readonly GlanceEntryId[] = []
 ): GlanceMobileSettings {
   return withEditedMobileEntries(
     settings,
-    pinEntryHome(settings.entries, id, home, glanceModulesFor("mobile"))
+    pinEntryHome(settings.entries, id, home, [...glanceModulesFor("mobile"), ...plugins])
   )
 }

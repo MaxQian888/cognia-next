@@ -18,11 +18,16 @@ import type { TrayStateSnapshot } from "@/lib/tray/types"
 import type {
   GlanceActivityRange,
   GlanceLayoutEntry,
+  GlanceModuleSize,
   GlancePanelSettings,
+  GlancePluginEntryId,
   GlancePresetId,
   GlanceUsageScope,
 } from "@/types/glance/layout"
 import type { LimitsMeterKind } from "@/types/subscription"
+
+import type { GlancePluginModuleData } from "./plugin-data"
+import type { GlancePlatform } from "./registry"
 
 export const GLANCE_SNAPSHOT_VERSION = 1
 
@@ -231,6 +236,42 @@ export interface GlancePetSlice {
   bond: number
 }
 
+/* ── Plugin modules (ADR-0225 §6) ─────────────────────────────────────── */
+
+/**
+ * A plugin module a surface can offer, its title already resolved in the
+ * main window (the plugin's own i18n bundle lives there, not in the panel's
+ * webview or on a phone).
+ */
+export interface GlancePluginCatalogEntry {
+  id: GlancePluginEntryId
+  pluginId: string
+  title: string
+  /** lucide icon name, or null for the generic one. */
+  icon: string | null
+  sizes: GlanceModuleSize[]
+  platforms: GlancePlatform[]
+}
+
+/** One plugin module's published data, sanitized (`plugin-data.ts`). */
+export interface GlancePluginModuleSlice {
+  updatedAt: number
+  data: GlancePluginModuleData
+}
+
+export interface GlancePluginsSlice {
+  updatedAt: number
+  /**
+   * Every plugin module running now, for this surface's platform: what the
+   * editor's add list offers and what plugin entries are labelled with.
+   * Always present, because it is small and an editor needs it before
+   * anything is shown.
+   */
+  catalog: GlancePluginCatalogEntry[]
+  /** Data for the visible plugin entries that published any, by entry id. */
+  modules: Record<string, GlancePluginModuleSlice>
+}
+
 /* ── Whole snapshot ──────────────────────────────────────────────────── */
 
 export interface GlanceSnapshotV1 {
@@ -270,6 +311,12 @@ export interface GlanceSnapshotV1 {
   activity: GlanceActivitySlice | null
   recents: GlanceRecentsSlice | null
   pet: GlancePetSlice | null
+  /**
+   * Plugin modules. Absent on a snapshot from a desktop that predates them
+   * (a paired phone may be talking to one), which reads as "no plugin
+   * modules".
+   */
+  plugins?: GlancePluginsSlice | null
 }
 
 /** True when `next` should replace `current` (newer epoch, or same epoch and higher revision). */

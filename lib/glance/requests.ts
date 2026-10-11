@@ -4,8 +4,9 @@
  * The consumer renders and asks; the main window validates and decides. Every
  * request kind here is either a route to an owner surface or a light action
  * that ADR-0225 §1 allows on a glance surface (refresh, retry, enable a quota
- * source, change a panel option or the layout, a pet care command). None approves, stops or
- * answers anything: those stay in Agent Fleet. Delegating and running the
+ * source, change a panel option or the layout, a pet care command, one of a
+ * plugin module's own actions). None approves, stops or answers anything:
+ * those stay in Agent Fleet. Delegating and running the
  * user's quick actions keep their existing path (`tray-panel://run`).
  */
 
@@ -13,20 +14,24 @@ import {
   GLANCE_ACTIVITY_RANGES,
   GLANCE_MAX_HEIGHT_MAX,
   GLANCE_MAX_HEIGHT_MIN,
+  GLANCE_MAX_PLUGIN_ENTRIES,
   GLANCE_MODULE_IDS,
   GLANCE_MODULE_SIZES,
   GLANCE_PRESET_IDS,
   GLANCE_WIDTH_STEPS,
+  isPluginEntryId,
   type GlanceActivityRange,
   type GlanceLayoutEntry,
   type GlanceModuleId,
   type GlanceModuleSize,
+  type GlancePluginEntryId,
   type GlancePresetId,
   type GlanceScope,
   type GlanceUsageScope,
   type GlanceWidthStep,
 } from "@/types/glance/layout"
 
+import { isGlancePluginLocalId } from "./plugin-data"
 import type { GlanceOwnerSurface } from "./registry"
 
 /** Pet care commands a glance may run. Exactly the tray menu's pet submenu. */
@@ -66,6 +71,13 @@ export type GlanceRequestBody =
   /** Reset the layout to a built-in preset. */
   | { kind: "apply-preset"; preset: GlancePresetId }
   | { kind: "set-delegate-visible"; visible: boolean }
+  /**
+   * Run one action of a plugin module (ADR-0225 §6). Named by the module's
+   * entry and the action's id, never by a command: the main window looks the
+   * command up in what the plugin published, so a consumer cannot run
+   * anything the plugin did not offer.
+   */
+  | { kind: "plugin-action"; entryId: GlancePluginEntryId; actionId: string }
 
 export type GlanceRequest = GlanceRequestBody & {
   requestId: string
@@ -112,19 +124,31 @@ function isOptionalId(value: unknown): boolean {
  * beyond that is not an editor's output and is refused.
  */
 function parseEntries(value: unknown): GlanceLayoutEntry[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > GLANCE_MODULE_IDS.length) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > GLANCE_MODULE_IDS.length + GLANCE_MAX_PLUGIN_ENTRIES
+  ) {
     return null
   }
   const seen = new Set<string>()
   const out: GlanceLayoutEntry[] = []
+  let plugins = 0
   for (const item of value) {
     if (typeof item !== "object" || item === null) return null
     const e = item as Record<string, unknown>
-    if (!GLANCE_MODULE_IDS.includes(e.id as GlanceModuleId) || seen.has(e.id as string)) return null
+    const known = GLANCE_MODULE_IDS.includes(e.id as GlanceModuleId)
+    const plugin = isPluginEntryId(e.id)
+    if ((!known && !plugin) || seen.has(e.id as string)) return null
+    if (plugin && ++plugins > GLANCE_MAX_PLUGIN_ENTRIES) return null
     if (!GLANCE_MODULE_SIZES.includes(e.size as GlanceModuleSize)) return null
     if (typeof e.hidden !== "boolean") return null
     seen.add(e.id as string)
-    out.push({ id: e.id as GlanceModuleId, size: e.size as GlanceModuleSize, hidden: e.hidden })
+    out.push({
+      id: e.id as GlanceLayoutEntry["id"],
+      size: e.size as GlanceModuleSize,
+      hidden: e.hidden,
+    })
   }
   return out
 }
@@ -209,6 +233,10 @@ export function parseGlanceRequest(value: unknown): GlanceRequest | null {
     case "set-delegate-visible":
       return typeof v.visible === "boolean"
         ? { ...base, kind: "set-delegate-visible", visible: v.visible }
+        : null
+    case "plugin-action":
+      return isPluginEntryId(v.entryId) && isGlancePluginLocalId(v.actionId)
+        ? { ...base, kind: "plugin-action", entryId: v.entryId, actionId: v.actionId }
         : null
     default:
       return null

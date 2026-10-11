@@ -5,9 +5,10 @@
  * the frameless, always-on-top `usage-dock` Tauri window (ADR-0165 Phase 2).
  *
  * The window owns no Dexie and no app stores. It renders a projection the main
- * window pushes over `usage-dock://state`, exactly like the tray quick panel,
- * which is what keeps this webview least-privilege (see
- * `src-tauri/capabilities/usage-dock.json`).
+ * window pushes over `usage-dock://state`, which is what keeps this webview
+ * least-privilege (see `src-tauri/capabilities/usage-dock.json`). Budget mode
+ * draws one row per provider from the spend projection; quota mode draws one
+ * row per queried quota source from the glance quota slice (ADR-0225 §7).
  *
  * Interaction contract, shared with every other edge rail worth using:
  *   - collapsed shows the preferred provider only,
@@ -22,8 +23,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 
+import { useGlanceNow } from "@/hooks/glance/use-glance-now"
 import {
   onUsageDockGeometry,
   onUsageDockHover,
@@ -35,7 +37,7 @@ import {
   setUsageDockClickThrough,
   snapUsageDock,
 } from "@/lib/usage-dock/client"
-import { buildDockRows, collapsedRow } from "@/lib/usage-dock/rows"
+import { buildDockQuotaRows, buildDockRows, collapsedRow } from "@/lib/usage-dock/rows"
 import {
   DEFAULT_USAGE_DOCK_PREFERENCES,
   isVerticalEdge,
@@ -61,10 +63,13 @@ const SHADOW_MARGIN = 12
 
 export function UsageDockView() {
   const t = useTranslations("usageDock")
+  const tRoot = useTranslations()
+  const format = useFormatter()
   const railRef = useRef<HTMLDivElement>(null)
 
   const [state, setState] = useState<UsageDockState>({
     glance: null,
+    quota: null,
     preferences: DEFAULT_USAGE_DOCK_PREFERENCES,
   })
   const [hovering, setHovering] = useState(false)
@@ -112,17 +117,47 @@ export function UsageDockView() {
 
   const edge: DockEdge = nativeEdge ?? state.preferences.edge
 
-  const rows = useMemo(
-    () =>
-      state.glance
-        ? buildDockRows({
-            snapshot: state.glance,
-            providerIds: state.preferences.providerIds,
-            gaugeMode: state.preferences.gaugeMode,
-          })
-        : [],
-    [state.glance, state.preferences.providerIds, state.preferences.gaugeMode]
-  )
+  const quotaMode = state.preferences.gaugeMode === "quota"
+  // Reset times are relative ("in 3 h"), so they need a clock that ticks.
+  const now = useGlanceNow(quotaMode)
+  const rows = useMemo(() => {
+    if (quotaMode) return buildDockQuotaRows({ slice: state.quota })
+    return state.glance
+      ? buildDockRows({ snapshot: state.glance, providerIds: state.preferences.providerIds })
+      : []
+  }, [quotaMode, state.quota, state.glance, state.preferences.providerIds])
+
+  // A quota row names its source the way the tray panel's quota module does.
+  const rowName = (row: UsageDockRow): string => {
+    if (row.quotaState === null) return row.providerId
+    const key = `subscription.providers.${row.providerId}`
+    const provider = tRoot.has(key) ? tRoot(key) : row.providerId
+    return row.accountLabel ? t("sourceName", { provider, account: row.accountLabel }) : provider
+  }
+
+  const rowDetail = (row: UsageDockRow): string => {
+    const name = rowName(row)
+    switch (row.quotaState) {
+      case null:
+        return row.unpricedTurns > 0
+          ? t("detailPartial", { provider: name, amount: row.label, count: row.unpricedTurns })
+          : t("detail", { provider: name, amount: row.label })
+      case "stale":
+        return t("quotaStale", { provider: name, amount: row.label })
+      case "error":
+        return t("quotaError", { provider: name })
+      case "refreshing":
+        return t("quotaReading", { provider: name })
+      default:
+        return row.resetAt
+          ? t("quotaDetailReset", {
+              provider: name,
+              amount: row.label,
+              when: format.relativeTime(new Date(row.resetAt), now),
+            })
+          : t("quotaDetail", { provider: name, amount: row.label })
+    }
+  }
 
   const expanded = hovering || state.preferences.startExpanded || pinnedRow !== null
   const collapsed = collapsedRow(rows, state.preferences.preferredProviderId)
@@ -179,7 +214,14 @@ export function UsageDockView() {
 
   const headline = state.glance ? formatGlanceMetric(state.glance) : null
   const active = pinnedRow ?? detailRow
-  const activeRow = active ? rows.find((r) => r.providerId === active) : null
+  const activeRow = active ? rows.find((r) => r.key === active) : null
+  const emptyText = quotaMode
+    ? state.quota
+      ? t("emptyQuota")
+      : t("loadingQuota")
+    : state.glance
+      ? t("empty")
+      : t("loading")
 
   return (
     <div
@@ -224,24 +266,23 @@ export function UsageDockView() {
             className="px-1 py-0.5 text-[10px] text-muted-foreground"
             data-testid="usage-dock-empty"
           >
-            {state.glance ? t("empty") : t("loading")}
+            {emptyText}
           </span>
         ) : (
           visible.map((row) => (
             <button
-              key={row.providerId}
+              key={row.key}
               type="button"
-              data-testid={`usage-dock-row-${row.providerId}`}
-              aria-label={t("row", { provider: row.providerId, amount: row.label })}
-              aria-pressed={pinnedRow === row.providerId}
-              onMouseEnter={() => setDetailRow(row.providerId)}
-              onMouseLeave={() => setDetailRow((cur) => (cur === row.providerId ? null : cur))}
-              onClick={() =>
-                setPinnedRow((cur) => (cur === row.providerId ? null : row.providerId))
-              }
+              data-testid={`usage-dock-row-${row.key}`}
+              data-quota-state={row.quotaState ?? undefined}
+              aria-label={t("row", { provider: rowName(row), amount: row.label })}
+              aria-pressed={pinnedRow === row.key}
+              onMouseEnter={() => setDetailRow(row.key)}
+              onMouseLeave={() => setDetailRow((cur) => (cur === row.key ? null : cur))}
+              onClick={() => setPinnedRow((cur) => (cur === row.key ? null : row.key))}
               className={cn(
                 "flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/60",
-                pinnedRow === row.providerId && "bg-muted",
+                pinnedRow === row.key && "bg-muted",
                 vertical ? "flex-col" : "flex-row"
               )}
             >
@@ -264,7 +305,14 @@ export function UsageDockView() {
                   }
                 />
               </span>
-              <span className="truncate text-[10px] tabular-nums">{row.label}</span>
+              <span
+                className={cn(
+                  "truncate text-[10px] tabular-nums",
+                  row.quotaState !== null && row.severity === "unknown" && "text-muted-foreground"
+                )}
+              >
+                {row.label}
+              </span>
             </button>
           ))
         )}
@@ -288,13 +336,7 @@ export function UsageDockView() {
           role="status"
           className="pointer-events-none absolute bottom-1 left-1 right-1 truncate rounded-md bg-popover px-1.5 py-1 text-[10px] text-muted-foreground shadow"
         >
-          {activeRow.unpricedTurns > 0
-            ? t("detailPartial", {
-                provider: activeRow.providerId,
-                amount: activeRow.label,
-                count: activeRow.unpricedTurns,
-              })
-            : t("detail", { provider: activeRow.providerId, amount: activeRow.label })}
+          {rowDetail(activeRow)}
         </div>
       )}
     </div>

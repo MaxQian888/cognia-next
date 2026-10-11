@@ -20,6 +20,7 @@ import { GlanceLayoutEditor } from "@/components/glance/glance-layout-editor"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { glanceModulesFor } from "@/lib/glance/registry"
+import type { GlancePluginCatalogEntry } from "@/lib/glance/snapshot"
 import {
   GLANCE_WIDTH_PX,
   GLANCE_WIDTH_STEPS,
@@ -32,6 +33,8 @@ const DESKTOP_MODULES = glanceModulesFor("desktop")
 
 export interface TrayPanelEditModeProps {
   config: GlancePanelSettings
+  /** The plugin modules the snapshot offers (ADR-0225 §6). */
+  plugins?: readonly GlancePluginCatalogEntry[]
   onEntries: (entries: GlanceLayoutEntry[]) => void
   onDelegateVisible: (visible: boolean) => void
   onWidth: (width: GlanceWidthStep) => void
@@ -39,6 +42,7 @@ export interface TrayPanelEditModeProps {
 
 export function TrayPanelEditMode({
   config,
+  plugins,
   onEntries,
   onDelegateVisible,
   onWidth,
@@ -53,6 +57,7 @@ export function TrayPanelEditMode({
         entries={config.entries}
         onChange={onEntries}
         available={DESKTOP_MODULES}
+        plugins={plugins}
         density="compact"
       />
       <div className="space-y-2 border-t pt-2.5">

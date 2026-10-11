@@ -105,6 +105,7 @@ describe("plugin-sdk: contracts", () => {
       "lsp.server",
       "cli.tool",
       "tray.item",
+      "glance.module",
       "uri.handler",
     ] as const
 

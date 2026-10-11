@@ -120,6 +120,11 @@ export type { PluginDeploymentFilterDef } from "@/types/plugin/plugin-deployment
 export type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
 export type { PluginIconName } from "@/types/plugin/plugin-icon"
 export type { PluginExtensionDef } from "@/types/plugin/plugin-extension"
+export type {
+  PluginGlanceModuleSize,
+  PluginGlancePlatform,
+  PluginManifestGlanceModuleDef,
+} from "@/types/plugin/plugin-glance"
 export type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
 export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 export type { PluginLinkMatcherDef } from "@/types/plugin/plugin-link-matcher"

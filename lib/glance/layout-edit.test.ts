@@ -8,6 +8,7 @@ import {
 } from "@/types/glance/layout"
 
 import {
+  addEntry,
   hideEntry,
   moveVisible,
   pinEntryHome,
@@ -504,5 +505,49 @@ describe("withShortcuts", () => {
 
   it("keeps an emptied list", () => {
     expect(withShortcuts(settings, []).shortcuts).toEqual([])
+  })
+})
+
+describe("plugin entries (ADR-0225 §6)", () => {
+  const PLUGIN = "plugin:com.ci:status" as const
+  const base = layoutFromPreset("minimal")
+
+  it("adds a plugin module the layout never placed, shown at the end of the stack", () => {
+    const out = addEntry(base, { id: PLUGIN, size: "compact", hidden: false }, [PLUGIN])
+    const shown = out.filter((e) => !e.hidden).map((e) => e.id)
+    expect(shown.at(-1)).toBe(PLUGIN)
+    expect(out.find((e) => e.id === PLUGIN)).toEqual({ id: PLUGIN, size: "compact", hidden: false })
+  })
+
+  it("shows a placed but hidden plugin entry instead of adding a second one", () => {
+    const placed = [...base, { id: PLUGIN, size: "expanded" as const, hidden: true }]
+    const out = addEntry(placed, { id: PLUGIN, size: "compact", hidden: false }, [PLUGIN])
+    expect(out.filter((e) => e.id === PLUGIN)).toEqual([
+      { id: PLUGIN, size: "expanded", hidden: false },
+    ])
+  })
+
+  it("adds nothing that is not available", () => {
+    const out = addEntry(base, { id: PLUGIN, size: "compact", hidden: false }, [])
+    expect(out.some((e) => e.id === PLUGIN)).toBe(false)
+  })
+
+  it("resizes a plugin entry within the sizes its module declares", () => {
+    const placed = [...base, { id: PLUGIN, size: "compact" as const, hidden: false }]
+    expect(
+      resizeEntry(placed, PLUGIN, "expanded", ["compact", "standard"]).find((e) => e.id === PLUGIN)
+        ?.size
+    ).toBe("standard")
+    // Without the catalogue the size is kept for the renderer to degrade.
+    expect(resizeEntry(placed, PLUGIN, "expanded").find((e) => e.id === PLUGIN)?.size).toBe(
+      "expanded"
+    )
+  })
+
+  it("keeps plugin entries through an edit and drops them on a preset", () => {
+    const placed = [...base, { id: PLUGIN, size: "compact" as const, hidden: false }]
+    const settings = withEditedEntries(DEFAULT_GLANCE_PANEL_SETTINGS, placed)
+    expect(settings.entries.some((e) => e.id === PLUGIN)).toBe(true)
+    expect(withPreset(settings, "balanced").entries.some((e) => e.id === PLUGIN)).toBe(false)
   })
 })

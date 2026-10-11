@@ -213,6 +213,7 @@ import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
+import { createGlanceAPI } from "@/lib/plugin/api/glance-api"
 import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { requestPluginNavigation } from "@/lib/plugin/api/navigation-request"
 import { createViewContainerAPI } from "@/lib/plugin/api/view-container-api"
@@ -300,6 +301,15 @@ export function createPluginContext(
     quickActions: createQuickActionsAPI({
       pluginId,
       capabilities: plugin.manifest.capabilities ?? [],
+    }),
+    glance: createGlanceAPI({
+      pluginId,
+      capabilities: plugin.manifest.capabilities ?? [],
+      // Resolved per registration, not here: the manager hands out a fresh
+      // scope for each activation, and this context may outlive the first.
+      track: manager.getPluginDisposableScope
+        ? (dispose, label) => manager.getPluginDisposableScope(pluginId).track(dispose, label)
+        : undefined,
     }),
     window: createWindowAPI(pluginId),
     secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP, [

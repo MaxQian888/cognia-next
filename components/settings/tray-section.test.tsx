@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TraySection } from "./tray-section"
 import { __resetTrayStoreForTesting, useTrayStore } from "@/lib/tray/store"
@@ -22,6 +22,14 @@ jest.mock("@/lib/tray/usage", () => ({
   })),
 }))
 
+const osFamily = { current: "macos" }
+jest.mock("@/lib/platform/os", () => ({
+  ...jest.requireActual("@/lib/platform/os"),
+  detectDesktopOsFamily: () => osFamily.current,
+}))
+// The composed title's feeds are covered by lib/tray/title.test.ts.
+jest.mock("@/lib/tray/title", () => ({ useTrayTitle: jest.fn(() => "1D 3M · ▶2") }))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: { fallback?: string }) => vars?.fallback ?? key,
 }))
@@ -40,6 +48,7 @@ jest.mock("@/lib/tauri/store", () => ({
 }))
 
 beforeEach(() => {
+  osFamily.current = "macos"
   __resetTrayStoreForTesting()
   __resetSlashCommandsForTesting()
   useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
@@ -164,5 +173,48 @@ describe("TraySection — usage glance dimensions (ADR-0165)", () => {
   it("warns that the all-tools scope reads other agents' local files", () => {
     render(<TraySection />)
     expect(screen.getByText("usageScopeHint")).toBeInTheDocument()
+  })
+})
+
+describe("TraySection — composable menu-bar title (ADR-0225 §11)", () => {
+  beforeEach(() => {
+    __resetTrayStoreForTesting()
+  })
+
+  it("shows the field editor and the live title only in title mode", () => {
+    const { rerender } = render(<TraySection />)
+    expect(screen.queryByTestId("tray-title-fields")).not.toBeInTheDocument()
+    act(() => useTrayStore.getState().setDisplay({ taskbarUsageMode: "title" }))
+    rerender(<TraySection />)
+    expect(screen.getByTestId("tray-title-fields")).toBeInTheDocument()
+    expect(screen.getByTestId("tray-title-preview")).toHaveTextContent("preview")
+  })
+
+  it("writes edited fields to the display prefs", async () => {
+    useTrayStore
+      .getState()
+      .setDisplay({ taskbarUsageMode: "title", titleFields: [{ kind: "running" }] })
+    render(<TraySection />)
+    await userEvent.click(screen.getByLabelText("remove"))
+    expect(useTrayStore.getState().display.titleFields).toEqual([])
+  })
+
+  it("on Windows, says there is no title instead of offering an editor", () => {
+    osFamily.current = "windows"
+    useTrayStore.getState().setDisplay({ taskbarUsageMode: "title" })
+    render(<TraySection />)
+    expect(screen.getByTestId("tray-title-unsupported")).toHaveTextContent("titleUnsupported")
+    expect(screen.queryByTestId("tray-title-fields")).not.toBeInTheDocument()
+  })
+
+  it("enables the counted scope for a title with usage fields, even under the quota metric", () => {
+    useTrayStore.getState().setDisplay({
+      usageMetric: "quota",
+      taskbarUsageMode: "title",
+      titleFields: [{ kind: "usage", period: "7d", metric: "spend" }],
+    })
+    render(<TraySection />)
+    expect(screen.getByLabelText("usageScope")).toBeEnabled()
+    expect(screen.getByLabelText("usagePeriod")).toBeDisabled()
   })
 })

@@ -172,8 +172,8 @@ describe("sparklineSeries", () => {
   it("pads a short history so the shape is not misread as a spike", () => {
     const s = snap({
       daily: [
-        { day: "2026-06-04", knownCostUsd: 1, tokens: 10, turns: 1 },
-        { day: "2026-06-05", knownCostUsd: 2, tokens: 20, turns: 1 },
+        { day: "2026-06-04", knownCostUsd: 1, tokens: 10, turns: 1, unpricedTurns: 0 },
+        { day: "2026-06-05", knownCostUsd: 2, tokens: 20, turns: 1, unpricedTurns: 0 },
       ],
     })
     expect(sparklineSeries(s, 7)).toEqual([0, 0, 0, 0, 0, 1, 2])
@@ -185,12 +185,15 @@ describe("sparklineSeries", () => {
       knownCostUsd: i,
       tokens: i,
       turns: 1,
+      unpricedTurns: 0,
     }))
     expect(sparklineSeries(snap({ daily }), 3)).toEqual([7, 8, 9])
   })
 
   it("can plot tokens instead of money", () => {
-    const s = snap({ daily: [{ day: "d", knownCostUsd: 1, tokens: 99, turns: 1 }] })
+    const s = snap({
+      daily: [{ day: "d", knownCostUsd: 1, tokens: 99, turns: 1, unpricedTurns: 0 }],
+    })
     expect(sparklineSeries(s, 1, "tokens")).toEqual([99])
   })
 })

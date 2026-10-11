@@ -50,6 +50,7 @@ jest.mock("@/lib/plugin/commands/registry", () => ({
   getCommand: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+jest.mock("@/lib/glance/plugin-actions", () => ({ runGlancePluginAction: jest.fn() }))
 jest.mock("@/lib/tauri/fleet", () => ({
   isIslandWindowOpen: jest.fn(),
   openIslandWindow: jest.fn(),
@@ -93,6 +94,7 @@ import { getIslandProjection } from "@/lib/island/projection-store"
 import { requestNotificationCenter } from "@/lib/notifications/center-request"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
+import { runGlancePluginAction } from "@/lib/glance/plugin-actions"
 import { isTauri } from "@/lib/tauri"
 import { isIslandWindowOpen, openIslandWindow } from "@/lib/tauri/fleet"
 import {
@@ -125,6 +127,7 @@ const centerMock = requestNotificationCenter as jest.Mock
 const mainWindowMock = isMainAppWindow as jest.Mock
 const executeCommandMock = executeCommand as jest.Mock
 const getCommandMock = getCommand as jest.Mock
+const runPluginActionMock = runGlancePluginAction as jest.Mock
 const isTauriMock = isTauri as jest.Mock
 const islandOpenMock = isIslandWindowOpen as jest.Mock
 const openIslandMock = openIslandWindow as jest.Mock
@@ -193,6 +196,7 @@ const PHONE = "dev-A:phone-1"
 
 const PHONE_DEMAND: GlanceRemoteDemand = {
   modules: ["fleet", "usage"],
+  catalog: false,
   scope: "workspace",
   workspaceId: "p1",
   usage: { scope: "cognia", showSpend: false },
@@ -641,6 +645,20 @@ describe("executeGlanceRequest", () => {
       await expect(run(request({ kind: "pet-care", command: "pet.feed" }))).rejects.toThrow(
         "pet asleep"
       )
+    })
+  })
+
+  describe("plugin-action", () => {
+    it("runs the action through the plugin action runner and answers its result", async () => {
+      runPluginActionMock.mockResolvedValue(null)
+      await expect(
+        run(request({ kind: "plugin-action", entryId: "plugin:com.ci:status", actionId: "open" }))
+      ).resolves.toBeNull()
+      expect(runPluginActionMock).toHaveBeenCalledWith("plugin:com.ci:status", "open")
+      runPluginActionMock.mockResolvedValue("errors.commandUnavailable")
+      await expect(
+        run(request({ kind: "plugin-action", entryId: "plugin:com.ci:status", actionId: "x" }))
+      ).resolves.toBe("errors.commandUnavailable")
     })
   })
 })
@@ -1225,13 +1243,17 @@ describe("GlancePublisherInitializer", () => {
     }
 
     /** The phones' build call: the one made with options. */
-    function lastRemoteCall(): [boolean, { config: unknown; workspaceId: unknown }] | undefined {
+    function lastRemoteCall():
+      [boolean, { config: unknown; workspaceId: unknown; platform: unknown }] | undefined {
       return useGlanceSourcesMock.mock.calls.filter((call) => call.length === 2).at(-1) as never
     }
 
     it("builds nothing for phones while no lease is live", async () => {
       await mount()
-      expect(lastRemoteCall()).toEqual([false, { config: null, workspaceId: null }])
+      expect(lastRemoteCall()).toEqual([
+        false,
+        { config: null, workspaceId: null, platform: "mobile" },
+      ])
       await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
       expect(publishMock).not.toHaveBeenCalled()
       expect(glanceRemoteHub.getLatest(Date.now())).toBeNull()
@@ -1242,7 +1264,7 @@ describe("GlancePublisherInitializer", () => {
       announce()
       expect(lastRemoteCall()).toEqual([
         true,
-        { config: glanceConfigForDemand(PHONE_DEMAND), workspaceId: "p1" },
+        { config: glanceConfigForDemand(PHONE_DEMAND), workspaceId: "p1", platform: "mobile" },
       ])
       // The tray's build stays off: no tray consumer is subscribed.
       expect(lastActiveFlag()).toBe(false)
@@ -1260,10 +1282,19 @@ describe("GlancePublisherInitializer", () => {
       announce(empty)
       expect(lastRemoteCall()).toEqual([
         false,
-        { config: glanceConfigForDemand(empty), workspaceId: "p1" },
+        { config: glanceConfigForDemand(empty), workspaceId: "p1", platform: "mobile" },
       ])
       await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
       expect(publishMock).not.toHaveBeenCalled()
+    })
+
+    it("runs the build for a phone editor that only wants the plugin catalogue", async () => {
+      await mount()
+      const catalogOnly = { ...PHONE_DEMAND, modules: [], catalog: true }
+      announce(catalogOnly)
+      expect(lastRemoteCall()?.[0]).toBe(true)
+      await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+      expect(publishMock).toHaveBeenCalled()
     })
 
     it("stores each build on the hub at once, stripped for the phone", async () => {

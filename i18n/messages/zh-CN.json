@@ -18519,9 +18519,13 @@
       "homePin": "在首页显示{module}",
       "homePinned": "已显示在首页",
       "homeUnpinned": "未显示在首页",
+      "pluginOff": "插件已关闭 — {module}",
+      "pluginOffHint": "它的插件当前未运行。插件恢复后模块会回来。",
+      "pluginTag": "插件",
       "presetHint": "预设会替换模块及其顺序和尺寸，宽度、高度与选项保持不变。",
       "presetLabel": "预设：{preset}",
       "presets": "预设",
+      "remove": "移除 {module}",
       "reorder": "调整{module}的顺序",
       "shown": "已显示",
       "shownEmpty": "没有显示任何模块，可在下方添加。",
@@ -18533,6 +18537,7 @@
       "deliveryFailed": "Cognia 主窗口未响应。",
       "hostUnavailable": "桌面暂时无法提供这项数据。",
       "hostUnreachable": "无法连接到你的桌面。",
+      "pluginUnavailable": "该插件当前未运行。",
       "quotaEnable": "无法为该账号开启配额查询。",
       "quotaRefresh": "无法刷新该配额来源。",
       "requestFailed": "Cognia 无法完成该操作。",
@@ -18757,6 +18762,13 @@
       "fromHostOffline": "{host} 离线 · {age}",
       "offline": "桌面离线，尚未收到数据。",
       "unsupported": "你的桌面版本不提供这项数据。"
+    },
+    "plugin": {
+      "desktopOnly": "在桌面上操作",
+      "empty": "暂无内容",
+      "moreRows": "还有 {count} 项",
+      "unnamed": "插件模块",
+      "waiting": "正在等待插件…"
     },
     "presets": {
       "agentOps": "Agent 运维",
@@ -52353,16 +52365,48 @@
         "showUsageInMenu": "在托盘菜单中显示订阅额度",
         "showUsageInTooltip": "在托盘悬浮提示中显示额度",
         "taskbarMode": "任务栏额度显示",
-        "taskbarModeHint": "图标角标把百分比绘制到托盘图标上；标题文字显示在图标旁（macOS / Linux）。",
+        "taskbarModeHint": "图标角标把数字绘制到托盘图标上；标题在图标旁显示你选择的字段（macOS / Linux）。",
         "taskbarModes": {
           "iconBadge": "图标角标",
           "off": "关闭",
           "title": "标题文字"
         },
         "title": "显示",
+        "titleFields": {
+          "add": "添加字段",
+          "empty": "没有字段：标题保持空白。",
+          "hint": "按顺序显示在托盘图标旁。当前没有内容可报的字段会被省略。",
+          "kind": {
+            "awaiting": "等待审批",
+            "budget": "预算已用",
+            "quota": "额度已用",
+            "running": "运行中的任务",
+            "usage": "用量"
+          },
+          "label": "标题字段",
+          "max": "最多 {max} 个字段",
+          "metric": {
+            "spend": "花费",
+            "tokens": "Token"
+          },
+          "metricLabel": "{field} 统计什么",
+          "moveDown": "下移 {field}",
+          "moveUp": "上移 {field}",
+          "period": {
+            "1d": "今天",
+            "30d": "30 天",
+            "7d": "7 天"
+          },
+          "periodLabel": "{field} 的时间窗口",
+          "preview": "当前：{text}",
+          "previewEmpty": "当前没有可显示的内容",
+          "remove": "移除 {field}",
+          "usageName": "{metric} · {period}"
+        },
+        "titleUnsupported": "Windows 没有菜单栏标题。可改用图标角标，在托盘图标上显示数字。",
         "tooltipBase": "悬浮提示文本",
         "usageMetric": "任务栏数值",
-        "usageMetricHint": "菜单栏、悬浮提示与快捷面板优先显示的内容。",
+        "usageMetricHint": "图标角标与悬浮提示优先显示的内容。标题由你选择的字段组成。",
         "usagePeriod": "统计区间",
         "usageScope": "统计范围",
         "usageScopeHint": "「全部编码工具」会读取其他 Agent 的本地会话文件。它们的花费单独展示，不会计入 Cognia 预算。"
@@ -52555,7 +52599,7 @@
         "notDesktop": "用量边栏是桌面悬浮窗口，当前环境不支持。托盘用量读数仍可使用。",
         "waylandPositioning": "当前 Wayland 会话不允许应用自行摆放窗口，用量边栏无法运行。托盘用量读数仍可使用。"
       },
-      "description": "贴靠屏幕边缘的细长面板，按供应商实时展示花费。",
+      "description": "贴靠屏幕边缘的细长面板，按供应商实时展示花费，或每个账号的套餐额度。",
       "edge": "贴靠边缘",
       "edges": {
         "bottom": "底部",
@@ -52566,7 +52610,7 @@
       },
       "enabled": "显示用量边栏",
       "gauge": "指示条含义",
-      "gaugeHint": "「今日花费占比」按当天总额对比各供应商，「套餐额度」显示账号剩余额度。",
+      "gaugeHint": "「今日花费占比」按当天总额对比各供应商；「套餐额度」按每个正在查询的额度来源显示其最紧窗口的已用比例。",
       "gauges": {
         "budget": "今日花费占比",
         "quota": "套餐额度"
@@ -57636,6 +57680,18 @@
       "runningCount": "{count, plural, other {# 个会话进行中}}",
       "streaming": "回复中…"
     },
+    "title": {
+      "awaiting": "⚑{count}",
+      "budget": "预算 {pct}%",
+      "period": {
+        "1d": "1天",
+        "30d": "30天",
+        "7d": "7天"
+      },
+      "quota": "额度 {pct}%",
+      "running": "▶{count}",
+      "usage": "{period} {value}"
+    },
     "toggleWindow": "显示 / 隐藏窗口",
     "trayPanelToggle": "快捷面板",
     "usage": {
@@ -58691,9 +58747,17 @@
     "detailPartial": "{provider} · {amount} · {count, plural, other {# 项无价格}}",
     "drag": "移动边栏",
     "empty": "今天还没有花费",
+    "emptyQuota": "没有正在查询的额度来源",
     "loading": "正在读取用量…",
+    "loadingQuota": "正在读取额度…",
     "openFull": "查看完整用量",
+    "quotaDetail": "{provider} · 已用 {amount}",
+    "quotaDetailReset": "{provider} · 已用 {amount} · {when}重置",
+    "quotaError": "{provider} · 上次查询失败",
+    "quotaReading": "{provider} · 读取中…",
+    "quotaStale": "{provider} · 已用 {amount} · 数据已过期",
     "row": "{provider}：{amount}",
+    "sourceName": "{provider} · {account}",
     "title": "用量边栏"
   },
   "usageInsights": {

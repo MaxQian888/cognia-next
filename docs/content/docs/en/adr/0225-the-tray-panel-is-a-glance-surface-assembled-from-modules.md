@@ -93,7 +93,7 @@ The main window publishes one **`GlanceSnapshotV1`**: a versioned, content-free 
 Consumers:
 
 - the tray panel window, replacing today's `tray-panel://state` push;
-- the Capacity Dock, which also receives quota slices, so its `quota` gauge mode finally has data (defect 2);
+- the Capacity Dock, which also receives quota slices, so its `quota` gauge mode finally has data (defect 2; over its own push, amended in phase 4);
 - paired phones, through a `glance://update` event channel plus `glance_subscribe` / `glance_request` / `glance_quota_enable` companion commands (amended in phase 3, see below).
 
 The usage slice is computed for the panel's own period/scope/metric. It no longer depends on the tray title metric (defect 1).
@@ -135,9 +135,9 @@ Each phase is complete on its own, with co-located tests, both locales, a change
 
 ## Consequences
 
-- `tray-panel://state` and the Capacity Dock's own state push are replaced by the snapshot channel; their tests move with them.
+- `tray-panel://state` is replaced by the snapshot channel; its tests move with it. The Capacity Dock keeps its own push and gains the quota slice on it (amended in phase 4).
 - `AppSettings` gains the desktop layout field and the mobile one (`mobileGlanceLayout`); `mobileHomeLayout` is read into the latter until a phone first saves it. No Dexie table changes.
-- A new plugin point and SDK catalog entry; `pnpm audit:slots` and the plugin author-import gate cover them.
+- A new plugin point and SDK catalog entry; `plugin:contract:check` and the runtime-point reachability test (`runtime-proof-audit.test.ts`) cover them (amended in phase 4: `audit:slots` walks UI slots only).
 - Two documentation drifts are corrected: the `action-icon.tsx` reference in `lib/tray-panel/types.ts` (icons resolve through `lib/a2ui/resolve-icon`), and the `BYPASS_PREFIXES` reference in `app/tray-panel/page.tsx` (the bypass list is `lib/shell/bypass-routes.ts`).
 - Agent Fleet stays the only place to approve or stop an individual task; the panel's Fleet module is pinned by a test to expose no approval or stop control.
 
@@ -160,4 +160,14 @@ Each phase is complete on its own, with co-located tests, both locales, a change
 - The desktop advertises `glance.remote`; a headless brain answers `headless_host`, and the phone says in place that the host does not share glance.
 
 The pet joined the host-sourced subjects: its profile syncs, but whether it is on (`petSettings`) is desktop-only.
+
+## Amendment (phase 4): plugin modules, the title, the dock
+
+Phase 4 settled five points the sections above left open or got wrong:
+
+- **Plugin modules on a paired phone are read-only.** A paired phone shows the desktop's plugin modules, never its own, labelled with the host like every desktop slice; their actions render disabled with "Runs on your desktop", and no write command is added for them. The demand names plugin entries (`plugin:<pluginId>:<id>`, at most 24) and gains `catalog`, so the phone's editor can offer the desktop's plugin modules while nothing host-sourced is on screen. A phone that is not paired runs its own plugins. The demand changed before the paired-phone channel was released, so no deployed phone or desktop speaks the phase-3 shape.
+- **Plugin actions are named, not commanded.** A consumer sends `plugin-action` with the module entry and the action id; the main window looks the command up in what the plugin published and runs only that plugin's own `<pluginId>.<command>`.
+- **The Capacity Dock keeps its own push.** §7 and the consequences said the dock's push would be replaced by the snapshot channel. Its budget rows are a day's spend per provider with unpriced turns counted, which is not a glance slice, so the dock keeps `usage-dock://state` and the main window adds the glance quota slice to it, built by the panel's builder (no login discovery; refreshed on the shared throttle while the dock is up). Quota mode draws one row per queried source, its tightest window's used share, instead of one account-wide figure on every provider row.
+- **The title shows quota as used %.** §11 said "lowest remaining quota %". The panel shows quota as used %, so the title's quota field is the highest used share, the same convention (the user's choice). Title fields live in `TrayDisplayPrefs.titleFields`, next to the readout mode in Settings › Desktop › Tray rather than in the tray panel's settings (§12), and stay per desktop. A title stored before fields existed migrates to the one number its metric named. Windows offers no title option and says why.
+- **The budget readout had no number.** The tray's usage feed never folded the cost budget into its glance, so the `budget` metric left the icon badge and the tooltip blank. Every glance build now folds the same `usageGlanceBudget`.
 

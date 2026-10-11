@@ -21,6 +21,9 @@ jest.mock("@/lib/db/goals", () => ({
 // The usage feed (consumed via useTrayStateSnapshot) would hit the real
 // subscription transport — stub it to a controllable mock.
 jest.mock("./usage", () => ({ useTrayUsage: jest.fn(() => null) }))
+// The composed title has its own feeds and tests (`title.test.ts`); here only
+// what the sync hook does with its answer matters.
+jest.mock("./title", () => ({ useTrayTitle: jest.fn(() => null) }))
 jest.mock("@/lib/tauri/store", () => ({
   getPref: jest.fn(),
   setPref: jest.fn(() => Promise.resolve()),
@@ -47,9 +50,11 @@ import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 import { __resetTrayRegistryForTesting, registerTrayItem } from "./registry"
 import { DEFAULT_TRAY_ITEMS } from "./defaults"
 import { rasterizeAndRegisterTrayIcons } from "./icon-builder"
+import { useTrayTitle } from "./title"
 import { useTrayUsage } from "./usage"
 
 const useTrayUsageMock = useTrayUsage as jest.Mock
+const useTrayTitleMock = useTrayTitle as jest.Mock
 const rasterizeMock = rasterizeAndRegisterTrayIcons as jest.Mock
 
 beforeEach(() => {
@@ -58,6 +63,7 @@ beforeEach(() => {
   invoke.mockResolvedValue(undefined)
   rasterizeMock.mockClear()
   useTrayUsageMock.mockReturnValue(null)
+  useTrayTitleMock.mockReturnValue(null)
   __resetTrayStoreForTesting()
   __resetTrayRegistryForTesting()
 })
@@ -197,17 +203,23 @@ describe("useSyncTrayToRust", () => {
     expect(tooltipCall?.[1]).toEqual({ text: "Cognia · Claude Pro · 42%" })
   })
 
-  it("pushes tray_set_title in title mode and clears it when switched off", () => {
+  it("pushes the composed title and clears it when the title has nothing to say", () => {
     useTrayUsageMock.mockReturnValue(usageAt42())
+    useTrayTitleMock.mockReturnValue("1D 103.3M · ▶2")
     useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
     useTrayStore.getState().setDisplay({ taskbarUsageMode: "title" })
     const { rerender } = renderHook(() => useSyncTrayToRust())
     act(() => {
       jest.advanceTimersByTime(200)
     })
-    expect(invoke).toHaveBeenCalledWith("tray_set_title", { text: "42%" })
+    expect(invoke).toHaveBeenCalledWith("tray_set_title", { text: "1D 103.3M · ▶2" })
+    expect(useTrayTitleMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ taskbarUsageMode: "title" }),
+      expect.objectContaining({ accounts: expect.any(Array) })
+    )
 
     invoke.mockClear()
+    useTrayTitleMock.mockReturnValue(null)
     act(() => {
       useTrayStore.getState().setDisplay({ taskbarUsageMode: "off" })
     })

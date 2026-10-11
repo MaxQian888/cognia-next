@@ -11258,7 +11258,7 @@
         }
       },
       "additionalProperties": true,
-      "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
+      "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents), the plugin modules slice (plugins: the desktop's mobile catalogue and the data of the demanded plugin entries) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
       "x-cognia-wire-source": "lib/glance/snapshot.ts"
     },
     "GlanceSubscribeResponse": {

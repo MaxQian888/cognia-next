@@ -1,6 +1,9 @@
+import { GLANCE_MAX_PLUGIN_ENTRIES } from "@/types/glance/layout"
+
 import {
   GLANCE_HOST_MODULES,
   glanceRefused,
+  isGlanceHostEntry,
   isGlanceHostModule,
   isGlanceRemoteResult,
   isGlanceSubscribeResponse,
@@ -14,6 +17,7 @@ import {
 
 const DEMAND: GlanceRemoteDemand = {
   modules: ["fleet", "usage"],
+  catalog: false,
   scope: "all",
   workspaceId: null,
   usage: { scope: "cognia", showSpend: false },
@@ -54,11 +58,34 @@ describe("parseGlanceDemand", () => {
     ).toEqual(["usage", "fleet"])
   })
 
-  it("rejects a list longer than twice the host modules", () => {
-    const modules = Array.from({ length: GLANCE_HOST_MODULES.length * 2 + 1 }, () => "fleet")
+  it("rejects a list longer than twice the host modules and plugin entries it can hold", () => {
+    const limit = (GLANCE_HOST_MODULES.length + GLANCE_MAX_PLUGIN_ENTRIES) * 2
+    const modules = Array.from({ length: limit + 1 }, () => "fleet")
     expect(parseGlanceDemand({ ...DEMAND, modules })).toBeNull()
-    const atLimit = Array.from({ length: GLANCE_HOST_MODULES.length * 2 }, () => "fleet")
+    const atLimit = Array.from({ length: limit }, () => "fleet")
     expect(parseGlanceDemand({ ...DEMAND, modules: atLimit })?.modules).toEqual(["fleet"])
+  })
+
+  it("accepts plugin entries, deduplicated, up to the layout's limit", () => {
+    expect(
+      parseGlanceDemand({
+        ...DEMAND,
+        modules: ["fleet", "plugin:com.ci:status", "plugin:com.ci:status"],
+      })?.modules
+    ).toEqual(["fleet", "plugin:com.ci:status"])
+    const tooMany = Array.from(
+      { length: GLANCE_MAX_PLUGIN_ENTRIES + 1 },
+      (_, i) => `plugin:p:m${i}`
+    )
+    expect(parseGlanceDemand({ ...DEMAND, modules: tooMany })).toBeNull()
+    expect(parseGlanceDemand({ ...DEMAND, modules: ["plugin:bad id:x"] })).toBeNull()
+  })
+
+  it("reads the catalogue flag, absent meaning false, and refuses a non-boolean", () => {
+    expect(parseGlanceDemand({ ...DEMAND, catalog: true })?.catalog).toBe(true)
+    const { catalog: _omit, ...older } = DEMAND
+    expect(parseGlanceDemand(older)?.catalog).toBe(false)
+    expect(parseGlanceDemand({ ...DEMAND, catalog: "yes" })).toBeNull()
   })
 
   it.each([["recents"], ["quick"], ["bogus"], [3], [null]])(
@@ -309,5 +336,27 @@ describe("mergeGlanceDemands", () => {
       { demand: { ...DEMAND, modules: ["pet"] }, announcedAt: 2 },
     ])
     expect(input.modules).toEqual(["fleet", "usage"])
+  })
+})
+
+describe("isGlanceHostEntry", () => {
+  it("is true for host-sourced modules and plugin entries, false for the phone's own", () => {
+    expect(isGlanceHostEntry("fleet")).toBe(true)
+    expect(isGlanceHostEntry("plugin:com.ci:status")).toBe(true)
+    expect(isGlanceHostEntry("recents")).toBe(false)
+    expect(isGlanceHostEntry("quick")).toBe(false)
+  })
+})
+
+describe("mergeGlanceDemands catalogue", () => {
+  it("asks for the catalogue while any phone does", () => {
+    const merged = mergeGlanceDemands([
+      { demand: { ...DEMAND, catalog: true }, announcedAt: 1 },
+      { demand: { ...DEMAND, catalog: false }, announcedAt: 2 },
+    ])
+    expect(merged?.catalog).toBe(true)
+    expect(
+      mergeGlanceDemands([{ demand: { ...DEMAND, catalog: false }, announcedAt: 1 }])?.catalog
+    ).toBe(false)
   })
 })

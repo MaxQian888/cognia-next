@@ -93,7 +93,7 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 消费者：
 
 - 托盘面板窗口，取代现在的 `tray-panel://state` 推送；
-- Capacity Dock，同时接收配额切片，使其 `quota` 仪表模式终于有数据（缺陷 2）；
+- Capacity Dock，同时接收配额切片，使其 `quota` 仪表模式终于有数据（缺陷 2；经由其自有推送，见第四阶段修订）；
 - 已配对手机，经 `glance://update` 事件通道以及 `glance_subscribe` / `glance_request` / `glance_quota_enable` 伴侣命令（第三阶段修订，见下文）。
 
 用量切片按面板自身的周期 / 范围 / 指标计算，不再依赖托盘标题指标（缺陷 1）。
@@ -135,9 +135,9 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 
 ## 影响
 
-- `tray-panel://state` 与 Capacity Dock 自有的状态推送被快照通道取代，相应测试随之迁移。
+- `tray-panel://state` 被快照通道取代，相应测试随之迁移。Capacity Dock 保留自有推送，并在其中获得配额切片（见第四阶段修订）。
 - `AppSettings` 新增桌面布局字段与移动布局字段（`mobileGlanceLayout`）；手机第一次保存后者之前，读取时会把 `mobileHomeLayout` 读入其中。不涉及 Dexie 表变更。
-- 新增一个插件点与 SDK catalog 条目，由 `pnpm audit:slots` 与插件作者导入门禁覆盖。
+- 新增一个插件点与 SDK catalog 条目，由 `plugin:contract:check` 与运行时插件点可达性测试（`runtime-proof-audit.test.ts`）覆盖（第四阶段修订：`audit:slots` 只检查 UI 插槽）。
 - 修正两处文档漂移：`lib/tray-panel/types.ts` 中的 `action-icon.tsx` 引用（图标经 `lib/a2ui/resolve-icon` 解析），以及 `app/tray-panel/page.tsx` 中的 `BYPASS_PREFIXES` 引用（绕过列表在 `lib/shell/bypass-routes.ts`）。
 - Agent Fleet 仍是审批或停止单个任务的唯一位置；面板的 Fleet 模块由测试固定为不暴露任何审批或停止控件。
 
@@ -160,4 +160,14 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 - 桌面声明 `glance.remote`；headless 大脑回答 `headless_host`，手机会就地说明该宿主不提供速览。
 
 宠物也成为桌面来源的主题：它的档案会同步，但是否开启（`petSettings`）是桌面专属设置。
+
+## 修订（第四阶段）：插件模块、标题与 Dock
+
+第四阶段确定了上文未定或写错的五点：
+
+- **配对手机上的插件模块只读。** 已配对的手机只显示桌面端的插件模块，从不显示自己的，并像所有桌面切片一样标注宿主；它们的动作按钮显示为禁用并注明「在桌面上操作」，也不为此新增任何写命令。需求会列出插件条目（`plugin:<pluginId>:<id>`，最多 24 个），并新增 `catalog`，使手机的编辑器在屏幕上没有桌面来源模块时也能提供桌面端的插件模块。未配对的手机运行自己的插件。需求的变化发生在配对手机通道发布之前，因此没有已部署的手机或桌面使用第三阶段的格式。
+- **插件动作按名称而非命令发出。** 消费端发送 `plugin-action`，携带模块条目与动作 id；主窗口在插件发布的数据里查到命令，只运行该插件自己的 `<pluginId>.<command>`。
+- **Capacity Dock 保留自己的推送。** §7 与后果一节说 Dock 的推送会被快照通道取代。它的预算行是按供应商统计的当日花费并计入未定价轮次，不是速览切片，所以 Dock 保留 `usage-dock://state`，主窗口在其中附加速览额度切片，使用与面板相同的构建器（不做登录发现；Dock 显示期间按共享节流刷新）。额度模式改为每个正在查询的来源一行，取其最紧窗口的已用比例，而不是在每个供应商行上显示同一个账户级数值。
+- **标题中的额度显示为已用 %。** §11 写的是「最低剩余额度 %」。面板以已用 % 显示额度，因此标题的额度字段取最高的已用比例，口径一致（用户的选择）。标题字段保存在 `TrayDisplayPrefs.titleFields`，位于 设置 › 桌面 › 托盘 中读数模式旁，而非托盘面板的设置（§12），并且按桌面区分。字段出现之前保存的标题会迁移为其原指标对应的那一个数字。Windows 不提供标题选项，并说明原因。
+- **预算读数原本没有数字。** 托盘的用量数据源从未把花费预算并入其速览，所以 `budget` 指标让图标角标与悬浮提示一直为空。现在每次速览构建都并入同一个 `usageGlanceBudget`。
 

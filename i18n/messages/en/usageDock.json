@@ -3,8 +3,16 @@
   "detailPartial": "{provider} · {amount} · {count, plural, other {# unpriced}}",
   "drag": "Move the dock",
   "empty": "No spend yet today",
+  "emptyQuota": "No quota source is queried",
   "loading": "Reading usage…",
+  "loadingQuota": "Reading quota…",
   "openFull": "Open full usage",
+  "quotaDetail": "{provider} · {amount} used",
+  "quotaDetailReset": "{provider} · {amount} used · resets {when}",
+  "quotaError": "{provider} · the last query failed",
+  "quotaReading": "{provider} · reading…",
+  "quotaStale": "{provider} · {amount} used · out of date",
   "row": "{provider}: {amount}",
+  "sourceName": "{provider} · {account}",
   "title": "Capacity Dock"
 }

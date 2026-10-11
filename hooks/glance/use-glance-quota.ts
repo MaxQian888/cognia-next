@@ -120,12 +120,27 @@ export interface UseGlanceQuotaResult {
 export interface UseGlanceQuotaOptions {
   /** Read the table and the vault only: no refreshes, no discovery. */
   passive?: boolean
+  /**
+   * Look for logins on this machine that are not in the vault. On by default
+   * (unless passive). A surface that only draws queried sources, like the
+   * Capacity Dock, turns it off: it would probe a keychain for rows it never
+   * shows.
+   */
+  discover?: boolean
+  /**
+   * Re-run the throttled refresh on this interval while enabled. For a
+   * surface that stays on screen for hours (the Capacity Dock); a panel that
+   * opens and closes refreshes on open instead. The shared throttle still
+   * applies, so a short interval cannot query a provider more often than any
+   * other quota surface would.
+   */
+  pollMs?: number
 }
 
 export function useGlanceQuota(
   enabled: boolean,
   now: number,
-  { passive = false }: UseGlanceQuotaOptions = {}
+  { passive = false, discover = !passive, pollMs }: UseGlanceQuotaOptions = {}
 ): UseGlanceQuotaResult {
   const enabledAccounts = useSettingsStore((s) => s.settings?.limitsQueryEnabledAccounts)
   const customSources = useSettingsStore((s) => s.settings?.customLimitsSources)
@@ -171,11 +186,16 @@ export function useGlanceQuota(
       loadVault()
       if (!passive) void refreshConfigured()
     })
+    const poll =
+      !passive && pollMs !== undefined && pollMs > 0
+        ? setInterval(() => void refreshConfigured(), pollMs)
+        : null
     return () => {
       disposed = true
       unsubscribe()
+      if (poll) clearInterval(poll)
     }
-  }, [enabled, passive, refreshConfigured])
+  }, [enabled, passive, pollMs, refreshConfigured])
 
   // Discovery, gated: only providers the vault has nothing for, at most every
   // 10 minutes, never with a keychain prompt. The vault is read through a ref
@@ -189,7 +209,7 @@ export function useGlanceQuota(
     vaultProvidersRef.current = vaultProviders
   }, [vaultProviders])
   useEffect(() => {
-    if (!enabled || passive || !isTauri()) return
+    if (!enabled || passive || !discover || !isTauri()) return
     let cancelled = false
     const probe = async () => {
       if (Date.now() - lastDiscoveryAt.current < GLANCE_DISCOVERY_INTERVAL_MS) return
@@ -215,7 +235,7 @@ export function useGlanceQuota(
       // An interrupted probe never landed, so the next enable probes again.
       lastDiscoveryAt.current = 0
     }
-  }, [enabled, passive])
+  }, [enabled, passive, discover])
 
   const markRefreshing = useCallback((key: string, on: boolean) => {
     setRefreshingKeys((prev) => {

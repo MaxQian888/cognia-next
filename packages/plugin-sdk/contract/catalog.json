@@ -581,6 +581,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "glance",
+      "support": "supported",
+      "manifestFields": ["glanceModules"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "automation",
       "support": "experimental",
       "manifestFields": [],
@@ -683,6 +690,7 @@
     "contextPanels[].labelKey",
     "extensions[].labelKey",
     "trayItems[].labelKey",
+    "glanceModules[].titleKey",
     "commands[].descriptionKey",
     "piPackages[].nameKey",
     "piPackages[].descriptionKey",
@@ -1334,6 +1342,11 @@
     {
       "field": "trayItems",
       "capabilities": ["tray"],
+      "execution": "host"
+    },
+    {
+      "field": "glanceModules",
+      "capabilities": ["glance"],
       "execution": "host"
     },
     {
@@ -6764,6 +6777,61 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "glance",
+      "authorPath": "ctx.glance",
+      "type": "PluginGlanceAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.glance",
+      "enforcement": "shadow",
+      "dataClassification": "internal",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "glance.register",
+          "name": "register",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "glance.update",
+          "name": "update",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "glance.onVisibilityChange",
+          "name": "onVisibilityChange",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
           }
         }
       ]

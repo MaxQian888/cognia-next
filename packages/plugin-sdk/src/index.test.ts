@@ -72,6 +72,7 @@ describe("plugin-sdk root barrel", () => {
       "defineImRateSource",
       "defineCompactionStrategy",
       "defineTrayItem",
+      "defineGlanceModule",
     ]
 
     for (const helperExport of helperExports) {

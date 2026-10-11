@@ -72,6 +72,11 @@ export interface UsageGlanceBucket {
   knownCostUsd: number
   tokens: number
   turns: number
+  /**
+   * Turns that day whose price was unknown, so a total over any run of days
+   * can still say "at least" or "unknown" instead of passing for exact.
+   */
+  unpricedTurns: number
 }
 
 export interface UsageGlanceLeader {
@@ -276,10 +281,17 @@ export function buildUsageGlance(input: BuildUsageGlanceInput): UsageGlanceSnaps
     if (row.sourceId) bump(sources, row.sourceId, cost, rowTokens)
 
     const day = localDay(row.at)
-    const bucket = buckets.get(day) ?? { day, knownCostUsd: 0, tokens: 0, turns: 0 }
+    const bucket = buckets.get(day) ?? {
+      day,
+      knownCostUsd: 0,
+      tokens: 0,
+      turns: 0,
+      unpricedTurns: 0,
+    }
     bucket.knownCostUsd += cost.known ? cost.cost : 0
     bucket.tokens += rowTokens
     bucket.turns += 1
+    if (!cost.known) bucket.unpricedTurns += 1
     buckets.set(day, bucket)
   }
 

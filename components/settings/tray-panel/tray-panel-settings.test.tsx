@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useLocale: () => "en",
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -32,6 +33,7 @@ import { getTrayPanelConfig, openTrayPanel, setTrayLeftClickAction } from "@/lib
 import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
 import { toast } from "sonner"
 import { withEditedEntries } from "@/lib/glance/layout-edit"
+import { glancePluginModules } from "@/lib/glance/plugin-registry"
 import {
   desktopEntriesFromMobile,
   mobileLayoutFromPreset,
@@ -338,6 +340,26 @@ describe("TrayPanelSettings", () => {
           .getAllByTestId(/^glance-editor-row-/)
           .map((el) => el.getAttribute("data-testid")?.replace("glance-editor-row-", ""))
       ).toEqual(["fleet", "usage", "quota", "agenda", "activity", "quick"])
+    })
+
+    it("offers the desktop's running plugin modules in the add list", () => {
+      glancePluginModules.register("test.settings", { id: "ci", title: "CI status" })
+      glancePluginModules.register("test.settings", {
+        id: "phone",
+        title: "Phone only",
+        platforms: ["mobile"],
+      })
+      try {
+        render(<TrayPanelSettings />)
+        expect(
+          screen.getByTestId("glance-editor-hidden-plugin:test.settings:ci")
+        ).toHaveTextContent("CI status")
+        expect(
+          screen.queryByTestId("glance-editor-hidden-plugin:test.settings:phone")
+        ).not.toBeInTheDocument()
+      } finally {
+        glancePluginModules.unregisterAllByPlugin("test.settings")
+      }
     })
 
     it("hides a module and saves the layout as custom", async () => {

@@ -6,7 +6,7 @@ import {
   GLANCE_REMOTE_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
 } from "@/lib/platform/host-feature-manifest"
-import { GLANCE_ACTIVITY_RANGES } from "@/types/glance/layout"
+import { GLANCE_ACTIVITY_RANGES, GLANCE_MAX_PLUGIN_ENTRIES } from "@/types/glance/layout"
 import {
   GLANCE_REMOTE_COMMANDS,
   GLANCE_REMOTE_COMMAND_NAMES,
@@ -36,6 +36,7 @@ type Schema = {
   properties?: Record<string, Schema>
   items?: Schema
   enum?: string[]
+  pattern?: string
   maxItems?: number
   minLength?: number
   maxLength?: number
@@ -106,9 +107,19 @@ describe("glance remote commands", () => {
     expect(subscribe.properties!.consumer!.maxLength).toBe(64)
     const demand = subscribe.properties!.demand!
     expect(demand.additionalProperties).toBe(false)
-    expect(demand.properties!.modules!.items!.enum).toEqual([...GLANCE_HOST_MODULES])
-    // `parseGlanceDemand` accepts up to twice the module list (duplicates fold).
-    expect(demand.properties!.modules!.maxItems).toBe(GLANCE_HOST_MODULES.length * 2)
+    const [hostModules, pluginEntries] = demand.properties!.modules!.items!.oneOf!
+    expect(hostModules.enum).toEqual([...GLANCE_HOST_MODULES])
+    // The same plugin entry ids `isPluginEntryId` accepts.
+    const plugin = new RegExp(pluginEntries.pattern as string)
+    expect(plugin.test("plugin:com.ci:status")).toBe(true)
+    expect(plugin.test("plugin:a b:c")).toBe(false)
+    // `parseGlanceDemand` accepts up to twice the modules and plugin entries
+    // a layout can hold (duplicates fold).
+    expect(demand.properties!.modules!.maxItems).toBe(
+      (GLANCE_HOST_MODULES.length + GLANCE_MAX_PLUGIN_ENTRIES) * 2
+    )
+    expect(demand.properties!.catalog!.type).toBe("boolean")
+    expect(demand.required).not.toContain("catalog")
     expect(demand.properties!.activity!.properties!.range!.enum).toEqual([
       ...GLANCE_ACTIVITY_RANGES,
     ])

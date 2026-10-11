@@ -80,6 +80,8 @@ import { resolveTrayPanelActions } from "@/lib/tray-panel/catalogue"
 import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
 import type { TrayPanelAction } from "@/lib/tray-panel/types"
 
+import { glancePluginModules } from "@/lib/glance/plugin-registry"
+
 import { GLANCE_TICK_MS, useGlanceSources } from "./use-glance-sources"
 
 const useLiveQueryMock = useLiveQuery as unknown as jest.Mock
@@ -984,6 +986,82 @@ describe("useGlanceSources", () => {
       settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
       const { result } = render(true)
       expect(result.current.body.fleet?.workflows).toEqual(NO_RUNNING_WORKFLOWS)
+    })
+  })
+
+  describe("plugin modules (ADR-0225 §6)", () => {
+    const PLUGIN = "test.glance"
+
+    beforeEach(() => {
+      glancePluginModules.register(PLUGIN, {
+        id: "status",
+        title: "Build status",
+        icon: "GitBranch",
+        sizes: ["compact", "expanded"],
+      })
+      glancePluginModules.register(PLUGIN, { id: "desk", title: "Desk", platforms: ["desktop"] })
+      glancePluginModules.update(PLUGIN, "status", { summary: "green" }, NOW - 5)
+    })
+
+    afterEach(() => {
+      glancePluginModules.unregisterAllByPlugin(PLUGIN)
+    })
+
+    function withPluginVisible() {
+      settingsState.settings = {
+        trayPanelLayout: {
+          ...layoutWith(["fleet"]),
+          entries: [
+            { id: "fleet", size: "standard", hidden: false },
+            { id: `plugin:${PLUGIN}:status`, size: "expanded", hidden: false },
+          ],
+        },
+      }
+    }
+
+    it("offers the catalogue even while nothing is on screen, without data", () => {
+      const { result } = render(false)
+      expect(result.current.body.plugins?.catalog.map((c) => c.id)).toEqual([
+        `plugin:${PLUGIN}:status`,
+        `plugin:${PLUGIN}:desk`,
+      ])
+      expect(result.current.body.plugins?.modules).toEqual({})
+    })
+
+    it("carries data for a visible plugin entry while active and says it is on screen", () => {
+      withPluginVisible()
+      const { result, unmount } = render(true)
+      expect(result.current.body.plugins?.modules).toEqual({
+        [`plugin:${PLUGIN}:status`]: { updatedAt: NOW - 5, data: { summary: "green" } },
+      })
+      expect(glancePluginModules.isVisible(`plugin:${PLUGIN}:status`)).toBe(true)
+      unmount()
+      expect(glancePluginModules.isVisible(`plugin:${PLUGIN}:status`)).toBe(false)
+    })
+
+    it("withdraws the on-screen report when the consumer goes away", () => {
+      withPluginVisible()
+      const { rerender } = render(true)
+      rerender({ on: false })
+      expect(glancePluginModules.isVisible(`plugin:${PLUGIN}:status`)).toBe(false)
+    })
+
+    it("rebuilds when the plugin publishes new data", () => {
+      withPluginVisible()
+      const { result } = render(true)
+      act(() => {
+        glancePluginModules.update(PLUGIN, "status", { summary: "red" }, NOW)
+      })
+      expect(result.current.body.plugins?.modules[`plugin:${PLUGIN}:status`]?.data).toEqual({
+        summary: "red",
+      })
+    })
+
+    it("offers only mobile modules to a mobile build", () => {
+      const { result } = renderHook(() => useGlanceSources(false, { platform: "mobile" }))
+      expect(result.current.body.plugins?.catalog.map((c) => c.id)).toEqual([
+        `plugin:${PLUGIN}:status`,
+      ])
     })
   })
 })

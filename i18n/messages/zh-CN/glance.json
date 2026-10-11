@@ -16,7 +16,11 @@
     "size": "{module}的尺寸",
     "homePin": "在首页显示{module}",
     "homePinned": "已显示在首页",
-    "homeUnpinned": "未显示在首页"
+    "homeUnpinned": "未显示在首页",
+    "pluginOff": "插件已关闭 — {module}",
+    "pluginOffHint": "它的插件当前未运行。插件恢复后模块会回来。",
+    "remove": "移除 {module}",
+    "pluginTag": "插件"
   },
   "errors": {
     "commandUnavailable": "该命令暂不可用。",
@@ -26,7 +30,8 @@
     "requestFailed": "Cognia 无法完成该操作。",
     "timeout": "Cognia 主窗口未及时响应。",
     "hostUnavailable": "桌面暂时无法提供这项数据。",
-    "hostUnreachable": "无法连接到你的桌面。"
+    "hostUnreachable": "无法连接到你的桌面。",
+    "pluginUnavailable": "该插件当前未运行。"
   },
   "modules": {
     "activity": {
@@ -263,5 +268,12 @@
     },
     "title": "速览",
     "updated": "更新于{when}"
+  },
+  "plugin": {
+    "unnamed": "插件模块",
+    "waiting": "正在等待插件…",
+    "empty": "暂无内容",
+    "moreRows": "还有 {count} 项",
+    "desktopOnly": "在桌面上操作"
   }
 }

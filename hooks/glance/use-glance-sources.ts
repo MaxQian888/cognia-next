@@ -16,8 +16,9 @@
  * consumer that becomes visible needs them before anything else.
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useId, useMemo, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useLocale, useTranslations } from "next-intl"
 
 import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 import { useUsageGlance } from "@/hooks/usage/use-usage-glance"
@@ -30,9 +31,16 @@ import {
   summarizeRunningWorkflows,
 } from "@/lib/glance/build-fleet"
 import { buildPetSlice } from "@/lib/glance/build-pet"
+import { buildPluginsSlice } from "@/lib/glance/build-plugins"
+import { glancePluginModules } from "@/lib/glance/plugin-registry"
 import { buildRecentsSlice, type RecentSessionInput } from "@/lib/glance/build-recents"
 import { buildUsageSlice } from "@/lib/glance/build-usage"
-import { normalizeGlancePanelSettings, visibleModuleIds } from "@/lib/glance/presets"
+import {
+  normalizeGlancePanelSettings,
+  visibleModuleIds,
+  visiblePluginEntryIds,
+} from "@/lib/glance/presets"
+import type { GlancePlatform } from "@/lib/glance/registry"
 import type { GlanceFleetWorkflows, GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import { resolveTrayPanelActions } from "@/lib/tray-panel/catalogue"
 import {
@@ -41,7 +49,9 @@ import {
   subscribeIslandProjection,
 } from "@/lib/island/projection-store"
 import { useTrayStateSnapshot } from "@/lib/tray/state-snapshot"
-import type { UsageGlanceBudget, UsageGlanceQuery } from "@/lib/usage/usage-glance"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
+import { usageGlanceBudget } from "@/lib/usage/cost-budget"
+import type { UsageGlanceQuery } from "@/lib/usage/usage-glance"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -49,10 +59,10 @@ import type { GlanceModuleId, GlancePanelSettings } from "@/types/glance/layout"
 
 import { useGlanceActivity } from "./use-glance-activity"
 import { useGlanceAgenda } from "./use-glance-agenda"
+import { useGlanceNow } from "./use-glance-now"
 import { useGlanceQuota, type UseGlanceQuotaResult } from "./use-glance-quota"
 
-/** How often relative states (stale, "in 14 h") are re-evaluated while visible. */
-export const GLANCE_TICK_MS = 30_000
+export { GLANCE_TICK_MS } from "./use-glance-now"
 
 const RECENTS_SCAN = 40
 
@@ -66,24 +76,6 @@ export interface UseGlanceSourcesResult {
   quota: UseGlanceQuotaResult
   /** Re-read the external usage index (all-tools scope only). */
   refreshUsage: () => Promise<void>
-}
-
-/** A ticking clock while `active`, frozen otherwise. */
-function useGlanceNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!active) return
-    const tick = () => setNow(Date.now())
-    // Re-read immediately on becoming visible, so a panel opened after an hour
-    // closed does not judge freshness against the time it was last open.
-    const first = setTimeout(tick, 0)
-    const timer = setInterval(tick, GLANCE_TICK_MS)
-    return () => {
-      clearTimeout(first)
-      clearInterval(timer)
-    }
-  }, [active])
-  return now
 }
 
 export interface UseGlanceSourcesOptions {
@@ -105,11 +97,22 @@ export interface UseGlanceSourcesOptions {
    * the usage slice reports (`workspaceFiltered: false`).
    */
   workspaceId?: string | null
+  /**
+   * The platform the build is for: which plugin modules are offered
+   * (ADR-0225 §6). The desktop's build for paired phones and a phone's own
+   * build say `mobile`.
+   */
+  platform?: GlancePlatform
 }
 
 export function useGlanceSources(
   active: boolean,
-  { passive = false, config: configOverride = null, workspaceId }: UseGlanceSourcesOptions = {}
+  {
+    passive = false,
+    config: configOverride = null,
+    workspaceId,
+    platform = "desktop",
+  }: UseGlanceSourcesOptions = {}
 ): UseGlanceSourcesResult {
   const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
   const config = useMemo(
@@ -178,16 +181,7 @@ export function useGlanceSources(
     [usageScope]
   )
   const budgetStatus = useCostBudgetStatus()
-  const budget = useMemo<UsageGlanceBudget | null>(() => {
-    const worst = budgetStatus.worst
-    if (!worst) return null
-    return {
-      ratio: worst.ratio,
-      target: worst.target,
-      period: worst.period,
-      blocked: worst.level === "exceeded",
-    }
-  }, [budgetStatus.worst])
+  const budget = useMemo(() => usageGlanceBudget(budgetStatus.worst), [budgetStatus.worst])
   const { snapshot: usageGlance, refresh: refreshUsage } = useUsageGlance({
     query: usageQuery,
     enabled: usageOn,
@@ -235,6 +229,48 @@ export function useGlanceSources(
     null
   )
 
+  // Plugin modules: the catalogue always (an editor needs it before anything
+  // is shown), data for the visible ones while a consumer looks. This build
+  // reports what it shows, so a plugin knows when it may stop computing.
+  const tRoot = useTranslations()
+  // Titles follow the language, not the translator's identity (which is not
+  // guaranteed stable across renders).
+  const locale = useLocale()
+  const pluginVersion = useSyncExternalStore(
+    glancePluginModules.subscribe,
+    glancePluginModules.getVersion,
+    glancePluginModules.getVersion
+  )
+  const visiblePluginKey = visiblePluginEntryIds(config.entries).join("\n")
+  const visiblePlugins = useMemo(
+    () =>
+      (visiblePluginKey ? visiblePluginKey.split("\n") : []) as ReturnType<
+        typeof visiblePluginEntryIds
+      >,
+    [visiblePluginKey]
+  )
+  const buildId = useId()
+  useEffect(() => {
+    glancePluginModules.setOnScreen(buildId, active ? visiblePlugins : null)
+  }, [buildId, active, visiblePlugins])
+  useEffect(() => () => glancePluginModules.setOnScreen(buildId, null), [buildId])
+  const plugins = useMemo(
+    () =>
+      buildPluginsSlice({
+        catalog: glancePluginModules.catalog(),
+        dataOf: (id) => glancePluginModules.dataOf(id),
+        visible: active ? visiblePlugins : [],
+        platform,
+        resolveTitle: (entry) =>
+          resolvePluginLabel(tRoot, entry.pluginId, entry.def.titleKey, entry.def.title),
+        now,
+      }),
+    // `pluginVersion` is the registry's change signal (catalogue or data moved)
+    // and `locale` the translator's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pluginVersion, active, visiblePlugins, platform, locale, now]
+  )
+
   const body = useMemo<GlanceSnapshotBody>(
     () => ({
       generatedAt: now,
@@ -257,6 +293,7 @@ export function useGlanceSources(
       activity,
       recents: recentsOn ? buildRecentsSlice(recentRows, activeSessionId, now) : null,
       pet: petOn ? buildPetSlice(petEnabled, petProfile, now) : null,
+      plugins,
     }),
     [
       now,
@@ -280,6 +317,7 @@ export function useGlanceSources(
       petOn,
       petEnabled,
       petProfile,
+      plugins,
     ]
   )
 

@@ -76,6 +76,12 @@ jest.mock("@cognia/logging", () => ({
 // `invokeMock.mockRejectedValueOnce` the desktop-action tests arm for the
 // "Ping Rust" button. Its own behaviour is covered by
 // `components/settings/tray-panel/tray-panel-settings.test.tsx`.
+// The panel settings themselves build glance sources (stores, Dexie, the
+// island projection); this page only mounts them. Their behaviour is covered by
+// `tray-panel-settings.test.tsx`.
+jest.mock("./tray-panel/tray-panel-settings", () => ({
+  TrayPanelSettings: () => <div data-testid="tray-panel-settings-stub" />,
+}))
 jest.mock("@/lib/tauri/tray-panel", () => ({
   DEFAULT_TRAY_PANEL_CONFIG: { leftClick: "panel", width: 380, height: 460 },
   getTrayPanelConfig: jest.fn().mockResolvedValue({ leftClick: "panel", width: 380, height: 460 }),

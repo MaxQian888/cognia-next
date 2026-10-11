@@ -38,6 +38,7 @@ import {
 import { toast } from "sonner"
 
 import { GlanceLayoutEditor } from "@/components/glance/glance-layout-editor"
+import { useGlancePluginCatalog } from "@/hooks/glance/use-glance-plugin-catalog"
 import { GlancePresetMenu } from "@/components/glance/glance-preset-menu"
 import { useTrayPanelActions } from "@/hooks/tray-panel/use-tray-panel-actions"
 
@@ -94,6 +95,7 @@ const SCOPES: GlanceScope[] = ["all", "workspace"]
 export function TrayPanelSettings() {
   const t = useTranslations("settings.trayPanel")
   const tRoot = useTranslations()
+  const pluginCatalog = useGlancePluginCatalog("desktop")
 
   const {
     actions,
@@ -212,6 +214,7 @@ export function TrayPanelSettings() {
               entries={layout.entries}
               onChange={(entries) => saveLayout(withEditedEntries(layout, entries))}
               available={DESKTOP_MODULES}
+              plugins={pluginCatalog}
             />
             <SettingsField
               htmlFor="tray-panel-delegate"

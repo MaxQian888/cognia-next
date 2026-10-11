@@ -108,6 +108,15 @@ export type {
   PluginRunTeamOptions,
   PluginRunTeamResult,
 } from "@/types/plugin/plugin-agent-sdk"
+export type {
+  PluginGlanceAPI,
+  PluginGlanceAction,
+  PluginGlanceModuleData,
+  PluginGlanceModuleInput,
+  PluginGlanceRow,
+  PluginGlanceStat,
+  PluginGlanceTone,
+} from "@/types/plugin/plugin-glance"
 export type { PluginAgentGuardrailsAPI } from "@/types/plugin/plugin-agent-guardrails"
 export type {
   PluginAgentSessionsAPI,

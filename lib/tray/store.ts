@@ -21,6 +21,7 @@ import {
   TRAY_TOOLTIP_PREF,
 } from "./defaults"
 import { retiredNativeReplacement } from "./native-actions"
+import { legacyTitleFields, normalizeTitleFields } from "./title-format"
 import type { TrayDisplayPrefs, TrayIconState, TrayMenuItem } from "./types"
 
 interface TrayState {
@@ -95,9 +96,22 @@ export function migrateRetiredNativePayloads(stored: TrayMenuItem[]): TrayMenuIt
   return changed ? out : stored
 }
 
-/** Merge a stored (possibly partial / stale-shaped) prefs blob over defaults. */
-function mergeDisplay(stored: Partial<TrayDisplayPrefs> | null | undefined): TrayDisplayPrefs {
-  return { ...DEFAULT_TRAY_DISPLAY, ...(stored ?? {}) }
+/**
+ * Merge a stored (possibly partial / stale-shaped) prefs blob over defaults.
+ *
+ * Title fields are normalized rather than spread: a malformed list must not
+ * reach the formatter. A blob written before the title was composable has no
+ * list at all and migrates to the one field its metric named, so an upgraded
+ * install keeps the title it had (ADR-0225 §11).
+ */
+export function mergeDisplay(
+  stored: Partial<TrayDisplayPrefs> | null | undefined
+): TrayDisplayPrefs {
+  const merged: TrayDisplayPrefs = { ...DEFAULT_TRAY_DISPLAY, ...(stored ?? {}) }
+  const fields = normalizeTitleFields(stored?.titleFields)
+  merged.titleFields =
+    fields ?? (stored ? legacyTitleFields(merged) : [...DEFAULT_TRAY_DISPLAY.titleFields])
+  return merged
 }
 
 export const useTrayStore = create<TrayState>((set, get) => ({

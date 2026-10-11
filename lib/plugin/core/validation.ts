@@ -73,6 +73,7 @@ import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifes
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
 import { validateTemplatePackageManifest } from "@/lib/templates/package-manifest"
 import { isValidLinkMatcherPattern } from "@/lib/plugin/api/link-matchers"
+import { GLANCE_PLUGIN_LIMITS, isGlancePluginLocalId } from "@/lib/glance/plugin-data"
 import {
   validatePetAchievementDef,
   validatePetItemDef,
@@ -621,6 +622,92 @@ function validateDeclarativeTrayItems(
         "manifest.trayItems.when.invalid",
         `${field}.when must be a string`
       )
+    }
+  })
+}
+
+const GLANCE_MODULE_SIZE_VALUES = new Set(["compact", "standard", "expanded"])
+const GLANCE_MODULE_PLATFORM_VALUES = new Set(["desktop", "mobile"])
+
+/**
+ * `manifest.glanceModules[]` (ADR-0225 §6). The host registry sanitizes a
+ * declaration again at enable time and drops one it cannot use; refusing it
+ * here tells the author why instead of the module silently never appearing.
+ */
+function validateDeclarativeGlanceModules(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const raw = (manifest as unknown as Record<string, unknown>).glanceModules
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    pushError(
+      "glanceModules",
+      "manifest.glanceModules.invalid_type",
+      '"glanceModules" must be an array if provided'
+    )
+    return
+  }
+  if (raw.length > GLANCE_PLUGIN_LIMITS.modulesPerPlugin) {
+    pushError(
+      "glanceModules",
+      "manifest.glanceModules.too_many",
+      `"glanceModules" may declare at most ${GLANCE_PLUGIN_LIMITS.modulesPerPlugin} modules`
+    )
+  }
+  const seen = new Set<string>()
+  raw.forEach((item, index) => {
+    const field = `glanceModules[${index}]`
+    if (!isPlainObject(item)) {
+      pushError(field, "manifest.glanceModules.invalid_item", `${field} must be an object`)
+      return
+    }
+    if (!isGlancePluginLocalId(item.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.glanceModules.id.invalid",
+        `${field}.id must be letters, digits, ".", "_" or "-", starting with a letter or digit (at most ${GLANCE_PLUGIN_LIMITS.id} characters)`
+      )
+    } else if (seen.has(item.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.glanceModules.id.duplicate",
+        `${field}.id "${item.id}" is declared more than once`
+      )
+    } else {
+      seen.add(item.id)
+    }
+    if (typeof item.title !== "string" || item.title.trim().length === 0) {
+      pushError(
+        `${field}.title`,
+        "manifest.glanceModules.title.missing",
+        `${field} requires a fallback "title"`
+      )
+    }
+    if (item.titleKey !== undefined && typeof item.titleKey !== "string") {
+      pushError(
+        `${field}.titleKey`,
+        "manifest.glanceModules.titleKey.invalid",
+        `${field}.titleKey must be a string`
+      )
+    }
+    for (const [key, allowed, code] of [
+      ["sizes", GLANCE_MODULE_SIZE_VALUES, "manifest.glanceModules.sizes.invalid"],
+      ["platforms", GLANCE_MODULE_PLATFORM_VALUES, "manifest.glanceModules.platforms.invalid"],
+    ] as const) {
+      const value = item[key]
+      if (value === undefined) continue
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.some((entry) => typeof entry !== "string" || !allowed.has(entry))
+      ) {
+        pushError(
+          `${field}.${key}`,
+          code,
+          `${field}.${key} must be a non-empty array of ${[...allowed].map((v) => `"${v}"`).join(", ")}`
+        )
+      }
     }
   })
 }
@@ -1195,6 +1282,7 @@ const NATIVE_LUCIDE_ICON_PATHS = [
   "modes[].icon",
   "quickActions[].icon",
   "trayItems[].icon",
+  "glanceModules[].icon",
   "viewsContainers[].icon",
   "a2uiComponents[].icon",
   "a2uiTemplates[].icon",
@@ -2593,6 +2681,7 @@ export function validatePluginManifest(
 
   validateDeclarativeExtensions(m as unknown as PluginManifest, pushError)
   validateDeclarativeTrayItems(m as unknown as PluginManifest, pushError)
+  validateDeclarativeGlanceModules(m as unknown as PluginManifest, pushError)
   validateIntegrations(m as unknown as PluginManifest, pushError)
   validateExternalServices(m as unknown as PluginManifest, pushError)
   validateWorkflowKindAliases(m as unknown as PluginManifest, pushError)

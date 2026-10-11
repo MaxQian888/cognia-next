@@ -4,6 +4,7 @@ import {
   GLANCE_PRESET_IDS,
   type GlanceLayoutEntry,
   type GlanceMobileEntry,
+  type GlanceModuleId,
 } from "@/types/glance/layout"
 import { DEFAULT_MOBILE_HOME_LAYOUT, MOBILE_QUICK_ACTION_CATALOG } from "@/types/shell/mobile-home"
 
@@ -44,7 +45,7 @@ describe("mobileLayoutFromPreset", () => {
       )
       const rest = entries.slice(visible.length)
       expect(rest.every((e) => e.hidden && !e.home)).toBe(true)
-      for (const e of rest) expect(e.size).toBe(GLANCE_MODULES[e.id].sizes[0])
+      for (const e of rest) expect(e.size).toBe(GLANCE_MODULES[e.id as GlanceModuleId].sizes[0])
     }
   )
 
@@ -53,7 +54,7 @@ describe("mobileLayoutFromPreset", () => {
     (preset) => {
       for (const e of mobileLayoutFromPreset(preset)) {
         if (e.home) expect(e.hidden).toBe(false)
-        expect(supportsSize(e.id, e.size)).toBe(true)
+        expect(supportsSize(e.id as GlanceModuleId, e.size)).toBe(true)
       }
     }
   )
@@ -132,7 +133,7 @@ describe("normalizeMobileEntries", () => {
     for (const e of rest) {
       expect(e).toEqual({
         id: e.id,
-        size: GLANCE_MODULES[e.id].sizes[0],
+        size: GLANCE_MODULES[e.id as GlanceModuleId].sizes[0],
         hidden: true,
         home: false,
       })
@@ -420,5 +421,33 @@ describe("desktopEntriesFromMobile", () => {
   it("round-trips with mobileEntriesFromDesktop", () => {
     const mobile = mobileLayoutFromPreset("balanced")
     expect(mobileEntriesFromDesktop(desktopEntriesFromMobile(mobile), mobile)).toEqual(mobile)
+  })
+})
+
+describe("plugin entries on a phone layout (ADR-0225 §6)", () => {
+  it("keeps plugin entries with their home pin", () => {
+    const entries = normalizeMobileEntries([
+      { id: "plugin:com.ci:status", size: "compact", hidden: false, home: true },
+      { id: "plugin:com.ci:status", size: "standard", hidden: false, home: false },
+    ])
+    expect(entries.filter((e) => e.id === "plugin:com.ci:status")).toEqual([
+      { id: "plugin:com.ci:status", size: "compact", hidden: false, home: true },
+    ])
+  })
+
+  it("carries plugin entries across a desktop copy, keeping the phone's pins", () => {
+    const current = normalizeMobileEntries([
+      { id: "plugin:com.ci:status", size: "compact", hidden: false, home: true },
+    ])
+    const copied = mobileEntriesFromDesktop(
+      [{ id: "plugin:com.ci:status", size: "expanded", hidden: false }],
+      current
+    )
+    expect(copied.find((e) => e.id === "plugin:com.ci:status")).toEqual({
+      id: "plugin:com.ci:status",
+      size: "expanded",
+      hidden: false,
+      home: true,
+    })
   })
 })

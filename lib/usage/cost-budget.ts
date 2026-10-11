@@ -24,6 +24,8 @@
  * these services actually bill.
  */
 
+import type { UsageGlanceBudget } from "./usage-glance"
+
 /** Rolling window a limit applies to. */
 export type CostBudgetPeriod = "day" | "month"
 
@@ -249,6 +251,20 @@ export function worstCostBudgetVerdict(
     }
   }
   return worst
+}
+
+/**
+ * The worst verdict as the usage glance carries it (ADR-0165), so every
+ * surface that folds a budget into a glance folds the same thing.
+ */
+export function usageGlanceBudget(worst: CostBudgetVerdict | null): UsageGlanceBudget | null {
+  if (!worst) return null
+  return {
+    ratio: worst.ratio,
+    target: worst.target,
+    period: worst.period,
+    blocked: worst.level === "exceeded",
+  }
 }
 
 /** Every scope at or past its ceiling — the ones that block a send. */

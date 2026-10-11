@@ -34142,19 +34142,32 @@
             "properties": {
               "modules": {
                 "type": "array",
-                "maxItems": 12,
+                "maxItems": 60,
                 "items": {
-                  "type": "string",
-                  "enum": [
-                    "fleet",
-                    "usage",
-                    "quota",
-                    "agenda",
-                    "activity",
-                    "pet"
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "fleet",
+                        "usage",
+                        "quota",
+                        "agenda",
+                        "activity",
+                        "pet"
+                      ]
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^plugin:[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                      "description": "A plugin module on the desktop (ADR-0225 §6), rendered read-only on the phone. At most 24."
+                    }
                   ]
                 },
-                "description": "The host-sourced modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+                "description": "The host-sourced modules and desktop plugin modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+              },
+              "catalog": {
+                "type": "boolean",
+                "description": "The phone's layout editor is open and needs the desktop's plugin catalogue, even with nothing host-sourced on screen. Absent means false."
               },
               "scope": {
                 "type": "string",
@@ -34279,7 +34292,7 @@
                       }
                     },
                     "additionalProperties": true,
-                    "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
+                    "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents), the plugin modules slice (plugins: the desktop's mobile catalogue and the data of the demanded plugin entries) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
                     "x-cognia-wire-source": "lib/glance/snapshot.ts"
                   },
                   {
@@ -75623,5 +75636,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "cc65d61d15f163193d6aac4863be232abdf23ede698fe2771ce2949a89ebeb9c"
+  "catalogHash": "0c9c71725a8bc78ce042a5280784aff67d6bf7432996e92a7bb0a7725ac66a1e"
 }

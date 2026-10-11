@@ -29,9 +29,12 @@ import {
 } from "@/types/shell/mobile-home"
 import {
   DEFAULT_GLANCE_MODULE_OPTIONS,
+  GLANCE_MAX_PLUGIN_ENTRIES,
   GLANCE_MODULE_IDS,
   GLANCE_MODULE_SIZES,
   GLANCE_PRESET_IDS,
+  isPluginEntryId,
+  type GlanceEntryId,
   type GlanceLayoutEntry,
   type GlanceMobileEntry,
   type GlanceMobileSettings,
@@ -40,7 +43,7 @@ import {
   type GlancePresetId,
 } from "@/types/glance/layout"
 
-import { normalizeGlanceModuleOptions } from "./presets"
+import { normalizeGlanceModuleOptions, storedEntrySize } from "./presets"
 import { effectiveSize, glanceModule, GLANCE_MODULES } from "./registry"
 
 /**
@@ -116,13 +119,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-/** Repair a mobile entry list against the current catalogue. */
+/**
+ * Repair a mobile entry list against the current catalogue. Plugin entries
+ * are kept as the desktop layout keeps them (`normalizeEntries`).
+ */
 export function normalizeMobileEntries(raw: unknown): GlanceMobileEntry[] {
   if (!Array.isArray(raw)) return mobileLayoutFromPreset("balanced")
-  const seen = new Set<GlanceModuleId>()
+  const seen = new Set<GlanceEntryId>()
   const out: GlanceMobileEntry[] = []
+  let plugins = 0
   for (const item of raw) {
     if (!isRecord(item) || typeof item.id !== "string") continue
+    if (isPluginEntryId(item.id)) {
+      if (seen.has(item.id) || plugins >= GLANCE_MAX_PLUGIN_ENTRIES) continue
+      seen.add(item.id)
+      plugins += 1
+      out.push({
+        id: item.id,
+        size: storedEntrySize(item.id, item.size),
+        hidden: item.hidden === true,
+        home: item.home === true,
+      })
+      continue
+    }
     const def = glanceModule(item.id)
     if (!def || seen.has(def.id)) continue
     seen.add(def.id)
@@ -181,7 +200,7 @@ export function migrateMobileHomeLayout(legacy: LegacyMobileHomeState): GlanceMo
       : []
   )
   const dashboard = resolveWelcomeStatsPrefs(legacy.welcomeStats ?? undefined).enabled
-  const pinned: Partial<Record<GlanceModuleId, boolean>> = {
+  const pinned: Partial<Record<string, boolean>> = {
     fleet: !hidden.has("activeRuns"),
     quick: !hidden.has("quickActions"),
     recents: !hidden.has("recents"),

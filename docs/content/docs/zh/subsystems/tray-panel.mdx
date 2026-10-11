@@ -1,11 +1,11 @@
 ---
 title: 托盘面板
-description: 点击桌面托盘图标打开的速览面板 —— 由模块组装的 Fleet、用量、额度、日程、活跃度、快捷操作、最近会话与宠物，只做摘要与路由，数据来自主窗口发布的同一份快照。同一套模块也组成手机首页与速览抽屉。
+description: 点击桌面托盘图标打开的速览面板 —— 由模块组装的 Fleet、用量、额度、日程、活跃度、快捷操作、最近会话、宠物与插件模块，只做摘要与路由，数据来自主窗口发布的同一份快照。同一套模块也组成手机首页与速览抽屉；可组合的菜单栏标题与 Capacity Dock 读取同样的数据源。
 ---
 
 # 托盘面板
 
-<Status variant="beta">Beta · 桌面端与移动端 · ADR-0225 第一至三阶段</Status>
+<Status variant="beta">Beta · 桌面端与移动端 · ADR-0225 第一至四阶段</Status>
 
 <TLDR>
   左键点击托盘图标，会打开一个置顶的小窗口：页头放工作区范围切换和总体状态胶囊，中间是一列**速览模块**，
@@ -42,9 +42,27 @@ description: 点击桌面托盘图标打开的速览面板 —— 由模块组�
 | `quick`    | compact · standard            | 桌面：主操作之外的托盘操作；手机：布局自己的快捷入口网格             | 设置 › 桌面 / 手机的布局编辑器    |
 | `recents`  | compact · standard            | 最近几次会话                                                          | 对应会话                          |
 | `pet`      | compact · standard            | 宠物状态，以及喂食 / 玩耍 / 抚摸 / 睡觉 / 清洁                         | 宠物页                            |
+| `plugin:<插件>:<id>` | 由插件声明                 | 插件发布的统计、行与动作（见[插件模块](#插件模块)）                    | 插件自己的命令                    |
 
 预设（`balanced`、`usage-first`、`agent-ops`、`minimal`）位于 `lib/glance/presets.ts`。
 已存布局只能通过 `normalizeGlancePanelSettings` 读取：未知 id 丢弃，重复项保留第一个，缺失的模块以隐藏状态补在末尾，越界高度会被钳制。
+
+## 插件模块
+
+插件通过 `glance.module` 扩展点以**数据**形式贡献模块：声明模块（`manifest.glanceModules[]` 或 `ctx.glance.register`），
+再用 `ctx.glance.update` 发布统计、行与动作。宿主用与自带模块相同的组件渲染（`components/glance/modules/glance-plugin-module.tsx`）：
+compact 为一行（摘要或第一项统计），standard 为统计条、前三行与动作，expanded 显示全部行。插件永远不会把 React 注入速览界面。
+编写方式见[速览模块](../plugin-dev/glance-modules)。
+
+- **注册表。** `lib/glance/plugin-registry.ts`（每个运行插件的渲染进程一份）保存声明与数据，进入时清洗并限量（`lib/glance/plugin-data.ts`）：
+  每个插件最多 8 个模块，每个模块最多 4 项统计、8 行、3 个动作，文字都是短标签。
+- **快照。** `GlanceSnapshotV1.plugins` 携带当前平台的模块目录（标题在主窗口里解析，插件的语言包在那里），以及可见插件条目的数据。
+  编辑器的添加列表会提供目录中的每个模块。
+- **是否在屏幕上。** 每次构建都会报告它显示了哪些插件条目；`ctx.glance.onVisibilityChange` 通知插件，没人显示时插件可以停止计算。
+- **动作。** 点击只发送 `plugin-action`（条目与动作 id），从不发送命令。主窗口在插件发布的数据里查到对应命令，
+  只运行该插件自己的 `<pluginId>.<command>`（`lib/glance/plugin-actions.ts`）。
+- **插件关闭时。** 插件被禁用或卸载后，布局仍保留它的条目；速览列表跳过它们，编辑器把显示中的条目标为「插件已关闭」，可以移除。
+  应用预设会移除插件条目，添加列表仍会继续提供这些模块。
 
 ## 编辑
 
@@ -146,6 +164,10 @@ glancePhoneStore ── glance_subscribe ─────▶ glanceRemoteHub（�
   桌面无法提供的模块会就地说明原因：桌面离线且尚未收到数据，或桌面不提供速览（headless 大脑回答 `headless_host`，旧版桌面不声明 `glance.remote`）。
 - **不进离线队列。** 三个命令都不在离线外发队列中：稍后重放的刷新回答的是已经过去的时刻。
 
+- **插件模块。** 已配对的手机只显示桌面端的插件模块，从不显示自己的：需求里会列出这些条目；手机的布局编辑器打开时，
+  即使屏幕上没有桌面来源的模块，也会请求桌面的插件目录（`catalog`）。它们在手机上只读：动作按钮显示为禁用，并注明「在桌面上操作」。
+  未配对的手机运行自己的插件。
+
 ### 迁移与复制
 
 ADR-0225 之前，首页有自己的模型 `mobileHomeLayout`（快捷网格加三个板块开关），仪表盘也有自己的开关（`welcomeStats.enabled`）。
@@ -154,6 +176,29 @@ ADR-0225 之前，首页有自己的模型 `mobileHomeLayout`（快捷网格加�
 
 该布局在设置同步中属于 `shared`，每个账号一份。手机的编辑器可以复制桌面的顺序、尺寸与可见性（手机自己的首页固定保持不变）；
 设置 › 桌面 › 托盘面板 可以复制手机的布局（首页固定与快捷入口仍只属于手机）。
+
+## 菜单栏标题
+
+在 设置 › 桌面 › 托盘 中，把菜单栏读数设为「标题文字」后，会出现**标题字段**：最多六个字段的有序列表，在托盘图标旁显示为一行，
+例如 `1D 103.3M · 7D 12.6B · ▶2 · ⚑1 · Q 82%`。
+
+| 字段     | 显示                                                         |
+| -------- | ------------------------------------------------------------ |
+| 用量     | 今天、7 天或 30 天的 token 或花费，按托盘的统计口径          |
+| 运行中   | 正在运行的 Fleet 任务数                                      |
+| 等待审批 | 等待审批的 Fleet 任务数                                      |
+| 额度     | 各额度窗口中最高的已用比例（或已固定订阅的）                 |
+| 预算     | 最紧的花费预算的已用比例                                     |
+
+没有内容可报的字段（没有任务、没有读数、窗口内没有轮次）会被省略；含未定价轮次的花费显示为「≥$x」。
+标题默认关闭（ADR-0165），只在开启时、且只为所显示的字段运行数据源（`lib/tray/title.ts`，纯模型与格式化在 `lib/tray/title-format.ts`）。
+字段出现之前保存的标题会迁移为其原指标对应的那一个数字。Windows 没有菜单栏标题：该选项在 Windows 上禁用，卡片提示改用图标角标。
+
+## Capacity Dock
+
+Capacity Dock 的**套餐额度**模式按每个正在查询的额度来源各画一行，取其最紧窗口的已用比例，最紧的排在最前；
+数据来自与面板额度模块相同的额度切片构建器，因此两者对每种状态的判断一致：过期或出错的读数保留最后的比例但不再着色，并在详情里说明。
+主窗口通过 Dock 自己的推送（`usage-dock://state`，在花费投影旁附带 `quota`）提供数据，Dock 显示期间按共享的五分钟节流刷新；预算模式完全不读取额度。
 
 ## 代码位置
 
@@ -173,8 +218,11 @@ ADR-0225 之前，首页有自己的模型 `mobileHomeLayout`（快捷网格加�
 | 手机布局与迁移           | `types/glance/layout.ts`、`lib/glance/mobile-layout.ts`           |
 | 配对手机通道             | `lib/glance/remote/`（命令、需求、桌面端 hub 与分发、手机端 store 与视图） |
 | 手机界面                 | `hooks/glance/use-mobile-glance.ts`、`components/mobile/glance/`   |
+| 插件模块                 | `lib/glance/plugin-{data,registry,actions}.ts`、`lib/glance/build-plugins.ts`、`components/glance/modules/glance-plugin-module.tsx`、`lib/plugin/api/glance-api.ts` |
+| 菜单栏标题               | `lib/tray/title{,-format}.ts`、`components/settings/tray-title-fields-editor.tsx` |
+| Capacity Dock 额度行     | `lib/usage-dock/rows.ts`、`components/providers/initializers/usage-dock-initializer.tsx` |
 
-## 尚未包含
+## 交付
 
 第一阶段交付了注册表、快照、桌面面板、Fleet 路由和额度状态；第二阶段交付了就地编辑、预设、带实时预览的设置编辑器与目录迁移；
-第三阶段交付了手机首页与速览抽屉、配对手机通道与来源标签。插件模块扩展点、可组合的菜单栏标题与 Capacity Dock 额度数据源（第四阶段）按 ADR-0225 的交付计划推进。
+第三阶段交付了手机首页与速览抽屉、配对手机通道与来源标签；第四阶段交付了插件模块扩展点、可组合的菜单栏标题与 Capacity Dock 额度数据源。

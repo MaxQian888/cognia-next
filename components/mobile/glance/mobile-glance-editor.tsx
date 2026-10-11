@@ -9,6 +9,9 @@
  * Rendered in two places, the drawer's edit mode and the home-layout sheet
  * (the app bar's ⋮ menu), so the layout is reachable even when the home
  * screen shows nothing. Every change is saved at once.
+ *
+ * Plugin modules are offered from the phone's own plugins when standalone and
+ * from the paired desktop's (which the editor asks for while open).
  */
 
 import { useId } from "react"
@@ -23,18 +26,30 @@ import { pinnedLayout } from "@/hooks/glance/use-mobile-glance"
 import { withEditedMobileEntries, withMobilePreset, withShortcuts } from "@/lib/glance/layout-edit"
 import { mobileEntriesFromDesktop } from "@/lib/glance/mobile-layout"
 import { glanceModulesFor } from "@/lib/glance/registry"
-import type { GlanceMobileSettings } from "@/types/glance/layout"
+import type {
+  GlanceMobileEntry,
+  GlanceMobileSettings,
+  GlanceModuleSize,
+  GlancePluginEntryId,
+} from "@/types/glance/layout"
 
-import { useMobileGlanceContext } from "./mobile-glance-provider"
+import { useMobileGlanceContext, useRegisterGlanceEditor } from "./mobile-glance-provider"
 import { MobileShortcutsEditor } from "./mobile-shortcuts-editor"
 
 const MOBILE_MODULES = glanceModulesFor("mobile")
 
+/** A plugin module's first entry on a phone: shown in the drawer, not pinned. */
+function makeMobileEntry(id: GlancePluginEntryId, size: GlanceModuleSize): GlanceMobileEntry {
+  return { id, size, hidden: false, home: false }
+}
+
 export function MobileGlanceEditor() {
   const t = useTranslations("glance.mobile")
   const tGlance = useTranslations("glance")
-  const { settings, save, paired, hostLayout } = useMobileGlanceContext()
+  const { settings, save, paired, hostLayout, pluginCatalog } = useMobileGlanceContext()
   const hintId = useId()
+  useRegisterGlanceEditor()
+  const pluginIds = pluginCatalog.map((entry) => entry.id)
 
   const commit = (next: GlanceMobileSettings) => {
     void save(next).then((errorKey) => {
@@ -93,10 +108,12 @@ export function MobileGlanceEditor() {
           entries={settings.entries}
           onChange={(entries) => commit(withEditedMobileEntries(settings, entries))}
           available={MOBILE_MODULES}
+          plugins={pluginCatalog}
+          makeEntry={makeMobileEntry}
           density="touch"
           home={{
             isPinned: (id) => pins.get(id) === true,
-            onToggle: (id, home) => commit(pinnedLayout(settings, id, home)),
+            onToggle: (id, home) => commit(pinnedLayout(settings, id, home, pluginIds)),
           }}
         />
       </section>

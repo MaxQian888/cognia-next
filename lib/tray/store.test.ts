@@ -124,7 +124,47 @@ describe("display prefs", () => {
     expect(useTrayStore.getState().display).toEqual({
       ...DEFAULT_TRAY_DISPLAY,
       taskbarUsageMode: "iconBadge",
+      // A blob from before the composable title migrates to its metric's field.
+      titleFields: [{ kind: "quota" }],
     })
+  })
+
+  it("migrates a pre-composable title to the one number it showed (ADR-0225 §11)", async () => {
+    getPrefMock.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === TRAY_DISPLAY_PREF
+          ? { taskbarUsageMode: "title", usageMetric: "spend", usagePeriod: "7d" }
+          : undefined
+      )
+    )
+    await useTrayStore.getState().hydrate()
+    expect(useTrayStore.getState().display.titleFields).toEqual([
+      { kind: "usage", period: "7d", metric: "spend" },
+    ])
+  })
+
+  it("keeps stored title fields, cleaned, including an empty list", async () => {
+    getPrefMock.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === TRAY_DISPLAY_PREF
+          ? { titleFields: [{ kind: "running" }, { kind: "bogus" }, { kind: "running" }] }
+          : undefined
+      )
+    )
+    await useTrayStore.getState().hydrate()
+    expect(useTrayStore.getState().display.titleFields).toEqual([{ kind: "running" }])
+
+    getPrefMock.mockImplementation((key: string) =>
+      Promise.resolve(key === TRAY_DISPLAY_PREF ? { titleFields: [] } : undefined)
+    )
+    await useTrayStore.getState().hydrate()
+    expect(useTrayStore.getState().display.titleFields).toEqual([])
+  })
+
+  it("gives a fresh install the default title fields", async () => {
+    getPrefMock.mockResolvedValue(undefined)
+    await useTrayStore.getState().hydrate()
+    expect(useTrayStore.getState().display.titleFields).toEqual(DEFAULT_TRAY_DISPLAY.titleFields)
   })
 
   it("setDisplay merges the patch and persists the full prefs blob", () => {

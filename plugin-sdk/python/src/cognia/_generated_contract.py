@@ -218,6 +218,7 @@ VALID_CAPABILITIES = (
     "cli-tools",
     "pi-package",
     "tray",
+    "glance",
     "automation",
     "companion",
     "context-panel",
@@ -408,6 +409,9 @@ CAPABILITY_FIELDS = {
     "tray": [
         "trayItems",
     ],
+    "glance": [
+        "glanceModules",
+    ],
     "automation": [],
     "companion": [],
     "context-panel": [
@@ -502,6 +506,7 @@ CAPABILITY_SUPPORT = {
     "cli-tools": "supported",
     "pi-package": "supported",
     "tray": "supported",
+    "glance": "supported",
     "automation": "experimental",
     "companion": "experimental",
     "context-panel": "supported",
@@ -580,6 +585,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "cli-tools": "0.1.0",
     "pi-package": "0.1.0",
     "tray": "0.1.0",
+    "glance": "0.1.0",
     "automation": "0.1.0",
     "companion": "0.1.0",
     "context-panel": "0.1.0",
@@ -658,6 +664,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "cli-tools": "0.1.0",
     "pi-package": "0.1.0",
     "tray": "0.1.0",
+    "glance": "0.1.0",
     "automation": "0.1.0",
     "companion": "0.1.0",
     "context-panel": "0.1.0",
@@ -1065,6 +1072,13 @@ MANIFEST_CONTRIBUTIONS = [
         "field": "trayItems",
         "capabilities": [
             "tray",
+        ],
+        "execution": "host",
+    },
+    {
+        "field": "glanceModules",
+        "capabilities": [
+            "glance",
         ],
         "execution": "host",
     },
@@ -3624,6 +3638,13 @@ PLUGIN_POINT_CONTRACTS = [
     },
     {
         "id": "tray.item",
+        "kind": "runtime",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.5.0",
+    },
+    {
+        "id": "glance.module",
         "kind": "runtime",
         "stability": "stable",
         "status": "implemented",
@@ -10037,6 +10058,68 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
+                },
+            },
+        ],
+    },
+    {
+        "id": "glance",
+        "authorPath": "ctx.glance",
+        "type": "PluginGlanceAPI",
+        "stability": "stable",
+        "introducedIn": "0.1.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+        ],
+        "transport": "direct",
+        "factory": "context.glance",
+        "enforcement": "shadow",
+        "dataClassification": "internal",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "glance.register",
+                "name": "register",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
+            },
+            {
+                "id": "glance.update",
+                "name": "update",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "glance.onVisibilityChange",
+                "name": "onVisibilityChange",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
                 },
             },
         ],

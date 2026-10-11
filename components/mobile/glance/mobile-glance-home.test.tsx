@@ -21,7 +21,7 @@ import {
   type GlanceFleetSlice,
   type GlanceSnapshotV1,
 } from "@/lib/glance/snapshot"
-import type { GlanceMobileEntry, GlanceModuleId } from "@/types/glance/layout"
+import type { GlanceEntryId, GlanceMobileEntry, GlanceModuleId } from "@/types/glance/layout"
 
 import { MobileGlanceHome, speaksOnHome } from "./mobile-glance-home"
 import { MobileGlanceProvider } from "./mobile-glance-provider"
@@ -75,7 +75,7 @@ function mockGlance({
   entries: GlanceMobileEntry[]
   shortcuts?: string[]
   fleet?: GlanceFleetSlice | null
-  originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
+  originOf?: (id: GlanceEntryId) => GlanceModuleOrigin | null
 }) {
   const glance: GlanceContextValue = {
     snapshot: makeSnapshot(fleet),
@@ -94,6 +94,7 @@ function mockGlance({
     paired: false,
     supported: false,
     hostLayout: null,
+    pluginCatalog: [],
     save: jest.fn(async () => null),
   } satisfies UseMobileGlanceResult)
 }
@@ -189,7 +190,7 @@ describe("MobileGlanceHome", () => {
   })
 
   it("asks where each pinned module's data came from", () => {
-    const originOf = jest.fn((id: GlanceModuleId): GlanceModuleOrigin | null =>
+    const originOf = jest.fn((id: GlanceEntryId): GlanceModuleOrigin | null =>
       id === "fleet" ? { kind: "unavailable", reason: "host-offline" } : null
     )
     mockGlance({

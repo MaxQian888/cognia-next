@@ -10,6 +10,8 @@ let stateRequestHandler: (() => void) | null = null
 let openFullHandler: (() => void) | null = null
 const pushMock = jest.fn()
 const glanceMock = jest.fn()
+const quotaMock = jest.fn()
+const QUOTA_SLICE = { updatedAt: 1, refreshing: false, sources: [] }
 
 jest.mock("@/lib/usage-dock/client", () => ({
   openUsageDock: () => openMock(),
@@ -42,6 +44,17 @@ jest.mock("@/hooks/usage/use-usage-glance", () => ({
     }
   },
 }))
+jest.mock("@/hooks/glance/use-glance-quota", () => ({
+  useGlanceQuota: (...a: unknown[]) => {
+    quotaMock(...a)
+    return {
+      slice: a[0] ? QUOTA_SLICE : null,
+      refreshAll: jest.fn(),
+      refreshOne: jest.fn(),
+      enable: jest.fn(),
+    }
+  },
+}))
 jest.mock("@/lib/tauri/store", () => ({
   getPref: jest.fn().mockResolvedValue(null),
   setPref: jest.fn().mockResolvedValue(undefined),
@@ -59,6 +72,7 @@ beforeEach(() => {
   sendStateMock.mockClear()
   pushMock.mockClear()
   glanceMock.mockClear()
+  quotaMock.mockClear()
   stateRequestHandler = null
   openFullHandler = null
 })
@@ -140,6 +154,51 @@ describe("UsageDockInitializer", () => {
     await waitFor(() => expect(useUsageDockStore.getState().hydrated).toBe(true))
     expect(stateRequestHandler).toBeNull()
     expect(openFullHandler).toBeNull()
+  })
+
+  it("reads no quota in budget mode and pushes a null slice", async () => {
+    await renderEnabled()
+    expect(quotaMock).toHaveBeenLastCalledWith(false, expect.any(Number), expect.anything())
+    await waitFor(() =>
+      expect(sendStateMock).toHaveBeenCalledWith(expect.objectContaining({ quota: null }))
+    )
+  })
+
+  it("feeds the glance quota slice in quota mode, polled on the shared throttle, without discovery", async () => {
+    await renderEnabled()
+    sendStateMock.mockClear()
+    await act(async () => {
+      useUsageDockStore.getState().setPreferences({ gaugeMode: "quota" })
+    })
+    expect(quotaMock).toHaveBeenLastCalledWith(true, expect.any(Number), {
+      discover: false,
+      pollMs: 5 * 60_000,
+    })
+    await waitFor(() =>
+      expect(sendStateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ quota: QUOTA_SLICE, glance: { fake: true } })
+      )
+    )
+  })
+
+  it("seeds a dock with the current quota slice too", async () => {
+    await renderEnabled()
+    await act(async () => {
+      useUsageDockStore.getState().setPreferences({ gaugeMode: "quota" })
+    })
+    await waitFor(() => expect(stateRequestHandler).not.toBeNull())
+    sendStateMock.mockClear()
+    await act(async () => stateRequestHandler?.())
+    expect(sendStateMock).toHaveBeenCalledWith(expect.objectContaining({ quota: QUOTA_SLICE }))
+  })
+
+  it("keeps quota off while the dock is disabled, whatever the mode", async () => {
+    render(<UsageDockInitializer />)
+    await waitFor(() => expect(useUsageDockStore.getState().hydrated).toBe(true))
+    await act(async () => {
+      useUsageDockStore.getState().setPreferences({ gaugeMode: "quota" })
+    })
+    expect(quotaMock).not.toHaveBeenCalledWith(true, expect.anything(), expect.anything())
   })
 
   it("reads spend for today in the Cognia scope", async () => {
