@@ -41,6 +41,7 @@ function createDeps(): jest.Mocked<SandboxSessionRuntimeDeps> {
   return {
     getConnection: jest.fn(),
     getMicrovmAdapter: jest.fn(() => null),
+    getContainerAdapter: jest.fn(() => null),
     executeOsSandbox: jest.fn(async (_payload: MicrovmExecPayload) => ({
       exit_code: 0,
       stdout: "/workspace\n",
@@ -1391,5 +1392,100 @@ describe("OS-tier audit", () => {
       { exit_code: 0 }
     )
     expect(rows).toEqual([])
+  })
+
+  describe("container tier (ADR-0224 A8)", () => {
+    const input = {
+      sessionId: "hosted",
+      binding: { shellTier: "container", computerTarget: "local" } as const,
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspaces/p",
+    }
+
+    function containerAdapter() {
+      return {
+        preflight: jest.fn(async () => undefined),
+        execute: jest.fn(async () => ({
+          exit_code: 0,
+          stdout: "in the container",
+          stderr: "",
+          duration: 7,
+          timed_out: false,
+        })),
+        release: jest.fn(async () => undefined),
+      }
+    }
+
+    it("refuses to bind on a host with no sandbox pool instead of running here", async () => {
+      const deps = createDeps()
+      const runtime = new SandboxSessionRuntime(deps)
+      await expect(runtime.bindSession(input)).rejects.toMatchObject({
+        code: "placement-unavailable",
+      })
+      expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+    })
+
+    it("places through the adapter, runs every call there and attests the tier", async () => {
+      const deps = createDeps()
+      const adapter = containerAdapter()
+      deps.getContainerAdapter!.mockReturnValue(adapter)
+      const runtime = new SandboxSessionRuntime(deps)
+
+      const ref = await runtime.bindSession(input)
+      expect(adapter.preflight).toHaveBeenCalledWith(ref, "/workspaces/p", "hosted")
+      const result = await runtime.executeSandbox(ref, payload)
+
+      expect(result.stdout).toBe("in the container")
+      // The environment bounds the container; no microVM ceiling is stamped.
+      expect(adapter.execute).toHaveBeenCalledWith(ref, payload)
+      expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+      expect(deps.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processName: "container:cognia-sandbox-pool",
+          decision: "allow",
+          reason: expect.stringContaining("tier=container"),
+        })
+      )
+      expect(runtime.attest(ref, 9)).toEqual({ schemaVersion: 1, tier: "container", verifiedAt: 9 })
+    })
+
+    it("releases a retired generation's runtimes and the session's on release", async () => {
+      const deps = createDeps()
+      let refs = 0
+      deps.makeRef.mockImplementation(() => `sandbox-runtime:c-${++refs}`)
+      const adapter = containerAdapter()
+      deps.getContainerAdapter!.mockReturnValue(adapter)
+      const runtime = new SandboxSessionRuntime(deps)
+
+      const first = await runtime.bindSession(input)
+      const second = await runtime.bindSession({ ...input, workspaceRoot: "/workspaces/p/sub" })
+      await Promise.resolve()
+      expect(adapter.release).toHaveBeenCalledWith(first)
+      expect(runtime.attest(first)).toBeNull()
+
+      await runtime.releaseSession("hosted")
+      expect(adapter.release).toHaveBeenCalledWith(second)
+    })
+
+    it("refuses an unplaced container session at call time and audits the refusal", async () => {
+      const deps = createDeps()
+      const runtime = new SandboxSessionRuntime(deps)
+      const ref = runtime.bindUnplacedSession(input, new Error("no project"))
+
+      await expect(runtime.executeSandbox(ref, payload)).rejects.toMatchObject({
+        code: "placement-unavailable",
+      })
+      expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+      expect(deps.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: "deny",
+          reason: expect.stringContaining("termination=placement_unavailable"),
+        })
+      )
+      expect(runtime.attest(ref)).toBeNull()
+    })
   })
 })

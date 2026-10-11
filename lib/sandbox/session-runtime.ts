@@ -15,6 +15,7 @@ import type { SandboxConnectionRow, SandboxSessionBinding } from "@/types/sandbo
 import { validateSandboxSessionBinding } from "./binding"
 import { runSandboxConnectionOperation } from "./connection-lifecycle"
 import { assertSandboxOperationAllowed } from "./lifecycle-contract"
+import { getContainerExec } from "./container-exec-adapter"
 import {
   getMicrovmExec,
   type MicrovmExecAdapter,
@@ -24,6 +25,9 @@ import {
 import { clampPolicyRequest, isPathUnderRoot } from "./policy-bridge"
 
 export type SandboxConfine = NonNullable<CallContext["sandboxConfine"]>
+
+/** The audit row's provider for the `container` tier. */
+const CONTAINER_AUDIT_PROVIDER = "cognia-sandbox-pool"
 
 export {
   HOST_FALLBACK_RUNTIME_REF,
@@ -47,6 +51,11 @@ export interface BindSandboxSessionInput {
 export interface SandboxSessionRuntimeDeps {
   getConnection(id: string): Promise<SandboxConnectionRow | undefined>
   getMicrovmAdapter(): MicrovmExecAdapter | null
+  /**
+   * The `container` tier's adapter (ADR-0224 A8): present on a headless Host
+   * with a sandbox pool, absent everywhere else, where the tier refuses.
+   */
+  getContainerAdapter?(): MicrovmExecAdapter | null
   executeOsSandbox(payload: MicrovmExecPayload): Promise<MicrovmResult>
   makeRef(): SandboxRuntimeRef
   recordAudit?(row: AutomationAuditLogRow): Promise<void>
@@ -65,7 +74,8 @@ interface UnplacedSurfaces {
 interface RuntimeRecord extends BindSandboxSessionInput {
   ref: SandboxRuntimeRef
   fingerprint: string
-  microvmAdapter?: MicrovmExecAdapter
+  /** The adapter a `microvm` or `container` generation runs every call through. */
+  tierAdapter?: MicrovmExecAdapter
   unplaced?: UnplacedSurfaces
 }
 
@@ -113,6 +123,11 @@ function fingerprint(input: BindSandboxSessionInput): string {
     computerUseEnabled: input.computerUseEnabled,
     workspaceRoot: input.workspaceRoot,
   })
+}
+
+/** Tiers whose generation is placed by an adapter's preflight and released by it. */
+function adapterTier(tier: SandboxSessionBinding["shellTier"]): boolean {
+  return tier === "microvm" || tier === "container"
 }
 
 function operationContext(row: SandboxConnectionRow) {
@@ -239,13 +254,21 @@ export class SandboxSessionRuntime {
     assertBindingCurrent(attempt)
 
     const ref = this.deps.makeRef()
-    let microvmAdapter: MicrovmExecAdapter | undefined
+    let tierAdapter: MicrovmExecAdapter | undefined
     if (input.sandboxEnabled && input.binding.shellTier === "microvm") {
-      microvmAdapter = this.deps.getMicrovmAdapter() ?? undefined
-      if (!microvmAdapter) {
+      tierAdapter = this.deps.getMicrovmAdapter() ?? undefined
+      if (!tierAdapter) {
         throw new SandboxRuntimeError(
           "microvm-unavailable",
           "The microVM sandbox was explicitly selected, but no E2B execution adapter is registered."
+        )
+      }
+    } else if (input.sandboxEnabled && input.binding.shellTier === "container") {
+      tierAdapter = this.deps.getContainerAdapter?.() ?? undefined
+      if (!tierAdapter) {
+        throw new SandboxRuntimeError(
+          "placement-unavailable",
+          "The container shell tier runs in a project's runtime environment on an always-on Host, and this host has no sandbox pool to run it in."
         )
       }
     }
@@ -257,13 +280,13 @@ export class SandboxSessionRuntime {
       confine: copyConfine(input.confine),
       ref,
       fingerprint: nextFingerprint,
-      ...(microvmAdapter ? { microvmAdapter } : {}),
+      ...(tierAdapter ? { tierAdapter } : {}),
     })
     try {
-      await microvmAdapter?.preflight?.(ref, input.workspaceRoot, input.sessionId)
+      await tierAdapter?.preflight?.(ref, input.workspaceRoot, input.sessionId)
       assertBindingCurrent(attempt)
     } catch (cause) {
-      if (microvmAdapter?.release) {
+      if (tierAdapter?.release) {
         this.cleanupByRef.set(ref, record)
         // Keep failed cleanup in the ledger for releaseSession to retry.
         await this.releaseCleanupRecord(record).catch(() => undefined)
@@ -386,8 +409,8 @@ export class SandboxSessionRuntime {
     const record = this.records.get(ref)
     if (!record) return
     this.records.delete(ref)
-    if (record.binding.shellTier !== "microvm") return
-    if (!record.microvmAdapter?.release) return
+    if (!adapterTier(record.binding.shellTier)) return
+    if (!record.tierAdapter?.release) return
     this.cleanupByRef.set(ref, record)
     void this.releaseCleanupRecord(record).catch(() => undefined)
   }
@@ -443,6 +466,14 @@ export class SandboxSessionRuntime {
           durationMs: 0,
           termination: "placement_unavailable",
         })
+      } else if (record.binding.shellTier === "container") {
+        this.recordTierAudit(payload, {
+          tier: "container",
+          provider: CONTAINER_AUDIT_PROVIDER,
+          error,
+          durationMs: 0,
+          termination: "placement_unavailable",
+        })
       }
       throw error
     }
@@ -478,7 +509,7 @@ export class SandboxSessionRuntime {
         }
       }
       case "microvm": {
-        const adapter = record.microvmAdapter
+        const adapter = record.tierAdapter
         if (!adapter) {
           throw new SandboxRuntimeError(
             "microvm-unavailable",
@@ -513,6 +544,36 @@ export class SandboxSessionRuntime {
           return result
         } catch (error) {
           this.recordMicrovmAudit(payload, {
+            error,
+            durationMs: Date.now() - started,
+          })
+          throw error
+        }
+      }
+      case "container": {
+        const adapter = record.tierAdapter
+        if (!adapter) {
+          throw new SandboxRuntimeError(
+            "placement-unavailable",
+            "The bound container placement is no longer available; the operation was not run locally."
+          )
+        }
+        // No ceiling stamp: the environment's own size class and egress tier
+        // bound the container, and the per-call request is clamped above.
+        const started = Date.now()
+        try {
+          const result = await adapter.execute(ref, payload)
+          this.recordTierAudit(payload, {
+            tier: "container",
+            provider: CONTAINER_AUDIT_PROVIDER,
+            result,
+            durationMs: Math.max(result.duration, Date.now() - started),
+          })
+          return result
+        } catch (error) {
+          this.recordTierAudit(payload, {
+            tier: "container",
+            provider: CONTAINER_AUDIT_PROVIDER,
             error,
             durationMs: Date.now() - started,
           })
@@ -621,7 +682,7 @@ export class SandboxSessionRuntime {
     const owned = [...this.records.values()].filter((record) => record.sessionId === sessionId)
     for (const record of owned) {
       this.records.delete(record.ref)
-      if (record.binding.shellTier === "microvm" && record.microvmAdapter?.release) {
+      if (adapterTier(record.binding.shellTier) && record.tierAdapter?.release) {
         this.cleanupByRef.set(record.ref, record)
       }
     }
@@ -649,13 +710,13 @@ export class SandboxSessionRuntime {
   private releaseCleanupRecord(record: RuntimeRecord): Promise<void> {
     const existing = this.cleanupInFlight.get(record.ref)
     if (existing) return existing
-    const release = record.microvmAdapter?.release
+    const release = record.tierAdapter?.release
     if (!release) {
       this.cleanupByRef.delete(record.ref)
       return Promise.resolve()
     }
     const pending = Promise.resolve()
-      .then(() => release.call(record.microvmAdapter, record.ref))
+      .then(() => release.call(record.tierAdapter, record.ref))
       .then(() => {
         this.cleanupByRef.delete(record.ref)
       })
@@ -776,8 +837,8 @@ export class SandboxSessionRuntime {
   /**
    * The host's word that `ref` runs its sandboxed tools in an isolated
    * placement (ADR-0224 A7), or null. Only the session's current generation of
-   * a placed `microvm` tier qualifies: its preflight succeeded and its adapter
-   * runs every sandboxed call or refuses it. The host OS tier, an unplaced
+   * a placed `microvm` or `container` tier qualifies: its preflight succeeded
+   * and its adapter runs every sandboxed call or refuses it. The host OS tier, an unplaced
    * record, a retired generation and the fallback record never do. A
    * placement lost after this answer still cannot run anything on this
    * machine, because an unplaced record refuses instead of falling back.
@@ -789,9 +850,10 @@ export class SandboxSessionRuntime {
     if (!ref || ref === HOST_FALLBACK_RUNTIME_REF) return null
     const record = this.records.get(ref)
     if (!record || !record.sandboxEnabled || record.unplaced?.sandbox) return null
-    if (record.binding.shellTier !== "microvm" || !record.microvmAdapter) return null
+    const tier = record.binding.shellTier
+    if ((tier !== "microvm" && tier !== "container") || !record.tierAdapter) return null
     if (this.activeBySession.get(record.sessionId) !== ref) return null
-    return { schemaVersion: 1, tier: "microvm", verifiedAt: now }
+    return { schemaVersion: 1, tier, verifiedAt: now }
   }
 
   private requireRecord(ref: SandboxRuntimeRef): RuntimeRecord {
@@ -912,6 +974,7 @@ export function __setSandboxOsExecForTesting(
 export const sandboxSessionRuntime = new SandboxSessionRuntime({
   getConnection: getSandboxConnection,
   getMicrovmAdapter: defaultMicrovmAdapter,
+  getContainerAdapter: getContainerExec,
   executeOsSandbox,
   makeRef: makeRuntimeRef,
   recordAudit: recordSandboxAudit,

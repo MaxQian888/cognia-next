@@ -29,7 +29,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::remote::RemoteLimits;
-use crate::runtime::{RuntimePort, SandboxRuntimeControl, ToolHostBridge, ToolHostService};
+use crate::runtime::{
+    RuntimePort, SandboxRuntimeControl, TaskShellRequest, TaskShellResult, ToolHostBridge,
+    ToolHostService,
+};
 use crate::status::{RemoteUsage, SandboxDriverStatus};
 
 /// One driver of the set.
@@ -111,6 +114,25 @@ impl ProviderSet {
             tool_leases: Mutex::new(HashMap::new()),
             bridges: Mutex::new(HashMap::new()),
         }))
+    }
+
+    /// The runtime control of the provider a task shell names.
+    fn task_shell_runtime(
+        &self,
+        provider: &str,
+    ) -> Result<Arc<dyn SandboxRuntimeControl>, SandboxSpawnError> {
+        let member = self.members.get(provider).ok_or_else(|| {
+            SandboxSpawnError::refused(
+                "sandbox_provider_unknown",
+                format!("this Host has no sandbox provider {provider}"),
+            )
+        })?;
+        member.runtime.clone().ok_or_else(|| {
+            SandboxSpawnError::refused(
+                "sandbox_task_shell_unsupported",
+                format!("sandbox provider {provider} cannot run task shell commands"),
+            )
+        })
     }
 
     pub fn member(&self, id: &str) -> Option<&ProviderMember> {
@@ -401,6 +423,27 @@ fn unsupported() -> SandboxSpawnError {
 
 #[async_trait]
 impl SandboxRuntimeControl for ProviderSet {
+    async fn exec_task_shell(
+        &self,
+        request: TaskShellRequest,
+    ) -> Result<TaskShellResult, SandboxSpawnError> {
+        let provider = request.placement.provider().to_string();
+        let runtime = self.task_shell_runtime(&provider)?;
+        let mut result = runtime.exec_task_shell(request).await?;
+        result.provider = provider;
+        Ok(result)
+    }
+
+    async fn release_task_shell(
+        &self,
+        provider: &str,
+        container_ids: &[String],
+    ) -> Result<Vec<String>, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .release_task_shell(provider, container_ids)
+            .await
+    }
+
     fn agent_origin_allowed(&self, agent_id: &str, device_id: &str) -> Option<bool> {
         let member = self.owner_of(agent_id)?;
         member.runtime.as_ref()?.agent_origin_allowed(agent_id, device_id)
@@ -524,6 +567,7 @@ mod tests {
         running: Mutex<Vec<String>>,
         spawned: Mutex<Vec<ExternalAgentSpawnConfig>>,
         registered: Mutex<Vec<String>>,
+        released: Mutex<Vec<(String, Vec<String>)>>,
         unreachable: bool,
     }
 
@@ -617,6 +661,40 @@ mod tests {
 
     #[async_trait]
     impl SandboxRuntimeControl for Member {
+        // Only the local driver runs task shells, as on a real Host.
+        async fn exec_task_shell(
+            &self,
+            request: TaskShellRequest,
+        ) -> Result<TaskShellResult, SandboxSpawnError> {
+            if self.driver != "docker" {
+                return Err(SandboxSpawnError::refused(
+                    "sandbox_task_shell_remote_unsupported",
+                    "remote",
+                ));
+            }
+            Ok(TaskShellResult {
+                exit_code: Some(0),
+                stdout: request.argv.join(" "),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                timed_out: false,
+                duration_ms: 1,
+                provider: "set-by-the-member".into(),
+                container_id: format!("{}-runtime", self.driver),
+                tier: "container".into(),
+            })
+        }
+        async fn release_task_shell(
+            &self,
+            provider: &str,
+            container_ids: &[String],
+        ) -> Result<Vec<String>, SandboxSpawnError> {
+            self.released
+                .lock()
+                .push((provider.to_string(), container_ids.to_vec()));
+            Ok(container_ids.to_vec())
+        }
         async fn register_tool_host(
             &self,
             service: ToolHostService,
@@ -727,6 +805,57 @@ mod tests {
         set.kill("b").await.unwrap();
         assert!(cloud_backend.running.lock().is_empty());
         assert_eq!(local_backend.running.lock().clone(), vec!["a".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn task_shells_go_to_the_member_their_placement_names() {
+        let (local, local_backend) = member("local", "docker", false);
+        let (cloud, cloud_backend) = member("cloud", "e2b", true);
+        let set = ProviderSet::new(vec![local, cloud], Some("cloud".into())).unwrap();
+        let request = |provider: Option<&str>| TaskShellRequest {
+            placement: placed("t", provider, vec![]).sandbox.unwrap(),
+            owner: "session:s".into(),
+            workspace_root: "/w".into(),
+            workspace_path: "/w".into(),
+            cwd: "/w".into(),
+            argv: vec!["true".into()],
+            env: BTreeMap::new(),
+            stdin: None,
+            timeout_ms: 1000,
+        };
+
+        let result = set.exec_task_shell(request(None)).await.unwrap();
+        assert_eq!(result.provider, "local");
+        assert_eq!(result.container_id, "docker-runtime");
+        assert_eq!(
+            set.exec_task_shell(request(Some("cloud")))
+                .await
+                .unwrap_err()
+                .code,
+            "sandbox_task_shell_remote_unsupported"
+        );
+        assert_eq!(
+            set.exec_task_shell(request(Some("elsewhere")))
+                .await
+                .unwrap_err()
+                .code,
+            "sandbox_provider_unknown"
+        );
+
+        let ids = vec!["docker-runtime".to_string()];
+        assert_eq!(set.release_task_shell("local", &ids).await.unwrap(), ids);
+        assert_eq!(
+            local_backend.released.lock().clone(),
+            vec![("local".to_string(), ids.clone())]
+        );
+        assert!(cloud_backend.released.lock().is_empty());
+        assert_eq!(
+            set.release_task_shell("elsewhere", &ids)
+                .await
+                .unwrap_err()
+                .code,
+            "sandbox_provider_unknown"
+        );
     }
 
     #[tokio::test]

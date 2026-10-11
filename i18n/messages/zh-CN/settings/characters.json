@@ -314,6 +314,8 @@
         "label": "沙盒化 Bash / Edit / Write"
       },
       "tier": {
+        "container": "运行环境（常驻主机）",
+        "containerHint": "让 shell 与文件操作在常驻主机上项目的运行环境中执行。在其他设备上，沙箱工具会直接拒绝，而不会改在该设备上执行。",
         "cuaDesktop": "绑定的沙箱桌面",
         "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
         "inherit": "继承应用默认",

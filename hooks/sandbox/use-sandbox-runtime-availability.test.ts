@@ -6,6 +6,7 @@ const mockCodeSandboxStatus = jest.fn(async () => ({ confined: false, backend: "
 const mockSnapshot = {
   os: { available: false, backend: "", reason: "probe-required", detail: "" },
   microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+  container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
 }
 jest.mock("@/lib/ai/code-mode/sandbox-status", () => ({
   codeSandboxStatus: () => mockCodeSandboxStatus(),

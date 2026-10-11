@@ -3,7 +3,7 @@
 
 use super::*;
 use cognia_external_agent::container_backend::{
-    OwnedContainer, RunnerExecSpec, PERSISTENT_RUNTIME_LABEL,
+    OwnedContainer, RunnerExecSpec, PERSISTENT_RUNTIME_LABEL, TASK_SHELL_RUNTIME_LABEL,
 };
 use sha2::{Digest, Sha256};
 
@@ -15,7 +15,20 @@ fn fault(message: impl Into<String>) -> SandboxSpawnError {
     SandboxSpawnError::fault("sandbox_persistent_runtime_failed", message.into())
 }
 
-fn runtime_key(spec: &RunnerSpec, environment: &EnvironmentSpec) -> String {
+/// What a retained runtime is for. A task shell's runtime is never an
+/// agent's: releasing it removes the container, which would take an agent's
+/// installed packages and running services with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RuntimePurpose {
+    Agent,
+    TaskShell,
+}
+
+fn runtime_key(
+    spec: &RunnerSpec,
+    environment: &EnvironmentSpec,
+    purpose: RuntimePurpose,
+) -> String {
     // Mount identity is part of compatibility: project ids alone do not
     // distinguish two checkouts, volume subpaths, or another deployment.
     // Keep every container-level setting, including injected bundle mounts,
@@ -26,7 +39,14 @@ fn runtime_key(spec: &RunnerSpec, environment: &EnvironmentSpec) -> String {
     stable.cmd.clear();
     stable.env.clear();
     stable.labels.clear();
-    let identity = format!("{}\0{stable:?}", environment.spec_digest);
+    let identity = match purpose {
+        // Unchanged since agent runtimes were introduced: a new spelling
+        // would orphan every existing one.
+        RuntimePurpose::Agent => format!("{}\0{stable:?}", environment.spec_digest),
+        RuntimePurpose::TaskShell => {
+            format!("{}\0{stable:?}\0task-shell", environment.spec_digest)
+        }
+    };
     sha256_hex(identity.as_bytes())
 }
 
@@ -233,24 +253,79 @@ impl DockerSandboxBackend {
 
     async fn persistent_inner(
         &self,
-        mut spec: RunnerSpec,
+        spec: RunnerSpec,
         auth: Option<RegistryAuth>,
         environment: &EnvironmentSpec,
         config: &ExternalAgentSpawnConfig,
     ) -> Result<(RunningRunner, Arc<dyn ContainerApi>), SandboxSpawnError> {
-        let key = runtime_key(&spec, environment);
-        let lock = self.stage_lock(&format!("runtime:{key}"));
-        let _guard = lock.lock().await;
         let command_start = spec
             .cmd
             .iter()
             .position(|arg| arg == "--")
             .ok_or_else(|| fault("missing agent invocation"))?;
         let invocation = spec.cmd[command_start + 1..].to_vec();
-        let mut boot = runtime_config(environment, config)?;
+        let acquired = self
+            .acquire_runtime(spec, auth, environment, RuntimePurpose::Agent)
+            .await?;
+        let container_id = acquired.container_id.clone();
+        self.remember_retained_task(config, &container_id, environment)?;
+        let session = sha256_hex(format!("{}:{}", config.id, default_instance_id()).as_bytes());
+        let mut request = exec_spec(
+            &container_id,
+            &[
+                "connect-agent",
+                "--socket",
+                SOCKET,
+                "--session",
+                &session,
+                "--lease-seconds",
+                "60",
+                "--",
+            ],
+        );
+        request.command.extend(invocation);
+        let mut runtime = runtime_config(environment, config)?;
+        runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
+        request.env =
+            encode_runtime_config_env(&runtime).map_err(|error| fault(error.to_string()))?;
+        let cleanup: Arc<dyn ContainerApi> = Arc::new(SessionApi::new(
+            self.api.clone(),
+            container_id.clone(),
+            session,
+        ));
+        // A failed start may still have reached the server; signal the unique
+        // session before releasing the reservation, never retry that exec.
+        match self.api.exec_runtime(request).await {
+            Ok(running) => Ok((running, cleanup)),
+            Err(error) => {
+                let _ = cleanup.remove(&container_id).await;
+                Err(fault(error))
+            }
+        }
+    }
+
+    /// Find or start the retained runtime for `spec` (an `init-agent` spec
+    /// whose command after `--` is dropped) and wait for its lifecycle
+    /// preparation. The returned guard is the runtime's lock: a session
+    /// connected while it is held cannot race a release of the container.
+    pub(super) async fn acquire_runtime(
+        &self,
+        mut spec: RunnerSpec,
+        auth: Option<RegistryAuth>,
+        environment: &EnvironmentSpec,
+        purpose: RuntimePurpose,
+    ) -> Result<AcquiredRuntime, SandboxSpawnError> {
+        let key = runtime_key(&spec, environment, purpose);
+        let lock = self.stage_lock(&format!("runtime:{key}"));
+        let guard = lock.lock_owned().await;
+        let command_start = spec
+            .cmd
+            .iter()
+            .position(|arg| arg == "--")
+            .ok_or_else(|| fault("missing agent invocation"))?;
+        let mut boot = runtime_config_with_env(environment, BTreeMap::new())?;
         // Task leases are never baked into a retained container or replayed on
         // restart. Lifecycle preparation uses only the approved project env.
-        boot.spawn_env.clear();
         boot.lifecycle_phases
             .retain(|phase| *phase != LifecyclePhase::PostAttach);
         spec.env = encode_runtime_config_env(&boot).map_err(|error| fault(error.to_string()))?;
@@ -276,6 +351,10 @@ impl DockerSandboxBackend {
         spec.labels = ownership_labels(&key, &self.config.instance_id, &self.config.deployment_id);
         spec.labels
             .insert(PERSISTENT_RUNTIME_LABEL.into(), "1".into());
+        if purpose == RuntimePurpose::TaskShell {
+            spec.labels
+                .insert(TASK_SHELL_RUNTIME_LABEL.into(), "1".into());
+        }
         spec.labels.insert(RUNTIME_KEY_LABEL.into(), key.clone());
         spec.labels
             .insert(PROJECT_LABEL.into(), environment.project_id.clone());
@@ -362,41 +441,17 @@ impl DockerSandboxBackend {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        self.remember_retained_task(config, &container_id, environment)?;
-        let session = sha256_hex(format!("{}:{}", config.id, default_instance_id()).as_bytes());
-        let mut request = exec_spec(
-            &container_id,
-            &[
-                "connect-agent",
-                "--socket",
-                SOCKET,
-                "--session",
-                &session,
-                "--lease-seconds",
-                "60",
-                "--",
-            ],
-        );
-        request.command.extend(invocation);
-        let mut runtime = runtime_config(environment, config)?;
-        runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
-        request.env =
-            encode_runtime_config_env(&runtime).map_err(|error| fault(error.to_string()))?;
-        let cleanup: Arc<dyn ContainerApi> = Arc::new(SessionApi::new(
-            self.api.clone(),
-            container_id.clone(),
-            session,
-        ));
-        // A failed start may still have reached the server; signal the unique
-        // session before releasing the reservation, never retry that exec.
-        match self.api.exec_runtime(request).await {
-            Ok(running) => Ok((running, cleanup)),
-            Err(error) => {
-                let _ = cleanup.remove(&container_id).await;
-                Err(fault(error))
-            }
-        }
+        Ok(AcquiredRuntime {
+            container_id,
+            _guard: guard,
+        })
     }
+}
+
+/// A retained runtime that is up and prepared, held under its lock.
+pub(super) struct AcquiredRuntime {
+    pub container_id: String,
+    pub _guard: tokio::sync::OwnedMutexGuard<()>,
 }
 
 pub(super) fn runtime_ready(state: &Value, expected_key: &str) -> bool {
@@ -447,25 +502,45 @@ mod tests {
             .find(|spec| spec.cmd.first().is_some_and(|arg| arg == "init-agent"))
             .unwrap()
             .clone();
-        let expected = runtime_key(&original, &environment);
+        let expected = runtime_key(&original, &environment, RuntimePurpose::Agent);
         let mut changed = original.clone();
         changed.extra_mounts[0].volume.push_str("-new-bundle");
-        assert_ne!(runtime_key(&changed, &environment), expected);
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
         changed = original.clone();
         changed.read_only_rootfs = !changed.read_only_rootfs;
-        assert_ne!(runtime_key(&changed, &environment), expected);
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
         changed = original.clone();
         changed.tmpfs.push("/new:rw".into());
-        assert_ne!(runtime_key(&changed, &environment), expected);
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
         changed = original.clone();
         changed.user = Some("1234".into());
-        assert_ne!(runtime_key(&changed, &environment), expected);
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
         changed = original;
         changed.name = "different-agent".into();
         changed.env.push("TOKEN=fresh".into());
         changed.cmd.push("another-agent-option".into());
         changed.labels.clear();
-        assert_eq!(runtime_key(&changed, &environment), expected);
+        assert_eq!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
+        // A task shell never resolves to an agent's runtime for the same spec.
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::TaskShell),
+            expected
+        );
         harness.backend.kill_all().await.unwrap();
     }
 

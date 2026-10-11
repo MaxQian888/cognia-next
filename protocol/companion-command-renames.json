@@ -1315,6 +1315,12 @@
     "ensure_system_lsp_host": {
       "to": "lsp.system_host.ensure"
     },
+    "environment_task_shell_exec": {
+      "to": "environment.task_shell.exec"
+    },
+    "environment_task_shell_release": {
+      "to": "environment.task_shell.release"
+    },
     "execution_run_approval_list": {
       "to": "execution.run.approval.list"
     },

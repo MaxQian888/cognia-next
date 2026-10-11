@@ -104,6 +104,13 @@ enum Mode {
         /// Host-renewed lease; expiry terminates an abandoned Docker exec.
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
         lease_seconds: Option<u64>,
+        /// Run a Host task's tool command instead of attaching an agent: no
+        /// postAttach lifecycle, starting in this directory (ADR-0224 A8).
+        #[arg(long)]
+        task_cwd: Option<String>,
+        /// With `--task-cwd`: the Host's path for the workspace, linked to it.
+        #[arg(long, requires = "task_cwd")]
+        workspace_alias: Option<String>,
         #[arg(last = true, required = true)]
         argv: Vec<String>,
     },
@@ -324,6 +331,8 @@ fn main() -> ExitCode {
             session,
             runtime_config,
             lease_seconds,
+            task_cwd,
+            workspace_alias,
             argv,
         } => {
             let runtime = match load_runtime(runtime_config.as_deref(), &std::env::vars().collect())
@@ -336,13 +345,27 @@ fn main() -> ExitCode {
                     )
                 }
             };
-            match cognia_sandboxd::serve::connect_agent_with_lease(
-                &socket,
-                session,
-                argv,
-                runtime,
-                lease_seconds,
-            ) {
+            let connected = match task_cwd {
+                Some(cwd) => cognia_sandboxd::serve::connect_task(
+                    &socket,
+                    session,
+                    argv,
+                    runtime,
+                    lease_seconds,
+                    cognia_sandboxd::serve::TaskCommand {
+                        cwd,
+                        workspace_alias,
+                    },
+                ),
+                None => cognia_sandboxd::serve::connect_agent_with_lease(
+                    &socket,
+                    session,
+                    argv,
+                    runtime,
+                    lease_seconds,
+                ),
+            };
+            match connected {
                 Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
                 Err(error) => fail(error, EXIT_INIT_FAILED),
             }

@@ -948,6 +948,7 @@ export function CharacterEditor({
               <SelectItem value="inherit">{tSandbox("tier.inherit")}</SelectItem>
               <SelectItem value="os">{tSandbox("tier.os")}</SelectItem>
               <SelectItem value="microvm">{tSandbox("tier.microvm")}</SelectItem>
+              <SelectItem value="container">{tSandbox("tier.container")}</SelectItem>
               {/*
                 The tier runs shell and file work inside the bound desktop, so
                 it is meaningless without one: `validateSandboxSessionBinding`
@@ -962,6 +963,14 @@ export function CharacterEditor({
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">{tSandbox("tier.description")}</p>
+          {s.sandboxTier === "container" && (
+            <p
+              className="text-[10px] text-muted-foreground"
+              data-testid="character-sandbox-tier-container-hint"
+            >
+              {tSandbox("tier.containerHint")}
+            </p>
+          )}
           {!hasBoundDesktop && (
             <p className="text-[10px] text-muted-foreground">
               {tSandbox("tier.cuaDesktopNeedsBoundDesktop")}

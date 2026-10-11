@@ -34,6 +34,20 @@ it("keeps both tiers unavailable when their live proof is missing", () => {
   expect(unavailable.microvm).toMatchObject({ available: false, reason: "adapter-missing" })
 })
 
+it("offers the container tier only where a Host's sandbox pool adapter runs it", () => {
+  const status = { confined: true, backend: "linux-bwrap", detail: "" }
+  // Every desktop and paired client: the tier is an always-on Host's.
+  expect(projectSandboxRuntimeAvailability(status, false).container).toMatchObject({
+    available: false,
+    reason: "always-on-host-only",
+  })
+  expect(projectSandboxRuntimeAvailability(status, false, true).container).toMatchObject({
+    available: true,
+    reason: "workspace-required",
+    requiresWorkspace: true,
+  })
+})
+
 function connection(overrides: Partial<SandboxConnectionRow> = {}): SandboxConnectionRow {
   return {
     id: "conn",

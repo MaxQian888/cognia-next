@@ -220,7 +220,9 @@ describe("requiredOperationsForBinding", () => {
 
 describe("compareSandboxIsolation", () => {
   it("ranks cua-desktop above microvm above os", () => {
-    expect(SANDBOX_ISOLATION_RANK.os).toBeLessThan(SANDBOX_ISOLATION_RANK.microvm)
+    expect(SANDBOX_ISOLATION_RANK.os).toBeLessThan(SANDBOX_ISOLATION_RANK.container)
+    // A container shares the Host's kernel; a microVM does not.
+    expect(SANDBOX_ISOLATION_RANK.container).toBeLessThan(SANDBOX_ISOLATION_RANK.microvm)
     expect(SANDBOX_ISOLATION_RANK.microvm).toBeLessThan(SANDBOX_ISOLATION_RANK["cua-desktop"])
   })
 
@@ -231,6 +233,8 @@ describe("compareSandboxIsolation", () => {
     expect(compareSandboxIsolation("microvm", "os")).toBe("weaker")
     expect(compareSandboxIsolation("cua-desktop", "microvm")).toBe("weaker")
     expect(compareSandboxIsolation("microvm", "cua-desktop")).toBe("stronger")
+    expect(compareSandboxIsolation("os", "container")).toBe("stronger")
+    expect(compareSandboxIsolation("microvm", "container")).toBe("weaker")
   })
 })
 

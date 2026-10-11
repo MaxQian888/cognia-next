@@ -8,6 +8,9 @@
 //
 //   - filled  Shield      / emerald — sandbox enabled, OS tier
 //   - dashed  Shield      / sky     — sandbox enabled, microvm tier
+//   - box     Container   / teal    — sandbox enabled, container tier: the
+//                                     project's runtime environment on an
+//                                     always-on host (ADR-0224 A8)
 //   - monitor MonitorCheck/ violet  — sandbox enabled, cua-desktop tier: shell,
 //                                     file AND GUI work run inside a bound
 //                                     sandbox connection (Epic 5)
@@ -17,7 +20,7 @@
 //                                     inside the mandatory launcher sandbox
 //                                     (ADR-0077 / ADR-0119)
 
-import { MonitorCheck, Shield, ShieldCheck, ShieldOff } from "lucide-react"
+import { Container, MonitorCheck, Shield, ShieldCheck, ShieldOff } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -34,7 +37,7 @@ import type { SandboxShellTier } from "@/types/sandbox"
 import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 
-export type ShieldState = "os" | "microvm" | "cua-desktop" | "off" | "external"
+export type ShieldState = "os" | "container" | "microvm" | "cua-desktop" | "off" | "external"
 
 export interface SandboxShieldProps {
   session: ChatSession | null
@@ -109,9 +112,11 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       ? availability.os.available
       : state === "microvm"
         ? availability.microvm.available
-        : state === "off" || state === "external"
-          ? true
-          : false
+        : state === "container"
+          ? availability.container.available
+          : state === "off" || state === "external"
+            ? true
+            : false
   const ariaLabel = runtimeAvailable ? t(`label.${state}`) : t(`unavailableLabel.${state}`)
   const tooltip = runtimeAvailable
     ? t(`tooltip.${state}`)
@@ -128,6 +133,17 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       <ShieldCheck className={cn("size-3.5 text-muted-foreground", className)} aria-hidden="true" />
     ) : state === "off" ? (
       <ShieldOff className={cn("size-3.5 text-muted-foreground", className)} aria-hidden="true" />
+    ) : state === "container" ? (
+      // Its own glyph: the work leaves this machine for the host's runtime
+      // environment, which is not the same claim as a shield around it here.
+      <Container
+        className={cn(
+          "size-3.5",
+          runtimeAvailable ? "text-teal-500" : "text-muted-foreground",
+          className
+        )}
+        aria-hidden="true"
+      />
     ) : state === "cua-desktop" ? (
       // A distinct glyph, not a differently-coloured shield: this tier moves
       // execution onto another machine entirely, which is a bigger claim than

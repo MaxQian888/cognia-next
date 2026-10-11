@@ -68,6 +68,14 @@ export function buildLocalShellTiers(
       reasonKey: local.osSandboxAvailable ? undefined : "osBackendUnavailable",
     },
     {
+      // Listed even where it cannot run, like `cua-desktop`: a session the
+      // always-on Host created keeps the tier, and this row is what explains
+      // why it refuses here (ADR-0224 A8).
+      tier: "container",
+      available: local.containerAvailable === true,
+      reasonKey: local.containerAvailable ? undefined : "containerAlwaysOnHostOnly",
+    },
+    {
       tier: "microvm",
       available: local.microvmAvailable,
       // The adapter is registered by the E2B plugin on activate. Without it

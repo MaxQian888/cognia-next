@@ -15784,6 +15784,72 @@
       "required": ["ports"],
       "additionalProperties": false
     },
+    "environment_task_shell_exec": {
+      "description": "What one task shell command did. Output beyond 1 MiB per stream is dropped and flagged; invalid UTF-8 is replaced.",
+      "type": "object",
+      "properties": {
+        "exitCode": {
+          "description": "Null when the command was killed on timeout without an exit status.",
+          "type": ["integer", "null"]
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdoutTruncated": {
+          "type": "boolean"
+        },
+        "stderrTruncated": {
+          "type": "boolean"
+        },
+        "timedOut": {
+          "type": "boolean"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provider": {
+          "description": "The provider that ran it; a release names it.",
+          "type": "string"
+        },
+        "containerId": {
+          "description": "The retained runtime the command ran in; a release names it.",
+          "type": "string"
+        },
+        "tier": {
+          "description": "The isolation tier the runtime was admitted at.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stdout",
+        "stderr",
+        "stdoutTruncated",
+        "stderrTruncated",
+        "timedOut",
+        "durationMs",
+        "provider",
+        "containerId",
+        "tier"
+      ]
+    },
+    "environment_task_shell_release": {
+      "description": "What a task shell release removed.",
+      "type": "object",
+      "properties": {
+        "removed": {
+          "description": "The runtimes removed; one a session still uses is kept and not listed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["removed"]
+    },
     "environment_declaration_read": {
       "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse \u2014 and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",
       "properties": {

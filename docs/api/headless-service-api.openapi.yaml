@@ -46224,6 +46224,453 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/environment_task_shell_exec:
+    post:
+      operationId: internalRpcEnvironmentTaskShellExec
+      tags:
+        - headless-rpc
+      summary: environment_task_shell_exec (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: "Run one tool command of a Host task in the task's runtime environment (ADR-0224 A8): a built-in turn's
+                sandboxed bash, edit or write on an always-on Host, where nothing a task runs may run on the Host
+                itself. Service plane only: the brain stamps the placement it resolved, and the workspace and cwd clear
+                the spawn policy rule an agent's cwd follows."
+              type: object
+              required:
+                - placement
+                - owner
+                - workspaceRoot
+                - argv
+                - timeoutMs
+              properties:
+                placement:
+                  type: object
+                  description: "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not
+                    described here: the host re-admits it against its own baseline, catalog and approvals and answers
+                    with a typed refusal code."
+                  required:
+                    - kind
+                    - spec
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - container
+                owner:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                  description: Who the command runs for (`session:<id>`); scopes its exec session.
+                workspaceRoot:
+                  type: string
+                  minLength: 1
+                  description: The task workspace as the task's tools name it. Inside the runtime this path leads to the mounted
+                    workspace, so tool paths are unchanged.
+                cwd:
+                  type: string
+                  minLength: 1
+                  description: Where the command starts, inside the workspace. The workspace root when absent.
+                argv:
+                  type: array
+                  minItems: 1
+                  maxItems: 256
+                  items:
+                    type: string
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  example: {}
+                stdin:
+                  type: string
+                  description: The command's whole input; its stdin closes after it.
+                timeoutMs:
+                  type: integer
+                  minimum: 1
+                  maximum: 3600000
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: What one task shell command did. Output beyond 1 MiB per stream is dropped and flagged; invalid UTF-8 is
+                  replaced.
+                type: object
+                properties:
+                  exitCode:
+                    description: Null when the command was killed on timeout without an exit status.
+                    type:
+                      - integer
+                      - "null"
+                  stdout:
+                    type: string
+                  stderr:
+                    type: string
+                  stdoutTruncated:
+                    type: boolean
+                  stderrTruncated:
+                    type: boolean
+                  timedOut:
+                    type: boolean
+                  durationMs:
+                    type: integer
+                    minimum: 0
+                  provider:
+                    description: The provider that ran it; a release names it.
+                    type: string
+                  containerId:
+                    description: The retained runtime the command ran in; a release names it.
+                    type: string
+                  tier:
+                    description: The isolation tier the runtime was admitted at.
+                    type: string
+                required:
+                  - stdout
+                  - stderr
+                  - stdoutTruncated
+                  - stderrTruncated
+                  - timedOut
+                  - durationMs
+                  - provider
+                  - containerId
+                  - tier
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/environment_task_shell_release:
+    post:
+      operationId: internalRpcEnvironmentTaskShellRelease
+      tags:
+        - headless-rpc
+      summary: environment_task_shell_release (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: "The task is done with these task shell runtimes (ADR-0224 A8): remove each one no session uses. A
+                container that is not this Host's task shell runtime refuses the release."
+              type: object
+              required:
+                - provider
+                - containerIds
+              properties:
+                provider:
+                  type: string
+                  minLength: 1
+                  description: The provider a task shell result named.
+                containerIds:
+                  type: array
+                  maxItems: 64
+                  items:
+                    type: string
+                    minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: What a task shell release removed.
+                type: object
+                properties:
+                  removed:
+                    description: The runtimes removed; one a session still uses is kept and not listed.
+                    type: array
+                    items:
+                      type: string
+                required:
+                  - removed
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/execution_run_approval_list:
     post:
       operationId: internalRpcExecutionRunApprovalList
@@ -175328,6 +175775,8 @@ components:
           - environment_ports_list
           - environment_probe_get
           - environment_spec_resolve_preview
+          - environment_task_shell_exec
+          - environment_task_shell_release
           - execution_run_approval_list
           - execution_run_approval_respond
           - execution_run_control
@@ -176188,10 +176637,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 820
-  generatedRequestSchemaCount: 820
+  internalCommandCount: 822
+  generatedRequestSchemaCount: 822
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 820
+  contractRequestSchemaCount: 822
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 820
+  generatedResponseSchemaCount: 822
   loopbackOnly: true

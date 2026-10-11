@@ -26,6 +26,9 @@ export function transportCommandTimeoutMs(command: string): number {
   // Native environment initialization allows 3600s plus5s child cleanup.
   // Wait for that result across every remote channel, including reply headroom.
   if (command === "project_environment_execute") return 3_620_000
+  // A task shell command may run an hour once started (ADR-0224 A8), and the
+  // Host first prepares its runtime (an image pull, lifecycle hooks).
+  if (command === "environment_task_shell_exec") return 3_900_000
   // Native media operations run bounded FFmpeg jobs. Include metadata probes
   // and reply transfer headroom so every remote transport waits for the same job.
   if (command === "plugin_media_get_video_frame") return 180_000

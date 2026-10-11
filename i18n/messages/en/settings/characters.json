@@ -314,6 +314,8 @@
         "label": "Sandbox Bash / Edit / Write"
       },
       "tier": {
+        "container": "Runtime environment (always-on host)",
+        "containerHint": "Runs shell and file work in the project's runtime environment on an always-on host. Anywhere else, sandboxed tools refuse instead of running on that device.",
         "cuaDesktop": "Bound sandbox desktop",
         "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
         "inherit": "Inherit app default",

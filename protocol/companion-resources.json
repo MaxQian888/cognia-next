@@ -539,7 +539,8 @@
         "probe": {},
         "spec": {},
         "build": {},
-        "ports": {}
+        "ports": {},
+        "task_shell": {}
       }
     },
     "execution": {

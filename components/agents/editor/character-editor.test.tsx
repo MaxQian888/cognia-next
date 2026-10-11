@@ -268,6 +268,21 @@ describe("CharacterEditor — v2 fields", () => {
     )
   })
 
+  it("offers the always-on host's container tier and says where it runs", async () => {
+    renderEditor(baseInitial({ sandboxTier: "container" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId("character-sandbox-tier-container-hint")).toHaveTextContent(
+      "tier.containerHint"
+    )
+    fireEvent.click(screen.getByTestId("character-sandbox-tier"))
+    expect(screen.getByRole("option", { name: "tier.container" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
   it("hydrates persona, voice, avatar image, and platform fields from initial and saves them", async () => {
     const { onSave } = renderEditor(
       baseInitial({

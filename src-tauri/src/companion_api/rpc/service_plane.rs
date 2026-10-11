@@ -6,6 +6,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "kill_external_agent",
     "external_agent_delete_gateway_task",
     "get_external_agent_status",
+    "environment_task_shell_exec",
+    "environment_task_shell_release",
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
@@ -104,6 +106,36 @@ pub(super) const COMMANDS: &[&str] = &[
     "langfuse_trace_ingest",
     "app_settings_update",
 ];
+
+/// The sandbox pool's runtime control, or the refusal that names the switch.
+fn task_shell_runtime() -> Result<
+    std::sync::Arc<dyn cognia_sandbox_pool::runtime::SandboxRuntimeControl>,
+    (StatusCode, Json<RpcError>),
+> {
+    crate::companion_api::environment_pool::installed()
+        .and_then(|pool| pool.runtime)
+        .ok_or_else(|| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(RpcError::new(
+                    "sandbox_pool_disabled",
+                    "task shells need the runtime environment sandbox pool \
+                     (COGNIA_SANDBOX_POOL_ENABLED)",
+                )),
+            )
+        })
+}
+
+fn task_shell_error(
+    error: cognia_external_agent::sandbox_routing_backend::SandboxSpawnError,
+) -> (StatusCode, Json<RpcError>) {
+    use cognia_external_agent::sandbox_routing_backend::SandboxErrorKind;
+    let status = match error.kind {
+        SandboxErrorKind::Refused => StatusCode::BAD_REQUEST,
+        SandboxErrorKind::Fault => StatusCode::BAD_GATEWAY,
+    };
+    (status, Json(RpcError::new(error.code, error.message)))
+}
 
 fn langfuse_account(tenant_id: Option<&str>) -> Result<&str, (StatusCode, Json<RpcError>)> {
     tenant_id.ok_or_else(|| RpcError::forbidden("Langfuse requires an authenticated account"))
@@ -329,6 +361,87 @@ pub(super) async fn dispatch(
         // ── Connector webhook ingress registry (ADR-0059 F4 / R12) ───────────
         // The brain registers its adapters here so the public `/connectors`
         // routes on the front door can verify + forward platform webhooks.
+        // ── Host task shells (ADR-0224 A8) ───────────────────────────────────
+        // A built-in turn's sandboxed tool command on an always-on Host runs
+        // in a retained runtime of the task's environment, never on the Host.
+        // Service-only: the brain stamps the placement it resolved; the
+        // workspace must clear the same SpawnPolicy rule a spawn's cwd does.
+        "environment_task_shell_exec" => {
+            let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
+            let placement: cognia_external_agent::sandbox_routing_backend::SandboxPlacement =
+                required(&args, "placement")?;
+            let owner: String = required(&args, "owner")?;
+            let workspace_path: String = required(&args, "workspaceRoot")?;
+            let cwd: Option<String> = optional(&args, "cwd")?;
+            let argv: Vec<String> = required(&args, "argv")?;
+            let env: std::collections::BTreeMap<String, String> =
+                optional(&args, "env")?.unwrap_or_default();
+            let stdin: Option<String> = optional(&args, "stdin")?;
+            let timeout_ms: u64 = required(&args, "timeoutMs")?;
+            let denied = |violation: crate::external_agent::presets::PolicyViolation| {
+                RpcError::forbidden(format!("task shell denied by policy: {violation}"))
+            };
+            let workspace_root = policy
+                .validate_workspace_path(&workspace_path)
+                .map_err(denied)?;
+            let cwd = cwd.unwrap_or_else(|| workspace_path.clone());
+            // The command starts under the workspace both as named and once
+            // resolved: a symlink inside it cannot lead the cwd out.
+            if !std::path::Path::new(&cwd).starts_with(&workspace_path)
+                || !std::path::Path::new(&policy.validate_workspace_path(&cwd).map_err(denied)?)
+                    .starts_with(&workspace_root)
+            {
+                return Err(RpcError::forbidden(
+                    "task shell denied by policy: the cwd is outside its workspace",
+                ));
+            }
+            let runtime = task_shell_runtime()?;
+            let mut fields = serde_json::json!({
+                "owner": owner,
+                "program": argv.first().cloned().unwrap_or_default(),
+                "cwd": cwd,
+                "sandbox": placement.audit_fields(),
+            });
+            let outcome = runtime
+                .exec_task_shell(cognia_sandbox_pool::runtime::TaskShellRequest {
+                    placement,
+                    owner,
+                    workspace_root,
+                    workspace_path,
+                    cwd,
+                    argv,
+                    env,
+                    stdin,
+                    timeout_ms,
+                })
+                .await;
+            match &outcome {
+                Ok(result) => {
+                    fields["exit_code"] = serde_json::json!(result.exit_code);
+                    fields["timed_out"] = Value::Bool(result.timed_out);
+                    fields["tier"] = Value::String(result.tier.clone());
+                }
+                Err(error) => fields["reason"] = Value::String(error.code.clone()),
+            }
+            super::super::audit::record_async(
+                "environment_task_shell",
+                device_id,
+                scope.unwrap_or(""),
+                if outcome.is_ok() { "allow" } else { "deny" },
+                fields,
+            )
+            .await;
+            to_json(outcome.map_err(task_shell_error)?)
+        }
+        "environment_task_shell_release" => {
+            let provider: String = required(&args, "provider")?;
+            let container_ids: Vec<String> = required(&args, "containerIds")?;
+            let removed = task_shell_runtime()?
+                .release_task_shell(&provider, &container_ids)
+                .await
+                .map_err(task_shell_error)?;
+            to_json(cognia_sandbox_pool::runtime::TaskShellRelease { removed })
+        }
         "connectors_register" => {
             let services = host
                 .headless()

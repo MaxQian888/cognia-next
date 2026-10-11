@@ -49,6 +49,8 @@ enum Request {
         runtime: Box<RuntimeConfigV1>,
         #[serde(default)]
         lease_seconds: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<TaskCommand>,
     },
     Renew {
         session: String,
@@ -61,6 +63,96 @@ enum Request {
     Port {
         port: u16,
     },
+}
+
+/// A Host task's tool command rather than an agent attaching (ADR-0224 A8):
+/// it runs without the postAttach lifecycle, which belongs to an agent
+/// connecting, and starts where the Host's tool asked.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCommand {
+    /// Absolute directory the command starts in.
+    pub cwd: String,
+    /// The Host's path for this workspace. It is made a symlink to the
+    /// workspace so the absolute paths a Host tool passes resolve unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_alias: Option<String>,
+}
+
+impl TaskCommand {
+    fn validate(&self) -> io::Result<()> {
+        let path_ok =
+            |value: &str| value.starts_with('/') && value.len() <= 4096 && !value.contains('\0');
+        if !path_ok(&self.cwd)
+            || self
+                .workspace_alias
+                .as_deref()
+                .is_some_and(|alias| !path_ok(alias))
+        {
+            return Err(invalid("invalid task command"));
+        }
+        Ok(())
+    }
+}
+
+/// Make `alias` (the Host's path for the workspace) a symlink to `workspace`.
+/// Idempotent. Only directories root or this supervisor's uid owns are
+/// walked or created, and nothing that already exists is replaced: a session's user
+/// can neither redirect the link nor have it clobber a file of the image.
+fn ensure_workspace_alias(alias: &Path, workspace: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    use std::path::Component;
+    if alias == workspace {
+        return Ok(());
+    }
+    if !alias.is_absolute()
+        || alias
+            .components()
+            .any(|part| !matches!(part, Component::RootDir | Component::Normal(_)))
+        || alias.starts_with(workspace)
+        || workspace.starts_with(alias)
+    {
+        return Err(invalid("invalid workspace alias"));
+    }
+    let parent = alias
+        .parent()
+        .ok_or_else(|| invalid("invalid workspace alias"))?;
+    let owner = effective_uid();
+    let mut current = PathBuf::from("/");
+    for part in parent.components().skip(1) {
+        current.push(part);
+        let meta = match fs::symlink_metadata(&current) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match fs::DirBuilder::new().mode(0o755).create(&current) {
+                    Err(error) if error.kind() != io::ErrorKind::AlreadyExists => {
+                        return Err(error)
+                    }
+                    _ => fs::symlink_metadata(&current)?,
+                }
+            }
+            other => other?,
+        };
+        if !meta.file_type().is_dir() || (meta.uid() != 0 && meta.uid() != owner) {
+            return Err(invalid(
+                "workspace alias parent is not a supervisor-owned directory",
+            ));
+        }
+    }
+    let linked = |path: &Path| -> io::Result<bool> {
+        let meta = fs::symlink_metadata(path)?;
+        Ok(meta.file_type().is_symlink() && fs::read_link(path)? == workspace)
+    };
+    match std::os::unix::fs::symlink(workspace, alias) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            if linked(alias)? {
+                Ok(())
+            } else {
+                Err(invalid("workspace alias is already taken"))
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub struct ServeOptions {
@@ -282,6 +374,7 @@ fn spawn_worker(
     runtime: &RuntimeConfigV1,
     argv: &[String],
     piped: bool,
+    cwd: Option<&str>,
 ) -> io::Result<(Child, PathBuf)> {
     let path = options
         .socket
@@ -315,6 +408,9 @@ fn spawn_worker(
         }
         if let Some(owner) = &options.match_owner_of {
             command.arg("--match-owner-of").arg(owner);
+        }
+        if let Some(cwd) = cwd {
+            command.arg("--cwd").arg(cwd);
         }
         command
             .arg("--")
@@ -730,6 +826,7 @@ fn handle_connection(
             argv,
             mut runtime,
             lease_seconds,
+            task,
         } => {
             runtime
                 .validate()
@@ -753,6 +850,17 @@ fn handle_connection(
             if lease_seconds.is_some_and(|seconds| !(1..=300).contains(&seconds)) {
                 return Err(invalid("session lease must be between 1 and 300 seconds"));
             }
+            if let Some(task) = &task {
+                task.validate()?;
+                if let Some(alias) = &task.workspace_alias {
+                    // The mount itself, not the devcontainer workspaceFolder
+                    // inside it: the alias names the Host's mount source.
+                    let mount = options
+                        .root
+                        .join(crate::layout::WORKSPACE_ROOT.trim_start_matches('/'));
+                    ensure_workspace_alias(Path::new(alias), &mount)?;
+                }
+            }
             let lease = lease_seconds
                 .map(|seconds| -> io::Result<_> {
                     let duration = Duration::from_secs(seconds);
@@ -764,7 +872,11 @@ fn handle_connection(
                     })
                 })
                 .transpose()?;
-            runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
+            runtime.lifecycle_phases = if task.is_some() {
+                Vec::new()
+            } else {
+                vec![LifecyclePhase::PostAttach]
+            };
             let mut active = sessions.lock().unwrap();
             if active.len() >= MAX_SESSIONS || active.contains_key(&session) {
                 return Err(io::Error::new(
@@ -772,7 +884,13 @@ fn handle_connection(
                     "session already exists or capacity reached",
                 ));
             }
-            let (mut child, path) = spawn_worker(&options, &runtime, &argv, true)?;
+            let (mut child, path) = spawn_worker(
+                &options,
+                &runtime,
+                &argv,
+                true,
+                task.as_ref().map(|task| task.cwd.as_str()),
+            )?;
             let pid = child.id() as i32;
             active.insert(session.clone(), Session { pid, lease });
             drop(active);
@@ -867,6 +985,7 @@ fn boot_phase(
         &config,
         &["/bin/sh".into(), "-c".into(), ":".into()],
         false,
+        None,
     )?;
     let pid = child.id() as i32;
     let status = loop {
@@ -1108,6 +1227,30 @@ pub fn connect_agent_with_lease(
     runtime: RuntimeConfigV1,
     lease_seconds: Option<u64>,
 ) -> io::Result<i32> {
+    connect_session(socket, session, argv, runtime, lease_seconds, None)
+}
+
+/// Run a Host task's tool command in this runtime (see [`TaskCommand`]).
+pub fn connect_task(
+    socket: &Path,
+    session: String,
+    argv: Vec<String>,
+    runtime: RuntimeConfigV1,
+    lease_seconds: Option<u64>,
+    task: TaskCommand,
+) -> io::Result<i32> {
+    task.validate()?;
+    connect_session(socket, session, argv, runtime, lease_seconds, Some(task))
+}
+
+fn connect_session(
+    socket: &Path,
+    session: String,
+    argv: Vec<String>,
+    runtime: RuntimeConfigV1,
+    lease_seconds: Option<u64>,
+    task: Option<TaskCommand>,
+) -> io::Result<i32> {
     runtime
         .validate()
         .map_err(|_| invalid("invalid session runtime"))?;
@@ -1119,6 +1262,7 @@ pub fn connect_agent_with_lease(
             argv,
             runtime: Box::new(runtime),
             lease_seconds,
+            task,
         },
     )?;
     pump_stdio(stream)
@@ -1295,5 +1439,121 @@ mod tests {
                 Some((REPLY, br#"{"existed":false}"#.to_vec()))
             );
         }
+    }
+
+    #[test]
+    fn task_commands_round_trip_and_agent_requests_stay_unchanged() {
+        let agent = serde_json::to_value(Request::Connect {
+            session: "s".into(),
+            argv: vec!["agent".into()],
+            runtime: Box::default(),
+            lease_seconds: Some(60),
+            task: None,
+        })
+        .unwrap();
+        // An agent connect from an older Host has no `task` key at all.
+        assert!(agent.get("task").is_none());
+        let parsed: Request = serde_json::from_value(agent).unwrap();
+        assert!(matches!(parsed, Request::Connect { task: None, .. }));
+
+        let task = TaskCommand {
+            cwd: "/work/p/src".into(),
+            workspace_alias: Some("/work/p".into()),
+        };
+        let value = serde_json::to_value(Request::Connect {
+            session: "s".into(),
+            argv: vec!["ls".into()],
+            runtime: Box::default(),
+            lease_seconds: None,
+            task: Some(task.clone()),
+        })
+        .unwrap();
+        let Request::Connect {
+            task: Some(back), ..
+        } = serde_json::from_value(value).unwrap()
+        else {
+            panic!("task command lost");
+        };
+        assert_eq!(back, task);
+        assert!(serde_json::from_value::<TaskCommand>(
+            serde_json::json!({"cwd": "/w", "user": "root"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn task_commands_need_absolute_bounded_paths() {
+        let ok = TaskCommand {
+            cwd: "/w".into(),
+            workspace_alias: None,
+        };
+        assert!(ok.validate().is_ok());
+        for (cwd, alias) in [
+            ("relative", None),
+            ("/w\0", None),
+            ("/w", Some("relative")),
+            ("/w", Some("")),
+        ] {
+            let task = TaskCommand {
+                cwd: cwd.into(),
+                workspace_alias: alias.map(Into::into),
+            };
+            assert!(task.validate().is_err(), "{cwd:?} {alias:?}");
+        }
+        let long = TaskCommand {
+            cwd: format!("/{}", "a".repeat(4096)),
+            workspace_alias: None,
+        };
+        assert!(long.validate().is_err());
+    }
+
+    #[test]
+    fn workspace_alias_links_once_and_never_replaces_or_redirects() {
+        let dir = tempfile::tempdir().unwrap();
+        // macOS puts temp directories behind the /var symlink.
+        let root = dir.path().canonicalize().unwrap();
+        let root = root.as_path();
+        let workspace = root.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let alias = root.join("srv/workspaces/project");
+        ensure_workspace_alias(&alias, &workspace).unwrap();
+        assert_eq!(fs::read_link(&alias).unwrap(), workspace);
+        assert_eq!(
+            fs::metadata(alias.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        // Idempotent for the same link.
+        ensure_workspace_alias(&alias, &workspace).unwrap();
+        // The alias equal to the workspace is a no-op.
+        ensure_workspace_alias(&workspace, &workspace).unwrap();
+
+        // An existing file or a link elsewhere is never replaced.
+        let taken = root.join("taken");
+        fs::write(&taken, b"image file").unwrap();
+        assert!(ensure_workspace_alias(&taken, &workspace).is_err());
+        assert_eq!(fs::read(&taken).unwrap(), b"image file");
+        let elsewhere = root.join("elsewhere");
+        std::os::unix::fs::symlink("/etc", &elsewhere).unwrap();
+        assert!(ensure_workspace_alias(&elsewhere, &workspace).is_err());
+
+        // A parent that is a symlink is not walked through.
+        let redirect = root.join("redirect");
+        std::os::unix::fs::symlink(root.join("srv"), &redirect).unwrap();
+        assert!(ensure_workspace_alias(&redirect.join("x"), &workspace).is_err());
+
+        // Dot components, a path inside the workspace, and an ancestor of it
+        // are refused before anything is created.
+        for bad in [
+            root.join("a/../b"),
+            workspace.join("inner"),
+            root.to_path_buf(),
+        ] {
+            assert!(ensure_workspace_alias(&bad, &workspace).is_err(), "{bad:?}");
+        }
+        assert!(!root.join("a").exists());
     }
 }

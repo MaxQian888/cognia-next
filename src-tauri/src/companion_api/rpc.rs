@@ -420,6 +420,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "kill_external_agent",
     "external_agent_delete_gateway_task",
     "get_external_agent_status",
+    // ADR-0224 A8 — a Host task's tool command in its runtime environment.
+    // Service-scope only, same SpawnPolicy workspace rule and audit trail.
+    "environment_task_shell_exec",
+    "environment_task_shell_release",
     // ADR-0059 R12 — service-scope management of the public `/connectors`
     // webhook ingress registry on the headless front door.
     "connectors_register",
@@ -2435,6 +2439,8 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_remove",
     "github_workspace_stat",
     "task_workspace_remote_source_ensure",
+    "environment_task_shell_exec",
+    "environment_task_shell_release",
     "fleet_project_managed_session",
     "fleet_project_worker_load",
     "fleet_remove_managed_session",

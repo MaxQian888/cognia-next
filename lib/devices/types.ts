@@ -455,6 +455,11 @@ export interface LocalDeviceInput {
   capabilities: readonly CapabilityId[]
   /** Registered `MicrovmExecAdapter`, i.e. the E2B plugin is active. */
   microvmAvailable: boolean
+  /**
+   * The `container` tier's adapter is present: this process is an always-on
+   * Host's brain with a sandbox pool (ADR-0224 A8). Absent: it is not.
+   */
+  containerAvailable?: boolean
   /** `sandbox_health_probe` said the OS sandbox backend is installed. */
   osSandboxAvailable: boolean
   /** This desktop is in always-on host mode (ADR-0224 A3). */

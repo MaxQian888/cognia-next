@@ -413,6 +413,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
         appVersion: APP_VERSION,
         capabilities: detectLocalCapabilities(),
         microvmAvailable: runtimeAvailability.microvm.available,
+        containerAvailable: runtimeAvailability.container.available,
         osSandboxAvailable: runtimeAvailability.os.available,
         hostMode,
       },

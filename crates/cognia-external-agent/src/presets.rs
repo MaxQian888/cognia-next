@@ -472,6 +472,18 @@ impl SpawnPolicy {
         )))
     }
 
+    /// A task workspace directory a Host task shell may mount and start in
+    /// (ADR-0224 A8): the rule a spawn's cwd follows, and its canonical form.
+    /// A relative path or one that does not exist is refused.
+    pub fn validate_workspace_path(&self, path: &str) -> Result<String, PolicyViolation> {
+        if !Path::new(path).is_absolute() {
+            return Err(PolicyViolation(format!(
+                "workspace path {path:?} is not absolute"
+            )));
+        }
+        self.validate_cwd(Some(path))
+    }
+
     /// The cwd must exist and canonicalize under the workspaces root.
     /// `None` resolves to the workspaces root itself (created on demand).
     fn validate_cwd(&self, cwd: Option<&str>) -> Result<String, PolicyViolation> {
@@ -1524,6 +1536,26 @@ mod tests {
         let mut cfg = config("claude", &[]);
         cfg.cwd = Some("proj/../..".into());
         assert!(p.validate(cfg).is_err(), "dot-dot escape must be denied");
+    }
+
+    #[test]
+    fn task_shell_workspace_paths_follow_the_cwd_rule_and_come_back_canonical() {
+        let (tmp, p) = policy(false);
+        let proj = tmp.path().join("workspaces").join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        assert_eq!(
+            p.validate_workspace_path(&proj.display().to_string())
+                .unwrap(),
+            proj.canonicalize().unwrap().display().to_string()
+        );
+        for refused in [
+            "proj".to_string(),
+            tmp.path().display().to_string(),
+            proj.join("..").join("..").display().to_string(),
+            proj.join("missing").display().to_string(),
+        ] {
+            assert!(p.validate_workspace_path(&refused).is_err(), "{refused}");
+        }
     }
 
     #[test]

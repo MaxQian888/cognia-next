@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::{RuntimePort, SandboxRuntimeControl};
+use crate::runtime::{RuntimePort, SandboxRuntimeControl, TaskShellRequest, TaskShellResult};
 use cognia_external_agent::container_backend::{is_owned, RunnerExecSpec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -60,6 +60,21 @@ impl DockerSandboxBackend {
 
 #[async_trait]
 impl SandboxRuntimeControl for DockerSandboxBackend {
+    async fn exec_task_shell(
+        &self,
+        request: TaskShellRequest,
+    ) -> Result<TaskShellResult, SandboxSpawnError> {
+        DockerSandboxBackend::exec_task_shell(self, request).await
+    }
+
+    async fn release_task_shell(
+        &self,
+        _provider: &str,
+        container_ids: &[String],
+    ) -> Result<Vec<String>, SandboxSpawnError> {
+        DockerSandboxBackend::release_task_shell(self, container_ids).await
+    }
+
     fn agent_origin_allowed(&self, agent_id: &str, device_id: &str) -> Option<bool> {
         self.runners.origin_allowed(agent_id, device_id)
     }

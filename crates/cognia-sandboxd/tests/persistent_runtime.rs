@@ -139,6 +139,26 @@ impl Host {
             .spawn()
             .unwrap()
     }
+    fn connect_task(&self, session: &str, cwd: &Path, alias: &Path, script: &str) -> Child {
+        Command::new(BINARY)
+            .arg("connect-agent")
+            .arg("--socket")
+            .arg(self.socket())
+            .arg("--session")
+            .arg(session)
+            .arg("--runtime-config")
+            .arg(self.config_path())
+            .arg("--task-cwd")
+            .arg(cwd)
+            .arg("--workspace-alias")
+            .arg(alias)
+            .args(["--", "/bin/sh", "-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
 }
 
 impl Drop for Host {
@@ -509,4 +529,65 @@ fn lease_bounds_and_renewal_never_change_unleased_sessions() {
     assert!(unleased.try_wait().unwrap().is_none());
     signal_agent(&host.socket(), "unleased".into(), libc::SIGTERM).unwrap();
     wait_for(|| unleased.try_wait().unwrap().is_some());
+}
+
+#[test]
+fn task_commands_skip_post_attach_and_run_in_the_hosts_path_for_the_workspace() {
+    let mut host = Host::new(RuntimeConfigV1 {
+        lifecycle_commands: RuntimeLifecycleCommands {
+            post_attach: Some(shell("printf a >> attached")),
+            ..RuntimeLifecycleCommands::default()
+        },
+        ..RuntimeConfigV1::default()
+    });
+    fs::create_dir(host.workspace().join("src")).unwrap();
+    host.start();
+    // The Host knows this workspace as <tmp>/host/workspaces/project.
+    // macOS reaches /tmp through a symlink, which the alias never walks.
+    let alias = host
+        .directory
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("host/workspaces/project");
+    let mut child = host.connect_task("task-1", &alias.join("src"), &alias, "cat > note; pwd -P");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"from stdin")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let workspace = host.workspace().canonicalize().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        workspace.join("src").to_string_lossy()
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("src/note")).unwrap(),
+        "from stdin"
+    );
+    assert_eq!(fs::read_link(&alias).unwrap(), host.workspace());
+    // A second command reuses the link; an agent attach still runs postAttach.
+    let again = host
+        .connect_task("task-2", &alias, &alias, "test -f src/note")
+        .wait_with_output()
+        .unwrap();
+    assert!(again.status.success());
+    assert!(!host.workspace().join("attached").exists());
+    assert!(host
+        .connect("agent", "true")
+        .wait_with_output()
+        .unwrap()
+        .status
+        .success());
+    assert_eq!(
+        fs::read_to_string(host.workspace().join("attached")).unwrap(),
+        "a"
+    );
 }

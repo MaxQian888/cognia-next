@@ -13,6 +13,7 @@ jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
   useSandboxRuntimeAvailability: () => ({
     os: { available: true, backend: "mock", detail: "ok", reason: "available" },
     microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+    container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
   }),
 }))
 

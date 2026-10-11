@@ -203,7 +203,10 @@ export function readPermissionProfile(raw: unknown): ResolvedPermissionProfile |
 export function readSandboxAttested(raw: unknown): boolean {
   if (typeof raw !== "object" || raw === null) return false
   const attestation = raw as { schemaVersion?: unknown; tier?: unknown }
-  return attestation.schemaVersion === 1 && attestation.tier === "microvm"
+  return (
+    attestation.schemaVersion === 1 &&
+    (attestation.tier === "microvm" || attestation.tier === "container")
+  )
 }
 
 /** The approval wait ceiling from `SendOptions.approvalTtlMs`, or undefined for none. */

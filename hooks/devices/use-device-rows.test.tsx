@@ -39,6 +39,7 @@ let settingsLoaded = true
 let runtimeAvailability = {
   os: { available: true, backend: "seatbelt", reason: "available", detail: "" },
   microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+  container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
 }
 
 jest.mock("dexie-react-hooks", () => ({
@@ -117,6 +118,7 @@ beforeEach(() => {
   runtimeAvailability = {
     os: { available: true, backend: "seatbelt", reason: "available", detail: "" },
     microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+    container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
   }
   jest.clearAllMocks()
 })
@@ -131,6 +133,8 @@ describe("useDeviceRows", () => {
       expect.arrayContaining([
         expect.objectContaining({ tier: "os", available: true }),
         expect.objectContaining({ tier: "microvm", available: false }),
+        // A desktop never runs the always-on Host's container tier.
+        expect.objectContaining({ tier: "container", available: false }),
       ])
     )
     expect(result.current.summary).toMatchObject({ total: 1, online: 1 })
@@ -155,6 +159,8 @@ describe("useDeviceRows", () => {
     runtimeAvailability = {
       os: { available: false, backend: "seatbelt", reason: "probe-failed", detail: "failed" },
       microvm: { available: true, reason: "workspace-required", requiresWorkspace: true },
+      // This process is an always-on Host's brain with a sandbox pool.
+      container: { available: true, reason: "workspace-required", requiresWorkspace: true },
     }
 
     const { result } = renderHook(() => useDeviceRows())
@@ -163,6 +169,7 @@ describe("useDeviceRows", () => {
       expect.arrayContaining([
         expect.objectContaining({ tier: "os", available: false }),
         expect.objectContaining({ tier: "microvm", available: true }),
+        expect.objectContaining({ tier: "container", available: true }),
       ])
     )
   })

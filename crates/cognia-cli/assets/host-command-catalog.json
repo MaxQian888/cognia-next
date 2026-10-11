@@ -18456,6 +18456,203 @@
       "outputTyped": true
     },
     {
+      "name": "environment_task_shell_exec",
+      "category": "development",
+      "resource": "environment",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "environment_task_shell_exec (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "description": "Run one tool command of a Host task in the task's runtime environment (ADR-0224 A8): a built-in turn's sandboxed bash, edit or write on an always-on Host, where nothing a task runs may run on the Host itself. Service plane only: the brain stamps the placement it resolved, and the workspace and cwd clear the spawn policy rule an agent's cwd follows.",
+        "type": "object",
+        "required": [
+          "placement",
+          "owner",
+          "workspaceRoot",
+          "argv",
+          "timeoutMs"
+        ],
+        "properties": {
+          "placement": {
+            "type": "object",
+            "description": "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not described here: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code.",
+            "required": [
+              "kind",
+              "spec"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "container"
+                ]
+              }
+            }
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Who the command runs for (`session:<id>`); scopes its exec session."
+          },
+          "workspaceRoot": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The task workspace as the task's tools name it. Inside the runtime this path leads to the mounted workspace, so tool paths are unchanged."
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Where the command starts, inside the workspace. The workspace root when absent."
+          },
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {}
+          },
+          "stdin": {
+            "type": "string",
+            "description": "The command's whole input; its stdin closes after it."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600000
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "What one task shell command did. Output beyond 1 MiB per stream is dropped and flagged; invalid UTF-8 is replaced.",
+        "type": "object",
+        "properties": {
+          "exitCode": {
+            "description": "Null when the command was killed on timeout without an exit status.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdoutTruncated": {
+            "type": "boolean"
+          },
+          "stderrTruncated": {
+            "type": "boolean"
+          },
+          "timedOut": {
+            "type": "boolean"
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "provider": {
+            "description": "The provider that ran it; a release names it.",
+            "type": "string"
+          },
+          "containerId": {
+            "description": "The retained runtime the command ran in; a release names it.",
+            "type": "string"
+          },
+          "tier": {
+            "description": "The isolation tier the runtime was admitted at.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stdout",
+          "stderr",
+          "stdoutTruncated",
+          "stderrTruncated",
+          "timedOut",
+          "durationMs",
+          "provider",
+          "containerId",
+          "tier"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_task_shell_release",
+      "category": "development",
+      "resource": "environment",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "environment_task_shell_release (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "description": "The task is done with these task shell runtimes (ADR-0224 A8): remove each one no session uses. A container that is not this Host's task shell runtime refuses the release.",
+        "type": "object",
+        "required": [
+          "provider",
+          "containerIds"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The provider a task shell result named."
+          },
+          "containerIds": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "What a task shell release removed.",
+        "type": "object",
+        "properties": {
+          "removed": {
+            "description": "The runtimes removed; one a session still uses is kept and not listed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "removed"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "execution_run_approval_list",
       "category": "tasks",
       "resource": "execution",
@@ -76239,5 +76436,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "dad4ba93550ea39754f438d0cea78a16298f7a551e9a31bea9b06ea93059e0a9"
+  "catalogHash": "42629809aaa0b842c3968089d51f2e0b2ed421a19c06052bf012cc25d8fb7b47"
 }

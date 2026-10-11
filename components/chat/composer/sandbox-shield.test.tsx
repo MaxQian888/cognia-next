@@ -16,6 +16,7 @@ jest.mock("dexie-react-hooks", () => ({
 const mockAvailability = {
   os: { available: true, backend: "mock", detail: "ok", reason: "available" },
   microvm: { available: true, reason: "workspace-required", requiresWorkspace: true },
+  container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
 }
 jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
   useSandboxRuntimeAvailability: () => mockAvailability,
@@ -49,21 +50,25 @@ const MESSAGES = {
         label: {
           os: "OS active",
           microvm: "microVM active",
+          container: "Runtime environment active",
           off: "Off",
         },
         tooltip: {
           os: "OS tier tooltip",
           microvm: "microVM tooltip",
+          container: "Container tooltip",
           off: "Off tooltip",
         },
         unavailableDetail: {
           os: "Verify OS confinement",
           microvm: "Enable E2B",
+          container: "Always-on host only",
           "cua-desktop": "No desktop workspace adapter",
         },
         unavailableLabel: {
           os: "OS unavailable",
           microvm: "microVM unavailable",
+          container: "Runtime environment unavailable",
           "cua-desktop": "Desktop unavailable",
         },
         inheritedDetail: "Inherited",
@@ -247,6 +252,32 @@ describe("SandboxShield component", () => {
     expect(shield).toHaveAttribute("data-available", "false")
     expect(shield).toHaveAttribute("aria-label", expect.stringMatching(/unavailable.*microVM/i))
     mockAvailability.microvm.available = true
+  })
+
+  it("renders the 'container' tier as inert on a device that cannot run it", () => {
+    const { container } = withIntl(<SandboxShield session={session} forceState="container" />)
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-state", "container")
+    expect(shield).toHaveAttribute("data-available", "false")
+    expect(shield).toHaveAttribute(
+      "aria-label",
+      expect.stringMatching(/unavailable.*runtime environment/i)
+    )
+    expect(container.querySelector("svg.lucide-shield")).toBeNull()
+    expect(container.querySelector("svg")).toHaveClass("text-muted-foreground")
+  })
+
+  it("renders the 'container' tier as active on the always-on host", () => {
+    mockAvailability.container.available = true
+    const { container } = withIntl(<SandboxShield session={session} forceState="container" />)
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-available", "true")
+    expect(shield).toHaveAttribute(
+      "aria-label",
+      expect.stringMatching(/active.*runtime environment/i)
+    )
+    expect(container.querySelector("svg")).toHaveClass("text-teal-500")
+    mockAvailability.container.available = false
   })
 
   it("renders the 'cua-desktop' state with a distinct glyph, not a shield", () => {

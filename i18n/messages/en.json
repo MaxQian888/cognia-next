@@ -7931,6 +7931,7 @@
         "externalDetail": "The built-in sandbox setting does not apply here: the external agent brings its own tools, and Cognia never starts it outside the agent sandbox.",
         "inheritedDetail": "This conversation follows the character or app default. It will be pinned to the tier it runs on the first time it uses the sandbox.",
         "label": {
+          "container": "Sandbox active — runtime environment",
           "cua-desktop": "Sandbox tier unavailable — bound desktop",
           "external": "Agent sandbox — external runtime",
           "microvm": "Sandbox active — microVM tier",
@@ -7939,6 +7940,7 @@
         },
         "pinnedDetail": "This conversation keeps its own sandbox tier, so changing the default elsewhere will not re-tier it.",
         "tooltip": {
+          "container": "Bash / Edit / Write run in the project's runtime environment, a container on the always-on host's sandbox pool.",
           "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
           "external": "This conversation runs on an external agent. Its process always runs inside Cognia's mandatory agent sandbox, which can write to the workspace and reach the network.",
           "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
@@ -7946,12 +7948,14 @@
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
         },
         "unavailableDetail": {
+          "container": "This tier runs only on an always-on host, in the project's runtime environment. This device cannot run it, and sandboxed tools refuse instead of running here.",
           "cua-desktop": "No verified workspace adapter exists for this desktop connection.",
           "microvm": "Enable the E2B Sandbox plugin and use a session backed by an E2B workspace.",
           "os": "Run the active confinement verification in Sandbox settings.",
           "osProbeFailed": "The active OS confinement check failed. Open Sandbox settings for the diagnostic detail, then retry verification."
         },
         "unavailableLabel": {
+          "container": "Sandbox unavailable — runtime environment",
           "cua-desktop": "Sandbox unavailable — bound desktop",
           "microvm": "Sandbox unavailable — microVM tier",
           "os": "Sandbox unavailable — OS tier"
@@ -14514,6 +14518,7 @@
       "tierAvailable": "Available",
       "tierCount": "{available}/{total} available",
       "tierReason": {
+        "containerAlwaysOnHostOnly": "Runs only on an always-on host, in the project's runtime environment on its sandbox pool. Here a request for it is refused rather than run on this machine.",
         "cuaDesktopNoConnection": "Needs a bound machine that carries shell and file execution. A Docker connection provides it through `docker exec`, which runs inside the container. Cloud and Lume connections have no adapter yet, so they offer the remote desktop only.",
         "microvmAdapterMissing": "No microVM adapter is registered. Activate the E2B sandbox plugin; without it a microVM request is refused outright rather than falling back to the host.",
         "osBackendUnavailable": "The OS sandbox backend is not installed on this machine."
@@ -43199,6 +43204,8 @@
             "label": "Sandbox Bash / Edit / Write"
           },
           "tier": {
+            "container": "Runtime environment (always-on host)",
+            "containerHint": "Runs shell and file work in the project's runtime environment on an always-on host. Anywhere else, sandboxed tools refuse instead of running on that device.",
             "cuaDesktop": "Bound sandbox desktop",
             "cuaDesktopNeedsBoundDesktop": "Runs shell and file work inside the bound desktop. Needs a bound machine whose provider carries it, so pick a sandbox connection under Computer Use first.",
             "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",

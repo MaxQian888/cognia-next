@@ -960,6 +960,8 @@ mod tests {
         ("environment_egress_grant_delete", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::approval::EgressGrant", schema: schema_of::<cognia_environment::approval::EgressGrant> })),
         ("environment_probe_get", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::ProbeCacheResult", schema: schema_of::<crate::companion_api::environment_pool::ProbeCacheResult> })),
         ("environment_driver_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::DriverStatus", schema: schema_of::<crate::companion_api::environment_pool::DriverStatus> })),
+        ("environment_task_shell_exec", OutputShape::Derived(DerivedOutput { rust_type: "cognia_sandbox_pool::runtime::TaskShellResult", schema: schema_of::<cognia_sandbox_pool::runtime::TaskShellResult> })),
+        ("environment_task_shell_release", OutputShape::Derived(DerivedOutput { rust_type: "cognia_sandbox_pool::runtime::TaskShellRelease", schema: schema_of::<cognia_sandbox_pool::runtime::TaskShellRelease> })),
         ("environment_image_inspect", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::registry::ImageMetadata", schema: schema_of::<cognia_environment::registry::ImageMetadata> })),
         // ── live file shares (cognia_file_share::rpc via rpc/file_share.rs) ──
         ("file_share_activate", OutputShape::Derived(DerivedOutput { rust_type: "cognia_file_share::service::FileShareStatus", schema: schema_of::<cognia_file_share::service::FileShareStatus> })),

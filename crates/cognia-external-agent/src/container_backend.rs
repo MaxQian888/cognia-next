@@ -605,6 +605,12 @@ pub trait SandboxDockerApi: ContainerApi {
 /// Retained workspace runtime, reconciled by the sandbox pool after restart.
 pub const PERSISTENT_RUNTIME_LABEL: &str = "cognia.persistent-runtime";
 
+/// Marks a persistent runtime that runs a Host task's tool commands
+/// (ADR-0224 A8). It holds no agent state the next process could resume, so
+/// unlike an agent's runtime the orphan sweep removes one another process
+/// left behind.
+pub const TASK_SHELL_RUNTIME_LABEL: &str = "cognia.task-shell-runtime";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeContainerState {
     pub running: bool,
@@ -1223,12 +1229,10 @@ pub async fn reap_owned_orphans(
     let owned = api.list_owned().await?;
     let mut reaped = Vec::new();
     for container in owned {
+        let label = |key: &str| container.labels.get(key).map(String::as_str);
         if container.instance() == Some(instance_id)
-            || container
-                .labels
-                .get(PERSISTENT_RUNTIME_LABEL)
-                .map(String::as_str)
-                == Some("1")
+            || (label(PERSISTENT_RUNTIME_LABEL) == Some("1")
+                && label(TASK_SHELL_RUNTIME_LABEL) != Some("1"))
         {
             continue;
         }
@@ -2453,6 +2457,8 @@ pub mod test_support {
         pub runtime_execs: Mutex<Vec<RunnerExecSpec>>,
         pub stopped_runtimes: Mutex<std::collections::BTreeSet<String>>,
         pub restarted_runtimes: Mutex<Vec<String>>,
+        /// Runtimes whose `health` reports a live session.
+        pub busy_runtimes: Mutex<std::collections::BTreeSet<String>>,
         pub volumes: Mutex<BTreeMap<String, BTreeMap<String, String>>>,
         pub volumes_in_use: Mutex<std::collections::BTreeSet<String>>,
         pub fail_volume: Mutex<Option<String>>,
@@ -2500,6 +2506,7 @@ pub mod test_support {
                 runtime_execs: Mutex::new(Vec::new()),
                 stopped_runtimes: Mutex::new(std::collections::BTreeSet::new()),
                 restarted_runtimes: Mutex::new(Vec::new()),
+                busy_runtimes: Mutex::new(std::collections::BTreeSet::new()),
                 volumes: Mutex::new(BTreeMap::new()),
                 volumes_in_use: Mutex::new(std::collections::BTreeSet::new()),
                 fail_volume: Mutex::new(None),
@@ -2708,10 +2715,15 @@ pub mod test_support {
                         .get(&spec.container_id)
                         .and_then(|labels| labels.get("cognia.runtime-key"))
                         .cloned();
+                    let active =
+                        usize::from(self.busy_runtimes.lock().contains(&spec.container_id));
                     let _ = event_tx.send(RunnerEvent::Stdout(
-                        serde_json::to_vec(
-                            &serde_json::json!({"ready":true,"runtimeKey":runtime_key}),
-                        )
+                        serde_json::to_vec(&serde_json::json!({
+                            "ready": true,
+                            "runtimeKey": runtime_key,
+                            "activeSessions": active,
+                            "activeConnections": active,
+                        }))
                         .unwrap(),
                     ));
                     let _ = event_tx.send(RunnerEvent::Exited { code: Some(0) });
@@ -3041,6 +3053,38 @@ mod tests {
         assert_eq!(reaped, vec!["orphan".to_string()]);
         let removed = api.removes.lock().clone();
         assert_eq!(removed, vec!["orphan".to_string()]);
+    }
+
+    // An agent's persistent runtime holds state the next process resumes; a
+    // task shell's runtime holds none and would otherwise leak one stopped
+    // container per task workspace across restarts.
+    #[tokio::test]
+    async fn reaping_keeps_agent_runtimes_but_not_a_previous_runs_task_shells() {
+        let api = FakeContainerApi::new();
+        let runtime = |instance: &str, task_shell: bool| {
+            let mut labels = ownership_labels("key", instance, "deployment-A");
+            labels.insert(PERSISTENT_RUNTIME_LABEL.into(), "1".into());
+            if task_shell {
+                labels.insert(TASK_SHELL_RUNTIME_LABEL.into(), "1".into());
+            }
+            labels
+        };
+        for (id, labels) in [
+            ("agent-runtime", runtime("instance-PREVIOUS", false)),
+            ("old-task-shell", runtime("instance-PREVIOUS", true)),
+            ("live-task-shell", runtime("instance-A", true)),
+        ] {
+            api.labels_by_container.lock().insert(id.into(), labels);
+        }
+
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+        let reaped = backend.reap_orphans().await.expect("reap");
+
+        assert_eq!(reaped, vec!["old-task-shell".to_string()]);
     }
 
     // Two cognia-server deployments sharing one daemon (two compose

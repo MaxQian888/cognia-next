@@ -113,9 +113,10 @@ export function resolveSandboxEnabled(inputs: SandboxEnabledInputs): boolean {
 }
 
 /**
- * Isolation strength, ascending. `cua-desktop` outranks `microvm` because it
- * moves shell, file AND GUI work off the host, where `microvm` still leaves the
- * GUI axis local.
+ * Isolation strength, ascending. A `container` shares the Host's kernel, which
+ * a `microvm` does not. `cua-desktop` outranks `microvm` because it moves
+ * shell, file AND GUI work off the host, where `microvm` still leaves the GUI
+ * axis local.
  *
  * Exists so a *change* of tier can be classified. Resolution alone cannot say
  * whether a session just lost isolation, and "lost isolation" is the one
@@ -123,8 +124,9 @@ export function resolveSandboxEnabled(inputs: SandboxEnabledInputs): boolean {
  */
 export const SANDBOX_ISOLATION_RANK: Record<SandboxShellTier, number> = {
   os: 1,
-  microvm: 2,
-  "cua-desktop": 3,
+  container: 2,
+  microvm: 3,
+  "cua-desktop": 4,
 }
 
 /** How `next` compares to `prev` on the isolation axis. */

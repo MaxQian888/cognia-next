@@ -214,8 +214,12 @@ export function validatePermissionProfile(
  */
 export interface SandboxAttestationV1 {
   schemaVersion: 1
-  /** The shell tier the placement runs (`microvm`: a VM or a container behind the same seam). */
-  tier: "microvm"
+  /**
+   * The shell tier the placement runs: `microvm`, a VM (or a container behind
+   * the same seam); `container`, the project's runtime environment on an
+   * always-on Host's sandbox pool (ADR-0224 A8).
+   */
+  tier: "microvm" | "container"
   /** When the host established the placement (epoch ms). */
   verifiedAt: number
 }

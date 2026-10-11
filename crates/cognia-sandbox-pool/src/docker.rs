@@ -90,6 +90,7 @@ mod ports;
 mod remote_prep;
 mod retained_tasks;
 mod services;
+mod task_shell;
 
 pub use remote_prep::{EXPIRES_AT_LABEL, PROVIDER_LABEL};
 
@@ -1078,14 +1079,25 @@ fn runtime_config(
     spec: &EnvironmentSpec,
     config: &ExternalAgentSpawnConfig,
 ) -> Result<RuntimeConfigV1, SandboxSpawnError> {
-    let mut runtime = RuntimeConfigV1 {
-        container_env: spec.container_env.clone(),
-        remote_env: spec.remote_env.clone(),
-        spawn_env: config
+    runtime_config_with_env(
+        spec,
+        config
             .env
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
+    )
+}
+
+/// [`runtime_config`] for a command whose environment is `spawn_env`.
+fn runtime_config_with_env(
+    spec: &EnvironmentSpec,
+    spawn_env: BTreeMap<String, String>,
+) -> Result<RuntimeConfigV1, SandboxSpawnError> {
+    let mut runtime = RuntimeConfigV1 {
+        container_env: spec.container_env.clone(),
+        remote_env: spec.remote_env.clone(),
+        spawn_env,
         lifecycle_commands: serde_json::from_value(
             serde_json::to_value(&spec.lifecycle_commands).expect("lifecycle commands serialize"),
         )
@@ -1211,6 +1223,197 @@ impl SandboxDriverStatus for DockerSandboxBackend {
     }
 }
 
+/// What preparing a local sandbox start yields, before the command is known:
+/// the admitted spec, the workspace mount, the staged core bundle's probe of
+/// the image, and the leases that keep it all valid.
+struct LocalPrepared {
+    admitted: AdmittedSandbox,
+    mount: RunnerMount,
+    report: ProbeReport,
+    libc: Libc,
+    user: UserSpec,
+    match_owner: bool,
+    bundle: PinnedImage,
+    auth: Option<RegistryAuth>,
+    leases: OperationLeases,
+}
+
+impl DockerSandboxBackend {
+    /// Admit `placement` for a workspace at `cwd` on this Host's local driver
+    /// and probe the image with the core bundle staged. Shared by agent spawns
+    /// and task shells (ADR-0224 A8), which differ only in what they run.
+    async fn prepare_local(
+        &self,
+        placement: &SandboxPlacement,
+        cwd: &str,
+        leases: OperationLeases,
+    ) -> Result<LocalPrepared, SandboxSpawnError> {
+        if placement.workspace().is_some() {
+            return Err(SandboxSpawnError::refused(
+                "sandbox_workspace_source_unsupported",
+                "a local sandbox mounts this Host's checkout; a remote workspace needs a remote provider",
+            ));
+        }
+        let mount =
+            self.config.host.resolve_mount(cwd).map_err(|error| {
+                SandboxSpawnError::refused("sandbox_workspace_outside_root", error)
+            })?;
+
+        let tiers = self.available_tiers().await?;
+        let admitted = self.admission.admit(placement.spec(), &tiers)?;
+        if !tiers.contains(&admitted.admission.actual_tier) {
+            // Admission picks from what it was handed, so this is unreachable;
+            // it is here because silently running a weaker tier than the
+            // placement records is the one failure nothing downstream notices.
+            return Err(SandboxSpawnError::refused(
+                "isolation_tier_unavailable",
+                format!(
+                    "this daemon cannot attest {}",
+                    admitted.admission.actual_tier.as_str()
+                ),
+            ));
+        }
+        let bundle = admitted.admission.bundle.image();
+        let leases = OperationLeases {
+            _bundle: Some(Arc::new(
+                self.bundle_lock(&bundle.digest).read_owned().await,
+            )),
+            ..leases
+        };
+        let (user, match_owner) = target_user(&admitted.spec.user, admitted.admission.actual_tier);
+
+        let core_volume = self
+            .ensure_staged(&bundle, Stage::Core, leases.clone())
+            .await?;
+        let report = self
+            .probe_image(
+                &admitted,
+                &core_volume,
+                &mount,
+                cwd,
+                (&user, match_owner),
+                leases.clone(),
+            )
+            .await?;
+        let libc = report.libc.expect("a report without a libc is refused");
+        let auth = admitted
+            .spec
+            .image
+            .registry_image()
+            .map(|image| self.admission.registry_auth(&image.registry))
+            .transpose()?
+            .flatten();
+        Ok(LocalPrepared {
+            admitted,
+            mount,
+            report,
+            libc,
+            user,
+            match_owner,
+            bundle,
+            auth,
+            leases,
+        })
+    }
+
+    /// Stage the libc half of the bundle the probe chose.
+    async fn stage_libc(&self, prepared: &LocalPrepared) -> Result<String, SandboxSpawnError> {
+        self.ensure_staged(
+            &prepared.bundle,
+            Stage::Libc(prepared.libc),
+            prepared.leases.clone(),
+        )
+        .await
+    }
+
+    /// The container for a prepared start: `init-agent` switches to the
+    /// target user and runs `tail` (everything after `--`).
+    fn local_runner_spec(
+        &self,
+        id: &str,
+        prepared: &LocalPrepared,
+        libc_volume: String,
+        env: Vec<String>,
+        tail: Vec<String>,
+    ) -> Result<RunnerSpec, SandboxSpawnError> {
+        let admitted = &prepared.admitted;
+        let mut cmd = vec![
+            "init-agent".to_string(),
+            "--root".to_string(),
+            "/".to_string(),
+            "--bundle".to_string(),
+            INJECTION_ROOT.to_string(),
+            "--user".to_string(),
+            prepared.user.to_string(),
+        ];
+        if prepared.match_owner {
+            cmd.push("--match-owner-of".to_string());
+            cmd.push(WORKSPACE_TARGET.to_string());
+        }
+        cmd.push("--".to_string());
+        cmd.extend(tail);
+
+        let size_class = &admitted.admission.size_class;
+        Ok(RunnerSpec {
+            name: sanitize_container_name(id),
+            image: self.admission.runtime_image(&admitted.spec)?,
+            entrypoint: Some(vec![format!("{INJECTION_ROOT}/bin/cognia-sandboxd")]),
+            cmd,
+            env,
+            working_dir: WORKSPACE_TARGET.to_string(),
+            mount: Some(prepared.mount.clone()),
+            seccomp_json: self.config.host.seccomp_json.clone(),
+            memory_bytes: i64::from(size_class.memory_mib).saturating_mul(1024 * 1024),
+            nano_cpus: i64::from(size_class.cpu_millis).saturating_mul(1_000_000),
+            pids_limit: self.config.host.pids_limit,
+            network_mode: match admitted.spec.egress.tier {
+                EgressTier::Off => "none".to_string(),
+                EgressTier::Allowlist | EgressTier::On => self.config.host.network_mode.clone(),
+            },
+            labels: {
+                let mut labels =
+                    ownership_labels(id, &self.config.instance_id, &self.config.deployment_id);
+                labels.insert("cognia.project-id".into(), admitted.spec.project_id.clone());
+                labels.insert(
+                    "cognia.spec-digest".into(),
+                    admitted.spec.spec_digest.clone(),
+                );
+                labels
+            },
+            // Root so `init-agent` can switch to the target user; it exits 125
+            // rather than running the agent as root by accident.
+            user: Some("0".to_string()),
+            extra_mounts: vec![VolumeMount {
+                volume: libc_volume,
+                target: INJECTION_ROOT.to_string(),
+                read_only: true,
+            }],
+            runtime: runtime_for(admitted.admission.actual_tier),
+            // The privilege `init-agent` actually uses: the setuid/gid switch
+            // to the target user, and the home handover's lchown through a
+            // home that may be mode 0700 (CHOWN + DAC_OVERRIDE + FOWNER).
+            // Everything else — NET_ADMIN, SYS_ADMIN, the rest — is dropped.
+            cap_drop: vec!["ALL".to_string()],
+            cap_add: vec![
+                "SETUID".to_string(),
+                "SETGID".to_string(),
+                "CHOWN".to_string(),
+                "DAC_OVERRIDE".to_string(),
+                "FOWNER".to_string(),
+            ],
+            // Writable: the image is user-authored, so its own entrypoint
+            // conventions and mid-task package installs (apt, npm -g) write
+            // where they will. Until the spec can declare writable roots,
+            // the confinement here is the capability set, not the rootfs —
+            // the helper containers above, which run only our binaries, are
+            // the read-only ones.
+            read_only_rootfs: false,
+            tmpfs: vec!["/tmp".to_string()],
+            writable_dirs: Vec::new(),
+        })
+    }
+}
+
 impl DockerSandboxBackend {
     async fn prepare_spawn(
         &self,
@@ -1294,164 +1497,44 @@ impl DockerSandboxBackend {
                 .prepare_remote(config, sink, leases, gateway, tool_hosts, nonce)
                 .await;
         }
-        if placement.workspace().is_some() {
-            return Err(SandboxSpawnError::refused(
-                "sandbox_workspace_source_unsupported",
-                "a local sandbox mounts this Host's checkout; a remote workspace needs a remote provider",
-            ));
-        }
         let cwd = config.cwd.clone().ok_or_else(|| {
             SandboxSpawnError::refused(
                 "sandbox_workspace_required",
                 "a sandbox runs the agent in its workspace and needs a cwd",
             )
         })?;
-        let mount =
-            self.config.host.resolve_mount(&cwd).map_err(|error| {
-                SandboxSpawnError::refused("sandbox_workspace_outside_root", error)
-            })?;
+        let prepared = self.prepare_local(placement, &cwd, leases).await?;
+        let libc = prepared.libc;
 
-        let tiers = self.available_tiers().await?;
-        let admitted = self.admission.admit(placement.spec(), &tiers)?;
-        if !tiers.contains(&admitted.admission.actual_tier) {
-            // Admission picks from what it was handed, so this is unreachable;
-            // it is here because silently running a weaker tier than the
-            // placement records is the one failure nothing downstream notices.
-            return Err(SandboxSpawnError::refused(
-                "isolation_tier_unavailable",
-                format!(
-                    "this daemon cannot attest {}",
-                    admitted.admission.actual_tier.as_str()
-                ),
-            ));
-        }
-        let bundle = admitted.admission.bundle.image();
-        let leases = OperationLeases {
-            _bundle: Some(Arc::new(
-                self.bundle_lock(&bundle.digest).read_owned().await,
-            )),
-            ..leases
-        };
-        let (user, match_owner) = target_user(&admitted.spec.user, admitted.admission.actual_tier);
+        let invocation =
+            bundled_invocation(&config.command, &config.args, &prepared.report.commands)
+                .ok_or_else(|| {
+                    SandboxSpawnError::refused(
+                        "sandbox_command_unavailable",
+                        format!(
+                            "the agent bundle has no {} for {}",
+                            config.command,
+                            libc.as_str()
+                        ),
+                    )
+                })?;
 
-        let core_volume = self
-            .ensure_staged(&bundle, Stage::Core, leases.clone())
-            .await?;
-        let report = self
-            .probe_image(
-                &admitted,
-                &core_volume,
-                &mount,
-                &cwd,
-                (&user, match_owner),
-                leases.clone(),
-            )
-            .await?;
-        let libc = report.libc.expect("a report without a libc is refused");
-
-        let invocation = bundled_invocation(&config.command, &config.args, &report.commands)
-            .ok_or_else(|| {
-                SandboxSpawnError::refused(
-                    "sandbox_command_unavailable",
-                    format!(
-                        "the agent bundle has no {} for {}",
-                        config.command,
-                        libc.as_str()
-                    ),
-                )
-            })?;
-
-        let libc_volume = self
-            .ensure_staged(&bundle, Stage::Libc(libc), leases.clone())
-            .await?;
-
-        let mut cmd = vec![
-            "init-agent".to_string(),
-            "--root".to_string(),
-            "/".to_string(),
-            "--bundle".to_string(),
-            INJECTION_ROOT.to_string(),
-            "--user".to_string(),
-            user.to_string(),
-        ];
-        if match_owner {
-            cmd.push("--match-owner-of".to_string());
-            cmd.push(WORKSPACE_TARGET.to_string());
-        }
-        cmd.push("--".to_string());
-        cmd.push(format!(
+        let libc_volume = self.stage_libc(&prepared).await?;
+        let mut tail = vec![format!(
             "{INJECTION_ROOT}/{}/bin/{}",
             libc.as_str(),
             invocation.name
-        ));
-        cmd.extend(invocation.args.iter().cloned());
-
-        let size_class = &admitted.admission.size_class;
-        let spec = RunnerSpec {
-            name: sanitize_container_name(&id),
-            image: self.admission.runtime_image(&admitted.spec)?,
-            entrypoint: Some(vec![format!("{INJECTION_ROOT}/bin/cognia-sandboxd")]),
-            cmd,
-            env: container_env(&admitted.spec, &config)?,
-            working_dir: WORKSPACE_TARGET.to_string(),
-            mount: Some(mount),
-            seccomp_json: self.config.host.seccomp_json.clone(),
-            memory_bytes: i64::from(size_class.memory_mib).saturating_mul(1024 * 1024),
-            nano_cpus: i64::from(size_class.cpu_millis).saturating_mul(1_000_000),
-            pids_limit: self.config.host.pids_limit,
-            network_mode: match admitted.spec.egress.tier {
-                EgressTier::Off => "none".to_string(),
-                EgressTier::Allowlist | EgressTier::On => self.config.host.network_mode.clone(),
-            },
-            labels: {
-                let mut labels =
-                    ownership_labels(&id, &self.config.instance_id, &self.config.deployment_id);
-                labels.insert("cognia.project-id".into(), admitted.spec.project_id.clone());
-                labels.insert(
-                    "cognia.spec-digest".into(),
-                    admitted.spec.spec_digest.clone(),
-                );
-                labels
-            },
-            // Root so `init-agent` can switch to the target user; it exits 125
-            // rather than running the agent as root by accident.
-            user: Some("0".to_string()),
-            extra_mounts: vec![VolumeMount {
-                volume: libc_volume,
-                target: INJECTION_ROOT.to_string(),
-                read_only: true,
-            }],
-            runtime: runtime_for(admitted.admission.actual_tier),
-            // The privilege `init-agent` actually uses: the setuid/gid switch
-            // to the target user, and the home handover's lchown through a
-            // home that may be mode 0700 (CHOWN + DAC_OVERRIDE + FOWNER).
-            // Everything else — NET_ADMIN, SYS_ADMIN, the rest — is dropped.
-            cap_drop: vec!["ALL".to_string()],
-            cap_add: vec![
-                "SETUID".to_string(),
-                "SETGID".to_string(),
-                "CHOWN".to_string(),
-                "DAC_OVERRIDE".to_string(),
-                "FOWNER".to_string(),
-            ],
-            // Writable: the image is user-authored, so its own entrypoint
-            // conventions and mid-task package installs (apt, npm -g) write
-            // where they will. Until the spec can declare writable roots,
-            // the confinement here is the capability set, not the rootfs —
-            // the helper containers above, which run only our binaries, are
-            // the read-only ones.
-            read_only_rootfs: false,
-            tmpfs: vec!["/tmp".to_string()],
-            writable_dirs: Vec::new(),
-        };
-
-        let auth = admitted
-            .spec
-            .image
-            .registry_image()
-            .map(|image| self.admission.registry_auth(&image.registry))
-            .transpose()?
-            .flatten();
+        )];
+        tail.extend(invocation.args.iter().cloned());
+        let env = container_env(&prepared.admitted.spec, &config)?;
+        let spec = self.local_runner_spec(&id, &prepared, libc_volume, env, tail)?;
+        let auth = prepared.auth.clone();
+        let LocalPrepared {
+            admitted,
+            report,
+            leases,
+            ..
+        } = prepared;
         let placement = sandbox_placement(
             &admitted,
             &report,
@@ -1951,7 +2034,7 @@ mod tests {
         }
     }
 
-    fn decode_agent_environment(env: &[String]) -> RuntimeConfigV1 {
+    pub(super) fn decode_agent_environment(env: &[String]) -> RuntimeConfigV1 {
         let entries = env
             .iter()
             .map(|entry| {

@@ -1,10 +1,17 @@
 import type { CodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
+import { getContainerExec } from "@/lib/sandbox/container-exec-adapter"
 import { getMicrovmExec, subscribeMicrovmAvailability } from "@/lib/sandbox/microvm-bridge"
 import type { SandboxCapabilities, SandboxConnectionRow } from "@/types/sandbox"
 import { hasSandboxConnectionLifecycleAdapter } from "./connection-lifecycle"
 
 export type SandboxAvailabilityReason =
-  "available" | "probe-required" | "probe-failed" | "adapter-missing" | "workspace-required"
+  | "available"
+  | "probe-required"
+  | "probe-failed"
+  | "adapter-missing"
+  | "workspace-required"
+  /** The `container` tier runs only on an always-on Host (ADR-0224 A8). */
+  | "always-on-host-only"
 
 export interface SandboxRuntimeAvailability {
   os: {
@@ -14,6 +21,12 @@ export interface SandboxRuntimeAvailability {
     detail: string
   }
   microvm: {
+    available: boolean
+    reason: SandboxAvailabilityReason
+    requiresWorkspace: true
+  }
+  /** The project's runtime environment on this Host's sandbox pool. */
+  container: {
     available: boolean
     reason: SandboxAvailabilityReason
     requiresWorkspace: true
@@ -28,7 +41,8 @@ let cachedSnapshot: SandboxRuntimeAvailability
 
 export function projectSandboxRuntimeAvailability(
   status: CodeSandboxStatus,
-  microvmAdapterAvailable: boolean
+  microvmAdapterAvailable: boolean,
+  containerAdapterAvailable = false
 ): SandboxRuntimeAvailability {
   return Object.freeze({
     os: Object.freeze({
@@ -40,6 +54,11 @@ export function projectSandboxRuntimeAvailability(
     microvm: Object.freeze({
       available: microvmAdapterAvailable,
       reason: microvmAdapterAvailable ? "workspace-required" : "adapter-missing",
+      requiresWorkspace: true as const,
+    }),
+    container: Object.freeze({
+      available: containerAdapterAvailable,
+      reason: containerAdapterAvailable ? "workspace-required" : "always-on-host-only",
       requiresWorkspace: true as const,
     }),
   })
@@ -73,10 +92,15 @@ export function updateOsSandboxAvailability(status: CodeSandboxStatus): void {
 
 export function getSandboxRuntimeAvailability(): SandboxRuntimeAvailability {
   const microvmAvailable = getMicrovmExec() !== null
-  const key = `${osStatus.confined}:${osStatus.backend}:${osStatus.detail}:${microvmAvailable}`
+  const containerAvailable = getContainerExec() !== null
+  const key = `${osStatus.confined}:${osStatus.backend}:${osStatus.detail}:${microvmAvailable}:${containerAvailable}`
   if (key !== cachedKey) {
     cachedKey = key
-    cachedSnapshot = projectSandboxRuntimeAvailability(osStatus, microvmAvailable)
+    cachedSnapshot = projectSandboxRuntimeAvailability(
+      osStatus,
+      microvmAvailable,
+      containerAvailable
+    )
   }
   return cachedSnapshot
 }

@@ -45,3 +45,9 @@ it("keeps remote bootstrap deadline beyond the native initialization and cleanup
   expect(transportCommandTimeoutMs("project_environment_execute")).toBeGreaterThan(3_605_000)
   expect(transportCommandTimeoutMs("shell_exec")).toBe(30_000)
 })
+
+it("waits for a task shell command's whole hour plus its runtime preparation", () => {
+  // The Host's cap is one hour once the command starts (ADR-0224 A8).
+  expect(transportCommandTimeoutMs("environment_task_shell_exec")).toBeGreaterThan(3_600_000)
+  expect(transportCommandTimeoutMs("environment_task_shell_release")).toBe(30_000)
+})

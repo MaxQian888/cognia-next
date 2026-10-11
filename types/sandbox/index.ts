@@ -20,10 +20,15 @@
  * Where `Bash` / `Read` / `Edit` / `Write` run.
  *
  * - `"os"` — the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).
+ * - `"container"` — the task's runtime environment on an always-on Host: a
+ *   retained container from the Host's sandbox pool, reached through the
+ *   service-only `environment_task_shell_*` commands (ADR-0224 A8). Only a
+ *   headless Host can bind it; anywhere else the bind refuses rather than
+ *   running here.
  * - `"microvm"` — the Firecracker workspace backend (`plugins/e2b-sandbox`).
  * - `"cua-desktop"` — inside the bound sandbox connection, alongside the GUI.
  */
-export type SandboxShellTier = "os" | "microvm" | "cua-desktop"
+export type SandboxShellTier = "os" | "container" | "microvm" | "cua-desktop"
 
 /** Where Computer Use actions land: the host desktop, or a bound connection. */
 export type SandboxComputerTarget = "local" | "bound"

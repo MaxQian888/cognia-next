@@ -125,9 +125,12 @@ test("reads the profile, failing a malformed class closed to ask", () => {
   })
 })
 
-test("only a schema-1 microvm attestation counts", () => {
+test("only a schema-1 microvm or container attestation counts", () => {
   assert.equal(readSandboxAttested({ schemaVersion: 1, tier: "microvm", verifiedAt: 1 }), true)
+  // An always-on Host's runtime environment container (ADR-0224 A8).
+  assert.equal(readSandboxAttested({ schemaVersion: 1, tier: "container", verifiedAt: 1 }), true)
   assert.equal(readSandboxAttested({ schemaVersion: 1, tier: "os" }), false)
+  assert.equal(readSandboxAttested({ schemaVersion: 1, tier: "cua-desktop" }), false)
   assert.equal(readSandboxAttested({ schemaVersion: 2, tier: "microvm" }), false)
   assert.equal(readSandboxAttested(null), false)
 })

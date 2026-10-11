@@ -5080,6 +5080,99 @@
       },
       "additionalProperties": false
     },
+    "environment_task_shell_exec": {
+      "description": "Run one tool command of a Host task in the task's runtime environment (ADR-0224 A8): a built-in turn's sandboxed bash, edit or write on an always-on Host, where nothing a task runs may run on the Host itself. Service plane only: the brain stamps the placement it resolved, and the workspace and cwd clear the spawn policy rule an agent's cwd follows.",
+      "type": "object",
+      "required": [
+        "placement",
+        "owner",
+        "workspaceRoot",
+        "argv",
+        "timeoutMs"
+      ],
+      "properties": {
+        "placement": {
+          "type": "object",
+          "description": "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not described here: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code.",
+          "required": [
+            "kind",
+            "spec"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "container"
+              ]
+            }
+          }
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Who the command runs for (`session:<id>`); scopes its exec session."
+        },
+        "workspaceRoot": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The task workspace as the task's tools name it. Inside the runtime this path leads to the mounted workspace, so tool paths are unchanged."
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the command starts, inside the workspace. The workspace root when absent."
+        },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "stdin": {
+          "type": "string",
+          "description": "The command's whole input; its stdin closes after it."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_task_shell_release": {
+      "description": "The task is done with these task shell runtimes (ADR-0224 A8): remove each one no session uses. A container that is not this Host's task shell runtime refuses the release.",
+      "type": "object",
+      "required": [
+        "provider",
+        "containerIds"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The provider a task shell result named."
+        },
+        "containerIds": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "execution_run_approval_list": {
       "type": "object",
       "properties": {

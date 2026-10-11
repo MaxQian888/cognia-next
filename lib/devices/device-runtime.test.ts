@@ -80,6 +80,19 @@ describe("buildLocalShellTiers", () => {
     })
   })
 
+  it("lists the container tier as an always-on Host's, available only there", () => {
+    expect(buildLocalShellTiers(LOCAL).find((tier) => tier.tier === "container")).toEqual({
+      tier: "container",
+      available: false,
+      reasonKey: "containerAlwaysOnHostOnly",
+    })
+    expect(
+      buildLocalShellTiers({ ...LOCAL, containerAvailable: true }).find(
+        (tier) => tier.tier === "container"
+      )
+    ).toEqual({ tier: "container", available: true, reasonKey: undefined })
+  })
+
   it("withholds the OS tier when the backend probe failed", () => {
     const tiers = buildLocalShellTiers({ ...LOCAL, osSandboxAvailable: false })
     expect(tiers.find((tier) => tier.tier === "os")).toMatchObject({
