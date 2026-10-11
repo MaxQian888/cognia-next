@@ -533,6 +533,7 @@
         "driver": {},
         "egress_grant": {},
         "image": {},
+        "local": {},
         "probe": {},
         "spec": {},
         "build": {},
@@ -1009,7 +1010,8 @@
     },
     "sandbox": {
       "children": {
-        "health": {}
+        "health": {},
+        "remote": {}
       }
     },
     "scheduler": {
