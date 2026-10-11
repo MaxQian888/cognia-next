@@ -865,7 +865,7 @@ function renderBridgeFixture(source, catalog) {
   const fixture = JSON.parse(source)
   fixture.protocol = BRIDGE_PROTOCOL_VERSION
   for (const frame of Object.values(fixture.frames ?? {})) frame.v = BRIDGE_PROTOCOL_VERSION
-  for (const name of ["hello", "helloAck"]) {
+  for (const name of ["hello", "helloAck", "helloRefused"]) {
     fixture.frames[name].protocol = BRIDGE_PROTOCOL_VERSION
     fixture.frames[name].catalogHash = catalog.catalogHash
     fixture.frames[name].contractVersion = catalog.schemaVersion
@@ -2660,6 +2660,28 @@ function ensurePublicComponents(components, publicNames) {
             "The command contract this host serves (ADR-0175). Issuing a token is the device handshake, and a device built against another number refuses to dispatch.",
         },
         catalogHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        brainRefusal: {
+          type: "object",
+          description:
+            "Present while this host's server refuses its own brain: the two come from different builds and the host needs updating (ADR-0224 A10).",
+          required: ["reason", "atMs", "brain", "server"],
+          properties: {
+            reason: { type: "string", enum: ["protocol_mismatch", "contract_mismatch"] },
+            atMs: { type: "integer", format: "int64" },
+            brain: { $ref: "#/components/schemas/BridgeIdentity" },
+            server: { $ref: "#/components/schemas/BridgeIdentity" },
+          },
+        },
+      },
+    },
+    BridgeIdentity: {
+      type: "object",
+      required: ["version", "protocol", "contractVersion", "catalogHash"],
+      properties: {
+        version: { type: "string" },
+        protocol: { type: "integer" },
+        contractVersion: { type: "integer" },
+        catalogHash: { type: "string" },
       },
     },
     SocketTicketRequest: {
@@ -3167,6 +3189,7 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
         messages: {
           hello: { $ref: "#/components/messages/BridgeHelloFrame" },
           helloAck: { $ref: "#/components/messages/BridgeHelloAckFrame" },
+          helloRefused: { $ref: "#/components/messages/BridgeHelloRefusedFrame" },
           event: { $ref: "#/components/messages/BridgeEventFrame" },
           respond: { $ref: "#/components/messages/BridgeRespondFrame" },
           ping: { $ref: "#/components/messages/BridgePingFrame" },
@@ -3213,6 +3236,7 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
         channel: { $ref: "#/channels/headlessBridge" },
         messages: [
           { $ref: "#/channels/headlessBridge/messages/helloAck" },
+          { $ref: "#/channels/headlessBridge/messages/helloRefused" },
           { $ref: "#/channels/headlessBridge/messages/event" },
           { $ref: "#/channels/headlessBridge/messages/ping" },
           { $ref: "#/channels/headlessBridge/messages/pong" },
@@ -3339,6 +3363,20 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
             serverVersion: { type: "string" },
             protocol: { type: "integer", const: BRIDGE_PROTOCOL_VERSION },
             accountId: { type: "string" },
+            catalogHash: { type: "string", const: catalog.catalogHash },
+            contractVersion: { type: "integer", const: catalog.schemaVersion },
+          },
+        }),
+        BridgeHelloRefusedFrame: message("BridgeHelloRefusedFrame", {
+          ...frameBase,
+          required: [...frameBase.required, "reason", "serverVersion", "protocol", "catalogHash", "contractVersion"],
+          additionalProperties: false,
+          properties: {
+            ...frameBase.properties,
+            type: { type: "string", const: "hello_refused" },
+            reason: { type: "string", enum: ["protocol_mismatch", "contract_mismatch"] },
+            serverVersion: { type: "string" },
+            protocol: { type: "integer", const: BRIDGE_PROTOCOL_VERSION },
             catalogHash: { type: "string", const: catalog.catalogHash },
             contractVersion: { type: "integer", const: catalog.schemaVersion },
           },

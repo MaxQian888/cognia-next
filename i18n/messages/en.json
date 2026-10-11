@@ -14318,6 +14318,15 @@
         "ready": "Ready",
         "revoked": "This device was revoked",
         "versionMismatch": "Upgrade required"
+      },
+      "version": {
+        "checkAppUpdates": "Check for app updates",
+        "halfUpdated": "This host's server ({server}) and brain ({brain}) come from different builds, so it cannot run work. Update the host so both come from one release.",
+        "hostAhead": "This host serves command contract v{host}, newer than this app (v{app}). Update this app to the same release as the host.",
+        "hostBehind": "This host serves command contract v{host}, and this app was built for v{app}. Update the host to the same release as this app.",
+        "hostUnversioned": "This host predates command contract versions, and this app was built for v{app}. Update the host to the same release as this app.",
+        "updateApp": "Update this app",
+        "updateHost": "Update the host"
       }
     },
     "hostRole": {

@@ -828,11 +828,38 @@ fn describe_readiness(ok: bool, body: &serde_json::Value) -> String {
         })
         .unwrap_or_default();
     failing.sort_unstable();
-    match (ok, failing.is_empty()) {
+    let summary = match (ok, failing.is_empty()) {
         (true, true) => "ready".to_owned(),
         (_, false) => format!("not ready ({})", failing.join(", ")),
         (false, true) => "not ready".to_owned(),
+    };
+    match describe_brain_refusal(body) {
+        Some(refusal) => format!("{summary}; {refusal}"),
+        None => summary,
     }
+}
+
+/// Why the server refused the brain, from `/readyz`'s `brainRefusal`. A
+/// refused brain will not become ready by waiting: the install's server and
+/// brain come from different builds (ADR-0224 A10).
+fn describe_brain_refusal(body: &serde_json::Value) -> Option<String> {
+    let refusal = body.get("brainRefusal")?;
+    let side = |name: &str| {
+        let side = &refusal[name];
+        format!(
+            "{name} {} contract {}",
+            side["version"].as_str().unwrap_or("unknown"),
+            side["contractVersion"]
+                .as_u64()
+                .map_or_else(|| "?".to_owned(), |v| v.to_string()),
+        )
+    };
+    Some(format!(
+        "the server refused the brain ({}: {}, {}); update the host so both come from one build",
+        refusal["reason"].as_str().unwrap_or("mismatch"),
+        side("brain"),
+        side("server"),
+    ))
 }
 
 fn data_dir() -> PathBuf {
@@ -3142,6 +3169,19 @@ mod tests {
         });
         assert_eq!(super::describe_readiness(false, &held), "not ready (brain, draining, sidecar)");
         assert_eq!(super::describe_readiness(false, &serde_json::Value::Null), "not ready");
+        let refused = serde_json::json!({
+            "checks": { "brain": false },
+            "brainRefusal": {
+                "reason": "contract_mismatch",
+                "brain": { "version": "0.2.0", "contractVersion": 4 },
+                "server": { "version": "0.1.0", "contractVersion": 3 },
+            },
+        });
+        assert_eq!(
+            super::describe_readiness(false, &refused),
+            "not ready (brain); the server refused the brain (contract_mismatch: brain 0.2.0 \
+             contract 4, server 0.1.0 contract 3); update the host so both come from one build"
+        );
     }
 
     #[test]

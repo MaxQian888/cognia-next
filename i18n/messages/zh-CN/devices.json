@@ -413,6 +413,15 @@
       "revoked": "该设备已被吊销",
       "versionMismatch": "需要升级"
     },
+    "version": {
+      "updateHost": "需要更新主机",
+      "updateApp": "需要更新此应用",
+      "hostBehind": "此主机提供的命令契约为 v{host}，而此应用基于 v{app} 构建。请把主机更新到与此应用相同的版本。",
+      "hostUnversioned": "此主机早于命令契约版本机制，而此应用基于 v{app} 构建。请把主机更新到与此应用相同的版本。",
+      "hostAhead": "此主机提供的命令契约为 v{host}，比此应用（v{app}）更新。请把此应用更新到与主机相同的版本。",
+      "halfUpdated": "此主机的服务端（{server}）与 brain（{brain}）来自不同构建，因此无法运行任务。请更新主机，让两者来自同一版本。",
+      "checkAppUpdates": "检查应用更新"
+    },
     "managePairing": "管理已配对的 Host",
     "moreAria": "{label} 的更多操作"
   },

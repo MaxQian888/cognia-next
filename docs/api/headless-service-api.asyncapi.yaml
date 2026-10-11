@@ -39,6 +39,8 @@ channels:
         $ref: "#/components/messages/BridgeHelloFrame"
       helloAck:
         $ref: "#/components/messages/BridgeHelloAckFrame"
+      helloRefused:
+        $ref: "#/components/messages/BridgeHelloRefusedFrame"
       event:
         $ref: "#/components/messages/BridgeEventFrame"
       respond:
@@ -88,6 +90,7 @@ operations:
       $ref: "#/channels/headlessBridge"
     messages:
       - $ref: "#/channels/headlessBridge/messages/helloAck"
+      - $ref: "#/channels/headlessBridge/messages/helloRefused"
       - $ref: "#/channels/headlessBridge/messages/event"
       - $ref: "#/channels/headlessBridge/messages/ping"
       - $ref: "#/channels/headlessBridge/messages/pong"
@@ -313,6 +316,42 @@ components:
             const: 3
           accountId:
             type: string
+          catalogHash:
+            type: string
+            const: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af
+          contractVersion:
+            type: integer
+            const: 3
+        additionalProperties: false
+    BridgeHelloRefusedFrame:
+      name: BridgeHelloRefusedFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - reason
+          - serverVersion
+          - protocol
+          - catalogHash
+          - contractVersion
+        properties:
+          v:
+            type: integer
+            const: 3
+          type:
+            type: string
+            const: hello_refused
+          reason:
+            type: string
+            enum:
+              - protocol_mismatch
+              - contract_mismatch
+          serverVersion:
+            type: string
+          protocol:
+            type: integer
+            const: 3
           catalogHash:
             type: string
             const: ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af

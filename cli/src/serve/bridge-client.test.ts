@@ -3,8 +3,8 @@
  *
  * @jest-environment node
  */
-import { BridgeClient, type WebSocketLike } from "./bridge-client"
-import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
+import { BridgeClient, BridgeRefusedError, type WebSocketLike } from "./bridge-client"
+import { BRAIN_REFUSED_EXIT_CODE, BRIDGE_PROTOCOL_VERSION } from "./protocol"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 import { MAX_MEDIA_RESPONSE_BYTES } from "@/lib/headless/types"
 
@@ -13,6 +13,7 @@ type Listener = (event: {
   error?: unknown
   message?: unknown
   code?: unknown
+  reason?: unknown
 }) => void
 
 class FakeSocket implements WebSocketLike {
@@ -37,7 +38,7 @@ class FakeSocket implements WebSocketLike {
 
   fire(
     type: string,
-    event: { data?: string; error?: unknown; message?: unknown; code?: unknown }
+    event: { data?: string; error?: unknown; message?: unknown; code?: unknown; reason?: unknown }
   ): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
@@ -385,8 +386,59 @@ describe("BridgeClient", () => {
     const connected = h.client.connect()
     h.sockets[0].fire("open", {})
     h.sockets[0].serverSend(helloAck(99))
-    await expect(connected).rejects.toThrow(/protocol mismatch/)
+    await expect(connected).rejects.toMatchObject({
+      name: "BridgeRefusedError",
+      reason: "protocol_mismatch",
+      exitCode: BRAIN_REFUSED_EXIT_CODE,
+    })
     expect(h.client.getState()).toBe("closed")
+  })
+
+  it("stops for good when the server refuses this brain, instead of reconnecting forever", async () => {
+    const h = makeClient()
+    const connected = h.client.connect()
+    h.sockets[0].fire("open", {})
+    h.sockets[0].serverSend({
+      v: BRIDGE_PROTOCOL_VERSION,
+      type: "hello_refused",
+      reason: "contract_mismatch",
+      serverVersion: "9.9.9",
+      protocol: BRIDGE_PROTOCOL_VERSION,
+      catalogHash: "server-catalog",
+      contractVersion: 4,
+    })
+    // The server closes right after; that must not schedule a reconnect.
+    h.sockets[0].fire("close", { code: 1002, reason: "Headless contract mismatch" })
+
+    const error = await connected.catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(BridgeRefusedError)
+    expect(error).toMatchObject({
+      reason: "contract_mismatch",
+      exitCode: BRAIN_REFUSED_EXIT_CODE,
+      server: { version: "9.9.9", contractVersion: 4, catalogHash: "server-catalog" },
+    })
+    expect((error as Error).message).toContain("update the host")
+    expect(h.client.getState()).toBe("closed")
+    expect(h.scheduled).toHaveLength(0)
+    expect(h.sockets).toHaveLength(1)
+  })
+
+  it("reads an older server's bare 1002 contract close as the same refusal", async () => {
+    const h = makeClient()
+    const connected = h.client.connect()
+    h.sockets[0].fire("open", {})
+    h.sockets[0].fire("close", { code: 1002, reason: "Headless contract mismatch" })
+    await expect(connected).rejects.toMatchObject({ reason: "contract_mismatch" })
+    expect(h.scheduled).toHaveLength(0)
+  })
+
+  it("still reconnects after any other close before the ack", async () => {
+    const h = makeClient()
+    void h.client.connect()
+    h.sockets[0].fire("open", {})
+    h.sockets[0].fire("close", { code: 1002, reason: "no hello within timeout" })
+    expect(h.client.getState()).toBe("reconnecting")
+    expect(h.scheduled).toHaveLength(1)
   })
 
   it("rejects connect when hello_ack belongs to another account", async () => {
@@ -405,7 +457,7 @@ describe("BridgeClient", () => {
     const connected = h.client.connect()
     h.sockets[0].fire("open", {})
     h.sockets[0].serverSend(helloAck(BRIDGE_PROTOCOL_VERSION, "stale-catalog"))
-    await expect(connected).rejects.toThrow(/contract mismatch/)
+    await expect(connected).rejects.toMatchObject({ reason: "contract_mismatch" })
     expect(h.client.getState()).toBe("closed")
   })
 

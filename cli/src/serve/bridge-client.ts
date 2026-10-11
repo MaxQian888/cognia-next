@@ -24,6 +24,7 @@ import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-con
 import { reconnectDelayMs } from "../runtime/reconnect-delay"
 
 import {
+  BRAIN_REFUSED_EXIT_CODE,
   BRIDGE_PROTOCOL_VERSION,
   buildHello,
   buildPong,
@@ -35,6 +36,39 @@ import {
 } from "./protocol"
 
 export type BridgeClientState = "idle" | "connecting" | "connected" | "reconnecting" | "closed"
+
+/** The other side's bridge identity, as it reported it. */
+export interface BridgePeerIdentity {
+  version?: string
+  protocol?: number
+  catalogHash?: string
+  contractVersion?: number
+}
+
+/**
+ * The server and this brain do not speak the same bridge protocol or Headless
+ * contract. Not retryable: the brain exits with {@link BRAIN_REFUSED_EXIT_CODE}
+ * so its supervisor stops respawning it and reports the mismatch.
+ */
+export class BridgeRefusedError extends Error {
+  readonly exitCode = BRAIN_REFUSED_EXIT_CODE
+  constructor(
+    readonly reason: "protocol_mismatch" | "contract_mismatch",
+    readonly server: BridgePeerIdentity
+  ) {
+    super(
+      `the server refused this brain (${reason}): brain protocol ${BRIDGE_PROTOCOL_VERSION} ` +
+        `contract ${HEADLESS_CONTRACT_VERSION} catalog ${HEADLESS_CATALOG_HASH}, server ` +
+        `${server.version ?? "unknown"} protocol ${server.protocol ?? "?"} contract ` +
+        `${server.contractVersion ?? "?"} catalog ${server.catalogHash ?? "?"}. ` +
+        "The server and brain come from different builds; update the host so both match."
+    )
+    this.name = "BridgeRefusedError"
+  }
+}
+
+/** Close reason an older server sends, without a `hello_refused` frame. */
+const LEGACY_CONTRACT_REFUSAL_REASON = "Headless contract mismatch"
 
 /** The subset of the WHATWG WebSocket surface the client uses (Node 20+'s
  * global `WebSocket` satisfies it; tests inject fakes). */
@@ -48,6 +82,7 @@ export interface WebSocketLike {
       error?: unknown
       message?: unknown
       code?: unknown
+      reason?: unknown
     }) => void
   ): void
 }
@@ -334,25 +369,14 @@ export class BridgeClient implements RuntimeBridge {
             return
           }
           if (frame.protocol !== BRIDGE_PROTOCOL_VERSION) {
-            this.log(
-              "error",
-              `bridge protocol mismatch (server ${frame.protocol}, client ${BRIDGE_PROTOCOL_VERSION})`
-            )
-            this.close()
-            this.connectReject?.(new Error("bridge protocol mismatch"))
-            this.connectReject = null
-            this.connectResolve = null
+            this.refuse(new BridgeRefusedError("protocol_mismatch", serverIdentity(frame)))
             return
           }
           if (
             frame.catalogHash !== HEADLESS_CATALOG_HASH ||
             frame.contractVersion !== HEADLESS_CONTRACT_VERSION
           ) {
-            this.log("error", "bridge Headless contract mismatch")
-            this.close()
-            this.connectReject?.(new Error("bridge Headless contract mismatch"))
-            this.connectReject = null
-            this.connectResolve = null
+            this.refuse(new BridgeRefusedError("contract_mismatch", serverIdentity(frame)))
             return
           }
           acked = true
@@ -364,6 +388,10 @@ export class BridgeClient implements RuntimeBridge {
           this.connectReject = null
           this.log("info", `bridge connected (server ${frame.serverVersion})`)
           break
+        }
+        case "hello_refused": {
+          this.refuse(new BridgeRefusedError(frame.reason, serverIdentity(frame)))
+          return
         }
         case "event": {
           const set = this.handlers.get(frame.event)
@@ -425,8 +453,14 @@ export class BridgeClient implements RuntimeBridge {
       }
     })
 
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       cancelAckTimeout?.()
+      // A server from before `hello_refused` only closes 1002 with this
+      // reason. Reconnecting would be refused the same way, forever.
+      if (!acked && event.code === 1002 && event.reason === LEGACY_CONTRACT_REFUSAL_REASON) {
+        this.refuse(new BridgeRefusedError("contract_mismatch", {}))
+        return
+      }
       this.onDisconnect(new Error("bridge socket closed"))
     })
     socket.addEventListener("error", (event) => {
@@ -434,6 +468,16 @@ export class BridgeClient implements RuntimeBridge {
       const detail = describeBridgeSocketError(event)
       this.log("warn", detail ? `bridge socket error: ${detail}` : "bridge socket error")
     })
+  }
+
+  /** Stop for good: the server will refuse every attempt for this reason. */
+  private refuse(error: BridgeRefusedError): void {
+    if (this.state === "closed") return
+    this.log("error", `bridge refused: ${error.message}`)
+    this.close()
+    this.connectReject?.(error)
+    this.connectReject = null
+    this.connectResolve = null
   }
 
   private onDisconnect(cause: Error): void {
@@ -458,5 +502,19 @@ export class BridgeClient implements RuntimeBridge {
       if (this.state === "closed") return
       this.open()
     }, delay)
+  }
+}
+
+function serverIdentity(frame: {
+  serverVersion?: string
+  protocol?: number
+  catalogHash?: string
+  contractVersion?: number
+}): BridgePeerIdentity {
+  return {
+    ...(frame.serverVersion !== undefined ? { version: frame.serverVersion } : {}),
+    ...(frame.protocol !== undefined ? { protocol: frame.protocol } : {}),
+    ...(frame.catalogHash !== undefined ? { catalogHash: frame.catalogHash } : {}),
+    ...(frame.contractVersion !== undefined ? { contractVersion: frame.contractVersion } : {}),
   }
 }

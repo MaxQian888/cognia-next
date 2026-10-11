@@ -11,6 +11,13 @@ import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-con
 
 export const BRIDGE_PROTOCOL_VERSION = 3
 
+/**
+ * Exit code of a brain the server refused (EX_CONFIG). The server's brain
+ * supervisor reads it as "do not respawn this build": the next attempt would
+ * be refused for the same reason (ADR-0224 A10).
+ */
+export const BRAIN_REFUSED_EXIT_CODE = 78
+
 export interface HelloFrame {
   v: number
   type: "hello"
@@ -29,6 +36,21 @@ export interface HelloAckFrame {
   serverVersion: string
   protocol: number
   accountId: string
+  catalogHash: string
+  contractVersion: number
+}
+
+/**
+ * Sent instead of `hello_ack` when the server will not take this brain: its
+ * bridge protocol or Headless contract differs from the server's. The socket
+ * closes right after, and reconnecting would be refused for the same reason.
+ */
+export interface HelloRefusedFrame {
+  v: number
+  type: "hello_refused"
+  reason: "protocol_mismatch" | "contract_mismatch"
+  serverVersion: string
+  protocol: number
   catalogHash: string
   contractVersion: number
 }
@@ -97,6 +119,7 @@ export interface WorkerDetachFrame {
 export type BridgeFrame =
   | HelloFrame
   | HelloAckFrame
+  | HelloRefusedFrame
   | EventFrame
   | RespondFrame
   | PingFrame
@@ -109,6 +132,7 @@ export type BridgeFrame =
 const FRAME_TYPES = new Set([
   "hello",
   "hello_ack",
+  "hello_refused",
   "event",
   "respond",
   "ping",

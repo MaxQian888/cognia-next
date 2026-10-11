@@ -13,6 +13,16 @@ export function normalizeProcessExitCode(exitCode: EntrypointProcess["exitCode"]
 }
 
 /**
+ * The exit code a fatal error asks for, or 1. An error carries one when its
+ * supervisor must tell it apart from a crash: a brain the server refused
+ * exits 78 so it is not respawned into the same refusal.
+ */
+export function fatalExitCode(error: unknown): number {
+  const code = (error as { exitCode?: unknown } | null)?.exitCode
+  return typeof code === "number" && Number.isInteger(code) && code > 0 && code < 256 ? code : 1
+}
+
+/**
  * Settle the executable process after boot. Fatal startup failures must use
  * `exit()` rather than only setting `exitCode`: database and runtime imports
  * may already own live timers that would otherwise strand the process until
@@ -29,7 +39,7 @@ export async function runProcessEntrypoint(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     proc.stderr.write(`cognia-agent: fatal: ${message}\n`)
-    proc.exit(1)
+    proc.exit(fatalExitCode(error))
   }
   proc.exitCode = code
   if (options.forceExitOnSuccess) proc.exit(code)

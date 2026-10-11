@@ -579,6 +579,13 @@ pub fn render_prometheus() -> String {
             "Brain RSS from its bridge pong frames (0 = unknown).",
             status.rss_bytes,
         );
+        push_metric(
+            &mut out,
+            "cognia_brain_parked",
+            "gauge",
+            "1 when the server refused the brain and the supervisor stopped respawning it.",
+            u8::from(status.parked),
+        );
     }
     if let Some(services) = super::runtime::headless() {
         push_metric(

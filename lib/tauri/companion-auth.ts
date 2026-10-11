@@ -5,7 +5,7 @@ import { APP_VERSION } from "@/lib/app-version"
 import { requireJwtPayload } from "@/lib/security/jwt-payload"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 import { parseProblem } from "./companion-problem"
-import { recordHostContract } from "./companion-contract"
+import { recordHostBrain, recordHostContract } from "./companion-contract"
 import { OIDC_ISSUER_KINDS, type OidcIssuerKind } from "@/lib/logto/client"
 
 /** A social sign-in method the deployment enabled at Logto. */
@@ -561,6 +561,9 @@ async function refreshAccessToken(
   // it serves here, and a Host that names none is an older Host. The transport
   // reads this verdict before every dispatch.
   recordHostContract(config.deviceId, body)
+  // The Host also says here whether its own server refused its brain: the two
+  // come from different builds and the Host needs updating (ADR-0224 A10).
+  recordHostBrain(config.deviceId, body.brainRefusal)
   const state = {
     accessToken: body.accessToken,
     jti: claims.jti,

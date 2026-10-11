@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 import { HostConnectionState, HostControls, isPairedCompanionHost } from "./host-controls"
+import { HostVersionNotice } from "./host-version-notice"
 import { PairedDeviceLifecycle, PairedDeviceLifecycleNotice } from "./paired-device-lifecycle"
 import {
   AdminStateBadge,
@@ -221,6 +222,7 @@ export function DeviceHero({ row, actions, onRepairHost, children }: DeviceHeroP
       </div>
 
       <PairedDeviceLifecycleNotice row={row} />
+      <HostVersionNotice row={row} />
 
       {children ? <div className="mt-3">{children}</div> : null}
     </div>

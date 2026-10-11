@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  fatalExitCode,
   installClosedPipeHandler,
   normalizeProcessExitCode,
   runProcessEntrypoint,
@@ -39,6 +40,19 @@ describe("runProcessEntrypoint", () => {
     expect(stderr.join("")).toBe("cognia-agent: fatal: database bootstrap failed\n")
     expect(exit).toHaveBeenCalledWith(1)
     expect(proc.exitCode).toBeUndefined()
+  })
+
+  it("exits with the code a fatal error asks for, so a refused brain is not a crash", async () => {
+    const exit = jest.fn((code?: number): never => {
+      throw new Error(`process-exit:${code}`)
+    })
+    const proc: EntrypointProcess = { stderr: { write: () => true }, exit, exitCode: undefined }
+
+    await expect(
+      runProcessEntrypoint(async () => {
+        throw Object.assign(new Error("the server refused this brain"), { exitCode: 78 })
+      }, proc)
+    ).rejects.toThrow("process-exit:78")
   })
 
   it("records a successful exit code without forcing termination", async () => {
@@ -133,5 +147,16 @@ describe("installClosedPipeHandler", () => {
     const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })
     expect(() => emit("stdout", reset)).toThrow("read ECONNRESET")
     expect(exit).not.toHaveBeenCalled()
+  })
+})
+
+describe("fatalExitCode", () => {
+  it("takes an integer exit code from 1 to 255 and treats anything else as 1", () => {
+    expect(fatalExitCode(Object.assign(new Error("x"), { exitCode: 78 }))).toBe(78)
+    expect(fatalExitCode(new Error("plain"))).toBe(1)
+    expect(fatalExitCode({ exitCode: 0 })).toBe(1)
+    expect(fatalExitCode({ exitCode: 300 })).toBe(1)
+    expect(fatalExitCode({ exitCode: "78" })).toBe(1)
+    expect(fatalExitCode(null)).toBe(1)
   })
 })

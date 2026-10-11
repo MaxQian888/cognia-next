@@ -1945,6 +1945,12 @@ struct TokenResponse {
     expires_in: i64,
     contract_version: u32,
     catalog_hash: &'static str,
+    /// Present while this host's server refuses its own brain: the two come
+    /// from different builds, so commands the brain answers cannot run and the
+    /// host needs updating (ADR-0224 A10). A device shows that instead of a
+    /// stream of failed calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    brain_refusal: Option<super::ws_bridge::BrainRefusal>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2061,6 +2067,7 @@ async fn token_handler(
         expires_in: ACCESS_TOKEN_TTL_SECS,
         contract_version: super::command_manifest::CONTRACT_VERSION,
         catalog_hash: super::command_manifest::CATALOG_HASH,
+        brain_refusal: super::ws_bridge::brain_refusal(),
     }))
 }
 
@@ -3463,6 +3470,7 @@ mod tests {
             expires_in: ACCESS_TOKEN_TTL_SECS,
             contract_version: super::super::command_manifest::CONTRACT_VERSION,
             catalog_hash: super::super::command_manifest::CATALOG_HASH,
+            brain_refusal: None,
         })
         .unwrap();
         assert_eq!(body["tokenType"], "DPoP");
@@ -3474,6 +3482,29 @@ mod tests {
             body["catalogHash"],
             super::super::command_manifest::CATALOG_HASH
         );
+        // Absent unless the host refused its brain.
+        assert!(body.get("brainRefusal").is_none());
+    }
+
+    /// While this host refuses its own brain, every token says so, so a device
+    /// can tell the user to update the host (ADR-0224 A10).
+    #[tokio::test]
+    async fn token_response_reports_a_refused_brain() {
+        let _guard = super::super::ws_bridge::test_support::lock_slot().await;
+        super::super::ws_bridge::test_support::refuse_for_testing("contract_mismatch");
+        let body = serde_json::to_value(TokenResponse {
+            access_token: "t".to_string(),
+            token_type: "DPoP",
+            expires_in: ACCESS_TOKEN_TTL_SECS,
+            contract_version: super::super::command_manifest::CONTRACT_VERSION,
+            catalog_hash: super::super::command_manifest::CATALOG_HASH,
+            brain_refusal: super::super::ws_bridge::brain_refusal(),
+        })
+        .unwrap();
+        super::super::ws_bridge::test_support::clear_refusal_for_testing();
+        assert_eq!(body["brainRefusal"]["reason"], "contract_mismatch");
+        assert_eq!(body["brainRefusal"]["brain"]["contractVersion"], 2);
+        assert_eq!(body["brainRefusal"]["server"]["contractVersion"], 3);
     }
 
     /// The Owner route `PUT /api/devices/{id}/capabilities` is a raw snapshot

@@ -135303,6 +135303,28 @@ components:
         catalogHash:
           type: string
           pattern: ^[0-9a-f]{64}$
+        brainRefusal:
+          type: object
+          description: "Present while this host's server refuses its own brain: the two come from different builds and the host
+            needs updating (ADR-0224 A10)."
+          required:
+            - reason
+            - atMs
+            - brain
+            - server
+          properties:
+            reason:
+              type: string
+              enum:
+                - protocol_mismatch
+                - contract_mismatch
+            atMs:
+              type: integer
+              format: int64
+            brain:
+              $ref: "#/components/schemas/BridgeIdentity"
+            server:
+              $ref: "#/components/schemas/BridgeIdentity"
     SocketTicketRequest:
       oneOf:
         - type: object
@@ -136118,6 +136140,22 @@ components:
             filtered by the caller's grants, so it never advertises what dispatch would refuse.
           items:
             $ref: "#/components/schemas/CommandDescriptor"
+    BridgeIdentity:
+      type: object
+      required:
+        - version
+        - protocol
+        - contractVersion
+        - catalogHash
+      properties:
+        version:
+          type: string
+        protocol:
+          type: integer
+        contractVersion:
+          type: integer
+        catalogHash:
+          type: string
 x-cognia-generated:
   sources:
     - protocol/companion-commands.json

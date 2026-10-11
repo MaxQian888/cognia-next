@@ -25,6 +25,8 @@ describe("bridge protocol golden fixtures", () => {
     expect(fixtures.frames.hello.contractVersion).toBe(HEADLESS_CONTRACT_VERSION)
     expect(fixtures.frames.helloAck.catalogHash).toBe(HEADLESS_CATALOG_HASH)
     expect(fixtures.frames.helloAck.contractVersion).toBe(HEADLESS_CONTRACT_VERSION)
+    expect(fixtures.frames.helloRefused.catalogHash).toBe(HEADLESS_CATALOG_HASH)
+    expect(fixtures.frames.helloRefused.contractVersion).toBe(HEADLESS_CONTRACT_VERSION)
   })
 
   it("every fixture frame parses and roundtrips byte-identically", () => {

@@ -21,6 +21,7 @@ import type { PlacementLiveness } from "@/lib/placement/liveness"
 import type { PlacementRequirement } from "@/lib/placement/types"
 import type { CapabilityId } from "@/lib/platform/capabilities"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import type { HostVersionState } from "@/lib/remote-host/host-version"
 import type { Platform } from "@/lib/platform/detect"
 import type {
   DeviceAttention,
@@ -315,6 +316,8 @@ export interface DeviceRow {
    * "refused this device" need different fixes.
    */
   lastProbe?: RemoteHostProbeInput
+  /** Remote hosts: which side to update, from the last handshake (ADR-0224 A10). */
+  hostVersion?: HostVersionState
 
   capabilities: readonly DeviceCapabilityCell[]
   capabilitiesReportedAt?: number
@@ -357,6 +360,8 @@ export interface RemoteHostInput {
   alwaysOn?: boolean
   /** The last liveness probe this session, if any. */
   lastProbe?: RemoteHostProbeInput
+  /** Which side to update, from the last handshake (ADR-0224 A10). */
+  version?: HostVersionState
   connectionState: RemoteHostConnectionState
   connectionError?: string
   addedAt: number

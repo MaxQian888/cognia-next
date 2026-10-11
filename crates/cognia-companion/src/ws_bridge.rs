@@ -135,6 +135,23 @@ pub enum BridgeFrame {
         #[serde(rename = "contractVersion")]
         contract_version: u32,
     },
+    /// server → brain, instead of `hello_ack`, when the server will not take
+    /// this brain: its bridge protocol or its Headless contract differs from
+    /// the server's. The socket closes right after. A brain that reads it
+    /// stops and reports the mismatch instead of reconnecting, because the
+    /// next attempt would be refused for the same reason (ADR-0224 A10).
+    HelloRefused {
+        v: u32,
+        /// `protocol_mismatch` or `contract_mismatch`.
+        reason: String,
+        #[serde(rename = "serverVersion")]
+        server_version: String,
+        protocol: u32,
+        #[serde(rename = "catalogHash")]
+        catalog_hash: String,
+        #[serde(rename = "contractVersion")]
+        contract_version: u32,
+    },
     /// server → brain: a bridge request. `event` is the Tauri channel name;
     /// `payload` is byte-identical to the desktop event payload.
     Event {
@@ -312,6 +329,65 @@ static SOCKET_BRIDGE: Lazy<RwLock<Option<BridgeSlot>>> = Lazy::new(|| RwLock::ne
 /// The brain supervisor (R8) uses this as its readiness probe.
 static READY: Lazy<(watch::Sender<bool>, watch::Receiver<bool>)> =
     Lazy::new(|| watch::channel(false));
+
+/// Why the server last refused a brain, until a brain is accepted. The
+/// supervisor reads it to stop respawning a brain that cannot be accepted,
+/// and `/healthz` and `/readyz` report it (ADR-0224 A10).
+static BRAIN_REFUSAL: Lazy<RwLock<Option<BrainRefusal>>> = Lazy::new(|| RwLock::new(None));
+
+/// Bumped on every refusal, so the supervisor can wait for one.
+static REFUSALS: Lazy<(watch::Sender<u64>, watch::Receiver<u64>)> = Lazy::new(|| watch::channel(0));
+
+/// A brain the server would not take, and both sides of the mismatch.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrainRefusal {
+    /// `protocol_mismatch` or `contract_mismatch`.
+    pub reason: String,
+    pub at_ms: i64,
+    pub brain: BridgeIdentity,
+    pub server: BridgeIdentity,
+}
+
+/// One side's bridge identity, as each side reported it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeIdentity {
+    pub version: String,
+    pub protocol: u32,
+    pub contract_version: u32,
+    pub catalog_hash: String,
+}
+
+/// Why the last brain was refused, while no brain has been accepted since.
+pub fn brain_refusal() -> Option<BrainRefusal> {
+    BRAIN_REFUSAL.read().clone()
+}
+
+/// Wakes on every refusal.
+pub fn subscribe_refusals() -> watch::Receiver<u64> {
+    REFUSALS.1.clone()
+}
+
+fn record_refusal(refusal: BrainRefusal) {
+    log::error!(
+        "companion-api ws-bridge: refused brain {} ({}): brain protocol {} contract {} catalog {}, \
+         server {} protocol {} contract {} catalog {}",
+        refusal.brain.version,
+        refusal.reason,
+        refusal.brain.protocol,
+        refusal.brain.contract_version,
+        refusal.brain.catalog_hash,
+        refusal.server.version,
+        refusal.server.protocol,
+        refusal.server.contract_version,
+        refusal.server.catalog_hash,
+    );
+    *BRAIN_REFUSAL.write() = Some(refusal);
+    REFUSALS
+        .0
+        .send_modify(|count| *count = count.wrapping_add(1));
+}
 
 /// Latest RSS gauge from the brain's pong frames (0 = unknown).
 static BRAIN_RSS_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -610,6 +686,43 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+/// Refuse a brain: record why, tell it in a `hello_refused` frame it can act
+/// on, then close. A brain built before the frame existed ignores it and sees
+/// the 1002 close; the supervisor reads the record either way.
+async fn refuse(
+    socket: &mut WebSocket,
+    reason: &str,
+    brain: BridgeIdentity,
+    server_contract: Option<(u32, String)>,
+    close_reason: &str,
+) {
+    let (contract_version, catalog_hash) = server_contract.unwrap_or_default();
+    let server = BridgeIdentity {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        protocol: BRIDGE_PROTOCOL_VERSION,
+        contract_version,
+        catalog_hash,
+    };
+    record_refusal(BrainRefusal {
+        reason: reason.to_string(),
+        at_ms: now_ms(),
+        brain,
+        server: server.clone(),
+    });
+    let frame = BridgeFrame::HelloRefused {
+        v: BRIDGE_PROTOCOL_VERSION,
+        reason: reason.to_string(),
+        server_version: server.version,
+        protocol: server.protocol,
+        catalog_hash: server.catalog_hash,
+        contract_version: server.contract_version,
+    };
+    if let Ok(text) = serde_json::to_string(&frame) {
+        let _ = socket.send(Message::Text(text.into())).await;
+    }
+    close_with(socket, CLOSE_PROTOCOL_ERROR, close_reason).await;
+}
+
 /// Drive one brain connection.
 async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: String) {
     // ── 1. Await hello ───────────────────────────────────────────────────────
@@ -635,10 +748,21 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         unreachable!("await_hello only returns Hello frames");
     };
 
+    let brain_identity = BridgeIdentity {
+        version: brain_version.clone(),
+        protocol,
+        contract_version,
+        catalog_hash: catalog_hash.clone(),
+    };
     if protocol != BRIDGE_PROTOCOL_VERSION {
-        close_with(
+        let server_contract = super::command_manifest::headless_contract().ok();
+        refuse(
             &mut socket,
-            CLOSE_PROTOCOL_ERROR,
+            "protocol_mismatch",
+            brain_identity,
+            server_contract
+                .as_ref()
+                .map(|c| (c.schema_version(), c.catalog_hash().to_string())),
             &format!(
                 "unsupported bridge protocol {protocol} (server speaks {BRIDGE_PROTOCOL_VERSION})"
             ),
@@ -660,9 +784,14 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
     };
     if catalog_hash != contract.catalog_hash() || contract_version != contract.schema_version() {
         super::metrics::record_contract_mismatch();
-        close_with(
+        refuse(
             &mut socket,
-            CLOSE_PROTOCOL_ERROR,
+            "contract_mismatch",
+            brain_identity,
+            Some((
+                contract.schema_version(),
+                contract.catalog_hash().to_string(),
+            )),
             "Headless contract mismatch",
         )
         .await;
@@ -703,6 +832,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
     let (out_tx, mut out_rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
     let transport = SocketBridgeTransport::new(out_tx, conn_id);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    BRAIN_REFUSAL.write().take();
     install_socket_bridge(
         Arc::clone(&transport),
         shutdown_tx,
@@ -1207,6 +1337,26 @@ pub mod test_support {
     }
 
     /// Clear the slot regardless of owner. Hold the slot lock first.
+    pub fn clear_refusal_for_testing() {
+        BRAIN_REFUSAL.write().take();
+    }
+
+    /// Record a refusal as if a brain had just been refused.
+    pub fn refuse_for_testing(reason: &str) {
+        let identity = |version: &str, contract_version: u32| BridgeIdentity {
+            version: version.to_string(),
+            protocol: BRIDGE_PROTOCOL_VERSION,
+            contract_version,
+            catalog_hash: format!("hash-{contract_version}"),
+        };
+        record_refusal(BrainRefusal {
+            reason: reason.to_string(),
+            at_ms: now_ms(),
+            brain: identity("brain-test", 2),
+            server: identity("server-test", 3),
+        });
+    }
+
     pub fn clear_socket_for_testing() {
         SOCKET_BRIDGE.write().take();
         let _ = READY.0.send(false);
@@ -1539,6 +1689,8 @@ mod tests {
         let state = test_state();
         let addr = serve_bridge(state).await;
         let mut ws = connect(addr, &service_token()).await;
+        // A brain refused earlier stops being reported once one is accepted.
+        test_support::refuse_for_testing("contract_mismatch");
 
         let ack = handshake(&mut ws).await;
         assert_eq!(ack["v"], BRIDGE_PROTOCOL_VERSION);
@@ -1548,6 +1700,10 @@ mod tests {
 
         wait_connected().await;
         assert!(socket_bridge_transport().is_some());
+        assert!(
+            brain_refusal().is_none(),
+            "an accepted brain clears the refusal"
+        );
         let hello = brain_hello().expect("hello metadata");
         assert_eq!(hello.brain_version, "0.0.0-test");
         assert_eq!(hello.capabilities, vec!["sync", "messages", "writes"]);
@@ -1557,6 +1713,41 @@ mod tests {
 
         ws.close(None).await.ok();
         wait_disconnected().await;
+    }
+
+    /// The server tells a refused brain why in a `hello_refused` frame, then
+    /// closes 1002.
+    async fn expect_refusal(ws: &mut WsClient, reason: &str) {
+        async fn next(ws: &mut WsClient) -> WsMessage {
+            tokio::time::timeout(Duration::from_secs(5), ws.next())
+                .await
+                .expect("frame timeout")
+                .expect("stream ended")
+                .expect("ws frame err")
+        }
+        match next(ws).await {
+            WsMessage::Text(text) => {
+                let frame: BridgeFrame = serde_json::from_str(text.as_str()).expect("frame");
+                match frame {
+                    BridgeFrame::HelloRefused {
+                        reason: got,
+                        protocol,
+                        ..
+                    } => {
+                        assert_eq!(got, reason);
+                        assert_eq!(protocol, BRIDGE_PROTOCOL_VERSION);
+                    }
+                    other => panic!("expected hello_refused, got {other:?}"),
+                }
+            }
+            other => panic!("expected hello_refused, got {other:?}"),
+        }
+        match next(ws).await {
+            WsMessage::Close(Some(frame)) => {
+                assert_eq!(u16::from(frame.code), CLOSE_PROTOCOL_ERROR);
+            }
+            other => panic!("expected close frame, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1575,18 +1766,12 @@ mod tests {
         .unwrap();
         ws.send(WsMessage::Text(bad_hello.into())).await.unwrap();
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
-            .await
-            .expect("close timeout")
-            .expect("stream ended")
-            .expect("ws frame err");
-        match msg {
-            WsMessage::Close(Some(frame)) => {
-                assert_eq!(u16::from(frame.code), CLOSE_PROTOCOL_ERROR);
-            }
-            other => panic!("expected close frame, got {other:?}"),
-        }
+        expect_refusal(&mut ws, "protocol_mismatch").await;
         assert!(!bridge_connected(), "mismatched brain must not install");
+        let refusal = brain_refusal().expect("the refusal is recorded");
+        assert_eq!(refusal.reason, "protocol_mismatch");
+        assert_eq!(refusal.brain.version, "x");
+        assert_eq!(refusal.server.version, env!("CARGO_PKG_VERSION"));
     }
 
     #[tokio::test]
@@ -1605,18 +1790,12 @@ mod tests {
         .unwrap();
         ws.send(WsMessage::Text(bad_hello.into())).await.unwrap();
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
-            .await
-            .expect("close timeout")
-            .expect("stream ended")
-            .expect("ws frame err");
-        match msg {
-            WsMessage::Close(Some(frame)) => {
-                assert_eq!(u16::from(frame.code), CLOSE_PROTOCOL_ERROR);
-            }
-            other => panic!("expected close frame, got {other:?}"),
-        }
+        expect_refusal(&mut ws, "contract_mismatch").await;
         assert!(!bridge_connected(), "stale brain must not install");
+        let refusal = brain_refusal().expect("the refusal is recorded");
+        assert_eq!(refusal.reason, "contract_mismatch");
+        assert_eq!(refusal.brain.version, "x");
+        assert_eq!(refusal.server.version, env!("CARGO_PKG_VERSION"));
     }
 
     #[tokio::test]

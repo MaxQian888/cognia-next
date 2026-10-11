@@ -34,6 +34,9 @@ import {
   type HostFeatureManifest,
 } from "@/lib/platform/host-feature-manifest"
 import { codeServerClient } from "@/lib/codeserver/client"
+import { COMPANION_CONTRACT_VERSION } from "@/lib/tauri/command-descriptors"
+import { onHostBrainChange, onHostContractChange } from "@/lib/tauri/companion-contract"
+import { nextHostVersionState, type HostVersionState } from "@/lib/remote-host/host-version"
 import { CompanionTransport } from "@/lib/tauri/transport-companion"
 import { transport } from "@/lib/tauri/transport-instance"
 import { setActiveRemoteEndpoint, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -96,6 +99,13 @@ export interface RemoteHost {
    * not trusted across a relaunch.
    */
   lastProbe?: RemoteHostProbe
+  /**
+   * Which side to update, from the last handshake (ADR-0175, ADR-0224 A10).
+   * Persisted: the in-memory contract verdict starts `unknown` on every
+   * launch, and the console should still say "update the host" before the
+   * next handshake. See `lib/remote-host/host-version.ts`.
+   */
+  version?: HostVersionState
 }
 
 export interface RemoteHostProbe {
@@ -314,17 +324,11 @@ export async function refreshHostFeatureManifest(id: string): Promise<HostFeatur
       }))
       return null
     }
-    if (manifest.hostBuildId !== host.config.serverVersion) {
-      useRemoteHostStore.setState((state) => ({
-        hosts: state.hosts.map((candidate) =>
-          candidate.id === id
-            ? { ...candidate, featureManifest: undefined, featureManifestAt: undefined }
-            : candidate
-        ),
-      }))
-      markConnectionFailure(id, "host feature manifest version mismatch")
-      return null
-    }
+    // A host that reports another build than the one it was paired at has
+    // been updated. Versions are judged by the command contract (ADR-0175),
+    // through the handshake verdict, not by the build: so the build it runs
+    // now is adopted rather than refused (ADR-0224 A10).
+    if (manifest.hostBuildId !== host.config.serverVersion) adoptHostBuild(id, manifest.hostBuildId)
 
     useRemoteHostStore.setState((state) => ({
       hosts: state.hosts.map((candidate) =>
@@ -397,14 +401,17 @@ export function recordHostProbe(
     const manifest = parseHostFeatureManifest(outcome.manifest)
     if (!manifest) {
       probe = { at: now, ok: false, error: "the host's feature manifest could not be read" }
-    } else if (manifest.hostBuildId !== host.config.serverVersion) {
-      const message = "host feature manifest version mismatch"
-      probe = { at: now, ok: false, error: message }
-      if (!active) patch = { connectionState: "versionMismatch", connectionError: message }
     } else {
       probe = { at: now, ok: true }
       patch = { featureManifest: manifest, featureManifestAt: now, lastConnectedAt: now }
-      if (!active && host.connectionState !== "disconnected") {
+      // An updated host reports its new build: adopt it (see
+      // `refreshHostFeatureManifest`). Whether this app still matches it is
+      // the handshake verdict's call, kept in `version`.
+      if (manifest.hostBuildId !== host.config.serverVersion) {
+        patch = { ...patch, config: { ...host.config, serverVersion: manifest.hostBuildId } }
+      }
+      const mismatched = (host.version?.advice ?? "none") !== "none"
+      if (!active && !mismatched && host.connectionState !== "disconnected") {
         patch = { ...patch, connectionState: "disconnected", connectionError: undefined }
       }
     }
@@ -428,10 +435,76 @@ export function recordHostProbe(
 export function rehydratedHosts(hosts: readonly RemoteHost[]): RemoteHost[] {
   return hosts.map((host) => {
     const { lastProbe: _session, ...rest } = host
-    return host.connectionState === "revoked"
-      ? rest
-      : { ...rest, connectionState: "disconnected", connectionError: undefined }
+    if (host.connectionState === "revoked") return rest
+    // Which side to update is a durable fact about the two builds, so it
+    // survives a relaunch until the next handshake says otherwise.
+    const mismatched = (host.version?.advice ?? "none") !== "none"
+    return {
+      ...rest,
+      connectionState: mismatched ? "versionMismatch" : "disconnected",
+      connectionError: undefined,
+    }
   })
+}
+
+/** Record the build a host now runs, as reported by its feature manifest. */
+function adoptHostBuild(id: string, hostBuildId: string): void {
+  useRemoteHostStore.setState((state) => ({
+    hosts: state.hosts.map((candidate) =>
+      candidate.id === id
+        ? { ...candidate, config: { ...candidate.config, serverVersion: hostBuildId } }
+        : candidate
+    ),
+  }))
+}
+
+/**
+ * Keep each host's {@link RemoteHost.version} in step with its handshakes.
+ *
+ * Every transport to a host, the active one and the management channels
+ * alike, records the contract verdict and the brain report under the
+ * pairing's device id; this folds them onto the host record that pairing
+ * belongs to. A mismatch shows as `versionMismatch`; a host that matches
+ * again leaves it. Returns a disposer. Installed once below.
+ */
+export function installHostVersionTracking(): () => void {
+  const apply = (deviceId: string, fact: Parameters<typeof nextHostVersionState>[1]): void => {
+    useRemoteHostStore.setState((state) => {
+      let changed = false
+      const hosts = state.hosts.map((host) => {
+        if (host.config.deviceId !== deviceId) return host
+        const version = nextHostVersionState(
+          host.version,
+          fact,
+          COMPANION_CONTRACT_VERSION,
+          Date.now()
+        )
+        if (version === host.version) return host
+        changed = true
+        const mismatched = (version?.advice ?? "none") !== "none"
+        const connectionState: RemoteHost["connectionState"] =
+          host.connectionState === "revoked"
+            ? "revoked"
+            : mismatched
+              ? "versionMismatch"
+              : host.connectionState === "versionMismatch" && state.activeHostId !== host.id
+                ? "disconnected"
+                : host.connectionState
+        return { ...host, ...(version ? { version } : {}), connectionState }
+      })
+      return changed ? { hosts } : state
+    })
+  }
+  const offContract = onHostContractChange((deviceId, verdict) =>
+    apply(deviceId, { kind: "contract", verdict })
+  )
+  const offBrain = onHostBrainChange((deviceId, refusal) =>
+    apply(deviceId, { kind: "brain", refusal })
+  )
+  return () => {
+    offContract()
+    offBrain()
+  }
 }
 
 async function probeHostConnection(id: string): Promise<void> {
@@ -719,5 +792,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
     }
   )
 )
+
+installHostVersionTracking()
 
 export default useRemoteHostStore

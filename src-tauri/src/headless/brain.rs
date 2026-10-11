@@ -47,6 +47,31 @@ const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 3600);
 /// permanently-broken config doesn't hot-loop between backoff table entries.
 const SPAWN_ERROR_PAUSE: Duration = Duration::from_secs(1);
 
+/// Exit code of a brain the server refused (`BRAIN_REFUSED_EXIT_CODE` in
+/// `cli/src/serve/protocol.ts`, EX_CONFIG).
+pub const BRAIN_REFUSED_EXIT_CODE: i32 = 78;
+
+/// How often a parked supervisor looks for a replaced brain entry.
+const PARKED_ENTRY_POLL: Duration = Duration::from_secs(30);
+
+/// How one child's run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChildOutcome {
+    /// Exited, crashed or was killed by the ready watchdog: respawn.
+    Exited,
+    /// The server refused it. This build will be refused again, so stop.
+    Refused,
+    /// Shutdown was requested.
+    Shutdown,
+}
+
+/// What identifies the installed brain build: replacing it changes the
+/// entry's size or modification time.
+fn entry_identity(entry: &std::path::Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(entry).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
 /// Everything needed to launch one brain child. Pure data — env construction
 /// is unit-tested via [`build_brain_env`].
 #[derive(Debug, Clone)]
@@ -71,6 +96,8 @@ pub struct BrainConfig {
     pub node_extra_ca_certs: Option<PathBuf>,
     /// How long a fresh child has to complete the bridge hello.
     pub ready_timeout: Duration,
+    /// How often a parked supervisor looks for a replaced brain entry.
+    pub parked_entry_poll: Duration,
 }
 
 impl BrainConfig {
@@ -100,6 +127,7 @@ impl BrainConfig {
             tls_fingerprint,
             node_extra_ca_certs,
             ready_timeout: Duration::from_secs(90),
+            parked_entry_poll: PARKED_ENTRY_POLL,
         }
     }
 }
@@ -175,6 +203,8 @@ pub struct BrainSupervisor {
     state: SharedState,
     backoff: Mutex<CrashBackoff>,
     running: AtomicBool,
+    /// Respawning stopped after a refusal (see [`ChildOutcome::Refused`]).
+    parked: AtomicBool,
     restart_count: AtomicU64,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
@@ -299,6 +329,7 @@ impl BrainSupervisor {
             state,
             backoff: Mutex::new(CrashBackoff::default()),
             running: AtomicBool::new(false),
+            parked: AtomicBool::new(false),
             restart_count: AtomicU64::new(0),
             shutdown_tx,
             shutdown_rx,
@@ -312,6 +343,8 @@ impl BrainSupervisor {
             restart_count: self.restart_count.load(Ordering::SeqCst),
             rss_bytes: ws_bridge::brain_rss_bytes(),
             version: ws_bridge::brain_hello().map(|h| h.brain_version),
+            refusal: ws_bridge::brain_refusal(),
+            parked: self.parked.load(Ordering::SeqCst),
         }
     }
 
@@ -355,7 +388,9 @@ impl BrainSupervisor {
 
             match self.spawn_once().await {
                 Ok(child) => {
-                    self.supervise_child(child, &mut shutdown).await;
+                    if self.supervise_child(child, &mut shutdown).await == ChildOutcome::Refused {
+                        self.park(&mut shutdown).await;
+                    }
                 }
                 Err(e) => {
                     log::error!("brain supervisor: spawn failed: {e}");
@@ -368,6 +403,49 @@ impl BrainSupervisor {
             }
         }
         log::info!("brain supervisor: stopped");
+    }
+
+    /// Stop respawning a brain the server refused, and wait for a different
+    /// build: the brain entry is replaced (an update swapped it), or the
+    /// process restarts. Respawning the same build would be refused for the
+    /// same reason every time, so the supervisor reports the state instead
+    /// of looping (ADR-0224 A10).
+    async fn park(&self, shutdown: &mut watch::Receiver<bool>) {
+        let installed = entry_identity(&self.config.entry);
+        self.parked.store(true, Ordering::SeqCst);
+        match ws_bridge::brain_refusal() {
+            Some(refusal) => log::error!(
+                "brain supervisor: the server refused the brain ({}): brain {} contract {}, \
+                 server {} contract {}. Not respawning until the brain is replaced; update \
+                 the host so its server and brain come from the same build",
+                refusal.reason,
+                refusal.brain.version,
+                refusal.brain.contract_version,
+                refusal.server.version,
+                refusal.server.contract_version,
+            ),
+            None => log::error!(
+                "brain supervisor: the brain exited because it does not match this server; \
+                 not respawning until it is replaced"
+            ),
+        }
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(self.config.parked_entry_poll) => {
+                    if entry_identity(&self.config.entry) != installed {
+                        log::info!("brain supervisor: the brain entry changed; respawning");
+                        break;
+                    }
+                }
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+        self.parked.store(false, Ordering::SeqCst);
+        self.backoff.lock().await.reset();
     }
 
     async fn spawn_once(&self) -> Result<tokio::process::Child, String> {
@@ -409,8 +487,12 @@ impl BrainSupervisor {
         &self,
         mut child: tokio::process::Child,
         shutdown: &mut watch::Receiver<bool>,
-    ) {
+    ) -> ChildOutcome {
         self.running.store(true, Ordering::SeqCst);
+        let mut refusals = ws_bridge::subscribe_refusals();
+        refusals.mark_unchanged();
+        let mut refused = false;
+        let mut outcome = ChildOutcome::Exited;
         self.restart_count.fetch_add(1, Ordering::SeqCst);
 
         // Pipe child output to the server log, keeping the level the child
@@ -447,15 +529,36 @@ impl BrainSupervisor {
         loop {
             tokio::select! {
                 status = child.wait() => {
-                    match status {
+                    match &status {
                         Ok(s) => log::warn!("brain exited: {s}"),
                         Err(e) => log::error!("brain wait error: {e}"),
+                    }
+                    if refused
+                        || status
+                            .as_ref()
+                            .is_ok_and(|s| s.code() == Some(BRAIN_REFUSED_EXIT_CODE))
+                    {
+                        outcome = ChildOutcome::Refused;
+                        break;
                     }
                     // Any exit is a failure for backoff purposes; a healthy
                     // run reset the counter at hello time, so a single crash
                     // after a long healthy run respawns immediately.
                     self.backoff.lock().await.note_failure(Instant::now());
                     break;
+                }
+
+                // The server refused this child. One built before it could
+                // read `hello_refused` keeps reconnecting into the same
+                // refusal, so stop it here instead of waiting out the
+                // watchdog.
+                changed = refusals.changed(), if !refused && !was_ready => {
+                    if changed.is_err() || ws_bridge::brain_refusal().is_none() {
+                        continue;
+                    }
+                    refused = true;
+                    let _ = child.start_kill();
+                    // Loop continues; child.wait() observes the kill.
                 }
 
                 changed = ready_rx.changed(), if !was_ready => {
@@ -495,6 +598,7 @@ impl BrainSupervisor {
                         log::info!("brain supervisor: shutdown — killing brain");
                         let _ = child.start_kill();
                         let _ = child.wait().await;
+                        outcome = ChildOutcome::Shutdown;
                         break;
                     }
                 }
@@ -502,6 +606,7 @@ impl BrainSupervisor {
         }
 
         self.running.store(false, Ordering::SeqCst);
+        outcome
     }
 }
 
@@ -545,6 +650,7 @@ mod tests {
             tls_fingerprint: "ff00".into(),
             node_extra_ca_certs: Some(PathBuf::from("/data/cognia/companion/tls.pem")),
             ready_timeout,
+            parked_entry_poll: Duration::from_millis(50),
         }
     }
 
@@ -705,6 +811,105 @@ mod tests {
             .await
             .expect("loop must stop on shutdown")
             .expect("join");
+    }
+
+    /// Wait until `done(status)` holds, or fail after ~5 s.
+    async fn wait_for(sup: &BrainSupervisor, what: &str, done: impl Fn(&BrainStatus) -> bool) {
+        for _ in 0..100 {
+            if done(&sup.status()) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("timed out waiting for: {what} (status {:?})", sup.status());
+    }
+
+    /// A brain that exits with the refusal code is not respawned into the
+    /// same refusal: the supervisor parks, and a replaced entry wakes it.
+    /// Requires node.
+    #[tokio::test]
+    async fn a_refused_brain_parks_the_supervisor_until_the_brain_is_replaced() {
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let entry = tmp.path().join("refused.mjs");
+        std::fs::write(
+            &entry,
+            format!("process.exit({BRAIN_REFUSED_EXIT_CODE});\n"),
+        )
+        .expect("write");
+
+        let sup = BrainSupervisor::new(
+            test_config(entry.clone(), Duration::from_secs(5)),
+            test_state(),
+        );
+        let handle = sup.start();
+        wait_for(&sup, "parked after the refusal", |s| s.parked).await;
+        // Well past the zero-backoff respawn: still one spawn.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(
+            sup.status().restart_count,
+            1,
+            "a refused build is not respawned"
+        );
+        assert!(!sup.status().running);
+
+        // An update replaces the brain: the supervisor tries the new build.
+        std::fs::write(&entry, "setInterval(() => {}, 60_000); // a newer build\n")
+            .expect("rewrite");
+        wait_for(&sup, "respawned after the entry changed", |s| {
+            s.restart_count >= 2 && !s.parked
+        })
+        .await;
+
+        sup.shutdown();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop must stop on shutdown")
+            .expect("join");
+    }
+
+    /// A brain from before `hello_refused` keeps reconnecting after the
+    /// server refuses it; the supervisor stops it at the refusal instead of
+    /// waiting out the ready watchdog, and parks. Requires node.
+    #[tokio::test]
+    async fn a_refusal_stops_a_brain_that_would_keep_reconnecting() {
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let entry = tmp.path().join("reconnects-forever.mjs");
+        std::fs::write(&entry, "setInterval(() => {}, 60_000);\n").expect("write");
+
+        // A watchdog far longer than the test: only the refusal can stop it.
+        let sup = BrainSupervisor::new(test_config(entry, Duration::from_secs(60)), test_state());
+        let handle = sup.start();
+        wait_for(&sup, "child running", |s| s.running).await;
+
+        crate::companion_api::ws_bridge::test_support::refuse_for_testing("contract_mismatch");
+        wait_for(&sup, "parked after the refusal", |s| s.parked && !s.running).await;
+        let status = sup.status();
+        assert_eq!(status.restart_count, 1);
+        assert_eq!(
+            status.refusal.expect("refusal reported").reason,
+            "contract_mismatch"
+        );
+
+        sup.shutdown();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop must stop on shutdown")
+            .expect("join");
+        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
     }
 
     #[test]

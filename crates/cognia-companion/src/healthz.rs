@@ -92,15 +92,17 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
-    (
-        status,
-        Json(json!({
-            "status": if ready { "ready" } else { "not_ready" },
-            "configRevision": actual_revision,
-            "checks": checks,
-        })),
-    )
-        .into_response()
+    let mut body = json!({
+        "status": if ready { "ready" } else { "not_ready" },
+        "configRevision": actual_revision,
+        "checks": checks,
+    });
+    // A refused brain is not "still starting": the server and brain come from
+    // different builds and will not converge by waiting (ADR-0224 A10).
+    if let Some(refusal) = super::ws_bridge::brain_refusal() {
+        body["brainRefusal"] = serde_json::to_value(refusal).unwrap_or_default();
+    }
+    (status, Json(body)).into_response()
 }
 
 fn config_revision_matches(expected: Option<&str>, actual: Option<&str>) -> bool {
@@ -398,5 +400,33 @@ mod tests {
         assert_eq!(draining_body["checks"]["draining"], true);
         assert_eq!(draining_body["checks"]["acceptingWrites"], false);
         crate::server::set_draining_for_test(false);
+    }
+
+    #[tokio::test]
+    async fn readyz_names_a_refused_brain_until_one_is_accepted() {
+        let _guard = crate::ws_bridge::test_support::lock_slot().await;
+        crate::ws_bridge::test_support::clear_refusal_for_testing();
+        let readyz = || async {
+            let response = build_router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .uri("/readyz")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_json(response).await
+        };
+        assert!(readyz().await.get("brainRefusal").is_none());
+
+        crate::ws_bridge::test_support::refuse_for_testing("contract_mismatch");
+        let body = readyz().await;
+        assert_eq!(body["brainRefusal"]["reason"], "contract_mismatch");
+        assert_eq!(body["brainRefusal"]["brain"]["contractVersion"], 2);
+        assert_eq!(body["brainRefusal"]["server"]["contractVersion"], 3);
+
+        crate::ws_bridge::test_support::clear_refusal_for_testing();
+        assert!(readyz().await.get("brainRefusal").is_none());
     }
 }

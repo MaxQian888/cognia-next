@@ -400,6 +400,7 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
     connectionState: host.connectionState,
     connectionError: host.connectionError,
     lastProbe: probe,
+    ...(host.version ? { hostVersion: host.version } : {}),
     capabilities,
     capabilitiesReportedAt: host.capabilitiesAt,
     capabilityReportMissing:

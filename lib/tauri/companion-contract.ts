@@ -36,8 +36,82 @@ export interface HostContractIdentity {
 
 export type HostContractListener = (deviceId: string, verdict: HostContractVerdict) => void
 
+/**
+ * The Host's own server refused its brain: the two come from different builds
+ * (ADR-0224 A10). The Host reports it in the device token while it lasts.
+ * Independent of the contract verdict, which is about this app and the Host.
+ */
+export interface HostBrainRefusal {
+  reason: string
+  brain: { version: string; contractVersion: number | null }
+  server: { version: string; contractVersion: number | null }
+}
+
+export type HostBrainListener = (deviceId: string, refusal: HostBrainRefusal | null) => void
+
 const verdicts = new Map<string, HostContractVerdict>()
 const listeners = new Set<HostContractListener>()
+const brainRefusals = new Map<string, HostBrainRefusal | null>()
+const brainListeners = new Set<HostBrainListener>()
+
+/** Read a `brainRefusal` the Host sent, or null for none or a malformed one. */
+export function parseHostBrainRefusal(value: unknown): HostBrainRefusal | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  const side = (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return null
+    const entry = raw as Record<string, unknown>
+    return {
+      version: typeof entry.version === "string" ? entry.version : "unknown",
+      contractVersion:
+        typeof entry.contractVersion === "number" && Number.isInteger(entry.contractVersion)
+          ? entry.contractVersion
+          : null,
+    }
+  }
+  const brain = side(record.brain)
+  const server = side(record.server)
+  if (typeof record.reason !== "string" || !brain || !server) return null
+  return { reason: record.reason, brain, server }
+}
+
+/**
+ * Record whether the Host reported a refused brain, from the device token
+ * answer. Only the token carries it; other Host answers must not clear it.
+ */
+export function recordHostBrain(deviceId: string, value: unknown): HostBrainRefusal | null {
+  const refusal = parseHostBrainRefusal(value)
+  const previous = brainRefusals.get(deviceId)
+  brainRefusals.set(deviceId, refusal)
+  if (previous === undefined || !sameRefusal(previous, refusal)) {
+    for (const listener of brainListeners) {
+      try {
+        listener(deviceId, refusal)
+      } catch (error) {
+        console.warn("companion-contract: brain listener threw", error)
+      }
+    }
+  }
+  return refusal
+}
+
+export function onHostBrainChange(listener: HostBrainListener): () => void {
+  brainListeners.add(listener)
+  return () => {
+    brainListeners.delete(listener)
+  }
+}
+
+function sameRefusal(left: HostBrainRefusal | null, right: HostBrainRefusal | null): boolean {
+  if (left === null || right === null) return left === right
+  return (
+    left.reason === right.reason &&
+    left.brain.version === right.brain.version &&
+    left.brain.contractVersion === right.brain.contractVersion &&
+    left.server.version === right.server.version &&
+    left.server.contractVersion === right.server.contractVersion
+  )
+}
 
 /**
  * Judge one Host answer against this client's contract. A Host that names
@@ -88,6 +162,7 @@ export function hostContractVerdict(deviceId: string): HostContractVerdict {
 
 /** Forget a pairing's verdict, for example when it is unpaired. */
 export function forgetHostContract(deviceId: string): void {
+  brainRefusals.delete(deviceId)
   if (verdicts.delete(deviceId)) {
     for (const listener of listeners) listener(deviceId, { state: "unknown" })
   }
@@ -129,4 +204,6 @@ function sameVerdict(left: HostContractVerdict, right: HostContractVerdict): boo
 export function __resetHostContractsForTests(): void {
   verdicts.clear()
   listeners.clear()
+  brainRefusals.clear()
+  brainListeners.clear()
 }

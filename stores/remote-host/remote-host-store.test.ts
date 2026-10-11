@@ -49,6 +49,12 @@ import {
 } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 import {
+  __resetHostContractsForTests,
+  recordHostBrain,
+  recordHostContract,
+} from "@/lib/tauri/companion-contract"
+import { COMPANION_CONTRACT_VERSION } from "@/lib/tauri/command-descriptors"
+import {
   __setRemoteTransportFactoryForTests,
   activeHostCapabilities,
   activeHostFeatureManifest,
@@ -59,6 +65,7 @@ import {
   refreshHostFeatureManifest,
   rehydratedHosts,
   useActiveHostSupportsFeature,
+  installHostVersionTracking,
   useRemoteHostStore,
   withSigningKey,
   type RemoteHost,
@@ -665,18 +672,21 @@ describe("host feature manifest", () => {
     spy.mockRestore()
   })
 
-  it("rejects a valid manifest for another host build and marks a version mismatch", async () => {
+  it("adopts the build an updated host reports instead of refusing it (ADR-0224 A10)", async () => {
     seedActive()
     const spy = jest
       .spyOn(transport, "call")
-      .mockResolvedValue({ ...manifest, hostBuildId: "older" } as never)
+      .mockResolvedValue({ ...manifest, hostBuildId: "1.3.0" } as never)
 
-    await expect(refreshHostFeatureManifest("h1")).resolves.toBeNull()
+    await expect(refreshHostFeatureManifest("h1")).resolves.toMatchObject({ hostBuildId: "1.3.0" })
 
+    // Versions are judged by the command contract; the build is just recorded.
     expect(useRemoteHostStore.getState().hosts[0]).toMatchObject({
-      connectionState: "versionMismatch",
-      featureManifest: undefined,
+      connectionState: "ready",
+      config: { serverVersion: "1.3.0" },
+      featureManifest: { hostBuildId: "1.3.0" },
     })
+    expect(activeHostFeatureManifest()).toMatchObject({ hostBuildId: "1.3.0" })
     spy.mockRestore()
   })
 
@@ -928,13 +938,32 @@ describe("recordHostProbe (ADR-0224 A4)", () => {
     })
   })
 
-  it("flags a host running another build, without counting it as seen", () => {
+  it("records a host that updated itself as seen, on the build it now runs", () => {
     seed()
-    expect(
-      recordHostProbe("h1", { kind: "answered", manifest: manifest("9.9.9") }, 100)
-    ).toMatchObject({ ok: false, error: "host feature manifest version mismatch" })
-    expect(only()).toMatchObject({ connectionState: "versionMismatch" })
-    expect(only().lastConnectedAt).toBeUndefined()
+    expect(recordHostProbe("h1", { kind: "answered", manifest: manifest("9.9.9") }, 100)).toEqual({
+      at: 100,
+      ok: true,
+    })
+    expect(only()).toMatchObject({
+      connectionState: "disconnected",
+      lastConnectedAt: 100,
+      config: { serverVersion: "9.9.9" },
+    })
+  })
+
+  it("keeps a version mismatch the handshake reported while the probe answers", () => {
+    seed({
+      connectionState: "versionMismatch",
+      version: {
+        advice: "update-host",
+        hostContractVersion: 2,
+        appContractVersion: 3,
+        brainRefusal: null,
+        observedAt: 1,
+      },
+    })
+    recordHostProbe("h1", { kind: "answered", manifest: manifest() }, 100)
+    expect(only().connectionState).toBe("versionMismatch")
   })
 
   it("records an unreadable manifest as a miss", () => {
@@ -1038,5 +1067,98 @@ describe("deactivate stops the remote host's IDE instances", () => {
 
     expect(mockStopAll).toHaveBeenCalledTimes(1)
     expect(stopAllSawRemote[0]).not.toBeNull()
+  })
+})
+
+describe("host version tracking (ADR-0224 A10)", () => {
+  let dispose: (() => void) | null = null
+  beforeEach(() => {
+    __resetHostContractsForTests()
+    dispose = installHostVersionTracking()
+    useRemoteHostStore.setState({
+      activeHostId: null,
+      hosts: [
+        {
+          id: "h1",
+          label: "Mini",
+          credentialRef: "remote-host:h1",
+          addedAt: 1,
+          connectionState: "disconnected",
+          config: makeConfig({ deviceId: "device-1" }),
+        },
+        {
+          id: "h2",
+          label: "Other",
+          credentialRef: "remote-host:h2",
+          addedAt: 1,
+          connectionState: "disconnected",
+          config: makeConfig({ deviceId: "device-2" }),
+        },
+      ],
+    })
+  })
+  afterEach(() => {
+    dispose?.()
+    __resetHostContractsForTests()
+  })
+  const host = (id: string) => useRemoteHostStore.getState().hosts.find((h) => h.id === id)!
+
+  it("says which side to update, on the host the pairing belongs to", () => {
+    recordHostContract("device-1", { contractVersion: COMPANION_CONTRACT_VERSION - 1 })
+    expect(host("h1")).toMatchObject({
+      connectionState: "versionMismatch",
+      version: { advice: "update-host", hostContractVersion: COMPANION_CONTRACT_VERSION - 1 },
+    })
+    expect(host("h2").version).toBeUndefined()
+
+    recordHostContract("device-2", { contractVersion: COMPANION_CONTRACT_VERSION + 1 })
+    expect(host("h2").version?.advice).toBe("update-app")
+  })
+
+  it("leaves the mismatch once the host matches again", () => {
+    recordHostContract("device-1", { contractVersion: COMPANION_CONTRACT_VERSION - 1 })
+    recordHostContract("device-1", { contractVersion: COMPANION_CONTRACT_VERSION })
+    expect(host("h1")).toMatchObject({
+      connectionState: "disconnected",
+      version: { advice: "none" },
+    })
+  })
+
+  it("sends a half-updated host to an update even when the contract matches", () => {
+    recordHostContract("device-1", { contractVersion: COMPANION_CONTRACT_VERSION })
+    recordHostBrain("device-1", {
+      reason: "contract_mismatch",
+      brain: { version: "0.2.0", contractVersion: 4 },
+      server: { version: "0.1.0", contractVersion: 3 },
+    })
+    expect(host("h1")).toMatchObject({
+      connectionState: "versionMismatch",
+      version: { advice: "update-host", brainRefusal: { reason: "contract_mismatch" } },
+    })
+    recordHostBrain("device-1", undefined)
+    expect(host("h1").version).toMatchObject({ advice: "none", brainRefusal: null })
+  })
+
+  it("keeps the advice across a relaunch, and a revoked host stays revoked", () => {
+    const stored = rehydratedHosts([
+      {
+        ...host("h1"),
+        connectionState: "ready",
+        version: {
+          advice: "update-app",
+          hostContractVersion: 9,
+          appContractVersion: 3,
+          brainRefusal: null,
+          observedAt: 1,
+        },
+      },
+    ])
+    expect(stored[0].connectionState).toBe("versionMismatch")
+
+    useRemoteHostStore.setState((state) => ({
+      hosts: state.hosts.map((h) => (h.id === "h1" ? { ...h, connectionState: "revoked" } : h)),
+    }))
+    recordHostContract("device-1", { contractVersion: COMPANION_CONTRACT_VERSION - 1 })
+    expect(host("h1").connectionState).toBe("revoked")
   })
 })

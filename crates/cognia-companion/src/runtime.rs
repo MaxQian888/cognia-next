@@ -163,6 +163,12 @@ pub struct BrainStatus {
     pub rss_bytes: u64,
     /// `brainVersion` from the hello frame, when connected.
     pub version: Option<String>,
+    /// Why the server last refused the brain, until one is accepted.
+    pub refusal: Option<super::ws_bridge::BrainRefusal>,
+    /// The supervisor stopped respawning because the brain was refused: the
+    /// installed brain and server come from different builds. It resumes when
+    /// the brain entry changes (ADR-0224 A10).
+    pub parked: bool,
 }
 
 /// Whatever supervises the brain child.
@@ -270,6 +276,23 @@ mod tests {
             restart_count: 3,
             rss_bytes: 7,
             version: Some("1.2.3".into()),
+            refusal: Some(crate::ws_bridge::BrainRefusal {
+                reason: "contract_mismatch".into(),
+                at_ms: 1,
+                brain: crate::ws_bridge::BridgeIdentity {
+                    version: "0.2.0".into(),
+                    protocol: 3,
+                    contract_version: 4,
+                    catalog_hash: "brain".into(),
+                },
+                server: crate::ws_bridge::BridgeIdentity {
+                    version: "0.1.0".into(),
+                    protocol: 3,
+                    contract_version: 3,
+                    catalog_hash: "server".into(),
+                },
+            }),
+            parked: true,
         })
         .unwrap();
         assert_eq!(
@@ -280,6 +303,23 @@ mod tests {
                 "restart_count": 3,
                 "rss_bytes": 7,
                 "version": "1.2.3",
+                "refusal": {
+                    "reason": "contract_mismatch",
+                    "atMs": 1,
+                    "brain": {
+                        "version": "0.2.0",
+                        "protocol": 3,
+                        "contractVersion": 4,
+                        "catalogHash": "brain",
+                    },
+                    "server": {
+                        "version": "0.1.0",
+                        "protocol": 3,
+                        "contractVersion": 3,
+                        "catalogHash": "server",
+                    },
+                },
+                "parked": true,
             })
         );
     }

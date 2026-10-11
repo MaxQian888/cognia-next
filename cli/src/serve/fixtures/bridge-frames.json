@@ -28,6 +28,15 @@
       "catalogHash": "ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af",
       "contractVersion": 3
     },
+    "helloRefused": {
+      "v": 3,
+      "type": "hello_refused",
+      "reason": "contract_mismatch",
+      "serverVersion": "0.9.0",
+      "protocol": 3,
+      "catalogHash": "ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af",
+      "contractVersion": 3
+    },
     "eventSyncPull": {
       "v": 3,
       "type": "event",

@@ -5,7 +5,10 @@ import {
   forgetHostContract,
   hostContractVerdict,
   judgeHostContract,
+  onHostBrainChange,
   onHostContractChange,
+  parseHostBrainRefusal,
+  recordHostBrain,
   recordHostContract,
 } from "./companion-contract"
 
@@ -91,5 +94,39 @@ describe("companion contract verdict (ADR-0175)", () => {
         clientContractVersion: 3,
       }).message
     ).toContain("names no command contract version")
+  })
+
+  describe("a Host's refused brain (ADR-0224 A10)", () => {
+    const refusal = {
+      reason: "contract_mismatch",
+      atMs: 1,
+      brain: { version: "0.2.0", protocol: 3, contractVersion: 4, catalogHash: "b" },
+      server: { version: "0.1.0", protocol: 3, contractVersion: 3, catalogHash: "s" },
+    }
+
+    it("reads both sides of the mismatch and nothing malformed", () => {
+      expect(parseHostBrainRefusal(refusal)).toEqual({
+        reason: "contract_mismatch",
+        brain: { version: "0.2.0", contractVersion: 4 },
+        server: { version: "0.1.0", contractVersion: 3 },
+      })
+      expect(parseHostBrainRefusal(undefined)).toBeNull()
+      expect(parseHostBrainRefusal({ reason: "x" })).toBeNull()
+      expect(parseHostBrainRefusal({ ...refusal, reason: 7 })).toBeNull()
+    })
+
+    it("tells listeners when a refusal appears and when it clears, once each", () => {
+      const seen: unknown[] = []
+      onHostBrainChange((deviceId, value) => seen.push([deviceId, value?.reason ?? null]))
+      recordHostBrain("dev-1", undefined)
+      recordHostBrain("dev-1", refusal)
+      recordHostBrain("dev-1", refusal)
+      recordHostBrain("dev-1", undefined)
+      expect(seen).toEqual([
+        ["dev-1", null],
+        ["dev-1", "contract_mismatch"],
+        ["dev-1", null],
+      ])
+    })
   })
 })
