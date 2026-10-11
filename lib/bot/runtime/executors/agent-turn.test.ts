@@ -124,6 +124,24 @@ describe("createAgentTurnBotExecutor", () => {
     expect(result).toMatchObject({ summary: "Looks fine", output: { sessionId: "s1" } })
   })
 
+  it("carries the installation's permission profile as the turn's grant (ADR-0224 A7)", async () => {
+    const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
+    await createAgentTurnBotExecutor({ run })(
+      ctx({ policy: { permissionProfile: { outbound: "deny", workspace: "ask" } } })
+    )
+    expect(run.mock.calls[0][0].capabilityGrants).toEqual([
+      {
+        schemaVersion: 1,
+        source: { kind: "bot", id: "acme:summary" },
+        permissionProfile: { outbound: "deny", workspace: "ask" },
+      },
+    ])
+    await createAgentTurnBotExecutor({ run })(ctx())
+    // No layer had an opinion: an empty profile, which still marks the turn
+    // unattended and resolves to the host's ceiling.
+    expect(run.mock.calls[1][0].capabilityGrants[0].permissionProfile).toEqual({})
+  })
+
   it("passes the resolved authority, never a widened default", async () => {
     const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
     await createAgentTurnBotExecutor({ run })(

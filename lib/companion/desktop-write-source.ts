@@ -692,6 +692,17 @@ export async function dispatchCommand(
       return handleLegacyTeamRunControl()
     // The one remote control seam for a run: the cockpit's own command,
     // revision-checked and idempotent, through the same gate.
+    // ADR-0224 A7: the approvals unattended runs are parked on, and a paired
+    // device's answer to one. The answer is the approval itself (no lease); the
+    // host stamped `callerDeviceId`, and it goes through the control gate.
+    case "execution_run_approval_list": {
+      const { listRunApprovals } = await import("@/lib/execution/run-approvals")
+      return listRunApprovals(payload)
+    }
+    case "execution_run_approval_respond": {
+      const { respondRunApproval } = await import("@/lib/execution/run-approvals")
+      return respondRunApproval(payload)
+    }
     case "execution_run_detail": {
       const { readExecutionRunDetailSources } = await import("@/lib/execution/run-detail-source")
       return readExecutionRunDetailSources(payload.runId as string)

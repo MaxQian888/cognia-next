@@ -774,6 +774,12 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
 /// reference it.
 pub(crate) const CONNECTOR_MESSAGE_ADDED_CHANNEL: &str = "connector://message-added";
 
+/// Channel announcing that an unattended run is parked on a person (ADR-0224
+/// A7): a tool approval a Bot or scheduled turn raised, or a Bot's own
+/// approval step. Named because the push trigger, the body builder and the
+/// data allowlist all reference it.
+pub(crate) const RUN_APPROVAL_PENDING_CHANNEL: &str = "run://approval-pending";
+
 /// Channel carrying host computer-use consent prompts. Named because both the
 /// event-bus registration and the push trigger reference it, and because its
 /// payload needs channel-specific sanitizing before it can transit a push.
@@ -807,6 +813,22 @@ fn push_body_for_channel(
             Some(process) => format!("Confirm {command} in {process}"),
             None => format!("Confirm {command}"),
         };
+    }
+    if channel == RUN_APPROVAL_PENDING_CHANNEL {
+        // Name the kind of decision, never the run's or the tool's text: a
+        // Bot's title is author-written and a tool input can carry anything.
+        // The phone reads both with `execution_run_approval_list` once it is unlocked.
+        if data.get("type").and_then(|v| v.as_str()) == Some("bot_approval") {
+            return "A Bot is waiting for your approval".to_string();
+        }
+        return match data.get("permissionClass").and_then(|v| v.as_str()) {
+            Some("outbound") => "Approve an outbound message from an unattended run",
+            Some("secrets") => "Approve secret use by an unattended run",
+            Some("hostConfig") => "Approve a host change by an unattended run",
+            Some("workspace") => "Approve a workspace change by an unattended run",
+            _ => "An unattended run is waiting for your approval",
+        }
+        .to_string();
     }
     if channel == CONNECTOR_MESSAGE_ADDED_CHANNEL {
         // Name the conversation, never the message. `senderName` is already
@@ -863,6 +885,40 @@ fn push_data_for_channel(
             "source".into(),
             serde_json::Value::String("remote-session".into()),
         );
+        return out;
+    }
+    if channel == RUN_APPROVAL_PENDING_CHANNEL {
+        // Ids, the kind, the class and the deep link: everything the phone
+        // needs to open the right card, nothing it would show on a lock screen.
+        let mut out = serde_json::Map::new();
+        for key in [
+            "interruptId",
+            "runId",
+            "type",
+            "permissionClass",
+            "href",
+            "dedupeKey",
+        ] {
+            if let Some(value) = raw.get(key).and_then(|v| v.as_str()) {
+                out.insert(key.into(), serde_json::Value::String(value.to_string()));
+            }
+        }
+        // The phone's notification center files a push by `source` (one of
+        // its known sources), groups it by `notificationId`, and a run parked
+        // on a person is worth more than an info row.
+        let source = if raw.get("href").and_then(|v| v.as_str()) == Some("/scheduler") {
+            "scheduler"
+        } else {
+            "system"
+        };
+        out.insert("source".into(), serde_json::Value::String(source.into()));
+        out.insert("level".into(), serde_json::Value::String("warning".into()));
+        if let Some(key) = raw.get("dedupeKey").and_then(|v| v.as_str()) {
+            out.insert(
+                "notificationId".into(),
+                serde_json::Value::String(key.to_string()),
+            );
+        }
         return out;
     }
     if channel != AUTOMATION_CONSENT_CHANNEL {
@@ -937,6 +993,11 @@ pub const PUSH_TRIGGER_CHANNELS: &[&str] = &[
     // fix (bot on the desktop, operator on the phone). Payload is ids + the
     // `/inbox/c?key=…` deep link; message text never rides the push.
     CONNECTOR_MESSAGE_ADDED_CHANNEL,
+    // ADR-0224 A7 — an unattended run (a Bot, a scheduled task) is parked on a
+    // person. Nobody is at the host by design, so the phone is the approver;
+    // without a push the run waits out its timeout unseen. Allowlisted down
+    // to ids by `push_data_for_channel`.
+    RUN_APPROVAL_PENDING_CHANNEL,
 ];
 
 /// Turn one event on a push-worthy channel into provider pushes for the
@@ -2495,6 +2556,117 @@ mod tests {
             encoded.len() < 4096,
             "sanitized push data is {} bytes, over the ~4 KB provider ceiling",
             encoded.len()
+        );
+    }
+
+    fn run_approval_payload(
+        kind: &str,
+        class: Option<&str>,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert(
+            "interruptId".into(),
+            serde_json::json!("tool-interrupt:r1:q1"),
+        );
+        m.insert("runId".into(), serde_json::json!("r1"));
+        m.insert("type".into(), serde_json::json!(kind));
+        if let Some(class) = class {
+            m.insert("permissionClass".into(), serde_json::json!(class));
+        }
+        m.insert(
+            "title".into(),
+            serde_json::json!("Post the secret plan to #general"),
+        );
+        m.insert("href".into(), serde_json::json!("/bots"));
+        m.insert(
+            "dedupeKey".into(),
+            serde_json::json!("run-approval:tool-interrupt:r1:q1"),
+        );
+        m.insert("expiresAt".into(), serde_json::json!(1_700_000_000_000_u64));
+        m
+    }
+
+    #[test]
+    fn run_approval_pending_is_a_push_trigger() {
+        assert!(PUSH_TRIGGER_CHANNELS.contains(&RUN_APPROVAL_PENDING_CHANNEL));
+        assert!(!PUSH_TRIGGER_CHANNELS.contains(&"run://approval-resolved"));
+    }
+
+    #[test]
+    fn run_approval_push_body_names_the_class_never_the_title() {
+        for (kind, class, expected) in [
+            (
+                "tool_approval",
+                Some("outbound"),
+                "Approve an outbound message from an unattended run",
+            ),
+            (
+                "tool_approval",
+                Some("secrets"),
+                "Approve secret use by an unattended run",
+            ),
+            (
+                "tool_approval",
+                Some("hostConfig"),
+                "Approve a host change by an unattended run",
+            ),
+            (
+                "tool_approval",
+                Some("workspace"),
+                "Approve a workspace change by an unattended run",
+            ),
+            (
+                "tool_approval",
+                None,
+                "An unattended run is waiting for your approval",
+            ),
+            ("bot_approval", None, "A Bot is waiting for your approval"),
+        ] {
+            let body = push_body_for_channel(
+                RUN_APPROVAL_PENDING_CHANNEL,
+                &run_approval_payload(kind, class),
+            );
+            assert_eq!(body, expected);
+            assert!(!body.contains("secret plan"), "title leaked: {body:?}");
+        }
+    }
+
+    #[test]
+    fn run_approval_push_data_is_allowlisted_to_ids() {
+        let data = push_data_for_channel(
+            RUN_APPROVAL_PENDING_CHANNEL,
+            &run_approval_payload("tool_approval", Some("outbound")),
+        );
+        assert_eq!(
+            data.get("interruptId").and_then(|v| v.as_str()),
+            Some("tool-interrupt:r1:q1")
+        );
+        assert_eq!(
+            data.get("permissionClass").and_then(|v| v.as_str()),
+            Some("outbound")
+        );
+        assert_eq!(data.get("href").and_then(|v| v.as_str()), Some("/bots"));
+        // Filed under a source the phone's notification center knows, and
+        // grouped per question.
+        assert_eq!(data.get("source").and_then(|v| v.as_str()), Some("system"));
+        assert_eq!(data.get("level").and_then(|v| v.as_str()), Some("warning"));
+        assert_eq!(
+            data.get("notificationId").and_then(|v| v.as_str()),
+            Some("run-approval:tool-interrupt:r1:q1")
+        );
+        assert!(
+            !data.contains_key("title"),
+            "the title must never transit a push provider"
+        );
+        // Non-string values are not carried either.
+        assert!(!data.contains_key("expiresAt"));
+
+        let mut scheduled = run_approval_payload("tool_approval", Some("outbound"));
+        scheduled.insert("href".into(), serde_json::json!("/scheduler"));
+        let data = push_data_for_channel(RUN_APPROVAL_PENDING_CHANNEL, &scheduled);
+        assert_eq!(
+            data.get("source").and_then(|v| v.as_str()),
+            Some("scheduler")
         );
     }
 

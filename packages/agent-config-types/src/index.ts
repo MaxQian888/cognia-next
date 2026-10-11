@@ -47,12 +47,18 @@ import type {
 } from "./claude-agent-sdk-options"
 import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
 import type { AgentEffortLevel, AgentPermissionMode, AgentSettingSource } from "./agent-modes"
+import type {
+  PermissionClass,
+  ResolvedPermissionProfile,
+  SandboxAttestationV1,
+} from "./unattended-permission"
 
 export * from "./transcript"
 export * from "./working-set"
 export * from "./host-state"
 export * from "./onboarding"
 export * from "./updates"
+export * from "./unattended-permission"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -366,6 +372,28 @@ export type SendOptions = {
   trustedWorkspaceRoots?: string[]
   permissionMode?: AgentPermissionMode
   /**
+   * The resolved permission profile of an unattended run (ADR-0224 A7), set
+   * only for Bot and scheduled-task turns. The sidecar enforces it ahead of
+   * the permission mode: a `deny` class is refused, the outbound, secret and
+   * host-configuration classes ask a person on every call even under
+   * `bypassPermissions`, and workspace work inside a verified sandbox
+   * ({@link sandboxAttestation}) is allowed without asking when the workspace
+   * class is `sandbox`. Absent on interactive turns, which keep today's ladder.
+   */
+  permissionProfile?: ResolvedPermissionProfile
+  /**
+   * Present when the host established this run's sandbox placement in an
+   * isolated tier. Read only together with {@link permissionProfile}.
+   */
+  sandboxAttestation?: SandboxAttestationV1
+  /**
+   * How long a permission request may wait for its answer before the sidecar
+   * denies it (ms). Set for unattended runs, whose host parks the request for
+   * a person and could die while it waits; an interactive turn leaves it
+   * unset and waits for its user as before.
+   */
+  approvalTtlMs?: number
+  /**
    * The second gate on `claudeAgentSdk.allowDangerouslySkipPermissions`.
    *
    * Deliberately a SEPARATE field from `permissionMode`, and never inferred
@@ -622,6 +650,12 @@ export type SendOptions = {
      * resolver. Absent on host-synthesized entries.
      */
     manifestPath?: string
+    /**
+     * The permission classes this tool belongs to, derived by the host from
+     * the declaring plugin's permissions (ADR-0224 A7). Set only on turns that
+     * carry a {@link SendOptions.permissionProfile}.
+     */
+    permissionClasses?: PermissionClass[]
   }>
 
   /**
@@ -1311,6 +1345,12 @@ export interface PermissionRequestEvent {
    * The sidecar also sets `suppressAlwaysAllowRule`; either one hides "Always allow".
    */
   requiresPerCallApproval?: boolean
+  /**
+   * ADR-0224 A7: the permission class that made an unattended run ask (an
+   * outbound message, secret use, host configuration, or workspace work
+   * outside a verified sandbox). The host's parked approval names it.
+   */
+  permissionClass?: PermissionClass
 }
 
 /**

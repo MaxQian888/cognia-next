@@ -44,6 +44,7 @@ import { McpPicker } from "./mcp-picker"
 import { BuiltinToolsToggles } from "./builtin-tools-toggles"
 import { PermissionModeSelect } from "./permission-mode-select"
 import { AdditionalDirectoriesList } from "./additional-directories-list"
+import { UnattendedPermissionProfileFields } from "@/components/agent/unattended-permission-profile-fields"
 import type { ChatLikeDraft } from "./types"
 
 const SENTINEL_RUNTIME = "__runtime__"
@@ -385,6 +386,31 @@ export function ChatPayloadEditor({
         />
         <p className="text-xs text-muted-foreground">{t("payload.permissionModeCapHelp")}</p>
       </div>
+
+      {/* Unattended permission profile (ADR-0224 A7) — collapsible */}
+      <Collapsible defaultOpen={!!draft.permissionProfile}>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-between bg-muted/30"
+            data-testid={`${testId}-permission-profile-toggle`}
+          >
+            <span>{t("payload.permissionProfile.heading")}</span>
+            <ChevronDown />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-3 rounded-md border p-3">
+          <p className="text-xs text-muted-foreground">{t("payload.permissionProfile.help")}</p>
+          <UnattendedPermissionProfileFields
+            value={draft.permissionProfile}
+            onChange={(v) => update("permissionProfile", v)}
+            idPrefix={`${testId}-permission`}
+            disabled={disabled}
+            testId={`${testId}-permission-profile`}
+          />
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Tools — collapsible */}
       <Collapsible defaultOpen={!!draft.allowedTools?.length || !!draft.disallowedTools?.length}>

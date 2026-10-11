@@ -1029,6 +1029,10 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 "workflow://approval-request",
                 "workflow://approval-resolved",
                 "workflow://approval-pending",
+                // ADR-0224 A7: an unattended run parked on a person, and its
+                // answer. Ids, kind, class and a deep link only.
+                "run://approval-pending",
+                "run://approval-resolved",
                 "workflow://step-execute",
                 "workflow://step-pending",
                 "thread-handoff://offer",

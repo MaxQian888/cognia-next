@@ -26,6 +26,10 @@ import { FactList, FactRow } from "@/components/surface/fact-list"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import type { BotPolicyLayerName } from "@/lib/bot/policy/ceilings"
 import type { PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
+import {
+  PERMISSION_CLASSES,
+  type UnattendedPermissionProfileV1,
+} from "@cognia/agent-config-types/unattended-permission"
 
 /**
  * The fields in the order a reader wants them: what it may do, then how long
@@ -43,6 +47,7 @@ const POLICY_FIELDS = [
   "maxConcurrentRuns",
   "requireApprovalForWrites",
   "allowSelfTriggering",
+  "permissionProfile",
 ] as const satisfies readonly (keyof PluginBotPolicyV1)[]
 
 type PolicyField = (typeof POLICY_FIELDS)[number]
@@ -53,6 +58,29 @@ function LayerBadge({ layer }: { layer: BotPolicyLayerName }) {
     <Badge variant="outline" className="ml-1.5 font-normal text-muted-foreground">
       {t(`policyLayer.${layer}`)}
     </Badge>
+  )
+}
+
+/**
+ * The classes a layer narrowed, by name. A profile that names none leaves
+ * every class at the host's ceiling, which is said rather than left blank.
+ */
+function ProfileSummary({ profile }: { profile: UnattendedPermissionProfileV1 }) {
+  const t = useTranslations("bots")
+  const tp = useTranslations("unattendedPermissions")
+  const narrowed = PERMISSION_CLASSES.filter((cls) => profile[cls] !== undefined)
+  if (narrowed.length === 0) return <>{t("policy.permissionCeiling")}</>
+  return (
+    <span className="flex flex-col" data-testid="bot-policy-permission-profile">
+      {narrowed.map((cls) => (
+        <span key={cls}>
+          {t("policy.permissionClass", {
+            cls: tp(`class.${cls}.label`),
+            level: tp(`level.${profile[cls]!}`),
+          })}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -92,6 +120,9 @@ export function BotPolicySection({ row }: { row: BotConsoleRow }) {
 
   const render = (field: PolicyField) => {
     const value = policy[field]
+    if (field === "permissionProfile") {
+      return <ProfileSummary profile={value as UnattendedPermissionProfileV1} />
+    }
     if (field === "maxRunDurationMs") return t("policy.duration", { seconds: Number(value) / 1000 })
     if (field === "maxRunCostUsd") return t("policy.cost", { usd: Number(value) })
     if (typeof value === "boolean") return t(value ? "policy.yes" : "policy.no")

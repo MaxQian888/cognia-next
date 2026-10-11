@@ -130,8 +130,8 @@ export async function executeGoalTask(
   })
 
   // 3. Drive the loop to terminal. Its turns run unattended: a tool that needs
-  // approval is denied, and the goal pauses `needs_approval` with the tools
-  // named in the error and listed below.
+  // approval parks for a person, and one nobody answers pauses the goal
+  // `needs_approval` with the tools named in the error and listed below.
   // A session created here for a task that names no workspace was stamped with
   // whichever one was active in the UI (`createSession`). That is not the
   // task's workspace, so the loop resolves with none rather than with it.
@@ -142,6 +142,12 @@ export async function executeGoalTask(
     appSettings,
     signal,
     ...(unboundRun ? { workspace: "none" as const } : {}),
+    // Unattended (ADR-0224 A7): requests park for a person, and every turn
+    // carries the task's permission profile.
+    unattended: {
+      label: `Scheduled task: ${task.name}`,
+      ...(payload.permissionProfile ? { permissionProfile: payload.permissionProfile } : {}),
+    },
   })
 
   const success = result.status === "completed"

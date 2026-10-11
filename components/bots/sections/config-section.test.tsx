@@ -121,6 +121,57 @@ describe("BotConfigSection", () => {
     expect(screen.getByRole("switch", { name: "Allow commands without asking" })).not.toBeChecked()
   })
 
+  it("saves a narrowed unattended permission profile with the authority in force", async () => {
+    const user = userEvent.setup()
+    render(<BotConfigSection row={row()} />)
+    expect(screen.getByRole("combobox", { name: "Outbound messages" })).toHaveTextContent("Ask me")
+    await user.click(screen.getByRole("combobox", { name: "Outbound messages" }))
+    await user.click(screen.getByRole("option", { name: "Never" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenCalledWith("boti_1", expect.any(Object), {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+      permissionProfile: { outbound: "deny" },
+    })
+  })
+
+  it("keeps a stored profile when only an authority switch changes", async () => {
+    const user = userEvent.setup()
+    render(
+      <BotConfigSection
+        row={row({
+          policyGrant: {
+            maxAuthority: "acceptEdits",
+            maxAutonomy: "confirm",
+            requireApprovalForWrites: true,
+            permissionProfile: { secrets: "deny" },
+          },
+        })}
+      />
+    )
+    expect(screen.getByRole("combobox", { name: "Secret use" })).toHaveTextContent("Never")
+    await user.click(screen.getByRole("switch", { name: "Allow commands without asking" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenCalledWith("boti_1", expect.any(Object), {
+      maxAuthority: "bypassPermissions",
+      maxAutonomy: "autopilot",
+      requireApprovalForWrites: true,
+      permissionProfile: { secrets: "deny" },
+    })
+  })
+
+  it("does not rewrite the grant when a class is set back to what it already was", async () => {
+    const user = userEvent.setup()
+    render(<BotConfigSection row={row()} />)
+    await user.click(screen.getByRole("combobox", { name: "Host configuration" }))
+    await user.click(screen.getByRole("option", { name: "Never" }))
+    await user.click(screen.getByRole("combobox", { name: "Host configuration" }))
+    await user.click(screen.getByRole("option", { name: "Ask me" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenCalledWith("boti_1", { channel: "#general", verbose: false })
+  })
+
   it("does not carry an unsaved authority selection to another installation", async () => {
     const user = userEvent.setup()
     const { rerender } = render(<BotConfigSection row={row()} />)

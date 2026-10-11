@@ -14,7 +14,9 @@
     "authorityTitle": "宿主授权",
     "authorityHint": "当 Bot 请求无人执行或自动发布时使用这些权限。保存后授权给当前安装实例；更严格的宿主策略仍然生效。自动发布不包含合并权限。",
     "allowUnattended": "允许执行命令，无需逐次审批",
-    "allowAutomaticPublication": "允许自动发布 PR 和代码评审"
+    "allowAutomaticPublication": "允许自动发布 PR 和代码评审",
+    "permissionProfileTitle": "无人值守时",
+    "permissionProfileHint": "此 Bot 在无人值守运行中无需询问即可执行的操作。需要你确认的请求会暂停运行并向你的手机发送审批；30 分钟内无人回应则拒绝。"
   },
   "credentials": {
     "bindAria": "绑定 {slot}",
@@ -162,7 +164,9 @@
     "title": "策略上限",
     "unconstrainedBody": "没有任何一层设过限制，因此这个 Bot 与其他运行使用同一套默认值。",
     "unconstrainedTitle": "未设上限",
-    "yes": "是"
+    "yes": "是",
+    "permissionCeiling": "宿主上限",
+    "permissionClass": "{cls}：{level}"
   },
   "policyField": {
     "allowSelfTriggering": "响应自己产生的事件",
@@ -171,7 +175,8 @@
     "maxConcurrentRuns": "并发运行数",
     "maxRunCostUsd": "花费上限",
     "maxRunDurationMs": "时长上限",
-    "requireApprovalForWrites": "每次写入都需审批"
+    "requireApprovalForWrites": "每次写入都需审批",
+    "permissionProfile": "无人值守权限"
   },
   "policyLayer": {
     "definition": "定义",

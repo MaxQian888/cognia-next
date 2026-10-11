@@ -89,6 +89,7 @@ import {
 // so the boot provider must recognise it as an onboarding surface or it
 // would redirect the user straight back out of the flow.
 import { ONBOARDING_ROUTE } from "@/lib/onboarding/route"
+import { runApprovalTapHref } from "@/lib/execution/run-approval-tap"
 
 const ONBOARDING_PREFIXES = ["/onboarding", "/pair", "/oauth"]
 
@@ -700,7 +701,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           typeof delivery.data?.sessionId === "string" ? delivery.data.sessionId : null
         if (sessionId && !delivery.foreground) {
           navigators.pushSession(sessionId)
+          return
         }
+        // A tapped run-approval push opens the page whose approvals card
+        // answers it (ADR-0224 A7).
+        const approvalHref = delivery.foreground ? null : runApprovalTapHref(delivery.data)
+        if (approvalHref) routerRef.current.push(approvalHref)
       })
       addNativeCleanup(unsubPush)
       if (cancelled) return

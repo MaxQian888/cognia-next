@@ -83,6 +83,7 @@ describe("validateAgentCapabilityGrant", () => {
       tools: { allow: ["Read"] },
       mcpServers: [],
       permissionMode: "root",
+      permissionProfile: { outbound: "sandbox" },
     })
     expect(result.ok).toBe(false)
     if (!result.ok) {
@@ -97,6 +98,7 @@ describe("validateAgentCapabilityGrant", () => {
           "tools.allow is not a recognised field",
           "mcpServers must be an object",
           "permissionMode must be a known permission mode",
+          "permissionProfile.outbound must be one of ask|deny",
         ])
       )
     }
@@ -174,6 +176,22 @@ describe("mergeCapabilityGrants", () => {
     expect(mergeCapabilityGrants(grant(), grant({ permissionMode: "plan" })).permissionMode).toBe(
       "plan"
     )
+  })
+
+  it("narrows the unattended permission profile class by class (ADR-0224 A7)", () => {
+    const merged = mergeCapabilityGrants(
+      grant({ permissionProfile: { outbound: "deny", workspace: "ask" } }),
+      grant({ permissionProfile: { outbound: "ask", workspace: "sandbox", secrets: "deny" } })
+    )
+    expect(merged.permissionProfile).toEqual({
+      workspace: "ask",
+      outbound: "deny",
+      secrets: "deny",
+    })
+    expect(mergeCapabilityGrants(grant(), grant()).permissionProfile).toBeUndefined()
+    expect(
+      mergeCapabilityGrants(grant(), grant({ permissionProfile: {} })).permissionProfile
+    ).toEqual({})
   })
 
   it("intersects subagent restrictions and keeps a one-sided one", () => {

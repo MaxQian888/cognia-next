@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { ABORTED_ANSWER, awaitApproval } from "./approval.ts"
+import { ABORTED_ANSWER, TIMED_OUT_ANSWER, awaitApproval } from "./approval.ts"
 import type { ApprovalAnswer, PendingApproval } from "./approval.ts"
 
 /** What the host's permission_response handler does: forget the waiter, then settle it. */
@@ -107,4 +107,50 @@ test("a settled approval detaches from the signal, and a later abort changes not
   assert.deepEqual(await waiting, { behavior: "deny", message: "no" })
   controller.abort()
   assert.deepEqual([added, removed, notified], [1, 1, 0])
+})
+
+test("an unanswered request denies when its TTL runs out", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const timeouts: string[] = []
+  const waiting = awaitApproval({
+    pendingApprovals: pending,
+    requestId: "r1",
+    entry: { input: {} },
+    ttlMs: 10,
+    onTimeout: () => timeouts.push("r1"),
+  })
+  assert.deepEqual(await waiting, { ...TIMED_OUT_ANSWER })
+  assert.deepEqual(timeouts, ["r1"])
+  assert.equal(pending.has("r1"), false, "the timed-out waiter is forgotten")
+})
+
+test("an answer before the TTL wins and the timer never fires", async () => {
+  const pending = new Map<string, PendingApproval>()
+  let timedOut = false
+  const waiting = awaitApproval({
+    pendingApprovals: pending,
+    requestId: "r1",
+    entry: { input: {} },
+    ttlMs: 20,
+    onTimeout: () => {
+      timedOut = true
+    },
+  })
+  answer(pending, "r1", { behavior: "allow", updatedInput: {} })
+  assert.deepEqual(await waiting, { behavior: "allow", updatedInput: {} })
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(timedOut, false)
+})
+
+test("no TTL means the waiter waits for its answer", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const waiting = awaitApproval({
+    pendingApprovals: pending,
+    requestId: "r1",
+    entry: { input: {} },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.ok(pending.has("r1"))
+  answer(pending, "r1", { behavior: "deny", message: "no" })
+  assert.deepEqual(await waiting, { behavior: "deny", message: "no" })
 })

@@ -797,6 +797,59 @@ describe("runAndCaptureAssistantReply", () => {
     }
   })
 
+  it("stops the wall clock while a parked permission request waits (ADR-0224 A7)", async () => {
+    jest.useFakeTimers()
+    try {
+      let answer!: (decision: { decision: "allow" }) => void
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 1_000,
+        pauseTimeoutWhileAwaitingPermission: true,
+        onPermissionRequest: () =>
+          new Promise((resolve) => {
+            answer = resolve
+          }),
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking"))
+      jest.advanceTimersByTime(400)
+      fire(idlePermissionRequest())
+      await Promise.resolve()
+      await Promise.resolve()
+      // A person takes far longer than the whole turn's budget to answer.
+      jest.advanceTimersByTime(10_000)
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      answer({ decision: "allow" })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(approveToolMock).toHaveBeenCalledWith(SESSION, "req-1", "allow", undefined, undefined)
+      // The clock resumes with what was left (600ms), not a fresh budget.
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      jest.advanceTimersByTime(650)
+      await rejection
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("keeps the wall clock running during a permission wait by default", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 1_000,
+        onPermissionRequest: () => new Promise(() => undefined),
+      })
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      await flushUntilSubscribed()
+      fire(idlePermissionRequest())
+      jest.advanceTimersByTime(1_050)
+      await rejection
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("re-arms the idle watchdog once a tool-result review is dispatched", async () => {
     jest.useFakeTimers()
     try {

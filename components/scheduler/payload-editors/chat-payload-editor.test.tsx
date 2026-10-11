@@ -47,4 +47,23 @@ describe("ChatPayloadEditor", () => {
       )
     ).toBeInTheDocument()
   })
+
+  it("offers the unattended permission profile, open when the task already narrows it", () => {
+    render(
+      <ChatPayloadEditor
+        taskType="chat"
+        draft={{ ...EMPTY_CHAT_LIKE_DRAFT, permissionProfile: { secrets: "deny" } }}
+        onDraftChange={jest.fn()}
+        charactersForTesting={[]}
+        skillsForTesting={[]}
+        teamsForTesting={[]}
+      />
+    )
+    expect(screen.getByTestId("chat-payload-editor-permission-profile-toggle")).toHaveTextContent(
+      "When nobody is watching"
+    )
+    expect(screen.getByTestId("chat-payload-editor-permission-profile-secrets")).toHaveTextContent(
+      "Never"
+    )
+  })
 })

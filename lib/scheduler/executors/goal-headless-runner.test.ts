@@ -12,6 +12,16 @@ const isWorkspaceTrustedMock = jest.fn(async (_path: string) => true)
 const hostEnforcesTrustMock = jest.fn(() => false)
 
 jest.mock("@/lib/db/goals", () => ({ getGoal: (...a: unknown[]) => getGoalMock(...a) }))
+const parkOutcomeMock = jest.fn(async (): Promise<Record<string, unknown>> => ({ kind: "expired" }))
+const parkFinishMock = jest.fn(async (..._args: unknown[]) => undefined)
+const createUnattendedParkMock = jest.fn((_options: Record<string, unknown>) => ({
+  park: () => parkOutcomeMock(),
+  finish: (...args: unknown[]) => parkFinishMock(...args),
+  runId: () => null,
+}))
+jest.mock("@/lib/claude/unattended-park", () => ({
+  createUnattendedPark: (options: Record<string, unknown>) => createUnattendedParkMock(options),
+}))
 jest.mock("@/lib/db/sessions", () => ({ getSession: (...a: unknown[]) => getSessionMock(...a) }))
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (...a: unknown[]) => resolveSendOptionsMock(...a),
@@ -552,6 +562,55 @@ describe("runGoalLoopHeadless — unattended permissions", () => {
       expect.objectContaining({ onPermissionRequest: expect.any(Function) })
     )
     expect(r.needsApproval).toEqual([expect.objectContaining({ toolName: "Bash" })])
+  })
+
+  it("parks for a person when the scheduler marks the run unattended (ADR-0224 A7)", async () => {
+    parkOutcomeMock.mockResolvedValueOnce({ kind: "approved", decision: { decision: "allow" } })
+    runCaptureMock.mockImplementation(captureAsking(["Edit"], "Edited."))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "done",
+    })
+
+    const r = await runGoalLoopHeadless(
+      input({
+        unattended: { label: "Scheduled task: Ship", permissionProfile: { outbound: "deny" } },
+      })
+    )
+    expect(createUnattendedParkMock).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "scheduler", label: "Scheduled task: Ship" })
+    )
+    expect(decisions).toEqual([{ decision: "allow" }])
+    expect(r.needsApproval).toBeUndefined()
+    expect(runCaptureMock.mock.calls[0][3]).toEqual(
+      expect.objectContaining({ pauseTimeoutWhileAwaitingPermission: true })
+    )
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      capabilityGrants: [
+        {
+          schemaVersion: 1,
+          source: { kind: "goal", id: activeGoal.id },
+          permissionProfile: { outbound: "deny" },
+        },
+      ],
+    })
+    expect(parkFinishMock).toHaveBeenCalledWith("completed", undefined)
+  })
+
+  it("does not park or carry a profile for a run nobody marked unattended", async () => {
+    createUnattendedParkMock.mockClear()
+    runCaptureMock.mockResolvedValue({ text: "r1" })
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "done",
+    })
+    await runGoalLoopHeadless(input())
+    expect(createUnattendedParkMock).not.toHaveBeenCalled()
+    expect(resolveSendOptionsMock.mock.calls[0][0]).not.toHaveProperty("capabilityGrants")
   })
 
   it("adds nothing to the result when no tool asked", async () => {

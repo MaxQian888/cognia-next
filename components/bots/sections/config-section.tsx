@@ -20,6 +20,11 @@
  * Values are seeded through `resolveBotConfig`, the same resolver the runtime
  * uses, so what the form opens with is what a run would receive. Deriving
  * defaults here instead would give the form and the runtime two answers.
+ *
+ * The unattended permission profile (ADR-0224 A7) rides the same
+ * `policyGrant` as the two authority switches: one installation layer, saved
+ * together, so changing one never drops the other. A level wider than another
+ * layer allows is refused by the fold, and the policy section says so.
  */
 
 import { useMemo, useState } from "react"
@@ -30,11 +35,19 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import {
+  UnattendedPermissionProfileFields,
+  samePermissionProfile,
+} from "@/components/agent/unattended-permission-profile-fields"
+import {
   useBotLifecycleActions,
   useBotLifecycleReadiness,
 } from "@/hooks/bots/use-bot-lifecycle-actions"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import { defaultsFromConfigSchema, resolveBotConfig } from "@/lib/bot/config/resolve-effective"
+import {
+  compactPermissionProfile,
+  type UnattendedPermissionProfileV1,
+} from "@cognia/agent-config-types/unattended-permission"
 
 export function BotConfigSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
@@ -44,17 +57,26 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
     id: string
     unattended: boolean
     automatic: boolean
+    profile: UnattendedPermissionProfileV1 | undefined
   } | null>(null)
   const storedUnattended = row.policyGrant?.maxAuthority === "bypassPermissions"
   const storedAutomatic =
     row.policyGrant?.maxAutonomy === "autopilot" &&
     row.policyGrant?.requireApprovalForWrites === false
+  const storedProfile = row.policyGrant?.permissionProfile
   const selection =
     authority?.id === row.id
       ? authority
-      : { id: row.id, unattended: storedUnattended, automatic: storedAutomatic }
+      : {
+          id: row.id,
+          unattended: storedUnattended,
+          automatic: storedAutomatic,
+          profile: storedProfile,
+        }
   const authorityChanged =
-    selection.unattended !== storedUnattended || selection.automatic !== storedAutomatic
+    selection.unattended !== storedUnattended ||
+    selection.automatic !== storedAutomatic ||
+    !samePermissionProfile(selection.profile, storedProfile)
 
   const initialValues = useMemo(
     () =>
@@ -105,6 +127,21 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
           />
         </div>
       </fieldset>
+      <fieldset
+        className="mb-3 flex flex-col gap-3 rounded-md border p-3"
+        disabled={!readiness.can || busy}
+        data-testid="bot-permission-profile"
+      >
+        <legend className="px-1 text-sm font-medium">{t("config.permissionProfileTitle")}</legend>
+        <p className="text-xs text-muted-foreground">{t("config.permissionProfileHint")}</p>
+        <UnattendedPermissionProfileFields
+          value={selection.profile}
+          onChange={(profile) => setAuthority({ ...selection, profile })}
+          idPrefix={`bot-permission-${row.id}`}
+          disabled={!readiness.can || busy}
+          testId={`bot-permission-profile-${row.id}`}
+        />
+      </fieldset>
       <AdapterForm
         key={row.id}
         // The schema is `Record<string, unknown>` on the definition because the
@@ -120,10 +157,12 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
         onSubmit={async (values) => {
           const config = row.configSchema ? values : row.config
           if (authorityChanged) {
+            const permissionProfile = compactPermissionProfile(selection.profile)
             const saved = await actions.saveConfig(row.id, config, {
               maxAuthority: selection.unattended ? "bypassPermissions" : "acceptEdits",
               maxAutonomy: selection.unattended || selection.automatic ? "autopilot" : "confirm",
               requireApprovalForWrites: !selection.automatic,
+              ...(permissionProfile ? { permissionProfile } : {}),
             })
             if (saved) setAuthority(null)
           } else await actions.saveConfig(row.id, config)

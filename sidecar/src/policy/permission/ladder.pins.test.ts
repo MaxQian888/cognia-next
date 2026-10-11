@@ -624,6 +624,129 @@ async function caseLines(): Promise<string[]> {
     }
   }
 
+  // An unattended run's permission profile (ADR-0224 A7): denied classes,
+  // always-ask classes that no mode or grant skips, and the sandbox step.
+  const CEILING = { workspace: "sandbox", outbound: "ask", secrets: "ask", hostConfig: "ask" }
+  const ATTESTED = { schemaVersion: 1, tier: "microvm", verifiedAt: 1 }
+  const UNATTENDED_PLUGINS = [
+    DECLARED_READ_PLUGIN,
+    { name: "im:send", pluginId: "acme-im", permissionClasses: ["outbound"] },
+    { name: "sandbox_write", pluginId: "cognia-sandboxed-tools" },
+  ]
+  const OUTBOUND = "mcp__cognia-plugin-tools__im:send"
+  const SANDBOX_WRITE = TOOLS.find((t) => t.id === "p.sandbox_write")!
+  const unattended = (
+    rail: Rail,
+    toolName: string,
+    input: Json,
+    options: Json,
+    extra: Partial<Call> = {}
+  ): Call => ({
+    rail,
+    sendOptions: {
+      permissionMode: "default",
+      cwd: ROOT,
+      pluginTools: UNATTENDED_PLUGINS,
+      permissionProfile: CEILING,
+      ...options,
+    },
+    toolName,
+    input,
+    ...extra,
+  })
+  for (const rail of RAILS) {
+    const send = { text: "hi" }
+    for (const mode of ["default", "acceptEdits", "bypassPermissions", "dontAsk"]) {
+      await add(
+        `${rail} prof out ask ${mode.replace("Permissions", "")}`,
+        unattended(rail, OUTBOUND, send, { permissionMode: mode })
+      )
+    }
+    await add(
+      `${rail} prof out ask suppressed`,
+      unattended(rail, OUTBOUND, send, { suppressApprovalForTools: [OUTBOUND] })
+    )
+    await add(
+      `${rail} prof out ask ruleset-allow`,
+      unattended(rail, OUTBOUND, send, { permissionRuleset: { [OUTBOUND]: "allow" } })
+    )
+    await add(
+      `${rail} prof out deny bypass`,
+      unattended(rail, OUTBOUND, send, {
+        permissionMode: "bypassPermissions",
+        permissionProfile: { ...CEILING, outbound: "deny" },
+      })
+    )
+    await add(
+      `${rail} prof ws deny b.write bypass`,
+      unattended(rail, WRITE.name, WRITE.input("in"), {
+        permissionMode: "bypassPermissions",
+        permissionProfile: { ...CEILING, workspace: "deny" },
+      })
+    )
+    const sandboxInput = SANDBOX_WRITE.input("in")
+    await add(
+      `${rail} prof sbx attested`,
+      unattended(rail, SANDBOX_WRITE.name, sandboxInput, { sandboxAttestation: ATTESTED })
+    )
+    await add(
+      `${rail} prof sbx attested dontAsk`,
+      unattended(rail, SANDBOX_WRITE.name, sandboxInput, {
+        permissionMode: "dontAsk",
+        sandboxAttestation: ATTESTED,
+      })
+    )
+    await add(
+      `${rail} prof sbx not attested`,
+      unattended(rail, SANDBOX_WRITE.name, sandboxInput, {})
+    )
+    await add(
+      `${rail} prof sbx workspace ask`,
+      unattended(rail, SANDBOX_WRITE.name, sandboxInput, {
+        sandboxAttestation: ATTESTED,
+        permissionProfile: { ...CEILING, workspace: "ask" },
+      })
+    )
+    await add(
+      `${rail} prof sbx attested doom`,
+      unattended(
+        rail,
+        SANDBOX_WRITE.name,
+        sandboxInput,
+        { sandboxAttestation: ATTESTED },
+        {
+          doom: true,
+        }
+      )
+    )
+    await add(
+      `${rail} prof sbx attested no profile`,
+      unattended(rail, SANDBOX_WRITE.name, sandboxInput, {
+        sandboxAttestation: ATTESTED,
+        permissionProfile: undefined,
+      })
+    )
+    await add(
+      `${rail} prof host write attested`,
+      unattended(rail, WRITE.name, WRITE.input("in"), { sandboxAttestation: ATTESTED })
+    )
+  }
+  for (const rail of ["sdk", "ai"] as const) {
+    const call = unattended(rail, OUTBOUND, { text: "hi" }, { permissionMode: "bypassPermissions" })
+    const obs = await observe(call)
+    const frame = obs.frames.find((f) => f.type === "permission_request")
+    lines.push(
+      `${`${rail} prof out frame`.padEnd(46)}${normalize(
+        describe({
+          requiresPerCallApproval: frame?.requiresPerCallApproval,
+          suppressAlwaysAllowRule: frame?.suppressAlwaysAllowRule,
+          defaultToNo: frame?.defaultToNo,
+          permissionClass: frame?.permissionClass,
+        })
+      )}`
+    )
+  }
+
   // Agent SDK only: plugin aliases, the verbose trace, and delegated approval.
   const aliases = new Map([["notes_search", "notes:search"]])
   await add("sdk alias restored for the ruleset", {

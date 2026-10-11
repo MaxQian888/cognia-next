@@ -1,0 +1,25 @@
+{
+  "class": {
+    "workspace": {
+      "label": "Workspace files and commands",
+      "hint": "Editing files and running commands in the run's workspace. Allowed without asking only inside a verified sandbox."
+    },
+    "outbound": {
+      "label": "Outbound messages",
+      "hint": "Sending messages, sharing files, or publishing anything beyond this host."
+    },
+    "secrets": {
+      "label": "Secret use",
+      "hint": "Reading or filling stored passwords, tokens and keys."
+    },
+    "hostConfig": {
+      "label": "Host configuration",
+      "hint": "Changing connectors, agents, backups or this host's own settings."
+    }
+  },
+  "level": {
+    "sandbox": "Allow in a verified sandbox",
+    "ask": "Ask me",
+    "deny": "Never"
+  }
+}

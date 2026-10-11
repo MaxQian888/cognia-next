@@ -18,12 +18,19 @@
 //   - removals and denials only ever narrow, and a later grant cannot re-admit
 //     a tool an earlier one denied;
 //   - `permissionMode` is narrow-only: the run gets the less privileged of the
-//     grant's mode and the one the profile/session chain resolved.
+//     grant's mode and the one the profile/session chain resolved;
+//   - `permissionProfile` (ADR-0224 A7) is narrow-only per class, and marks
+//     the run unattended: the resolver hands the sidecar the resolved profile.
 
 import type { ValidationResult } from "./agent-execution"
 import { AUTHORITY_RANK, narrowAuthority } from "./agent-composition"
 import type { AgentPermissionMode } from "./agent-modes"
 import type { SendOptions } from "./index"
+import {
+  narrowPermissionProfile,
+  validatePermissionProfile,
+  type UnattendedPermissionProfileV1,
+} from "./unattended-permission"
 
 /** Wire-format version of {@link AgentCapabilityGrantV1}. */
 export const AGENT_CAPABILITY_GRANT_SCHEMA_VERSION = 1
@@ -105,6 +112,12 @@ export interface AgentCapabilityGrantV1 {
   subagents?: { only?: string[] }
   /** Narrow-only permission cap. It can lower the resolved mode, never raise it. */
   permissionMode?: AgentPermissionMode
+  /**
+   * The unattended permission profile (ADR-0224 A7). Each class can only be
+   * lowered by a later grant. Its presence is what makes the resolver hand the
+   * sidecar a resolved profile, so only Bot and scheduled-task turns set it.
+   */
+  permissionProfile?: UnattendedPermissionProfileV1
 }
 
 const EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"]
@@ -172,6 +185,10 @@ export function validateAgentCapabilityGrant(v: unknown): ValidationResult<Agent
     !Object.prototype.hasOwnProperty.call(AUTHORITY_RANK, v.permissionMode as string)
   ) {
     errors.push("permissionMode must be a known permission mode")
+  }
+  if (v.permissionProfile !== undefined) {
+    const profile = validatePermissionProfile(v.permissionProfile)
+    if (!profile.ok) errors.push(...profile.errors)
   }
   return errors.length > 0
     ? { ok: false, errors }
@@ -290,6 +307,11 @@ export function mergeCapabilityGrants(
   } else if (outer.permissionMode ?? inner.permissionMode) {
     merged.permissionMode = outer.permissionMode ?? inner.permissionMode
   }
+  const permissionProfile = narrowPermissionProfile(
+    outer.permissionProfile,
+    inner.permissionProfile
+  )
+  if (permissionProfile) merged.permissionProfile = permissionProfile
   return merged
 }
 

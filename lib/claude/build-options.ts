@@ -41,6 +41,7 @@ import {
 } from "@/lib/claude/env-resolver"
 import { resolveSandboxEnabled, resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { applyUnattendedPermissionProfile } from "./unattended-permission-options"
 import {
   deriveExternalSessionPermission,
   type ExternalSessionPermissionSpec,
@@ -5656,6 +5657,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         bypassRouterFusion(error)
       }
     }
+  }
+
+  // --- Unattended permission profile (ADR-0224 A7) --------------------------
+  // Last, over the final tool surface and placement: a Bot or scheduled turn's
+  // grant carries a profile, and the sidecar needs it resolved, every plugin
+  // tool's classes, the placement's attestation and an approval TTL. An
+  // interactive turn has no profile and gets none of these.
+  if (grant?.permissionProfile) {
+    const { usePluginStore } = await import("@/stores/plugin-runtime")
+    const plugins = usePluginStore.getState().plugins
+    applyUnattendedPermissionProfile(opts, grant, {
+      pluginPermissions: (pluginId) => plugins[pluginId]?.manifest.permissions ?? [],
+      attestSandbox: (ref) => sandboxSessionRuntime.attest(ref),
+    })
   }
 
   return opts

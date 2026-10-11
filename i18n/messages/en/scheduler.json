@@ -703,7 +703,11 @@
       "maxRuntimePlaceholder": "No limit",
       "maxRuntimeHelp": "Kill the process if it is still running after this long. Leave blank to let it run until it finishes or the app closes."
     },
-    "permissionModeCapHelp": "A cap for this run: it can lower the agent's permission mode, never raise it."
+    "permissionModeCapHelp": "A cap for this run: it can lower the agent's permission mode, never raise it.",
+    "permissionProfile": {
+      "heading": "When nobody is watching",
+      "help": "What this task's runs may do without asking. A request that needs you pauses the run and sends an approval to your phone; nobody answering within 30 minutes denies it."
+    }
   },
   "payloadEditorMode": {
     "toJson": "Edit as JSON",

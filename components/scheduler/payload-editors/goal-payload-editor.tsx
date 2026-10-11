@@ -10,6 +10,7 @@ import { CharacterPicker } from "./character-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { UnattendedPermissionProfileFields } from "@/components/agent/unattended-permission-profile-fields"
 import { cn } from "@/lib/utils"
 import type { GoalDraft } from "./types"
 
@@ -116,6 +117,20 @@ export function GoalPayloadEditor({
             data-testid={`${testId}-timeout-input`}
           />
         </div>
+      </div>
+
+      {/* A goal drives its turns with nobody watching, so it gets the same
+          unattended profile as a scheduled chat (ADR-0224 A7). */}
+      <div className="space-y-3 rounded-md border p-3">
+        <Label className="text-sm font-medium">{t("payload.permissionProfile.heading")}</Label>
+        <p className="text-xs text-muted-foreground">{t("payload.permissionProfile.help")}</p>
+        <UnattendedPermissionProfileFields
+          value={draft.permissionProfile}
+          onChange={(v) => update("permissionProfile", v)}
+          idPrefix={`${testId}-permission`}
+          disabled={disabled}
+          testId={`${testId}-permission-profile`}
+        />
       </div>
     </div>
   )

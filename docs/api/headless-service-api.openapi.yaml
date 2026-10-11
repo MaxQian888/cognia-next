@@ -9037,6 +9037,31 @@ paths:
                             - autopilot
                         requireApprovalForWrites:
                           type: boolean
+                        permissionProfile:
+                          type: object
+                          properties:
+                            workspace:
+                              type: string
+                              enum:
+                                - sandbox
+                                - ask
+                                - deny
+                            outbound:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                            secrets:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                            hostConfig:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                          additionalProperties: false
                       required:
                         - maxAuthority
                         - maxAutonomy
@@ -9080,6 +9105,31 @@ paths:
                             - autopilot
                         requireApprovalForWrites:
                           type: boolean
+                        permissionProfile:
+                          type: object
+                          properties:
+                            workspace:
+                              type: string
+                              enum:
+                                - sandbox
+                                - ask
+                                - deny
+                            outbound:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                            secrets:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                            hostConfig:
+                              type: string
+                              enum:
+                                - ask
+                                - deny
+                          additionalProperties: false
                       required:
                         - maxAuthority
                         - maxAutonomy
@@ -46035,6 +46085,441 @@ paths:
                   - fault
                 title: SpecPreview
                 type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/execution_run_approval_list:
+    post:
+      operationId: internalRpcExecutionRunApprovalList
+      tags:
+        - headless-rpc
+      summary: execution_run_approval_list (agent.run)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "One page of the approvals unattended runs are parked on (ADR-0224 A7; ADR-0175 B3): pending tool approvals
+                  a Bot or scheduled turn raised and pending Bot approval steps, oldest first."
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - interruptId
+                        - runId
+                        - type
+                        - title
+                        - runTitle
+                        - runKind
+                        - createdAt
+                        - expiresAt
+                      properties:
+                        interruptId:
+                          type: string
+                        runId:
+                          type: string
+                        type:
+                          type: string
+                          enum:
+                            - tool_approval
+                            - bot_approval
+                        title:
+                          type: string
+                        runTitle:
+                          type: string
+                        runKind:
+                          type: string
+                        toolName:
+                          type: string
+                        permissionClass:
+                          type: string
+                          enum:
+                            - workspace
+                            - outbound
+                            - secrets
+                            - hostConfig
+                        message:
+                          type: string
+                        risk:
+                          type: string
+                          enum:
+                            - low
+                            - medium
+                            - high
+                        detail:
+                          type: object
+                          additionalProperties: true
+                          description: A Bot's proposal, rendered as data. Absent when larger than the inline limit.
+                        detailTruncated:
+                          type: boolean
+                        createdAt:
+                          type: integer
+                        expiresAt:
+                          type: integer
+                      additionalProperties: false
+                  nextPageToken:
+                    type: string
+                    description: Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page.
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/execution_run_approval_respond:
+    post:
+      operationId: internalRpcExecutionRunApprovalRespond
+      tags:
+        - headless-rpc
+      summary: execution_run_approval_respond (agent.run)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - interruptId
+                - decision
+              properties:
+                interruptId:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+                decision:
+                  type: string
+                  enum:
+                    - approve
+                    - deny
+                deviceName:
+                  type: string
+                  maxLength: 120
+                  description: "Display only: the name the run journal shows for the approver. The actor is the authenticated device the
+                    host stamps."
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "Whether the answer was taken. A refusal names why: the approval is gone (answered elsewhere, expired, or
+                  not one this command serves), the payload was malformed, or the control gate refused it."
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                  status:
+                    type: string
+                    enum:
+                      - approved
+                      - denied
+                  reason:
+                    type: string
+                  field:
+                    type: string
+                additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -174843,6 +175328,8 @@ components:
           - environment_ports_list
           - environment_probe_get
           - environment_spec_resolve_preview
+          - execution_run_approval_list
+          - execution_run_approval_respond
           - execution_run_control
           - execution_run_create
           - execution_run_detail
@@ -175701,10 +176188,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 818
-  generatedRequestSchemaCount: 818
+  internalCommandCount: 820
+  generatedRequestSchemaCount: 820
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 818
+  contractRequestSchemaCount: 820
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 818
+  generatedResponseSchemaCount: 820
   loopbackOnly: true

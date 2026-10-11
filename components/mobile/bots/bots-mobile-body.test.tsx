@@ -18,6 +18,10 @@ jest.mock("@/components/bots/bot-runtime-notice", () => ({
     <div data-testid="bot-runtime-notice-stub" data-has-bots={String(hasBots)} />
   ),
 }))
+// The approvals card has its own suite and talks to the host transport.
+jest.mock("@/components/mobile/run-approvals/run-approvals-card", () => ({
+  RunApprovalsCard: () => <div data-testid="run-approvals-card-stub" />,
+}))
 jest.mock("@/components/bots/install-bot-sheet", () => ({
   InstallBotSheet: ({ open }: { open: boolean }) =>
     open ? <div data-testid="install-bot-sheet-stub" /> : null,
@@ -93,6 +97,12 @@ describe("BotsMobileBody", () => {
     render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
     expect(screen.getByTestId("bot-list-pane")).toBeInTheDocument()
     expect(screen.queryByTestId("bot-detail-sheet")).toBeNull()
+  })
+
+  it("puts the runs waiting on an approval on the page a push opens", () => {
+    // ADR-0224 A7: a Bot approval push deep-links to /bots.
+    render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
+    expect(screen.getByTestId("run-approvals-card-stub")).toBeInTheDocument()
   })
 
   it("opens the detail drawer on the ?bot= deep link", () => {

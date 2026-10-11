@@ -12,7 +12,10 @@
 import { interpolateEnvelopeTemplate } from "@/lib/bot/events/envelope"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
-import type { PluginAgentTurnResult } from "@cognia/plugin-sdk/api/agent-turn"
+import type {
+  PluginAgentTurnRequest,
+  PluginAgentTurnResult,
+} from "@cognia/plugin-sdk/api/agent-turn"
 
 import { BotExecutorUnavailableError, type BotExecutorContext, type BotExecutorFn } from "./types"
 
@@ -25,6 +28,7 @@ export interface AgentTurnExecutorDeps {
     timeoutMs?: number
     permissionMode?: SendOptions["permissionMode"]
     composition?: AgentCompositionSelectionV1
+    capabilityGrants?: PluginAgentTurnRequest["capabilityGrants"]
   }) => Promise<
     Pick<PluginAgentTurnResult, "sessionId" | "text"> &
       Partial<Pick<PluginAgentTurnResult, "status" | "needsApproval">>
@@ -70,7 +74,10 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
       deps.run ??
       (async (input) => {
         const { runPluginAgentTurn } = await import("@/lib/plugin/api/agent-turn")
-        return runPluginAgentTurn(input, { grantSource: { kind: "bot", id: ctx.definition.id } })
+        return runPluginAgentTurn(input, {
+          grantSource: { kind: "bot", id: ctx.definition.id },
+          unattendedLabel: `Bot: ${ctx.definition.name}`,
+        })
       })
 
     // Inside a step, because a Bot handler is re-entered from the top after a
@@ -93,6 +100,16 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
         // prompt delta and tool set belong to this Bot, and without it the turn
         // composed from the desktop composer's last choice.
         composition: ctx.composition.selection,
+        // The installation's resolved permission profile (ADR-0224 A7): what
+        // this unattended turn may do without a person. Absent layers leave
+        // the host's ceiling, which the turn applies on its own.
+        capabilityGrants: [
+          {
+            schemaVersion: 1,
+            source: { kind: "bot", id: ctx.definition.id },
+            permissionProfile: ctx.policy.permissionProfile ?? {},
+          },
+        ],
       })
     )
 

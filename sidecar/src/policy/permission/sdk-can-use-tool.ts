@@ -17,6 +17,15 @@ import { restorePluginToolName } from "../tool-catalog/plugin-aliases.ts"
 import { awaitApproval } from "./approval.ts"
 import type { ApprovalAnswer, PendingApproval } from "./approval.ts"
 import {
+  buildPluginClassIndex,
+  classesOfTool,
+  profileDenialMessage,
+  readApprovalTtlMs,
+  readPermissionProfile,
+  readSandboxAttested,
+  profileVerdict,
+} from "./permission-classes.ts"
+import {
   buildApprovalRequiredSet,
   buildPerCallApprovalSet,
   decidePermission,
@@ -39,6 +48,10 @@ const HARD_CHECKS: readonly HardCheck[] = [
   "sandbox-scope",
   "plan-mode-cognia",
   "credential-path",
+  // An unattended run's denied classes (ADR-0224 A7). The SDK's own bypass
+  // never reaches here, so ./../../runtimes/claude-agent-sdk/profile-hooks.ts
+  // enforces the same profile ahead of the SDK's modes.
+  "profile",
 ]
 
 /**
@@ -64,6 +77,9 @@ export const CLAUDE_AGENT_SDK_RAIL: RailProfile = {
     // The Nth identical call must round-trip through the user even when a
     // grant or ruleset would allow it silently.
     "doom",
+    // An attested sandbox placement runs its own tools without asking
+    // (ADR-0224 A7); a doomed repeat still asks.
+    "sandbox",
     "grants",
   ],
   confinementErrors: "throw",
@@ -86,6 +102,9 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     cwd: sendOptions.cwd,
     pluginAccess: buildPluginAccessMap(sendOptions.pluginTools),
     perCallApproval: buildPerCallApprovalSet(sendOptions.pluginTools),
+    profile: readPermissionProfile(sendOptions.permissionProfile),
+    pluginClasses: buildPluginClassIndex(sendOptions.pluginTools),
+    sandboxAttested: readSandboxAttested(sendOptions.sandboxAttestation),
   }
 }
 
@@ -112,6 +131,8 @@ function renderDenial(reason: DenyReason, toolName: string): string {
       return `dontAsk mode: tool "${toolName}" is not pre-approved`
     case "no-approval-channel":
       return `denied: no approval channel to authorize "${toolName}"`
+    case "profile":
+      return profileDenialMessage(toolName, reason.cls)
   }
 }
 
@@ -158,6 +179,11 @@ export interface AnthropicCanUseToolOptions {
   pendingApprovals: Map<string, PendingApproval>
   pluginToolNameAliases: ReadonlyMap<string, string> | null | undefined
   doomGuard: Pick<DoomLoopGuard, "check">
+  /**
+   * Tool-use ids a person already approved in the profile PreToolUse hook
+   * (`runtimes/claude-agent-sdk/profile-hooks.ts`). Each is honoured once.
+   */
+  profileApprovals?: Set<string>
 }
 
 /**
@@ -174,6 +200,7 @@ export function createAnthropicCanUseTool({
   pendingApprovals,
   pluginToolNameAliases,
   doomGuard,
+  profileApprovals,
 }: AnthropicCanUseToolOptions): (
   modelToolName: string,
   input: Record<string, unknown>,
@@ -186,6 +213,11 @@ export function createAnthropicCanUseTool({
     process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
 
   return (modelToolName, input, ctx) => {
+    // The profile hook already asked a person about this very call and was
+    // answered; the SDK consulting us afterwards must not ask again.
+    if (ctx?.toolUseID && profileApprovals?.delete(ctx.toolUseID)) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
     // Everything below (ruleset, plan-mode policy, suppress and always-allow
     // lists, the permission request the renderer answers) keys on the
     // original plugin tool name, not the one the SDK just called it by.
@@ -194,23 +226,33 @@ export function createAnthropicCanUseTool({
       PLUGIN_TOOLS_SERVER_NAME,
       modelToolName
     )
+    const policy = livePolicy(sendOptions)
     const outcome = decidePermission(CLAUDE_AGENT_SDK_RAIL, {
       toolName,
       input,
       signal: ctx?.signal,
       doomGuard,
       canPrompt: true,
-      policy: livePolicy(sendOptions),
+      policy,
     })
     if (outcome.kind === "deny") {
       return Promise.resolve({ behavior: "deny", message: renderDenial(outcome.reason, toolName) })
     }
     if (outcome.kind === "allow") return Promise.resolve({ behavior: "allow", updatedInput: input })
 
-    const perCall = requiresPerCallApproval(
-      toolName,
-      buildPerCallApprovalSet(sendOptions.pluginTools)
-    )
+    const pluginClasses = policy.pluginClasses ?? buildPluginClassIndex(undefined)
+    const profile = profileVerdict(policy.profile, toolName, pluginClasses)
+    // An always-ask class is approved per call exactly like a per-call plugin
+    // tool: never remembered, never turned into a standing rule.
+    const perCall =
+      requiresPerCallApproval(toolName, buildPerCallApprovalSet(sendOptions.pluginTools)) ||
+      profile.kind === "always-ask"
+    const permissionClass =
+      profile.kind === "always-ask"
+        ? profile.cls
+        : policy.profile
+          ? classesOfTool(toolName, pluginClasses)[0]
+          : undefined
     // The SDK enforces dontAsk before calling here, so this is defence in
     // depth: an approve-every-call tool is never asked about under dontAsk,
     // it is denied (ADR-0201).
@@ -251,6 +293,7 @@ export function createAnthropicCanUseTool({
       suppressAlwaysAllowRule: perCall ? true : ctx.suppressAlwaysAllowRule,
       ...(declared ? { requiresApproval: true } : {}),
       ...(perCall ? { requiresPerCallApproval: true } : {}),
+      ...(permissionClass ? { permissionClass } : {}),
       ...(sendOptions.remoteExecutionContext
         ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
         : {}),
@@ -281,6 +324,11 @@ export function createAnthropicCanUseTool({
       // still gets its required deny.
       onAbort: () =>
         emit({ type: "permission_interrupted", sessionId, requestId, reason: "aborted" }),
+      // An unattended run's host parks the request for a person; if nobody
+      // (or no host) answers in time, the call is denied here.
+      ttlMs: readApprovalTtlMs(sendOptions.approvalTtlMs),
+      onTimeout: () =>
+        emit({ type: "permission_interrupted", sessionId, requestId, reason: "timeout" }),
       review: (answer) => {
         if (verbose) {
           log(

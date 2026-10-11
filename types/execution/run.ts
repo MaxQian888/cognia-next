@@ -629,6 +629,12 @@ export interface ExecutionRunInterrupt {
    * still demand more than this, never less.
    */
   approvalRisk?: "low" | "medium" | "high"
+  /**
+   * For a `tool_approval` an unattended run parked (ADR-0224 A7): the
+   * permission class that made the tool ask, so a card can say "outbound
+   * message" without parsing the title.
+   */
+  permissionClass?: import("@cognia/agent-config-types").PermissionClass
   expiresAt: number
   createdAt: number
   resolvedAt?: number

@@ -38,6 +38,7 @@ import type {
   BotStepApiV1,
   BotWaitForEventInput,
 } from "@/types/bot/run"
+import { announceRunApproval } from "@/lib/execution/run-approval-push"
 import type { ExecutionRunInterrupt } from "@/types/execution/run"
 
 /** How often a BLOCKING wait re-reads the row it is waiting on. */
@@ -275,10 +276,12 @@ export function createBotStepApi(input: {
         interrupt.approvalDecisionMode = "human"
       }
     }
+    let created = true
     await createRunInterrupt(interrupt).catch(async (error) => {
       // A re-entry finds its own interrupt already there. Anything else is real.
       const existing = await getDb().executionRunInterrupts.get(interruptId)
       if (!existing) throw error
+      created = false
       return existing
     })
 
@@ -323,6 +326,14 @@ export function createBotStepApi(input: {
           }
         }
       )
+    }
+
+    // A person is needed: wake a paired phone (ADR-0224 A7). Only when this
+    // pass created the question and host policy did not answer it, so a run
+    // re-entered every park interval does not buzz the phone each time.
+    if (created) {
+      const pending = await getDb().executionRunInterrupts.get(interruptId)
+      if (pending?.status === "pending") await announceRunApproval(pending, { origin: "bot" })
     }
 
     if (!begun.memoized) {

@@ -43,6 +43,7 @@ import type {
   PermissionRequestEvent,
   SendContent,
   SendOptions,
+  UnattendedPermissionProfileV1,
 } from "@cognia/agent-config-types"
 import { isTerminalGoalStatus, type ExitReason, type Goal, type GoalStatus } from "@/types/goal"
 import { getGoal } from "@/lib/db/goals"
@@ -64,6 +65,8 @@ import {
   type UnattendedPermissionDenial,
   type UnattendedPermissionResponder,
 } from "@/lib/claude/unattended-permission-responder"
+import { createUnattendedPark } from "@/lib/claude/unattended-park"
+import { holdExecutionClock } from "../execution-clock"
 import { loadOwningWorkspace, resolveScheduledWorkspaceTrust } from "./owning-workspace"
 import { loggers } from "@cognia/logging"
 
@@ -143,6 +146,18 @@ export interface RunGoalLoopInput {
    * the next turn would find nobody there either.
    */
   onPermissionRequest?: GoalPermissionResponder
+  /**
+   * The run is unattended (ADR-0224 A7), which the scheduler says and the
+   * connector driver does not. Every turn then carries the permission
+   * profile, and with no {@link onPermissionRequest} a request parks for a
+   * person under {@link label} instead of being denied at once; the turn's
+   * timeout and the scheduled execution's clock stop while it waits. The
+   * connector driver leaves it unset: its IM card already waited for a person.
+   */
+  unattended?: {
+    label: string
+    permissionProfile?: UnattendedPermissionProfileV1
+  }
 }
 
 export interface RunGoalLoopResult {
@@ -170,12 +185,49 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
   // the headless brain's hang until the capture timeout. With no caller
   // responder nobody is watching, so every request gets a recorded denial.
   // With one, only the requests it hands back are recorded.
-  const permissions = createUnattendedPermissionResponder("goal")
   const callerResponder = input.onPermissionRequest
-  const onPermissionRequest: RunAndCaptureOptions["onPermissionRequest"] = callerResponder
+  const permissions = createUnattendedPermissionResponder("goal", {
+    ...(input.unattended && !callerResponder
+      ? {
+          park: createUnattendedPark({
+            origin: "scheduler",
+            sessionId: input.sessionId,
+            label: input.unattended.label,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }),
+        }
+      : {}),
+  })
+  const answer: RunAndCaptureOptions["onPermissionRequest"] = callerResponder
     ? (request) => callerResponder(request, permissions.onPermissionRequest)
     : permissions.onPermissionRequest
-  const result = await driveGoalLoop(input, permissions, onPermissionRequest)
+  // A parked request is a person's think-time: the scheduled execution's
+  // clock stops while it waits, like the turn's own.
+  const onPermissionRequest: RunAndCaptureOptions["onPermissionRequest"] = permissions.parks
+    ? async (request) => {
+        const release = holdExecutionClock(input.signal)
+        try {
+          return await answer!(request)
+        } finally {
+          release()
+        }
+      }
+    : answer
+  let result: RunGoalLoopResult
+  try {
+    result = await driveGoalLoop(input, permissions, onPermissionRequest)
+  } catch (error) {
+    await permissions.finish("failed", error instanceof Error ? error.message : String(error))
+    throw error
+  }
+  await permissions.finish(
+    result.status === "completed"
+      ? "completed"
+      : result.error === "aborted"
+        ? "cancelled"
+        : "failed",
+    result.error
+  )
   return permissions.needsApproval()
     ? { ...result, needsApproval: [...permissions.denials] }
     : result
@@ -288,6 +340,17 @@ async function driveGoalLoop(
         activeProject,
         workspaceRestricted: workspaceTrust.restricted,
         trustedWorkspaceRoots: workspaceTrust.trustedRoots,
+        ...(input.unattended
+          ? {
+              capabilityGrants: [
+                {
+                  schemaVersion: 1 as const,
+                  source: { kind: "goal" as const, id: goalId },
+                  permissionProfile: { ...(input.unattended.permissionProfile ?? {}) },
+                },
+              ],
+            }
+          : {}),
       })
     } catch (err) {
       return {
@@ -311,6 +374,7 @@ async function driveGoalLoop(
           : {}),
         execution: { kind: "goal", label: `Goal ${goalId.slice(0, 8)}`, taskId: goalId },
         onPermissionRequest,
+        ...(permissions.parks ? { pauseTimeoutWhileAwaitingPermission: true } : {}),
       })
       captureText = capture.text
       lastResponse = capture.text

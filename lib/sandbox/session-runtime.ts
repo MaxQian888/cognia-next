@@ -1,4 +1,4 @@
-import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+import type { SandboxAttestationV1, SandboxResourcePolicy } from "@cognia/agent-config-types"
 import {
   HOST_FALLBACK_RUNTIME_REF,
   SandboxRuntimeError,
@@ -771,6 +771,27 @@ export class SandboxSessionRuntime {
     this.cleanupInFlight.clear()
     this.closedSessions.clear()
     this.records.set(HOST_FALLBACK_RUNTIME_REF, HOST_FALLBACK_RECORD)
+  }
+
+  /**
+   * The host's word that `ref` runs its sandboxed tools in an isolated
+   * placement (ADR-0224 A7), or null. Only the session's current generation of
+   * a placed `microvm` tier qualifies: its preflight succeeded and its adapter
+   * runs every sandboxed call or refuses it. The host OS tier, an unplaced
+   * record, a retired generation and the fallback record never do. A
+   * placement lost after this answer still cannot run anything on this
+   * machine, because an unplaced record refuses instead of falling back.
+   */
+  attest(
+    ref: SandboxRuntimeRef | undefined,
+    now: number = Date.now()
+  ): SandboxAttestationV1 | null {
+    if (!ref || ref === HOST_FALLBACK_RUNTIME_REF) return null
+    const record = this.records.get(ref)
+    if (!record || !record.sandboxEnabled || record.unplaced?.sandbox) return null
+    if (record.binding.shellTier !== "microvm" || !record.microvmAdapter) return null
+    if (this.activeBySession.get(record.sessionId) !== ref) return null
+    return { schemaVersion: 1, tier: "microvm", verifiedAt: now }
   }
 
   private requireRecord(ref: SandboxRuntimeRef): RuntimeRecord {

@@ -793,6 +793,20 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "remote step pending wake-up; had a push trigger but no socket path",
     },
     EventChannelSpec {
+        pattern: "run://approval-pending",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "ADR-0224 A7: an unattended run parked on a person (a tool approval or a Bot approval step); ids, kind, class and a deep link only, and a push trigger",
+    },
+    EventChannelSpec {
+        pattern: "run://approval-resolved",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "ADR-0224 A7: a parked approval was answered or expired; lets an open approvals card drop it",
+    },
+    EventChannelSpec {
         pattern: "orchestration-proxy:exec",
         audience: ChannelAudience::ServiceOnly,
         default_on: false,

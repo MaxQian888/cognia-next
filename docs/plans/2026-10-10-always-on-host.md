@@ -180,6 +180,34 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
    - A dedicated mobile card modelled on `pending-approvals-card.tsx`.
 5. Tests: each class decision, park/resume/timeout, push emission, mobile card.
 
+**A7 outcome (2026-10-11).** Built against the plan with these deviations:
+
+- **Contract** (`packages/agent-config-types/src/unattended-permission.ts`): `UnattendedPermissionProfileV1` holds one level per class: `workspace` takes `sandbox | ask | deny`; `outbound`, `secrets` and `hostConfig` take `ask | deny`. The ceiling is `{ workspace: "sandbox", others: "ask" }`, so no profile can let an outbound message, secret use or a host change through without a person. Narrowing is per class.
+  - `AgentCapabilityGrantV1.permissionProfile` merges by narrowing.
+  - `resolveBotPolicy` folds it per layer. A layer that names a level above the one in force is refused for that field, and the Bot's policy panel shows the refusal.
+  - Any profile, even an empty one, marks the turn unattended. Bot turns, plugin agent turns, scheduled chat turns and goal turns always carry one.
+- **Classes** are decided host-side. A plugin tool takes the classes its plugin's manifest permissions reach (`lib/claude/unattended-permission-options.ts`), and a handful of host tools are classed by what they do. A declared read-only tool is exempt from every class except secrets. Built-in tools that are not read-only count as workspace.
+- **Sandbox auto-allow:** a `sandbox` ladder step after `dont-ask`, plus a `profile` hard check (pinned in `ladder.pins.test.ts`). The allow covers only the first-party sandboxed tools (`sandbox_bash`/`edit`/`write`/`text_editor`), and only with a `SandboxAttestationV1` the host stamps at build time from `sandboxSessionRuntime.attest`. The attestation requires the current placement generation on the microvm tier; anything weaker asks.
+  - Always-ask classes disarm the `dont-ask`, `bypass` and grant shortcuts.
+  - On the Claude Agent SDK, bypass and allow rules never reach `canUseTool`. A PreToolUse hook (`sidecar/src/runtimes/claude-agent-sdk/profile-hooks.ts`) therefore runs the gate itself for always-ask classes and hands the approved `toolUseID` to `canUseTool`.
+  - The sidecar approval waiter takes `approvalTtlMs` (park TTL + 2 min) and reports a timeout as a `permission_interrupted`.
+- **Park:** the unattended responder no longer denies at once.
+  - It parks the request (`lib/claude/unattended-park.ts`): one `agent-turn` execution run per turn, and a `tool_approval` interrupt carrying the tool and its class.
+  - It announces the park, waits in the approval registry for 30 minutes, then resumes or denies.
+  - The cockpit's `execution_run_control` answers it through the agent-turn handler. Parking failures fall back to the old immediate deny.
+  - Parked time is not charged: the capture wall clock pauses, and scheduled executions stop their timeout clock (`lib/scheduler/execution-clock.ts`). This covers both chat tasks, which register as the turn's capture responder, and goal turns.
+- **Push:** one channel, `run://approval-pending`, carries both tool approvals and Bot approval steps, plus `run://approval-resolved`. The plan named a single `bot_approval` channel; one channel lets a phone open one card for either kind.
+  - The push body names only the class or "a Bot", never the title or tool input. Push data is allowlisted to ids, the kind, the class, the deep link and the dedupe key.
+  - A Bot step announces once, when its interrupt row is created and still pending after the policy auto-approve, because the step re-enters every 20 s.
+- **Phone answers** go through two new commands, `execution_run_approval_list` / `execution_run_approval_respond` (`agent.run`, approval `none`; `respond` binds `callerDeviceId`). Answering through `execution_run_control` would need an admin lease, which a headless host cannot get approved for the device asking. The answer is the human approval itself, like `claude_approve`, and still passes the run control gate as the stamped device.
+  - The list pages by token like every list verb (ADR-0175 B3), and the card walks every page. It caps a Bot proposal at 4,000 characters inline and otherwise marks it truncated.
+- **UI:**
+  - **Profile controls:**
+    - A Bot's settings show a **When nobody is watching** section, saved in `policyGrant` alongside the authority switches; the policy panel names the classes each layer narrowed.
+    - The chat and goal scheduler editors show the same section, written to `payload.permissionProfile`.
+  - **Phone card:** `RunApprovalsCard` (`components/mobile/run-approvals/`) sits on the phone's Bots page and above the scheduler's attention block. It is modelled on the workflow approvals card.
+- **Live runs:** tightening a Bot's profile cancels its live runs, the same as narrowing its authority.
+
 ### A8 — Container per task by default
 
 1. **Host-authored placement** for every dispatched surface: phone turns (`remote-run-service.ts:827`), scheduled agent tasks, bots, agent teams, plugin SDK dispatch.

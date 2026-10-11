@@ -366,3 +366,34 @@ describe("isChatLikeTaskType / isStructuredEditableTaskType", () => {
     expect(isStructuredEditableTaskType("backup")).toBe(false)
   })
 })
+
+describe("unattended permission profile (ADR-0224 A7)", () => {
+  it("reads the classes a stored profile narrows and ignores a level a class does not take", () => {
+    const draft = payloadToChatLikeDraft("chat", {
+      prompt: "hi",
+      permissionProfile: { workspace: "ask", outbound: "sandbox", secrets: "deny" },
+    })
+    expect(draft.permissionProfile).toEqual({ workspace: "ask", secrets: "deny" })
+    expect(
+      payloadToChatLikeDraft("chat", { prompt: "hi", permissionProfile: "deny" })
+    ).not.toHaveProperty("permissionProfile")
+  })
+
+  it("writes only the narrowed classes, and nothing at the ceiling", () => {
+    expect(
+      chatLikeDraftToPayload("chat", {
+        ...EMPTY_CHAT_LIKE_DRAFT,
+        prompt: "hi",
+        permissionProfile: { hostConfig: "deny", outbound: "ask" },
+      })
+    ).toEqual({ prompt: "hi", permissionProfile: { hostConfig: "deny" } })
+    expect(
+      chatLikeDraftToPayload("agent", {
+        ...EMPTY_CHAT_LIKE_DRAFT,
+        prompt: "hi",
+        characterId: "c1",
+        permissionProfile: { workspace: "sandbox" },
+      })
+    ).toEqual({ prompt: "hi", characterId: "c1" })
+  })
+})

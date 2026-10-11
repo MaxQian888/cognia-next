@@ -486,6 +486,48 @@ describe("SandboxSessionRuntime", () => {
     expect(deps.getConnection).not.toHaveBeenCalled()
   })
 
+  it("attests only the current generation of a placed microVM tier (ADR-0224 A7)", async () => {
+    const deps = createDeps()
+    let refs = 0
+    deps.makeRef.mockImplementation(() => `sandbox-runtime:ref-${++refs}`)
+    const runtime = new SandboxSessionRuntime(deps)
+    const adapter = { preflight: jest.fn(async () => undefined), execute: jest.fn() }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const input = {
+      sessionId: "attested",
+      binding: { shellTier: "microvm", computerTarget: "local" } as const,
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspace",
+    }
+    const ref = await runtime.bindSession(input)
+    expect(runtime.attest(ref, 42)).toEqual({ schemaVersion: 1, tier: "microvm", verifiedAt: 42 })
+
+    // A newer generation supersedes it; the old ref attests nothing.
+    const next = await runtime.bindSession({ ...input, workspaceRoot: "/workspace/b" })
+    expect(runtime.attest(ref)).toBeNull()
+    expect(runtime.attest(next)).not.toBeNull()
+
+    // A placement that could not be established never attests.
+    const unplaced = runtime.bindUnplacedSession(
+      { ...input, sessionId: "unplaced" },
+      new Error("no workspace")
+    )
+    expect(runtime.attest(unplaced)).toBeNull()
+
+    // The host OS tier and a disabled sandbox are this machine.
+    const os = await runtime.bindSession({
+      ...input,
+      sessionId: "os",
+      binding: { shellTier: "os", computerTarget: "local" } as const,
+    })
+    expect(runtime.attest(os)).toBeNull()
+    expect(runtime.attest(undefined)).toBeNull()
+    expect(runtime.attest("unknown-ref")).toBeNull()
+  })
+
   it("rejects new microVM binds after unregister while bound owners keep their adapter", async () => {
     const deps = createDeps()
     const runtime = new SandboxSessionRuntime(deps)

@@ -22,6 +22,13 @@
  * every interactive chat with that character too, so widening it there hands
  * un-prompted Edit/Write/Bash to anyone who picks that persona from the
  * character list. Pass `"bypassPermissions"` explicitly, per call.
+ *
+ * Every turn is unattended (ADR-0224 A7). It carries a permission profile: the
+ * host's ceiling, narrowed by any profile the caller's grants declare (a Bot's
+ * installation profile arrives that way). Outbound messages, secret use and
+ * host configuration changes therefore ask a person even under
+ * `bypassPermissions`, and a request that asks is parked for a person rather
+ * than denied, with the turn's wall clock stopped while it waits.
  */
 
 import {
@@ -30,6 +37,7 @@ import {
   type PluginAgentTurnResult,
 } from "@cognia/plugin-sdk/api/agent-turn"
 import { createUnattendedPermissionResponder } from "@/lib/claude/unattended-permission-responder"
+import { createUnattendedPark } from "@/lib/claude/unattended-park"
 import type { AgentCapabilityGrantV1 } from "@cognia/agent-config-types/agent-capability-grant"
 
 export {
@@ -100,6 +108,16 @@ export interface RunPluginAgentTurnOptions {
    * audit trail names the real caller. Host-side callers (bots) pass their own.
    */
   grantSource?: { kind: "plugin" | "bot"; id?: string }
+  /** What a parked approval calls this turn ("Bot: Release notes"). */
+  unattendedLabel?: string
+}
+
+/**
+ * The host's own grant for an unattended turn: an empty permission profile,
+ * which resolves to the ceiling and which the caller's grants may only narrow.
+ */
+function unattendedGrant(source: { kind: "plugin" | "bot"; id?: string }): AgentCapabilityGrantV1 {
+  return { schemaVersion: 1, source, permissionProfile: {} }
 }
 
 export async function runPluginAgentTurn(
@@ -127,7 +145,9 @@ export async function runPluginAgentTurn(
     )
   }
 
-  const capabilityGrants = await acceptedGrants(request, options.grantSource)
+  const callerGrants = await acceptedGrants(request, options.grantSource)
+  const source = options.grantSource ?? { kind: "plugin" as const }
+  const capabilityGrants = [unattendedGrant(source), ...(callerGrants ?? [])]
   const sessionId = await ensureSession(request.characterId, cwd, request.sessionId?.trim())
   const appSettings = await getSettings().catch(() => undefined)
   const sendOptions = await resolveSendOptions({
@@ -135,20 +155,36 @@ export async function runPluginAgentTurn(
     character,
     appSettings: appSettings ?? null,
     ...(request.composition ? { compositionSelection: request.composition } : {}),
-    ...(capabilityGrants ? { capabilityGrants } : {}),
+    capabilityGrants,
   })
   if (request.permissionMode) sendOptions.permissionMode = request.permissionMode
 
   // Nobody is watching this turn. A permission request is answered here,
-  // now, with a recorded denial, rather than left to whichever shell-specific
+  // by parking it for a person, rather than left to whichever shell-specific
   // listener happens to exist (desktop: silent auto-deny; headless: a
   // five-minute hang reported as a timeout).
-  const permissions = createUnattendedPermissionResponder("plugin")
-  const result = await runner.runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
-    ...(request.signal ? { signal: request.signal } : {}),
-    ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
-    onPermissionRequest: permissions.onPermissionRequest,
+  const origin = source.kind === "bot" ? "bot" : "plugin"
+  const permissions = createUnattendedPermissionResponder(origin, {
+    park: createUnattendedPark({
+      origin,
+      sessionId,
+      label: options.unattendedLabel ?? `Plugin turn: ${character.name}`,
+      ...(request.signal ? { signal: request.signal } : {}),
+    }),
   })
+  let result: Awaited<ReturnType<typeof runner.runAndCaptureAssistantReply>>
+  try {
+    result = await runner.runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
+      onPermissionRequest: permissions.onPermissionRequest,
+      pauseTimeoutWhileAwaitingPermission: true,
+    })
+  } catch (error) {
+    await permissions.finish(request.signal?.aborted ? "cancelled" : "failed")
+    throw error
+  }
+  await permissions.finish("completed")
 
   return {
     sessionId,

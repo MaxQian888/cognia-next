@@ -1,0 +1,106 @@
+// An unattended run's permission profile, enforced ahead of the Claude Agent
+// SDK's own permission system (ADR-0224 A7).
+//
+// The SDK approves a call on its own before `canUseTool` is ever consulted:
+// `bypassPermissions` approves everything, `acceptEdits` approves its file
+// tools, and an allow rule (`allowedTools`) approves a matching tool in any
+// mode. The ladder's profile steps live in `canUseTool`, so on this engine
+// they would never see those calls. A PreToolUse hook runs first, in every
+// mode, which is the one place the profile can hold:
+//
+//   - a class the profile denies is refused (a hook deny binds even under
+//     `bypassPermissions`);
+//   - an outbound, secret or host-configuration call asks a person through
+//     the same `canUseTool` round trip the ladder would run.
+//
+// A hook `allow` does not stop the SDK from consulting `canUseTool` later, so
+// an approval obtained here is recorded under the call's tool-use id and
+// `canUseTool` honours it once instead of asking the same person twice.
+
+import type { HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk"
+
+import type { ApprovalAnswer } from "../../policy/permission/approval.ts"
+import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
+import {
+  buildPluginClassIndex,
+  profileDenialMessage,
+  profileVerdict,
+  readPermissionProfile,
+} from "../../policy/permission/permission-classes.ts"
+import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
+import { restorePluginToolName } from "../../policy/tool-catalog/plugin-aliases.ts"
+
+type CanUseTool = (
+  modelToolName: string,
+  input: Record<string, unknown>,
+  ctx: { toolUseID: string; signal?: AbortSignal }
+) => Promise<ApprovalAnswer>
+
+export interface ProfileToolHookOptions {
+  sendOptions: PermissionSendOptions
+  pluginToolNameAliases: Map<string, string>
+  /** The session's `canUseTool`: the ladder and the approval round trip. */
+  canUseTool: CanUseTool
+  /** Tool-use ids a person approved here; `canUseTool` consumes each once. */
+  profileApprovals: Set<string>
+}
+
+function decision(permissionDecision: "allow" | "deny", extra: Record<string, unknown>) {
+  return {
+    hookSpecificOutput: { hookEventName: "PreToolUse" as const, permissionDecision, ...extra },
+  }
+}
+
+/** The PreToolUse hook, or undefined for a turn without a profile. */
+export function buildProfileToolHooks({
+  sendOptions,
+  pluginToolNameAliases,
+  canUseTool,
+  profileApprovals,
+}: ProfileToolHookOptions): { PreToolUse: HookCallbackMatcher[] } | undefined {
+  const profile = readPermissionProfile(sendOptions.permissionProfile)
+  if (!profile) return undefined
+  const pluginClasses = buildPluginClassIndex(sendOptions.pluginTools)
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input, toolUseID, { signal }) => {
+            if (!("tool_name" in input) || typeof input.tool_name !== "string") return {}
+            const modelToolName = input.tool_name
+            const toolName = restorePluginToolName(
+              pluginToolNameAliases,
+              PLUGIN_TOOLS_SERVER_NAME,
+              modelToolName
+            )
+            const verdict = profileVerdict(profile, toolName, pluginClasses)
+            if (verdict.kind === "deny") {
+              return decision("deny", {
+                permissionDecisionReason: profileDenialMessage(toolName, verdict.cls),
+              })
+            }
+            if (verdict.kind !== "always-ask" || !toolUseID) return {}
+            const toolInput =
+              "tool_input" in input && input.tool_input && typeof input.tool_input === "object"
+                ? (input.tool_input as Record<string, unknown>)
+                : {}
+            const answer = await canUseTool(modelToolName, toolInput, { toolUseID, signal })
+            if (answer.behavior !== "allow") {
+              return decision("deny", {
+                permissionDecisionReason:
+                  typeof answer.message === "string" ? answer.message : `denied: ${toolName}`,
+              })
+            }
+            profileApprovals.add(toolUseID)
+            return decision("allow", {
+              permissionDecisionReason: "approved by a person for this unattended run",
+              ...(answer.updatedInput && typeof answer.updatedInput === "object"
+                ? { updatedInput: answer.updatedInput }
+                : {}),
+            })
+          },
+        ],
+      },
+    ],
+  }
+}

@@ -13,6 +13,13 @@ const resolveCharacterById = jest.fn(async () => ({ id: "char-1" }))
 const getSettings = jest.fn(async () => ({ theme: "dark" }))
 const resolveSendOptions = jest.fn(async () => ({ cwd: "/repo" }) as Record<string, unknown>)
 const runAndCaptureAssistantReply = jest.fn(async () => ({ text: "done", messageId: "m1" }))
+const parkOutcome = jest.fn(async (): Promise<Record<string, unknown>> => ({ kind: "expired" }))
+const parkFinish = jest.fn(async () => undefined)
+const createUnattendedPark = jest.fn((_options: Record<string, unknown>) => ({
+  park: () => parkOutcome(),
+  finish: (...a: unknown[]) => (parkFinish as (...args: unknown[]) => unknown)(...a),
+  runId: () => null,
+}))
 
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...a: unknown[]) => (getSession as (...args: unknown[]) => unknown)(...a),
@@ -28,6 +35,9 @@ jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettings() }))
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (...a: unknown[]) =>
     (resolveSendOptions as (...args: unknown[]) => unknown)(...a),
+}))
+jest.mock("@/lib/claude/unattended-park", () => ({
+  createUnattendedPark: (options: Record<string, unknown>) => createUnattendedPark(options),
 }))
 jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...a: unknown[]) =>
@@ -46,15 +56,19 @@ beforeEach(() => {
   resolveCharacterById.mockResolvedValue({ id: "char-1" })
   resolveSendOptions.mockResolvedValue({ cwd: "/repo" })
   runAndCaptureAssistantReply.mockResolvedValue({ text: "done", messageId: "m1" })
+  parkOutcome.mockResolvedValue({ kind: "expired" })
 })
 
+/** The host's own grant every unattended turn carries (ADR-0224 A7). */
+const HOST_GRANT = { schemaVersion: 1, source: { kind: "plugin" }, permissionProfile: {} }
+
 describe("runPluginAgentTurn", () => {
-  it("answers a permission ask itself and reports needs_approval instead of completed", async () => {
+  it("parks a permission ask and reports needs_approval when nobody answers", async () => {
     runAndCaptureAssistantReply.mockImplementation(async (...args: unknown[]) => {
       const opts = args[3] as {
-        onPermissionRequest?: (req: unknown) => { decision: string; message?: string }
+        onPermissionRequest?: (req: unknown) => Promise<{ decision: string; message?: string }>
       }
-      const decision = opts.onPermissionRequest?.({
+      const decision = await opts.onPermissionRequest?.({
         type: "permission_request",
         sessionId: "s1",
         requestId: "r1",
@@ -71,6 +85,51 @@ describe("runPluginAgentTurn", () => {
     expect(result.needsApproval).toEqual([
       expect.objectContaining({ requestId: "r1", toolName: "Edit" }),
     ])
+    expect(parkFinish).toHaveBeenCalledWith("completed", undefined)
+  })
+
+  it("resumes the turn when a person approves the parked request", async () => {
+    parkOutcome.mockResolvedValue({ kind: "approved", decision: { decision: "allow" } })
+    runAndCaptureAssistantReply.mockImplementation(async (...args: unknown[]) => {
+      const opts = args[3] as {
+        onPermissionRequest?: (req: unknown) => Promise<{ decision: string }>
+        pauseTimeoutWhileAwaitingPermission?: boolean
+      }
+      expect(opts.pauseTimeoutWhileAwaitingPermission).toBe(true)
+      const decision = await opts.onPermissionRequest?.({
+        type: "permission_request",
+        sessionId: "s1",
+        requestId: "r1",
+        toolUseID: "tu1",
+        toolName: "Edit",
+        input: {},
+      })
+      expect(decision).toEqual({ decision: "allow" })
+      return { text: "Edited.", messageId: "m1" }
+    })
+    const result = await runPluginAgentTurn(base)
+    expect(result.status).toBe("completed")
+  })
+
+  it("parks a Bot's turn under its own name and links it to the Bots page", async () => {
+    await runPluginAgentTurn(base, {
+      grantSource: { kind: "bot", id: "inst-1" },
+      unattendedLabel: "Bot: Release notes",
+    })
+    expect(createUnattendedPark).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "bot", sessionId: "sess-new", label: "Bot: Release notes" })
+    )
+    expect(resolveSendOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilityGrants: [{ ...HOST_GRANT, source: { kind: "bot", id: "inst-1" } }],
+      })
+    )
+  })
+
+  it("closes a parked run as failed when the turn throws", async () => {
+    runAndCaptureAssistantReply.mockRejectedValue(new Error("sidecar exited"))
+    await expect(runPluginAgentTurn(base)).rejects.toThrow("sidecar exited")
+    expect(parkFinish).toHaveBeenCalledWith("failed", undefined)
   })
 
   it("reports completed when the turn never asked for a permission", async () => {
@@ -154,6 +213,7 @@ describe("runPluginAgentTurn", () => {
     expect(resolveSendOptions).toHaveBeenCalledWith(
       expect.objectContaining({
         capabilityGrants: [
+          { ...HOST_GRANT, source: { kind: "plugin", id: "acme" } },
           {
             schemaVersion: 1,
             source: { kind: "plugin", id: "acme" },
@@ -175,11 +235,11 @@ describe("runPluginAgentTurn", () => {
     expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
   })
 
-  it("sends neither composition nor grants when the caller set none", async () => {
+  it("sends only the host's unattended grant when the caller set none", async () => {
     await runPluginAgentTurn(base)
     const ctx = (resolveSendOptions.mock.calls[0] as unknown[])[0] as Record<string, unknown>
     expect(ctx).not.toHaveProperty("compositionSelection")
-    expect(ctx).not.toHaveProperty("capabilityGrants")
+    expect(ctx.capabilityGrants).toEqual([HOST_GRANT])
   })
 
   it("survives an unreadable settings row", async () => {

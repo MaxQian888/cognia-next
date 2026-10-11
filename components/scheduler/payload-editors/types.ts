@@ -21,6 +21,10 @@ import type {
   WorkflowTaskPayload,
 } from "@/types/scheduler"
 import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
+import {
+  compactPermissionProfile,
+  type UnattendedPermissionProfileV1,
+} from "@cognia/agent-config-types/unattended-permission"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 
 /**
@@ -62,6 +66,9 @@ export interface ChatLikeDraft {
   maxTurns?: number
   effort?: SendOptions["effort"]
   disabledSkillIds?: string[]
+
+  /** What the unattended run may do without a person (ADR-0224 A7). */
+  permissionProfile?: UnattendedPermissionProfileV1
 }
 
 export interface ExternalAgentDraft {
@@ -95,6 +102,8 @@ export interface GoalDraft {
   maxTurns?: number
   maxTokens?: number
   timeoutMinutes?: number
+  /** What the goal's unattended turns may do without a person (ADR-0224 A7). */
+  permissionProfile?: UnattendedPermissionProfileV1
 }
 
 /**
@@ -166,6 +175,16 @@ export const EMPTY_IM_PUSH_DRAFT: ImPushDraft = {
 }
 
 /**
+ * A stored profile as the editor shows it: the classes it narrows. A level a
+ * class does not accept is read as no opinion, which is what the run's own
+ * resolver does with it, so the editor never shows a level no run gets.
+ */
+function readPermissionProfile(raw: unknown): UnattendedPermissionProfileV1 | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  return compactPermissionProfile(raw as UnattendedPermissionProfileV1)
+}
+
+/**
  * Convert an existing JSON-shaped payload back into a `ChatLikeDraft` so an
  * edit-in-place flow doesn't lose user input when the form mounts.
  *
@@ -227,6 +246,8 @@ export function payloadToChatLikeDraft(taskType: ScheduledTaskType, raw: unknown
   if (typeof p.appendSystemPrompt === "string") draft.appendSystemPrompt = p.appendSystemPrompt
   if (typeof p.maxTurns === "number" && p.maxTurns > 0) draft.maxTurns = Math.floor(p.maxTurns)
   if (typeof p.effort === "string") draft.effort = p.effort as SendOptions["effort"]
+  const permissionProfile = readPermissionProfile(p.permissionProfile)
+  if (permissionProfile) draft.permissionProfile = permissionProfile
 
   // Acknowledge the task-type discriminator without forcing characterId / skillId
   // when the payload is partial. Validation happens at submit.
@@ -329,6 +350,8 @@ export function chatLikeDraftToPayload(
     out.maxTurns = Math.floor(draft.maxTurns)
   }
   if (draft.effort) out.effort = draft.effort
+  const permissionProfile = compactPermissionProfile(draft.permissionProfile)
+  if (permissionProfile) out.permissionProfile = permissionProfile
 
   if (taskType === "agent") {
     return { ...out, characterId: characterId! } as AgentTaskPayload
@@ -399,6 +422,8 @@ export function payloadToGoalDraft(raw: unknown): GoalDraft {
     draft.maxTokens = Math.floor(cfg.maxTokens)
   if (typeof cfg.timeoutMs === "number" && cfg.timeoutMs > 0)
     draft.timeoutMinutes = Math.round(cfg.timeoutMs / 60_000)
+  const permissionProfile = readPermissionProfile(p.permissionProfile)
+  if (permissionProfile) draft.permissionProfile = permissionProfile
   return draft
 }
 
@@ -431,6 +456,8 @@ export function goalDraftToPayload(draft: GoalDraft): GoalTaskPayload {
   if (typeof draft.timeoutMinutes === "number" && draft.timeoutMinutes > 0)
     config.timeoutMs = draft.timeoutMinutes * 60_000
   if (Object.keys(config).length > 0) out.config = config
+  const permissionProfile = compactPermissionProfile(draft.permissionProfile)
+  if (permissionProfile) out.permissionProfile = permissionProfile
   return out
 }
 

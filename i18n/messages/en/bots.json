@@ -14,7 +14,9 @@
     "authorityTitle": "Host permissions",
     "authorityHint": "These permissions apply when the Bot requests unattended execution or automatic publication. Saving grants access for this installation; stricter host policies still apply. Automatic publication does not authorize merging.",
     "allowUnattended": "Allow commands without asking",
-    "allowAutomaticPublication": "Allow automatic publication of PRs and reviews"
+    "allowAutomaticPublication": "Allow automatic publication of PRs and reviews",
+    "permissionProfileTitle": "When nobody is watching",
+    "permissionProfileHint": "What this Bot's unattended runs may do without asking. A request that needs you pauses the run and sends an approval to your phone; nobody answering within 30 minutes denies it."
   },
   "credentials": {
     "bindAria": "Bind {slot}",
@@ -162,7 +164,9 @@
     "title": "Policy ceiling",
     "unconstrainedBody": "No layer set a limit, so this Bot runs under the same defaults as any other run.",
     "unconstrainedTitle": "No ceiling set",
-    "yes": "Yes"
+    "yes": "Yes",
+    "permissionCeiling": "Host ceiling",
+    "permissionClass": "{cls}: {level}"
   },
   "policyField": {
     "allowSelfTriggering": "Answer its own events",
@@ -171,7 +175,8 @@
     "maxConcurrentRuns": "Concurrent runs",
     "maxRunCostUsd": "Cost ceiling",
     "maxRunDurationMs": "Time ceiling",
-    "requireApprovalForWrites": "Approve every write"
+    "requireApprovalForWrites": "Approve every write",
+    "permissionProfile": "Unattended permissions"
   },
   "policyLayer": {
     "definition": "Definition",

@@ -13,6 +13,10 @@ import { handleExecutionRunControl } from "@/lib/companion/execution-run-control
 import { registerRunControlHandler } from "@/lib/execution/run-control"
 import { resolveOwnedBotAuthority } from "@/lib/bot/policy/run-authority"
 jest.mock("@/lib/bot/policy/run-authority", () => ({ resolveOwnedBotAuthority: jest.fn() }))
+import { announceRunApproval } from "@/lib/execution/run-approval-push"
+jest.mock("@/lib/execution/run-approval-push", () => ({
+  announceRunApproval: jest.fn(async () => undefined),
+}))
 
 import {
   BotRunCancelledError,
@@ -603,6 +607,36 @@ it("records and resolves an exact policy decision with host provenance through t
   const events = await getDb().executionRunEvents.where("runId").equals(RUN_ID).toArray()
   expect(events.some((event) => event.type === "interrupt.resolved")).toBe(true)
   expect(await parkingApi().waitForApproval("policy", request)).toEqual(decision)
+})
+
+it("wakes a paired phone once per question, never on re-entry or for a policy answer (ADR-0224 A7)", async () => {
+  jest.mocked(announceRunApproval).mockClear()
+  await expect(
+    parkingApi().waitForApproval("publish", { title: "Publish" })
+  ).rejects.toBeInstanceOf(BotRunParkedError)
+  const id = await botApprovalInterruptId(RUN_ID, "publish")
+  expect(announceRunApproval).toHaveBeenCalledTimes(1)
+  expect(announceRunApproval).toHaveBeenCalledWith(
+    expect.objectContaining({ id, runId: RUN_ID, type: "bot_approval", status: "pending" }),
+    { origin: "bot" }
+  )
+  // The runner re-enters a parked run every park interval.
+  await expect(
+    parkingApi().waitForApproval("publish", { title: "Publish" })
+  ).rejects.toBeInstanceOf(BotRunParkedError)
+  expect(announceRunApproval).toHaveBeenCalledTimes(1)
+
+  jest.mocked(announceRunApproval).mockClear()
+  jest.mocked(resolveOwnedBotAuthority).mockResolvedValue({
+    installation: { id: "boti_1" },
+    automatedPublicationAllowed: true,
+  } as never)
+  const decision = await parkingApi().waitForApproval("auto", {
+    title: "Publish",
+    decisionMode: "policy",
+  })
+  expect(decision.outcome).toBe("approved")
+  expect(announceRunApproval).not.toHaveBeenCalled()
 })
 
 it("falls back to human review without authority and never converts a parked human approval", async () => {

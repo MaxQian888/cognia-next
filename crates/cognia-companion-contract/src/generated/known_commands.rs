@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "223526d8b1f6c5dfec0b6078801b90457c8594bb04bb0d9c029ca2f78ed396cd";
+pub const CATALOG_HASH: &str = "dad4ba93550ea39754f438d0cea78a16298f7a551e9a31bea9b06ea93059e0a9";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -1012,6 +1012,8 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "reveal_tray_panel", arm: "reveal_tray_panel", resource: "desktop.tray.panel", verb: "reveal", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "revoke_push_token", arm: "revoke_push_token", resource: "notification.push_token", verb: "revoke", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "client.write", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "run_agent_hook", arm: "run_agent_hook", resource: "agent.hook", verb: "run", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
+    WireCommand { name: "execution_run_approval_list", arm: "execution_run_approval_list", resource: "execution.run.approval", verb: "list", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "agent.run", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::PageToken, long_running: false },
+    WireCommand { name: "execution_run_approval_respond", arm: "execution_run_approval_respond", resource: "execution.run.approval", verb: "respond", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "agent.run", risk: CommandRisk::High, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "remote_sandboxes_get", arm: "remote_sandboxes_get", resource: "sandbox.remote", verb: "get", target: CommandTarget::Client, operation: CommandOperation::Read, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "remote_sandboxes_set", arm: "remote_sandboxes_set", resource: "sandbox.remote", verb: "set", target: CommandTarget::Client, operation: CommandOperation::Write, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "sandbox_exec", arm: "sandbox_exec", resource: "sandbox", verb: "exec", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
@@ -2034,6 +2036,8 @@ pub static RENAMED_COMMANDS: &[(&str, &str)] = &[
     ("ensure_dir", "fs.dir.ensure"),
     ("ensure_dir_confined", "fs.dir.ensure_confined"),
     ("ensure_system_lsp_host", "lsp.system_host.ensure"),
+    ("execution_run_approval_list", "execution.run.approval.list"),
+    ("execution_run_approval_respond", "execution.run.approval.respond"),
     ("execution_run_control", "execution.run.control"),
     ("execution_run_create", "execution.run.create"),
     ("execution_run_events", "execution.run.event.replay"),

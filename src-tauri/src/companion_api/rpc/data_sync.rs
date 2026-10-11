@@ -129,6 +129,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "team_run_stop",
     "execution_run_control",
     "execution_run_detail",
+    "execution_run_approval_list",
+    "execution_run_approval_respond",
     "execution_run_create",
     "execution_run_resume",
     "execution_run_get",
@@ -935,6 +937,11 @@ pub(super) async fn dispatch(
         // paired device, through the same TS gate. Gated by CONTROL_COMMANDS.
         | "execution_run_control"
         | "execution_run_detail"
+        // ADR-0224 A7: parked approvals. The TS arms (`lib/execution/run-approvals.ts`)
+        // serve only pending tool and Bot approvals, and answer through the
+        // same control gate as the arm above.
+        | "execution_run_approval_list"
+        | "execution_run_approval_respond"
         // ADR-0188 companion RPC: Router + Fusion runs for a paired device.
         // The TS arm (`lib/router-fusion/gate/companion-bridge.ts`) runs the
         // Run API with the injected `callerDeviceId` as the run's actor, and

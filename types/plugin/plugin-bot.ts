@@ -30,6 +30,7 @@ import type {
   AutonomyLevel,
   EngagementMode,
 } from "@cognia/agent-config-types/agent-composition"
+import type { UnattendedPermissionProfileV1 } from "@cognia/agent-config-types/unattended-permission"
 
 import type { PluginIconName } from "./plugin-icon"
 
@@ -291,6 +292,13 @@ export interface PluginBotPolicyV1 {
    * that comments on a pull request and listens for comments is a loop.
    */
   allowSelfTriggering?: boolean
+  /**
+   * What the Bot's unattended turns may do without a person (ADR-0224 A7):
+   * a level per permission class, narrowed class by class across the layers.
+   * Absent everywhere means the host's ceiling: sandboxed workspace work runs,
+   * outbound messages, secret use and host configuration ask a person.
+   */
+  permissionProfile?: UnattendedPermissionProfileV1
 }
 
 /**

@@ -5480,6 +5480,8 @@
       "emptyTitle": "无需配置",
       "orphanBody": "定义已不存在，无法渲染表单。该安装此前存下的内容仍留在记录里。",
       "orphanTitle": "没有可显示的设置",
+      "permissionProfileHint": "此 Bot 在无人值守运行中无需询问即可执行的操作。需要你确认的请求会暂停运行并向你的手机发送审批；30 分钟内无人回应则拒绝。",
+      "permissionProfileTitle": "无人值守时",
       "save": "保存设置",
       "title": "设置"
     },
@@ -5634,6 +5636,8 @@
       "no": "否",
       "orphanBody": "上限由定义和安装记录一起折叠得出，而现在已经没有定义可折叠。",
       "orphanTitle": "定义缺失",
+      "permissionCeiling": "宿主上限",
+      "permissionClass": "{cls}：{level}",
       "refusal": "{layer} 试图放宽「{field}」，已被驳回。",
       "refusalsHint": "每一层都只能收窄。下面这些要的比上层允许的更多。",
       "title": "策略上限",
@@ -5648,6 +5652,7 @@
       "maxConcurrentRuns": "并发运行数",
       "maxRunCostUsd": "花费上限",
       "maxRunDurationMs": "时长上限",
+      "permissionProfile": "无人值守权限",
       "requireApprovalForWrites": "每次写入都需审批"
     },
     "policyLayer": {
@@ -27007,6 +27012,33 @@
       },
       "title": "远程会话"
     },
+    "runApprovals": {
+      "approve": "批准",
+      "approvedToast": "已批准，运行继续。",
+      "class": {
+        "hostConfig": "主机变更",
+        "outbound": "对外发送",
+        "secrets": "使用密钥",
+        "workspace": "工作区变更"
+      },
+      "deniedToast": "已拒绝。",
+      "deny": "拒绝",
+      "detailTruncated": "完整提案太大，无法在此显示，请在宿主上查看。",
+      "expires": "将于 {time, time, short} 自动拒绝",
+      "goneToast": "已被处理或已过期。",
+      "heading": "{count, plural, other {# 个运行正在等你审批}}",
+      "kind": {
+        "bot": "Bot 审批",
+        "tool": "工具请求"
+      },
+      "refusedToast": "宿主未接受这个答复。",
+      "respondFailedToast": "无法连接宿主，请重试。",
+      "risk": {
+        "high": "高风险",
+        "low": "低风险",
+        "medium": "中风险"
+      }
+    },
     "security": {
       "accountUnlockDescription": "输入一次账号密码，即可为这台手机设置指纹或面部解锁。设置后，锁屏会自动发起生物识别验证。下方的敏感操作保护需单独配置。",
       "accountUnlockTitle": "账号解锁",
@@ -39021,6 +39053,10 @@
       "modelPlaceholder": "claude-opus-4-7",
       "permissionMode": "权限模式",
       "permissionModeCapHelp": "本次运行的权限上限：只能降低智能体的权限模式，不能提高。",
+      "permissionProfile": {
+        "heading": "无人值守时",
+        "help": "此任务的运行无需询问即可执行的操作。需要你确认的请求会暂停运行并向你的手机发送审批；30 分钟内无人回应则拒绝。"
+      },
       "plan": {
         "planId": "智能体计划",
         "planIdPlaceholder": "选择或粘贴计划 ID",
@@ -58555,6 +58591,31 @@
       "templateSelfHint": "复刻我自己的口吻与知识。",
       "title": "创建数字孪生",
       "workerEnabled": "工作器已启用"
+    }
+  },
+  "unattendedPermissions": {
+    "class": {
+      "hostConfig": {
+        "hint": "更改连接器、智能体、备份或本机自身的设置。",
+        "label": "主机配置"
+      },
+      "outbound": {
+        "hint": "发送消息、分享文件，或向本机之外发布任何内容。",
+        "label": "对外发送"
+      },
+      "secrets": {
+        "hint": "读取或填入已保存的密码、令牌和密钥。",
+        "label": "使用密钥"
+      },
+      "workspace": {
+        "hint": "在运行的工作区中编辑文件、执行命令。仅在已验证的沙箱中可无需询问直接执行。",
+        "label": "工作区文件与命令"
+      }
+    },
+    "level": {
+      "ask": "询问我",
+      "deny": "禁止",
+      "sandbox": "在已验证的沙箱中允许"
     }
   },
   "unifiedReview": {

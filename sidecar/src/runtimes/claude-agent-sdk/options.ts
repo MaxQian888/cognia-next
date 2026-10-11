@@ -17,6 +17,7 @@ import {
 import { buildLspHooks } from "../../hooks/lsp-diagnostics.ts"
 import { buildAgentHooks, mergeHookMaps } from "../../hooks/agent-hooks.ts"
 import { buildLedgerToolHooks } from "./ledger.ts"
+import { buildProfileToolHooks } from "./profile-hooks.ts"
 import { createNativeHookExecutor } from "../../hooks/native-executor.ts"
 
 import { applyEmbeddedClaudeExecutable } from "./executable.ts"
@@ -117,6 +118,19 @@ export function buildAnthropicOptions({
   // recognise. They're consumed earlier in `resolveSendOptions` (translated
   // into env / settingSources / appendSystemPrompt / etc.) or in this
   // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
+  // One `canUseTool` for the SDK and the profile hook (ADR-0224 A7), which
+  // asks through it ahead of the SDK's own modes and hands the approval over.
+  const profileApprovals = new Set<string>()
+  const sessionCanUseTool = createAnthropicCanUseTool({
+    sendOptions,
+    sessionId,
+    emit,
+    log,
+    pendingApprovals,
+    pluginToolNameAliases,
+    doomGuard,
+    profileApprovals,
+  })
   let options: Options & Record<string, unknown> = {
     cwd: sendOptions.cwd,
     model:
@@ -203,18 +217,16 @@ export function buildAnthropicOptions({
       buildLedgerToolHooks({
         gate: ledgerGate,
         onRefused: () => interruptForLedger(),
+      }) as unknown as HookMap,
+      buildProfileToolHooks({
+        sendOptions,
+        pluginToolNameAliases,
+        canUseTool: sessionCanUseTool,
+        profileApprovals,
       }) as unknown as HookMap
     ) as Options["hooks"],
 
-    canUseTool: createAnthropicCanUseTool({
-      sendOptions,
-      sessionId,
-      emit,
-      log,
-      pendingApprovals,
-      pluginToolNameAliases,
-      doomGuard,
-    }) as Options["canUseTool"],
+    canUseTool: sessionCanUseTool as Options["canUseTool"],
   }
 
   // Nested `SendOptions.claudeAgentSdk` — the 29 SDK options the flat allowlist

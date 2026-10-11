@@ -104,11 +104,15 @@ import {
   needsApprovalSummary,
   type UnattendedPermissionResponder,
 } from "@/lib/claude/unattended-permission-responder"
+import { createUnattendedPark } from "@/lib/claude/unattended-park"
+import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { holdExecutionClock } from "../execution-clock"
 import type {
   AppSettings,
   BuiltinToolsConfig,
   ChatSession,
   ClaudeEvent,
+  PermissionRequestEvent,
   SendOptions,
 } from "@cognia/agent-config-types"
 import { createSession, getSession } from "@/lib/db/sessions"
@@ -321,33 +325,32 @@ function unionStrings(...sources: (readonly string[] | undefined)[]): string[] {
  *   - `disabledSkillIds`                → skill removals
  *   - `permissionMode`                  → a cap: it can lower the resolved
  *                                          mode, never raise it
+ *   - `permissionProfile`               → the unattended profile; always
+ *                                          present, empty meaning the host's
+ *                                          ceiling (ADR-0224 A7)
  *
- * `undefined` when the payload sets none of them.
+ * Always a grant: every scheduled turn is unattended, so it always carries a
+ * profile even when the payload customises nothing else.
  */
 function buildSchedulerCapabilityGrant(
   task: Pick<ScheduledTask, "id">,
   payload: ChatLikeTaskPayload
-): AgentCapabilityGrantV1 | undefined {
+): AgentCapabilityGrantV1 {
   const grant: AgentCapabilityGrantV1 = {
     schemaVersion: AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
     source: { kind: "scheduler", id: task.id },
   }
-  let touched = false
   if (payload.model?.trim()) {
     grant.model = payload.model.trim()
-    touched = true
   }
   if (payload.effort) {
     grant.effort = payload.effort
-    touched = true
   }
   if (typeof payload.maxTurns === "number") {
     grant.maxTurns = payload.maxTurns
-    touched = true
   }
   if (payload.appendSystemPrompt?.trim()) {
     grant.instructions = [payload.appendSystemPrompt.trim()]
-    touched = true
   }
   const addTools = payload.allowedTools?.filter(Boolean) ?? []
   const denyTools = payload.disallowedTools?.filter(Boolean) ?? []
@@ -356,24 +359,21 @@ function buildSchedulerCapabilityGrant(
       ...(addTools.length > 0 ? { add: addTools } : {}),
       ...(denyTools.length > 0 ? { deny: denyTools } : {}),
     }
-    touched = true
   }
   if (payload.mcpServerIds) {
     // `only` narrows the resolved subset to these ids and `add` brings in the
     // ones the character did not pick, so the run gets exactly these enabled
     // servers. An empty list means no MCP servers.
     grant.mcpServers = { only: [...payload.mcpServerIds], add: [...payload.mcpServerIds] }
-    touched = true
   }
   if (payload.disabledSkillIds?.length) {
     grant.skills = { remove: [...payload.disabledSkillIds] }
-    touched = true
   }
   if (payload.permissionMode) {
     grant.permissionMode = payload.permissionMode
-    touched = true
   }
-  return touched ? grant : undefined
+  grant.permissionProfile = { ...(payload.permissionProfile ?? {}) }
+  return grant
 }
 
 /**
@@ -767,7 +767,7 @@ async function runChatPrompt(
       session: { ...session, projectId: owningProjectId ?? undefined },
       appSettings: withPayloadBuiltinTools(appSettings, payload),
       agentMode,
-      ...(capabilityGrant ? { capabilityGrants: [capabilityGrant] } : {}),
+      capabilityGrants: [capabilityGrant],
       ...(options.skillId ? { ephemeralSkillIds: [options.skillId] } : {}),
       activeProject,
       workspaceRestricted: workspaceTrust.restricted,
@@ -929,11 +929,26 @@ async function runChatPrompt(
     resolveOnce = resolve
   })
 
-  // Nobody is watching a scheduled turn. A permission request is answered
-  // here with a recorded denial, so the task ends `needs_approval` with the
-  // tools named, instead of the desktop's silent auto-deny or the headless
-  // brain's five-minute hang that surfaced as "timeout or cancellation".
-  const permissions = createUnattendedPermissionResponder("scheduled task")
+  // Nobody is watching a scheduled turn. A permission request is parked here
+  // for a person (ADR-0224 A7): it raises an approval, wakes a paired phone,
+  // and the turn resumes on approval. Nobody answering in time ends the task
+  // `needs_approval` with the tools named, instead of the desktop's silent
+  // auto-deny or the headless brain's five-minute hang that surfaced as
+  // "timeout or cancellation".
+  const permissions = createUnattendedPermissionResponder("scheduled task", {
+    park: createUnattendedPark({
+      origin: "scheduler",
+      sessionId,
+      label: `Scheduled task: ${task.name}`,
+      ...(session.projectId ? { projectId: session.projectId } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    }),
+  })
+  // This turn answers its own permission requests. Registered under its turn
+  // id so the desktop's chat listener stands back instead of racing it with
+  // a "session not open" denial.
+  finalOptions = { ...finalOptions, turnId: finalOptions.turnId ?? crypto.randomUUID() }
+  const releaseResponder = registerCaptureResponder(sessionId, finalOptions.turnId!, true)
   // Set when the prompt is handed to the agent host; the first event for this
   // session after that closes the `first-response` phase.
   let promptSentAt: number | null = null
@@ -949,18 +964,36 @@ async function runChatPrompt(
     collected.push(evt)
     const evtType = (evt as { type?: string }).type
     if (evtType === "permission_request") {
-      const request = evt as { requestId?: string; toolName?: string }
+      const request = evt as Partial<PermissionRequestEvent>
       if (request.requestId && request.toolName) {
-        const decision = permissions.onPermissionRequest({
-          type: "permission_request",
-          sessionId,
-          requestId: request.requestId,
-          toolUseID: (evt as { toolUseID?: string }).toolUseID ?? request.requestId,
-          toolName: request.toolName,
-          input: (evt as { input?: Record<string, unknown> }).input ?? {},
-        })
-        void approveTool(sessionId, request.requestId, decision.decision, decision.message).catch(
-          (error) => log.warn("Scheduler unattended deny failed", { sessionId, error })
+        const requestId = request.requestId
+        // A parked request is a person's think-time, not the task running long.
+        const releaseClock = holdExecutionClock(options.signal)
+        void (async () => {
+          let decision: Awaited<ReturnType<UnattendedPermissionResponder["onPermissionRequest"]>>
+          try {
+            decision = await permissions.onPermissionRequest({
+              ...request,
+              type: "permission_request",
+              sessionId,
+              requestId,
+              toolUseID: request.toolUseID ?? requestId,
+              toolName: request.toolName!,
+              input: request.input ?? {},
+            })
+          } finally {
+            releaseClock()
+          }
+          if (options.signal?.aborted) return
+          await approveTool(
+            sessionId,
+            requestId,
+            decision.decision === "allow_always" ? "allow" : decision.decision,
+            decision.message,
+            decision.updatedInput
+          )
+        })().catch((error) =>
+          log.warn("Scheduler unattended permission answer failed", { sessionId, error })
         )
       }
       return
@@ -1024,6 +1057,7 @@ async function runChatPrompt(
     } catch {
       /* */
     }
+    releaseResponder()
     return await finished
   }
 
@@ -1036,6 +1070,7 @@ async function runChatPrompt(
     } catch {
       /* */
     }
+    releaseResponder()
     signal?.removeEventListener("abort", abortHandler)
     return await finished
   }
@@ -1057,12 +1092,18 @@ async function runChatPrompt(
     if (taskLease) {
       await taskLease.settle(result.success ? "ready" : "failed").catch(() => undefined)
     }
+    await permissions.finish(
+      result.success ? "completed" : signal?.aborted ? "cancelled" : "failed",
+      result.success ? undefined : result.error
+    )
     return result
   } catch (err) {
     if (promptSentAt !== null) recordTurnPhases(execution, promptSentAt, firstEventAt, Date.now())
     if (taskLease) await taskLease.settle("failed").catch(() => undefined)
+    await permissions.finish("failed", err instanceof Error ? err.message : String(err))
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
+    releaseResponder()
     signal?.removeEventListener("abort", abortHandler)
     try {
       unlisten()

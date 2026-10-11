@@ -11,17 +11,24 @@
  * browser threw before the send. None of the three told the caller that a tool
  * needed a human.
  *
- * This responder makes the decision at the call site, once, the same way on
- * every shell: deny immediately, tell the model why, and record the denial so
- * the caller can mark its run `needs_approval` instead of `completed`.
+ * This responder makes the decision at the call site, the same way on every
+ * shell. With a park (ADR-0224 A7, `./unattended-park.ts`), which every Bot,
+ * scheduled-task and plugin turn now passes, the request waits for a person:
+ * it raises an approval interrupt, wakes a paired phone, and the turn resumes
+ * on approval. A person's denial is their decision and tells the model so. A
+ * question nobody answered before the park timed out, or that the turn ended
+ * on, is recorded as a denial so the caller can mark its run `needs_approval`
+ * instead of `completed`. Without a park, or when parking itself fails, the
+ * request is denied at once, as before.
  *
- * `bypassPermissions` turns never reach it (the runtime asks nothing), so a
- * caller that resolved that authority keeps unattended autonomy. Everything
- * else fails fast and honestly.
+ * A `bypassPermissions` turn rarely reaches it, but an unattended turn's
+ * permission profile still makes its outbound, secret and host-configuration
+ * calls ask, so even a bypass turn can park.
  */
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "./run-and-capture"
+import type { UnattendedPark } from "./unattended-park"
 
 /** The status a run carries when at least one tool was denied for want of an approver. */
 export const NEEDS_APPROVAL_STATUS = "needs_approval" as const
@@ -36,15 +43,48 @@ export interface UnattendedPermissionDenial {
   reason: string
 }
 
+/** A request a person answered with a denial while it was parked. */
+export interface UnattendedPermissionRefusal {
+  requestId: string
+  toolName: string
+  at: number
+}
+
 export interface UnattendedPermissionResponder {
   /** Plug into `RunAndCaptureOptions.onPermissionRequest`. */
-  onPermissionRequest: (request: PermissionRequestEvent) => CapturePermissionDecision
-  /** Every denial so far, in arrival order. */
+  onPermissionRequest: (
+    request: PermissionRequestEvent
+  ) => CapturePermissionDecision | Promise<CapturePermissionDecision>
+  /** Requests nobody approved (denied at once, timed out, or withdrawn), in arrival order. */
   readonly denials: readonly UnattendedPermissionDenial[]
-  /** True once any request was denied. */
+  /** Requests a person explicitly denied while they were parked. */
+  readonly refusals: readonly UnattendedPermissionRefusal[]
+  /** True once any request went unapproved for want of an answer. */
   needsApproval: () => boolean
   /** Distinct tool names that were denied, for a one-line summary. */
   deniedToolNames: () => string[]
+  /** Whether requests wait for a person instead of being denied at once. */
+  readonly parks: boolean
+  /** Close the run a parked request opened, once the turn is over. */
+  finish: (status: "completed" | "failed" | "cancelled", summary?: string) => Promise<void>
+}
+
+/** Provider-visible text for a parked request a person refused. */
+export function unattendedRefusalMessage(toolName: string, reason?: string): string {
+  return (
+    `A person reviewed the request to use tool "${toolName}" and denied it` +
+    `${reason ? ` (${reason})` : ""}. Do not retry it. Finish what you can without it.`
+  )
+}
+
+/** Provider-visible text for a parked request nobody answered in time. */
+export function unattendedTimeoutMessage(surface: string, toolName: string): string {
+  return (
+    `Tool "${toolName}" needs a human approval. This ${surface} turn runs unattended, ` +
+    `and nobody approved the request before it timed out, so it was recorded as ` +
+    `${NEEDS_APPROVAL_STATUS}. Do not retry it. Finish what you can without it ` +
+    `and state plainly what still needs approval.`
+  )
 }
 
 /** Provider-visible text. English on purpose: the model reads it. */
@@ -62,22 +102,67 @@ export function unattendedDenialMessage(surface: string, toolName: string): stri
  *
  * @param surface Where the turn came from ("plugin", "bot", "scheduled task").
  *   Only used in the message the model sees and in logs.
+ * @param options.park Park requests for a person instead of denying them.
  */
 export function createUnattendedPermissionResponder(
   surface: string,
-  options: { now?: () => number } = {}
+  options: { now?: () => number; park?: UnattendedPark } = {}
 ): UnattendedPermissionResponder {
   const now = options.now ?? (() => Date.now())
   const denials: UnattendedPermissionDenial[] = []
+  const refusals: UnattendedPermissionRefusal[] = []
+  const park = options.park
+
+  const deny = (request: PermissionRequestEvent, reason: string): CapturePermissionDecision => {
+    denials.push({ requestId: request.requestId, toolName: request.toolName, at: now(), reason })
+    return { decision: "deny", message: reason }
+  }
+
+  const parked = async (
+    request: PermissionRequestEvent,
+    parking: UnattendedPark
+  ): Promise<CapturePermissionDecision> => {
+    let outcome: Awaited<ReturnType<UnattendedPark["park"]>>
+    try {
+      outcome = await parking.park(request)
+    } catch (error) {
+      // Nowhere to park (no database, a broken journal): say so and fall back
+      // to what an unattended turn did before parking existed.
+      console.warn(
+        `[unattended] could not park ${request.toolName}; denying it instead:`,
+        error instanceof Error ? error.message : error
+      )
+      return deny(request, unattendedDenialMessage(surface, request.toolName))
+    }
+    switch (outcome.kind) {
+      case "approved":
+        return outcome.decision
+      case "denied": {
+        refusals.push({ requestId: request.requestId, toolName: request.toolName, at: now() })
+        return {
+          decision: "deny",
+          message: unattendedRefusalMessage(request.toolName, outcome.message),
+        }
+      }
+      case "expired":
+      case "withdrawn":
+        return deny(request, unattendedTimeoutMessage(surface, request.toolName))
+    }
+  }
+
   return {
     denials,
-    onPermissionRequest: (request) => {
-      const reason = unattendedDenialMessage(surface, request.toolName)
-      denials.push({ requestId: request.requestId, toolName: request.toolName, at: now(), reason })
-      return { decision: "deny", message: reason }
-    },
+    refusals,
+    parks: Boolean(park),
+    onPermissionRequest: (request) =>
+      park
+        ? parked(request, park)
+        : deny(request, unattendedDenialMessage(surface, request.toolName)),
     needsApproval: () => denials.length > 0,
     deniedToolNames: () => [...new Set(denials.map((denial) => denial.toolName))],
+    finish: async (status, summary) => {
+      await park?.finish(status, summary)
+    },
   }
 }
 

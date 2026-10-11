@@ -471,6 +471,13 @@ export interface ChatLikeTaskPayload extends Record<string, unknown> {
   effort?: SendOptions["effort"]
   /** Skill ids to disable for this run, in addition to `session.disabledSkillIds`. */
   disabledSkillIds?: string[]
+  /**
+   * What this unattended run may do without a person (ADR-0224 A7). Each class
+   * can only be lowered from the host's ceiling: sandboxed workspace work runs,
+   * outbound messages, secret use and host configuration ask a person (and
+   * park the run until someone answers). Absent means the ceiling.
+   */
+  permissionProfile?: import("@cognia/agent-config-types").UnattendedPermissionProfileV1
 }
 
 /** Payload for `agent` task type — a chat-like turn bound to a specific character. */
@@ -538,6 +545,8 @@ export interface GoalTaskPayload extends Record<string, unknown> {
   sessionTitle?: string
   /** Per-goal config overrides (maxTurns / maxTokens / timeoutMs / judge…). */
   config?: Partial<GoalConfig>
+  /** What the goal's unattended turns may do without a person (ADR-0224 A7). */
+  permissionProfile?: import("@cognia/agent-config-types").UnattendedPermissionProfileV1
 }
 
 /**

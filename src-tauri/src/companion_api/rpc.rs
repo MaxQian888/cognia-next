@@ -667,6 +667,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     // `upgrade-required` on the TS side).
     "execution_run_control",
     "execution_run_detail",
+    // ADR-0224 A7: the approvals unattended runs are parked on, and a paired
+    // device's answer to one. The answer is the approval itself, like
+    // `claude_approve`, so it takes no admin lease; it goes through the same
+    // control gate as `execution_run_control`, as the stamped device.
+    "execution_run_approval_list",
+    "execution_run_approval_respond",
     // ADR-0188 companion RPC: Router + Fusion runs for a paired device, and a
     // companion renderer's answer to a sidecar call reservation.
     "execution_run_create",
@@ -1289,6 +1295,7 @@ pub fn known_commands() -> &'static [&'static str] {
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
     "execution_run_detail",
+    "execution_run_approval_list",
     "execution_run_get",
     "execution_run_events",
     "bot_console_read",
@@ -1724,6 +1731,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "team_run_resume",
     "team_run_stop",
     "execution_run_control",
+    "execution_run_approval_respond",
     "agent_task_start",
     "agent_task_pause",
     "agent_task_resume",
@@ -2121,6 +2129,8 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // it becomes the operator the control gate authorizes and the actor the
     // receipt names, so a payload must not be able to borrow another one.
     "execution_run_control",
+    // ADR-0224 A7: the approver of a parked run is the device that answered.
+    "execution_run_approval_respond",
     // ADR-0188 companion RPC. The Run API actor of a companion run is the
     // authenticated device (`device:<id>`): only it may read, resume or stop
     // the run, and it answers only the reservations of its own turns (the

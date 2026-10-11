@@ -50,6 +50,19 @@ jest.mock("@/lib/claude/ipc", () => ({
   approveTool: (...args: unknown[]) => approveToolMock(...args),
 }))
 
+// Parking needs Dexie and the approval registry; the scheduler's part is how it
+// answers the request with whatever the park decided (ADR-0224 A7).
+const parkOutcomeMock = jest.fn(async (): Promise<Record<string, unknown>> => ({ kind: "expired" }))
+const parkFinishMock = jest.fn(async (..._args: unknown[]) => undefined)
+const createUnattendedParkMock = jest.fn((_options: Record<string, unknown>) => ({
+  park: () => parkOutcomeMock(),
+  finish: (...args: unknown[]) => parkFinishMock(...args),
+  runId: () => null,
+}))
+jest.mock("@/lib/claude/unattended-park", () => ({
+  createUnattendedPark: (options: Record<string, unknown>) => createUnattendedParkMock(options),
+}))
+
 const createSessionMock = jest.fn(async (input: unknown) => ({
   id: "session-created",
   ...((input as Record<string, unknown>) ?? {}),
@@ -489,11 +502,16 @@ describe("resolveAgentMode", () => {
 describe("buildSchedulerCapabilityGrant", () => {
   const task = { id: "task-1" }
 
-  it("returns undefined when the payload sets no capability knob", () => {
-    expect(buildSchedulerCapabilityGrant(task, { prompt: "p" })).toBeUndefined()
+  it("is only the unattended profile when the payload sets no capability knob", () => {
+    const bare = {
+      schemaVersion: 1,
+      source: { kind: "scheduler", id: "task-1" },
+      permissionProfile: {},
+    }
+    expect(buildSchedulerCapabilityGrant(task, { prompt: "p" })).toEqual(bare)
     expect(
       buildSchedulerCapabilityGrant(task, { prompt: "p", model: "  ", appendSystemPrompt: " " })
-    ).toBeUndefined()
+    ).toEqual(bare)
   })
 
   it("maps every knob onto the grant, attributed to the task", () => {
@@ -521,6 +539,7 @@ describe("buildSchedulerCapabilityGrant", () => {
       mcpServers: { only: ["a"], add: ["a"] },
       skills: { remove: ["s2"] },
       permissionMode: "plan",
+      permissionProfile: {},
     })
   })
 
@@ -655,7 +674,8 @@ describe("executeChatTask", () => {
     const [sId, prompt, options] = sendPromptMock.mock.calls[0] as [string, string, SendOptions]
     expect(sId).toBe("session-created")
     expect(prompt).toBe("hello")
-    expect(options).toEqual({})
+    // Only the turn id the run answers its own permission requests under.
+    expect(options).toEqual({ turnId: expect.any(String) })
     // The model heads the resolver's chain, so the provider is derived for it.
     const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
       capabilityGrants?: Array<{ model?: string }>
@@ -1000,11 +1020,67 @@ describe("executeChatTask", () => {
     }
     expect(ctx.capabilityGrants?.[0]?.skills?.remove).toEqual(["s2"])
   })
-  it("sends no grant when the payload sets no capability knob", async () => {
+  it("sends only the unattended profile when the payload sets no capability knob", async () => {
     emitTerminalResult()
-    await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution(), makeSignal())
+    const task = makeTask({ payload: { prompt: "hi" } })
+    await executeChatTask(task, makeExecution(), makeSignal())
     const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(ctx).not.toHaveProperty("capabilityGrants")
+    expect(ctx.capabilityGrants).toEqual([
+      { schemaVersion: 1, source: { kind: "scheduler", id: task.id }, permissionProfile: {} },
+    ])
+  })
+  it("carries the task's permission profile on its grant (ADR-0224 A7)", async () => {
+    emitTerminalResult()
+    await executeChatTask(
+      makeTask({ payload: { prompt: "hi", permissionProfile: { outbound: "deny" } } }),
+      makeExecution(),
+      makeSignal()
+    )
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
+      capabilityGrants?: Array<{ permissionProfile?: unknown }>
+    }
+    expect(ctx.capabilityGrants?.[0]?.permissionProfile).toEqual({ outbound: "deny" })
+  })
+  it("parks a permission ask and resumes the turn when a person approves it", async () => {
+    parkOutcomeMock.mockResolvedValueOnce({
+      kind: "approved",
+      decision: { decision: "allow", updatedInput: { file_path: "/repo/b.ts" } },
+    })
+    onClaudeMessageMock.mockImplementationOnce(async (cb) => {
+      const cast = cb as (e: unknown) => void
+      setTimeout(
+        () =>
+          cast({
+            sessionId: "session-created",
+            type: "permission_request",
+            requestId: "req-1",
+            toolUseID: "tu-1",
+            toolName: "Edit",
+            input: { file_path: "/repo/a.ts" },
+            permissionClass: "workspace",
+          }),
+        0
+      )
+      setTimeout(() => cast({ sessionId: "session-created", type: "result" }), 20)
+      return () => undefined
+    })
+    const task = makeTask({ name: "Nightly digest", payload: { prompt: "hi" } })
+    const r = await executeChatTask(task, makeExecution(), makeSignal())
+    expect(createUnattendedParkMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: "scheduler",
+        sessionId: "session-created",
+        label: "Scheduled task: Nightly digest",
+      })
+    )
+    expect(approveToolMock).toHaveBeenCalledWith("session-created", "req-1", "allow", undefined, {
+      file_path: "/repo/b.ts",
+    })
+    expect(r.success).toBe(true)
+    expect(parkFinishMock).toHaveBeenCalledWith("completed", undefined)
+    // The turn id it answers for rides the send, so the desktop listener stands back.
+    const options = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
+    expect(options.turnId).toEqual(expect.any(String))
   })
   it("resolves with the payload's builtinTools patch applied to settings", async () => {
     emitTerminalResult()
@@ -1066,7 +1142,8 @@ describe("executeChatTask", () => {
       "session-created",
       "req-1",
       "deny",
-      expect.stringContaining("needs_approval")
+      expect.stringContaining("needs_approval"),
+      undefined
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("needs approval: Edit")

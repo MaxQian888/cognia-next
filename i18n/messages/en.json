@@ -5480,6 +5480,8 @@
       "emptyTitle": "Nothing to configure",
       "orphanBody": "The definition is gone, so there is no form to render. Whatever this installation stored is still on the row.",
       "orphanTitle": "No settings to show",
+      "permissionProfileHint": "What this Bot's unattended runs may do without asking. A request that needs you pauses the run and sends an approval to your phone; nobody answering within 30 minutes denies it.",
+      "permissionProfileTitle": "When nobody is watching",
       "save": "Save settings",
       "title": "Settings"
     },
@@ -5634,6 +5636,8 @@
       "no": "No",
       "orphanBody": "A ceiling is folded from the definition and the installation together, and there is no definition left to fold.",
       "orphanTitle": "Definition missing",
+      "permissionCeiling": "Host ceiling",
+      "permissionClass": "{cls}: {level}",
       "refusal": "{layer} asked to widen {field} and was overruled.",
       "refusalsHint": "A layer can only narrow. These asked for more than the layer above allowed.",
       "title": "Policy ceiling",
@@ -5648,6 +5652,7 @@
       "maxConcurrentRuns": "Concurrent runs",
       "maxRunCostUsd": "Cost ceiling",
       "maxRunDurationMs": "Time ceiling",
+      "permissionProfile": "Unattended permissions",
       "requireApprovalForWrites": "Approve every write"
     },
     "policyLayer": {
@@ -27007,6 +27012,33 @@
       },
       "title": "Remote sessions"
     },
+    "runApprovals": {
+      "approve": "Approve",
+      "approvedToast": "Approved. The run continues.",
+      "class": {
+        "hostConfig": "Host change",
+        "outbound": "Outbound message",
+        "secrets": "Secret use",
+        "workspace": "Workspace change"
+      },
+      "deniedToast": "Denied.",
+      "deny": "Deny",
+      "detailTruncated": "The full proposal is too large to show here. Open it on the host.",
+      "expires": "Denied automatically at {time, time, short}",
+      "goneToast": "Already answered, or it expired.",
+      "heading": "{count, plural, =1 {1 run is waiting for you} other {# runs are waiting for you}}",
+      "kind": {
+        "bot": "Bot approval",
+        "tool": "Tool request"
+      },
+      "refusedToast": "The host did not accept that answer.",
+      "respondFailedToast": "Could not reach the host. Try again.",
+      "risk": {
+        "high": "High risk",
+        "low": "Low risk",
+        "medium": "Medium risk"
+      }
+    },
     "security": {
       "accountUnlockDescription": "Enter your account password once to set up fingerprint or face unlock on this phone. After setup, the lock screen automatically asks for biometrics. Sensitive-action protection below is configured separately.",
       "accountUnlockTitle": "Account unlock",
@@ -39021,6 +39053,10 @@
       "modelPlaceholder": "claude-opus-4-7",
       "permissionMode": "Permission mode",
       "permissionModeCapHelp": "A cap for this run: it can lower the agent's permission mode, never raise it.",
+      "permissionProfile": {
+        "heading": "When nobody is watching",
+        "help": "What this task's runs may do without asking. A request that needs you pauses the run and sends an approval to your phone; nobody answering within 30 minutes denies it."
+      },
       "plan": {
         "planId": "Agent plan",
         "planIdPlaceholder": "Select or paste a plan id",
@@ -58555,6 +58591,31 @@
       "templateSelfHint": "A twin of my own voice and knowledge.",
       "title": "Create a digital twin",
       "workerEnabled": "Worker enabled"
+    }
+  },
+  "unattendedPermissions": {
+    "class": {
+      "hostConfig": {
+        "hint": "Changing connectors, agents, backups or this host's own settings.",
+        "label": "Host configuration"
+      },
+      "outbound": {
+        "hint": "Sending messages, sharing files, or publishing anything beyond this host.",
+        "label": "Outbound messages"
+      },
+      "secrets": {
+        "hint": "Reading or filling stored passwords, tokens and keys.",
+        "label": "Secret use"
+      },
+      "workspace": {
+        "hint": "Editing files and running commands in the run's workspace. Allowed without asking only inside a verified sandbox.",
+        "label": "Workspace files and commands"
+      }
+    },
+    "level": {
+      "ask": "Ask me",
+      "deny": "Never",
+      "sandbox": "Allow in a verified sandbox"
     }
   },
   "unifiedReview": {

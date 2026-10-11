@@ -5149,6 +5149,40 @@ fn execution_run_detail_is_read_only_and_scoped_to_agent_authority() {
 }
 
 #[test]
+fn run_approval_commands_are_lease_free_and_bound_to_the_device() {
+    // ADR-0224 A7: a phone answers a parked unattended run the way it answers
+    // a paired chat's permission request. No admin lease (a headless host has
+    // nobody to approve one), the Control grant's `agent.run`, and the
+    // approver is the authenticated device, never one the payload names.
+    use crate::companion_api::command_manifest::{descriptor, CommandApproval, CommandTarget};
+    for command in [
+        "execution_run_approval_list",
+        "execution_run_approval_respond",
+    ] {
+        assert!(KNOWN_COMMANDS.contains(&command), "{command} must be known");
+        assert!(
+            data_sync::COMMANDS.contains(&command),
+            "{command} is bridged"
+        );
+        let d = descriptor(command).expect("run approval commands have a manifest descriptor");
+        assert_eq!(d.capability, "agent.run");
+        assert_eq!(d.approval, CommandApproval::None);
+        assert_eq!(d.target, CommandTarget::Execution);
+    }
+    assert!(READ_ONLY_COMMANDS.contains(&"execution_run_approval_list"));
+    assert!(!CONTROL_COMMANDS.contains(&"execution_run_approval_list"));
+    assert!(!READ_ONLY_COMMANDS.contains(&"execution_run_approval_respond"));
+    assert!(CONTROL_COMMANDS.contains(&"execution_run_approval_respond"));
+    assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"execution_run_approval_respond"));
+    let bound = inject_caller_device_id(
+        "execution_run_approval_respond",
+        json!({ "interruptId": "i", "decision": "approve", "callerDeviceId": "spoofed" }),
+        "verified-device",
+    );
+    assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+}
+
+#[test]
 fn router_fusion_companion_commands_are_classified_and_bound_to_the_device() {
     // ADR-0188 companion RPC: the Run API actor of a companion run is the
     // authenticated device, so every one of these binds `callerDeviceId`, and

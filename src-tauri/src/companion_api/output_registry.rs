@@ -361,6 +361,9 @@ mod tests {
         ("team_run_stop", OutputShape::Opaque(RootType::Any)),
         ("execution_run_control", OutputShape::Opaque(RootType::Any)),
         ("execution_run_detail", OutputShape::Opaque(RootType::Object)),
+        // ADR-0224 A7: parked approvals for a paired device.
+        ("execution_run_approval_list", OutputShape::Declared(RootType::Object)),
+        ("execution_run_approval_respond", OutputShape::Declared(RootType::Object)),
         // ADR-0188 companion RPC: Router + Fusion's `{ ok, value | error }`
         // envelope (`#/$defs/RouterFusionOutcome`), answered by the brain.
         ("execution_run_create", OutputShape::Declared(RootType::Object)),

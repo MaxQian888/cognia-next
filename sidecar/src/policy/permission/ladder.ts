@@ -6,6 +6,13 @@
 // that allow a call without asking: `ask_user`, the permission mode,
 // remembered grants and ruleset allows. Whatever is left asks the user.
 //
+// An unattended run also carries a permission profile (ADR-0224 A7,
+// ./permission-classes.ts). Its `deny` classes are a hard check; its
+// outbound, secret and host-configuration classes at `ask` disarm every
+// shortcut, the way a per-call plugin tool does; and its workspace class at
+// `sandbox` adds one shortcut, allowing the sandboxed tools of a run whose
+// placement the host attested.
+//
 // The rails share every step, but not the order or the set of steps. The
 // Claude Agent SDK enforces plan, dontAsk and bypassPermissions over its own
 // tools, so its profile leaves them to the SDK, while the ai-sdk rail has no
@@ -19,6 +26,10 @@
 // ./sdk-can-use-tool.ts) and ./approval.ts.
 
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type {
+  PermissionClass,
+  ResolvedPermissionProfile,
+} from "@cognia/agent-config-types/unattended-permission"
 
 import { classifyToolCallConfinement } from "../confinement/classify.ts"
 import type {
@@ -38,6 +49,13 @@ import {
   qualifiedToolName,
   splitToolName,
 } from "../tool-catalog/names.ts"
+import {
+  EMPTY_PLUGIN_CLASS_INDEX,
+  isSandboxExecuted,
+  profileVerdict,
+  type PluginClassIndex,
+  type ProfileVerdict,
+} from "./permission-classes.ts"
 import { resolveForToolCall } from "./resolver.ts"
 import type { Verdict } from "./resolver.ts"
 
@@ -53,6 +71,12 @@ export interface PermissionSendOptions {
   cwd?: string
   pluginTools?: unknown
   remoteExecutionContext?: unknown
+  /** An unattended run's resolved permission profile (ADR-0224 A7). */
+  permissionProfile?: unknown
+  /** The host's attestation of this run's sandbox placement. */
+  sandboxAttestation?: unknown
+  /** How long a permission request may wait for an answer (ms). */
+  approvalTtlMs?: unknown
 }
 
 /**
@@ -75,6 +99,12 @@ export interface LadderPolicy {
    * dontAsk denies it.
    */
   perCallApproval?: ReadonlySet<string> | null
+  /** An unattended run's permission profile; absent on interactive turns. */
+  profile?: ResolvedPermissionProfile | null
+  /** Plugin tool classes and the first-party sandboxed tools, from `pluginTools`. */
+  pluginClasses?: PluginClassIndex | null
+  /** Whether the host attested an isolated sandbox placement for this run. */
+  sandboxAttested?: boolean
 }
 
 export interface LadderCall {
@@ -89,7 +119,14 @@ export interface LadderCall {
 
 /** Steps that can only deny; the Agent SDK rail re-runs them on approved input. */
 export type HardCheck =
-  "interrupted" | "input-pii" | "ruleset" | "sandbox-scope" | "plan-mode-cognia" | "credential-path"
+  | "interrupted"
+  | "input-pii"
+  | "ruleset"
+  | "sandbox-scope"
+  | "plan-mode-cognia"
+  | "credential-path"
+  /** A class the unattended run's permission profile denies. */
+  | "profile"
 
 export type LadderStep =
   | HardCheck
@@ -104,6 +141,11 @@ export type LadderStep =
   | "bypass"
   /** acceptEdits, suppress/always-allow grants and ruleset allows. */
   | "grants"
+  /**
+   * An unattended run whose workspace class is `sandbox` and whose placement
+   * the host attested: its sandboxed tools run without asking.
+   */
+  | "sandbox"
   /** No one can answer a request: read-only built-ins pass, the rest is denied. */
   | "approval-channel"
 
@@ -127,6 +169,7 @@ export type DenyReason =
   | { code: "credential-path" }
   | { code: "dont-ask" }
   | { code: "no-approval-channel" }
+  | { code: "profile"; cls: PermissionClass }
 
 export type LadderOutcome =
   { kind: "allow" } | { kind: "deny"; reason: DenyReason } | { kind: "ask" }
@@ -151,6 +194,7 @@ class CallState {
   doomed = false
   #ruleset: Verdict | undefined
   #confinement: ConfinementVerdict | null | undefined
+  #profile: ProfileVerdict | undefined
 
   constructor(call: LadderCall, profile: RailProfile) {
     this.call = call
@@ -193,6 +237,41 @@ class CallState {
   confinementBlocksShortcuts(): boolean {
     const verdict = this.confinementVerdict()
     return verdict === "ask" || verdict === "deny"
+  }
+
+  /** What the unattended permission profile requires of this call. */
+  profileVerdict(): ProfileVerdict {
+    this.#profile ??= profileVerdict(
+      this.call.policy.profile,
+      this.call.toolName,
+      this.call.policy.pluginClasses ?? EMPTY_PLUGIN_CLASS_INDEX
+    )
+    return this.#profile
+  }
+
+  /**
+   * A call no shortcut may allow: a per-call plugin tool, or a class the
+   * profile makes ask on every call.
+   */
+  mustAsk(): boolean {
+    const { policy, toolName } = this.call
+    return (
+      requiresPerCallApproval(toolName, policy.perCallApproval) ||
+      this.profileVerdict().kind === "always-ask"
+    )
+  }
+
+  /** The sandbox shortcut: an attested placement running the call itself. */
+  sandboxAllows(): boolean {
+    const { policy, toolName } = this.call
+    return (
+      policy.profile?.workspace === "sandbox" &&
+      policy.sandboxAttested === true &&
+      isSandboxExecuted(toolName, policy.pluginClasses ?? EMPTY_PLUGIN_CLASS_INDEX) &&
+      !this.doomed &&
+      !this.mustAsk() &&
+      !this.confinementBlocksShortcuts()
+    )
   }
 
   /** Suppress entries, always-allow grants and explicit ruleset allows. */
@@ -302,6 +381,10 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
         : undefined
     case "credential-path":
       return state.confinementVerdict() === "deny" ? deny({ code: "credential-path" }) : undefined
+    case "profile": {
+      const verdict = state.profileVerdict()
+      return verdict.kind === "deny" ? deny({ code: "profile", cls: verdict.cls }) : undefined
+    }
     case "ask-user":
       return toolName === ASK_USER_QUALIFIED ? ALLOW : undefined
     case "doom":
@@ -319,18 +402,22 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
     }
     case "dont-ask":
       if (policy.mode !== "dontAsk") return undefined
-      if (requiresPerCallApproval(toolName, policy.perCallApproval)) {
-        return deny({ code: "dont-ask" })
-      }
+      if (state.mustAsk()) return deny({ code: "dont-ask" })
       // A doomed repeat cannot be asked about here, so it is denied outright.
-      if (!state.doomed && (isReadOnlyBuiltin(toolName) || state.granted())) return ALLOW
+      if (
+        !state.doomed &&
+        (isReadOnlyBuiltin(toolName) || state.granted() || state.sandboxAllows())
+      )
+        return ALLOW
       return deny({ code: "dont-ask" })
+    case "sandbox":
+      return state.sandboxAllows() ? ALLOW : undefined
     case "bypass":
-      if (requiresPerCallApproval(toolName, policy.perCallApproval)) return undefined
+      if (state.mustAsk()) return undefined
       return policy.mode === "bypassPermissions" && !state.doomed ? ALLOW : undefined
     case "grants":
       if (state.doomed) return undefined
-      if (requiresPerCallApproval(toolName, policy.perCallApproval)) return undefined
+      if (state.mustAsk()) return undefined
       if (
         policy.mode === "acceptEdits" &&
         state.profile.acceptsEdit(toolName) &&

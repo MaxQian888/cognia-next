@@ -213,6 +213,35 @@ secrets it set on the host are deleted with it.
 Pushing credentials, changing a Bot installation and arming its triggers from a paired
 device now ask for the same approval.
 
+## What unattended runs may do
+
+Bots and scheduled tasks run on the host with nobody watching. Each one carries a
+permission profile that sets, for four kinds of action, whether the run may go ahead
+or must ask you:
+
+| Kind                         | Default                        | Can be lowered to |
+| ---------------------------- | ------------------------------ | ----------------- |
+| Workspace files and commands | Allowed in a verified sandbox  | Ask me, Never     |
+| Outbound messages            | Ask me                         | Never             |
+| Secret use                   | Ask me                         | Never             |
+| Host configuration           | Ask me                         | Never             |
+
+Workspace work is allowed without asking only when the run's sandbox tools execute in
+an isolated sandbox the host has verified. Anywhere else it asks, like the other three.
+Nothing can be raised above these defaults.
+
+Set the profile in a Bot's **Settings** under **When nobody is watching**, or in a
+scheduled chat or goal task's editor under the same name. A plugin or your organisation
+can lower a Bot's profile further, and the Bot's **Policy ceiling** shows which layer
+lowered what. Lowering it stops the Bot's live runs.
+
+When a run needs you, it pauses rather than failing. Your paired phone gets a
+notification that says only what kind of approval is waiting, never what the run
+wants to send. Open it to see the request on the **Bots** or **Scheduled tasks** page
+and approve or deny it there. A run nobody answers is denied after 30 minutes. The
+time it spends waiting does not count against the task's timeout. A Bot's own approval
+steps arrive in the same list.
+
 ## Keep the master key safe
 
 Everything the host stores encrypted (device identities, provider and connector

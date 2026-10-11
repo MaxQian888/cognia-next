@@ -111,6 +111,9 @@ jest.mock("@/lib/scheduler/task-draft-handoff", () => ({
   },
 }))
 
+jest.mock("@/components/mobile/run-approvals/run-approvals-card", () => ({
+  RunApprovalsCard: () => <div data-testid="run-approvals-card-stub" />,
+}))
 jest.mock("@/components/mobile/me/sub-page-shell", () => ({
   SubPageShell: ({
     children,
@@ -273,6 +276,13 @@ describe("MobileSchedulerPage", () => {
     render(<MobileSchedulerPage />)
     // jsdom is a web host, so the chat task reads as unsupported: the block has a row.
     expect(screen.getByTestId("attention-block")).toBeInTheDocument()
+    // A run parked on an approval comes first of all (ADR-0224 A7).
+    expect(
+      screen
+        .getByTestId("run-approvals-card-stub")
+        .compareDocumentPosition(screen.getByTestId("attention-block")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(screen.getByTestId("scheduler-list-row-app:t1")).toBeInTheDocument()
     expect(screen.getByTestId("scheduler-list-row-workflow:w1")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-scheduler-fab")).toBeInTheDocument()

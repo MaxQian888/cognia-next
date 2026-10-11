@@ -1486,6 +1486,25 @@ describe("<CompanionBootProvider /> — host bindings detail", () => {
     pushObserver!({ data: { sessionId: "s-1" }, foreground: true })
     expect(pushMock).not.toHaveBeenCalled()
   })
+
+  it("opens the approvals page for a tapped run-approval push, and only that page", async () => {
+    // ADR-0224 A7: the push carries the page whose approvals card answers it.
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    let pushObserver: ((d: unknown) => void) | null = null
+    installPushBridgeMock.mockImplementationOnce((observer: (d: unknown) => void) => {
+      pushObserver = observer
+      return Promise.resolve(uninstallPushBridgeMock)
+    })
+    mount()
+    await waitFor(() => expect(pushObserver).not.toBeNull())
+    pushObserver!({ data: { interruptId: "i1", href: "/bots" }, foreground: true })
+    pushObserver!({ data: { interruptId: "i1", href: "/settings" }, foreground: false })
+    expect(pushMock).not.toHaveBeenCalled()
+    pushObserver!({ data: { interruptId: "i1", href: "/scheduler" }, foreground: false })
+    expect(pushMock).toHaveBeenCalledWith("/scheduler")
+  })
 })
 
 describe("<CompanionBootProvider /> — manifest retry after a boot without network", () => {

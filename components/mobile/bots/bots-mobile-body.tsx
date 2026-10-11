@@ -24,6 +24,7 @@ import { BotDetail } from "@/components/bots/bot-detail"
 import { BotListPane } from "@/components/bots/bot-list-pane"
 import { BotRuntimeNotice } from "@/components/bots/bot-runtime-notice"
 import { InstallBotSheet } from "@/components/bots/install-bot-sheet"
+import { RunApprovalsCard } from "@/components/mobile/run-approvals/run-approvals-card"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -90,6 +91,9 @@ export function BotsMobileBody({
           on the desktop shell — a phone almost never is the runner. */}
       <div className="shrink-0">
         <BotRuntimeNotice hasBots={rows.length > 0} />
+        {/* A parked Bot run waits on a person, and the phone is usually the
+            only person around (ADR-0224 A7); a push lands here. */}
+        <RunApprovalsCard className="mx-3 mt-2" />
         {failed ? (
           // Same persistent-state alert as the desktop console — a toast would
           // vanish while the rows below stay stale.

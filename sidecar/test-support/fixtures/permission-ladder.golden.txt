@@ -530,6 +530,53 @@ ai throwing ruleset b.write                   reject ruleset exploded | frames -
 ai throwing confinement b.write               input | frames request(mcp__cognia-tools__write) | doom 1
 ai doom-sequence suppress b.read              A A QA QA
 ai doom-sequence plan b.read                  A A A A
+sdk prof out ask default                      {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+sdk prof out ask acceptEdits                  {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+sdk prof out ask bypass                       {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+sdk prof out ask dontAsk                      {behavior:"deny",message:"dontAsk mode: tool \"mcp__cognia-plugin-tools__im:send\" is not pre-approved"} | frames - | doom 1
+sdk prof out ask suppressed                   {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+sdk prof out ask ruleset-allow                {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+sdk prof out deny bypass                      {behavior:"deny",message:"denied: this unattended run's permission profile does not allow outbound messages (\"mcp__cognia-plugin-tools__im:send\"). Do not retry it; finish without it and say what it would have done."} | frames - | doom 0
+sdk prof ws deny b.write bypass               {behavior:"deny",message:"denied: this unattended run's permission profile does not allow workspace file and shell operations (\"mcp__cognia-tools__write\"). Do not retry it; finish without it and say what it would have done."} | frames - | doom 0
+sdk prof sbx attested                         {behavior:"allow",updatedInput:<input>} | frames - | doom 1
+sdk prof sbx attested dontAsk                 {behavior:"allow",updatedInput:<input>} | frames - | doom 1
+sdk prof sbx not attested                     {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+sdk prof sbx workspace ask                    {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+sdk prof sbx attested doom                    {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+sdk prof sbx attested no profile              {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+sdk prof host write attested                  {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-tools__write) | doom 1
+ai prof out ask default                       input | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+ai prof out ask acceptEdits                   input | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+ai prof out ask bypass                        input | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+ai prof out ask dontAsk                       reject dontAsk mode: tool "mcp__cognia-plugin-tools__im:send" is not pre-approved (no allow rule), so it was denied without prompting. Proceed without it, or ask the user to add an allow rule or switch permission modes. | frames - | doom 1
+ai prof out ask suppressed                    input | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+ai prof out ask ruleset-allow                 input | frames request(mcp__cognia-plugin-tools__im:send) | doom 1
+ai prof out deny bypass                       reject denied: this unattended run's permission profile does not allow outbound messages ("mcp__cognia-plugin-tools__im:send"). Do not retry it; finish without it and say what it would have done. | frames - | doom 0
+ai prof ws deny b.write bypass                reject denied: this unattended run's permission profile does not allow workspace file and shell operations ("mcp__cognia-tools__write"). Do not retry it; finish without it and say what it would have done. | frames - | doom 0
+ai prof sbx attested                          input | frames - | doom 1
+ai prof sbx attested dontAsk                  input | frames - | doom 1
+ai prof sbx not attested                      input | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+ai prof sbx workspace ask                     input | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+ai prof sbx attested doom                     input | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+ai prof sbx attested no profile               input | frames request(mcp__cognia-plugin-tools__sandbox_write) | doom 1
+ai prof host write attested                   input | frames request(mcp__cognia-tools__write) | doom 1
+ai-headless prof out ask default              reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__im:send" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof out ask acceptEdits          reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__im:send" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof out ask bypass               reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__im:send" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof out ask dontAsk              reject dontAsk mode: tool "mcp__cognia-plugin-tools__im:send" is not pre-approved (no allow rule), so it was denied without prompting. Proceed without it, or ask the user to add an allow rule or switch permission modes. | frames - | doom 1
+ai-headless prof out ask suppressed           reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__im:send" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof out ask ruleset-allow        reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__im:send" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof out deny bypass              reject denied: this unattended run's permission profile does not allow outbound messages ("mcp__cognia-plugin-tools__im:send"). Do not retry it; finish without it and say what it would have done. | frames - | doom 0
+ai-headless prof ws deny b.write bypass       reject denied: this unattended run's permission profile does not allow workspace file and shell operations ("mcp__cognia-tools__write"). Do not retry it; finish without it and say what it would have done. | frames - | doom 0
+ai-headless prof sbx attested                 input | frames - | doom 1
+ai-headless prof sbx attested dontAsk         input | frames - | doom 1
+ai-headless prof sbx not attested             reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__sandbox_write" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof sbx workspace ask            reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__sandbox_write" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof sbx attested doom            reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__sandbox_write" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof sbx attested no profile      reject denied: no approval channel to authorize "mcp__cognia-plugin-tools__sandbox_write" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+ai-headless prof host write attested          reject denied: no approval channel to authorize "mcp__cognia-tools__write" — set bypassPermissions or an allow rule to run tools in a headless context | frames - | doom 1
+sdk prof out frame                            {requiresPerCallApproval:true,suppressAlwaysAllowRule:true,defaultToNo:true,permissionClass:"outbound"}
+ai prof out frame                             {requiresPerCallApproval:true,suppressAlwaysAllowRule:true,defaultToNo:true,permissionClass:"outbound"}
 sdk alias restored for the ruleset            {behavior:"allow",updatedInput:<input>} | frames - | doom 1
 sdk alias restored in the frame               {behavior:"allow",updatedInput:<input>} | frames request(mcp__cognia-plugin-tools__notes:search) | doom 1
 sdk verbose trace                             info [canUseTool] enter tool=mcp__cognia-tools__write requestId=<id> ; info [canUseTool] permission_request emitted tool=mcp__cognia-tools__write requestId=<id> ; info [canUseTool] resolved tool=mcp__cognia-tools__write requestId=<id> behavior=allow

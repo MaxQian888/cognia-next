@@ -24,6 +24,11 @@ import { BotControlTargetMissingError } from "./local"
 import { __setBotWriteRouteDepsForTests } from "./route"
 
 const mockRelay = jest.fn()
+const cancelLiveBotInstallation = jest.fn((_installationId: string) => 0)
+jest.mock("@/lib/bot/runtime/run", () => ({
+  ...jest.requireActual("@/lib/bot/runtime/run"),
+  cancelLiveBotInstallation: (installationId: string) => cancelLiveBotInstallation(installationId),
+}))
 jest.mock("@/lib/tauri", () => ({
   ...jest.requireActual("@/lib/tauri"),
   transport: { call: (...args: unknown[]) => mockRelay(...args) },
@@ -217,6 +222,64 @@ describe("updateBotConfig", () => {
     })
     const updated = await updateBotConfig(installed.id, { channel: "#alerts" })
     expect(updated.config).toEqual({ channel: "#alerts" })
+  })
+
+  it("stores a permission profile and cancels live runs when it tightens (ADR-0224 A7)", async () => {
+    register(definition())
+    const installed = await installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      policyGrant: {
+        maxAuthority: "acceptEdits",
+        maxAutonomy: "confirm",
+        requireApprovalForWrites: true,
+        permissionProfile: { outbound: "ask" },
+      },
+      now: NOW,
+    })
+    const cancel = cancelLiveBotInstallation
+    cancel.mockClear()
+    const base = {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+    } as const
+    const loosened = await updateBotConfig(
+      installed.id,
+      {},
+      {
+        ...base,
+        permissionProfile: { outbound: "ask", workspace: "sandbox" },
+      }
+    )
+    expect(loosened.policyGrant?.permissionProfile).toEqual({
+      outbound: "ask",
+      workspace: "sandbox",
+    })
+    expect(cancel).not.toHaveBeenCalled()
+    await updateBotConfig(installed.id, {}, { ...base, permissionProfile: { outbound: "deny" } })
+    expect(cancel).toHaveBeenCalledWith(installed.id)
+  })
+
+  it("refuses a profile level a class does not accept", async () => {
+    register(definition())
+    const installed = await installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      now: NOW,
+    })
+    await expect(
+      updateBotConfig(installed.id, {}, {
+        maxAuthority: "acceptEdits",
+        maxAutonomy: "confirm",
+        requireApprovalForWrites: true,
+        permissionProfile: { outbound: "sandbox" },
+      } as never)
+    ).rejects.toThrow()
   })
 
   it("names the installation when there is none", async () => {

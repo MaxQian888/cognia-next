@@ -134,6 +134,33 @@ describe("resolveBotPolicy", () => {
     expect(allowsSelfTriggering(resolved.policy)).toBe(false)
   })
 
+  it("narrows the permission profile class by class (ADR-0224 A7)", () => {
+    const resolved = resolveBotPolicy(
+      layers(
+        ["definition", { permissionProfile: { outbound: "deny", workspace: "ask" } }],
+        ["installation", { permissionProfile: { secrets: "deny" } }]
+      )
+    )
+    expect(resolved.policy.permissionProfile).toEqual({
+      workspace: "ask",
+      outbound: "deny",
+      secrets: "deny",
+    })
+    expect(resolved.provenance.permissionProfile).toBe("installation")
+    expect(resolved.refusals).toEqual([])
+  })
+
+  it("refuses a layer that tries to loosen a class and keeps its stricter ones", () => {
+    const resolved = resolveBotPolicy(
+      layers(
+        ["definition", { permissionProfile: { workspace: "ask" } }],
+        ["installation", { permissionProfile: { workspace: "sandbox", hostConfig: "deny" } }]
+      )
+    )
+    expect(resolved.policy.permissionProfile).toEqual({ workspace: "ask", hostConfig: "deny" })
+    expect(resolved.refusals).toEqual([{ layer: "installation", field: "permissionProfile" }])
+  })
+
   it("is order-independent for the resulting ceiling", () => {
     const forward = resolveBotPolicy(
       layers(

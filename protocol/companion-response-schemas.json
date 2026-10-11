@@ -13712,6 +13712,70 @@
     "revoke_push_token": {
       "$ref": "#/$defs/NullResult"
     },
+    "execution_run_approval_list": {
+      "type": "object",
+      "description": "One page of the approvals unattended runs are parked on (ADR-0224 A7; ADR-0175 B3): pending tool approvals a Bot or scheduled turn raised and pending Bot approval steps, oldest first.",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "interruptId",
+              "runId",
+              "type",
+              "title",
+              "runTitle",
+              "runKind",
+              "createdAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "interruptId": { "type": "string" },
+              "runId": { "type": "string" },
+              "type": { "type": "string", "enum": ["tool_approval", "bot_approval"] },
+              "title": { "type": "string" },
+              "runTitle": { "type": "string" },
+              "runKind": { "type": "string" },
+              "toolName": { "type": "string" },
+              "permissionClass": {
+                "type": "string",
+                "enum": ["workspace", "outbound", "secrets", "hostConfig"]
+              },
+              "message": { "type": "string" },
+              "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+              "detail": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "A Bot's proposal, rendered as data. Absent when larger than the inline limit."
+              },
+              "detailTruncated": { "type": "boolean" },
+              "createdAt": { "type": "integer" },
+              "expiresAt": { "type": "integer" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution_run_approval_respond": {
+      "type": "object",
+      "description": "Whether the answer was taken. A refusal names why: the approval is gone (answered elsewhere, expired, or not one this command serves), the payload was malformed, or the control gate refused it.",
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["approved", "denied"] },
+        "reason": { "type": "string" },
+        "field": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "scheduled_task_backfill": {
       "$ref": "#/$defs/TaskExecutionList"
     },

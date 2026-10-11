@@ -7,6 +7,7 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { useState } from "react"
 import { TeamPayloadEditor } from "./team-payload-editor"
@@ -48,12 +49,25 @@ const messages = {
         replanOnFailure: "Replan on failure",
         replanOnFailureHelp: "repair",
       },
+      permissionProfile: {
+        heading: "When nobody is watching",
+        help: "What the run may do without asking.",
+      },
       errors: {
         teamIdRequired: "Team is required",
         objectiveRequired: "Objective is required",
         planIdRequired: "Plan is required",
       },
     },
+  },
+  unattendedPermissions: {
+    class: {
+      workspace: { label: "Workspace", hint: "files" },
+      outbound: { label: "Outbound", hint: "messages" },
+      secrets: { label: "Secrets", hint: "keys" },
+      hostConfig: { label: "Host", hint: "settings" },
+    },
+    level: { sandbox: "Sandbox", ask: "Ask", deny: "Never" },
   },
 }
 
@@ -132,6 +146,30 @@ describe("GoalPayloadEditor", () => {
     expect(
       (screen.getByTestId("goal-payload-editor-max-turns-input") as HTMLInputElement).value
     ).toBe("7")
+  })
+})
+
+describe("GoalPayloadEditor permission profile", () => {
+  it("narrows a class into the draft (ADR-0224 A7)", async () => {
+    const seen: GoalDraft[] = []
+    function Host() {
+      const [draft, setDraft] = useState<GoalDraft>({ ...EMPTY_GOAL_DRAFT })
+      return (
+        <GoalPayloadEditor
+          draft={draft}
+          onDraftChange={(next) => {
+            seen.push(next)
+            setDraft(next)
+          }}
+          charactersForTesting={[]}
+        />
+      )
+    }
+    render(wrap(<Host />))
+    expect(screen.getByText("When nobody is watching")).toBeTruthy()
+    await userEvent.click(screen.getByTestId("goal-payload-editor-permission-profile-outbound"))
+    await userEvent.click(screen.getByRole("option", { name: "Never" }))
+    expect(seen.at(-1)?.permissionProfile).toEqual({ outbound: "deny" })
   })
 })
 

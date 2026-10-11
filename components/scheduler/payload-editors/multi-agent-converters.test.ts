@@ -61,6 +61,21 @@ describe("goal converters", () => {
     expect(goalDraftToPayload({ objective: "x" })).toEqual({ objective: "x" })
   })
 
+  it("round-trips the unattended permission profile, keeping only what it narrows", () => {
+    const draft = payloadToGoalDraft({
+      objective: "x",
+      permissionProfile: { outbound: "deny", workspace: "sandbox" },
+    })
+    expect(draft.permissionProfile).toEqual({ outbound: "deny" })
+    expect(goalDraftToPayload(draft)).toEqual({
+      objective: "x",
+      permissionProfile: { outbound: "deny" },
+    })
+    expect(goalDraftToPayload({ objective: "x", permissionProfile: { secrets: "ask" } })).toEqual({
+      objective: "x",
+    })
+  })
+
   it("throws when objective is missing", () => {
     expect(() => goalDraftToPayload({ objective: "" })).toThrow(DraftValidationError)
   })

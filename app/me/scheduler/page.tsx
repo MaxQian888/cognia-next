@@ -49,6 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ConsoleSection } from "@/components/surface/console-section"
 import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
+import { RunApprovalsCard } from "@/components/mobile/run-approvals/run-approvals-card"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
 import { BackfillDialog, TaskForm, SchedulerSkeleton } from "@/components/scheduler"
 import { DeleteItemDialog } from "@/components/scheduler/delete-item-dialog"
@@ -520,7 +521,9 @@ function MobileSchedulerBody() {
         </div>
 
         {/* What needs you stays above the tabs: a failure must not hide
-            behind whichever tab was last open. */}
+            behind whichever tab was last open. A run parked on your approval
+            needs you most (ADR-0224 A7). */}
+        <RunApprovalsCard />
         <AttentionBlock
           signals={signals}
           next={agenda.next}

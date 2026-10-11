@@ -87,6 +87,40 @@ describe("BotPolicySection", () => {
     expect(screen.getByTestId("bot-policy")).not.toHaveTextContent("true")
   })
 
+  it("names the permission classes a layer narrowed, and who narrowed them", () => {
+    render(
+      <BotPolicySection
+        row={row({
+          policy: resolveBotPolicy([
+            { name: "definition", policy: { permissionProfile: { outbound: "deny" } } },
+            { name: "installation", policy: { permissionProfile: { workspace: "ask" } } },
+          ]),
+        })}
+      />
+    )
+    const profile = screen.getByTestId("bot-policy-permission-profile")
+    expect(profile).toHaveTextContent("Outbound messages: Never")
+    expect(profile).toHaveTextContent("Workspace files and commands: Ask me")
+    expect(screen.getByTestId("bot-policy")).toHaveTextContent("Unattended permissions")
+    expect(screen.getByTestId("bot-policy")).toHaveTextContent("Installation")
+  })
+
+  it("reports an installation that tried to loosen a class a plugin closed", () => {
+    render(
+      <BotPolicySection
+        row={row({
+          policy: resolveBotPolicy([
+            { name: "plugin", policy: { permissionProfile: { workspace: "ask" } } },
+            { name: "installation", policy: { permissionProfile: { workspace: "sandbox" } } },
+          ]),
+        })}
+      />
+    )
+    expect(screen.getByTestId("bot-policy-refusal-permissionProfile")).toHaveTextContent(
+      "Installation asked to widen Unattended permissions and was overruled."
+    )
+  })
+
   it("says no layer set a limit, rather than showing a blank card", () => {
     // A blank card reads as a load failure. Running under the same defaults
     // as any other run is a real answer.

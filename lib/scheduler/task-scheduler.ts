@@ -3,6 +3,7 @@
  * Core service for managing scheduled tasks execution
  */
 
+import { startExecutionClock } from "./execution-clock"
 import { nanoid } from "nanoid"
 import { computeBackoffDelay } from "@cognia/primitives"
 import {
@@ -3098,7 +3099,8 @@ class TaskSchedulerImpl {
     timeoutMs: number,
     controller: AbortController = new AbortController()
   ): Promise<T> {
-    const timer = setTimeout(() => controller.abort("execution-timeout"), timeoutMs)
+    // Pausable: an unattended turn parked on a person holds it (ADR-0224 A7).
+    const clock = startExecutionClock(controller, timeoutMs)
     const abortError = () => {
       const reason = controller.signal.reason
       return reason === "overlap-cancelled"
@@ -3124,7 +3126,7 @@ class TaskSchedulerImpl {
       ])
       return result
     } finally {
-      clearTimeout(timer)
+      clock.clear()
     }
   }
 

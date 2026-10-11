@@ -703,7 +703,11 @@
       "maxRuntimePlaceholder": "不限制",
       "maxRuntimeHelp": "超过这个时长仍在运行的进程会被结束。留空表示一直运行到自然结束或应用关闭。"
     },
-    "permissionModeCapHelp": "本次运行的权限上限：只能降低智能体的权限模式，不能提高。"
+    "permissionModeCapHelp": "本次运行的权限上限：只能降低智能体的权限模式，不能提高。",
+    "permissionProfile": {
+      "heading": "无人值守时",
+      "help": "此任务的运行无需询问即可执行的操作。需要你确认的请求会暂停运行并向你的手机发送审批；30 分钟内无人回应则拒绝。"
+    }
   },
   "payloadEditorMode": {
     "toJson": "切换到 JSON 编辑",

@@ -42,6 +42,7 @@ import type {
 import type { OperationAvailability } from "@/lib/runtime/operation-availability"
 import type { PluginBotCredentialSlot } from "@/types/plugin/plugin-bot"
 import { z } from "zod"
+import { tightenedPermissionClasses } from "@cognia/agent-config-types/unattended-permission"
 
 import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
 import { BotControlTargetMissingError } from "./local"
@@ -54,12 +55,26 @@ import { transport } from "@/lib/tauri"
 import { withInteractiveApproval } from "@/lib/tauri/interactive-approval"
 import type { BotLifecycleMutation } from "./lifecycle-host"
 
+/**
+ * What the installation's unattended turns may do without a person (ADR-0224
+ * A7). Each class can only be lowered from the host's ceiling.
+ */
+export const botPermissionProfileSchema = z
+  .object({
+    workspace: z.enum(["sandbox", "ask", "deny"]).optional(),
+    outbound: z.enum(["ask", "deny"]).optional(),
+    secrets: z.enum(["ask", "deny"]).optional(),
+    hostConfig: z.enum(["ask", "deny"]).optional(),
+  })
+  .strict()
+
 /** User-selected authority, separate from plugin-controlled configuration. */
 export const botPolicyGrantSchema = z
   .object({
     maxAuthority: z.enum(["acceptEdits", "bypassPermissions"]),
     maxAutonomy: z.enum(["confirm", "autopilot"]),
     requireApprovalForWrites: z.boolean(),
+    permissionProfile: botPermissionProfileSchema.optional(),
   })
   .strict()
 export type BotPolicyGrantInput = z.infer<typeof botPolicyGrantSchema>
@@ -232,7 +247,13 @@ export async function updateBotConfigLocally(
       (installation.policyGrant?.maxAutonomy === "autopilot" &&
         grant.maxAutonomy !== "autopilot") ||
       (installation.policyGrant?.requireApprovalForWrites === false &&
-        grant.requireApprovalForWrites))
+        grant.requireApprovalForWrites) ||
+      // A stricter profile must not let a turn already running keep the
+      // looser one it started under.
+      tightenedPermissionClasses(
+        installation.policyGrant?.permissionProfile,
+        grant.permissionProfile
+      ).length > 0)
   ) {
     const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
     cancelLiveBotInstallation(installationId)

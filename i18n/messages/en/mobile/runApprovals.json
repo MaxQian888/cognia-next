@@ -1,0 +1,27 @@
+{
+  "heading": "{count, plural, =1 {1 run is waiting for you} other {# runs are waiting for you}}",
+  "approve": "Approve",
+  "deny": "Deny",
+  "approvedToast": "Approved. The run continues.",
+  "deniedToast": "Denied.",
+  "goneToast": "Already answered, or it expired.",
+  "refusedToast": "The host did not accept that answer.",
+  "respondFailedToast": "Could not reach the host. Try again.",
+  "detailTruncated": "The full proposal is too large to show here. Open it on the host.",
+  "expires": "Denied automatically at {time, time, short}",
+  "kind": {
+    "bot": "Bot approval",
+    "tool": "Tool request"
+  },
+  "class": {
+    "workspace": "Workspace change",
+    "outbound": "Outbound message",
+    "secrets": "Secret use",
+    "hostConfig": "Host change"
+  },
+  "risk": {
+    "low": "Low risk",
+    "medium": "Medium risk",
+    "high": "High risk"
+  }
+}

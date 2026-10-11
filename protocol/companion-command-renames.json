@@ -1315,6 +1315,12 @@
     "ensure_system_lsp_host": {
       "to": "lsp.system_host.ensure"
     },
+    "execution_run_approval_list": {
+      "to": "execution.run.approval.list"
+    },
+    "execution_run_approval_respond": {
+      "to": "execution.run.approval.respond"
+    },
     "execution_run_control": {
       "to": "execution.run.control"
     },

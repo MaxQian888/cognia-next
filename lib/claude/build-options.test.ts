@@ -7549,6 +7549,35 @@ describe("resolveSendOptions — capability grants", () => {
     expect(opts.allowedTools).toEqual(["Read"])
   })
 
+  it("hands an unattended turn its resolved permission profile (ADR-0224 A7)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ permissionMode: "bypassPermissions" }),
+      capabilityGrants: [
+        grant({ permissionProfile: { outbound: "deny" } }),
+        grant({ permissionProfile: { outbound: "ask", workspace: "ask" } }),
+      ],
+    })
+    expect(opts.permissionProfile).toEqual({
+      workspace: "ask",
+      outbound: "deny",
+      secrets: "ask",
+      hostConfig: "ask",
+    })
+    expect(opts.approvalTtlMs).toEqual(expect.any(Number))
+    // The profile governs the classes; the mode the chain resolved is untouched.
+    expect(opts.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("gives an interactive turn no profile, TTL or attestation", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar(),
+      capabilityGrants: [grant({ model: "claude-opus-4-8" })],
+    })
+    expect(opts).not.toHaveProperty("permissionProfile")
+    expect(opts).not.toHaveProperty("approvalTtlMs")
+    expect(opts).not.toHaveProperty("sandboxAttestation")
+  })
+
   it("treats permissionMode as a cap, never a rung", async () => {
     const lowered = await resolveSendOptions({
       character: makeChar({ permissionMode: "bypassPermissions" }),

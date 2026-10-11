@@ -524,6 +524,15 @@ export interface RunAndCaptureOptions {
     request: PermissionRequestEvent
   ) => CapturePermissionDecision | Promise<CapturePermissionDecision>
   /**
+   * Stop the wall-clock {@link timeoutMs} while a permission request waits for
+   * {@link onPermissionRequest}, and resume it with the time that was left
+   * once the decision goes out. An unattended turn that parks a request for a
+   * person (ADR-0224 A7) sets this: the time a person takes to answer is not
+   * the turn running long, and the park bounds that wait on its own. Sidecar
+   * turns only; a host-run external agent answers its requests elsewhere.
+   */
+  pauseTimeoutWhileAwaitingPermission?: boolean
+  /**
    * PostToolUse responder. Called exactly once per tool result: on the ai-sdk
    * channel via the `tool_result_review` round-trip (where a returned
    * `updatedToolOutput` REWRITES what the model sees), and otherwise at
@@ -893,6 +902,11 @@ async function captureAssistantReplyCore(
     let pendingTerminal: ClaudeEvent | null = null
     let terminalDrainHandle: ReturnType<typeof setTimeout> | null = null
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    // What is left of the wall clock, and when it was last armed, so a turn
+    // that parks a permission request can resume it where it stopped.
+    let timeoutRemainingMs = timeoutMs
+    let timeoutArmedAt = 0
+    let awaitingPermissions = 0
     let idleHandle: ReturnType<typeof setTimeout> | null = null
     let interruptDrainHandle: ReturnType<typeof setTimeout> | null = null
     let settled = false
@@ -973,12 +987,48 @@ async function captureAssistantReplyCore(
       }
     }
 
+    // ── Wall-clock timeout. Function declarations so the permission
+    //     responder above the watchdog block can pause and resume it. ──
+    function onWallClockTimeout(): void {
+      // Best-effort interrupt — the sidecar may still be running and
+      // without this it continues indefinitely, leaving the session in a
+      // stuck state that cascades into every subsequent turn (the renderer
+      // reuses the same sessionId, the sidecar queues new messages behind
+      // the still-running turn, and every future send times out too).
+      void interruptSession(sessionId).catch(() => undefined)
+      finishErr(
+        new RunAndCaptureError(
+          `session ${sessionId} did not end within ${timeoutMs}ms`,
+          "session_error"
+        )
+      )
+    }
+    function armWallClock(): void {
+      if (timeoutMs <= 0 || settled || abortRequested || timeoutHandle != null) return
+      timeoutArmedAt = Date.now()
+      timeoutHandle = setTimeout(onWallClockTimeout, timeoutRemainingMs)
+    }
+    function pauseWallClock(): void {
+      if (!cap?.pauseTimeoutWhileAwaitingPermission) return
+      awaitingPermissions += 1
+      if (awaitingPermissions !== 1 || timeoutHandle == null) return
+      clearTimeout(timeoutHandle)
+      timeoutHandle = null
+      timeoutRemainingMs = Math.max(0, timeoutRemainingMs - (Date.now() - timeoutArmedAt))
+    }
+    function resumeWallClock(): void {
+      if (!cap?.pauseTimeoutWhileAwaitingPermission) return
+      awaitingPermissions = Math.max(0, awaitingPermissions - 1)
+      if (awaitingPermissions === 0) armWallClock()
+    }
+
     // ── Headless permission responder. Answers `permission_request` events
     //     via `approveTool`, forwarding a rewritten `updatedInput`. Denies on
     //     responder error so a faulty gate can never hang the turn. ──
     const handlePermissionRequest = (req: PermissionRequestEvent) => {
       if (!cap?.onPermissionRequest || answeredPermissions.has(req.requestId)) return
       answeredPermissions.add(req.requestId)
+      pauseWallClock()
       void (async () => {
         let outcome: CapturePermissionDecision
         try {
@@ -1004,6 +1054,8 @@ async function captureAssistantReplyCore(
           }
         } catch {
           outcome = { decision: "deny", message: "permission responder failed" }
+        } finally {
+          resumeWallClock()
         }
         // A delayed UI response belongs to this turn only. Cancellation may
         // still be draining usage, so check the signal as well as settlement.
@@ -1197,22 +1249,7 @@ async function captureAssistantReplyCore(
     }
 
     // ── Timeout watchdog ─────────────────────────────────────────────
-    if (timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        // Best-effort interrupt — the sidecar may still be running and
-        // without this it continues indefinitely, leaving the session in a
-        // stuck state that cascades into every subsequent turn (the renderer
-        // reuses the same sessionId, the sidecar queues new messages behind
-        // the still-running turn, and every future send times out too).
-        void interruptSession(sessionId).catch(() => undefined)
-        finishErr(
-          new RunAndCaptureError(
-            `session ${sessionId} did not end within ${timeoutMs}ms`,
-            "session_error"
-          )
-        )
-      }, timeoutMs)
-    }
+    armWallClock()
 
     // ── Subscribe BEFORE sendPrompt so we don't race against fast
     //     completions. Both onClaudeMessage and sendPrompt run via the

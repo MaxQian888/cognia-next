@@ -1,0 +1,27 @@
+{
+  "heading": "{count, plural, other {# 个运行正在等你审批}}",
+  "approve": "批准",
+  "deny": "拒绝",
+  "approvedToast": "已批准，运行继续。",
+  "deniedToast": "已拒绝。",
+  "goneToast": "已被处理或已过期。",
+  "refusedToast": "宿主未接受这个答复。",
+  "respondFailedToast": "无法连接宿主，请重试。",
+  "detailTruncated": "完整提案太大，无法在此显示，请在宿主上查看。",
+  "expires": "将于 {time, time, short} 自动拒绝",
+  "kind": {
+    "bot": "Bot 审批",
+    "tool": "工具请求"
+  },
+  "class": {
+    "workspace": "工作区变更",
+    "outbound": "对外发送",
+    "secrets": "使用密钥",
+    "hostConfig": "主机变更"
+  },
+  "risk": {
+    "low": "低风险",
+    "medium": "中风险",
+    "high": "高风险"
+  }
+}

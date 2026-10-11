@@ -20,6 +20,10 @@ import {
   type AgentAuthority,
   type AutonomyLevel,
 } from "@cognia/agent-config-types/agent-composition"
+import {
+  narrowPermissionProfile,
+  widenedPermissionClasses,
+} from "@cognia/agent-config-types/unattended-permission"
 
 import type { PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
@@ -137,6 +141,19 @@ export function resolveBotPolicy(layers: readonly BotPolicyLayer[]): ResolvedBot
         note(field, name)
       }
       policy[field] = next
+    }
+
+    // The unattended permission profile narrows class by class (ADR-0224 A7).
+    // A layer asking for a level above the one in force is refused for the
+    // classes it would loosen; its stricter classes still apply.
+    if (incoming.permissionProfile !== undefined) {
+      const before = policy.permissionProfile
+      if (before && widenedPermissionClasses(before, incoming.permissionProfile).length > 0) {
+        refuse("permissionProfile", name)
+      }
+      const next = narrowPermissionProfile(before, incoming.permissionProfile)
+      if (JSON.stringify(next) !== JSON.stringify(before)) note("permissionProfile", name)
+      if (next) policy.permissionProfile = next
     }
 
     // Self-triggering is off unless EVERY layer that has an opinion allows it.

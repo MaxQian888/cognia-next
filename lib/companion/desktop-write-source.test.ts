@@ -406,6 +406,44 @@ describe("dispatchCommand: execution run detail", () => {
   })
 })
 
+describe("dispatchCommand: run approvals (ADR-0224 A7)", () => {
+  it("lists parked approvals and answers one as the stamped device", async () => {
+    const db = getDb()
+    await db.executionRuns.put({
+      id: "approval-host-run",
+      kind: "bot",
+      sourceId: "installation",
+      title: "Bot: Release notes",
+      status: "waiting",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await db.executionRunInterrupts.put({
+      id: "parked-approval",
+      runId: "approval-host-run",
+      type: "bot_approval",
+      status: "pending",
+      title: "Publish",
+      createdAt: 1,
+      expiresAt: Date.now() + 60_000,
+    })
+    await expect(dispatchCommand("execution_run_approval_list", {})).resolves.toMatchObject({
+      items: [
+        { interruptId: "parked-approval", type: "bot_approval", runTitle: "Bot: Release notes" },
+      ],
+    })
+    await expect(
+      dispatchCommand("execution_run_approval_respond", {
+        interruptId: "parked-approval",
+        decision: "deny",
+      })
+    ).resolves.toEqual({ ok: false, reason: "invalid-payload", field: "callerDeviceId" })
+    await db.executionRunInterrupts.delete("parked-approval")
+    await db.executionRuns.delete("approval-host-run")
+  })
+})
+
 describe("dispatchCommand: HostState authority", () => {
   it("validates the caller scope and reuses the authoritative service", async () => {
     const payload = {

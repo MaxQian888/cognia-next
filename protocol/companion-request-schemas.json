@@ -1388,6 +1388,41 @@
                 },
                 "requireApprovalForWrites": {
                   "type": "boolean"
+                },
+                "permissionProfile": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "type": "string",
+                      "enum": [
+                        "sandbox",
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "outbound": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "secrets": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "hostConfig": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -1446,6 +1481,41 @@
                 },
                 "requireApprovalForWrites": {
                   "type": "boolean"
+                },
+                "permissionProfile": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "type": "string",
+                      "enum": [
+                        "sandbox",
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "outbound": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "secrets": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    },
+                    "hostConfig": {
+                      "type": "string",
+                      "enum": [
+                        "ask",
+                        "deny"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -5006,6 +5076,50 @@
         "spec": {
           "type": "object",
           "description": "An EnvironmentSpec the brain resolved. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution_run_approval_list": {
+      "type": "object",
+      "properties": {
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution_run_approval_respond": {
+      "type": "object",
+      "required": [
+        "interruptId",
+        "decision"
+      ],
+      "properties": {
+        "interruptId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "deny"
+          ]
+        },
+        "deviceName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display only: the name the run journal shows for the approver. The actor is the authenticated device the host stamps."
         }
       },
       "additionalProperties": false

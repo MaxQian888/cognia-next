@@ -15,6 +15,16 @@ import { PLUGIN_TOOLS_SERVER_NAME, splitToolName } from "../tool-catalog/names.t
 import { awaitApproval } from "./approval.ts"
 import type { PendingApproval } from "./approval.ts"
 import {
+  EMPTY_PLUGIN_CLASS_INDEX,
+  buildPluginClassIndex,
+  classesOfTool,
+  profileDenialMessage,
+  profileVerdict,
+  readApprovalTtlMs,
+  readPermissionProfile,
+  readSandboxAttested,
+} from "./permission-classes.ts"
+import {
   buildApprovalRequiredSet,
   buildPerCallApprovalSet,
   decidePermission,
@@ -58,6 +68,8 @@ export const AI_SDK_RAIL: RailProfile = {
     // Explicit policy decisions precede every mode and remembered grant.
     "ruleset",
     "sandbox-scope",
+    // An unattended run's denied classes (ADR-0224 A7).
+    "profile",
     "ask-user",
     // Consulted before the modes so even bypassPermissions cannot disarm the
     // runaway-loop protection.
@@ -66,6 +78,8 @@ export const AI_SDK_RAIL: RailProfile = {
     "credential-path",
     "plan-mode-emulated",
     "dont-ask",
+    // An attested sandbox placement runs its own tools without asking.
+    "sandbox",
     // "auto" is not special-cased: it asks, and the renderer's Layer-B
     // auto-mode runner answers instead of a human (ADR-0041).
     "bypass",
@@ -110,6 +124,8 @@ function denialError(reason: DenyReason, toolName: string): unknown {
       return new Error(
         `denied: no approval channel to authorize "${toolName}" — set bypassPermissions or an allow rule to run tools in a headless context`
       )
+    case "profile":
+      return new Error(profileDenialMessage(toolName, reason.cls))
   }
 }
 
@@ -161,6 +177,14 @@ export function createToolPermissionGate({
   // Plugin tools that declared `requiresApproval`: asked on every call.
   const perCallApproval = buildPerCallApprovalSet(sendOptions?.pluginTools)
   const approvalRequired = buildApprovalRequiredSet(sendOptions?.pluginTools)
+  // The unattended permission profile (ADR-0224 A7). Read once like the
+  // ruleset: it is fixed for the run that carries it.
+  const profile = readPermissionProfile(sendOptions?.permissionProfile)
+  const pluginClasses = profile
+    ? buildPluginClassIndex(sendOptions?.pluginTools)
+    : EMPTY_PLUGIN_CLASS_INDEX
+  const sandboxAttested = readSandboxAttested(sendOptions?.sandboxAttestation)
+  const ttlMs = readApprovalTtlMs(sendOptions?.approvalTtlMs)
 
   return async function gate(toolName, input, signal) {
     const outcome = decidePermission(AI_SDK_RAIL, {
@@ -179,6 +203,9 @@ export function createToolPermissionGate({
         cwd: sendOptions?.cwd,
         pluginAccess,
         perCallApproval,
+        profile,
+        pluginClasses,
+        sandboxAttested,
       },
     })
     if (outcome.kind === "allow") return input
@@ -186,6 +213,13 @@ export function createToolPermissionGate({
     // Only "ask" is left, and the approval-channel step only asks when both
     // the emitter and the pending map exist.
     const requestId = randomUUID()
+    const verdict = profileVerdict(profile, toolName, pluginClasses)
+    const alwaysAsk = verdict.kind === "always-ask"
+    const permissionClass = alwaysAsk
+      ? verdict.cls
+      : profile
+        ? classesOfTool(toolName, pluginClasses)[0]
+        : undefined
     emit!({
       type: "permission_request",
       sessionId,
@@ -194,9 +228,10 @@ export function createToolPermissionGate({
       displayName: toolName,
       input,
       ...(requiresPerCallApproval(toolName, approvalRequired) ? { requiresApproval: true } : {}),
-      ...(requiresPerCallApproval(toolName, perCallApproval)
+      ...(alwaysAsk || requiresPerCallApproval(toolName, perCallApproval)
         ? { requiresPerCallApproval: true, suppressAlwaysAllowRule: true, defaultToNo: true }
         : {}),
+      ...(permissionClass ? { permissionClass } : {}),
       ...(sendOptions!.remoteExecutionContext
         ? { remoteExecutionContext: sendOptions!.remoteExecutionContext }
         : {}),
@@ -208,6 +243,9 @@ export function createToolPermissionGate({
       requestId,
       entry: { input },
       signal,
+      ttlMs,
+      onTimeout: () =>
+        emit!({ type: "permission_interrupted", sessionId, requestId, reason: "timeout" }),
     })
     if (decision && decision.behavior === "deny") {
       throw new Error((decision.message as string | undefined) ?? `denied: ${toolName}`)
