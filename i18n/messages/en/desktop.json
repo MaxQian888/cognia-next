@@ -189,8 +189,9 @@
     "emptyArchivedHint": "Archive a conversation to tidy the list without deleting it. Archived conversations stay searchable here.",
     "backToConversations": "Back to conversations",
     "searchWiden": {
-      "content": "Also search message content",
+      "active": "Search active conversations",
       "archived": "Include archived conversations",
+      "content": "Also search message content",
       "workspaces": "Search all workspaces"
     },
     "selectConversationsHere": "Select conversations here"

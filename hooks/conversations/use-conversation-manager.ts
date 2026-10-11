@@ -52,6 +52,7 @@ import { buildSessionHref } from "@/lib/chat/message-permalink"
 import { resolveSessionModelIdentity, sessionModelLabels } from "@/lib/chat/session-model-identity"
 import {
   countConversationsByTab,
+  orderByArchivedAt,
   type ConversationManagerCounts,
   type ConversationManagerTab,
 } from "@/lib/conversations/conversation-manager"
@@ -77,6 +78,8 @@ export function useConversationManager({ query }: { query: string }) {
   const setTab = useConversationManagerStore((s) => s.setTab)
   const sortBy = useConversationManagerStore((s) => s.sortBy)
   const setSortBy = useConversationManagerStore((s) => s.setSortBy)
+  const storedArchiveOrder = useConversationManagerStore((s) => s.archiveOrder)
+  const setArchiveOrder = useConversationManagerStore((s) => s.setArchiveOrder)
   const searchContent = useConversationManagerStore((s) => s.searchContent)
   const setSearchContent = useConversationManagerStore((s) => s.setSearchContent)
   const storedFilters = useConversationManagerStore((s) => s.filters)
@@ -219,7 +222,22 @@ export function useConversationManager({ query }: { query: string }) {
     contentMatchIds,
     flat: true,
   })
-  const rows = model.sections[0]?.sessions ?? EMPTY_ROWS
+  const modelRows = model.sections[0]?.sessions ?? EMPTY_ROWS
+  // The archive's own order (when rows were archived) only exists on the
+  // Archived tab, and a query ranks rows by relevance instead — the same rule
+  // the shared sorts follow. The selection walks the same order the rows
+  // draw, so a Shift-range spans what is on screen.
+  const ranked = trimmed !== ""
+  const archiveOrder = tab === "archived" ? storedArchiveOrder : null
+  const archiveOrdering = archiveOrder !== null && !ranked
+  const rows = useMemo(
+    () => (archiveOrdering ? orderByArchivedAt(modelRows, archiveOrder) : modelRows),
+    [archiveOrdering, archiveOrder, modelRows]
+  )
+  const orderedIds = useMemo(
+    () => (archiveOrdering ? rows.map((session) => session.id) : model.orderedIds),
+    [archiveOrdering, rows, model.orderedIds]
+  )
   const counts = useMemo<ConversationManagerCounts>(
     () => countConversationsByTab(sessions),
     [sessions]
@@ -329,10 +347,14 @@ export function useConversationManager({ query }: { query: string }) {
     loading: isLoadingSessions,
     counts,
     rows,
+    orderedIds,
+    ranked,
     model,
     filterController,
     sortBy,
     setSortBy,
+    archiveOrder,
+    setArchiveOrder,
     searchContent,
     setSearchContent,
     content: {

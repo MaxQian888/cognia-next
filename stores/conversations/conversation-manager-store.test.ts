@@ -12,7 +12,19 @@ describe("conversation manager store", () => {
       sortBy: "recent",
       activeViewId: null,
       searchContent: false,
+      archiveOrder: null,
       filters: resolveConversationFilters(undefined),
+    })
+  })
+
+  it("keeps the archive order until a shared sort is picked", () => {
+    const s = useConversationManagerStore.getState()
+    s.setArchiveOrder("archivedAsc")
+    expect(useConversationManagerStore.getState().archiveOrder).toBe("archivedAsc")
+    s.setSortBy("created")
+    expect(useConversationManagerStore.getState()).toMatchObject({
+      sortBy: "created",
+      archiveOrder: null,
     })
   })
 
@@ -47,6 +59,7 @@ describe("conversation manager store", () => {
     const saved = options.partialize!(useConversationManagerStore.getState()) as object
     expect(Object.keys(saved).sort()).toEqual([
       "activeViewId",
+      "archiveOrder",
       "filters",
       "searchContent",
       "sortBy",

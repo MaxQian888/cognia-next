@@ -39,6 +39,20 @@ describe("ConversationListEmptyState", () => {
     expect(onShowActive).toHaveBeenCalled()
   })
 
+  it("takes the host's title over the default one", () => {
+    render(
+      <ConversationListEmptyState
+        archived={false}
+        team={false}
+        title="No conversations yet"
+        onCreate={jest.fn()}
+      />
+    )
+    expect(screen.getByText("No conversations yet")).toBeInTheDocument()
+    // The action keeps its own label.
+    expect(screen.getByRole("button", { name: /desktop.channelList.newChat/ })).toBeInTheDocument()
+  })
+
   it("draws no action without a handler and takes the host's sizing", () => {
     render(<ConversationListEmptyState archived team={false} className="flex-1" />)
     expect(screen.queryByRole("button")).toBeNull()
@@ -73,13 +87,28 @@ describe("ConversationNarrowedEmptyState", () => {
       screen.getByText('desktop.channelList.emptySearch:{"query":"deploy"}')
     ).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("channel-list-empty-widen-archived"))
-    expect(base.onWiden).toHaveBeenCalledWith({ includeArchived: true })
+    expect(base.onWiden).toHaveBeenCalledWith({ includeArchived: true }, "archived")
     fireEvent.click(screen.getByTestId("channel-list-empty-search-everywhere"))
     expect(base.onSearchEverywhere).toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("channel-list-empty-clear-filters"))
     expect(base.onClearFilters).toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("channel-list-empty-clear-search"))
     expect(base.onClearSearch).toHaveBeenCalled()
+  })
+
+  it("names a widening in the host's words and offers the active list", () => {
+    render(
+      <ConversationNarrowedEmptyState
+        {...base}
+        query="deploy"
+        activeFilters={0}
+        widenings={[{ key: "active", patch: {}, label: "Search active conversations" }]}
+      />
+    )
+    const widen = screen.getByTestId("channel-list-empty-widen-active")
+    expect(widen).toHaveTextContent("Search active conversations")
+    fireEvent.click(widen)
+    expect(base.onWiden).toHaveBeenCalledWith({}, "active")
   })
 
   it("offers only clearing the filters when no search is running", () => {

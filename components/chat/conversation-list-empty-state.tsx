@@ -44,6 +44,7 @@ export function ConversationListEmptyState({
   team,
   onCreate,
   onShowActive,
+  title: titleOverride,
   className,
 }: {
   archived: boolean
@@ -55,13 +56,20 @@ export function ConversationListEmptyState({
    * do reads as a dead end.
    */
   onShowActive?: () => void
+  /**
+   * The host's own title. A page whose header already carries "New chat"
+   * names the empty state for what it is instead of repeating the action.
+   */
+  title?: string
   /** Sizing for the host (a sidebar column, a page body). */
   className?: string
 }) {
   const t = useTranslations("desktop.channelList")
   // The archive's title names what is missing; "Conversations" said nothing
   // about why the list was empty.
-  const title = archived ? t("emptyArchivedTitle") : team ? t("newConversation") : t("newChat")
+  const title =
+    titleOverride ??
+    (archived ? t("emptyArchivedTitle") : team ? t("newConversation") : t("newChat"))
   const description = archived ? t("emptyArchivedHint") : team ? t("emptyTeam") : t("emptyDm")
   const actionLabel = team ? t("newConversation") : t("newChat")
   const Icon = archived ? ArchiveIcon : team ? UsersIcon : MessagesSquareIcon
@@ -104,9 +112,16 @@ export function ConversationListEmptyState({
 
 /** One closed axis of the search scope, offered from the no-results state. */
 export interface SearchWidening {
-  key: "content" | "archived" | "workspaces"
+  /**
+   * `"active"` is the conversation manager's: its tabs split the archive from
+   * the active list, so the way out of an empty archived search is the other
+   * tab rather than a scope axis.
+   */
+  key: "content" | "archived" | "workspaces" | "active"
   /** What opening the axis writes into the persisted search scope. */
   patch: Partial<ResolvedConversationSearchOptions>
+  /** The host's own wording, when the axis means something else there. */
+  label?: string
 }
 
 /**
@@ -133,7 +148,7 @@ export function ConversationNarrowedEmptyState({
   onClearSearch: () => void
   onSearchEverywhere: () => void
   widenings: readonly SearchWidening[]
-  onWiden: (patch: Partial<ResolvedConversationSearchOptions>) => void
+  onWiden: (patch: Partial<ResolvedConversationSearchOptions>, key: SearchWidening["key"]) => void
 }) {
   const t = useTranslations("desktop.channelList")
   // Filter vocabulary is shared with the mobile list — see
@@ -157,17 +172,21 @@ export function ConversationNarrowedEmptyState({
                 size="sm"
                 variant="outline"
                 className="h-7 justify-start text-xs"
-                onClick={() => onWiden(widening.patch)}
+                onClick={() => onWiden(widening.patch, widening.key)}
                 data-testid={`channel-list-empty-widen-${widening.key}`}
               >
                 {widening.key === "content" ? (
                   <TextSearchIcon className="size-3.5" />
                 ) : widening.key === "archived" ? (
                   <ArchiveIcon className="size-3.5" />
+                ) : widening.key === "active" ? (
+                  <MessagesSquareIcon className="size-3.5" />
                 ) : (
                   <BoxesIcon className="size-3.5" />
                 )}
-                <span className="truncate">{t(`searchWiden.${widening.key}`)}</span>
+                <span className="truncate">
+                  {widening.label ?? t(`searchWiden.${widening.key}`)}
+                </span>
               </Button>
             ))}
             <Button

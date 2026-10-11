@@ -14,14 +14,22 @@
  * the title, a folder is a chip — in the archive both are frozen (ADR-0213)
  * and still shown, because they are where the row returns to on restore. The
  * facts line under the title only renders when there is a fact to put on it,
- * so a plain row stays one line instead of carrying an empty second one. A
- * conversation running a goal says so with a chip that opens the goal.
+ * so a plain row stays one line instead of carrying an empty second one. The
+ * last message's preview (`lastMessagePreview`, denormalized on the session)
+ * fills the rest of that line, so a row says what the conversation was about
+ * without opening it. A conversation running a goal says so with a chip that
+ * opens the goal.
+ *
+ * On the Archived tab a row also says when it was archived (its own sortable
+ * column) and carries Restore beside its menu: restoring is the archive's
+ * everyday action, not something to dig for in a menu.
  */
 
 import { memo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import {
+  ArchiveRestoreIcon,
   FolderIcon,
   HashIcon,
   LockKeyholeIcon,
@@ -82,6 +90,8 @@ export interface ConversationManagerRowProps {
   workspaceName: string | undefined
   /** Render the workspace cell (the table shows the column). */
   showWorkspace: boolean
+  /** The Archived tab: draw the archived-at cell and the inline Restore. */
+  showArchived?: boolean
   /** The goal this conversation runs, or last ran. */
   goal?: Goal
   /** Folders of the profile; the menu offers those that can hold this row. */
@@ -106,6 +116,7 @@ function ConversationManagerRowImpl({
   decorations,
   workspaceName,
   showWorkspace,
+  showArchived = false,
   goal,
   folders,
   usage,
@@ -167,7 +178,13 @@ function ConversationManagerRowImpl({
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
   const activityAt = conversationLastActivityAt(session)
   const turns = usage?.turns ?? 0
+  const preview = session.lastMessagePreview?.trim() || undefined
+  const restore =
+    showArchived && archived && rowActions.onUnarchive
+      ? () => void rowActions.onUnarchive!(id)
+      : undefined
   const hasFacts =
+    Boolean(preview) ||
     Boolean(goal) ||
     Boolean(folderName) ||
     locked ||
@@ -288,6 +305,15 @@ function ConversationManagerRowImpl({
                     testId={`conversation-row-unread-${id}`}
                   />
                 ) : null}
+                {preview ? (
+                  <span
+                    className="min-w-0 flex-1 truncate"
+                    title={preview}
+                    data-testid={`conversation-row-preview-${id}`}
+                  >
+                    {preview}
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -321,6 +347,26 @@ function ConversationManagerRowImpl({
           t("none")
         )}
       </TableCell>
+      {showArchived ? (
+        <TableCell
+          className="text-xs whitespace-nowrap text-muted-foreground"
+          data-testid={`conversation-row-archived-${id}`}
+        >
+          {session.archivedAt != null ? (
+            <time
+              dateTime={new Date(session.archivedAt).toISOString()}
+              title={format.dateTime(new Date(session.archivedAt), {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            >
+              {format.relativeTime(new Date(session.archivedAt), now)}
+            </time>
+          ) : (
+            t("none")
+          )}
+        </TableCell>
+      ) : null}
       <TableCell className="hidden text-xs whitespace-nowrap text-muted-foreground @5xl/conversations:table-cell">
         {session.createdAt ? (
           <time dateTime={new Date(session.createdAt).toISOString()}>
@@ -342,7 +388,23 @@ function ConversationManagerRowImpl({
             })
           : t("none")}
       </TableCell>
-      <TableCell className="w-10 text-right">
+      <TableCell className="text-right whitespace-nowrap">
+        {restore ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={restore}
+            // Restoring a handed-off conversation would only fail at write time.
+            disabled={locked}
+            aria-label={t("restoreRow", { title })}
+            title={t("restoreRow", { title })}
+            data-testid={`conversation-row-restore-${id}`}
+          >
+            <ArchiveRestoreIcon className="size-3.5" aria-hidden />
+            <span className="hidden @3xl/conversations:inline">{t("restore")}</span>
+          </Button>
+        ) : null}
         <DropdownMenu onOpenChange={desktopHandoffs.onActionsOpenChange}>
           <DropdownMenuTrigger asChild>
             <Button

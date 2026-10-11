@@ -22,6 +22,10 @@
  * (`useCompactLayout`) is a two-line list with a Select mode for bulk work,
  * and the search field gets its own row under the tabs instead of shrinking to
  * a glyph beside them. Rows running a goal carry a chip into the Goals console.
+ *
+ * Rows preview their last message. The Archived tab orders by when rows were
+ * archived on request (its own column), and restores from the row itself; a
+ * search that finds nothing in one tab offers the other.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -116,10 +120,14 @@ export function ConversationManager() {
     loading,
     counts,
     rows,
+    orderedIds,
+    ranked,
     model,
     filterController,
     sortBy,
     setSortBy,
+    archiveOrder,
+    setArchiveOrder,
     searchContent,
     setSearchContent,
     content,
@@ -158,7 +166,7 @@ export function ConversationManager() {
   // the filters. `useRangeSelection` only hides ids that left the view, so
   // without this a row selected, filtered out and filtered back in came back
   // selected. A sort change keeps it: the same rows, in another order.
-  const selection = useRangeSelection(model.orderedIds)
+  const selection = useRangeSelection(orderedIds)
   const { clear: clearSelection } = selection
   const selectionScope = `${tab}|${query}|${JSON.stringify(filterController.filters)}`
   useEffect(() => {
@@ -175,7 +183,7 @@ export function ConversationManager() {
   }, [clearSelection])
 
   const [limit, setLimit] = useState({ for: "", count: CONVERSATION_MANAGER_PAGE_SIZE })
-  const viewKey = `${tab}|${query}|${sortBy}|${JSON.stringify(filterController.filters)}`
+  const viewKey = `${tab}|${query}|${sortBy}|${archiveOrder ?? ""}|${JSON.stringify(filterController.filters)}`
   const shown = limit.for === viewKey ? limit.count : CONVERSATION_MANAGER_PAGE_SIZE
   const page = useMemo(() => rows.slice(0, shown), [rows, shown])
   const pageIds = useMemo(() => page.map((session) => session.id), [page])
@@ -187,7 +195,6 @@ export function ConversationManager() {
     () => new Set(rows.map((session) => session.projectId ?? "")).size > 1,
     [rows]
   )
-  const ranked = query.trim() !== ""
 
   const [emptyArchiveOpen, setEmptyArchiveOpen] = useState(false)
 
@@ -212,10 +219,23 @@ export function ConversationManager() {
   const clearSearch = () => updateField("")
   const searchEverywhere = () =>
     requestCommandPalette({ query: paletteQueryForView(query, tab), scope: "chats" })
-  const widenings = useMemo<SearchWidening[]>(
-    () => (searchContent ? [] : [{ key: "content", patch: { content: true } }]),
-    [searchContent]
-  )
+  // The tabs split the archive from the active list, so the other tab is the
+  // way out of a search that found nothing in this one — offered only when it
+  // holds anything to search.
+  const otherTab: ConversationManagerTab = tab === "archived" ? "active" : "archived"
+  const otherTabHasRows = counts[otherTab] > 0
+  const widenings = useMemo<SearchWidening[]>(() => {
+    const next: SearchWidening[] = []
+    if (!searchContent) next.push({ key: "content", patch: { content: true } })
+    if (otherTabHasRows) {
+      next.push(
+        otherTab === "archived"
+          ? { key: "archived", patch: {}, label: t("searchArchive") }
+          : { key: "active", patch: {} }
+      )
+    }
+    return next
+  }, [searchContent, otherTabHasRows, otherTab, t])
 
   const searchField = (
     <InputGroup className={cn("h-8 min-w-0 flex-1", compact ? "h-10" : "max-w-md")}>
@@ -276,35 +296,41 @@ export function ConversationManager() {
     </>
   )
 
-  // Tabs already carry both counts; the header no longer repeats them.
+  // Tabs already carry both counts; the header no longer repeats them. A
+  // desktop keeps them beside the search in the header; a phone gives them a
+  // full-width row of their own above it (the header's navigation slot sizes
+  // to its content, so it cannot stretch two tabs across a phone).
+  const tabs = (
+    <Tabs
+      value={tab}
+      onValueChange={(value) => {
+        if (isConversationManagerTab(value)) chooseTab(value)
+      }}
+      className={compact ? "w-full" : undefined}
+      data-testid="conversation-manager-tabs"
+    >
+      <TabsList aria-label={t("tabsAria")} className={compact ? "h-10 w-full" : undefined}>
+        {CONVERSATION_MANAGER_TABS.map((id) => (
+          <TabsTrigger key={id} value={id} data-testid={`conversation-manager-tab-${id}`}>
+            {id === "archived" ? <ArchiveIcon className="size-3.5" aria-hidden /> : null}
+            {t(`tabs.${id}`)}
+            <span
+              className="ml-1 rounded-pill bg-muted px-1.5 text-[11px] text-muted-foreground tabular-nums"
+              data-testid={`conversation-manager-tab-count-${id}`}
+            >
+              {counts[id]}
+            </span>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  )
   const header = (
     <FeaturePageHeader
       icon={<HistoryIcon className="size-5" aria-hidden />}
       title={t("title")}
       description={t("description")}
-      navigation={
-        <Tabs
-          value={tab}
-          onValueChange={(value) => {
-            if (isConversationManagerTab(value)) chooseTab(value)
-          }}
-        >
-          <TabsList aria-label={t("tabsAria")}>
-            {CONVERSATION_MANAGER_TABS.map((id) => (
-              <TabsTrigger key={id} value={id} data-testid={`conversation-manager-tab-${id}`}>
-                {id === "archived" ? <ArchiveIcon className="size-3.5" aria-hidden /> : null}
-                {t(`tabs.${id}`)}
-                <span
-                  className="ml-1 rounded-pill bg-muted px-1.5 text-[11px] text-muted-foreground tabular-nums"
-                  data-testid={`conversation-manager-tab-count-${id}`}
-                >
-                  {counts[id]}
-                </span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      }
+      navigation={compact ? undefined : tabs}
       controls={
         compact ? undefined : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -360,6 +386,8 @@ export function ConversationManager() {
     <ConversationListEmptyState
       archived={tab === "archived"}
       team={false}
+      // The header already offers "New chat"; the body says why it is empty.
+      title={tab === "active" ? t("emptyTitle") : undefined}
       onCreate={tab === "active" ? startConversation : undefined}
       onShowActive={tab === "archived" ? () => chooseTab("active") : undefined}
       className="flex-1"
@@ -383,8 +411,11 @@ export function ConversationManager() {
       onClearSearch={clearSearch}
       onSearchEverywhere={searchEverywhere}
       widenings={widenings}
-      onWiden={(patch) => {
+      onWiden={(patch, key) => {
         if (patch.content) setSearchContent(true)
+        // The query stays in the field, so the other tab is searched at once.
+        if (key === "archived") chooseTab("archived")
+        if (key === "active") chooseTab("active")
       }}
     />
   ) : compact ? (
@@ -413,6 +444,7 @@ export function ConversationManager() {
       sortBy={sortBy}
       onSortBy={setSortBy}
       ranked={ranked}
+      archive={tab === "archived" ? { order: archiveOrder, onOrder: setArchiveOrder } : undefined}
       showWorkspace={showWorkspace}
       workspaceNameById={workspaceNameById}
       {...rowProps}
@@ -426,27 +458,36 @@ export function ConversationManager() {
           {compact ? (
             // On a phone the search gets a row of its own under the tabs, and
             // Select turns the list into a selection.
-            <div
-              className="flex items-center gap-1.5 px-3 pt-3"
-              data-testid="conversation-manager-compact-tools"
-            >
-              {searchField}
-              {searchTools}
-              {/* Once something is selected the bulk bar carries Done; one is enough. */}
-              {selection.selected.size === 0 ? (
-                <Button
-                  type="button"
-                  variant={selectionActive ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-10 shrink-0"
-                  onClick={() => (selectionActive ? stopSelecting() : setSelecting(true))}
-                  aria-pressed={selectionActive}
-                  data-testid="conversation-manager-select-mode"
-                >
-                  <CheckSquareIcon className="size-4" aria-hidden />
-                  {selectionActive ? t("selectDone") : t("select")}
-                </Button>
-              ) : null}
+            <div className="space-y-2 px-3 pt-3" data-testid="conversation-manager-compact-tools">
+              {tabs}
+              <div className="flex items-center gap-1.5">
+                {searchField}
+                {searchTools}
+                {/* Once something is selected the bulk bar carries Done; one is
+                  enough. A glyph, like its neighbours, so the field keeps the
+                  row's width. */}
+                {selection.selected.size === 0 ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant={selectionActive ? "secondary" : "ghost"}
+                        size="icon"
+                        className="size-10 shrink-0"
+                        onClick={() => (selectionActive ? stopSelecting() : setSelecting(true))}
+                        aria-pressed={selectionActive}
+                        aria-label={selectionActive ? t("selectDone") : t("select")}
+                        data-testid="conversation-manager-select-mode"
+                      >
+                        <CheckSquareIcon className="size-4" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {selectionActive ? t("selectDone") : t("select")}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
             </div>
           ) : null}
           <div className="space-y-2 px-4 pt-3 empty:hidden">
@@ -457,7 +498,11 @@ export function ConversationManager() {
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 pb-2"
                 data-testid="conversation-manager-archive-panel"
               >
-                <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("archivedNote")}</p>
+                {/* `basis-64` wraps the policy under the note on a phone
+                    rather than squeezing the note into a sliver beside it. */}
+                <p className="min-w-0 flex-1 basis-64 text-xs text-muted-foreground">
+                  {t("archivedNote")}
+                </p>
                 <AutoArchiveControl variant="inline" />
               </div>
             ) : null}
@@ -471,7 +516,7 @@ export function ConversationManager() {
               layout="bar"
               visible={selection.selected.size > 0}
               selected={selection.selected}
-              orderedIds={model.orderedIds}
+              orderedIds={orderedIds}
               sessions={manager.sessions}
               archived={tab === "archived"}
               onDelete={rowActions.onBulkDelete}
@@ -510,6 +555,17 @@ export function ConversationManager() {
                 data-testid="conversation-manager-ranked"
               >
                 {t("rankedHint")}
+              </p>
+            ) : sortBy === "unread" &&
+              archiveOrder === null &&
+              !compact &&
+              model.filteredCount > 1 ? (
+              // No column sorts by unread, so no header can say this order.
+              <p
+                className="text-[11px] text-muted-foreground"
+                data-testid="conversation-manager-unread-sort"
+              >
+                {t("unreadSortHint")}
               </p>
             ) : null}
           </div>

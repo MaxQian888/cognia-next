@@ -54,6 +54,45 @@ export function sortForColumn(
 }
 
 /**
+ * The archive's own order: when conversations were archived. Only the
+ * Archived tab has the axis, so it lives beside the shared sorts instead of in
+ * them — the sidebar and saved views never see it. While it is set it takes
+ * over the order; picking any shared sort clears it.
+ */
+export type ConversationArchiveOrder = "archived" | "archivedAsc"
+
+/** A click on the Archived header: newest first, then the reverse. */
+export function archiveOrderForClick(
+  current: ConversationArchiveOrder | null
+): ConversationArchiveOrder {
+  return current === "archived" ? "archivedAsc" : "archived"
+}
+
+/** `aria-sort` for the Archived header; unsorted while a query ranks rows. */
+export function ariaSortForArchive(
+  order: ConversationArchiveOrder | null,
+  ranked = false
+): "ascending" | "descending" | "none" {
+  if (ranked || !order) return "none"
+  return order === "archived" ? "descending" : "ascending"
+}
+
+/**
+ * Re-order rows by when they were archived. Stable: rows archived at the same
+ * instant (a bulk archive) keep the order the list model gave them.
+ */
+export function orderByArchivedAt<T extends Pick<ChatSession, "archivedAt">>(
+  rows: readonly T[],
+  order: ConversationArchiveOrder
+): T[] {
+  const sign = order === "archived" ? -1 : 1
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => sign * ((a.row.archivedAt ?? 0) - (b.row.archivedAt ?? 0)) || a.index - b.index)
+    .map(({ row }) => row)
+}
+
+/**
  * `aria-sort` for `column`'s header under `sortBy`. `ranked` (a search query
  * is ordering rows by relevance, with the sort only breaking ties) leaves every
  * header unsorted, so a header never claims an order the rows do not follow.

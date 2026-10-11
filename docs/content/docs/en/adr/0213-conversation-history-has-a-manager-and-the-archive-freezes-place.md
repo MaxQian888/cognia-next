@@ -160,6 +160,38 @@ go through it, so no surface archives or deletes without Host routing and
 teardown. Unarchive now offers Undo, and Undo of an archive reopens the
 conversation that was open.
 
+### 6. Reading and restoring from the row (2026-10-11 amendment)
+
+The manager stays a table that opens conversations, with no preview panel; a
+row now says more on its own:
+
+- **Last message.** Every row previews its last message
+  (`ChatSession.lastMessagePreview`, already denormalized for the sidebar) on
+  the facts line under the title; the phone list gives it a line of its own.
+- **Archived at, sortable.** The Archived tab adds an "Archived" column. Its
+  order (`ConversationArchiveOrder`, newest or oldest archived first) is the
+  archive's own axis, so it lives beside `ConversationSortBy` instead of in it —
+  the sidebar and saved views never see it. It is persisted in
+  `useConversationManagerStore.archiveOrder`; picking any shared sort clears
+  it, and while it is set the shared headers report `aria-sort="none"`. A
+  search query ranks rows instead, as it does for every sort. The selection
+  walks the order the rows draw in, so a Shift-range spans what is on screen.
+- **Inline Restore.** Archived rows carry Restore beside their ⋯ menu (a
+  labelled button on a wide table, a 44px glyph on a phone), through the same
+  `onUnarchive` writer as the menu; it is disabled on a handed-off row and
+  hidden while the phone list is selecting.
+- **The unread order says so.** No column sorts by unread, so a status line
+  names the order instead of leaving every header claiming none.
+- **Search that finds nothing offers the other tab.** The narrowed empty state
+  gains a widening to the Archived tab (or back to Active), keeping the query,
+  offered only when that tab holds anything.
+- **Phone layout.** The tabs take a full-width row above the search; Select is
+  a glyph beside the search and filter tools so the field keeps its width; the
+  list runs edge to edge instead of inside a framed card; and the archive's
+  note wraps above its auto-archive control instead of being squeezed beside
+  it. The empty Active tab is titled "No conversations yet" instead of
+  repeating the header's "New chat".
+
 ## Consequences
 
 - One write path and one list model serve three surfaces: the sidebar, the

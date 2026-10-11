@@ -189,8 +189,9 @@
     "emptyArchivedHint": "归档可以整理列表而不删除会话，已归档的会话仍可在这里查找。",
     "backToConversations": "返回会话列表",
     "searchWiden": {
-      "content": "同时搜索消息正文",
+      "active": "搜索未归档会话",
       "archived": "包含已归档会话",
+      "content": "同时搜索消息正文",
       "workspaces": "搜索所有工作区"
     },
     "selectConversationsHere": "选择此处的会话"

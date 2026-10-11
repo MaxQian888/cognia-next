@@ -20,7 +20,8 @@ let mockData: Record<string, unknown> = {}
 jest.mock("@/hooks/conversations/use-conversation-manager", () => ({
   useConversationManager: (options: { query: string }) => {
     mockUseManager(options)
-    return mockData
+    // The hook ranks rows whenever a query is set.
+    return { ranked: options.query.trim() !== "", ...mockData }
   },
 }))
 const mockUsageIds = jest.fn()
@@ -123,6 +124,9 @@ function data(over: Record<string, unknown> = {}) {
     loading: false,
     counts: { active: 2, archived: 1 },
     rows,
+    orderedIds: rows.map((row) => row.id),
+    archiveOrder: null,
+    setArchiveOrder: jest.fn(),
     model: {
       sections: [{ key: "recent", sessions: rows }],
       orderedIds: rows.map((row) => row.id),
@@ -193,6 +197,12 @@ const toggle = { ctrlKey: true, metaKey: false, shiftKey: false }
 describe("ConversationManager", () => {
   it("names the page, and counts each tab", () => {
     render(<ConversationManager />)
+    // A desktop keeps the tabs in the header, beside the search.
+    expect(
+      within(screen.getByTestId("conversation-manager-header")).getByTestId(
+        "conversation-manager-tabs"
+      )
+    ).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Conversations" })).toBeInTheDocument()
     expect(screen.getByTestId("conversation-manager-tab-count-active")).toHaveTextContent("2")
     expect(screen.getByTestId("conversation-manager-tab-count-archived")).toHaveTextContent("1")
@@ -308,6 +318,8 @@ describe("ConversationManager", () => {
     mockData = data({ rows: [] })
     const { unmount } = render(<ConversationManager />)
     const empty = screen.getByTestId("channel-list-empty-state")
+    // The header already says "New chat"; the body says why it is empty.
+    expect(within(empty).getByText("No conversations yet")).toBeInTheDocument()
     fireEvent.click(within(empty).getByRole("button"))
     expect(mockData.startConversation).toHaveBeenCalled()
     unmount()
@@ -355,6 +367,58 @@ describe("ConversationManager", () => {
       expect(mockPalette).toHaveBeenCalledWith({ query: "is:archived plan", scope: "chats" })
       fireEvent.click(screen.getByTestId("channel-list-empty-clear-search"))
       expect(screen.getByTestId("conversation-manager-search")).toHaveValue("")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("takes a search that found nothing to the other tab, keeping the query", () => {
+    jest.useFakeTimers()
+    try {
+      mockData = narrowed("active", 0)
+      const { unmount } = render(<ConversationManager />)
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "plan" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      const widen = screen.getByTestId("channel-list-empty-widen-archived")
+      expect(widen).toHaveTextContent("Search archived conversations")
+      fireEvent.click(widen)
+      expect(mockData.setTab).toHaveBeenLastCalledWith("archived")
+      expect(mockReplace).toHaveBeenLastCalledWith("/conversations?tab=archived")
+      expect(screen.getByTestId("conversation-manager-search")).toHaveValue("plan")
+      unmount()
+
+      mockData = narrowed("archived", 0)
+      render(<ConversationManager />)
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "plan" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      fireEvent.click(screen.getByTestId("channel-list-empty-widen-active"))
+      expect(mockData.setTab).toHaveBeenLastCalledWith("active")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("offers no other tab that holds nothing", () => {
+    jest.useFakeTimers()
+    try {
+      mockData = { ...narrowed("active", 0), counts: { active: 2, archived: 0 } }
+      render(<ConversationManager />)
+      fireEvent.change(screen.getByTestId("conversation-manager-search"), {
+        target: { value: "plan" },
+      })
+      act(() => {
+        jest.advanceTimersByTime(150)
+      })
+      expect(screen.getByTestId("channel-list-empty-narrowed")).toBeInTheDocument()
+      expect(screen.queryByTestId("channel-list-empty-widen-archived")).not.toBeInTheDocument()
     } finally {
       jest.useRealTimers()
     }
@@ -482,6 +546,50 @@ describe("ConversationManager", () => {
     expect(lastTable().showWorkspace).toBe(true)
   })
 
+  it("gives the Archived tab its own column, ordered by the page's archive order", () => {
+    const { unmount } = render(<ConversationManager />)
+    expect((mockTableProps.mock.lastCall![0] as { archive?: unknown }).archive).toBeUndefined()
+    unmount()
+
+    mockData = data({ tab: "archived", archiveOrder: "archivedAsc" })
+    render(<ConversationManager />)
+    const archive = (
+      mockTableProps.mock.lastCall![0] as {
+        archive: { order: string | null; onOrder: (order: string) => void }
+      }
+    ).archive
+    expect(archive.order).toBe("archivedAsc")
+    archive.onOrder("archived")
+    expect(mockData.setArchiveOrder).toHaveBeenCalledWith("archived")
+  })
+
+  it("selects across the order the rows draw in, not the list model's", () => {
+    const rows = [session("a"), session("b"), session("c")]
+    mockData = data({ rows, orderedIds: ["c", "b", "a"] })
+    render(<ConversationManager />)
+    expect((mockBulkProps.mock.lastCall![0] as { orderedIds: string[] }).orderedIds).toEqual([
+      "c",
+      "b",
+      "a",
+    ])
+    act(() => lastTable().onToggleSelect("c", toggle))
+    act(() => lastTable().onToggleSelect("b", { ...toggle, shiftKey: true }))
+    expect([...lastBulk().selected].sort()).toEqual(["b", "c"])
+  })
+
+  it("says the unread order, which no column header can", () => {
+    mockData = data({ sortBy: "unread" })
+    const { unmount } = render(<ConversationManager />)
+    expect(screen.getByTestId("conversation-manager-unread-sort")).toHaveTextContent(
+      "Unread conversations first"
+    )
+    unmount()
+    // The archive's own order replaces it.
+    mockData = data({ sortBy: "unread", tab: "archived", archiveOrder: "archived" })
+    render(<ConversationManager />)
+    expect(screen.queryByTestId("conversation-manager-unread-sort")).not.toBeInTheDocument()
+  })
+
   it("says the rows are ranked while a query orders them", () => {
     jest.useFakeTimers()
     try {
@@ -589,6 +697,14 @@ describe("ConversationManager", () => {
       expect(within(tools).getByTestId("filter-menu")).toBeInTheDocument()
       // Only once: not also in the header.
       expect(screen.getAllByTestId("conversation-manager-search")).toHaveLength(1)
+      // The tabs take a full-width row of their own above the search.
+      expect(within(tools).getByTestId("conversation-manager-tabs")).toHaveClass("w-full")
+      expect(
+        within(screen.getByTestId("conversation-manager-header")).queryByTestId(
+          "conversation-manager-tabs"
+        )
+      ).not.toBeInTheDocument()
+      expect(screen.getAllByTestId("conversation-manager-tabs")).toHaveLength(1)
       expect(lastList().goals.get("a")).toBe(goal)
       expect(lastList().selecting).toBe(false)
     })
@@ -596,11 +712,12 @@ describe("ConversationManager", () => {
     it("turns selection on and off from Select", () => {
       render(<ConversationManager />)
       const select = screen.getByTestId("conversation-manager-select-mode")
-      expect(select).toHaveTextContent("Select")
+      // A glyph beside the search, named for what it does.
+      expect(select).toHaveAccessibleName("Select")
       expect(select).toHaveAttribute("aria-pressed", "false")
       fireEvent.click(select)
       expect(lastList().selecting).toBe(true)
-      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveTextContent("Done")
+      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveAccessibleName("Done")
       expect(screen.getByTestId("conversation-manager-select-mode")).toHaveAttribute(
         "aria-pressed",
         "true"
@@ -620,7 +737,7 @@ describe("ConversationManager", () => {
       act(() => lastBulk().onClear())
       expect(lastList().selecting).toBe(false)
       expect(lastBulk().selected.size).toBe(0)
-      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveTextContent("Select")
+      expect(screen.getByTestId("conversation-manager-select-mode")).toHaveAccessibleName("Select")
     })
 
     it("selects a long-pressed row once, without toggling it back off", () => {

@@ -17,6 +17,11 @@
  *
  * While a search query ranks the rows by relevance, the headers say so rather
  * than claim the order they would sort by.
+ *
+ * The Archived tab adds an "Archived" column — when each row was archived,
+ * sortable on its own axis (`archiveOrder`) — and widens the actions column
+ * for the inline Restore. While the archive order is set, the shared headers
+ * stop claiming theirs.
  */
 
 import { useTranslations } from "next-intl"
@@ -31,8 +36,11 @@ import type {
   ConversationRowExtraActions,
 } from "@/hooks/chat/use-conversation-row-actions"
 import {
+  archiveOrderForClick,
+  ariaSortForArchive,
   ariaSortForColumn,
   sortForColumn,
+  type ConversationArchiveOrder,
   type ConversationManagerSortColumn,
 } from "@/lib/conversations/conversation-manager"
 import type { SessionUsageSummary } from "@/lib/usage/session-analytics"
@@ -56,6 +64,14 @@ export interface ConversationManagerTableProps {
   onSortBy: (sortBy: ConversationSortBy) => void
   /** A search query is ordering the rows by relevance; the sort only breaks ties. */
   ranked: boolean
+  /**
+   * The Archived tab's own column. Absent on the Active tab, which has no
+   * archive axis; `order` is `null` while a shared sort orders the rows.
+   */
+  archive?: {
+    order: ConversationArchiveOrder | null
+    onOrder: (order: ConversationArchiveOrder) => void
+  }
   /** The rows span more than one workspace, so the workspace column says something. */
   showWorkspace: boolean
   /** The goal each drawn conversation runs (or last ran). */
@@ -85,6 +101,7 @@ export function ConversationManagerTable({
   sortBy,
   onSortBy,
   ranked,
+  archive,
   showWorkspace,
   goals,
   decorations,
@@ -103,8 +120,16 @@ export function ConversationManagerTable({
   const allSelected = totalInView > 0 && selectedCount >= totalInView
   const someSelected = selectedCount > 0 && !allSelected
 
-  const sortHeader = (column: ConversationManagerSortColumn, label: string, className?: string) => {
-    const direction = ariaSortForColumn(sortBy, column, ranked)
+  // While the archive order is set, the shared headers order nothing.
+  const archiveOrdering = archive?.order != null
+
+  const headerButton = (
+    testId: string,
+    label: string,
+    direction: "ascending" | "descending" | "none",
+    onClick: () => void,
+    className?: string
+  ) => {
     const Arrow =
       direction === "ascending"
         ? ArrowUpIcon
@@ -115,14 +140,14 @@ export function ConversationManagerTable({
       <TableHead aria-sort={direction} className={className}>
         <button
           type="button"
-          onClick={() => onSortBy(sortForColumn(sortBy, column))}
+          onClick={onClick}
           aria-label={t("sortBy", { column: label })}
           title={ranked ? t("rankedHint") : undefined}
           className={cn(
             "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
             direction !== "none" && "text-foreground"
           )}
-          data-testid={`conversation-table-sort-${column}`}
+          data-testid={testId}
         >
           {label}
           <Arrow className={cn("size-3", direction === "none" && "opacity-40")} aria-hidden />
@@ -130,6 +155,14 @@ export function ConversationManagerTable({
       </TableHead>
     )
   }
+  const sortHeader = (column: ConversationManagerSortColumn, label: string, className?: string) =>
+    headerButton(
+      `conversation-table-sort-${column}`,
+      label,
+      ariaSortForColumn(sortBy, column, ranked || archiveOrdering),
+      () => onSortBy(sortForColumn(sortBy, column)),
+      className
+    )
 
   return (
     <div className="@container/conversations" data-testid="conversation-table">
@@ -155,6 +188,15 @@ export function ConversationManagerTable({
               </TableHead>
             ) : null}
             {sortHeader("activity", t("columns.activity"), "w-28")}
+            {archive
+              ? headerButton(
+                  "conversation-table-sort-archived",
+                  t("columns.archived"),
+                  ariaSortForArchive(archive.order, ranked),
+                  () => archive.onOrder(archiveOrderForClick(archive.order)),
+                  "w-28"
+                )
+              : null}
             {sortHeader(
               "created",
               t("columns.created"),
@@ -163,7 +205,7 @@ export function ConversationManagerTable({
             <TableHead className="hidden w-40 text-right @4xl/conversations:table-cell">
               {t("columns.usage")}
             </TableHead>
-            <TableHead className="w-10">
+            <TableHead className={archive ? "w-20 @3xl/conversations:w-32" : "w-10"}>
               <span className="sr-only">{t("columns.actions")}</span>
             </TableHead>
           </TableRow>
@@ -180,6 +222,7 @@ export function ConversationManagerTable({
                 session.projectId ? workspaceNameById.get(session.projectId) : undefined
               }
               showWorkspace={showWorkspace}
+              showArchived={archive !== undefined}
               goal={goals.get(session.id)}
               folders={folders}
               usage={usage.get(session.id)}

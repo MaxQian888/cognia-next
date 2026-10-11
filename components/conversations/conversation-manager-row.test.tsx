@@ -181,6 +181,55 @@ describe("ConversationManagerRow", () => {
     expect(title.parentElement!.children).toHaveLength(1)
   })
 
+  it("previews the last message on the facts line", () => {
+    setup({ session: session({ lastMessagePreview: "  Shipped the draft to finance  " }) })
+    const preview = screen.getByTestId("conversation-row-preview-s1")
+    expect(preview).toHaveTextContent("Shipped the draft to finance")
+    expect(preview).toHaveAttribute("title", "Shipped the draft to finance")
+  })
+
+  it("draws no preview line for a blank preview", () => {
+    setup({ session: session({ lastMessagePreview: "   " }), runStatus: "idle" })
+    expect(screen.queryByTestId("conversation-row-preview-s1")).not.toBeInTheDocument()
+    const title = screen.getByTestId("conversation-row-open-s1")
+    expect(title.parentElement!.children).toHaveLength(1)
+  })
+
+  it("has no archived cell or Restore on the Active tab", () => {
+    setup({ session: session({ archivedAt: NOW.getTime() - 5_000 }) })
+    expect(screen.queryByTestId("conversation-row-archived-s1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-row-restore-s1")).not.toBeInTheDocument()
+  })
+
+  it("says when an archived row was archived and restores it in one click", () => {
+    const props = setup({
+      showArchived: true,
+      session: session({ archivedAt: NOW.getTime() - 5_000 }),
+    })
+    const cell = screen.getByTestId("conversation-row-archived-s1")
+    expect(cell).toHaveTextContent("rel(5000)")
+    expect(within(cell).getByText("rel(5000)")).toHaveAttribute(
+      "title",
+      `dt(${NOW.getTime() - 5_000})`
+    )
+    expect(within(screen.getByTestId("conversation-row-s1")).getAllByRole("cell")).toHaveLength(9)
+    const restore = screen.getByTestId("conversation-row-restore-s1")
+    expect(restore).toHaveAccessibleName('restoreRow:{"title":"Quarterly plan"}')
+    fireEvent.click(restore)
+    expect(props.rowActions.onUnarchive).toHaveBeenCalledWith("s1")
+  })
+
+  it("cannot restore a handed-off conversation from the row", () => {
+    setup({
+      showArchived: true,
+      session: session({
+        archivedAt: NOW.getTime(),
+        handoffLock: { ticketId: "t" } as ChatSession["handoffLock"],
+      }),
+    })
+    expect(screen.getByTestId("conversation-row-restore-s1")).toBeDisabled()
+  })
+
   it("draws the pin inside the title button", () => {
     setup({ session: session({ pinned: true }) })
     const title = screen.getByTestId("conversation-row-open-s1")

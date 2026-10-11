@@ -194,6 +194,63 @@ describe("ConversationManagerList", () => {
     expect(screen.queryByTestId("conversation-list-unread-s1")).not.toBeInTheDocument()
   })
 
+  it("runs edge to edge, without a card around the list", () => {
+    setup()
+    const list = screen.getByRole("list", { name: "Conversations" })
+    expect(list).toHaveClass("border-y")
+    expect(screen.getByTestId("conversation-list")).not.toHaveClass("px-3")
+    expect(list.parentElement).toBe(screen.getByTestId("conversation-list"))
+  })
+
+  it("previews the last message on its own line, only when there is one", () => {
+    setup({
+      rows: [
+        session("s1", { lastMessagePreview: "Shipped the draft to finance" }),
+        session("s2", { lastMessagePreview: "  " }),
+      ],
+    })
+    expect(screen.getByTestId("conversation-list-preview-s1")).toHaveTextContent(
+      "Shipped the draft to finance"
+    )
+    expect(screen.queryByTestId("conversation-list-preview-s2")).not.toBeInTheDocument()
+  })
+
+  it("says when an archived row was archived and restores it from the row", () => {
+    const { props } = setup({
+      rows: [session("s1", { archivedAt: NOW.getTime() - 3 * 86_400_000 }), session("s2")],
+    })
+    // The suite's formatter prints the instant; the app's says "3 days ago".
+    expect(screen.getByTestId("conversation-list-archived-s1")).toHaveTextContent(
+      `Archived ${new Date(NOW.getTime() - 3 * 86_400_000).toISOString()}`
+    )
+    expect(screen.queryByTestId("conversation-list-archived-s2")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-list-restore-s2")).not.toBeInTheDocument()
+    const restore = screen.getByTestId("conversation-list-restore-s1")
+    expect(restore).toHaveAccessibleName("Restore Title s1")
+    fireEvent.click(restore)
+    expect(props.rowActions.onUnarchive).toHaveBeenCalledWith("s1")
+    // Restoring is not opening.
+    expect(props.onOpen).not.toHaveBeenCalled()
+  })
+
+  it("offers no Restore while selecting, and none for a handed-off row", () => {
+    const { unmount } = setup({
+      selecting: true,
+      rows: [session("s1", { archivedAt: NOW.getTime() })],
+    })
+    expect(screen.queryByTestId("conversation-list-restore-s1")).not.toBeInTheDocument()
+    unmount()
+    setup({
+      rows: [
+        session("s1", {
+          archivedAt: NOW.getTime(),
+          handoffLock: { ticketId: "t" } as ChatSession["handoffLock"],
+        }),
+      ],
+    })
+    expect(screen.getByTestId("conversation-list-restore-s1")).toBeDisabled()
+  })
+
   it("puts the conversation's goal on the second line, outside the row's button", () => {
     const goal = {
       id: "g1",

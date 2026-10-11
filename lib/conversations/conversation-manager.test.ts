@@ -2,7 +2,10 @@ import type { ChatSession } from "@cognia/agent-config-types"
 
 import {
   CONVERSATION_MANAGER_ROUTE,
+  archiveOrderForClick,
+  ariaSortForArchive,
   ariaSortForColumn,
+  orderByArchivedAt,
   conversationManagerHref,
   countConversationsByTab,
   isConversationManagerTab,
@@ -80,5 +83,38 @@ describe("countConversationsByTab", () => {
       { kind: "subagent", archivedAt: 1 },
     ] as Pick<ChatSession, "archivedAt" | "kind">[]
     expect(countConversationsByTab(rows)).toEqual({ active: 1, archived: 2 })
+  })
+})
+
+describe("archive order", () => {
+  it("clicks newest-archived first, then reverses", () => {
+    expect(archiveOrderForClick(null)).toBe("archived")
+    expect(archiveOrderForClick("archived")).toBe("archivedAsc")
+    expect(archiveOrderForClick("archivedAsc")).toBe("archived")
+  })
+
+  it("reports its direction, and none while a query ranks the rows", () => {
+    expect(ariaSortForArchive(null)).toBe("none")
+    expect(ariaSortForArchive("archived")).toBe("descending")
+    expect(ariaSortForArchive("archivedAsc")).toBe("ascending")
+    expect(ariaSortForArchive("archived", true)).toBe("none")
+  })
+
+  it("orders by archive time and keeps a bulk archive's rows in the model's order", () => {
+    const rows = [
+      { id: "a", archivedAt: 10 },
+      { id: "b", archivedAt: 30 },
+      { id: "c", archivedAt: 30 },
+      { id: "d", archivedAt: 20 },
+    ]
+    expect(orderByArchivedAt(rows, "archived").map((row) => row.id)).toEqual(["b", "c", "d", "a"])
+    expect(orderByArchivedAt(rows, "archivedAsc").map((row) => row.id)).toEqual([
+      "a",
+      "d",
+      "b",
+      "c",
+    ])
+    // Pure: the input order is untouched.
+    expect(rows.map((row) => row.id)).toEqual(["a", "b", "c", "d"])
   })
 })

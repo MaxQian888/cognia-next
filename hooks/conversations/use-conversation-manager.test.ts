@@ -180,6 +180,42 @@ describe("useConversationManager", () => {
     expect(useConversationManagerStore.getState().sortBy).toBe("created")
   })
 
+  it("orders the archive by when rows were archived, unless a query ranks them", () => {
+    mockSessions = [
+      session("first", { archivedAt: 100, updatedAt: 50 }),
+      session("second", { archivedAt: 300, updatedAt: 10 }),
+      session("third", { archivedAt: 200, updatedAt: 30 }),
+    ]
+    const { result, rerender } = render()
+    act(() => result.current.setTab("archived"))
+    // By activity until the Archived column is picked.
+    expect(result.current.rows.map((row) => row.id)).toEqual(["first", "third", "second"])
+    expect(result.current.archiveOrder).toBeNull()
+
+    act(() => result.current.setArchiveOrder("archived"))
+    expect(result.current.rows.map((row) => row.id)).toEqual(["second", "third", "first"])
+    expect(result.current.orderedIds).toEqual(["second", "third", "first"])
+    act(() => result.current.setArchiveOrder("archivedAsc"))
+    expect(result.current.orderedIds).toEqual(["first", "third", "second"])
+
+    // A query ranks rows; the archive order steps aside without being lost.
+    rerender({ query: "t" })
+    expect(result.current.ranked).toBe(true)
+    expect(result.current.orderedIds).toEqual(result.current.model.orderedIds)
+    rerender({ query: "" })
+    expect(result.current.orderedIds).toEqual(["first", "third", "second"])
+
+    // The Active tab has no archive axis.
+    act(() => result.current.setTab("active"))
+    expect(result.current.archiveOrder).toBeNull()
+
+    // Picking a shared sort is picking the order: the archive order clears.
+    act(() => result.current.setTab("archived"))
+    act(() => result.current.setSortBy("title"))
+    expect(result.current.archiveOrder).toBeNull()
+    expect(result.current.rows.map((row) => row.id)).toEqual(["first", "second", "third"])
+  })
+
   it("narrows through its own filters and leaves the sidebar's alone", () => {
     const { result } = render()
     act(() => result.current.filterController.actions.toggle("pinned", true))

@@ -15,7 +15,10 @@ import {
   DEFAULT_CONVERSATION_SORT_BY,
   resolveConversationFilters,
 } from "@/lib/chat/conversation-filters"
-import type { ConversationManagerTab } from "@/lib/conversations/conversation-manager"
+import type {
+  ConversationArchiveOrder,
+  ConversationManagerTab,
+} from "@/lib/conversations/conversation-manager"
 import { persistLocalStorage } from "@/stores/persist-storage"
 
 interface ConversationManagerState {
@@ -25,11 +28,17 @@ interface ConversationManagerState {
   activeViewId: string | null
   /** Let the search field reach message content, not only titles. */
   searchContent: boolean
+  /**
+   * The Archived tab ordered by when rows were archived (its own column);
+   * `null` follows `sortBy`. Choosing any shared sort clears it.
+   */
+  archiveOrder: ConversationArchiveOrder | null
 
   // Session state
   tab: ConversationManagerTab
 
   setSortBy: (sortBy: ConversationSortBy) => void
+  setArchiveOrder: (order: ConversationArchiveOrder | null) => void
   setFilters: (filters: ConversationFilters) => void
   resetFilters: () => void
   setActiveViewId: (id: string | null) => void
@@ -44,10 +53,14 @@ export const useConversationManagerStore = create<ConversationManagerState>()(
       filters: resolveConversationFilters(undefined),
       activeViewId: null,
       searchContent: false,
+      archiveOrder: null,
 
       tab: "active",
 
-      setSortBy: (sortBy) => set({ sortBy }),
+      // A shared sort and the archive order are one control: picking either
+      // is picking the order.
+      setSortBy: (sortBy) => set({ sortBy, archiveOrder: null }),
+      setArchiveOrder: (archiveOrder) => set({ archiveOrder }),
       // Normalized on write, like the sidebar's store, so a partial (or a blob
       // from an older build) never leaves an unreadable field behind.
       setFilters: (filters) => set({ filters: resolveConversationFilters(filters) }),
@@ -66,6 +79,7 @@ export const useConversationManagerStore = create<ConversationManagerState>()(
         filters: s.filters,
         activeViewId: s.activeViewId,
         searchContent: s.searchContent,
+        archiveOrder: s.archiveOrder,
       }),
     }
   )

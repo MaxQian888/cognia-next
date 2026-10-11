@@ -200,6 +200,53 @@ describe("ConversationManagerTable", () => {
     )
   })
 
+  it("has no Archived column on the Active tab", () => {
+    setup()
+    expect(screen.queryByTestId("conversation-table-sort-archived")).not.toBeInTheDocument()
+    expect(mockRowProps.mock.calls.every(([props]) => props.showArchived === false)).toBe(true)
+  })
+
+  it("sorts the archive by when rows were archived, newest first, then the reverse", () => {
+    const onOrder = jest.fn()
+    setup({ archive: { order: null, onOrder } })
+    const header = screen.getByTestId("conversation-table-sort-archived")
+    expect(header).toHaveTextContent("columns.archived")
+    expect(header.closest("th")).toHaveAttribute("aria-sort", "none")
+    // Recent activity still orders the rows.
+    expect(screen.getByTestId("conversation-table-sort-activity").closest("th")).toHaveAttribute(
+      "aria-sort",
+      "descending"
+    )
+    expect(mockRowProps.mock.calls.every(([props]) => props.showArchived === true)).toBe(true)
+    fireEvent.click(header)
+    expect(onOrder).toHaveBeenCalledWith("archived")
+  })
+
+  it("lets the archive order own the headers while it is set", () => {
+    const onOrder = jest.fn()
+    setup({ archive: { order: "archived", onOrder } })
+    expect(screen.getByTestId("conversation-table-sort-archived").closest("th")).toHaveAttribute(
+      "aria-sort",
+      "descending"
+    )
+    for (const column of ["title", "activity", "created"]) {
+      expect(screen.getByTestId(`conversation-table-sort-${column}`).closest("th")).toHaveAttribute(
+        "aria-sort",
+        "none"
+      )
+    }
+    fireEvent.click(screen.getByTestId("conversation-table-sort-archived"))
+    expect(onOrder).toHaveBeenCalledWith("archivedAsc")
+  })
+
+  it("claims no archive order while a query ranks the rows", () => {
+    setup({ ranked: true, archive: { order: "archivedAsc", onOrder: jest.fn() } })
+    expect(screen.getByTestId("conversation-table-sort-archived").closest("th")).toHaveAttribute(
+      "aria-sort",
+      "none"
+    )
+  })
+
   it("cannot select all from an empty view", () => {
     setup({ rows: [], totalInView: 0 })
     expect(screen.getByTestId("conversation-table-select-all")).toBeDisabled()

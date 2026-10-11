@@ -1,9 +1,11 @@
 {
+  "archivedAgo": "{time}归档",
   "archivedNote": "已归档的会话在归档期间保留置顶和所在文件夹，恢复后两者都会回来。向已归档会话发送消息会自动恢复它。",
   "columns": {
     "actions": "操作",
     "activity": "最近活动",
     "agent": "智能体",
+    "archived": "归档时间",
     "created": "创建时间",
     "selectAll": "选择此视图中的所有会话",
     "title": "会话",
@@ -13,6 +15,7 @@
   "contentMatch": "在消息中匹配",
   "description": "所有工作区的全部会话。在这里查找、重命名、归入文件夹、归档和恢复。",
   "emptyArchive": "清空归档…",
+  "emptyTitle": "还没有对话",
   "goal": {
     "open": "目标{status}：{objective}。在目标页打开"
   },
@@ -24,8 +27,11 @@
   "none": "—",
   "openRow": "打开 {title}",
   "rankedHint": "搜索时按相关度排序",
+  "restore": "恢复",
+  "restoreRow": "恢复 {title}",
   "rowActions": "{title} 的操作",
   "rowSelect": "选择 {title}",
+  "searchArchive": "在已归档会话中搜索",
   "searchAria": "搜索会话",
   "searchClear": "清除搜索",
   "searchContent": "搜索消息内容",
@@ -41,6 +47,7 @@
   },
   "tabsAria": "要显示的会话",
   "title": "会话管理",
+  "unreadSortHint": "未读会话在前，其余按最近活动排序",
   "usage": "{turns} 轮 · {tokens} · {cost}",
   "usageCompact": "{turns} 轮 · {tokens}"
 }

@@ -12683,11 +12683,13 @@
       "unarchive": "Unarchive"
     },
     "manager": {
+      "archivedAgo": "Archived {time}",
       "archivedNote": "Archived conversations keep their pin and folder while they are archived, and get both back when you restore them. Sending a message to one restores it.",
       "columns": {
         "actions": "Actions",
         "activity": "Last activity",
         "agent": "Agent",
+        "archived": "Archived",
         "created": "Created",
         "selectAll": "Select every conversation in this view",
         "title": "Conversation",
@@ -12697,6 +12699,7 @@
       "contentMatch": "Matched in the messages",
       "description": "Every conversation across your workspaces. Find, rename, file, archive and restore them in one place.",
       "emptyArchive": "Empty archive…",
+      "emptyTitle": "No conversations yet",
       "goal": {
         "open": "Goal {status}: {objective}. Open it in Goals"
       },
@@ -12708,8 +12711,11 @@
       "none": "—",
       "openRow": "Open {title}",
       "rankedHint": "Sorted by relevance while searching",
+      "restore": "Restore",
+      "restoreRow": "Restore {title}",
       "rowActions": "Actions for {title}",
       "rowSelect": "Select {title}",
+      "searchArchive": "Search archived conversations",
       "searchAria": "Search conversations",
       "searchClear": "Clear search",
       "searchContent": "Search message content",
@@ -12725,6 +12731,7 @@
       },
       "tabsAria": "Which conversations to show",
       "title": "Conversations",
+      "unreadSortHint": "Unread conversations first, then by last activity",
       "usage": "{turns, plural, one {# turn} other {# turns}} · {tokens} · {cost}",
       "usageCompact": "{turns, plural, one {# turn} other {# turns}} · {tokens}"
     }
@@ -13171,6 +13178,7 @@
       "searchShortcutHint": "Press / to search",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchWiden": {
+        "active": "Search active conversations",
         "archived": "Include archived conversations",
         "content": "Also search message content",
         "workspaces": "Search all workspaces"

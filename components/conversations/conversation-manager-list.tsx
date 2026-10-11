@@ -5,14 +5,21 @@
  *
  * The table cannot be a phone layout: below ~640px it is a title squeezed to
  * a few characters between a checkbox and a timestamp, with every other fact
- * dropped. This draws the same rows as two-line list items instead —
+ * dropped. This draws the same rows as list items instead —
  *
  *   [avatar]  Refactor the auth middleware 📌                 2 hr ago   ⋯
+ *             Sure — the middleware now checks the token before…
  *             Coding Assistant · 12 turns · 42K · ◎ Active 4/20
  *
- * — with 44px touch targets, the same row menu (`SessionRowMenuItems`), the
- * same write boundary (`rowActions`) and the same delete confirmation as the
- * table rows.
+ * — the last message's preview on its own line (only when there is one), with
+ * 44px touch targets, the same row menu (`SessionRowMenuItems`), the same
+ * write boundary (`rowActions`) and the same delete confirmation as the table
+ * rows. An archived row says when it was archived and carries Restore beside
+ * its menu, as the table's rows do.
+ *
+ * The list runs edge to edge under the tools, the way a phone list does: a
+ * framed card around a page's only content spent 24px of a 390px screen on a
+ * border and set the rows apart from nothing.
  *
  * Selection is a mode, not a checkbox column: "Select" in the toolbar (or a
  * long-press on a row) turns the leading avatar into a checkbox and makes a tap
@@ -24,6 +31,7 @@ import { memo, useRef, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import {
+  ArchiveRestoreIcon,
   CheckIcon,
   HashIcon,
   MessageSquareIcon,
@@ -40,7 +48,6 @@ import type { RowDecorations } from "@/components/desktop/channel-list/row-decor
 import { LongPress } from "@/components/interactions/long-press"
 import { CountPill } from "@/components/shared/count-pill"
 import { DROPDOWN_MENU_KIT } from "@/components/shared/menu-kit"
-import { Surface } from "@/components/surface/surface"
 import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -110,32 +117,30 @@ export function ConversationManagerList({
 }: ConversationManagerListProps) {
   const t = useTranslations("conversations.manager")
   return (
-    <div className="px-3 pb-3" data-testid="conversation-list">
-      <Surface layer="raised" radius="panel" className="overflow-hidden border">
-        <ul aria-label={t("listAria")} className="flex flex-col">
-          {rows.map((session) => (
-            <ConversationManagerListRow
-              key={session.id}
-              session={session}
-              selecting={selecting}
-              selected={isSelected(session.id)}
-              onStartSelecting={onStartSelecting}
-              onToggleSelect={onToggleSelect}
-              decorations={decorations}
-              folders={folders}
-              usage={usage.get(session.id)}
-              runStatus={runStatusById.get(session.id)}
-              unread={session.archivedAt != null ? 0 : (unreadCountById.get(session.id) ?? 0)}
-              contentMatch={contentOnlyIds.has(session.id)}
-              goal={goals.get(session.id)}
-              now={now}
-              rowActions={rowActions}
-              extraActions={extraActions}
-              onOpen={onOpen}
-            />
-          ))}
-        </ul>
-      </Surface>
+    <div className="pb-3" data-testid="conversation-list">
+      <ul aria-label={t("listAria")} className="flex flex-col border-y">
+        {rows.map((session) => (
+          <ConversationManagerListRow
+            key={session.id}
+            session={session}
+            selecting={selecting}
+            selected={isSelected(session.id)}
+            onStartSelecting={onStartSelecting}
+            onToggleSelect={onToggleSelect}
+            decorations={decorations}
+            folders={folders}
+            usage={usage.get(session.id)}
+            runStatus={runStatusById.get(session.id)}
+            unread={session.archivedAt != null ? 0 : (unreadCountById.get(session.id) ?? 0)}
+            contentMatch={contentOnlyIds.has(session.id)}
+            goal={goals.get(session.id)}
+            now={now}
+            rowActions={rowActions}
+            extraActions={extraActions}
+            onOpen={onOpen}
+          />
+        ))}
+      </ul>
     </div>
   )
 }
@@ -218,6 +223,14 @@ const ConversationManagerListRow = memo(function ConversationManagerListRow({
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
   const activityAt = conversationLastActivityAt(session)
   const turns = usage?.turns ?? 0
+  const preview = session.lastMessagePreview?.trim() || undefined
+  const locked = Boolean(session.handoffLock)
+  // Not while selecting: a tap then toggles the row, and a second action on
+  // it would be one tap away from a write the reader did not mean.
+  const restore =
+    archived && !selecting && rowActions.onUnarchive
+      ? () => void rowActions.onUnarchive!(id)
+      : undefined
   const bind = (handler: ((id: string) => void) | undefined) =>
     handler ? () => handler(id) : undefined
   const toggle = () => onToggleSelect(id, { ctrlKey: true, metaKey: false, shiftKey: false })
@@ -293,8 +306,24 @@ const ConversationManagerListRow = memo(function ConversationManagerListRow({
                   {activityAt > 0 ? format.relativeTime(new Date(activityAt), now) : null}
                 </span>
               </span>
+              {preview ? (
+                <span
+                  className="block truncate text-xs text-muted-foreground"
+                  data-testid={`conversation-list-preview-${id}`}
+                >
+                  {preview}
+                </span>
+              ) : null}
               <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
                 {goal ? <ConversationGoalChip goal={goal} /> : null}
+                {session.archivedAt != null ? (
+                  <span className="shrink-0" data-testid={`conversation-list-archived-${id}`}>
+                    {t("archivedAgo", {
+                      time: format.relativeTime(new Date(session.archivedAt), now),
+                    })}
+                  </span>
+                ) : null}
+                {session.archivedAt != null && agentName ? <Dot /> : null}
                 {agentName ? <span className="truncate">{agentName}</span> : null}
                 {turns > 0 ? (
                   <>
@@ -328,6 +357,19 @@ const ConversationManagerListRow = memo(function ConversationManagerListRow({
           </span>
         </LongPress>
       )}
+      {restore && !editing ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-11 shrink-0"
+          onClick={restore}
+          disabled={locked}
+          aria-label={t("restoreRow", { title })}
+          data-testid={`conversation-list-restore-${id}`}
+        >
+          <ArchiveRestoreIcon className="size-4" />
+        </Button>
+      ) : null}
       <DropdownMenu onOpenChange={desktopHandoffs.onActionsOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button
