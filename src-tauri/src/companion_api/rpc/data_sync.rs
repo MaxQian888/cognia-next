@@ -95,6 +95,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "files_library_upload_chunk",
     "files_library_upload_commit",
     "files_library_upload_abort",
+    "glance_subscribe",
+    "glance_request",
+    "glance_quota_enable",
     "device_capabilities_report",
     "session_mark_read",
     "session_mark_unread",
@@ -862,6 +865,18 @@ pub(super) async fn dispatch(
         | "files_library_upload_chunk"
         | "files_library_upload_commit"
         | "files_library_upload_abort"
+        // Glance on a paired phone (ADR-0225 §7): the phone leases the
+        // desktop's glance snapshot, asks for a re-read, or turns quota
+        // queries on for a vault account. The arms
+        // (`lib/glance/remote/host-dispatch.ts`) run in the renderer whose
+        // publisher builds the snapshots, which then ride `glance://update`;
+        // a headless brain answers every one `headless_host`. Each carries an
+        // explicit request schema. Only the subscribe has the caller id
+        // injected: the renderer keys each lease on the verified device plus
+        // the phone's consumer id.
+        | "glance_subscribe"
+        | "glance_request"
+        | "glance_quota_enable"
         // ADR-0060 — device capability report; TS arm persists onto the
         // caller's `pairedDevices` row (caller id injected below).
         | "device_capabilities_report"

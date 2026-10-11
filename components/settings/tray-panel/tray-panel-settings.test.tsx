@@ -6,6 +6,7 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/tauri/tray-panel", () => ({
   DEFAULT_TRAY_PANEL_CONFIG: { leftClick: "panel", width: 380, height: 460 },
@@ -29,6 +30,13 @@ jest.mock("./tray-panel-preview", () => ({
 import { isTauri } from "@/lib/tauri"
 import { getTrayPanelConfig, openTrayPanel, setTrayLeftClickAction } from "@/lib/tauri/tray-panel"
 import { DEFAULT_TRAY_PANEL_ACTIONS } from "@/lib/tray-panel/defaults"
+import { toast } from "sonner"
+import { withEditedEntries } from "@/lib/glance/layout-edit"
+import {
+  desktopEntriesFromMobile,
+  mobileLayoutFromPreset,
+  normalizeGlanceMobileSettings,
+} from "@/lib/glance/mobile-layout"
 import { DEFAULT_GLANCE_PANEL_SETTINGS, layoutFromPreset } from "@/lib/glance/presets"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GlancePanelSettings } from "@/types/glance/layout"
@@ -459,6 +467,82 @@ describe("TrayPanelSettings", () => {
     it("enables the autofocus switch while the delegate bar is shown", () => {
       render(<TrayPanelSettings />)
       expect(screen.getByRole("switch", { name: "layout.autofocus" })).toBeEnabled()
+    })
+
+    describe("copy the phone's layout (ADR-0225 §10)", () => {
+      const toastSuccess = toast.success as jest.Mock
+
+      beforeEach(() => toastSuccess.mockClear())
+
+      function seedPhone(mobileGlanceLayout: unknown) {
+        useSettingsStore.setState({
+          settings: { trayPanelLayout: storedLayout, mobileGlanceLayout } as never,
+          save: saveSettingsMock as never,
+        })
+      }
+
+      it("is disabled and says why while no phone has saved a layout", async () => {
+        const user = userEvent.setup()
+        render(<TrayPanelSettings />)
+        const button = screen.getByRole("button", { name: "modules.copyPhone" })
+        expect(button).toBeDisabled()
+        expect(button).toHaveTextContent("modules.copyPhoneAction")
+        expect(screen.getByText("modules.copyPhoneNone")).toBeInTheDocument()
+        expect(screen.queryByText("modules.copyPhoneHint")).not.toBeInTheDocument()
+        await user.click(button)
+        expect(saveSettingsMock).not.toHaveBeenCalled()
+        expect(toastSuccess).not.toHaveBeenCalled()
+      })
+
+      it("copies the phone's modules, order and sizes into the tray layout", async () => {
+        const user = userEvent.setup()
+        const phone = {
+          version: 1,
+          preset: "agent-ops",
+          entries: mobileLayoutFromPreset("agent-ops"),
+          scope: "workspace",
+          shortcuts: ["search"],
+        }
+        storedLayout = { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "wide", maxHeight: 520 }
+        seedPhone(phone)
+        render(<TrayPanelSettings />)
+        expect(screen.getByText("modules.copyPhoneHint")).toBeInTheDocument()
+        expect(screen.queryByText("modules.copyPhoneNone")).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole("button", { name: "modules.copyPhone" }))
+
+        const expected = withEditedEntries(
+          { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "wide", maxHeight: 520 },
+          desktopEntriesFromMobile(normalizeGlanceMobileSettings(phone).entries)
+        )
+        expect(savedLayout()).toEqual(expected)
+        // The phone's order and sizes, its home pins and shortcuts left behind,
+        // and the panel's own geometry kept.
+        const saved = savedLayout()
+        expect(saved.entries.filter((e) => !e.hidden).map((e) => [e.id, e.size])).toEqual([
+          ["fleet", "expanded"],
+          ["agenda", "standard"],
+          ["recents", "standard"],
+          ["quick", "standard"],
+          ["quota", "compact"],
+        ])
+        expect(saved.entries.every((e) => !("home" in e))).toBe(true)
+        expect(saved.preset).toBe("custom")
+        expect(saved.width).toBe("wide")
+        expect(saved.maxHeight).toBe(520)
+        expect(saved.scope).toBe(DEFAULT_GLANCE_PANEL_SETTINGS.scope)
+        expect(toastSuccess).toHaveBeenCalledWith("modules.copiedPhone")
+      })
+
+      it("repairs a malformed stored phone layout before copying it", async () => {
+        const user = userEvent.setup()
+        seedPhone({ entries: [{ id: "usage", size: "expanded" }, { id: "nope" }] })
+        render(<TrayPanelSettings />)
+        await user.click(screen.getByRole("button", { name: "modules.copyPhone" }))
+        const shown = savedLayout().entries.filter((e) => !e.hidden)
+        expect(shown).toEqual([{ id: "usage", size: "expanded", hidden: false }])
+        expect(toastSuccess).toHaveBeenCalledTimes(1)
+      })
     })
   })
 

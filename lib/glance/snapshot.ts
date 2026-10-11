@@ -17,7 +17,9 @@ import type { TrayPanelAction } from "@/lib/tray-panel/types"
 import type { TrayStateSnapshot } from "@/lib/tray/types"
 import type {
   GlanceActivityRange,
+  GlanceLayoutEntry,
   GlancePanelSettings,
+  GlancePresetId,
   GlanceUsageScope,
 } from "@/types/glance/layout"
 import type { LimitsMeterKind } from "@/types/subscription"
@@ -53,6 +55,18 @@ export interface GlanceFleetSlice {
   total: number
   /** Rows by island priority, capped at {@link GLANCE_FLEET_MAX_ROWS}. */
   rows: GlanceFleetRow[]
+  /**
+   * Visual workflows running now. Not island rows (the island holds agent
+   * tasks and the approvals they wait on); summarized beside them because a
+   * running workflow is running work too, and it routes to its own runs page.
+   */
+  workflows: GlanceFleetWorkflows
+}
+
+export interface GlanceFleetWorkflows {
+  running: number
+  /** The most recently started run. Its name is the workflow's, capped. */
+  latest: { workflowId: string; name: string; startedAt: number } | null
 }
 
 export const GLANCE_FLEET_MAX_ROWS = 8
@@ -236,9 +250,15 @@ export interface GlanceSnapshotV1 {
    * The tray action catalogue, resolved (`resolveTrayPanelActions`): what the
    * quick actions module and the delegate bar render and run. Desktop-host
    * configuration the user authored, not session content. A remote consumer
-   * (a paired phone, phase 3) never receives it.
+   * (a paired phone) never receives it: its copy is always empty.
    */
   actions: TrayPanelAction[]
+  /**
+   * Remote snapshots only: the desktop's own tray layout, so a phone can copy
+   * it (ADR-0225 §10). `config` on a remote snapshot is the phone's demand,
+   * not this.
+   */
+  hostLayout?: { preset: GlancePresetId | "custom"; entries: GlanceLayoutEntry[] }
   /**
    * Slices for the VISIBLE modules only. A hidden module's slice is null, and
    * the publisher does not compute it.

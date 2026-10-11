@@ -6,9 +6,9 @@ import { render, screen } from "@testing-library/react"
 
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceLayoutEntry } from "@/types/glance/layout"
+import type { GlanceLayoutEntry, GlanceModuleId } from "@/types/glance/layout"
 
-import { GlanceProvider, type GlanceContextValue } from "./glance-context"
+import { GlanceProvider, type GlanceContextValue, type GlanceModuleOrigin } from "./glance-context"
 import { DEFAULT_GLANCE_RENDERERS, GlanceStack, type GlanceModuleRenderer } from "./glance-stack"
 
 function makeSnapshot(): GlanceSnapshotV1 {
@@ -34,7 +34,8 @@ function makeSnapshot(): GlanceSnapshotV1 {
 
 function renderStack(
   entries: readonly GlanceLayoutEntry[],
-  renderers?: Parameters<typeof GlanceStack>[0]["renderers"]
+  renderers?: Parameters<typeof GlanceStack>[0]["renderers"],
+  originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
 ) {
   const value: GlanceContextValue = {
     snapshot: makeSnapshot(),
@@ -43,6 +44,7 @@ function renderStack(
     now: 5_000,
     send: jest.fn(async () => null),
     route: jest.fn(),
+    originOf,
   }
   return render(
     <GlanceProvider value={value}>
@@ -139,5 +141,44 @@ describe("GlanceStack", () => {
     )
     // pet tops out at standard; fleet supports expanded; agenda keeps compact.
     expect(seen).toEqual({ pet: "standard", fleet: "expanded", agenda: "compact" })
+  })
+
+  describe("origins on a paired phone", () => {
+    const ENTRIES: GlanceLayoutEntry[] = [
+      { id: "fleet", size: "compact", hidden: false },
+      { id: "usage", size: "compact", hidden: false },
+      { id: "recents", size: "compact", hidden: false },
+    ]
+
+    it("says an unavailable module is unavailable in place of the module", () => {
+      const Usage: GlanceModuleRenderer = () => <div data-testid="usage-module" />
+      const { container } = renderStack(ENTRIES, { usage: Usage }, (id) =>
+        id === "usage" ? { kind: "unavailable", reason: "host-unsupported" } : null
+      )
+      expect(screen.queryByTestId("usage-module")).not.toBeInTheDocument()
+      const unavailable = container.querySelector("[data-glance-unavailable]")
+      expect(unavailable).toHaveAttribute("data-glance-module", "usage")
+      expect(unavailable).toHaveTextContent("Your desktop doesn't share this.")
+      // Order is kept: the placeholder sits where the module would.
+      expect(renderedModuleIds(container)).toEqual(["fleet", "usage", "recents"])
+    })
+
+    it("still renders a module received from the host", () => {
+      const Usage: GlanceModuleRenderer = ({ size }) => <div data-testid="usage-module">{size}</div>
+      const { container } = renderStack(ENTRIES, { usage: Usage }, (id) =>
+        id === "usage" ? { kind: "host", host: "MacBook", at: 1_000, live: true } : null
+      )
+      expect(screen.getByTestId("usage-module")).toHaveTextContent("compact")
+      expect(container.querySelector("[data-glance-unavailable]")).toBeNull()
+    })
+
+    it("does not render a placeholder for a hidden unavailable module", () => {
+      const { container } = renderStack(
+        [{ id: "usage", size: "compact", hidden: true }],
+        undefined,
+        () => ({ kind: "unavailable", reason: "host-offline" })
+      )
+      expect(container.querySelector("[data-glance-unavailable]")).toBeNull()
+    })
   })
 })

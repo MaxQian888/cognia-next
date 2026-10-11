@@ -5178,6 +5178,62 @@ fn files_library_commands_are_bridged_and_bind_the_caller() {
     }
 }
 
+/// Glance on a paired phone (ADR-0225 §7). The three arms ride the generic
+/// desktop-writes bridge to the renderer whose publisher builds the snapshots
+/// and stay off the remote-control gate. The lease renewal and the re-read are
+/// `host.observe` reads that skip the idempotency cache, since a cached answer
+/// would hand back a stale snapshot or swallow a refresh; turning quota queries
+/// on is a `client.write` settings write keyed like every other mutation. Only
+/// the subscribe binds the caller id: the host keys each lease on the verified
+/// device plus the phone's consumer id, so a device cannot touch another's
+/// lease; the requests are scoped to nothing on the device.
+#[test]
+fn glance_commands_are_bridged_observe_reads_and_one_settings_write() {
+    use crate::companion_api::command_manifest::{
+        descriptor, CommandIdempotency, CommandOperation, CommandTarget,
+    };
+    let reads = ["glance_subscribe", "glance_request"];
+    let write = "glance_quota_enable";
+    for command in reads.iter().chain(std::iter::once(&write)) {
+        assert!(KNOWN_COMMANDS.contains(command), "{command} is known");
+        assert!(
+            KNOWN_COMMANDS_SET.contains(command),
+            "{command} is in the generated set"
+        );
+        assert!(
+            data_sync::COMMANDS.contains(command),
+            "{command} is bridged"
+        );
+        assert!(
+            !is_control_command(command),
+            "{command} is the device's own glance, not remote control"
+        );
+        assert_eq!(
+            CALLER_DEVICE_ID_COMMANDS.contains(command),
+            *command == "glance_subscribe",
+            "only the lease is keyed on the verified device"
+        );
+        let descriptor = descriptor(command).expect("glance commands have a manifest descriptor");
+        assert_eq!(descriptor.target, CommandTarget::Execution);
+    }
+    for command in reads {
+        assert!(READ_ONLY_COMMANDS_SET.contains(command), "{command} reads");
+        assert!(
+            READ_ONLY_COMMANDS.contains(&command),
+            "{command} skips the cache"
+        );
+        let descriptor = descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "host.observe");
+        assert_eq!(descriptor.operation, CommandOperation::Read);
+        assert_eq!(descriptor.idempotency, CommandIdempotency::Structural);
+    }
+    assert!(!READ_ONLY_COMMANDS_SET.contains(write), "{write} writes");
+    let descriptor = descriptor(write).unwrap();
+    assert_eq!(descriptor.capability, "client.write");
+    assert_eq!(descriptor.operation, CommandOperation::Write);
+    assert_eq!(descriptor.idempotency, CommandIdempotency::Required);
+}
+
 /// The goal lifecycle a paired phone drives beyond pause/resume/stop: the
 /// acceptance verdict, delete, a held manual-continue turn, a verifier retry,
 /// the subgoal checklist (generate / mark a step / clear), and the verifier

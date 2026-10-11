@@ -8,9 +8,14 @@ import userEvent from "@testing-library/user-event"
 
 import { DEFAULT_GLANCE_PANEL_SETTINGS } from "@/lib/glance/presets"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceWidthStep } from "@/types/glance/layout"
+import type { GlanceModuleId, GlanceWidthStep } from "@/types/glance/layout"
 
-import { GlanceProvider, type GlanceContextValue, type GlancePlatform } from "./glance-context"
+import {
+  GlanceProvider,
+  type GlanceContextValue,
+  type GlanceModuleOrigin,
+  type GlancePlatform,
+} from "./glance-context"
 import {
   GlanceCompactSection,
   GlanceDot,
@@ -21,6 +26,8 @@ import {
   GlanceSparkline,
   GlanceStats,
   GlanceTag,
+  GlanceOriginTag,
+  GlanceUnavailableModule,
 } from "./glance-primitives"
 
 function makeSnapshot(): GlanceSnapshotV1 {
@@ -45,7 +52,11 @@ function makeSnapshot(): GlanceSnapshotV1 {
 
 function renderGlance(
   ui: ReactNode,
-  options: { platform?: GlancePlatform; width?: GlanceWidthStep } = {}
+  options: {
+    platform?: GlancePlatform
+    width?: GlanceWidthStep
+    originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
+  } = {}
 ) {
   const value: GlanceContextValue = {
     snapshot: makeSnapshot(),
@@ -54,6 +65,7 @@ function renderGlance(
     now: 5_000,
     send: jest.fn(async () => null),
     route: jest.fn(),
+    originOf: options.originOf,
   }
   return render(<GlanceProvider value={value}>{ui}</GlanceProvider>)
 }
@@ -414,5 +426,118 @@ describe("GlanceLinkButton", () => {
     )
     await user.click(screen.getByRole("button", { name: "Open the thing" }))
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("GlanceOriginTag", () => {
+  // The global next-intl mock formats a relative time as the ISO of its date.
+  const AT = 2_000
+  const AGE = new Date(AT).toISOString()
+  const host =
+    (overrides: Partial<Extract<GlanceModuleOrigin, { kind: "host" }>> = {}) =>
+    (): GlanceModuleOrigin => ({ kind: "host", host: "MacBook", at: AT, live: true, ...overrides })
+
+  it("renders nothing without originOf (this device's own data)", () => {
+    const { container } = renderGlance(<GlanceOriginTag moduleId="usage" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("renders nothing for a local module (originOf returns null)", () => {
+    const { container } = renderGlance(<GlanceOriginTag moduleId="recents" />, {
+      originOf: () => null,
+    })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("renders nothing for an unavailable origin (the stack says so in place)", () => {
+    const { container } = renderGlance(<GlanceOriginTag moduleId="usage" />, {
+      originOf: () => ({ kind: "unavailable", reason: "host-offline" }),
+    })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("names the live host and the reading's age", () => {
+    const originOf = jest.fn(host())
+    renderGlance(<GlanceOriginTag moduleId="usage" />, { originOf })
+    expect(originOf).toHaveBeenCalledWith("usage")
+    const tag = screen.getByTestId("glance-origin-usage")
+    expect(tag).toHaveAttribute("data-live", "true")
+    expect(tag).toHaveTextContent(`MacBook · ${AGE}`)
+    expect(tag).toHaveAttribute("title", `MacBook · ${AGE}`)
+    expect(tag).not.toHaveClass("text-warning")
+  })
+
+  it("says the host is offline for a reading kept from before the drop", () => {
+    renderGlance(<GlanceOriginTag moduleId="usage" />, { originOf: host({ live: false }) })
+    const tag = screen.getByTestId("glance-origin-usage")
+    expect(tag).toHaveAttribute("data-live", "false")
+    expect(tag).toHaveTextContent(`MacBook offline · ${AGE}`)
+    expect(tag).toHaveClass("text-warning")
+  })
+
+  it.each([
+    [true, `Desktop · ${AGE}`],
+    [false, `Desktop offline · ${AGE}`],
+  ])("falls back to 'Desktop' when the host has no label (live: %s)", (live, text) => {
+    renderGlance(<GlanceOriginTag moduleId="quota" />, { originOf: host({ host: null, live }) })
+    expect(screen.getByTestId("glance-origin-quota")).toHaveTextContent(text)
+  })
+
+  it("never dates a reading in the future of the consumer's clock", () => {
+    // `now` (5 000) is behind the reading: the age is measured from the reading.
+    renderGlance(<GlanceOriginTag moduleId="usage" />, { originOf: host({ at: 9_000 }) })
+    expect(screen.getByTestId("glance-origin-usage")).toHaveTextContent(
+      `MacBook · ${new Date(9_000).toISOString()}`
+    )
+  })
+
+  it("is part of a GlanceSection header and a GlanceCompactSection row", () => {
+    renderGlance(
+      <>
+        <GlanceSection moduleId="usage" title="Usage">
+          body
+        </GlanceSection>
+        <GlanceCompactSection moduleId="quota" title="Quota" onClick={jest.fn()} label="Open">
+          q
+        </GlanceCompactSection>
+      </>,
+      { originOf: host() }
+    )
+    const usage = screen.getByRole("region", { name: "Usage" })
+    expect(within(usage).getByTestId("glance-origin-usage")).toBeInTheDocument()
+    expect(
+      within(usage.querySelector("header") as HTMLElement).getByTestId("glance-origin-usage")
+    ).toBeInTheDocument()
+    const quota = screen.getByRole("button", { name: "Open" })
+    expect(within(quota).getByTestId("glance-origin-quota")).toBeInTheDocument()
+  })
+})
+
+describe("GlanceUnavailableModule", () => {
+  it("shows the module title and the offline reason", () => {
+    renderGlance(<GlanceUnavailableModule moduleId="usage" />, {
+      originOf: () => ({ kind: "unavailable", reason: "host-offline" }),
+    })
+    const section = screen.getByRole("region", { name: "Usage" })
+    expect(section).toHaveAttribute("data-glance-module", "usage")
+    expect(section).toHaveAttribute("data-glance-unavailable")
+    expect(within(section).getByText("Usage")).toBeInTheDocument()
+    expect(within(section).getByText("Desktop offline — nothing received yet.")).toBeInTheDocument()
+    expect(within(section).queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("says the desktop does not share the module when it is unsupported", () => {
+    renderGlance(<GlanceUnavailableModule moduleId="quota" />, {
+      originOf: () => ({ kind: "unavailable", reason: "host-unsupported" }),
+      platform: "mobile",
+    })
+    const section = screen.getByRole("region", { name: "Quota" })
+    expect(within(section).getByText("Your desktop doesn't share this.")).toBeInTheDocument()
+    expect(section).toHaveClass("px-5")
+  })
+
+  it("falls back to the offline reason without an origin", () => {
+    renderGlance(<GlanceUnavailableModule moduleId="fleet" />)
+    expect(screen.getByText("Desktop offline — nothing received yet.")).toBeInTheDocument()
   })
 })

@@ -5,12 +5,16 @@
  *
  * Counts and the most recent rows, nothing else. There is deliberately no
  * approve, answer or stop control here: every click opens Agent Fleet (the
- * island) on that task, which is the one place those controls live. The test
- * pins that this module renders no such control.
+ * island on the desktop, the Fleet page on a phone) on that task, which is the
+ * one place those controls live. The test pins that this module renders no
+ * such control.
+ *
+ * Running visual workflows are running work too, so a line summarizes them
+ * beside the tasks and opens the workflow's runs page.
  */
 
 import { useFormatter, useTranslations } from "next-intl"
-import { ExternalLinkIcon } from "lucide-react"
+import { ExternalLinkIcon, WorkflowIcon } from "lucide-react"
 
 import type { GlanceFleetRow, GlanceFleetState } from "@/lib/glance/snapshot"
 import type { GlanceModuleSize } from "@/types/glance/layout"
@@ -60,7 +64,7 @@ export function GlanceFleetModule({ size }: { size: GlanceModuleSize }) {
     )
   }
 
-  const { counts } = fleet
+  const { counts, workflows } = fleet
 
   if (size === "compact") {
     return (
@@ -84,6 +88,15 @@ export function GlanceFleetModule({ size }: { size: GlanceModuleSize }) {
             <span className="text-muted-foreground/60">·</span>
             <GlanceDot tone="err" />
             <span className="tabular-nums">{t("failed", { count: counts.failed })}</span>
+          </>
+        ) : null}
+        {workflows.running > 0 ? (
+          <>
+            <span className="text-muted-foreground/60">·</span>
+            <WorkflowIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            <span className="tabular-nums" data-testid="glance-fleet-workflows-compact">
+              {t("workflowsShort", { count: workflows.running })}
+            </span>
           </>
         ) : null}
       </GlanceCompactSection>
@@ -133,7 +146,7 @@ export function GlanceFleetModule({ size }: { size: GlanceModuleSize }) {
           },
         ]}
       />
-      {rows.length === 0 ? (
+      {rows.length === 0 && workflows.running === 0 ? (
         <GlanceRow>
           <span className="text-muted-foreground">{t("empty")}</span>
         </GlanceRow>
@@ -166,6 +179,19 @@ export function GlanceFleetModule({ size }: { size: GlanceModuleSize }) {
       {more > 0 ? (
         <GlanceRow label={t("openFleet")} onClick={() => route({ kind: "open-fleet" })}>
           <span className="text-muted-foreground">{t("more", { count: more })}</span>
+        </GlanceRow>
+      ) : null}
+      {workflows.running > 0 && workflows.latest ? (
+        <GlanceRow
+          testId="glance-fleet-workflows"
+          label={t("openWorkflows", { name: workflows.latest.name })}
+          leading={<WorkflowIcon aria-hidden className="size-3.5 shrink-0 text-success" />}
+          sub={format.relativeTime(new Date(workflows.latest.startedAt), now)}
+          onClick={() =>
+            route({ kind: "open-owner", owner: "workflows", itemId: workflows.latest?.workflowId })
+          }
+        >
+          {t("workflowsRunning", { count: workflows.running, name: workflows.latest.name })}
         </GlanceRow>
       ) : null}
     </GlanceSection>

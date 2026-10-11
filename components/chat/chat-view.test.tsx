@@ -1294,8 +1294,9 @@ describe("ChatPane", () => {
         expect(props?.variant).toBe("inline")
         expect(props?.welcomeStyle).toBe("minimal")
         expect(props?.userName).toBe("Max")
-        // The phone's dashboard is the compact one (hidden while empty).
-        expect(props?.statsSlot?.props?.compact).toBe(true)
+        // The phone has no welcome dashboard: its usage and activity are the
+        // glance modules on the home screen and in the drawer (ADR-0225 §9).
+        expect(props?.statsSlot).toBeUndefined()
       } finally {
         isCompactLayout = false
         settingsState.settings = null
@@ -1423,7 +1424,7 @@ describe("ChatPane", () => {
       }
     })
 
-    it("passes the full (non-compact) dashboard to the desktop rich welcome", () => {
+    it("passes the dashboard to the desktop rich welcome", () => {
       const saved = storeState.messages
       storeState.messages = []
       EmptyChatState.mockClear()
@@ -1433,7 +1434,6 @@ describe("ChatPane", () => {
         render(<ChatPane {...makeProps()} />)
         const props = EmptyChatState.mock.calls.at(-1)?.[0]
         expect(props?.statsSlot).toBeTruthy()
-        expect(props?.statsSlot?.props?.compact).toBeFalsy()
       } finally {
         settingsState.settings = null
         storeState.messages = saved

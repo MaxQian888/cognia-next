@@ -125,7 +125,8 @@ export function clampMaxHeight(value: unknown): number {
   return Math.round(Math.min(GLANCE_MAX_HEIGHT_MAX, Math.max(GLANCE_MAX_HEIGHT_MIN, value)))
 }
 
-function normalizeOptions(raw: unknown): GlanceModuleOptions {
+/** Repair per-module options; shared with the mobile layout. */
+export function normalizeGlanceModuleOptions(raw: unknown): GlanceModuleOptions {
   const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : {}
   const activity = isRecord(raw) && isRecord(raw.activity) ? raw.activity : {}
   return {
@@ -167,7 +168,7 @@ export function normalizeGlancePanelSettings(raw: unknown): GlancePanelSettings 
     // existed keep the bar they had.
     showDelegate: raw.showDelegate !== false,
     autofocusDelegate: raw.autofocusDelegate === true,
-    options: normalizeOptions(raw.options),
+    options: normalizeGlanceModuleOptions(raw.options),
   }
 }
 

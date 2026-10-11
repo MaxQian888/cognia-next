@@ -13,7 +13,10 @@
     "shown": "已显示",
     "shownEmpty": "没有显示任何模块，可在下方添加。",
     "shownHint": "拖动以调整顺序",
-    "size": "{module}的尺寸"
+    "size": "{module}的尺寸",
+    "homePin": "在首页显示{module}",
+    "homePinned": "已显示在首页",
+    "homeUnpinned": "未显示在首页"
   },
   "errors": {
     "commandUnavailable": "该命令暂不可用。",
@@ -21,7 +24,9 @@
     "quotaEnable": "无法为该账号开启配额查询。",
     "quotaRefresh": "无法刷新该配额来源。",
     "requestFailed": "Cognia 无法完成该操作。",
-    "timeout": "Cognia 主窗口未及时响应。"
+    "timeout": "Cognia 主窗口未及时响应。",
+    "hostUnavailable": "桌面暂时无法提供这项数据。",
+    "hostUnreachable": "无法连接到你的桌面。"
   },
   "modules": {
     "activity": {
@@ -83,7 +88,10 @@
         "failed": "失败",
         "stale": "已失联"
       },
-      "working": "{count} 运行"
+      "working": "{count} 运行",
+      "workflowsShort": "{count, plural, other {# 个工作流}}",
+      "workflowsRunning": "{count, plural, other {# 个工作流运行中}} · {name}",
+      "openWorkflows": "打开「{name}」的运行记录"
     },
     "pet": {
       "care": {
@@ -112,7 +120,10 @@
       "unwell": "身体不适"
     },
     "quick": {
-      "label": "快捷动作"
+      "label": "快捷动作",
+      "edit": "编辑",
+      "editShortcuts": "编辑快捷入口",
+      "noShortcuts": "还没有快捷入口，点按添加。"
     },
     "quota": {
       "collapse": "收起 {name}",
@@ -206,5 +217,51 @@
       "standard": "中"
     },
     "standard": "标准"
+  },
+  "origin": {
+    "fromHost": "{host} · {age}",
+    "fromHostOffline": "{host} 离线 · {age}",
+    "fromDesktop": "桌面 · {age}",
+    "fromDesktopOffline": "桌面离线 · {age}",
+    "offline": "桌面离线，尚未收到数据。",
+    "unsupported": "你的桌面版本不提供这项数据。"
+  },
+  "mobile": {
+    "addModules": "添加模块",
+    "connecting": "正在连接…",
+    "copiedDesktop": "已复制桌面的布局。",
+    "copyDesktop": "使用桌面布局",
+    "copyDesktopUnavailable": "在桌面已连接时打开速览，即可复制它的布局。",
+    "done": "完成",
+    "edit": "编辑",
+    "editorDescription": "选择速览中的模块、其中哪些也显示在首页，以及你的快捷入口。",
+    "editorTitle": "首页与速览",
+    "empty": "速览中没有显示任何模块。",
+    "homeHint": "这里列出的模块都会出现在速览中。点按房子图标，可让它同时显示在首页。",
+    "open": "打开速览",
+    "openAttention": "打开速览——有事项需要你处理",
+    "preset": "预设",
+    "refresh": "刷新",
+    "scope": {
+      "all": "全部",
+      "hint": "额度等账号级数据从不按工作区过滤。",
+      "label": "显示范围",
+      "noWorkspace": "未打开工作区",
+      "workspace": "当前工作区 · {name}"
+    },
+    "shortcuts": "快捷入口",
+    "shortcutsHint": "快捷操作模块显示的入口及其顺序。",
+    "source": {
+      "connecting": "正在连接 {host}…",
+      "desktop": "你的桌面",
+      "device": "本机数据",
+      "live": "来自 {host}",
+      "offline": "{host} 已离线，显示最后一次读数",
+      "pending": "正在确认 {host} 提供的数据…",
+      "unavailable": "{host} 尚未就绪，正在重试",
+      "unsupported": "{host} 不提供速览，请更新桌面应用"
+    },
+    "title": "速览",
+    "updated": "更新于{when}"
   }
 }

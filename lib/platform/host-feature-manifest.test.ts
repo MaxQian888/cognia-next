@@ -1,6 +1,7 @@
 import {
   ENVIRONMENT_CATALOG_HOST_OPERATIONS,
   FILES_LIBRARY_REMOTE_HOST_OPERATIONS,
+  GLANCE_REMOTE_HOST_OPERATIONS,
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
   INBOX_RELAY_HOST_OPERATIONS,
   PET_REMOTE_CARE_HOST_OPERATIONS,
@@ -53,6 +54,25 @@ describe("host feature manifest", () => {
       expect(
         buildLocalHostFeatureManifest({ platform }).features["files.library-remote"]
       ).toBeUndefined()
+    }
+  })
+
+  it("advertises glance to paired phones on the desktop only (ADR-0225 §7)", () => {
+    const desktop = buildLocalHostFeatureManifest({ platform: "tauri" })
+    expect(desktop.features["glance.remote"]).toEqual({
+      version: 1,
+      operations: [...GLANCE_REMOTE_HOST_OPERATIONS],
+    })
+    expect([...GLANCE_REMOTE_HOST_OPERATIONS]).toEqual([
+      "glance_subscribe",
+      "glance_request",
+      "glance_quota_enable",
+    ])
+    expect(supportsHostFeatureOperation(desktop, "glance.remote", "glance_subscribe")).toBe(true)
+    // Glance is built by the main window's publisher; the headless brain has
+    // none and answers every arm `headless_host`.
+    for (const platform of ["headless", "web", "mobile"] as const) {
+      expect(buildLocalHostFeatureManifest({ platform }).features["glance.remote"]).toBeUndefined()
     }
   })
 

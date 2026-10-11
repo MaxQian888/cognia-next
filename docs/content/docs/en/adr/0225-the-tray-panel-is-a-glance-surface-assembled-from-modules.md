@@ -94,7 +94,7 @@ Consumers:
 
 - the tray panel window, replacing today's `tray-panel://state` push;
 - the Capacity Dock, which also receives quota slices, so its `quota` gauge mode finally has data (defect 2);
-- paired phones, through a `glance` channel on the existing host-state service (`lib/sync/host-state-service.ts`), within its snapshot size cap.
+- paired phones, through a `glance://update` event channel plus `glance_subscribe` / `glance_request` / `glance_quota_enable` companion commands (amended in phase 3, see below).
 
 The usage slice is computed for the panel's own period/scope/metric. It no longer depends on the tray title metric (defect 1).
 
@@ -110,7 +110,7 @@ The module kit is platform-neutral React over the snapshot. On mobile:
 
 - The home screen's active-runs card, quick-actions grid and compact stats become modules of one mobile layout with one editor. Each mobile layout entry carries a `home` flag: pinned modules also render on the home screen, in layout order; the drawer always renders every visible module. `settings.mobileHomeLayout` migrates into the new layout model, its current sections becoming the pinned entries.
 - A **Glance** button in the mobile top bar opens a bottom drawer (`components/ui/drawer.tsx`) rendering the full mobile module stack: the phone's tray panel.
-- A standalone phone computes slices from its local data. A paired phone renders host slices for subjects it does not sync (usage, schedule, notifications, quota) and labels each with its source host and age. A module whose data is unavailable on the device says so in place.
+- A standalone phone computes slices from its local data. A paired phone renders host slices for subjects it cannot answer itself (Fleet, usage, activity, schedule, notifications, quota, and the pet, whose on/off is a desktop setting) and labels each with its source host and age. A module whose data is unavailable on the device says so in place.
 
 ### 10. Layouts persist per device in settings
 
@@ -130,13 +130,13 @@ Each phase is complete on its own, with co-located tests, both locales, a change
 
 1. **Registry, snapshot, desktop panel.** Module registry and the first-party modules, `GlanceSnapshotV1` and its publisher, the rebuilt panel (header, stack, delegate bar, footer, width steps, max height, keyboard), Fleet routing, quota states including `stale`, defect 1.
 2. **Editing.** In-place edit mode, presets, the settings editor with live preview, the settings migration of layouts and actions.
-3. **Mobile.** Mobile home migration onto the kit, the Glance drawer, the host-state `glance` channel, per-slice source labels.
+3. **Mobile.** Mobile home migration onto the kit, the Glance drawer, the paired-phone `glance` channel, per-slice source labels.
 4. **Extensions.** The `glance.module` plugin point and SDK contract, the composable menu-bar title, the Capacity Dock quota feed (defect 2).
 
 ## Consequences
 
 - `tray-panel://state` and the Capacity Dock's own state push are replaced by the snapshot channel; their tests move with them.
-- `AppSettings` gains the desktop layout field; `mobileHomeLayout` is migrated into the layout model. No Dexie table changes.
+- `AppSettings` gains the desktop layout field and the mobile one (`mobileGlanceLayout`); `mobileHomeLayout` is read into the latter until a phone first saves it. No Dexie table changes.
 - A new plugin point and SDK catalog entry; `pnpm audit:slots` and the plugin author-import gate cover them.
 - Two documentation drifts are corrected: the `action-icon.tsx` reference in `lib/tray-panel/types.ts` (icons resolve through `lib/a2ui/resolve-icon`), and the `BYPASS_PREFIXES` reference in `app/tray-panel/page.tsx` (the bypass list is `lib/shell/bypass-routes.ts`).
 - Agent Fleet stays the only place to approve or stop an individual task; the panel's Fleet module is pinned by a test to expose no approval or stop control.
@@ -149,3 +149,15 @@ Each phase is complete on its own, with co-located tests, both locales, a change
 - Defect 2: with a credentialed quota source, the Capacity Dock `quota` gauge shows a ratio, not `unknown`.
 - Mobile: the drawer renders the same modules from local data (standalone) and host slices with source labels (paired).
 - Desktop shell smoke: open the panel from the tray, resize by edge drag, edit and reorder, open Fleet from a row, delegate a task.
+
+## Amendment (phase 3): the paired-phone channel is an event channel, not host-state
+
+§7 named a `glance` channel on the host-state service. The service turned out to be a durable, ledgered protocol built only for sessions: closed channel kinds, reducers, one global sequence that every replica processes, and Dexie ledger rows for every commit. A glance snapshot is the opposite: ephemeral, recomputed from React sources in the main window, worthless once superseded. Phase 3 therefore follows the precedent `fleet://update` and the Files library set for desktop data on a phone:
+
+- `glance_subscribe` (`host.observe`, read) announces, renews or ends a lease with the phone's **demand** (the host-sourced modules on screen and the options they depend on, never its layout) and answers the newest snapshot. The lease is keyed on the verified device id plus the phone's consumer id, with the tray panel's 60 s TTL.
+- While a lease is live the desktop builds for the merged demand and pushes each snapshot on the opt-in `glance://update` event channel. The phone's copy never carries the tray action catalogue or the goal title.
+- `glance_request` (`host.observe`, read) refreshes everything or one quota source; `glance_quota_enable` (`client.write`) turns quota queries on for a vault account. None of the three is replayed from the offline queue.
+- The desktop advertises `glance.remote`; a headless brain answers `headless_host`, and the phone says in place that the host does not share glance.
+
+The pet joined the host-sourced subjects: its profile syncs, but whether it is on (`petSettings`) is desktop-only.
+

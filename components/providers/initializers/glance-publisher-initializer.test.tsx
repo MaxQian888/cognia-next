@@ -12,27 +12,34 @@ jest.mock("next/navigation", () => {
   return { useRouter: () => router }
 })
 
+// Two builds: the tray's (called with `active` only) and the phones' (called
+// with options). Each reads its own fake store, so a test can change one
+// without touching the other.
 jest.mock("@/hooks/glance/use-glance-sources", () => {
   const { useSyncExternalStore } = jest.requireActual("react") as typeof import("react")
-  const listeners = new Set<() => void>()
-  let value: unknown = null
+  const makeStore = () => ({ value: null as unknown, listeners: new Set<() => void>() })
+  const stores = { local: makeStore(), remote: makeStore() }
+  const set = (store: ReturnType<typeof makeStore>, next: unknown) => {
+    store.value = next
+    store.listeners.forEach((listener) => listener())
+  }
   return {
-    useGlanceSources: jest.fn(function useGlanceSources(active: boolean) {
+    useGlanceSources: jest.fn(function useGlanceSources(active: boolean, options?: unknown) {
       void active
+      const store = options === undefined ? stores.local : stores.remote
       return useSyncExternalStore(
         (onChange) => {
-          listeners.add(onChange)
-          return () => listeners.delete(onChange)
+          store.listeners.add(onChange)
+          return () => store.listeners.delete(onChange)
         },
-        () => value
+        () => store.value
       )
     }),
-    __setSources: (next: unknown) => {
-      value = next
-      listeners.forEach((listener) => listener())
-    },
+    __setSources: (next: unknown) => set(stores.local, next),
+    __setRemoteSources: (next: unknown) => set(stores.remote, next),
   }
 })
+jest.mock("@/lib/companion/host-event-publisher", () => ({ publishHostEvent: jest.fn() }))
 jest.mock("@/lib/island/client", () => ({ sendIslandFocusRow: jest.fn() }))
 jest.mock("@/lib/island/focus-request", () => ({ requestIslandFocus: jest.fn() }))
 jest.mock("@/lib/island/projection-store", () => ({ getIslandProjection: jest.fn() }))
@@ -61,7 +68,12 @@ jest.mock("@/stores/chat", () => {
 })
 jest.mock("@/stores/settings", () => {
   const state = { settings: {} as Record<string, unknown> | null, save: jest.fn() }
-  return { useSettingsStore: { getState: () => state } }
+  return {
+    useSettingsStore: Object.assign(
+      jest.fn((selector: (s: typeof state) => unknown) => selector(state)),
+      { getState: () => state }
+    ),
+  }
 })
 jest.mock("@/stores/ui", () => {
   const state = { setSelectedGuild: jest.fn() }
@@ -71,6 +83,10 @@ jest.mock("@/stores/ui", () => {
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import * as sourcesModule from "@/hooks/glance/use-glance-sources"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
+import { glanceConfigForDemand } from "@/lib/glance/remote/demand"
+import { glanceRemoteHub } from "@/lib/glance/remote/host-hub"
+import type { GlanceRemoteDemand } from "@/lib/glance/remote/types"
 import { sendIslandFocusRow } from "@/lib/island/client"
 import { requestIslandFocus } from "@/lib/island/focus-request"
 import { getIslandProjection } from "@/lib/island/projection-store"
@@ -94,10 +110,14 @@ import GlancePublisherInitializer, {
   GLANCE_PRUNE_INTERVAL_MS,
   GLANCE_PUSH_DEBOUNCE_MS,
   GlancePublisherInitializer as NamedInitializer,
+  remoteGlanceSnapshot,
 } from "./glance-publisher-initializer"
 
 const useGlanceSourcesMock = sourcesModule.useGlanceSources as unknown as jest.Mock
 const setSources = (sourcesModule as unknown as { __setSources: (v: unknown) => void }).__setSources
+const setRemoteSources = (sourcesModule as unknown as { __setRemoteSources: (v: unknown) => void })
+  .__setRemoteSources
+const publishMock = publishHostEvent as jest.Mock
 const sendFocusRowMock = sendIslandFocusRow as jest.Mock
 const requestFocusMock = requestIslandFocus as jest.Mock
 const projectionMock = getIslandProjection as jest.Mock
@@ -142,6 +162,50 @@ function makeSources(overrides: Partial<UseGlanceSourcesResult["quota"]> = {}, m
     quota,
     refreshUsage: jest.fn().mockResolvedValue(undefined),
   } as unknown as UseGlanceSourcesResult
+}
+
+/** The phones' build: its body carries the `when` the remote snapshot reads. */
+function makeRemoteSources(
+  overrides: Partial<UseGlanceSourcesResult["quota"]> = {},
+  marker = "remote-body",
+  usageScope: "cognia" | "all-tools" = "cognia"
+) {
+  const sources = makeSources(overrides, marker)
+  const config = normalizeGlancePanelSettings({
+    options: { usage: { scope: usageScope, showSpend: false }, activity: { range: "3m" } },
+  })
+  return {
+    ...sources,
+    body: {
+      marker,
+      config,
+      when: {
+        goal: { active: true, paused: false, title: "Ship the secret project" },
+        automation: { running: false, armed: false },
+      },
+      actions: [{ id: "trayPanel.delegate" }],
+      fleet: { marker: `${marker}-fleet` },
+    },
+  } as unknown as UseGlanceSourcesResult
+}
+
+const PHONE = "dev-A:phone-1"
+
+const PHONE_DEMAND: GlanceRemoteDemand = {
+  modules: ["fleet", "usage"],
+  scope: "workspace",
+  workspaceId: "p1",
+  usage: { scope: "cognia", showSpend: false },
+  activity: { range: "1y" },
+}
+
+/** End every lease a test may have opened and drop the stored build. */
+function resetHub() {
+  for (const consumer of [PHONE, "dev-B:phone-2"]) {
+    glanceRemoteHub.announce({ consumer, visible: false, demand: PHONE_DEMAND }, Date.now())
+  }
+  glanceRemoteHub.prune(Number.MAX_SAFE_INTEGER)
+  glanceRemoteHub.setLatest(null)
 }
 
 function request<T extends Record<string, unknown>>(body: T): GlanceRequest {
@@ -581,6 +645,63 @@ describe("executeGlanceRequest", () => {
   })
 })
 
+describe("remoteGlanceSnapshot", () => {
+  const local = {
+    version: GLANCE_SNAPSHOT_VERSION,
+    epoch: 7,
+    revision: 3,
+    generatedAt: 99,
+    config: normalizeGlancePanelSettings({ preset: "agent-ops" }),
+    workspace: { id: "p1", name: "One" },
+    when: {
+      goal: { active: true, paused: true, title: "Private objective" },
+      automation: { running: true, armed: false },
+    },
+    actions: [{ id: "trayPanel.delegate" }],
+    fleet: { marker: "fleet" },
+    usage: null,
+    quota: null,
+    agenda: null,
+    activity: null,
+    recents: null,
+    pet: null,
+  } as unknown as Parameters<typeof remoteGlanceSnapshot>[0]
+  const tray = normalizeGlancePanelSettings({ preset: "minimal", width: "wide" })
+
+  it("strips the action catalogue and the goal title", () => {
+    const out = remoteGlanceSnapshot(local, tray)
+    expect(out.actions).toEqual([])
+    expect(out.when.goal).toEqual({ active: true, paused: true })
+    expect(out.when.goal).not.toHaveProperty("title")
+    expect(out.when).toMatchObject({ automation: { running: true, armed: false } })
+  })
+
+  it("attaches the tray layout's preset and entries only", () => {
+    const out = remoteGlanceSnapshot(local, tray)
+    expect(out.hostLayout).toEqual({ preset: "minimal", entries: tray.entries })
+    expect(out.hostLayout).not.toHaveProperty("width")
+  })
+
+  it("keeps every other field, the phone's config included", () => {
+    const out = remoteGlanceSnapshot(local, tray)
+    expect(out).toMatchObject({
+      version: GLANCE_SNAPSHOT_VERSION,
+      epoch: 7,
+      revision: 3,
+      generatedAt: 99,
+      workspace: { id: "p1", name: "One" },
+      fleet: { marker: "fleet" },
+    })
+    expect(out.config).toBe(local.config)
+  })
+
+  it("does not mutate its input", () => {
+    const before = JSON.parse(JSON.stringify(local))
+    remoteGlanceSnapshot(local, tray)
+    expect(JSON.parse(JSON.stringify(local))).toEqual(before)
+  })
+})
+
 describe("GlancePublisherInitializer", () => {
   let offSubscription: jest.Mock
   let offRequest: jest.Mock
@@ -618,10 +739,14 @@ describe("GlancePublisherInitializer", () => {
     projectionMock.mockReturnValue(null)
     settingsState.settings = {}
     settingsState.save.mockResolvedValue(undefined)
+    publishMock.mockResolvedValue(undefined)
+    resetHub()
     act(() => setSources(makeSources()))
+    act(() => setRemoteSources(makeRemoteSources()))
   })
 
   afterEach(() => {
+    resetHub()
     jest.useRealTimers()
   })
 
@@ -647,8 +772,9 @@ describe("GlancePublisherInitializer", () => {
     })
   }
 
+  /** The tray build's `active` flag: the call made without options. */
   function lastActiveFlag(): boolean | undefined {
-    return useGlanceSourcesMock.mock.calls.at(-1)?.[0]
+    return useGlanceSourcesMock.mock.calls.filter((call) => call.length < 2).at(-1)?.[0]
   }
 
   it("exports the same component as default and by name, and renders nothing", async () => {
@@ -1083,6 +1209,278 @@ describe("GlancePublisherInitializer", () => {
       await act(async () => requestHandler(REFRESH))
       await flush()
       expect(sendResultMock).not.toHaveBeenCalled()
+    })
+  })
+  describe("paired phones", () => {
+    function announce(demand: GlanceRemoteDemand = PHONE_DEMAND, consumer = PHONE) {
+      act(() => {
+        glanceRemoteHub.announce({ consumer, visible: true, demand }, Date.now())
+      })
+    }
+
+    function endLease(consumer = PHONE) {
+      act(() => {
+        glanceRemoteHub.announce({ consumer, visible: false, demand: PHONE_DEMAND }, Date.now())
+      })
+    }
+
+    /** The phones' build call: the one made with options. */
+    function lastRemoteCall(): [boolean, { config: unknown; workspaceId: unknown }] | undefined {
+      return useGlanceSourcesMock.mock.calls.filter((call) => call.length === 2).at(-1) as never
+    }
+
+    it("builds nothing for phones while no lease is live", async () => {
+      await mount()
+      expect(lastRemoteCall()).toEqual([false, { config: null, workspaceId: null }])
+      await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+      expect(publishMock).not.toHaveBeenCalled()
+      expect(glanceRemoteHub.getLatest(Date.now())).toBeNull()
+    })
+
+    it("activates a second build for the announced demand and its workspace", async () => {
+      await mount()
+      announce()
+      expect(lastRemoteCall()).toEqual([
+        true,
+        { config: glanceConfigForDemand(PHONE_DEMAND), workspaceId: "p1" },
+      ])
+      // The tray's build stays off: no tray consumer is subscribed.
+      expect(lastActiveFlag()).toBe(false)
+    })
+
+    it("passes a null workspace for an unscoped demand", async () => {
+      await mount()
+      announce({ ...PHONE_DEMAND, scope: "all", workspaceId: null })
+      expect(lastRemoteCall()?.[1].workspaceId).toBeNull()
+    })
+
+    it("keeps the build off for a demand with no modules", async () => {
+      await mount()
+      const empty = { ...PHONE_DEMAND, modules: [] }
+      announce(empty)
+      expect(lastRemoteCall()).toEqual([
+        false,
+        { config: glanceConfigForDemand(empty), workspaceId: "p1" },
+      ])
+      await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+      expect(publishMock).not.toHaveBeenCalled()
+    })
+
+    it("stores each build on the hub at once, stripped for the phone", async () => {
+      settingsState.settings = {
+        trayPanelLayout: {
+          version: 1,
+          preset: "usage-first",
+          entries: layoutFromPreset("usage-first"),
+        },
+      }
+      await mount()
+      announce()
+      const latest = glanceRemoteHub.getLatest(Date.now())
+      expect(latest).toMatchObject({
+        version: GLANCE_SNAPSHOT_VERSION,
+        epoch: NOW,
+        revision: 1,
+        marker: "remote-body",
+        actions: [],
+        when: { goal: { active: true, paused: false } },
+        hostLayout: { preset: "usage-first", entries: layoutFromPreset("usage-first") },
+      })
+      expect(latest?.when.goal).not.toHaveProperty("title")
+      expect(publishMock).not.toHaveBeenCalled()
+    })
+
+    it("publishes the build on glance://update after the debounce", async () => {
+      await mount()
+      announce()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS - 1)
+      expect(publishMock).not.toHaveBeenCalled()
+      await advance(1)
+      expect(publishMock).toHaveBeenCalledTimes(1)
+      const [topic, snapshot] = publishMock.mock.calls[0]
+      expect(topic).toBe("glance://update")
+      expect(snapshot).toBe(glanceRemoteHub.getLatest(Date.now()))
+    })
+
+    it("coalesces a burst of remote changes into one publish of the newest build", async () => {
+      await mount()
+      announce()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      publishMock.mockClear()
+      act(() => setRemoteSources(makeRemoteSources({}, "one")))
+      await advance(GLANCE_PUSH_DEBOUNCE_MS / 2)
+      act(() => setRemoteSources(makeRemoteSources({}, "two")))
+      await advance(GLANCE_PUSH_DEBOUNCE_MS / 2)
+      expect(publishMock).not.toHaveBeenCalled()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      expect(publishMock).toHaveBeenCalledTimes(1)
+      expect(publishMock.mock.calls[0][1]).toMatchObject({ marker: "two", revision: 3 })
+    })
+
+    it("republishes when the tray layout changes, carrying the new host layout", async () => {
+      await mount()
+      announce()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      settingsState.settings = {
+        trayPanelLayout: { version: 1, preset: "minimal", entries: layoutFromPreset("minimal") },
+      }
+      // The settings hook is read on render; a remote change re-renders.
+      act(() => setRemoteSources(makeRemoteSources({}, "after-layout")))
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      expect(publishMock.mock.calls.at(-1)?.[1].hostLayout).toEqual({
+        preset: "minimal",
+        entries: layoutFromPreset("minimal"),
+      })
+    })
+
+    it("shares the epoch with the tray build and counts its own revisions", async () => {
+      await mount()
+      subscribe(TRAY)
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      const tray = sendSnapshotMock.mock.calls[0][1]
+      announce()
+      act(() => setRemoteSources(makeRemoteSources({}, "again")))
+      const latest = glanceRemoteHub.getLatest(Date.now())
+      expect(latest?.epoch).toBe(tray.epoch)
+      expect(latest?.revision).toBe(2)
+    })
+
+    it("drops the stored build and stops publishing when the last lease ends", async () => {
+      await mount()
+      announce()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS)
+      publishMock.mockClear()
+      endLease()
+      expect(lastRemoteCall()?.[0]).toBe(false)
+      glanceRemoteHub.announce(
+        { consumer: "dev-B:phone-2", visible: true, demand: PHONE_DEMAND },
+        NOW
+      )
+      expect(glanceRemoteHub.getLatest(NOW)).toBeNull()
+      endLease("dev-B:phone-2")
+      act(() => setRemoteSources(makeRemoteSources({}, "after-end")))
+      await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+      expect(publishMock).not.toHaveBeenCalled()
+    })
+
+    it("cancels a pending publish when the lease ends first", async () => {
+      await mount()
+      announce()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS / 2)
+      endLease()
+      await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+      expect(publishMock).not.toHaveBeenCalled()
+    })
+
+    it("prunes a phone lease that lapsed on the sweep", async () => {
+      await mount()
+      announce()
+      expect(lastRemoteCall()?.[0]).toBe(true)
+      await advance(LEASE_TTL - GLANCE_PRUNE_INTERVAL_MS)
+      expect(glanceRemoteHub.getDemandKey()).not.toBe("")
+      await advance(GLANCE_PRUNE_INTERVAL_MS)
+      expect(glanceRemoteHub.getDemandKey()).toBe("")
+      expect(lastRemoteCall()?.[0]).toBe(false)
+    })
+
+    describe("executor", () => {
+      it("is installed on mount and uninstalled on unmount", async () => {
+        const { unmount } = await mount()
+        expect(glanceRemoteHub.getExecutor()).not.toBeNull()
+        unmount()
+        expect(glanceRemoteHub.getExecutor()).toBeNull()
+      })
+
+      it("refresh re-reads quota over the phones' sources, not the tray's", async () => {
+        const tray = makeSources()
+        const remote = makeRemoteSources()
+        act(() => setSources(tray))
+        act(() => setRemoteSources(remote))
+        await mount()
+        await expect(glanceRemoteHub.getExecutor()!.refresh()).resolves.toBeNull()
+        expect(remote.quota.refreshAll).toHaveBeenCalledTimes(1)
+        expect(remote.refreshUsage).not.toHaveBeenCalled()
+        expect(tray.quota.refreshAll).not.toHaveBeenCalled()
+      })
+
+      it("refresh also re-reads the usage index for an all-tools demand", async () => {
+        const remote = makeRemoteSources({}, "all-tools", "all-tools")
+        act(() => setRemoteSources(remote))
+        await mount()
+        await glanceRemoteHub.getExecutor()!.refresh()
+        expect(remote.quota.refreshAll).toHaveBeenCalledTimes(1)
+        expect(remote.refreshUsage).toHaveBeenCalledTimes(1)
+      })
+
+      it("refresh propagates a failure to the dispatcher", async () => {
+        act(() =>
+          setRemoteSources(
+            makeRemoteSources({ refreshAll: jest.fn().mockRejectedValue(new Error("boom")) })
+          )
+        )
+        await mount()
+        await expect(glanceRemoteHub.getExecutor()!.refresh()).rejects.toThrow("boom")
+      })
+
+      it.each([
+        [true, null],
+        [false, "errors.quotaRefresh"],
+      ])("quotaRefresh maps %s to %j", async (refreshed, expected) => {
+        const remote = makeRemoteSources({ refreshOne: jest.fn().mockResolvedValue(refreshed) })
+        act(() => setRemoteSources(remote))
+        await mount()
+        await expect(glanceRemoteHub.getExecutor()!.quotaRefresh("anthropic:a")).resolves.toBe(
+          expected
+        )
+        expect(remote.quota.refreshOne).toHaveBeenCalledWith("anthropic:a")
+      })
+
+      it.each([
+        [true, null],
+        [false, "errors.quotaEnable"],
+      ])("quotaEnable maps %s to %j", async (enabled, expected) => {
+        const remote = makeRemoteSources({ enable: jest.fn().mockResolvedValue(enabled) })
+        act(() => setRemoteSources(remote))
+        await mount()
+        await expect(glanceRemoteHub.getExecutor()!.quotaEnable("anthropic", "acc")).resolves.toBe(
+          expected
+        )
+        expect(remote.quota.enable).toHaveBeenCalledWith("anthropic", "acc")
+      })
+
+      it("runs against the newest phones' sources", async () => {
+        const stale = makeRemoteSources()
+        act(() => setRemoteSources(stale))
+        await mount()
+        const fresh = makeRemoteSources()
+        act(() => setRemoteSources(fresh))
+        await glanceRemoteHub.getExecutor()!.refresh()
+        expect(fresh.quota.refreshAll).toHaveBeenCalledTimes(1)
+        expect(stale.quota.refreshAll).not.toHaveBeenCalled()
+      })
+    })
+
+    it.each([
+      ["outside Tauri", () => isTauriMock.mockReturnValue(false)],
+      ["in a secondary window", () => mainWindowMock.mockReturnValue(false)],
+    ])("does none of this %s", async (_name, arrange) => {
+      arrange()
+      const setLatest = jest.spyOn(glanceRemoteHub, "setLatest")
+      try {
+        await mount()
+        expect(glanceRemoteHub.getExecutor()).toBeNull()
+        announce()
+        await advance(GLANCE_PUSH_DEBOUNCE_MS * 3)
+        expect(setLatest).not.toHaveBeenCalled()
+        expect(publishMock).not.toHaveBeenCalled()
+        expect(glanceRemoteHub.getLatest(Date.now())).toBeNull()
+        // No sweep either: the lease is still on the hub past its TTL until
+        // something else prunes it.
+        await advance(LEASE_TTL + GLANCE_PRUNE_INTERVAL_MS)
+        expect(glanceRemoteHub.getDemandKey()).not.toBe("")
+      } finally {
+        setLatest.mockRestore()
+      }
     })
   })
 })

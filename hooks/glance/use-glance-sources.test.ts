@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/react"
 
-import type { GlanceQuotaSlice } from "@/lib/glance/snapshot"
+import { NO_RUNNING_WORKFLOWS, summarizeRunningWorkflows } from "@/lib/glance/build-fleet"
+import { normalizeGlancePanelSettings } from "@/lib/glance/presets"
+import type { GlanceFleetWorkflows, GlanceQuotaSlice } from "@/lib/glance/snapshot"
 import type { GlanceModuleId } from "@/types/glance/layout"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
@@ -109,6 +111,21 @@ const settingsState = (
   useSettingsStore as unknown as { getState: () => { settings: Record<string, unknown> | null } }
 ).getState()
 
+type LiveKind = "ids" | "workflows" | "recents" | "pet"
+
+/**
+ * Which of the hook's live queries a `useLiveQuery(fn, deps, fallback)` call
+ * is, from its shape: recents fall back to an array, the running workflows to
+ * the empty summary, the pet profile has two deps, the workspace's session
+ * ids three.
+ */
+function liveKind(args: readonly unknown[]): LiveKind {
+  const [, deps, fallback] = args
+  if (Array.isArray(fallback)) return "recents"
+  if (fallback !== null && typeof fallback === "object") return "workflows"
+  return (deps as unknown[]).length === 2 ? "pet" : "ids"
+}
+
 const NOW = new Date(2026, 9, 10, 12, 0, 0).getTime()
 
 const QUOTA_SLICE: GlanceQuotaSlice = { updatedAt: NOW, refreshing: false, sources: [] }
@@ -135,7 +152,7 @@ describe("useGlanceSources", () => {
   let liveSessionIds: string[] | null
   let liveRecentRows: unknown[]
   let livePetProfile: unknown
-  let callIndex: number
+  let liveWorkflows: GlanceFleetWorkflows
   let usageGlanceValue: unknown
 
   beforeEach(() => {
@@ -146,11 +163,14 @@ describe("useGlanceSources", () => {
     liveRecentRows = []
     livePetProfile = null
     usageGlanceValue = null
-    callIndex = 0
-    // Render order of the three live queries: workspace session ids, recents, pet profile.
-    useLiveQueryMock.mockImplementation(() => {
-      const i = callIndex++ % 3
-      return [liveSessionIds, liveRecentRows, livePetProfile][i]
+    liveWorkflows = NO_RUNNING_WORKFLOWS
+    // Answer each live query by what it is, not by call order.
+    useLiveQueryMock.mockImplementation((...args: unknown[]) => {
+      const kind = liveKind(args)
+      if (kind === "ids") return liveSessionIds
+      if (kind === "workflows") return liveWorkflows
+      if (kind === "recents") return liveRecentRows
+      return livePetProfile
     })
     budgetMock.mockReturnValue({ worst: null })
     usageGlanceMock.mockImplementation(() => ({
@@ -186,11 +206,16 @@ describe("useGlanceSources", () => {
   }
 
   function lastLive() {
-    const calls = useLiveQueryMock.mock.calls.slice(-3)
+    const last = (kind: LiveKind) => {
+      const call = [...useLiveQueryMock.mock.calls].reverse().find((c) => liveKind(c) === kind)
+      if (!call) throw new Error(`no ${kind} live query`)
+      return { run: call[0] as () => Promise<unknown>, deps: call[1] as unknown[] }
+    }
     return {
-      ids: { run: calls[0][0] as () => Promise<unknown>, deps: calls[0][1] as unknown[] },
-      recents: { run: calls[1][0] as () => Promise<unknown>, deps: calls[1][1] as unknown[] },
-      pet: { run: calls[2][0] as () => Promise<unknown>, deps: calls[2][1] as unknown[] },
+      ids: last("ids"),
+      workflows: last("workflows"),
+      recents: last("recents"),
+      pet: last("pet"),
     }
   }
 
@@ -791,6 +816,174 @@ describe("useGlanceSources", () => {
       const first = result.current.body
       rerender({ on: true })
       expect(result.current.body).toBe(first)
+    })
+  })
+  describe("config override", () => {
+    it("builds for the given layout instead of the stored tray layout", () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["usage", "quota"]) }
+      const config = normalizeGlancePanelSettings(
+        layoutWith(["activity", "pet"], {
+          scope: "all",
+          options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1m" } },
+        })
+      )
+      const { result } = renderHook(() => useGlanceSources(true, { config }))
+      const { body } = result.current
+      expect(body.config).toBe(config)
+      expect(body.usage).toBeNull()
+      expect(body.quota).toBeNull()
+      expect(body.activity).toBe(ACTIVITY_SLICE)
+      expect(body.pet).not.toBeNull()
+      expect(activityMock.mock.calls.at(-1)![1]).toBe("1m")
+      expect(activityMock.mock.calls.at(-1)![2]).toBe("all-tools")
+    })
+
+    it("falls back to the stored layout for a null override", () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["usage"]) }
+      const { result } = renderHook(() => useGlanceSources(true, { config: null }))
+      expect(result.current.body.config.entries.filter((e) => !e.hidden).map((e) => e.id)).toEqual([
+        "usage",
+      ])
+      expect(result.current.body.usage).not.toBeNull()
+    })
+
+    it("still carries the stored action catalogue", () => {
+      const config = normalizeGlancePanelSettings(layoutWith(["quick"]))
+      const { result } = renderHook(() => useGlanceSources(false, { config }))
+      expect(result.current.body.actions).toEqual(DEFAULT_TRAY_PANEL_ACTIONS)
+    })
+  })
+
+  describe("workspace override", () => {
+    beforeEach(() => {
+      projectState.activeProjectId = "p1"
+      projectState.projects = [
+        { id: "p1", name: "One" },
+        { id: "p2", name: "Two" },
+      ]
+      settingsState.settings = { trayPanelLayout: layoutWith(ALL_MODULES, { scope: "workspace" }) }
+    })
+
+    it("scopes to the named project instead of the active one", async () => {
+      workspaceIdsMock.mockResolvedValue(["s9"])
+      const { result } = renderHook(() => useGlanceSources(true, { workspaceId: "p2" }))
+      expect(result.current.body.workspace).toEqual({ id: "p2", name: "Two" })
+      const { ids } = lastLive()
+      expect(ids.deps).toEqual([true, true, "p2"])
+      await expect(ids.run()).resolves.toEqual(["s9"])
+      expect(workspaceIdsMock).toHaveBeenCalledWith("p2")
+      expect(result.current.body.usage?.workspaceFiltered).toBe(true)
+    })
+
+    it("is unscoped for an unknown project", () => {
+      const { result } = renderHook(() => useGlanceSources(true, { workspaceId: "nope" }))
+      expect(result.current.body.workspace).toBeNull()
+      expect(usageGlanceMock.mock.calls.at(-1)?.[0].sessionFilter).toBeNull()
+      expect(result.current.body.usage?.workspaceFiltered).toBe(false)
+      expect(lastLive().ids.deps).toEqual([true, false, undefined])
+    })
+
+    it("is unscoped for an explicit null, even with an active project", () => {
+      const { result } = renderHook(() => useGlanceSources(true, { workspaceId: null }))
+      expect(result.current.body.workspace).toBeNull()
+      expect(result.current.body.usage?.workspaceFiltered).toBe(false)
+    })
+
+    it("uses the active project when no override is given", () => {
+      const { result } = renderHook(() => useGlanceSources(true, {}))
+      expect(result.current.body.workspace).toEqual({ id: "p1", name: "One" })
+    })
+  })
+
+  describe("fleet workflows", () => {
+    function fakeDb(runs: Array<{ workflowId: string; startedAt: number }>, rows: unknown[]) {
+      const toArray = jest.fn().mockResolvedValue(runs)
+      const equals = jest.fn(() => ({ toArray }))
+      const where = jest.fn(() => ({ equals }))
+      const bulkGet = jest.fn().mockResolvedValue(rows)
+      getDbMock.mockReturnValue({ workflowRuns: { where }, workflows: { bulkGet } })
+      return { where, equals, bulkGet }
+    }
+
+    it("summarizes the running workflow runs with their workflows' names", async () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
+      const runs = [
+        { workflowId: "wf-a", startedAt: 10 },
+        { workflowId: "wf-b", startedAt: 30 },
+        { workflowId: "wf-a", startedAt: 20 },
+      ]
+      const db = fakeDb(runs, [
+        { id: "wf-a", name: "Alpha" },
+        { id: "wf-b", name: "Beta" },
+      ])
+      render(true)
+      const { workflows } = lastLive()
+      expect(workflows.deps).toEqual([true])
+      const out = await workflows.run()
+      expect(db.where).toHaveBeenCalledWith("status")
+      expect(db.equals).toHaveBeenCalledWith("running")
+      expect(db.bulkGet).toHaveBeenCalledWith(["wf-a", "wf-b"])
+      expect(out).toEqual(
+        summarizeRunningWorkflows(
+          runs,
+          new Map([
+            ["wf-a", "Alpha"],
+            ["wf-b", "Beta"],
+          ])
+        )
+      )
+      expect(out).toMatchObject({ running: 3, latest: { workflowId: "wf-b", name: "Beta" } })
+    })
+
+    it("falls back to the workflow id for a deleted workflow", async () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
+      fakeDb([{ workflowId: "wf-gone", startedAt: 5 }], [undefined])
+      render(true)
+      await expect(lastLive().workflows.run()).resolves.toMatchObject({
+        running: 1,
+        latest: { workflowId: "wf-gone", name: "wf-gone" },
+      })
+    })
+
+    it("answers the empty summary without reading names when nothing runs", async () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
+      const db = fakeDb([], [])
+      render(true)
+      await expect(lastLive().workflows.run()).resolves.toBe(NO_RUNNING_WORKFLOWS)
+      expect(db.bulkGet).not.toHaveBeenCalled()
+    })
+
+    it("reads nothing while fleet is off", async () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["usage"]) }
+      render(true)
+      const { workflows } = lastLive()
+      expect(workflows.deps).toEqual([false])
+      await expect(workflows.run()).resolves.toBe(NO_RUNNING_WORKFLOWS)
+      expect(getDbMock).not.toHaveBeenCalled()
+    })
+
+    it("reads nothing while inactive, even with fleet in the layout", async () => {
+      render(false)
+      const { workflows } = lastLive()
+      expect(workflows.deps).toEqual([false])
+      await expect(workflows.run()).resolves.toBe(NO_RUNNING_WORKFLOWS)
+      expect(getDbMock).not.toHaveBeenCalled()
+    })
+
+    it("carries the summary into the fleet slice", () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
+      liveWorkflows = {
+        running: 2,
+        latest: { workflowId: "wf-b", name: "Beta", startedAt: 30 },
+      }
+      const { result } = render(true)
+      expect(result.current.body.fleet?.workflows).toEqual(liveWorkflows)
+    })
+
+    it("carries the empty summary before the first read lands", () => {
+      settingsState.settings = { trayPanelLayout: layoutWith(["fleet"]) }
+      const { result } = render(true)
+      expect(result.current.body.fleet?.workflows).toEqual(NO_RUNNING_WORKFLOWS)
     })
   })
 })

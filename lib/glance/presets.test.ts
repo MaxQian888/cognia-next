@@ -15,6 +15,7 @@ import {
   GLANCE_PRESETS,
   layoutFromPreset,
   normalizeEntries,
+  normalizeGlanceModuleOptions,
   normalizeGlancePanelSettings,
   visibleModuleIds,
 } from "./presets"
@@ -351,5 +352,58 @@ describe("visibleModuleIds", () => {
       GLANCE_PRESETS.minimal.map(([id]) => id)
     )
     expect(visibleModuleIds([])).toEqual([])
+  })
+})
+
+describe("normalizeGlanceModuleOptions", () => {
+  it.each([[undefined], [null], ["x"], [[]], [{}]])("defaults everything for %j", (raw) => {
+    expect(normalizeGlanceModuleOptions(raw)).toEqual(DEFAULT_GLANCE_MODULE_OPTIONS)
+  })
+
+  it("keeps valid options", () => {
+    const options = {
+      usage: { scope: "all-tools", showSpend: true },
+      activity: { range: "1y" },
+    }
+    expect(normalizeGlanceModuleOptions(options)).toEqual(options)
+  })
+
+  it.each(["1m", "3m", "1y"])("accepts the activity range %s", (range) => {
+    expect(normalizeGlanceModuleOptions({ activity: { range } }).activity.range).toBe(range)
+  })
+
+  it("repairs each field on its own", () => {
+    expect(
+      normalizeGlanceModuleOptions({
+        usage: { scope: "everyone", showSpend: "true" },
+        activity: { range: "forever" },
+      })
+    ).toEqual(DEFAULT_GLANCE_MODULE_OPTIONS)
+    expect(
+      normalizeGlanceModuleOptions({ usage: { showSpend: true }, activity: { range: 3 } })
+    ).toEqual({
+      usage: { scope: "cognia", showSpend: true },
+      activity: { range: DEFAULT_GLANCE_MODULE_OPTIONS.activity.range },
+    })
+  })
+
+  it("ignores non-object sub-records", () => {
+    expect(normalizeGlanceModuleOptions({ usage: ["all-tools"], activity: "1y" })).toEqual(
+      DEFAULT_GLANCE_MODULE_OPTIONS
+    )
+  })
+
+  it("returns fresh objects, never the shared defaults", () => {
+    const out = normalizeGlanceModuleOptions(undefined)
+    expect(out).not.toBe(DEFAULT_GLANCE_MODULE_OPTIONS)
+    expect(out.usage).not.toBe(DEFAULT_GLANCE_MODULE_OPTIONS.usage)
+    expect(out.activity).not.toBe(DEFAULT_GLANCE_MODULE_OPTIONS.activity)
+  })
+
+  it("is what the panel settings normalize their options with", () => {
+    const raw = { usage: { scope: "all-tools", showSpend: 1 }, activity: { range: "1m" } }
+    expect(normalizeGlancePanelSettings({ options: raw }).options).toEqual(
+      normalizeGlanceModuleOptions(raw)
+    )
   })
 })

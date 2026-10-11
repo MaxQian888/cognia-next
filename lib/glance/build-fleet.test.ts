@@ -6,7 +6,12 @@ import {
   type IslandState,
 } from "@/lib/island/types"
 
-import { buildFleetSlice } from "./build-fleet"
+import {
+  buildFleetSlice,
+  GLANCE_WORKFLOW_NAME_MAX,
+  NO_RUNNING_WORKFLOWS,
+  summarizeRunningWorkflows,
+} from "./build-fleet"
 import { GLANCE_FLEET_MAX_ROWS } from "./snapshot"
 
 const NOW = 1_800_000_000_000
@@ -55,7 +60,17 @@ describe("buildFleetSlice", () => {
       counts: { working: 0, awaiting: 0, failed: 0 },
       total: 0,
       rows: [],
+      workflows: NO_RUNNING_WORKFLOWS,
     })
+  })
+
+  it("carries the running workflow summary it is given, island or not", () => {
+    const workflows = {
+      running: 2,
+      latest: { workflowId: "wf-1", name: "Nightly", startedAt: NOW - 5 },
+    }
+    expect(buildFleetSlice(null, NOW, workflows).workflows).toBe(workflows)
+    expect(buildFleetSlice(island([row("a", "working")]), NOW, workflows).workflows).toBe(workflows)
   })
 
   it("uses now when the island has not generated yet", () => {
@@ -213,5 +228,44 @@ describe("buildFleetSlice", () => {
         expect(serialized).not.toContain(needle)
       }
     })
+  })
+})
+
+describe("summarizeRunningWorkflows", () => {
+  it("is the empty summary for no runs", () => {
+    expect(summarizeRunningWorkflows([], new Map())).toBe(NO_RUNNING_WORKFLOWS)
+  })
+
+  it("counts every run and names the most recently started one", () => {
+    const names = new Map([
+      ["wf-a", "Alpha"],
+      ["wf-b", "Beta"],
+    ])
+    expect(
+      summarizeRunningWorkflows(
+        [
+          { workflowId: "wf-a", startedAt: 10 },
+          { workflowId: "wf-b", startedAt: 30 },
+          { workflowId: "wf-a", startedAt: 20 },
+        ],
+        names
+      )
+    ).toEqual({ running: 3, latest: { workflowId: "wf-b", name: "Beta", startedAt: 30 } })
+  })
+
+  it("falls back to the workflow id when the workflow row is gone", () => {
+    expect(
+      summarizeRunningWorkflows([{ workflowId: "wf-x", startedAt: 1 }], new Map()).latest
+    ).toEqual({ workflowId: "wf-x", name: "wf-x", startedAt: 1 })
+  })
+
+  it("caps a long workflow name", () => {
+    const long = "n".repeat(GLANCE_WORKFLOW_NAME_MAX + 20)
+    const name = summarizeRunningWorkflows(
+      [{ workflowId: "wf", startedAt: 1 }],
+      new Map([["wf", long]])
+    ).latest?.name
+    expect(name).toHaveLength(GLANCE_WORKFLOW_NAME_MAX)
+    expect(name?.endsWith("…")).toBe(true)
   })
 })

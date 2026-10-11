@@ -14,8 +14,8 @@ jest.mock("@/hooks/ui/use-back-dismiss", () => ({
   useBackDismiss: (active: boolean, onDismiss: () => void) => backDismiss(active, onDismiss),
 }))
 
-jest.mock("./mobile-quick-actions-editor", () => ({
-  MobileQuickActionsEditor: () => <div data-testid="mobile-quick-actions-editor" />,
+jest.mock("@/components/mobile/glance/mobile-glance-editor", () => ({
+  MobileGlanceEditor: () => <div data-testid="mobile-glance-editor" />,
 }))
 
 beforeEach(() => {
@@ -23,14 +23,16 @@ beforeEach(() => {
 })
 
 describe("<MobileHomeLayoutSheet />", () => {
-  it("renders the editor when open", () => {
+  it("renders the glance layout editor, titled, when open", () => {
     render(<MobileHomeLayoutSheet open onOpenChange={jest.fn()} />)
-    expect(screen.getByTestId("mobile-quick-actions-editor")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-glance-editor")).toBeInTheDocument()
+    expect(screen.getByText("editorTitle")).toBeInTheDocument()
+    expect(screen.getByText("editorDescription")).toBeInTheDocument()
   })
 
   it("mounts nothing while closed", () => {
     render(<MobileHomeLayoutSheet open={false} onOpenChange={jest.fn()} />)
-    expect(screen.queryByTestId("mobile-quick-actions-editor")).toBeNull()
+    expect(screen.queryByTestId("mobile-glance-editor")).toBeNull()
   })
 
   // Android hardware back has to close the sheet rather than leave the route.

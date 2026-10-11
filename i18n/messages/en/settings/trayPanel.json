@@ -123,6 +123,11 @@
     "delegateHint": "Hidden, the delegate action moves into the quick actions.",
     "description": "Which modules the panel shows, in what order and size. The preview updates as you edit.",
     "previewCaption": "Preview with your current data",
-    "title": "Modules"
+    "title": "Modules",
+    "copyPhone": "Phone layout",
+    "copyPhoneAction": "Copy phone layout",
+    "copyPhoneHint": "Use the modules, order and sizes of your phone's Glance here. Pins and shortcuts stay on the phone.",
+    "copyPhoneNone": "Available once a paired phone has saved its own Glance layout.",
+    "copiedPhone": "Copied your phone's layout."
   }
 }

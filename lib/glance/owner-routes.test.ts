@@ -1,9 +1,15 @@
 import type { GlanceOwnerSurface } from "./registry"
 import { GLANCE_MODULES } from "./registry"
-import { glanceOwnerHref, schedulerHref } from "./owner-routes"
+import {
+  glanceMobileOwnerHref,
+  glanceOwnerHref,
+  schedulerHref,
+  workflowRunsHref,
+} from "./owner-routes"
 
 const OWNERS: readonly GlanceOwnerSurface[] = [
   "fleet",
+  "workflows",
   "usage",
   "subscription",
   "scheduler",
@@ -70,5 +76,50 @@ describe("schedulerHref", () => {
 
   it("percent-encodes reserved characters", () => {
     expect(schedulerHref("plugin:a b&c")).toBe("/scheduler?item=plugin%3Aa%20b%26c")
+  })
+})
+
+describe("workflowRunsHref", () => {
+  it("selects one workflow's runs, encoding the id", () => {
+    expect(workflowRunsHref("wf 1/x")).toBe("/workflows/runs?id=wf%201%2Fx")
+  })
+
+  it("is the runs list without an id", () => {
+    expect(workflowRunsHref()).toBe("/workflows/runs")
+  })
+
+  it("is where the desktop's workflows owner lands", () => {
+    expect(glanceOwnerHref("workflows", "wf-1")).toBe(workflowRunsHref("wf-1"))
+  })
+})
+
+describe("glanceMobileOwnerHref", () => {
+  it.each(OWNERS.filter((o) => o !== "tray-actions").map((o) => [o]))(
+    "maps %s to an absolute phone route",
+    (owner) => {
+      expect(glanceMobileOwnerHref(owner)).toMatch(/^\/./)
+    }
+  )
+
+  it("has no page for the quick module's owner, whose editor is a sheet on a phone", () => {
+    expect(glanceMobileOwnerHref("tray-actions")).toBeNull()
+  })
+
+  it("sends Fleet to the phone's own Fleet page, not the desktop run history", () => {
+    expect(glanceMobileOwnerHref("fleet")).toBe("/fleet")
+  })
+
+  it("keeps usage and quota under Me › Subscription", () => {
+    expect(glanceMobileOwnerHref("usage")).toBe("/me/subscription?subTab=usage")
+    expect(glanceMobileOwnerHref("subscription")).toBe("/me/subscription")
+  })
+
+  it("routes the rest to the phone's pages", () => {
+    expect(glanceMobileOwnerHref("notifications")).toBe("/me/notifications")
+    expect(glanceMobileOwnerHref("connectivity")).toBe("/devices")
+    expect(glanceMobileOwnerHref("scheduler", "task:1")).toBe(schedulerHref("task:1"))
+    expect(glanceMobileOwnerHref("workflows", "wf")).toBe(workflowRunsHref("wf"))
+    expect(glanceMobileOwnerHref("pet")).toBe("/pet")
+    expect(glanceMobileOwnerHref("conversations")).toBe("/conversations")
   })
 })

@@ -14,6 +14,7 @@ import {
 
 const OWNERS = [
   "fleet",
+  "workflows",
   "usage",
   "subscription",
   "scheduler",
@@ -70,10 +71,10 @@ describe("platforms", () => {
     for (const platform of platforms) expect(["desktop", "mobile"]).toContain(platform)
   })
 
-  it("keeps quick on the desktop only, since a phone has no tray action catalogue", () => {
-    expect(GLANCE_MODULES.quick.platforms).toEqual(["desktop"])
+  it("renders every first-party module on both platforms", () => {
+    // `quick` included: each platform fills it from its own action list.
     for (const id of GLANCE_MODULE_IDS) {
-      if (id !== "quick") expect(GLANCE_MODULES[id].platforms).toContain("mobile")
+      expect(GLANCE_MODULES[id].platforms).toEqual(["desktop", "mobile"])
     }
   })
 })
@@ -83,10 +84,8 @@ describe("glanceModulesFor", () => {
     expect(glanceModulesFor("desktop")).toEqual([...GLANCE_MODULE_IDS])
   })
 
-  it("leaves quick out on mobile and keeps the rest in catalogue order", () => {
-    const mobile = glanceModulesFor("mobile")
-    expect(mobile).not.toContain("quick")
-    expect(mobile).toEqual(GLANCE_MODULE_IDS.filter((id) => id !== "quick"))
+  it("offers every module on mobile too, in catalogue order", () => {
+    expect(glanceModulesFor("mobile")).toEqual([...GLANCE_MODULE_IDS])
   })
 })
 

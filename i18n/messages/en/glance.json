@@ -13,7 +13,10 @@
     "shown": "Shown",
     "shownEmpty": "Nothing is shown — add a module below.",
     "shownHint": "Drag to reorder",
-    "size": "Size of {module}"
+    "size": "Size of {module}",
+    "homePin": "Show {module} on the home screen",
+    "homePinned": "On the home screen",
+    "homeUnpinned": "Not on the home screen"
   },
   "errors": {
     "commandUnavailable": "That command isn't available right now.",
@@ -21,7 +24,9 @@
     "quotaEnable": "Couldn't turn on quota for that account.",
     "quotaRefresh": "Couldn't refresh that quota source.",
     "requestFailed": "Cognia couldn't do that.",
-    "timeout": "Cognia's main window didn't answer in time."
+    "timeout": "Cognia's main window didn't answer in time.",
+    "hostUnavailable": "Your desktop isn't sharing this right now.",
+    "hostUnreachable": "Couldn't reach your desktop."
   },
   "modules": {
     "activity": {
@@ -83,7 +88,10 @@
         "failed": "Failed",
         "stale": "Stale"
       },
-      "working": "{count} running"
+      "working": "{count} running",
+      "workflowsShort": "{count, plural, one {# workflow} other {# workflows}}",
+      "workflowsRunning": "{count, plural, one {# workflow running} other {# workflows running}} · {name}",
+      "openWorkflows": "Open the runs of {name}"
     },
     "pet": {
       "care": {
@@ -112,7 +120,10 @@
       "unwell": "Not feeling well"
     },
     "quick": {
-      "label": "Quick actions"
+      "label": "Quick actions",
+      "edit": "Edit",
+      "editShortcuts": "Edit shortcuts",
+      "noShortcuts": "No shortcuts yet — tap to add some."
     },
     "quota": {
       "collapse": "Collapse {name}",
@@ -206,5 +217,51 @@
       "standard": "M"
     },
     "standard": "Standard"
+  },
+  "origin": {
+    "fromHost": "{host} · {age}",
+    "fromHostOffline": "{host} offline · {age}",
+    "fromDesktop": "Desktop · {age}",
+    "fromDesktopOffline": "Desktop offline · {age}",
+    "offline": "Desktop offline — nothing received yet.",
+    "unsupported": "Your desktop doesn't share this."
+  },
+  "mobile": {
+    "addModules": "Add modules",
+    "connecting": "Connecting…",
+    "copiedDesktop": "Copied your desktop's layout.",
+    "copyDesktop": "Use desktop layout",
+    "copyDesktopUnavailable": "Open Glance while your desktop is connected to copy its layout.",
+    "done": "Done",
+    "edit": "Edit",
+    "editorDescription": "Choose the modules in Glance, which of them also sit on your home screen, and your shortcuts.",
+    "editorTitle": "Home & Glance",
+    "empty": "Nothing is shown in Glance.",
+    "homeHint": "Every module listed here is in Glance. Tap the house to show it on the home screen too.",
+    "open": "Open Glance",
+    "openAttention": "Open Glance — something needs your attention",
+    "preset": "Preset",
+    "refresh": "Refresh",
+    "scope": {
+      "all": "All",
+      "hint": "Quota and other account-wide figures are never filtered by workspace.",
+      "label": "Show data for",
+      "noWorkspace": "No workspace open",
+      "workspace": "Current workspace · {name}"
+    },
+    "shortcuts": "Shortcuts",
+    "shortcutsHint": "What the quick-actions module shows, in this order.",
+    "source": {
+      "connecting": "Connecting to {host}…",
+      "desktop": "your desktop",
+      "device": "On this phone",
+      "live": "From {host}",
+      "offline": "{host} is offline — showing the last reading",
+      "pending": "Checking what {host} shares…",
+      "unavailable": "{host} isn't ready yet — retrying",
+      "unsupported": "{host} doesn't share Glance — update the desktop app"
+    },
+    "title": "Glance",
+    "updated": "Updated {when}"
   }
 }

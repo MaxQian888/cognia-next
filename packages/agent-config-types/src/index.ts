@@ -5131,10 +5131,11 @@ export interface AppSettings {
    */
   statusBarLayout?: import("@/types/shell/bars").BarLayout
   /**
-   * Customization of the mobile home (chat welcome): the ordered quick-action
-   * grid + which home sections are hidden. Lives in settings JSON (same pattern
-   * as `sidebarLayout`) so it persists without a Dexie migration. See
-   * `@/types/shell/mobile-home` for the model + default.
+   * Legacy (pre-ADR-0225) customization of the mobile home: the ordered
+   * quick-action grid + which home sections are hidden. Superseded by
+   * `mobileGlanceLayout`; read only by `migrateMobileHomeLayout`
+   * (`lib/glance/mobile-layout.ts`) until the phone first saves that field,
+   * and never written again. See `@/types/shell/mobile-home` for the model.
    */
   mobileHomeLayout?: import("@/types/shell/mobile-home").MobileHomeLayout
   /**
@@ -5145,6 +5146,17 @@ export interface AppSettings {
    * `normalizeGlancePanelSettings` (`lib/glance/presets.ts`), never raw.
    */
   trayPanelLayout?: import("@/types/glance/layout").GlancePanelSettings
+  /**
+   * The phone's glance layout (ADR-0225 §9, §10): the modules of its home
+   * screen (entries pinned with `home`) and its Glance drawer (every visible
+   * entry), their order and sizes, scope, options and the quick module's
+   * shortcut list. One per account, shared between the phones and the desktop
+   * so either platform can copy the other's layout. `undefined` means the
+   * phone still reads its pre-ADR-0225 home (`mobileHomeLayout` and
+   * `welcomeStats.enabled`) into this model on every read. Read through
+   * `normalizeGlanceMobileSettings` (`lib/glance/mobile-layout.ts`), never raw.
+   */
+  mobileGlanceLayout?: import("@/types/glance/layout").GlanceMobileSettings
   /**
    * The tray panel's action catalogue (quick actions and the delegate bar's
    * primary action). Imported once from the Tauri store pref

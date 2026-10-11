@@ -94,7 +94,7 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 
 - 托盘面板窗口，取代现在的 `tray-panel://state` 推送；
 - Capacity Dock，同时接收配额切片，使其 `quota` 仪表模式终于有数据（缺陷 2）；
-- 已配对手机，经现有 host-state 服务（`lib/sync/host-state-service.ts`）上的 `glance` 通道，受其快照大小上限约束。
+- 已配对手机，经 `glance://update` 事件通道以及 `glance_subscribe` / `glance_request` / `glance_quota_enable` 伴侣命令（第三阶段修订，见下文）。
 
 用量切片按面板自身的周期 / 范围 / 指标计算，不再依赖托盘标题指标（缺陷 1）。
 
@@ -110,7 +110,7 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 
 - 首页的运行中卡片、快捷动作宫格与紧凑统计成为同一个移动布局中的模块，只有一个编辑器。每个移动布局条目带有 `home` 标记：被图钉固定的模块按布局顺序同时出现在首页；抽屉始终渲染全部可见模块。`settings.mobileHomeLayout` 迁移到新的布局模型，现有分区成为被固定的条目。
 - 移动顶栏的 **Glance** 按钮打开底部抽屉（`components/ui/drawer.tsx`），渲染完整的移动模块堆叠，即手机上的托盘面板。
-- 独立使用的手机从本地数据计算切片。已配对手机对未同步的主题（用量、计划、通知、配额）渲染主机切片，并为每个切片标注来源主机与时效。设备上不可用的模块就地说明。
+- 独立使用的手机从本地数据计算切片。已配对手机对自己无法回答的主题（Fleet、用量、活跃度、计划、通知、配额，以及开关属于桌面设置的宠物）渲染主机切片，并为每个切片标注来源主机与时效。设备上不可用的模块就地说明。
 
 ### 10. 布局按设备保存在设置中
 
@@ -130,13 +130,13 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 
 1. **注册表、快照、桌面面板。** 模块注册表与一方模块、`GlanceSnapshotV1` 及其发布者、重建的面板（头部、堆叠区、委派栏、底栏、宽度档位、最大高度、键盘）、Fleet 导航、含 `stale` 的配额状态、缺陷 1。
 2. **编辑。** 原地编辑态、预设、带实时预览的设置编辑器、布局与动作的设置迁移。
-3. **移动端。** 移动首页迁移到组件套件、Glance 抽屉、host-state `glance` 通道、按切片的来源标注。
+3. **移动端。** 移动首页迁移到组件套件、Glance 抽屉、配对手机的 `glance` 通道、按切片的来源标注。
 4. **扩展。** `glance.module` 插件点与 SDK 契约、可组合菜单栏标题、Capacity Dock 配额供数（缺陷 2）。
 
 ## 影响
 
 - `tray-panel://state` 与 Capacity Dock 自有的状态推送被快照通道取代，相应测试随之迁移。
-- `AppSettings` 新增桌面布局字段；`mobileHomeLayout` 迁移到布局模型。不涉及 Dexie 表变更。
+- `AppSettings` 新增桌面布局字段与移动布局字段（`mobileGlanceLayout`）；手机第一次保存后者之前，读取时会把 `mobileHomeLayout` 读入其中。不涉及 Dexie 表变更。
 - 新增一个插件点与 SDK catalog 条目，由 `pnpm audit:slots` 与插件作者导入门禁覆盖。
 - 修正两处文档漂移：`lib/tray-panel/types.ts` 中的 `action-icon.tsx` 引用（图标经 `lib/a2ui/resolve-icon` 解析），以及 `app/tray-panel/page.tsx` 中的 `BYPASS_PREFIXES` 引用（绕过列表在 `lib/shell/bypass-routes.ts`）。
 - Agent Fleet 仍是审批或停止单个任务的唯一位置；面板的 Fleet 模块由测试固定为不暴露任何审批或停止控件。
@@ -149,3 +149,15 @@ description: "托盘快捷面板升级为迷你控制中心：一列已注册的
 - 缺陷 2：存在已登录配额来源时，Capacity Dock 的 `quota` 仪表显示比例而非 `unknown`。
 - 移动端：抽屉在独立使用时从本地数据渲染同样的模块，在已配对时渲染带来源标注的主机切片。
 - 桌面壳冒烟：从托盘打开面板、拖拽边缘调整高度、编辑并重排、从某行打开 Fleet、委派一个任务。
+
+## 修订（第三阶段）：配对手机通道是事件通道，而非 host-state
+
+§7 写的是 host-state 服务上的 `glance` 通道。实际上该服务是一套只为会话设计的持久化账本协议：通道类型封闭、有 reducer、所有副本都要处理的全局序号，以及每次提交都写入的 Dexie 账本行。速览快照恰好相反：短暂、在主窗口里由 React 数据源重新计算、被新快照取代后即无价值。因此第三阶段沿用 `fleet://update` 与文件页为手机提供桌面数据的先例：
+
+- `glance_subscribe`（`host.observe`，读）用手机的**需求**（屏幕上需要的桌面来源模块及其依赖的选项，从不包含布局）宣告、续约或结束租约，并返回最新快照。租约以经验证的设备 id 加手机的消费者 id 为键，TTL 与托盘面板相同，为 60 秒。
+- 租约存续期间，桌面按合并后的需求构建，并在按需订阅的 `glance://update` 事件通道上推送每份快照。手机收到的副本从不包含托盘操作目录与目标标题。
+- `glance_request`（`host.observe`，读）刷新全部或单个额度来源；`glance_quota_enable`（`client.write`）为保险库账号开启额度查询。三个命令都不会从离线队列重放。
+- 桌面声明 `glance.remote`；headless 大脑回答 `headless_host`，手机会就地说明该宿主不提供速览。
+
+宠物也成为桌面来源的主题：它的档案会同步，但是否开启（`petSettings`）是桌面专属设置。
+

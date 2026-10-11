@@ -200,6 +200,10 @@ export const SETTINGS_SYNC = {
   statusBarLayout: { category: "desktop-only" },
   mobileHomeLayout: { category: "desktop-only" },
   trayPanelLayout: { category: "desktop-only" },
+  // The phone's home screen and Glance drawer. One layout per account: every
+  // phone renders it, and the desktop's tray settings can copy from it, so it
+  // crosses the wire both ways (ADR-0225 §10).
+  mobileGlanceLayout: { category: "shared" },
   trayPanelActions: { category: "desktop-only" },
   mobileTabLayout: { category: "desktop-only" },
   mobileWorkflowView: { category: "desktop-only" },

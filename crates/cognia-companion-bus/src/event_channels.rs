@@ -791,6 +791,20 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         tauri_forwarded: true,
         note: "MCP orchestration proxy exec request the brain answers",
     },
+    // ADR-0225 §7: the desktop's glance snapshot for paired phones. The
+    // renderer's publisher emits it with a plain Tauri `emit` through
+    // `lib/companion/host-event-publisher.ts`, and only while some phone
+    // holds a lease (`glance_subscribe`), so a client that is not showing
+    // glance has no use for it: opt-in, like its siblings. A headless brain
+    // builds no glance and never publishes it.
+    EventChannelSpec {
+        pattern: "glance://update",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "content-free snapshot for paired phones' glance; pushed only while a phone \
+               holds a lease",
+    },
     EventChannelSpec {
         pattern: "crash://captured",
         audience: ChannelAudience::ServiceOnly,
@@ -1321,6 +1335,30 @@ mod tests {
             "the desktop host publishes it with a Tauri emit"
         );
         assert!(matches!(added.audience, ChannelAudience::Any));
+    }
+
+    /// ADR-0225 §7: glance snapshots reach a paired phone only because the
+    /// desktop's Tauri `emit` is forwarded into the bus, and only a phone that
+    /// subscribed (it holds a lease) wants them.
+    #[test]
+    fn glance_updates_are_forwarded_and_opt_in() {
+        let spec = spec_for("glance://update").expect("catalogued");
+        assert!(
+            spec.tauri_forwarded,
+            "the desktop renderer publishes it with a Tauri emit"
+        );
+        assert!(
+            !spec.default_on,
+            "only a phone holding a glance lease asks for it"
+        );
+        assert!(matches!(spec.audience, ChannelAudience::Any));
+        assert!(tauri_forwarded_channels().contains(&"glance://update"));
+
+        let mut device = EventSubscription::defaults_for(ConnectionScope::Device);
+        assert!(!device.allows("glance://update"));
+        let outcome = device.apply(&request(SubscribeMode::Add, &["glance://update"]));
+        assert!(outcome.rejected.is_empty());
+        assert!(device.allows("glance://update"));
     }
 
     #[test]

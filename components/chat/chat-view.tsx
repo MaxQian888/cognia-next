@@ -354,8 +354,8 @@ interface ChatPaneProps {
   /**
    * Mobile-home extras injected ONLY into the no-session welcome (the app
    * launch home) — not the empty-active-session state. The mobile shell passes
-   * its customizable quick-action grid + active-runs/search header here and
-   * suppresses the generic dev-tool starter cards.
+   * its glance home (the modules pinned to the home screen, ADR-0225 §9) as
+   * `quickActions` and suppresses the generic dev-tool starter cards.
    */
   welcomeExtras?: {
     quickActions?: ReactNode
@@ -745,13 +745,11 @@ export function ChatPane({
   // `emptyState`) get their own framing and would read as off-topic with it.
   // On desktop it is part of what "rich" means: "minimal" is the bare
   // launcher, and a dashboard under it made the two styles differ by little
-  // more than font size. The phone keeps its compact, self-hiding copy — it is
-  // forced minimal, so the style cannot be what decides there.
-  const statsSlot = emptyState ? undefined : isMobileShell ? (
-    <WelcomeStats compact />
-  ) : welcomeStyle === "rich" ? (
-    <WelcomeStats />
-  ) : undefined
+  // more than font size. The phone has none: its usage and activity are the
+  // glance modules on its home screen and in the Glance drawer (ADR-0225 §9),
+  // which the mobile shell renders through `welcomeExtras`.
+  const statsSlot =
+    emptyState || isMobileShell ? undefined : welcomeStyle === "rich" ? <WelcomeStats /> : undefined
 
   // Every surface this pane can show goes through one `ChatSurfaceTransition`
   // at the same tree position, so moving between them — home, notice,

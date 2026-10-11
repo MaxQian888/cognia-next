@@ -7,32 +7,36 @@
  * entries first in render order, hidden entries after them in their previous
  * relative order. A module the platform does not offer (`available`) is never
  * shown by an edit. Any edit makes the layout `custom` (§2); applying a preset
- * is the way back.
+ * is the way back. The entry functions are generic, so a phone's entries keep
+ * their `home` pin through every edit.
  */
 
 import type {
   GlanceLayoutEntry,
+  GlanceMobileEntry,
+  GlanceMobileSettings,
   GlanceModuleId,
   GlanceModuleSize,
   GlancePanelSettings,
   GlancePresetId,
 } from "@/types/glance/layout"
 
+import { mobileLayoutFromPreset, normalizeMobileEntries, normalizeShortcuts } from "./mobile-layout"
 import { layoutFromPreset, normalizeEntries } from "./presets"
 import { effectiveSize } from "./registry"
 
-function visibleFirst(entries: readonly GlanceLayoutEntry[]): GlanceLayoutEntry[] {
+function visibleFirst<E extends GlanceLayoutEntry>(entries: readonly E[]): E[] {
   return [...entries.filter((e) => !e.hidden), ...entries.filter((e) => e.hidden)]
 }
 
 /** Put the visible entries in `orderedVisibleIds` order. Ids not visible are ignored. */
-export function reorderVisible(
-  entries: readonly GlanceLayoutEntry[],
+export function reorderVisible<E extends GlanceLayoutEntry>(
+  entries: readonly E[],
   orderedVisibleIds: readonly GlanceModuleId[]
-): GlanceLayoutEntry[] {
+): E[] {
   const visible = entries.filter((e) => !e.hidden)
   const byId = new Map(visible.map((e) => [e.id, e]))
-  const ordered: GlanceLayoutEntry[] = []
+  const ordered: E[] = []
   for (const id of orderedVisibleIds) {
     const entry = byId.get(id)
     if (!entry) continue
@@ -45,11 +49,11 @@ export function reorderVisible(
 }
 
 /** Move one visible entry by `delta` places (keyboard and button reordering). */
-export function moveVisible(
-  entries: readonly GlanceLayoutEntry[],
+export function moveVisible<E extends GlanceLayoutEntry>(
+  entries: readonly E[],
   id: GlanceModuleId,
   delta: number
-): GlanceLayoutEntry[] {
+): E[] {
   const ids = entries.filter((e) => !e.hidden).map((e) => e.id)
   const from = ids.indexOf(id)
   if (from < 0) return visibleFirst(entries)
@@ -60,21 +64,21 @@ export function moveVisible(
 }
 
 /** Resize one entry, degrading to a size the module supports. */
-export function resizeEntry(
-  entries: readonly GlanceLayoutEntry[],
+export function resizeEntry<E extends GlanceLayoutEntry>(
+  entries: readonly E[],
   id: GlanceModuleId,
   size: GlanceModuleSize
-): GlanceLayoutEntry[] {
+): E[] {
   return visibleFirst(
     entries.map((e) => (e.id === id ? { ...e, size: effectiveSize(id, size) } : e))
   )
 }
 
 /** Hide one entry. It moves to the head of the hidden group, so "show" undoes it in place. */
-export function hideEntry(
-  entries: readonly GlanceLayoutEntry[],
+export function hideEntry<E extends GlanceLayoutEntry>(
+  entries: readonly E[],
   id: GlanceModuleId
-): GlanceLayoutEntry[] {
+): E[] {
   const target = entries.find((e) => e.id === id)
   if (!target || target.hidden) return visibleFirst(entries)
   const rest = entries.filter((e) => e.id !== id)
@@ -86,11 +90,11 @@ export function hideEntry(
 }
 
 /** Show one hidden entry at the end of the stack, unless the platform lacks it. */
-export function showEntry(
-  entries: readonly GlanceLayoutEntry[],
+export function showEntry<E extends GlanceLayoutEntry>(
+  entries: readonly E[],
   id: GlanceModuleId,
   available: readonly GlanceModuleId[]
-): GlanceLayoutEntry[] {
+): E[] {
   const target = entries.find((e) => e.id === id)
   if (!target || !target.hidden || !available.includes(id)) return visibleFirst(entries)
   const rest = entries.filter((e) => e.id !== id)
@@ -115,4 +119,49 @@ export function withPreset(
   preset: GlancePresetId
 ): GlancePanelSettings {
   return { ...settings, preset, entries: layoutFromPreset(preset) }
+}
+
+/**
+ * Pin one entry to the phone's home screen, or unpin it. Pinning a hidden
+ * entry also shows it, since the home renders only visible entries and a pin
+ * the user cannot see would be a switch that does nothing.
+ */
+export function pinEntryHome(
+  entries: readonly GlanceMobileEntry[],
+  id: GlanceModuleId,
+  home: boolean,
+  available: readonly GlanceModuleId[]
+): GlanceMobileEntry[] {
+  const target = entries.find((e) => e.id === id)
+  if (!target) return visibleFirst(entries)
+  if (home && !available.includes(id)) return visibleFirst(entries)
+  const shown = home && target.hidden ? showEntry(entries, id, available) : visibleFirst(entries)
+  return shown.map((e) => (e.id === id ? { ...e, home } : e))
+}
+
+/** The phone's layout after an edit: the new entries, and `custom`. */
+export function withEditedMobileEntries(
+  settings: GlanceMobileSettings,
+  entries: readonly GlanceMobileEntry[]
+): GlanceMobileSettings {
+  return { ...settings, preset: "custom", entries: normalizeMobileEntries(entries) }
+}
+
+/** The phone's layout after applying a preset. Shortcuts, scope and options are kept. */
+export function withMobilePreset(
+  settings: GlanceMobileSettings,
+  preset: GlancePresetId
+): GlanceMobileSettings {
+  return { ...settings, preset, entries: mobileLayoutFromPreset(preset) }
+}
+
+/**
+ * The phone's layout with a new shortcut list. The shortcuts are the quick
+ * module's content, not the layout, so the preset is left alone.
+ */
+export function withShortcuts(
+  settings: GlanceMobileSettings,
+  shortcuts: readonly string[]
+): GlanceMobileSettings {
+  return { ...settings, shortcuts: normalizeShortcuts(shortcuts) }
 }

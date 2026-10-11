@@ -15,11 +15,19 @@
  *   (`parseGlanceRequest`), executed through the owning subsystem's own path,
  *   and answered over `glance://result` to the consumer that asked.
  *
+ * - Paired phones (ADR-0225 §9) hold leases on `glanceRemoteHub` through the
+ *   companion dispatcher. While one is live, a second build runs for their
+ *   merged demand and each result is pushed on `glance://update`. That build
+ *   never carries the tray's action catalogue or the goal's title; it carries
+ *   the tray layout's entries instead, so a phone can copy them. The phone's
+ *   requests run through the executor installed on the hub, over the same
+ *   sources.
+ *
  * Nothing here approves, stops or answers a task: those requests do not exist
  * (ADR-0225 §1). A Fleet click opens the island on that row instead.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 
 import { useGlanceSources, type UseGlanceSourcesResult } from "@/hooks/glance/use-glance-sources"
@@ -29,6 +37,11 @@ import { normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { parseGlanceRequest, type GlanceRequest } from "@/lib/glance/requests"
 import { GLANCE_SNAPSHOT_VERSION, type GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import { GlanceSubscriptionRegistry } from "@/lib/glance/subscriptions"
+import { GLANCE_UPDATE_EVENT } from "@/lib/glance/remote/commands"
+import { glanceConfigForDemand } from "@/lib/glance/remote/demand"
+import { glanceRemoteHub } from "@/lib/glance/remote/host-hub"
+import type { GlanceRemoteDemand } from "@/lib/glance/remote/types"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import { sendIslandFocusRow } from "@/lib/island/client"
 import { requestIslandFocus } from "@/lib/island/focus-request"
 import { getIslandProjection } from "@/lib/island/projection-store"
@@ -71,6 +84,27 @@ async function patchLayout(apply: (current: GlancePanelSettings) => GlancePanelS
   const store = useSettingsStore.getState()
   const current = normalizeGlancePanelSettings(store.settings?.trayPanelLayout)
   await store.save({ trayPanelLayout: apply(current) })
+}
+
+/**
+ * The snapshot a paired phone receives: the build for its demand, with the
+ * desktop-only parts removed. The action catalogue is desktop configuration a
+ * phone cannot run, and the goal title is the one free-text field in `when`.
+ * The tray layout's entries ride along so the phone can copy them.
+ */
+export function remoteGlanceSnapshot(
+  local: GlanceSnapshotV1,
+  trayLayout: GlancePanelSettings
+): GlanceSnapshotV1 {
+  return {
+    ...local,
+    actions: [],
+    when: {
+      ...local.when,
+      goal: { active: local.when.goal.active, paused: local.when.goal.paused },
+    },
+    hostLayout: { preset: trayLayout.preset, entries: trayLayout.entries },
+  }
 }
 
 export interface GlanceRequestDeps {
@@ -189,15 +223,39 @@ export function GlancePublisherInitializer() {
   const [active, setActive] = useState(false)
   const sources = useGlanceSources(active)
 
+  // Paired phones: their merged demand, as a stable key, and a build for it.
+  const remoteKey = useSyncExternalStore(
+    glanceRemoteHub.subscribe,
+    glanceRemoteHub.getDemandKey,
+    () => ""
+  )
+  const remoteDemand = useMemo<GlanceRemoteDemand | null>(
+    () => (remoteKey ? (JSON.parse(remoteKey) as GlanceRemoteDemand) : null),
+    [remoteKey]
+  )
+  const remoteConfig = useMemo(
+    () => (remoteDemand ? glanceConfigForDemand(remoteDemand) : null),
+    [remoteDemand]
+  )
+  const remoteActive = remoteDemand !== null && remoteDemand.modules.length > 0
+  const remoteSources = useGlanceSources(remoteActive, {
+    config: remoteConfig,
+    workspaceId: remoteDemand?.workspaceId ?? null,
+  })
+  const trayLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
+
   const epoch = useRef(0)
   const revision = useRef(0)
+  const remoteRevision = useRef(0)
   const latest = useRef<GlanceSnapshotV1 | null>(null)
   const sourcesRef = useRef(sources)
+  const remoteSourcesRef = useRef(remoteSources)
   const routerRef = useRef(router)
   useEffect(() => {
     sourcesRef.current = sources
+    remoteSourcesRef.current = remoteSources
     routerRef.current = router
-  }, [sources, router])
+  }, [sources, remoteSources, router])
 
   // Build the snapshot on every source change and push it, coalesced.
   useEffect(() => {
@@ -227,6 +285,55 @@ export function GlancePublisherInitializer() {
     }, GLANCE_PUSH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [active, sources.body])
+
+  // The phones' build: stored on the hub (the next `glance_subscribe` answers
+  // it at once) and pushed, coalesced, to every phone that subscribed.
+  useEffect(() => {
+    if (!isTauri() || !isMainAppWindow()) return
+    if (!remoteActive) {
+      glanceRemoteHub.setLatest(null)
+      return
+    }
+    if (epoch.current === 0) epoch.current = Date.now()
+    remoteRevision.current += 1
+    const snapshot = remoteGlanceSnapshot(
+      {
+        version: GLANCE_SNAPSHOT_VERSION,
+        epoch: epoch.current,
+        revision: remoteRevision.current,
+        ...remoteSources.body,
+      },
+      normalizeGlancePanelSettings(trayLayout)
+    )
+    glanceRemoteHub.setLatest(snapshot)
+    const timer = setTimeout(() => {
+      void publishHostEvent(GLANCE_UPDATE_EVENT, snapshot)
+    }, GLANCE_PUSH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [remoteActive, remoteSources.body, trayLayout])
+
+  // The phones' requests run here, over their build's own sources.
+  useEffect(() => {
+    if (!isTauri() || !isMainAppWindow()) return
+    return glanceRemoteHub.setExecutor({
+      refresh: async () => {
+        const remote = remoteSourcesRef.current
+        await Promise.all([
+          remote.quota.refreshAll(),
+          remote.body.config.options.usage.scope === "all-tools"
+            ? remote.refreshUsage()
+            : Promise.resolve(),
+        ])
+        return null
+      },
+      quotaRefresh: async (key) =>
+        (await remoteSourcesRef.current.quota.refreshOne(key)) ? null : "errors.quotaRefresh",
+      quotaEnable: async (provider, accountId) =>
+        (await remoteSourcesRef.current.quota.enable(provider, accountId))
+          ? null
+          : "errors.quotaEnable",
+    })
+  }, [])
 
   useEffect(() => {
     if (!isTauri() || !isMainAppWindow()) return
@@ -278,6 +385,9 @@ export function GlancePublisherInitializer() {
     const prune = setInterval(() => {
       const now = Date.now()
       if (registry.current.prune(now)) setActive(registry.current.hasLive(now))
+      // A phone that went away without ending its lease stops costing
+      // anything once the lease lapses.
+      glanceRemoteHub.prune(now)
     }, GLANCE_PRUNE_INTERVAL_MS)
 
     return () => {

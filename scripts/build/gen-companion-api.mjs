@@ -656,8 +656,11 @@ const HOST_CATEGORIES = [
     title: "System and security",
     description: "Host capabilities, service secrets, backups, sync, logs, and bridge administration.",
     skill: "cognia-host-system",
+    // `glance_` is here: a paired phone leasing the desktop's glance snapshot
+    // (ADR-0225 §7) is observing the host, the way `perf_` leases are, not
+    // driving an agent or a session.
     pattern:
-      /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|langfuse_|logs_|perf_|secret_|sync_)/,
+      /^(app_|backup_|companion_|device_|external_bridge_|glance_|host_|keyring_|langfuse_|logs_|perf_|secret_|sync_)/,
   },
 ]
 

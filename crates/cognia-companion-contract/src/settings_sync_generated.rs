@@ -157,6 +157,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "messageDisplay",
     "mistralVoiceId",
     "mobileComputerUseEnabled",
+    "mobileGlanceLayout",
     "motion",
     "notificationPreferences",
     "onboardingProfile",

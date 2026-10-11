@@ -39,6 +39,11 @@ const valid: Array<[string, Record<string, unknown>, Record<string, unknown>]> =
     { kind: "open-owner", owner: "scheduler", itemId: "app:abc" },
   ],
   [
+    "open-owner workflows at one workflow",
+    { kind: "open-owner", owner: "workflows", itemId: "wf-1" },
+    { kind: "open-owner", owner: "workflows", itemId: "wf-1" },
+  ],
+  [
     "open-owner without item",
     { kind: "open-owner", owner: "usage" },
     { kind: "open-owner", owner: "usage" },

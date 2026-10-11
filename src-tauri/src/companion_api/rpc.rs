@@ -591,6 +591,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     "files_library_upload_chunk",
     "files_library_upload_commit",
     "files_library_upload_abort",
+    // Glance on a paired phone (ADR-0225 §7). Bridged to the desktop renderer,
+    // whose publisher builds the snapshots; the lease and the re-reads are
+    // observation, the quota switch a settings write the device makes for its
+    // own view. Deliberately NOT in `CONTROL_COMMANDS`, like the pet and Files.
+    "glance_subscribe",
+    "glance_request",
+    "glance_quota_enable",
     // ADR-0060 — a paired device reports its platform capability manifest
     // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
     // row by the TS dispatch arm. Direct `transport.call` from the mobile
@@ -1280,6 +1287,10 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "files_library_search",
     "files_library_get",
     "files_library_read_chunk",
+    // Glance (ADR-0225 §7): a lease renewal answers the newest snapshot and a
+    // re-read answers on the next push, so neither may replay a cached answer.
+    "glance_subscribe",
+    "glance_request",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -2169,6 +2180,10 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "pet_chat_send",
     "pet_chat_list",
     "pet_chat_clear",
+    // A paired phone's glance lease (ADR-0225 §9). The renderer keys each
+    // lease on `<callerDeviceId>:<consumer>`, so one device can neither renew
+    // nor end another device's lease by guessing its consumer id.
+    "glance_subscribe",
     // The Files library (ADR-0223 §9). The keyed writes (duplicate, attach,
     // folder create, upload commit) are deduped by the renderer's ledger on
     // `<callerDeviceId>:<command>:<idempotencyKey>`, and an upload is staged

@@ -18387,6 +18387,9 @@
       "addShort": "Add",
       "custom": "Custom",
       "hide": "Hide {module}",
+      "homePin": "Show {module} on the home screen",
+      "homePinned": "On the home screen",
+      "homeUnpinned": "Not on the home screen",
       "presetHint": "A preset replaces the modules, their order and sizes. Width, height and options stay.",
       "presetLabel": "Preset: {preset}",
       "presets": "Presets",
@@ -18399,10 +18402,50 @@
     "errors": {
       "commandUnavailable": "That command isn't available right now.",
       "deliveryFailed": "Cognia's main window didn't respond.",
+      "hostUnavailable": "Your desktop isn't sharing this right now.",
+      "hostUnreachable": "Couldn't reach your desktop.",
       "quotaEnable": "Couldn't turn on quota for that account.",
       "quotaRefresh": "Couldn't refresh that quota source.",
       "requestFailed": "Cognia couldn't do that.",
       "timeout": "Cognia's main window didn't answer in time."
+    },
+    "mobile": {
+      "addModules": "Add modules",
+      "connecting": "Connecting…",
+      "copiedDesktop": "Copied your desktop's layout.",
+      "copyDesktop": "Use desktop layout",
+      "copyDesktopUnavailable": "Open Glance while your desktop is connected to copy its layout.",
+      "done": "Done",
+      "edit": "Edit",
+      "editorDescription": "Choose the modules in Glance, which of them also sit on your home screen, and your shortcuts.",
+      "editorTitle": "Home & Glance",
+      "empty": "Nothing is shown in Glance.",
+      "homeHint": "Every module listed here is in Glance. Tap the house to show it on the home screen too.",
+      "open": "Open Glance",
+      "openAttention": "Open Glance — something needs your attention",
+      "preset": "Preset",
+      "refresh": "Refresh",
+      "scope": {
+        "all": "All",
+        "hint": "Quota and other account-wide figures are never filtered by workspace.",
+        "label": "Show data for",
+        "noWorkspace": "No workspace open",
+        "workspace": "Current workspace · {name}"
+      },
+      "shortcuts": "Shortcuts",
+      "shortcutsHint": "What the quick-actions module shows, in this order.",
+      "source": {
+        "connecting": "Connecting to {host}…",
+        "desktop": "your desktop",
+        "device": "On this phone",
+        "live": "From {host}",
+        "offline": "{host} is offline — showing the last reading",
+        "pending": "Checking what {host} shares…",
+        "unavailable": "{host} isn't ready yet — retrying",
+        "unsupported": "{host} doesn't share Glance — update the desktop app"
+      },
+      "title": "Glance",
+      "updated": "Updated {when}"
     },
     "modules": {
       "activity": {
@@ -18453,6 +18496,7 @@
         "openFiltered": "Open Agent Fleet at a task that is {state}",
         "openFleet": "Open Agent Fleet",
         "openRow": "Open “{title}” in Agent Fleet",
+        "openWorkflows": "Open the runs of {name}",
         "readOnly": "Read-only · act in Fleet",
         "stat": {
           "awaiting": "Awaiting",
@@ -18464,6 +18508,8 @@
           "failed": "Failed",
           "stale": "Stale"
         },
+        "workflowsRunning": "{count, plural, one {# workflow running} other {# workflows running}} · {name}",
+        "workflowsShort": "{count, plural, one {# workflow} other {# workflows}}",
         "working": "{count} running"
       },
       "pet": {
@@ -18493,7 +18539,10 @@
         "unwell": "Not feeling well"
       },
       "quick": {
-        "label": "Quick actions"
+        "edit": "Edit",
+        "editShortcuts": "Edit shortcuts",
+        "label": "Quick actions",
+        "noShortcuts": "No shortcuts yet — tap to add some."
       },
       "quota": {
         "collapse": "Collapse {name}",
@@ -18571,6 +18620,14 @@
         "week": "7 days",
         "workspaceOnly": "This workspace"
       }
+    },
+    "origin": {
+      "fromDesktop": "Desktop · {age}",
+      "fromDesktopOffline": "Desktop offline · {age}",
+      "fromHost": "{host} · {age}",
+      "fromHostOffline": "{host} offline · {age}",
+      "offline": "Desktop offline — nothing received yet.",
+      "unsupported": "Your desktop doesn't share this."
     },
     "presets": {
       "agentOps": "Agent ops",
@@ -25650,37 +25707,27 @@
         "workflows": "Workflows"
       },
       "actionsDescription": "Actions for this conversation",
-      "activeRuns": {
-        "empty": "No active runs",
-        "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
-        "viewRuns": "View runs"
-      },
       "bucketOlder": "Older",
       "bucketPrev30": "Previous 30 Days",
       "bucketPrev7": "Previous 7 Days",
       "bucketToday": "Today",
       "bucketYesterday": "Yesterday",
       "customize": {
-        "active": "On your home",
-        "activeEmpty": "No quick actions — add some below.",
-        "add": "Add",
-        "available": "Add actions",
-        "availableEmpty": "Every action is on your home.",
-        "description": "Pick which quick actions and sections show on your home screen.",
+        "active": "In the grid",
+        "activeEmpty": "No shortcuts — add some below.",
+        "addLabel": "Add {action}",
+        "available": "Add shortcuts",
+        "availableEmpty": "Every shortcut is in the grid.",
         "dragHint": "Drag to reorder",
-        "remove": "Remove",
-        "restoreDefaults": "Restore defaults",
-        "sections": "Sections",
-        "title": "Customize home"
+        "dragLabel": "Reorder {action}",
+        "removeLabel": "Remove {action}",
+        "restoreDefaults": "Restore defaults"
       },
-      "edit": "Edit",
       "folderEmpty": "Empty — long-press a chat to move it here.",
-      "hideSection": "Hide {section}",
       "listActions": "Conversation list actions",
       "loadingChats": "Loading conversations…",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
-      "quickActions": "Quick actions",
       "recent": "Recent",
       "renameAria": "Rename conversation",
       "results": "Results",
@@ -25691,12 +25738,6 @@
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchingMessages": "Searching messages…",
       "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
-      "sections": {
-        "activeRuns": "Active runs",
-        "activity": "Activity",
-        "quickActions": "Quick actions",
-        "recents": "Recent chats"
-      },
       "selectionRowHint": "Tap a chat to select or deselect it. Press Escape or Done to stop selecting.",
       "swipeArchive": "Archive",
       "swipeDelete": "Delete",
@@ -52330,6 +52371,11 @@
         }
       },
       "modules": {
+        "copiedPhone": "Copied your phone's layout.",
+        "copyPhone": "Phone layout",
+        "copyPhoneAction": "Copy phone layout",
+        "copyPhoneHint": "Use the modules, order and sizes of your phone's Glance here. Pins and shortcuts stay on the phone.",
+        "copyPhoneNone": "Available once a paired phone has saved its own Glance layout.",
         "delegate": "Show the delegate bar",
         "delegateHint": "Hidden, the delegate action moves into the quick actions.",
         "description": "Which modules the panel shows, in what order and size. The preview updates as you edit.",

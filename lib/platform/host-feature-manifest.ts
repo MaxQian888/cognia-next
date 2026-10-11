@@ -5,6 +5,7 @@ import {
   COMPOSER_MAX_ATTACHMENT_BYTES,
 } from "@/lib/chat/attachments/prepare"
 import { FILES_REMOTE_COMMAND_NAMES } from "@/lib/files-library/remote/commands"
+import { GLANCE_REMOTE_COMMAND_NAMES } from "@/lib/glance/remote/commands"
 import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 import type { Platform } from "./detect"
 
@@ -98,6 +99,12 @@ export const HOST_FEATURE_IDS = [
   // `files` surface stays closed on a paired client rather than opening onto
   // `headless_host` or `unknown command`.
   "files.library-remote",
+  // Glance on a paired phone (ADR-0225 §7). Its presence says this desktop
+  // leases its glance snapshot to phones, pushes it on `glance://update` and
+  // answers the `glance_*` arms; without it a phone builds glance from its own
+  // synced rows and shows the host modules as unavailable rather than calling
+  // into `headless_host` or `unknown command`.
+  "glance.remote",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -330,6 +337,15 @@ export const FILES_LIBRARY_REMOTE_HOST_OPERATIONS = Object.freeze([
   ...FILES_REMOTE_COMMAND_NAMES,
 ] as const)
 
+/**
+ * Glance on a paired phone (ADR-0225 §7): the lease, the re-read and the
+ * quota switch. The snapshots themselves ride the `glance://update` event
+ * channel, which a phone subscribes to while it holds a lease.
+ */
+export const GLANCE_REMOTE_HOST_OPERATIONS = Object.freeze([
+  ...GLANCE_REMOTE_COMMAND_NAMES,
+] as const)
+
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
 export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
   getCommandManifest()
@@ -421,6 +437,13 @@ export function buildLocalHostFeatureManifest({
     features["files.library-remote"] = {
       version: 1,
       operations: [...FILES_LIBRARY_REMOTE_HOST_OPERATIONS],
+    }
+    // Desktop only, for the same reason: glance is built by the main window's
+    // publisher, and the headless brain has no main window, so it answers
+    // every `glance_*` arm `headless_host`.
+    features["glance.remote"] = {
+      version: 1,
+      operations: [...GLANCE_REMOTE_HOST_OPERATIONS],
     }
   }
   if (platform === "tauri" || platform === "headless") {

@@ -1,8 +1,12 @@
 "use client"
 
 /**
- * Everything a `GlanceSnapshotV1` is built from, in the main window
- * (ADR-0225 §7).
+ * Everything a `GlanceSnapshotV1` is built from (ADR-0225 §7, §9).
+ *
+ * Three callers: the desktop main window's publisher (for the tray panel, from
+ * the stored tray layout, and a second time for paired phones, from their
+ * demand), the settings preview (passive), and a phone building its own
+ * slices from what it holds locally.
  *
  * `active` is "some consumer is visible right now". Each slice runs only when
  * the consumer is visible AND its module is visible in the layout, so a closed
@@ -20,12 +24,16 @@ import { useUsageGlance } from "@/hooks/usage/use-usage-glance"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { getDb } from "@/lib/db/schema"
 import { listWorkspaceSessionIds, listWorkspaceSessions } from "@/lib/db/sessions"
-import { buildFleetSlice } from "@/lib/glance/build-fleet"
+import {
+  buildFleetSlice,
+  NO_RUNNING_WORKFLOWS,
+  summarizeRunningWorkflows,
+} from "@/lib/glance/build-fleet"
 import { buildPetSlice } from "@/lib/glance/build-pet"
 import { buildRecentsSlice, type RecentSessionInput } from "@/lib/glance/build-recents"
 import { buildUsageSlice } from "@/lib/glance/build-usage"
 import { normalizeGlancePanelSettings, visibleModuleIds } from "@/lib/glance/presets"
-import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
+import type { GlanceFleetWorkflows, GlanceSnapshotV1 } from "@/lib/glance/snapshot"
 import { resolveTrayPanelActions } from "@/lib/tray-panel/catalogue"
 import {
   getIslandProjection,
@@ -37,7 +45,7 @@ import type { UsageGlanceBudget, UsageGlanceQuery } from "@/lib/usage/usage-glan
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
-import type { GlanceModuleId } from "@/types/glance/layout"
+import type { GlanceModuleId, GlancePanelSettings } from "@/types/glance/layout"
 
 import { useGlanceActivity } from "./use-glance-activity"
 import { useGlanceAgenda } from "./use-glance-agenda"
@@ -85,14 +93,29 @@ export interface UseGlanceSourcesOptions {
    * which must not fire network requests just because Settings is open.
    */
   passive?: boolean
+  /**
+   * Build for this layout instead of the stored tray layout: which modules are
+   * on, the scope and the module options. A phone's own layout, or a paired
+   * phone's demand on the desktop. `null`/absent means the tray layout.
+   */
+  config?: GlancePanelSettings | null
+  /**
+   * The workspace a scoped build filters to, instead of this window's active
+   * project. A paired phone names its own. Unknown here means unscoped, which
+   * the usage slice reports (`workspaceFiltered: false`).
+   */
+  workspaceId?: string | null
 }
 
 export function useGlanceSources(
   active: boolean,
-  { passive = false }: UseGlanceSourcesOptions = {}
+  { passive = false, config: configOverride = null, workspaceId }: UseGlanceSourcesOptions = {}
 ): UseGlanceSourcesResult {
   const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
-  const config = useMemo(() => normalizeGlancePanelSettings(storedLayout), [storedLayout])
+  const config = useMemo(
+    () => configOverride ?? normalizeGlancePanelSettings(storedLayout),
+    [configOverride, storedLayout]
+  )
   const storedActions = useSettingsStore((s) => s.settings?.trayPanelActions)
   const actions = useMemo(() => resolveTrayPanelActions(storedActions), [storedActions])
   const visible = useMemo(() => new Set(visibleModuleIds(config.entries)), [config.entries])
@@ -102,10 +125,11 @@ export function useGlanceSources(
   // Workspace.
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const projects = useProjectStore((s) => s.projects)
+  const workspaceTarget = workspaceId === undefined ? activeProjectId : workspaceId
   const workspace = useMemo(() => {
-    const project = projects.find((p) => p.id === activeProjectId)
+    const project = projects.find((p) => p.id === workspaceTarget)
     return project ? { id: project.id, name: project.name } : null
-  }, [projects, activeProjectId])
+  }, [projects, workspaceTarget])
   const scoped = config.scope === "workspace" && workspace !== null
   const sessionIds = useLiveQuery<string[] | null, null>(
     async () => (active && scoped && workspace ? listWorkspaceSessionIds(workspace.id) : null),
@@ -123,12 +147,27 @@ export function useGlanceSources(
   const tray = useTrayStateSnapshot()
   const when = useMemo(() => ({ ...tray, usage: null }), [tray])
 
-  // Fleet: the island's own projection.
+  // Fleet: the island's own projection (null where there is no island, as on
+  // a phone), plus the visual workflows running now.
   const fleetOn = on("fleet")
   const island = useSyncExternalStore(
     subscribeIslandProjection,
     getIslandProjection,
     getIslandProjectionServerSnapshot
+  )
+  const workflows = useLiveQuery<GlanceFleetWorkflows, GlanceFleetWorkflows>(
+    async () => {
+      if (!fleetOn) return NO_RUNNING_WORKFLOWS
+      const runs = await getDb().workflowRuns.where("status").equals("running").toArray()
+      if (runs.length === 0) return NO_RUNNING_WORKFLOWS
+      const ids = [...new Set(runs.map((run) => run.workflowId))]
+      const rows = await getDb().workflows.bulkGet(ids)
+      const names = new Map<string, string>()
+      for (const row of rows) if (row) names.set(row.id, row.name)
+      return summarizeRunningWorkflows(runs, names)
+    },
+    [fleetOn],
+    NO_RUNNING_WORKFLOWS
   )
 
   // Usage: one 30-day read; today and 7 days are sliced out of its buckets.
@@ -203,7 +242,7 @@ export function useGlanceSources(
       workspace,
       when,
       actions,
-      fleet: fleetOn ? buildFleetSlice(island, now) : null,
+      fleet: fleetOn ? buildFleetSlice(island, now, workflows) : null,
       usage: usageOn
         ? buildUsageSlice({
             glance: usageGlance,
@@ -227,6 +266,7 @@ export function useGlanceSources(
       actions,
       fleetOn,
       island,
+      workflows,
       usageOn,
       usageGlance,
       usageScope,

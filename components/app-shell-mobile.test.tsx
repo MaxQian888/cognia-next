@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
+import type { MobileGlanceShellActions } from "@/components/mobile/glance/mobile-glance-provider"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
@@ -511,6 +512,7 @@ jest.mock("@/hooks/ui/use-media-query", () => ({
 }))
 const APPBAR_INBOX_QUERY = "(min-width: 26rem)"
 const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
+const APPBAR_GLANCE_QUERY = "(min-width: 24rem)"
 
 // Header children that reach Dexie / native polling on mount. Stubbed so the
 // bar's own layout contract is what these tests measure.
@@ -529,23 +531,47 @@ jest.mock("@/components/desktop/job-center-panel", () => ({
 }))
 jest.mock("@/components/mobile/home/mobile-home-layout-sheet", () => ({
   MobileHomeLayoutSheet: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="mobile-quick-actions-editor-sheet" /> : null,
+    open ? <div data-testid="mobile-glance-editor-sheet" /> : null,
 }))
-// The real grid reads the settings store through a different module path than
-// this suite mocks, and the ChatPane stub never renders the welcome slots
-// anyway. The seam under test is the ELEMENT the shell builds, so the stub only
-// has to keep the real component out of the graph.
-jest.mock("@/components/mobile/home/mobile-quick-actions", () => ({
-  MobileQuickActions: () => <div data-testid="mobile-quick-actions-stub" />,
+// The phone's glance (ADR-0225 §9) has its own suites under
+// `components/mobile/glance/`. Here the provider is a passthrough that records
+// the shell's doors, and the surfaces are stubs: the seams under test are the
+// elements the shell builds and where it puts them.
+const glanceActionsRef: {
+  current: MobileGlanceShellActions | null
+} = { current: null }
+jest.mock("@/components/mobile/glance/mobile-glance-provider", () => ({
+  MobileGlanceProvider: ({
+    actions,
+    children,
+  }: {
+    actions: MobileGlanceShellActions
+    children: React.ReactNode
+  }) => {
+    glanceActionsRef.current = actions
+    return <>{children}</>
+  },
+}))
+jest.mock("@/components/mobile/glance/mobile-glance-home", () => ({
+  MobileGlanceHome: () => <div data-testid="mobile-glance-home-stub" />,
+}))
+jest.mock("@/components/mobile/glance/mobile-glance-drawer", () => ({
+  MobileGlanceDrawer: () => <div data-testid="mobile-glance-drawer-stub" />,
+}))
+jest.mock("@/components/mobile/glance/mobile-glance-trigger", () => ({
+  MobileGlanceTrigger: ({ variant = "icon" }: { variant?: "icon" | "menu" }) =>
+    variant === "menu" ? (
+      <div role="menuitem" data-testid="mobile-action-glance" />
+    ) : (
+      <button type="button" data-testid="mobile-glance-trigger" />
+    ),
+  MobileGlanceFoldedDot: () => <span data-testid="mobile-glance-folded-dot" />,
 }))
 // The search palette is its own surface with its own suite; here it only has
 // to be a sheet that can be open.
 jest.mock("@/components/mobile/home/mobile-command-palette", () => ({
   MobileCommandPalette: ({ open }: { open: boolean }) =>
     open ? <div data-testid="command-palette-stub" /> : null,
-}))
-jest.mock("@/components/mobile/home/mobile-active-runs-card", () => ({
-  MobileActiveRunsCard: () => null,
 }))
 
 const toggleArtifactDock = jest.fn()
@@ -559,6 +585,7 @@ jest.mock("@/stores/artifact/artifact-dock-layout-store", () => ({
 }))
 
 import { branchWholeConversation } from "@/lib/chat/branch-whole-conversation"
+import { MobileGlanceHome } from "@/components/mobile/glance/mobile-glance-home"
 import { AppShellMobile } from "./app-shell-mobile"
 
 beforeEach(() => {
@@ -593,6 +620,7 @@ beforeEach(() => {
   inboxUnreadRef.current = 0
   welcomeExtrasRef.current = null
   recentSessionsRef.current = undefined
+  glanceActionsRef.current = null
   isLoadingSessionsRef.current = false
   requestChatHome.mockReset()
   clearActiveSession.mockReset()
@@ -810,30 +838,90 @@ describe("<AppShellMobile />", () => {
     expect(screen.queryByTestId("mobile-actions-unread-dot")).toBeNull()
   })
 
-  // The other door to the same sheet: the grid's "Edit" asks the shell, which
-  // owns the state. That seam is the whole reason the sheet moved up here.
-  it("opens the home-layout editor from the quick-action grid's Edit", () => {
+  // The other door to the same sheet: the quick module's "Edit" (and a shortcut
+  // list's "no shortcuts" row) asks the shell through the glance provider's
+  // `editLayout`, because the shell owns the sheet's state.
+  it("hands the welcome the glance home and opens the layout editor from its Edit", () => {
     render(<AppShellMobile />)
     const extras = lastWelcomeExtras()
     expect(extras.hideNewChatAction).toBe(true)
-    const grid = extras.quickActions as React.ReactElement<{ onEditLayout: () => void }>
-    expect(screen.queryByTestId("mobile-quick-actions-editor-sheet")).toBeNull()
+    expect(extras.hideSamples).toBe(true)
+    const home = extras.quickActions as React.ReactElement
+    expect(home.type).toBe(MobileGlanceHome)
+    expect(screen.queryByTestId("mobile-glance-editor-sheet")).toBeNull()
     act(() => {
-      grid.props.onEditLayout()
+      glanceActionsRef.current?.editLayout()
     })
-    expect(screen.getByTestId("mobile-quick-actions-editor-sheet")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-glance-editor-sheet")).toBeInTheDocument()
   })
 
-  // The grid that hosts the other "Edit" entry renders null once its section is
-  // hidden, so this is the editor's only unconditional door.
+  // The home can show nothing at all (every module unpinned or quiet), so this
+  // is the editor's only unconditional door.
   it("opens the home-layout editor from the overflow menu", async () => {
     const user = userEvent.setup()
     render(<AppShellMobile />)
     await user.click(screen.getByTestId("mobile-actions-trigger"))
     await user.click(await screen.findByTestId("mobile-action-home-layout"))
     await waitFor(() =>
-      expect(screen.getByTestId("mobile-quick-actions-editor-sheet")).toBeInTheDocument()
+      expect(screen.getByTestId("mobile-glance-editor-sheet")).toBeInTheDocument()
     )
+  })
+
+  describe("glance (ADR-0225 §9)", () => {
+    it("mounts the Glance drawer once inside the shell", () => {
+      render(<AppShellMobile />)
+      expect(screen.getAllByTestId("mobile-glance-drawer-stub")).toHaveLength(1)
+    })
+
+    it("folds the Glance button into ⋮ on a narrow bar, dot and all", async () => {
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      expect(screen.queryByTestId("mobile-glance-trigger")).toBeNull()
+      const trigger = screen.getByTestId("mobile-actions-trigger")
+      expect(within(trigger).getByTestId("mobile-glance-folded-dot")).toBeInTheDocument()
+      await user.click(trigger)
+      expect(await screen.findByTestId("mobile-action-glance")).toBeInTheDocument()
+    })
+
+    it("lets a folded control's unread dot take the trigger's one dot slot", () => {
+      inboxUnreadRef.current = 2
+      render(<AppShellMobile />)
+      const trigger = screen.getByTestId("mobile-actions-trigger")
+      expect(within(trigger).getByTestId("mobile-actions-unread-dot")).toBeInTheDocument()
+      expect(within(trigger).queryByTestId("mobile-glance-folded-dot")).toBeNull()
+    })
+
+    it("puts the Glance button in the bar from 24rem, and never in both places", async () => {
+      mediaMatches[APPBAR_GLANCE_QUERY] = true
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      expect(screen.getByTestId("mobile-glance-trigger")).toBeInTheDocument()
+      const trigger = screen.getByTestId("mobile-actions-trigger")
+      expect(within(trigger).queryByTestId("mobile-glance-folded-dot")).toBeNull()
+      await user.click(trigger)
+      await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
+      expect(screen.queryByTestId("mobile-action-glance")).toBeNull()
+    })
+
+    it("gives the glance modules the shell's search and new-chat doors", async () => {
+      render(<AppShellMobile />)
+      const actions = glanceActionsRef.current
+      expect(actions).not.toBeNull()
+      act(() => actions?.search())
+      await waitFor(() => expect(screen.getByTestId("command-palette-stub")).toBeInTheDocument())
+      act(() => actions?.newChat())
+      expect(requestChatHome).toHaveBeenCalled()
+      expect(clearActiveSession).toHaveBeenCalled()
+    })
+
+    it("resumes a conversation through the shell's own session switch", async () => {
+      sessionsRef.current = [
+        { id: "s-7", title: "seven", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+      ]
+      render(<AppShellMobile />)
+      act(() => glanceActionsRef.current?.openSession("s-7"))
+      await waitFor(() => expect(select).toHaveBeenCalledWith("s-7"))
+    })
   })
 
   it("opens the navigation drawer when hamburger is pressed", async () => {
@@ -1124,20 +1212,15 @@ describe("<AppShellMobile />", () => {
     await waitFor(() => expect(screen.queryByTestId("channel-list-stub")).toBeNull())
   })
 
-  it("leaves archived conversations out of the welcome's Continue group", () => {
+  // Recent conversations are the glance recents module on this shell (home
+  // screen and drawer), so the welcome gets no Continue group of its own.
+  it("hands the welcome no recent conversations of its own", () => {
     sessionsRef.current = [
       { id: "live", title: "Live", kind: "direct", createdAt: 0, updatedAt: 5 } as ChatSession,
-      {
-        id: "put-away",
-        title: "Archived",
-        kind: "direct",
-        createdAt: 0,
-        updatedAt: 9,
-        archivedAt: 9,
-      } as ChatSession,
     ]
     render(<AppShellMobile />)
-    expect(recentSessionsRef.current?.map((s) => s.id)).toEqual(["live"])
+    expect(screen.getByTestId("chat-pane")).toBeInTheDocument()
+    expect(recentSessionsRef.current).toBeUndefined()
   })
 
   it("renders the active session title in the top bar", () => {

@@ -33,7 +33,9 @@ import {
   LayoutPanelTopIcon,
   LayoutListIcon,
   PanelsTopLeftIcon,
+  CopyIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { GlanceLayoutEditor } from "@/components/glance/glance-layout-editor"
 import { GlancePresetMenu } from "@/components/glance/glance-preset-menu"
@@ -57,6 +59,7 @@ import {
 } from "@/components/settings/common/settings-block"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { withEditedEntries, withPreset } from "@/lib/glance/layout-edit"
+import { desktopEntriesFromMobile, normalizeGlanceMobileSettings } from "@/lib/glance/mobile-layout"
 import { clampMaxHeight, normalizeGlancePanelSettings } from "@/lib/glance/presets"
 import { glanceModulesFor } from "@/lib/glance/registry"
 import { isTauri } from "@/lib/tauri"
@@ -109,6 +112,9 @@ export function TrayPanelSettings() {
   // receives it through the glance snapshot, so a change here repaints an open
   // panel immediately.
   const storedLayout = useSettingsStore((s) => s.settings?.trayPanelLayout)
+  // The phone's layout, when a phone has saved one (it syncs to this desktop),
+  // so its modules can be copied here (ADR-0225 §10).
+  const storedMobileLayout = useSettingsStore((s) => s.settings?.mobileGlanceLayout)
   const saveSettings = useSettingsStore((s) => s.save)
   const layout = useMemo(() => normalizeGlancePanelSettings(storedLayout), [storedLayout])
   const saveLayout = useCallback(
@@ -217,6 +223,36 @@ export function TrayPanelSettings() {
                 checked={layout.showDelegate}
                 onCheckedChange={(checked) => patchLayout({ showDelegate: checked })}
               />
+            </SettingsField>
+            <SettingsField
+              htmlFor="tray-panel-copy-phone"
+              label={t("modules.copyPhone")}
+              description={
+                storedMobileLayout ? t("modules.copyPhoneHint") : t("modules.copyPhoneNone")
+              }
+            >
+              <Button
+                id="tray-panel-copy-phone"
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!storedMobileLayout}
+                onClick={() => {
+                  if (!storedMobileLayout) return
+                  saveLayout(
+                    withEditedEntries(
+                      layout,
+                      desktopEntriesFromMobile(
+                        normalizeGlanceMobileSettings(storedMobileLayout).entries
+                      )
+                    )
+                  )
+                  toast.success(t("modules.copiedPhone"))
+                }}
+              >
+                <CopyIcon aria-hidden className="size-3.5" />
+                {t("modules.copyPhoneAction")}
+              </Button>
             </SettingsField>
           </div>
           <TrayPanelPreview />

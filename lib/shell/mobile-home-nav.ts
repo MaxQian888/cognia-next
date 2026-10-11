@@ -1,8 +1,9 @@
 /**
- * Icon mapping + catalog assembly + layout resolver for the mobile home
- * quick-action grid (`components/mobile/home/mobile-quick-actions.tsx`).
+ * Icon mapping + catalog assembly + shortcut resolver for the phone's quick
+ * module (`components/mobile/glance/mobile-glance-quick-module.tsx`) and its
+ * editor (`components/mobile/glance/mobile-shortcuts-editor.tsx`).
  *
- * The pure (icon-free) catalog and `MobileHomeLayout` model live in
+ * The pure (icon-free) catalog lives in
  * `@/types/shell/mobile-home`; this module is the only one that pulls in lucide,
  * so the persistence layer stays icon-free. `applyDragReorder` is shared with
  * the sidebar customizer (`@/lib/shell/sidebar-nav`).
@@ -28,7 +29,6 @@ import type { MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import {
   LEGACY_MOBILE_QUICK_ACTION_IDS,
   MOBILE_QUICK_ACTION_CATALOG,
-  type MobileHomeLayout,
   type MobileQuickActionMeta,
 } from "@/types/shell/mobile-home"
 
@@ -82,29 +82,30 @@ export function getMobileQuickActionCatalog(): MobileQuickActionItem[] {
 
 /** Resolved partition of the catalog into shown vs. available-to-add. */
 export interface ResolvedMobileQuickActions {
-  /** Actions shown on the home grid, in the user's stored order. */
+  /** Shortcuts shown, in the user's stored order. */
   active: MobileQuickActionItem[]
-  /** Catalog − active, in catalog order — the customizer's "add" pool. */
+  /** Catalog − active, in catalog order — the editor's "add" pool. */
   available: MobileQuickActionItem[]
 }
 
 /**
- * Partition `catalog` according to `layout.quickActions`:
+ * Partition `catalog` by a stored shortcut list (`mobileGlanceLayout.shortcuts`,
+ * formerly `mobileHomeLayout.quickActions`):
  *
- *  - **active**: `layout.quickActions` ids that exist in the catalog, in the
- *    user's stored order (deduped; unknown ids dropped).
+ *  - **active**: the stored ids that exist in the catalog, in the user's
+ *    stored order (deduped; renamed ids mapped; unknown ids dropped).
  *  - **available**: everything else (catalog − active), in catalog order — so a
- *    newly-added catalog item shows up in the customizer automatically.
+ *    newly-added catalog item shows up in the editor automatically.
  */
-export function resolveMobileHomeLayout(
+export function resolveMobileShortcuts(
   catalog: MobileQuickActionItem[],
-  layout: MobileHomeLayout
+  shortcuts: readonly string[]
 ): ResolvedMobileQuickActions {
   const byId = new Map(catalog.map((item) => [item.id, item]))
 
   const seen = new Set<string>()
   const active: MobileQuickActionItem[] = []
-  for (const stored of layout.quickActions) {
+  for (const stored of shortcuts) {
     // Renamed ids are mapped on read. Dropping them instead would delete the
     // tile from every saved grid rather than moving it.
     const id = LEGACY_MOBILE_QUICK_ACTION_IDS[stored] ?? stored

@@ -1,6 +1,8 @@
 import {
   GLANCE_MODULE_IDS,
   type GlanceLayoutEntry,
+  type GlanceMobileEntry,
+  type GlanceMobileSettings,
   type GlanceModuleId,
   type GlancePanelSettings,
 } from "@/types/glance/layout"
@@ -8,12 +10,21 @@ import {
 import {
   hideEntry,
   moveVisible,
+  pinEntryHome,
   reorderVisible,
   resizeEntry,
   showEntry,
   withEditedEntries,
+  withEditedMobileEntries,
+  withMobilePreset,
   withPreset,
+  withShortcuts,
 } from "./layout-edit"
+import {
+  DEFAULT_GLANCE_MOBILE_SETTINGS,
+  mobileLayoutFromPreset,
+  normalizeMobileEntries,
+} from "./mobile-layout"
 import { DEFAULT_GLANCE_PANEL_SETTINGS, layoutFromPreset } from "./presets"
 
 const ids = (entries: readonly GlanceLayoutEntry[]) => entries.map((e) => e.id)
@@ -322,5 +333,176 @@ describe("withPreset", () => {
     const before = JSON.parse(JSON.stringify(custom))
     withPreset(custom, "usage-first")
     expect(custom).toEqual(before)
+  })
+})
+
+/* ── Mobile entries (ADR-0225 §9, §10) ───────────────────────────────── */
+
+// balanced (mobile): fleet quick usage activity recents quota agenda | pet (hidden)
+// home pins:         fleet quick usage activity recents
+const mobile = () => mobileLayoutFromPreset("balanced")
+const pins = (entries: readonly GlanceMobileEntry[]) =>
+  Object.fromEntries(entries.map((e) => [e.id, e.home]))
+
+describe("generic edits keep the home pin", () => {
+  it("reorderVisible", () => {
+    const before = mobile()
+    const out = reorderVisible(before, ["recents", "fleet"])
+    expect(visibleIds(out).slice(0, 2)).toEqual(["recents", "fleet"])
+    expect(pins(out)).toEqual(pins(before))
+    for (const e of out) expect(typeof e.home).toBe("boolean")
+  })
+
+  it("moveVisible", () => {
+    const before = mobile()
+    const out = moveVisible(before, "usage", -2)
+    expect(visibleIds(out).slice(0, 3)).toEqual(["usage", "fleet", "quick"])
+    expect(pins(out)).toEqual(pins(before))
+  })
+
+  it("resizeEntry", () => {
+    const out = resizeEntry(mobile(), "fleet", "expanded")
+    expect(out.find((e) => e.id === "fleet")).toEqual({
+      id: "fleet",
+      size: "expanded",
+      hidden: false,
+      home: true,
+    })
+  })
+
+  it("hideEntry keeps the pin on the hidden entry", () => {
+    const out = hideEntry(mobile(), "usage")
+    expect(out.find((e) => e.id === "usage")).toMatchObject({ hidden: true, home: true })
+    expectWellFormed(out)
+  })
+
+  it("showEntry keeps the pin of the shown entry", () => {
+    const out = showEntry(mobile(), "pet", ALL)
+    expect(out.find((e) => e.id === "pet")).toEqual({
+      id: "pet",
+      size: "compact",
+      hidden: false,
+      home: false,
+    })
+    expect(pins(out)).toEqual(pins(mobile()))
+  })
+})
+
+describe("pinEntryHome", () => {
+  it("pins a visible entry in place", () => {
+    const out = pinEntryHome(mobile(), "quota", true, ALL)
+    expect(out.find((e) => e.id === "quota")).toMatchObject({ hidden: false, home: true })
+    expect(ids(out)).toEqual(ids(mobile()))
+  })
+
+  it("pinning a hidden entry shows it at the end of the visible stack", () => {
+    const out = pinEntryHome(mobile(), "pet", true, ALL)
+    expect(out.find((e) => e.id === "pet")).toMatchObject({ hidden: false, home: true })
+    expect(visibleIds(out).at(-1)).toBe("pet")
+    expectWellFormed(out)
+  })
+
+  it("unpinning keeps the entry's visibility", () => {
+    const out = pinEntryHome(mobile(), "usage", false, ALL)
+    expect(out.find((e) => e.id === "usage")).toMatchObject({ hidden: false, home: false })
+    expect(ids(out)).toEqual(ids(mobile()))
+
+    const hiddenPinned = hideEntry(mobile(), "fleet")
+    const unpinned = pinEntryHome(hiddenPinned, "fleet", false, ALL)
+    expect(unpinned.find((e) => e.id === "fleet")).toMatchObject({ hidden: true, home: false })
+  })
+
+  it("does not pin a module the platform lacks", () => {
+    const before = mobile()
+    const available = ALL.filter((id) => id !== "pet")
+    const out = pinEntryHome(before, "pet", true, available)
+    expect(out).toEqual(before)
+  })
+
+  it("still unpins a module the platform lacks", () => {
+    const before = mobile()
+    const available = ALL.filter((id) => id !== "fleet")
+    const out = pinEntryHome(before, "fleet", false, available)
+    expect(out.find((e) => e.id === "fleet")?.home).toBe(false)
+  })
+
+  it("is a no-op for an id not in the list", () => {
+    const before = mobile().filter((e) => e.id !== "quota")
+    expect(pinEntryHome(before, "quota", true, ALL)).toEqual(before)
+  })
+
+  it("re-sorts a list with a hidden entry ahead of visible ones", () => {
+    const messy: GlanceMobileEntry[] = [
+      { id: "pet", size: "compact", hidden: true, home: false },
+      { id: "fleet", size: "compact", hidden: false, home: false },
+    ]
+    expect(ids(pinEntryHome(messy, "fleet", true, ALL))).toEqual(["fleet", "pet"])
+  })
+
+  it("does not mutate the input", () => {
+    const before = mobile()
+    const copy = JSON.parse(JSON.stringify(before))
+    pinEntryHome(before, "pet", true, ALL)
+    expect(before).toEqual(copy)
+  })
+})
+
+describe("withEditedMobileEntries", () => {
+  const settings: GlanceMobileSettings = {
+    ...DEFAULT_GLANCE_MOBILE_SETTINGS,
+    scope: "workspace",
+    shortcuts: ["me"],
+  }
+
+  it("makes the layout custom with normalized entries, keeping the rest", () => {
+    const edited: GlanceMobileEntry[] = [
+      { id: "agenda", size: "expanded", hidden: false, home: true },
+      { id: "agenda", size: "compact", hidden: true, home: false },
+    ]
+    const out = withEditedMobileEntries(settings, edited)
+    expect(out.preset).toBe("custom")
+    expect(out.entries).toEqual(normalizeMobileEntries(edited))
+    expect(out.entries[0]).toEqual({ id: "agenda", size: "standard", hidden: false, home: true })
+    expect(out).toMatchObject({ scope: "workspace", shortcuts: ["me"], options: settings.options })
+  })
+})
+
+describe("withMobilePreset", () => {
+  const settings: GlanceMobileSettings = {
+    ...DEFAULT_GLANCE_MOBILE_SETTINGS,
+    preset: "custom",
+    entries: mobileLayoutFromPreset("minimal").map((e) => ({ ...e, home: false })),
+    scope: "workspace",
+    options: { usage: { scope: "all-tools", showSpend: true }, activity: { range: "1y" } },
+    shortcuts: ["inbox", "me"],
+  }
+
+  it.each(["balanced", "usage-first", "agent-ops", "minimal"] as const)(
+    "applies %s and keeps shortcuts, scope and options",
+    (preset) => {
+      const out = withMobilePreset(settings, preset)
+      expect(out.preset).toBe(preset)
+      expect(out.entries).toEqual(mobileLayoutFromPreset(preset))
+      expect(out).toMatchObject({
+        scope: "workspace",
+        options: settings.options,
+        shortcuts: ["inbox", "me"],
+      })
+    }
+  )
+})
+
+describe("withShortcuts", () => {
+  const settings: GlanceMobileSettings = { ...DEFAULT_GLANCE_MOBILE_SETTINGS, preset: "minimal" }
+
+  it("normalizes the list and keeps the preset and entries", () => {
+    const out = withShortcuts(settings, ["agentTeams", "bogus", "me", "me"])
+    expect(out.shortcuts).toEqual(["squads", "me"])
+    expect(out.preset).toBe("minimal")
+    expect(out.entries).toBe(settings.entries)
+  })
+
+  it("keeps an emptied list", () => {
+    expect(withShortcuts(settings, []).shortcuts).toEqual([])
   })
 })

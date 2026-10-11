@@ -1,7 +1,7 @@
 import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   getMobileQuickActionCatalog,
-  resolveMobileHomeLayout,
+  resolveMobileShortcuts,
   MOBILE_QUICK_ACTION_ICONS,
 } from "./mobile-home-nav"
 import { MOBILE_QUICK_ACTION_CATALOG, DEFAULT_MOBILE_HOME_LAYOUT } from "@/types/shell/mobile-home"
@@ -24,10 +24,7 @@ describe("mobile-home-nav", () => {
 
   it("resolves active in stored order and available as the remainder", () => {
     const catalog = getMobileQuickActionCatalog()
-    const { active, available } = resolveMobileHomeLayout(catalog, {
-      quickActions: ["discover", "newChat"],
-      hiddenSections: [],
-    })
+    const { active, available } = resolveMobileShortcuts(catalog, ["discover", "newChat"])
     expect(active.map((i) => i.id)).toEqual(["discover", "newChat"])
     // Everything else stays in catalog order.
     expect(available.map((i) => i.id)).toEqual(
@@ -37,10 +34,12 @@ describe("mobile-home-nav", () => {
 
   it("dedupes and drops unknown ids", () => {
     const catalog = getMobileQuickActionCatalog()
-    const { active } = resolveMobileHomeLayout(catalog, {
-      quickActions: ["newChat", "newChat", "does-not-exist", "search"],
-      hiddenSections: [],
-    })
+    const { active } = resolveMobileShortcuts(catalog, [
+      "newChat",
+      "newChat",
+      "does-not-exist",
+      "search",
+    ])
     expect(active.map((i) => i.id)).toEqual(["newChat", "search"])
   })
 
@@ -56,9 +55,9 @@ describe("mobile-home-nav", () => {
     expect(templates?.spotIcon).toBe("templates")
   })
 
-  it("default layout resolves to four active actions", () => {
+  it("the default shortcut list resolves to four active actions", () => {
     const catalog = getMobileQuickActionCatalog()
-    const { active } = resolveMobileHomeLayout(catalog, DEFAULT_MOBILE_HOME_LAYOUT)
+    const { active } = resolveMobileShortcuts(catalog, DEFAULT_MOBILE_HOME_LAYOUT.quickActions)
     expect(active.map((i) => i.id)).toEqual(DEFAULT_MOBILE_HOME_LAYOUT.quickActions)
   })
 })
@@ -72,19 +71,16 @@ describe("mobile-home-nav", () => {
  */
 describe("the retired agent-teams tile", () => {
   it("resolves a saved agentTeams tile to the squads one", () => {
-    const { active } = resolveMobileHomeLayout(getMobileQuickActionCatalog(), {
-      quickActions: ["agentTeams"],
-      hiddenSections: [...DEFAULT_MOBILE_HOME_LAYOUT.hiddenSections],
-    })
+    const { active } = resolveMobileShortcuts(getMobileQuickActionCatalog(), ["agentTeams"])
     expect(active.map((item) => item.id)).toEqual(["squads"])
     expect(active[0]!.route).toBe("/squads")
   })
 
   it("does not offer the tile twice when both ids are stored", () => {
-    const { active, available } = resolveMobileHomeLayout(getMobileQuickActionCatalog(), {
-      quickActions: ["agentTeams", "squads"],
-      hiddenSections: [...DEFAULT_MOBILE_HOME_LAYOUT.hiddenSections],
-    })
+    const { active, available } = resolveMobileShortcuts(getMobileQuickActionCatalog(), [
+      "agentTeams",
+      "squads",
+    ])
     expect(active.filter((item) => item.id === "squads")).toHaveLength(1)
     expect(available.some((item) => item.id === "squads")).toBe(false)
   })

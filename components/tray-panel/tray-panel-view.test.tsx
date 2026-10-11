@@ -104,6 +104,7 @@ function fleet(working: number, awaiting: number): GlanceFleetSlice {
     updatedAt: 1,
     counts: { working, awaiting, failed: 0 },
     total: working + awaiting,
+    workflows: { running: 0, latest: null },
     rows: [],
   }
 }

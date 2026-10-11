@@ -1,8 +1,9 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import { mobileLayoutFromPreset } from "@/lib/glance/mobile-layout"
 import { layoutFromPreset } from "@/lib/glance/presets"
-import type { GlanceLayoutEntry, GlanceModuleId } from "@/types/glance/layout"
+import type { GlanceLayoutEntry, GlanceMobileEntry, GlanceModuleId } from "@/types/glance/layout"
 
 import { GlanceLayoutEditor } from "./glance-layout-editor"
 
@@ -185,6 +186,113 @@ describe("GlanceLayoutEditor", () => {
       expect(within(group).getByRole("radio", { name: "Compact" })).toHaveTextContent("S")
       expect(within(group).getByRole("radio", { name: "Standard" })).toHaveTextContent("M")
       expect(within(group).getByRole("radio", { name: "Expanded" })).toHaveTextContent("L")
+    })
+  })
+
+  describe("touch density (phone)", () => {
+    it("uses short size labels and 44px-class targets", () => {
+      renderEditor({ density: "touch" })
+      const group = within(row("fleet")).getByRole("radiogroup", { name: "Size of Running" })
+      expect(group).toHaveTextContent("SML")
+      const standard = within(group).getByRole("radio", { name: "Standard" })
+      expect(standard).toHaveTextContent("M")
+      expect(standard).toHaveClass("h-9", "min-w-9")
+      expect(screen.getByRole("button", { name: "Reorder Running" })).toHaveClass("size-10")
+      expect(screen.getByRole("button", { name: "Hide Running" })).toHaveClass("size-10")
+      expect(screen.getByRole("button", { name: "Add Recent" })).toHaveClass("h-10")
+    })
+
+    it("keeps the small targets at the compact density", () => {
+      renderEditor({ density: "compact" })
+      expect(screen.getByRole("button", { name: "Reorder Running" })).toHaveClass("size-6")
+      expect(screen.getByRole("button", { name: "Add Recent" })).toHaveClass("h-6")
+    })
+  })
+
+  describe("home pins (phone)", () => {
+    // balanced on a phone: fleet, quick, usage, activity, recents pinned;
+    // quota and agenda shown but not pinned; pet hidden.
+    const MOBILE: GlanceMobileEntry[] = mobileLayoutFromPreset("balanced")
+
+    function renderMobile(onToggle = jest.fn()) {
+      const onChange = jest.fn()
+      const isPinned = (id: GlanceModuleId) =>
+        MOBILE.find((entry) => entry.id === id)?.home === true
+      render(
+        <GlanceLayoutEditor
+          entries={MOBILE}
+          available={ALL}
+          onChange={onChange}
+          density="touch"
+          home={{ isPinned, onToggle }}
+        />
+      )
+      return { onChange, onToggle }
+    }
+
+    it("puts a pressed or unpressed home toggle on every shown row", () => {
+      renderMobile()
+      const shown = MOBILE.filter((entry) => !entry.hidden)
+      for (const entry of shown) {
+        const toggle = within(row(entry.id)).getByTestId(`glance-editor-home-${entry.id}`)
+        expect(toggle).toHaveAttribute("aria-pressed", String(entry.home))
+      }
+      const fleet = screen.getByRole("button", { name: "Show Running on the home screen" })
+      expect(fleet).toHaveAttribute("aria-pressed", "true")
+      expect(fleet).toHaveAttribute("title", "On the home screen")
+      const quota = screen.getByTestId("glance-editor-home-quota")
+      expect(quota).toHaveAttribute("aria-pressed", "false")
+      expect(quota).toHaveAttribute("title", "Not on the home screen")
+      // A hidden module has no pin to show.
+      expect(screen.queryByTestId("glance-editor-home-pet")).not.toBeInTheDocument()
+      expect(screen.getAllByTestId(/^glance-editor-home-/)).toHaveLength(shown.length)
+    })
+
+    it("asks the caller to flip the pin and does not edit the entries itself", async () => {
+      const user = userEvent.setup()
+      const { onChange, onToggle } = renderMobile()
+      await user.click(screen.getByTestId("glance-editor-home-fleet"))
+      expect(onToggle).toHaveBeenLastCalledWith("fleet", false)
+      await user.click(screen.getByTestId("glance-editor-home-quota"))
+      expect(onToggle).toHaveBeenLastCalledWith("quota", true)
+      expect(onToggle).toHaveBeenCalledTimes(2)
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it("shows no home toggle without the home prop", () => {
+      renderEditor({ entries: MOBILE, density: "touch" })
+      expect(screen.queryByTestId(/^glance-editor-home-/)).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /on the home screen$/ })).not.toBeInTheDocument()
+    })
+
+    it("hands back entries with their extra fields intact", async () => {
+      const user = userEvent.setup()
+      const { onChange } = renderMobile()
+      await user.click(screen.getByRole("button", { name: "Hide Usage" }))
+      const hidden = onChange.mock.calls[0][0] as GlanceMobileEntry[]
+      expect(hidden.find((e) => e.id === "usage")).toEqual(
+        expect.objectContaining({ hidden: true, home: true })
+      )
+      // Every other entry comes back exactly as it went in, home pin included.
+      for (const entry of MOBILE.filter((e) => e.id !== "usage")) {
+        expect(hidden.find((e) => e.id === entry.id)).toEqual(entry)
+      }
+
+      await user.click(within(row("quota")).getByRole("radio", { name: "Expanded" }))
+      const resized = onChange.mock.calls[1][0] as GlanceMobileEntry[]
+      expect(resized.find((e) => e.id === "quota")).toEqual({
+        id: "quota",
+        size: "expanded",
+        hidden: false,
+        home: false,
+      })
+      expect(resized.every((e) => typeof e.home === "boolean")).toBe(true)
+
+      await user.click(screen.getByRole("button", { name: "Add Pet" }))
+      const added = onChange.mock.calls[2][0] as GlanceMobileEntry[]
+      expect(added.find((e) => e.id === "pet")).toEqual(
+        expect.objectContaining({ hidden: false, home: false })
+      )
     })
   })
 

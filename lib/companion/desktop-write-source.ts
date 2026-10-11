@@ -15,11 +15,13 @@
  *   - headless brain   — `lib/headless/runtimes/desktop-message-source.ts`
  *
  * The command surface is not a fixed list. `dispatchCommand` owns the arms
- * enumerated in its own switch and delegates seven families wholesale:
+ * enumerated in its own switch and delegates eight families wholesale:
  * `perf_*` (`lib/perf/host-dispatch.ts`), `pet_*` (`lib/pet/remote/host-dispatch.ts`,
  * remote care of the desktop pet, ADR-0219), `files_library_*`
  * (`lib/files-library/remote/host-dispatch.ts`, a paired device managing this
- * desktop's Files library, ADR-0223 §9), `scheduled_task_*`
+ * desktop's Files library, ADR-0223 §9), `glance_*`
+ * (`lib/glance/remote/host-dispatch.ts`, a paired phone's glance, ADR-0225 §9),
+ * `scheduled_task_*`
  * (`lib/scheduler/scheduled-task-rpc.ts`), `workflow_api_*`
  * (`lib/workflow/api/workflow-api-service.ts`), `router_fusion_run_*`
  * (`lib/router-fusion/gate/run-api-bridge.ts`) and `router_fusion_passthrough_*`
@@ -106,6 +108,7 @@ import {
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { isFilesRemoteCommand } from "@/lib/files-library/remote/commands"
 import { isPetRemoteCommand } from "@/lib/pet/remote/commands"
+import { isGlanceRemoteCommand } from "@/lib/glance/remote/commands"
 import { getDb } from "@/lib/db/schema"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -310,6 +313,14 @@ export async function dispatchCommand(
   if (isFilesRemoteCommand(command)) {
     const { dispatchFilesHostCommand } = await import("@/lib/files-library/remote/host-dispatch")
     return dispatchFilesHostCommand(command, payload)
+  }
+  // A paired phone's glance (ADR-0225 §9): leases and light requests for the
+  // snapshot the main window's publisher builds. On the headless brain the
+  // arms answer `headless_host`. Same split as `pet_*`: a leaf name check,
+  // and the arms load on a `glance_*` call.
+  if (isGlanceRemoteCommand(command)) {
+    const { dispatchGlanceHostCommand } = await import("@/lib/glance/remote/host-dispatch")
+    return dispatchGlanceHostCommand(command, payload)
   }
   // Router + Fusion's Run API (ADR-0188 B2). The gateway serves `/v1/runs` and
   // round-trips every request here, where Dexie is authoritative. The gate

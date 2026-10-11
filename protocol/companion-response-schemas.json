@@ -11188,6 +11188,112 @@
       "description": "A member's role in a shared conversation, as the collaboration server\nnames it (`SessionRole` there).",
       "enum": ["viewer", "member", "maintainer", "owner"],
       "type": "string"
+    },
+    "GlanceRemoteRefused": {
+      "type": "object",
+      "description": "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed.",
+      "required": ["ok", "code"],
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "x-cognia-wire-source": "lib/glance/remote/types.ts"
+    },
+    "GlanceRemoteResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/GlanceRemoteRefused"
+        }
+      ],
+      "x-cognia-wire-source": "lib/glance/remote/types.ts"
+    },
+    "GlanceSnapshot": {
+      "type": "object",
+      "description": "One content-free glance snapshot built for the merged demand of the leased phones (`GlanceSnapshotV1`). The phone checks it with `isGlanceSnapshot` and drops anything older than what it holds by (epoch, revision).",
+      "required": ["version", "epoch", "revision", "generatedAt", "config", "when", "actions"],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "epoch": {
+          "type": "number"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "generatedAt": {
+          "type": "number"
+        },
+        "config": {
+          "type": "object",
+          "x-cognia-opaque-reason": "On a remote snapshot this is the phone's own demand echoed back as normalized panel settings; GlancePanelSettings (types/glance/layout.ts) owns the shape."
+        },
+        "when": {
+          "type": "object",
+          "x-cognia-opaque-reason": "TrayStateSnapshot, the app state quick-action `when` expressions read; owned by the tray panel catalogue (lib/tray-panel/catalogue.ts)."
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "object"
+          },
+          "description": "Always empty for a paired phone: the desktop's tray actions are host configuration and never leave it."
+        }
+      },
+      "additionalProperties": true,
+      "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
+      "x-cognia-wire-source": "lib/glance/snapshot.ts"
+    },
+    "GlanceSubscribeResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok", "snapshot", "ttlMs"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "snapshot": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/GlanceSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The newest snapshot for the merged demand; null while the first is still building, or when the call ended the lease."
+            },
+            "ttlMs": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Renew the lease well before this many milliseconds pass."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/GlanceRemoteRefused"
+        }
+      ],
+      "x-cognia-wire-source": "lib/glance/remote/types.ts"
     }
   },
   "commands": {
@@ -16464,6 +16570,15 @@
     },
     "files_library_upload_abort": {
       "$ref": "#/$defs/FilesRemoteOk"
+    },
+    "glance_subscribe": {
+      "$ref": "#/$defs/GlanceSubscribeResponse"
+    },
+    "glance_request": {
+      "$ref": "#/$defs/GlanceRemoteResult"
+    },
+    "glance_quota_enable": {
+      "$ref": "#/$defs/GlanceRemoteResult"
     }
   }
 }

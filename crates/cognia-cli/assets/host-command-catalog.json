@@ -208,6 +208,11 @@
       "category": "development"
     },
     {
+      "id": "glance",
+      "title": "Glance",
+      "category": "system"
+    },
+    {
       "id": "goal",
       "title": "Goal",
       "category": "agents"
@@ -2156,6 +2161,7 @@
               "messageDisplay": {},
               "mistralVoiceId": {},
               "mobileComputerUseEnabled": {},
+              "mobileGlanceLayout": {},
               "motion": {},
               "notificationPreferences": {},
               "onboardingProfile": {},
@@ -33727,6 +33733,405 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "github-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "glance_quota_enable",
+      "category": "system",
+      "resource": "glance",
+      "target": "execution",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "glance_quota_enable (client.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Turn quota queries on for one vault account. A settings write on the desktop; asking again for an account already on changes nothing.",
+        "required": [
+          "provider",
+          "accountId"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "ok"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed.",
+            "required": [
+              "ok",
+              "code"
+            ],
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "x-cognia-wire-source": "lib/glance/remote/types.ts"
+          }
+        ],
+        "x-cognia-wire-source": "lib/glance/remote/types.ts"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "glance_request",
+      "category": "system",
+      "resource": "glance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "glance_request (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Re-read glance now: every slice, or one quota source. Runs through the same executor as the desktop tray panel's own requests; the result arrives as the next `glance://update` push.",
+        "required": [
+          "consumer",
+          "kind"
+        ],
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier demand."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "refresh",
+              "quota-refresh"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "The quota source to re-read, as the snapshot's quota slice names it. Required with kind quota-refresh; a refresh ignores it."
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "refresh"
+              }
+            }
+          },
+          {
+            "required": [
+              "kind",
+              "key"
+            ],
+            "properties": {
+              "kind": {
+                "const": "quota-refresh"
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "ok"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed.",
+            "required": [
+              "ok",
+              "code"
+            ],
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "x-cognia-wire-source": "lib/glance/remote/types.ts"
+          }
+        ],
+        "x-cognia-wire-source": "lib/glance/remote/types.ts"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "glance_subscribe",
+      "category": "system",
+      "resource": "glance",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "glance_subscribe (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Announce, renew or end this phone's glance lease. While a lease is live the desktop builds slices for the merged demand of every leased phone and pushes each new snapshot on `glance://update`; the answer carries the newest one and how soon to renew.",
+        "required": [
+          "consumer",
+          "visible",
+          "demand"
+        ],
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier demand."
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "False ends the lease: the phone stopped showing glance."
+          },
+          "demand": {
+            "type": "object",
+            "description": "What the phone shows, as the slices it needs. Its own layout (order, sizes, pins) never crosses the wire.",
+            "required": [
+              "modules",
+              "scope",
+              "workspaceId",
+              "usage",
+              "activity"
+            ],
+            "properties": {
+              "modules": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "fleet",
+                    "usage",
+                    "quota",
+                    "agenda",
+                    "activity",
+                    "pet"
+                  ]
+                },
+                "description": "The host-sourced modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "workspace"
+                ]
+              },
+              "workspaceId": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The workspace the phone filters to. Read only when scope is workspace."
+              },
+              "usage": {
+                "type": "object",
+                "required": [
+                  "scope",
+                  "showSpend"
+                ],
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "cognia",
+                      "all-tools"
+                    ]
+                  },
+                  "showSpend": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "activity": {
+                "type": "object",
+                "required": [
+                  "range"
+                ],
+                "properties": {
+                  "range": {
+                    "type": "string",
+                    "enum": [
+                      "1m",
+                      "3m",
+                      "1y"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "ok",
+              "snapshot",
+              "ttlMs"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              },
+              "snapshot": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "description": "One content-free glance snapshot built for the merged demand of the leased phones (`GlanceSnapshotV1`). The phone checks it with `isGlanceSnapshot` and drops anything older than what it holds by (epoch, revision).",
+                    "required": [
+                      "version",
+                      "epoch",
+                      "revision",
+                      "generatedAt",
+                      "config",
+                      "when",
+                      "actions"
+                    ],
+                    "properties": {
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "epoch": {
+                        "type": "number"
+                      },
+                      "revision": {
+                        "type": "number"
+                      },
+                      "generatedAt": {
+                        "type": "number"
+                      },
+                      "config": {
+                        "type": "object",
+                        "x-cognia-opaque-reason": "On a remote snapshot this is the phone's own demand echoed back as normalized panel settings; GlancePanelSettings (types/glance/layout.ts) owns the shape."
+                      },
+                      "when": {
+                        "type": "object",
+                        "x-cognia-opaque-reason": "TrayStateSnapshot, the app state quick-action `when` expressions read; owned by the tray panel catalogue (lib/tray-panel/catalogue.ts)."
+                      },
+                      "actions": {
+                        "type": "array",
+                        "maxItems": 0,
+                        "items": {
+                          "type": "object"
+                        },
+                        "description": "Always empty for a paired phone: the desktop's tray actions are host configuration and never leave it."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "x-cognia-opaque-reason": "The module slices (fleet, usage, quota, agenda, activity, pet, recents) and hostLayout are versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here, slice typing stays with the glance domain.",
+                    "x-cognia-wire-source": "lib/glance/snapshot.ts"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The newest snapshot for the merged demand; null while the first is still building, or when the call ended the lease."
+              },
+              "ttlMs": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Renew the lease well before this many milliseconds pass."
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed.",
+            "required": [
+              "ok",
+              "code"
+            ],
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "x-cognia-wire-source": "lib/glance/remote/types.ts"
+          }
+        ],
+        "x-cognia-wire-source": "lib/glance/remote/types.ts",
+        "x-cognia-schema-owner": "glance"
       },
       "outputTyped": true
     },
@@ -74623,5 +75028,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "8f2b28b2510aea47c46879c42e5d68c218405828d6e9bc6752bf57f41bdd79b3"
+  "catalogHash": "9eac7110cb1f93090cfd993e82b6f734ff37bde0992f8d2e18fe0b502a68675a"
 }

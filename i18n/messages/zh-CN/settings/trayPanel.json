@@ -123,6 +123,11 @@
     "delegateHint": "隐藏后，委托操作会移到快捷操作中。",
     "description": "面板显示哪些模块、以什么顺序和尺寸显示。编辑时预览会同步更新。",
     "previewCaption": "使用你当前数据的预览",
-    "title": "模块"
+    "title": "模块",
+    "copyPhone": "手机布局",
+    "copyPhoneAction": "复制手机布局",
+    "copyPhoneHint": "在这里使用手机速览的模块、顺序与尺寸。首页固定和快捷入口仍只属于手机。",
+    "copyPhoneNone": "配对的手机保存过自己的速览布局后即可使用。",
+    "copiedPhone": "已复制手机的布局。"
   }
 }

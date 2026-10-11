@@ -24,7 +24,7 @@
  * Settings → Appearance → Personalization brings it back.
  */
 
-import { useMemo, type ReactNode } from "react"
+import { useMemo } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import {
   ClockIcon,
@@ -52,7 +52,6 @@ import { UsageHeatmap } from "@/components/usage/usage-heatmap"
 import { useSettingsStore } from "@/stores/settings"
 import { useActivityStats } from "@/hooks/usage/use-activity-stats"
 import {
-  DEFAULT_WELCOME_STATS_PREFS,
   resolveWelcomeStatsPrefs,
   WELCOME_STAT_IDS,
   WELCOME_STATS_RANGE_DAYS,
@@ -212,13 +211,10 @@ function CustomizePopover({
   prefs,
   onChange,
   labels,
-  extra,
 }: {
   prefs: WelcomeStatsPrefs
   onChange: (patch: Partial<WelcomeStatsPrefs>) => void
   labels: { trigger: string; title: string; heatmap: string; tile: (id: WelcomeStatId) => string }
-  /** Controls hosted above the tile list — the compact header's view / range. */
-  extra?: ReactNode
 }) {
   function toggleTile(id: WelcomeStatId, checked: boolean) {
     const next = checked
@@ -242,14 +238,6 @@ function CustomizePopover({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-60 p-3">
-        {extra ? (
-          <div
-            className="mb-3 flex flex-col items-start gap-2 border-b border-border/60 pb-3"
-            data-testid="welcome-stats-customize-extra"
-          >
-            {extra}
-          </div>
-        ) : null}
         <p className="mb-2 text-xs font-medium">{labels.title}</p>
         <div className="flex flex-col gap-2">
           {WELCOME_STAT_IDS.map((id) => (
@@ -284,16 +272,13 @@ function CustomizePopover({
 
 export interface WelcomeStatsProps {
   className?: string
-  /**
-   * Phone welcome. The dashboard stays out of the way until there is usage to
-   * show (an empty "No usage recorded" block is noise on a small screen), and
-   * the view / range toggles move into the ⚙ popover so the header is one
-   * quiet row instead of six controls.
-   */
-  compact?: boolean
 }
 
-export function WelcomeStats({ className, compact = false }: WelcomeStatsProps) {
+/**
+ * The desktop welcome's usage dashboard. A phone has none: its usage and
+ * activity are glance modules on its home screen (ADR-0225 §9).
+ */
+export function WelcomeStats({ className }: WelcomeStatsProps) {
   const t = useTranslations("chat.empty")
   const locale = useLocale()
   const stored = useSettingsStore((s) => s.settings?.welcomeStats)
@@ -372,7 +357,7 @@ export function WelcomeStats({ className, compact = false }: WelcomeStatsProps) 
 
   const controls = (
     <>
-      {compact ? null : viewAndRange}
+      {viewAndRange}
       <CustomizePopover
         prefs={prefs}
         onChange={patch}
@@ -382,23 +367,9 @@ export function WelcomeStats({ className, compact = false }: WelcomeStatsProps) 
           heatmap: t("stats.heatmap"),
           tile: (id) => t(`stats.tiles.${id}`),
         }}
-        {...(compact ? { extra: viewAndRange } : {})}
       />
     </>
   )
-
-  // Compact: an empty window at the default width or wider means there is no
-  // usage to show yet, so render nothing (the ✕ and the customize-home switch
-  // still own "never show it"). A window the user NARROWED stays up even when
-  // empty, or the range control that widens it again would go with it.
-  if (
-    compact &&
-    !loading &&
-    stats.turns === 0 &&
-    prefs.rangeDays >= DEFAULT_WELCOME_STATS_PREFS.rangeDays
-  ) {
-    return null
-  }
 
   return (
     <section className={cn("w-full", className)} data-testid="welcome-stats">

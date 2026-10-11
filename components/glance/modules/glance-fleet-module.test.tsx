@@ -62,6 +62,7 @@ function makeFleet(overrides: Partial<GlanceFleetSlice> = {}): GlanceFleetSlice 
     counts: { working: 1, awaiting: 0, failed: 0 },
     total: rows.length,
     rows,
+    workflows: { running: 0, latest: null },
     ...overrides,
   }
 }
@@ -235,6 +236,85 @@ describe("GlanceFleetModule", () => {
       setup(makeFleet({ rows, total: 8 }), "expanded")
       expect(screen.getAllByTestId(/^glance-fleet-row-/)).toHaveLength(6)
       expect(screen.getByText("2 more tasks")).toBeInTheDocument()
+    })
+  })
+
+  describe("running workflows", () => {
+    const WORKFLOWS = {
+      running: 2,
+      latest: { workflowId: "wf-1", name: "Nightly digest", startedAt: NOW - 30_000 },
+    }
+
+    it("adds a workflow count to the compact line", () => {
+      setup(makeFleet({ workflows: WORKFLOWS }), "compact")
+      expect(screen.getByTestId("glance-fleet-workflows-compact")).toHaveTextContent("2 workflows")
+    })
+
+    it("uses the singular for one workflow", () => {
+      setup(makeFleet({ workflows: { ...WORKFLOWS, running: 1 } }), "compact")
+      expect(screen.getByTestId("glance-fleet-workflows-compact")).toHaveTextContent("1 workflow")
+    })
+
+    it("leaves the compact line alone while no workflow runs", () => {
+      setup(makeFleet(), "compact")
+      expect(screen.queryByTestId("glance-fleet-workflows-compact")).not.toBeInTheDocument()
+    })
+
+    it("summarizes them in a standard row that opens the workflow's runs", async () => {
+      const { route, user } = setup(makeFleet({ workflows: WORKFLOWS }), "standard")
+      const row = screen.getByTestId("glance-fleet-workflows")
+      expect(row).toHaveTextContent("2 workflows running · Nightly digest")
+      expect(row).toHaveTextContent(new Date(NOW - 30_000).toISOString())
+      expect(row).toHaveAccessibleName("Open the runs of Nightly digest")
+      await user.click(row)
+      expect(route).toHaveBeenCalledWith({
+        kind: "open-owner",
+        owner: "workflows",
+        itemId: "wf-1",
+      })
+    })
+
+    it("does not show the empty row when only workflows run", () => {
+      setup(
+        makeFleet({
+          rows: [],
+          total: 0,
+          counts: { working: 0, awaiting: 0, failed: 0 },
+          workflows: WORKFLOWS,
+        }),
+        "standard"
+      )
+      expect(screen.queryByText("Nothing running")).not.toBeInTheDocument()
+      expect(screen.getByTestId("glance-fleet-workflows")).toBeInTheDocument()
+    })
+
+    it("shows no workflow row without a latest run", () => {
+      setup(makeFleet({ workflows: { running: 1, latest: null } }), "standard")
+      expect(screen.queryByTestId("glance-fleet-workflows")).not.toBeInTheDocument()
+    })
+
+    it.each(["compact", "standard", "expanded"] as const)(
+      "still exposes no approve or stop control with workflows running at %s size",
+      (size) => {
+        const { container } = setup(
+          makeFleet({
+            rows: [makeRow("await", { state: "awaiting", waitingSince: NOW - 1_000 })],
+            counts: { working: 0, awaiting: 1, failed: 0 },
+            workflows: WORKFLOWS,
+          }),
+          size
+        )
+        for (const role of ["button", "link", "menuitem", "switch", "checkbox"] as const) {
+          expect(screen.queryByRole(role, { name: FORBIDDEN_CONTROL })).not.toBeInTheDocument()
+        }
+        expect(container.textContent ?? "").not.toMatch(FORBIDDEN_CONTROL)
+      }
+    )
+
+    it("never sends an action from the workflow row", async () => {
+      const { send, user } = setup(makeFleet({ workflows: WORKFLOWS }), "expanded")
+      await user.click(screen.getByTestId("glance-fleet-workflows"))
+      expect(send).not.toHaveBeenCalled()
     })
   })
 

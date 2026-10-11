@@ -11,11 +11,88 @@
  */
 
 import type { ReactNode } from "react"
-import { ChevronRightIcon } from "lucide-react"
+import { useFormatter, useTranslations } from "next-intl"
+import { ChevronRightIcon, CloudOffIcon, MonitorIcon } from "lucide-react"
 
+import { GLANCE_MODULES } from "@/lib/glance/registry"
 import { cn } from "@/lib/utils"
+import type { GlanceModuleId } from "@/types/glance/layout"
 
 import { useGlance } from "./glance-context"
+
+/* ── Origin (paired phones) ──────────────────────────────────────────── */
+
+/**
+ * "MacBook · 2 min ago" beside a module built on the desktop. Shown only on a
+ * paired phone (`originOf`), so a reading is never mistaken for this device's
+ * own, and a reading kept from before the host dropped says so.
+ */
+export function GlanceOriginTag({ moduleId }: { moduleId: string }) {
+  const { originOf, now } = useGlance()
+  const t = useTranslations("glance.origin")
+  const format = useFormatter()
+  const origin = originOf?.(moduleId as GlanceModuleId) ?? null
+  if (!origin || origin.kind !== "host") return null
+  const age = format.relativeTime(origin.at, Math.max(now, origin.at))
+  const label = origin.host
+    ? t(origin.live ? "fromHost" : "fromHostOffline", { host: origin.host, age })
+    : t(origin.live ? "fromDesktop" : "fromDesktopOffline", { age })
+  return (
+    <span
+      data-testid={`glance-origin-${moduleId}`}
+      data-live={origin.live}
+      title={label}
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1 truncate text-[11px]",
+        origin.live ? "text-muted-foreground/80" : "text-warning"
+      )}
+    >
+      {origin.live ? (
+        <MonitorIcon aria-hidden className="size-3 shrink-0" />
+      ) : (
+        <CloudOffIcon aria-hidden className="size-3 shrink-0" />
+      )}
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}
+
+/**
+ * A module whose data this device cannot get, said in place (ADR-0225 §9):
+ * the desktop is offline and nothing was received yet, or it does not serve
+ * glance. One line, the module's title and the reason.
+ */
+export function GlanceUnavailableModule({ moduleId }: { moduleId: GlanceModuleId }) {
+  const { originOf, platform } = useGlance()
+  const t = useTranslations("glance")
+  const origin = originOf?.(moduleId) ?? null
+  const reason =
+    origin?.kind === "unavailable" && origin.reason === "host-unsupported"
+      ? t("origin.unsupported")
+      : t("origin.offline")
+  const title = t(GLANCE_MODULES[moduleId].labelKey)
+  return (
+    <section
+      data-glance-module={moduleId}
+      data-glance-unavailable
+      aria-label={title}
+      className={cn("min-w-0", platform === "mobile" ? "px-5 py-1.5" : "px-3.5 py-1")}
+    >
+      <div className={cn(rowClass(platform), "hover:bg-transparent")}>
+        <span
+          className={cn(
+            "shrink-0 font-semibold text-muted-foreground",
+            platform === "mobile" ? "w-14 text-[13px]" : "w-12 text-[11.5px]"
+          )}
+        >
+          {title}
+        </span>
+        <CloudOffIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{reason}</span>
+      </div>
+    </section>
+  )
+}
 
 /* ── Section ─────────────────────────────────────────────────────────── */
 
@@ -46,6 +123,7 @@ export function GlanceSection({ moduleId, title, meta, aside, children }: Glance
           {title}
         </h3>
         {meta ? <div className="flex min-w-0 items-center gap-1.5">{meta}</div> : null}
+        <GlanceOriginTag moduleId={moduleId} />
         <div className="min-w-0 flex-1" />
         {aside ? <div className="flex shrink-0 items-center gap-1.5">{aside}</div> : null}
       </header>
@@ -85,6 +163,7 @@ export function GlanceCompactSection({
       <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden whitespace-nowrap">
         {children}
       </span>
+      <GlanceOriginTag moduleId={moduleId} />
       {trailing}
       {onClick ? (
         <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground/70" />

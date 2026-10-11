@@ -6,17 +6,18 @@
  *
  * Modules never import a store, a Dexie table or a Tauri API. They read this
  * context and call `send`, which is what lets the same module render in the
- * desktop tray panel window today and on the phone in phase 3.
+ * desktop tray panel window and on a phone's home screen and Glance drawer.
  */
 
 import { createContext, useContext } from "react"
 
 import type { GlancePlatform } from "@/lib/glance/registry"
+import type { GlanceModuleOrigin } from "@/lib/glance/remote/phone-view"
 import type { GlanceRequestBody } from "@/lib/glance/requests"
 import type { GlanceSnapshotV1 } from "@/lib/glance/snapshot"
-import type { GlanceWidthStep } from "@/types/glance/layout"
+import type { GlanceModuleId, GlanceWidthStep } from "@/types/glance/layout"
 
-export type { GlancePlatform }
+export type { GlancePlatform, GlanceModuleOrigin }
 
 export interface GlanceContextValue {
   snapshot: GlanceSnapshotV1
@@ -34,6 +35,13 @@ export interface GlanceContextValue {
    * sending; a phone drawer stays open. Same request vocabulary as `send`.
    */
   route: (body: GlanceRequestBody) => void
+  /**
+   * Where a module's data came from, when not from this device: a paired
+   * phone labels the desktop's slices with the host's name and their age, and
+   * says in place when the desktop cannot supply one (ADR-0225 §9). Absent or
+   * null means this device's own data.
+   */
+  originOf?: (id: GlanceModuleId) => GlanceModuleOrigin | null
 }
 
 const GlanceContext = createContext<GlanceContextValue | null>(null)

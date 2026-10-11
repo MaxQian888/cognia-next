@@ -12,8 +12,8 @@
 
 import { useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
 
+import { Spinner } from "@/components/ui/spinner"
 import type { GlanceQuotaSource, GlanceQuotaWindow } from "@/lib/glance/snapshot"
 import type { GlanceModuleSize } from "@/types/glance/layout"
 
@@ -231,10 +231,7 @@ export function GlanceQuotaModule({ size }: { size: GlanceModuleSize }) {
                 sub={source.accountLabel ?? undefined}
                 trailing={
                   isBusy ? (
-                    <Loader2Icon
-                      aria-label={t("enabling")}
-                      className="size-3.5 animate-spin text-muted-foreground"
-                    />
+                    <Spinner label={t("enabling")} className="size-3.5 text-muted-foreground" />
                   ) : (
                     <GlanceLinkButton
                       label={t("enableFor", { name })}
@@ -302,9 +299,9 @@ export function GlanceQuotaModule({ size }: { size: GlanceModuleSize }) {
                         </GlanceTag>
                       ) : null}
                       {source.state === "refreshing" || isBusy ? (
-                        <Loader2Icon
-                          aria-label={t("refreshing")}
-                          className="size-3.5 animate-spin text-muted-foreground"
+                        <Spinner
+                          label={t("refreshing")}
+                          className="size-3.5 text-muted-foreground"
                         />
                       ) : null}
                     </>

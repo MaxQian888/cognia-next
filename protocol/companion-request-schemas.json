@@ -984,6 +984,7 @@
               "messageDisplay",
               "mistralVoiceId",
               "mobileComputerUseEnabled",
+              "mobileGlanceLayout",
               "motion",
               "notificationPreferences",
               "onboardingProfile",
@@ -9455,6 +9456,189 @@
         "path": {
           "type": "string",
           "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "glance_quota_enable": {
+      "type": "object",
+      "description": "Turn quota queries on for one vault account. A settings write on the desktop; asking again for an account already on changes nothing.",
+      "required": [
+        "provider",
+        "accountId"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "glance_request": {
+      "type": "object",
+      "description": "Re-read glance now: every slice, or one quota source. Runs through the same executor as the desktop tray panel's own requests; the result arrives as the next `glance://update` push.",
+      "required": [
+        "consumer",
+        "kind"
+      ],
+      "properties": {
+        "consumer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier demand."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "refresh",
+            "quota-refresh"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The quota source to re-read, as the snapshot's quota slice names it. Required with kind quota-refresh; a refresh ignores it."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "refresh"
+            }
+          }
+        },
+        {
+          "required": [
+            "kind",
+            "key"
+          ],
+          "properties": {
+            "kind": {
+              "const": "quota-refresh"
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "glance_subscribe": {
+      "type": "object",
+      "description": "Announce, renew or end this phone's glance lease. While a lease is live the desktop builds slices for the merged demand of every leased phone and pushes each new snapshot on `glance://update`; the answer carries the newest one and how soon to renew.",
+      "required": [
+        "consumer",
+        "visible",
+        "demand"
+      ],
+      "properties": {
+        "consumer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier demand."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "False ends the lease: the phone stopped showing glance."
+        },
+        "demand": {
+          "type": "object",
+          "description": "What the phone shows, as the slices it needs. Its own layout (order, sizes, pins) never crosses the wire.",
+          "required": [
+            "modules",
+            "scope",
+            "workspaceId",
+            "usage",
+            "activity"
+          ],
+          "properties": {
+            "modules": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "fleet",
+                  "usage",
+                  "quota",
+                  "agenda",
+                  "activity",
+                  "pet"
+                ]
+              },
+              "description": "The host-sourced modules the phone shows. Duplicates are folded; an unknown module refuses the whole demand."
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "all",
+                "workspace"
+              ]
+            },
+            "workspaceId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace the phone filters to. Read only when scope is workspace."
+            },
+            "usage": {
+              "type": "object",
+              "required": [
+                "scope",
+                "showSpend"
+              ],
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "cognia",
+                    "all-tools"
+                  ]
+                },
+                "showSpend": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "activity": {
+              "type": "object",
+              "required": [
+                "range"
+              ],
+              "properties": {
+                "range": {
+                  "type": "string",
+                  "enum": [
+                    "1m",
+                    "3m",
+                    "1y"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

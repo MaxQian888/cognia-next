@@ -18387,6 +18387,9 @@
       "addShort": "添加",
       "custom": "自定义",
       "hide": "隐藏{module}",
+      "homePin": "在首页显示{module}",
+      "homePinned": "已显示在首页",
+      "homeUnpinned": "未显示在首页",
       "presetHint": "预设会替换模块及其顺序和尺寸，宽度、高度与选项保持不变。",
       "presetLabel": "预设：{preset}",
       "presets": "预设",
@@ -18399,10 +18402,50 @@
     "errors": {
       "commandUnavailable": "该命令暂不可用。",
       "deliveryFailed": "Cognia 主窗口未响应。",
+      "hostUnavailable": "桌面暂时无法提供这项数据。",
+      "hostUnreachable": "无法连接到你的桌面。",
       "quotaEnable": "无法为该账号开启配额查询。",
       "quotaRefresh": "无法刷新该配额来源。",
       "requestFailed": "Cognia 无法完成该操作。",
       "timeout": "Cognia 主窗口未及时响应。"
+    },
+    "mobile": {
+      "addModules": "添加模块",
+      "connecting": "正在连接…",
+      "copiedDesktop": "已复制桌面的布局。",
+      "copyDesktop": "使用桌面布局",
+      "copyDesktopUnavailable": "在桌面已连接时打开速览，即可复制它的布局。",
+      "done": "完成",
+      "edit": "编辑",
+      "editorDescription": "选择速览中的模块、其中哪些也显示在首页，以及你的快捷入口。",
+      "editorTitle": "首页与速览",
+      "empty": "速览中没有显示任何模块。",
+      "homeHint": "这里列出的模块都会出现在速览中。点按房子图标，可让它同时显示在首页。",
+      "open": "打开速览",
+      "openAttention": "打开速览——有事项需要你处理",
+      "preset": "预设",
+      "refresh": "刷新",
+      "scope": {
+        "all": "全部",
+        "hint": "额度等账号级数据从不按工作区过滤。",
+        "label": "显示范围",
+        "noWorkspace": "未打开工作区",
+        "workspace": "当前工作区 · {name}"
+      },
+      "shortcuts": "快捷入口",
+      "shortcutsHint": "快捷操作模块显示的入口及其顺序。",
+      "source": {
+        "connecting": "正在连接 {host}…",
+        "desktop": "你的桌面",
+        "device": "本机数据",
+        "live": "来自 {host}",
+        "offline": "{host} 已离线，显示最后一次读数",
+        "pending": "正在确认 {host} 提供的数据…",
+        "unavailable": "{host} 尚未就绪，正在重试",
+        "unsupported": "{host} 不提供速览，请更新桌面应用"
+      },
+      "title": "速览",
+      "updated": "更新于{when}"
     },
     "modules": {
       "activity": {
@@ -18453,6 +18496,7 @@
         "openFiltered": "在 Agent Fleet 中打开一个「{state}」的任务",
         "openFleet": "打开 Agent Fleet",
         "openRow": "在 Agent Fleet 中打开「{title}」",
+        "openWorkflows": "打开「{name}」的运行记录",
         "readOnly": "只读 · 在 Fleet 中处理",
         "stat": {
           "awaiting": "待审批",
@@ -18464,6 +18508,8 @@
           "failed": "失败",
           "stale": "已失联"
         },
+        "workflowsRunning": "{count, plural, other {# 个工作流运行中}} · {name}",
+        "workflowsShort": "{count, plural, other {# 个工作流}}",
         "working": "{count} 运行"
       },
       "pet": {
@@ -18493,7 +18539,10 @@
         "unwell": "身体不适"
       },
       "quick": {
-        "label": "快捷动作"
+        "edit": "编辑",
+        "editShortcuts": "编辑快捷入口",
+        "label": "快捷动作",
+        "noShortcuts": "还没有快捷入口，点按添加。"
       },
       "quota": {
         "collapse": "收起 {name}",
@@ -18571,6 +18620,14 @@
         "week": "7 天",
         "workspaceOnly": "仅本工作区"
       }
+    },
+    "origin": {
+      "fromDesktop": "桌面 · {age}",
+      "fromDesktopOffline": "桌面离线 · {age}",
+      "fromHost": "{host} · {age}",
+      "fromHostOffline": "{host} 离线 · {age}",
+      "offline": "桌面离线，尚未收到数据。",
+      "unsupported": "你的桌面版本不提供这项数据。"
     },
     "presets": {
       "agentOps": "Agent 运维",
@@ -25650,37 +25707,27 @@
         "workflows": "工作流"
       },
       "actionsDescription": "此会话的操作",
-      "activeRuns": {
-        "empty": "暂无运行中的工作流",
-        "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
-        "viewRuns": "查看运行"
-      },
       "bucketOlder": "更早",
       "bucketPrev30": "过去 30 天",
       "bucketPrev7": "过去 7 天",
       "bucketToday": "今天",
       "bucketYesterday": "昨天",
       "customize": {
-        "active": "已在首页",
-        "activeEmpty": "暂无快捷操作——从下方添加。",
-        "add": "添加",
-        "available": "添加操作",
-        "availableEmpty": "所有操作都已在首页。",
-        "description": "选择首页要显示的快捷操作与板块。",
+        "active": "已在网格中",
+        "activeEmpty": "暂无快捷入口——从下方添加。",
+        "addLabel": "添加{action}",
+        "available": "添加快捷入口",
+        "availableEmpty": "所有快捷入口都已在网格中。",
         "dragHint": "拖拽以排序",
-        "remove": "移除",
-        "restoreDefaults": "恢复默认",
-        "sections": "板块",
-        "title": "自定义首页"
+        "dragLabel": "调整{action}的顺序",
+        "removeLabel": "移除{action}",
+        "restoreDefaults": "恢复默认"
       },
-      "edit": "编辑",
       "folderEmpty": "空文件夹——长按聊天即可移到这里。",
-      "hideSection": "隐藏{section}",
       "listActions": "会话列表操作",
       "loadingChats": "正在加载会话…",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
-      "quickActions": "快捷操作",
       "recent": "最近",
       "renameAria": "重命名会话",
       "results": "搜索结果",
@@ -25691,12 +25738,6 @@
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "searchingMessages": "正在搜索消息内容…",
       "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
-      "sections": {
-        "activeRuns": "运行中",
-        "activity": "使用统计",
-        "quickActions": "快捷操作",
-        "recents": "最近会话"
-      },
       "selectionRowHint": "轻点聊天即可选中或取消选中。按 Esc 或点击“完成”结束选择。",
       "swipeArchive": "归档",
       "swipeDelete": "删除",
@@ -52330,6 +52371,11 @@
         }
       },
       "modules": {
+        "copiedPhone": "已复制手机的布局。",
+        "copyPhone": "手机布局",
+        "copyPhoneAction": "复制手机布局",
+        "copyPhoneHint": "在这里使用手机速览的模块、顺序与尺寸。首页固定和快捷入口仍只属于手机。",
+        "copyPhoneNone": "配对的手机保存过自己的速览布局后即可使用。",
         "delegate": "显示委托栏",
         "delegateHint": "隐藏后，委托操作会移到快捷操作中。",
         "description": "面板显示哪些模块、以什么顺序和尺寸显示。编辑时预览会同步更新。",

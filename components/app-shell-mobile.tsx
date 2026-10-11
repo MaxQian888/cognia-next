@@ -70,12 +70,19 @@ import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { SharedSessionJoin } from "@/components/chat/shared-session-join"
-import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
-import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
+import { MobileGlanceDrawer } from "@/components/mobile/glance/mobile-glance-drawer"
+import { MobileGlanceHome } from "@/components/mobile/glance/mobile-glance-home"
+import {
+  MobileGlanceProvider,
+  type MobileGlanceShellActions,
+} from "@/components/mobile/glance/mobile-glance-provider"
+import {
+  MobileGlanceFoldedDot,
+  MobileGlanceTrigger,
+} from "@/components/mobile/glance/mobile-glance-trigger"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
 import { MobileHomeLayoutSheet } from "@/components/mobile/home/mobile-home-layout-sheet"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
-import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
 import {
   Sheet,
@@ -145,6 +152,13 @@ const log = loggers.shell
  * the viewport on this shell, which makes the two measurements the same number.
  */
 const APPBAR_INBOX_QUERY = "(min-width: 26rem)"
+/**
+ * The Glance button (ADR-0225 §9). It folds later than the inbox: the drawer
+ * is the phone's tray panel, and its dot (something waiting or failed) is the
+ * signal worth keeping in reach. Below this (a 375px phone) it moves into ⋮
+ * with its dot, like the others.
+ */
+const APPBAR_GLANCE_QUERY = "(min-width: 24rem)"
 const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
 /**
  * The missing-credential warning's text label. Below this the warning is a key
@@ -210,7 +224,6 @@ export function AppShellMobile() {
   const requestChatHome = useUIStore((s) => s.requestChatHome)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
-  const { isSectionHidden } = useMobileHomeLayout()
 
   const { keyOk } = useCredentialStatus()
   // Same send gate as the desktop workspace: a paired phone whose host is
@@ -250,6 +263,7 @@ export function AppShellMobile() {
   // a wider device widens it on mount — never the other way round, which is the
   // direction that would flash an overflowing row.
   const inboxInBar = useMediaQuery(APPBAR_INBOX_QUERY)
+  const glanceInBar = useMediaQuery(APPBAR_GLANCE_QUERY)
   const artifactsInBar = useMediaQuery(APPBAR_ARTIFACTS_QUERY)
   const keyLabelInBar = useMediaQuery(APPBAR_KEY_LABEL_QUERY)
   const toggleArtifactDock = useArtifactDockLayoutStore((s) => s.toggleDock)
@@ -555,201 +569,206 @@ export function AppShellMobile() {
   // working.
   const handleSwitchInDrawer = (id: string) => switchToSession(id, { closeNav: false })
 
-  // Recent sessions for the welcome-page "Continue" group (newest first,
-  // excluding the one already open). Archived conversations were put away on
-  // purpose; offering them to continue would undo that.
-  const recentSessions = useMemo(
-    () =>
-      [...sessions]
-        .filter((s) => s.id !== activeSessionId && s.archivedAt == null)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 4)
-        .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),
-    [sessions, activeSessionId]
+  // The doors glance modules need from this shell (ADR-0225 §9). Stable
+  // across renders, so the provider's value does not churn with the shell's;
+  // the session switch reads the current closure through a ref.
+  const switchToSessionRef = useRef(handleSwitchToSession)
+  useEffect(() => {
+    switchToSessionRef.current = handleSwitchToSession
+  })
+  const glanceActions = useMemo<MobileGlanceShellActions>(
+    () => ({
+      newChat: handleNewDirect,
+      search: () => setSearchOpen(true),
+      openSession: (id) => switchToSessionRef.current(id),
+      editLayout: () => setHomeLayoutOpen(true),
+    }),
+    [handleNewDirect]
   )
 
   const headerTitle = activeSession?.title ?? t("emptyTitle", { default: "cognia" })
 
   return (
-    <div
-      // `h-full min-h-0 flex-1`, not `h-[100dvh]`. `MobileShellWrapper` now
-      // gives `/` the full-viewport branch, a definite-height flex column that
-      // has ALREADY subtracted the tab-bar reserve, so re-asserting a whole
-      // viewport here would add that reserve back and push the last 56px of the
-      // shell under the bar again. `flex-1` rather than height alone because
-      // the wrapper puts the offline banner and the first-run setup bar in that
-      // same column above us: a plain `h-full` would claim the WHOLE column and
-      // overflow it by however tall those rows are on the day they appear.
-      // Same three-class idiom as `FeaturePageShell`'"'"'s compact branch.
-      className="relative flex h-full min-h-0 w-full flex-1 flex-col bg-background text-foreground safe-area-pt safe-area-px"
-      data-testid="app-shell-mobile"
-    >
-      {/* ── Top bar ────────────────────────────────────────────────────── */}
-      <header
-        // `overflow-hidden` + shrinkable middle items is the whole horizontal
-        // contract: the action group on the right is `shrink-0`, so anything
-        // that grows (session title, workspace name, credential warning) gives
-        // up width instead of pushing the row past the viewport. Without it the
-        // bar measured 403px inside a 375px shell, the ⋮ menu — the only way to
-        // reach new chat / settings / export / delete — sat off-screen, and the
-        // document gained a horizontal scroll that dragged every `position:
-        // fixed` layer (the tab bar included) out of alignment with it.
-        // `gap-1`, not `gap-2`: every control on this row is already a 44px
-        // touch box whose glyph sits 12px inside it, so a wider gap only
-        // spread the action cluster and took width from the title.
-        className="flex h-14 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1"
-        data-app-chrome
+    <MobileGlanceProvider actions={glanceActions}>
+      <div
+        // `h-full min-h-0 flex-1`, not `h-[100dvh]`. `MobileShellWrapper` now
+        // gives `/` the full-viewport branch, a definite-height flex column that
+        // has ALREADY subtracted the tab-bar reserve, so re-asserting a whole
+        // viewport here would add that reserve back and push the last 56px of the
+        // shell under the bar again. `flex-1` rather than height alone because
+        // the wrapper puts the offline banner and the first-run setup bar in that
+        // same column above us: a plain `h-full` would claim the WHOLE column and
+        // overflow it by however tall those rows are on the day they appear.
+        // Same three-class idiom as `FeaturePageShell`'"'"'s compact branch.
+        className="relative flex h-full min-h-0 w-full flex-1 flex-col bg-background text-foreground safe-area-pt safe-area-px"
+        data-testid="app-shell-mobile"
       >
-        {/* The list's long-lived state (characters, teams, unread, search,
+        {/* ── Top bar ────────────────────────────────────────────────────── */}
+        <header
+          // `overflow-hidden` + shrinkable middle items is the whole horizontal
+          // contract: the action group on the right is `shrink-0`, so anything
+          // that grows (session title, workspace name, credential warning) gives
+          // up width instead of pushing the row past the viewport. Without it the
+          // bar measured 403px inside a 375px shell, the ⋮ menu — the only way to
+          // reach new chat / settings / export / delete — sat off-screen, and the
+          // document gained a horizontal scroll that dragged every `position:
+          // fixed` layer (the tab bar included) out of alignment with it.
+          // `gap-1`, not `gap-2`: every control on this row is already a 44px
+          // touch box whose glyph sits 12px inside it, so a wider gap only
+          // spread the action cluster and took width from the title.
+          className="flex h-14 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1"
+          data-app-chrome
+        >
+          {/* The list's long-lived state (characters, teams, unread, search,
             scroll position) lives here, outside the drawer: Radix unmounts
             closed SheetContent, and the list used to rebuild all of it on
             every open. */}
-        <MobileChannelListSourceProvider characters={characters}>
-          <Sheet open={navOpen} onOpenChange={setNavOpen}>
-            <SheetTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="touch-target"
-                aria-label={tShell("openNav")}
-                data-testid="mobile-nav-trigger"
-              >
-                <MenuIcon className="size-5" />
-              </Button>
-            </SheetTrigger>
+          <MobileChannelListSourceProvider characters={characters}>
+            <Sheet open={navOpen} onOpenChange={setNavOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="touch-target"
+                  aria-label={tShell("openNav")}
+                  data-testid="mobile-nav-trigger"
+                >
+                  <MenuIcon className="size-5" />
+                </Button>
+              </SheetTrigger>
 
-            <SheetContent
-              side="left"
-              // No corner close button: it sat on top of the list's New chat
-              // "+" (the overlay, Escape and the edge swipe all close the
-              // drawer). The drawer is portaled out of the shell, so the shell's
-              // own safe-area padding never reached it — it reserves the notch,
-              // the home indicator and a landscape left inset itself.
-              showCloseButton={false}
-              className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:max-w-md md:max-w-lg"
-              data-testid="mobile-nav-sheet"
-              data-mobile-nav-sheet=""
-            >
-              <SheetHeader className="sr-only">
-                <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
-              </SheetHeader>
-              {/* The overlay, Escape and the edge swipe are gestures a screen
+              <SheetContent
+                side="left"
+                // No corner close button: it sat on top of the list's New chat
+                // "+" (the overlay, Escape and the edge swipe all close the
+                // drawer). The drawer is portaled out of the shell, so the shell's
+                // own safe-area padding never reached it — it reserves the notch,
+                // the home indicator and a landscape left inset itself.
+                showCloseButton={false}
+                className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:max-w-md md:max-w-lg"
+                data-testid="mobile-nav-sheet"
+                data-mobile-nav-sheet=""
+              >
+                <SheetHeader className="sr-only">
+                  <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
+                </SheetHeader>
+                {/* The overlay, Escape and the edge swipe are gestures a screen
                 reader cannot always reach, so the drawer still owns an
                 explicit close control — just not one painted over the list's
                 "+". Hidden until keyboard focus lands on it, then shown in
                 the corner the old button used. */}
-              <SheetClose asChild>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-[calc(env(safe-area-inset-top)+0.5rem)] focus-visible:right-2 focus-visible:z-10"
-                  data-testid="mobile-nav-close"
-                >
-                  {tShell("closeNav")}
-                </Button>
-              </SheetClose>
-              <div className="flex flex-1 overflow-hidden">
-                {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
+                <SheetClose asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-[calc(env(safe-area-inset-top)+0.5rem)] focus-visible:right-2 focus-visible:z-10"
+                    data-testid="mobile-nav-close"
+                  >
+                    {tShell("closeNav")}
+                  </Button>
+                </SheetClose>
+                <div className="flex flex-1 overflow-hidden">
+                  {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
                   phone viewport never reaches `md`, so the default rail variant
                   rendered this whole column — workspace switcher, DM/Canvas,
                   pinned destinations, "More", teams, Settings — as
                   `display:none`, leaving the drawer with only the session
                   list. */}
-                <GuildRail
-                  variant="sheet"
-                  onCreateTeam={handleCreateTeam}
-                  onOpenSettings={() => {
-                    setNavOpen(false)
-                    openSettings()
-                  }}
-                />
-                {/* `min-w-0`: without it this flex item's minimum width is
+                  <GuildRail
+                    variant="sheet"
+                    onCreateTeam={handleCreateTeam}
+                    onOpenSettings={() => {
+                      setNavOpen(false)
+                      openSettings()
+                    }}
+                  />
+                  {/* `min-w-0`: without it this flex item's minimum width is
                   its content's, and a nowrap title stretched the list to
                   842px inside a 262px slot. */}
-                <div
-                  className="flex min-w-0 flex-1 overflow-hidden"
-                  data-testid="mobile-nav-list-slot"
-                >
-                  {/* The list surfaces its own failures; the writers are
+                  <div
+                    className="flex min-w-0 flex-1 overflow-hidden"
+                    data-testid="mobile-nav-list-slot"
+                  >
+                    {/* The list surfaces its own failures; the writers are
                     handed over un-voided so it can await them. */}
-                  {pluginViewContainerId ? (
-                    <PluginViewContainerPanel containerId={pluginViewContainerId} />
-                  ) : (
-                    <MobileChannelList
-                      sessions={sessions}
-                      isLoadingSessions={isLoadingSessions}
-                      activeSessionId={activeSessionId}
-                      onSelect={handleSwitchToSession}
-                      onSelectInPlace={handleSwitchInDrawer}
-                      onNewDirect={() => {
-                        setNavOpen(false)
-                        handleNewDirect()
-                      }}
-                      onDelete={remove}
-                      onRename={rename}
-                      onArchive={archive}
-                      onUnarchive={unarchive}
-                      onSetPinned={bulkSetPinned}
-                      onAssignToFolder={assignToFolder}
-                      onBulkDelete={bulkRemove}
-                      onBulkArchive={bulkArchive}
-                      onBulkUnarchive={bulkUnarchive}
-                      onBulkAssignToFolder={bulkAssignToFolder}
-                      folders={folders}
-                      runStatusById={runStatusById}
-                      onBranch={branchWholeConversation}
-                    />
-                  )}
+                    {pluginViewContainerId ? (
+                      <PluginViewContainerPanel containerId={pluginViewContainerId} />
+                    ) : (
+                      <MobileChannelList
+                        sessions={sessions}
+                        isLoadingSessions={isLoadingSessions}
+                        activeSessionId={activeSessionId}
+                        onSelect={handleSwitchToSession}
+                        onSelectInPlace={handleSwitchInDrawer}
+                        onNewDirect={() => {
+                          setNavOpen(false)
+                          handleNewDirect()
+                        }}
+                        onDelete={remove}
+                        onRename={rename}
+                        onArchive={archive}
+                        onUnarchive={unarchive}
+                        onSetPinned={bulkSetPinned}
+                        onAssignToFolder={assignToFolder}
+                        onBulkDelete={bulkRemove}
+                        onBulkArchive={bulkArchive}
+                        onBulkUnarchive={bulkUnarchive}
+                        onBulkAssignToFolder={bulkAssignToFolder}
+                        folders={folders}
+                        runStatusById={runStatusById}
+                        onBranch={branchWholeConversation}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-              {/* Joining someone else's conversation is a once-in-a-while
+                {/* Joining someone else's conversation is a once-in-a-while
                   action, so it sits at the foot of the drawer rather than
                   above the rail and the list (renders nothing unless shared
                   chat is enabled). */}
-              <SharedSessionJoin className="shrink-0 rounded-none border-t px-4" />
-            </SheetContent>
-          </Sheet>
-        </MobileChannelListSourceProvider>
+                <SharedSessionJoin className="shrink-0 rounded-none border-t px-4" />
+              </SheetContent>
+            </Sheet>
+          </MobileChannelListSourceProvider>
 
-        <CharacterHeader
-          subject={canvasGuild ? null : headerSubject}
-          fallbackTitle={canvasGuild ? tRail("canvas") : headerTitle}
-          streaming={chatStatus === "streaming"}
-        />
+          <CharacterHeader
+            subject={canvasGuild ? null : headerSubject}
+            fallbackTitle={canvasGuild ? tRail("canvas") : headerTitle}
+            streaming={chatStatus === "streaming"}
+          />
 
-        {/* No `ml-2`: the header's own gap already spaces it, and the
+          {/* No `ml-2`: the header's own gap already spaces it, and the
             doubled margin came straight out of the title's width. */}
-        <MobileWorkspaceChip className="min-w-0 shrink" />
+          <MobileWorkspaceChip className="min-w-0 shrink" />
 
-        {/* A phone shows one conversation, so turns started and navigated away
+          {/* A phone shows one conversation, so turns started and navigated away
             from had no representation at all here. Tapping goes to one. */}
-        <BackgroundRunsChip
-          className="ml-2 min-w-0 shrink"
-          onSelect={(id) => {
-            setNavOpen(false)
-            void select(id)
-          }}
-        />
+          <BackgroundRunsChip
+            className="ml-2 min-w-0 shrink"
+            onSelect={(id) => {
+              setNavOpen(false)
+              void select(id)
+            }}
+          />
 
-        <div className="ml-auto flex shrink-0 items-center gap-0 sm:gap-1">
-          {/* Missing-credential warning stays visible (blocking issue): a tap
+          <div className="ml-auto flex shrink-0 items-center gap-0 sm:gap-1">
+            {/* Missing-credential warning stays visible (blocking issue): a tap
               opens the session sheet whose Account section resolves it. Never
               buried in the overflow menu, and never shrunk. It heads the
               action cluster rather than sitting between the title and the
               chips: there it split the bar's identity half in two and took its
               width out of the title. */}
-          {keyOk === false && activeSession ? (
-            <MobileCredentialWarning
-              showLabel={keyLabelInBar}
-              onResolve={() => {
-                setSessionSettingsFocus("account")
-                setSessionSettingsOpen(true)
-              }}
-            />
-          ) : null}
-          {/* The artifact dock's only standing affordance on a phone. The copy
+            {keyOk === false && activeSession ? (
+              <MobileCredentialWarning
+                showLabel={keyLabelInBar}
+                onResolve={() => {
+                  setSessionSettingsFocus("account")
+                  setSessionSettingsOpen(true)
+                }}
+              />
+            ) : null}
+            {/* The artifact dock's only standing affordance on a phone. The copy
               in `chat-header` never mounts here (the chat pane below is given
               `showHeader={false}`), so without this the Sheet could only be
               reached by tapping an artifact card that happened to be in the
@@ -759,399 +778,411 @@ export function AppShellMobile() {
 
               Folded into the ⋮ menu below the width tier — see
               `APPBAR_ARTIFACTS_QUERY`. */}
-          {artifactsInBar ? <ArtifactDockToggle className="touch-target" /> : null}
-          <JobCenterPanel compact />
+            {artifactsInBar ? <ArtifactDockToggle className="touch-target" /> : null}
+            <JobCenterPanel compact />
 
-          {inboxInBar ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="relative touch-target"
-              aria-label={tShell("inbox")}
-              onClick={() => router.push("/inbox/all")}
-              data-testid="mobile-inbox-trigger"
-            >
-              <InboxIcon className="size-5" />
-              {(inboxUnread ?? 0) > 0 ? (
-                <span
-                  className="absolute right-1 top-1 size-2 rounded-full bg-primary"
-                  aria-hidden="true"
-                  data-testid="mobile-inbox-unread-dot"
-                />
-              ) : null}
-            </Button>
-          ) : null}
+            {/* The Glance drawer's door (ADR-0225 §9). Folded into ⋮ below
+              `APPBAR_GLANCE_QUERY`, dot and all. */}
+            {glanceInBar ? <MobileGlanceTrigger /> : null}
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="touch-target"
-            aria-label={tShell("search")}
-            onClick={() => setSearchOpen(true)}
-            data-testid="mobile-search-trigger"
-          >
-            <SearchIcon className="size-5" />
-          </Button>
-
-          {isTeamSession ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="touch-target"
-              aria-label={tShell("openMembers")}
-              onClick={() => setMemberSheetOpen(true)}
-              data-testid="mobile-members-trigger"
-            >
-              <UsersIcon className="size-5" />
-            </Button>
-          ) : null}
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            {inboxInBar ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="relative touch-target"
-                aria-label={tShell("sessionMenu")}
-                data-testid="mobile-actions-trigger"
+                aria-label={tShell("inbox")}
+                onClick={() => router.push("/inbox/all")}
+                data-testid="mobile-inbox-trigger"
               >
-                <MoreVerticalIcon className="size-5" />
-                {/* A folded control keeps its attention signal. Without this the
-                    inbox / artifact dots simply vanished at phone width, which
-                    is a worse outcome than the crowded bar they came from. */}
-                {foldedAttention ? (
+                <InboxIcon className="size-5" />
+                {(inboxUnread ?? 0) > 0 ? (
                   <span
                     className="absolute right-1 top-1 size-2 rounded-full bg-primary"
                     aria-hidden="true"
-                    data-testid="mobile-actions-unread-dot"
+                    data-testid="mobile-inbox-unread-dot"
                   />
                 ) : null}
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={handleNewDirect} data-testid="mobile-action-new-chat">
-                <UserPlusIcon className="size-4" />
-                <span>{tShell("newChat")}</span>
-              </DropdownMenuItem>
-              {/* The width-folded halves of the app bar. Rendered here ONLY when
+            ) : null}
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="touch-target"
+              aria-label={tShell("search")}
+              onClick={() => setSearchOpen(true)}
+              data-testid="mobile-search-trigger"
+            >
+              <SearchIcon className="size-5" />
+            </Button>
+
+            {isTeamSession ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="touch-target"
+                aria-label={tShell("openMembers")}
+                onClick={() => setMemberSheetOpen(true)}
+                data-testid="mobile-members-trigger"
+              >
+                <UsersIcon className="size-5" />
+              </Button>
+            ) : null}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="relative touch-target"
+                  aria-label={tShell("sessionMenu")}
+                  data-testid="mobile-actions-trigger"
+                >
+                  <MoreVerticalIcon className="size-5" />
+                  {/* A folded control keeps its attention signal. Without this the
+                    inbox / artifact dots simply vanished at phone width, which
+                    is a worse outcome than the crowded bar they came from. */}
+                  {foldedAttention ? (
+                    <span
+                      className="absolute right-1 top-1 size-2 rounded-full bg-primary"
+                      aria-hidden="true"
+                      data-testid="mobile-actions-unread-dot"
+                    />
+                  ) : glanceInBar ? null : (
+                    <MobileGlanceFoldedDot className="absolute right-1 top-1" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={handleNewDirect} data-testid="mobile-action-new-chat">
+                  <UserPlusIcon className="size-4" />
+                  <span>{tShell("newChat")}</span>
+                </DropdownMenuItem>
+                {/* The width-folded halves of the app bar. Rendered here ONLY when
                   the bar could not hold them, so neither control is ever
                   reachable twice on the same screen. */}
-              {inboxInBar ? null : (
-                <DropdownMenuItem
-                  onSelect={() => router.push("/inbox/all")}
-                  data-testid="mobile-action-inbox"
-                >
-                  <InboxIcon className="size-4" />
-                  <span>{tShell("inbox")}</span>
-                  {(inboxUnread ?? 0) > 0 ? (
-                    <span
-                      className="ms-auto size-2 rounded-full bg-primary"
-                      aria-hidden="true"
-                      data-testid="mobile-action-inbox-unread-dot"
-                    />
-                  ) : null}
-                </DropdownMenuItem>
-              )}
-              {artifactsInBar ? null : (
-                <DropdownMenuItem
-                  onSelect={() => toggleArtifactDock()}
-                  data-testid="mobile-action-artifacts"
-                >
-                  <PanelRightOpenIcon className="size-4" />
-                  <span>{tShell("artifacts")}</span>
-                  {unreadArtifact ? (
-                    <span
-                      className="ms-auto size-2 rounded-full bg-primary"
-                      aria-hidden="true"
-                      data-testid="mobile-action-artifacts-unread-dot"
-                    />
-                  ) : null}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              {/* The home layout editor's ONLY always-reachable entry. Its other
+                {inboxInBar ? null : (
+                  <DropdownMenuItem
+                    onSelect={() => router.push("/inbox/all")}
+                    data-testid="mobile-action-inbox"
+                  >
+                    <InboxIcon className="size-4" />
+                    <span>{tShell("inbox")}</span>
+                    {(inboxUnread ?? 0) > 0 ? (
+                      <span
+                        className="ms-auto size-2 rounded-full bg-primary"
+                        aria-hidden="true"
+                        data-testid="mobile-action-inbox-unread-dot"
+                      />
+                    ) : null}
+                  </DropdownMenuItem>
+                )}
+                {glanceInBar ? null : <MobileGlanceTrigger variant="menu" />}
+                {artifactsInBar ? null : (
+                  <DropdownMenuItem
+                    onSelect={() => toggleArtifactDock()}
+                    data-testid="mobile-action-artifacts"
+                  >
+                    <PanelRightOpenIcon className="size-4" />
+                    <span>{tShell("artifacts")}</span>
+                    {unreadArtifact ? (
+                      <span
+                        className="ms-auto size-2 rounded-full bg-primary"
+                        aria-hidden="true"
+                        data-testid="mobile-action-artifacts-unread-dot"
+                      />
+                    ) : null}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {/* The home layout editor's ONLY always-reachable entry. Its other
                   door is the "Edit" button inside the quick-action grid, and
                   that grid renders nothing once its own section is hidden — so
                   turning it off used to be a one-way trip. */}
-              <DropdownMenuItem
-                onSelect={() => {
-                  // Defer so the menu can close before the sheet grabs focus.
-                  setTimeout(() => setHomeLayoutOpen(true), 0)
-                }}
-                data-testid="mobile-action-home-layout"
-              >
-                <LayoutGridIcon className="size-4" />
-                <span>{tShell("homeLayout")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => openSettings()}
-                data-testid="mobile-action-settings"
-              >
-                <SettingsIcon className="size-4" />
-                <span>{tShell("settings")}</span>
-              </DropdownMenuItem>
-              {activeSession ? (
                 <DropdownMenuItem
                   onSelect={() => {
                     // Defer so the menu can close before the sheet grabs focus.
-                    setTimeout(() => {
-                      setSessionSettingsFocus(undefined)
-                      setSessionSettingsOpen(true)
-                    }, 0)
+                    setTimeout(() => setHomeLayoutOpen(true), 0)
                   }}
-                  data-testid="mobile-action-session-settings"
+                  data-testid="mobile-action-home-layout"
                 >
-                  <Settings2Icon className="size-4" />
-                  <span>{tShell("sessionSettings")}</span>
+                  <LayoutGridIcon className="size-4" />
+                  <span>{tShell("homeLayout")}</span>
                 </DropdownMenuItem>
-              ) : null}
-              {activeSession && sharedChatEnabled && !activeSession.collaboration ? (
                 <DropdownMenuItem
-                  onSelect={() => {
-                    // Defer so the menu can close before the sheet grabs focus.
-                    setTimeout(() => setSharePanelOpen(true), 0)
-                  }}
-                  data-testid="mobile-action-share-conversation"
+                  onSelect={() => openSettings()}
+                  data-testid="mobile-action-settings"
                 >
-                  <UsersIcon className="size-4" />
-                  <span>{tShell("shareConversation")}</span>
+                  <SettingsIcon className="size-4" />
+                  <span>{tShell("settings")}</span>
                 </DropdownMenuItem>
-              ) : null}
-              {activeSession ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    // Defer so the menu can close before the dialog grabs focus.
-                    setTimeout(() => setExportOpen(true), 0)
-                  }}
-                  data-testid="mobile-action-export"
-                >
-                  <Share2Icon className="size-4" />
-                  <span>{tShell("exportConversation")}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {activeSessionId ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    if (!activeSessionId) return
-                    void remove(activeSessionId).catch((err) =>
-                      toast.error(err instanceof Error ? err.message : String(err))
-                    )
-                  }}
-                  data-testid="mobile-action-delete"
-                  className="text-destructive focus:text-destructive"
-                >
-                  <XIcon className="size-4" />
-                  <span>{tShell("deleteSession")}</span>
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
-      {/* A row of its own only for a conversation that IS shared — then it
+                {activeSession ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      // Defer so the menu can close before the sheet grabs focus.
+                      setTimeout(() => {
+                        setSessionSettingsFocus(undefined)
+                        setSessionSettingsOpen(true)
+                      }, 0)
+                    }}
+                    data-testid="mobile-action-session-settings"
+                  >
+                    <Settings2Icon className="size-4" />
+                    <span>{tShell("sessionSettings")}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {activeSession && sharedChatEnabled && !activeSession.collaboration ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      // Defer so the menu can close before the sheet grabs focus.
+                      setTimeout(() => setSharePanelOpen(true), 0)
+                    }}
+                    data-testid="mobile-action-share-conversation"
+                  >
+                    <UsersIcon className="size-4" />
+                    <span>{tShell("shareConversation")}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {activeSession ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      // Defer so the menu can close before the dialog grabs focus.
+                      setTimeout(() => setExportOpen(true), 0)
+                    }}
+                    data-testid="mobile-action-export"
+                  >
+                    <Share2Icon className="size-4" />
+                    <span>{tShell("exportConversation")}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {activeSessionId ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (!activeSessionId) return
+                      void remove(activeSessionId).catch((err) =>
+                        toast.error(err instanceof Error ? err.message : String(err))
+                      )
+                    }}
+                    data-testid="mobile-action-delete"
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <XIcon className="size-4" />
+                    <span>{tShell("deleteSession")}</span>
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+        {/* A row of its own only for a conversation that IS shared — then it
           carries something live (the sync state, Request AI, the members
           trigger). A private one used to get the same bordered row for a
           single lock button; its way in is the ⋮ menu's "Share conversation…"
           now, which drives the same sheet. */}
-      {activeSession && sharedChatEnabled ? (
-        activeSession.collaboration ? (
-          <div
-            className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1"
-            data-testid="mobile-shared-session-strip"
-          >
-            <SharedSessionPanel session={activeSession} />
-          </div>
-        ) : (
-          <SharedSessionPanel
-            session={activeSession}
-            trigger="none"
-            open={sharePanelOpen}
-            onOpenChange={setSharePanelOpen}
-          />
-        )
-      ) : null}
+        {activeSession && sharedChatEnabled ? (
+          activeSession.collaboration ? (
+            <div
+              className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1"
+              data-testid="mobile-shared-session-strip"
+            >
+              <SharedSessionPanel session={activeSession} />
+            </div>
+          ) : (
+            <SharedSessionPanel
+              session={activeSession}
+              trigger="none"
+              open={sharePanelOpen}
+              onOpenChange={setSharePanelOpen}
+            />
+          )
+        ) : null}
 
-      <PerfCaptureShellStatus className="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-destructive/5 px-3 text-xs" />
+        <PerfCaptureShellStatus className="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-destructive/5 px-3 text-xs" />
 
-      {/* Conversation export / share-link dialog (reuses the desktop flow;
+        {/* Conversation export / share-link dialog (reuses the desktop flow;
           its download now writes to the device Files app on Capacitor). */}
-      {activeSession ? (
-        <SingleExportDialog
-          session={activeSession}
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-        />
-      ) : null}
+        {activeSession ? (
+          <SingleExportDialog
+            session={activeSession}
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+          />
+        ) : null}
 
-      {/* Per-session settings (mobile relocates the inner ChatHeader here via
+        {/* Per-session settings (mobile relocates the inner ChatHeader here via
           `showHeader={false}` below). `showAmbientStatus` surfaces the live
           cost badge, plan-mode tasks, and the `chat.header` plugin slot at the
           top of the sheet — the affordances the dropped header used to host. */}
-      {activeSession ? (
-        <SessionSettingsSheet
-          session={activeSession}
-          open={sessionSettingsOpen}
-          onOpenChange={setSessionSettingsOpen}
-          focusSection={sessionSettingsFocus}
-          showAmbientStatus
-        />
-      ) : null}
+        {activeSession ? (
+          <SessionSettingsSheet
+            session={activeSession}
+            open={sessionSettingsOpen}
+            onOpenChange={setSessionSettingsOpen}
+            focusSection={sessionSettingsFocus}
+            showAmbientStatus
+          />
+        ) : null}
 
-      {/* ── Chat pane (single column) ─────────────────────────────────── */}
-      <main
-        // No bottom reserve here. `MobileShellWrapper` owns the one and only
-        // <MobileTabBar /> reservation; this used to re-assert it because the
-        // shell root was `h-[100dvh]` and escaped the wrapper's padding. The
-        // root is `h-full` now, so the padding above already applies and a
-        // second copy showed up as a 56px band of bare background between the
-        // composer and the bar.
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-        data-bg-target="chat"
-      >
-        {!mounted ? null : canvasGuild ? (
-          <CanvasShell />
-        ) : (
-          // gap11 — wrap the chat in the artifact dock (mirrors the desktop
-          // workspace + /inbox/c). On mobile the dock renders an `ArtifactPanel`
-          // bottom Sheet that opens automatically when an artifact is created;
-          // without this mount an `ArtifactPart` tap had nothing to open.
-          <ArtifactWorkspaceDock>
-            <ChatPane
-              activeSession={activeSession}
-              // The mobile shell renders its own top bar (CharacterHeader) +
-              // relocates the inner ChatHeader's affordances into the session
-              // settings sheet, so suppress the duplicate inner header.
-              showHeader={false}
-              onSend={handleSend}
-              onStop={stop}
-              // Steer parity with desktop: without these the RunStatusBar's
-              // "steer now" button never renders and an errored settle would
-              // strand the queued steer with no flush affordance.
-              onSteerNow={isTeamSession ? teamChat.interruptAndSteer : directChat.interruptAndSteer}
-              onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
-              onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-              onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-              onCreate={handleNewDirect}
-              onUseSample={(text) => void handleFirstTurn(text)}
-              onHeroSend={handleFirstTurn}
-              // `handleFirstTurn` sends into an active team room through its
-              // own router, which carries no runtime route; with no session it
-              // always creates a direct chat, which does.
-              heroRouting={!isTeamSession}
-              onOpenSettings={openSettings}
-              recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
-              onResumeSession={handleSwitchToSession}
-              composerRef={composerRef}
-              runtimeNotice={
-                chatRuntime.composerDisabled ? (
-                  <MobileChatRuntimeNotice
-                    gate={chatRuntime}
-                    onNavigate={(href) => router.push(href)}
-                    onOpenSettings={openSettings}
-                  />
-                ) : null
-              }
-              // With history the card would push the transcript down; the
-              // same report rides the composer's top edge as one line instead.
-              runtimeStrip={
-                chatRuntime.composerDisabled ? (
-                  <MobileChatRuntimeStrip
-                    gate={chatRuntime}
-                    onNavigate={(href) => router.push(href)}
-                    onOpenSettings={openSettings}
-                  />
-                ) : null
-              }
-              composerDisabledPlaceholder={tChatRuntime("strip.placeholder")}
-              composerDisabled={chatRuntime.composerDisabled}
-              // Same guard as the desktop: only offered when the workspace has
-              // a directory, because "Local" means nothing without one.
-              newChatExecutionControls={
-                newChatExecutionRoot ? (
-                  <NewChatExecutionPicker
-                    rootDir={newChatExecutionRoot}
-                    value={newChatExecution}
-                    onChange={setNewChatExecution}
-                  />
-                ) : undefined
-              }
-              welcomeExtras={{
-                hideSamples: true,
-                // Three other doors to a new conversation on this shell: the ⋮
-                // menu, the quick-action grid, and the composer right above it
-                // (the first send creates the session). The fourth also threw
-                // away whatever had been typed.
-                hideNewChatAction: true,
-                header: <MobileActiveRunsCard />,
-                quickActions: (
-                  <MobileQuickActions
-                    onNewChat={handleNewDirect}
-                    onSearch={() => setSearchOpen(true)}
-                    onEditLayout={() => setHomeLayoutOpen(true)}
-                  />
-                ),
-              }}
-            />
-          </ArtifactWorkspaceDock>
-        )}
-      </main>
+        {/* ── Chat pane (single column) ─────────────────────────────────── */}
+        <main
+          // No bottom reserve here. `MobileShellWrapper` owns the one and only
+          // <MobileTabBar /> reservation; this used to re-assert it because the
+          // shell root was `h-[100dvh]` and escaped the wrapper's padding. The
+          // root is `h-full` now, so the padding above already applies and a
+          // second copy showed up as a 56px band of bare background between the
+          // composer and the bar.
+          className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+          data-bg-target="chat"
+        >
+          {!mounted ? null : canvasGuild ? (
+            <CanvasShell />
+          ) : (
+            // gap11 — wrap the chat in the artifact dock (mirrors the desktop
+            // workspace + /inbox/c). On mobile the dock renders an `ArtifactPanel`
+            // bottom Sheet that opens automatically when an artifact is created;
+            // without this mount an `ArtifactPart` tap had nothing to open.
+            <ArtifactWorkspaceDock>
+              <ChatPane
+                activeSession={activeSession}
+                // The mobile shell renders its own top bar (CharacterHeader) +
+                // relocates the inner ChatHeader's affordances into the session
+                // settings sheet, so suppress the duplicate inner header.
+                showHeader={false}
+                onSend={handleSend}
+                onStop={stop}
+                // Steer parity with desktop: without these the RunStatusBar's
+                // "steer now" button never renders and an errored settle would
+                // strand the queued steer with no flush affordance.
+                onSteerNow={
+                  isTeamSession ? teamChat.interruptAndSteer : directChat.interruptAndSteer
+                }
+                onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
+                onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+                onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+                onCreate={handleNewDirect}
+                onUseSample={(text) => void handleFirstTurn(text)}
+                onHeroSend={handleFirstTurn}
+                // `handleFirstTurn` sends into an active team room through its
+                // own router, which carries no runtime route; with no session it
+                // always creates a direct chat, which does.
+                heroRouting={!isTeamSession}
+                onOpenSettings={openSettings}
+                // Recent conversations are the glance recents module on this
+                // shell (home screen and drawer), not a welcome section.
+                recentSessions={undefined}
+                onResumeSession={handleSwitchToSession}
+                composerRef={composerRef}
+                runtimeNotice={
+                  chatRuntime.composerDisabled ? (
+                    <MobileChatRuntimeNotice
+                      gate={chatRuntime}
+                      onNavigate={(href) => router.push(href)}
+                      onOpenSettings={openSettings}
+                    />
+                  ) : null
+                }
+                // With history the card would push the transcript down; the
+                // same report rides the composer's top edge as one line instead.
+                runtimeStrip={
+                  chatRuntime.composerDisabled ? (
+                    <MobileChatRuntimeStrip
+                      gate={chatRuntime}
+                      onNavigate={(href) => router.push(href)}
+                      onOpenSettings={openSettings}
+                    />
+                  ) : null
+                }
+                composerDisabledPlaceholder={tChatRuntime("strip.placeholder")}
+                composerDisabled={chatRuntime.composerDisabled}
+                // Same guard as the desktop: only offered when the workspace has
+                // a directory, because "Local" means nothing without one.
+                newChatExecutionControls={
+                  newChatExecutionRoot ? (
+                    <NewChatExecutionPicker
+                      rootDir={newChatExecutionRoot}
+                      value={newChatExecution}
+                      onChange={setNewChatExecution}
+                    />
+                  ) : undefined
+                }
+                welcomeExtras={{
+                  hideSamples: true,
+                  // Three other doors to a new conversation on this shell: the ⋮
+                  // menu, the quick-action grid, and the composer right above it
+                  // (the first send creates the session). The fourth also threw
+                  // away whatever had been typed.
+                  hideNewChatAction: true,
+                  // The home screen's glance: the modules pinned to it, in one
+                  // container (ADR-0225 §9). Replaces the active-runs card, the
+                  // shortcut grid and the usage dashboard.
+                  quickActions: <MobileGlanceHome />,
+                }}
+              />
+            </ArtifactWorkspaceDock>
+          )}
+        </main>
 
-      {/* ── Right-side sheets ─────────────────────────────────────────── */}
-      {isTeamSession ? (
-        <Sheet open={memberSheetOpen} onOpenChange={setMemberSheetOpen}>
-          <SheetContent
-            side="right"
-            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md md:max-w-lg"
-            data-testid="mobile-members-sheet"
-          >
-            <SheetHeader>
-              <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
-            </SheetHeader>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {/* The same panel the desktop workbench shows — one roster, one
+        {/* ── Right-side sheets ─────────────────────────────────────────── */}
+        {isTeamSession ? (
+          <Sheet open={memberSheetOpen} onOpenChange={setMemberSheetOpen}>
+            <SheetContent
+              side="right"
+              className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md md:max-w-lg"
+              data-testid="mobile-members-sheet"
+            >
+              <SheetHeader>
+                <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {/* The same panel the desktop workbench shows — one roster, one
                   set of member actions. Opening a member's own chat navigates
                   away, so the sheet closes behind it. */}
-              <TeamMembersPanel
-                teamSessionId={activeSession?.id ?? null}
-                teamId={activeSession?.teamId ?? null}
-                onNavigated={() => setMemberSheetOpen(false)}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      ) : null}
+                <TeamMembersPanel
+                  teamSessionId={activeSession?.id ?? null}
+                  teamId={activeSession?.teamId ?? null}
+                  onNavigated={() => setMemberSheetOpen(false)}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
+        ) : null}
 
-      {/* ── Cross-cutting dialogs (mirrored from DesktopChatWorkspace) ── */}
-      <CharacterPicker
-        open={characterPickerOpen}
-        onOpenChange={setCharacterPickerOpen}
-        onPick={async (c) => {
-          const s = await create({
-            title: tShell("directSessionTitle", { name: c.name }),
-            kind: "direct",
-            characterId: c.id,
-          })
-          select(s.id)
-          setSelectedGuild({ kind: "dm" })
-        }}
-      />
+        {/* ── Cross-cutting dialogs (mirrored from DesktopChatWorkspace) ── */}
+        <CharacterPicker
+          open={characterPickerOpen}
+          onOpenChange={setCharacterPickerOpen}
+          onPick={async (c) => {
+            const s = await create({
+              title: tShell("directSessionTitle", { name: c.name }),
+              kind: "direct",
+              characterId: c.id,
+            })
+            select(s.id)
+            setSelectedGuild({ kind: "dm" })
+          }}
+        />
 
-      <MobileCommandPalette
-        open={searchOpen}
-        onOpenChange={setSearchOpen}
-        onNewChat={handleNewDirect}
-        onSelectSession={handleSwitchToSession}
-        onOpenSettings={openSettings}
-      />
+        <MobileCommandPalette
+          open={searchOpen}
+          onOpenChange={setSearchOpen}
+          onNewChat={handleNewDirect}
+          onSelectSession={handleSwitchToSession}
+          onOpenSettings={openSettings}
+        />
 
-      {/* Home-layout editor. Mounted by the shell rather than by the grid it
+        {/* Home-layout editor. Mounted by the shell rather than by the grid it
           edits, so the ⋮ entry can still reach it after every home section has
           been dismissed. */}
-      <MobileHomeLayoutSheet open={homeLayoutOpen} onOpenChange={setHomeLayoutOpen} />
-    </div>
+        <MobileHomeLayoutSheet open={homeLayoutOpen} onOpenChange={setHomeLayoutOpen} />
+
+        {/* The phone's tray panel. Mounted by the shell, like the layout sheet,
+          so the app bar's button reaches it from every screen. */}
+        <MobileGlanceDrawer />
+      </div>
+    </MobileGlanceProvider>
   )
 }

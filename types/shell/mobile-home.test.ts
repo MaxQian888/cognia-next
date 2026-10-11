@@ -1,19 +1,18 @@
 import {
   DEFAULT_MOBILE_HOME_LAYOUT,
   LEGACY_MOBILE_QUICK_ACTION_IDS,
-  MOBILE_HOME_SECTION_IDS,
   MOBILE_QUICK_ACTION_CATALOG,
 } from "./mobile-home"
 import enMessages from "@/i18n/messages/en.json"
 import zhCnMessages from "@/i18n/messages/zh-CN.json"
 
 /**
- * Both label sets on the mobile home are looked up DYNAMICALLY:
- * `mobile-quick-actions-editor.tsx` renders `tSections(id)` over the section
- * ids and `tActions(item.i18nKey)` over the catalog. `lint:i18n` only follows
- * literal keys, so neither is checked by the gate, and every suite that renders
- * these components stubs `useTranslations` to echo its argument. A missing key
- * would therefore ship as a `MISSING_MESSAGE` on screen with every gate green.
+ * The shortcut labels are looked up DYNAMICALLY: the quick module and the
+ * shortcut editor render `tActions(item.i18nKey)` over the catalog.
+ * `lint:i18n` only follows literal keys, so the gate does not check them, and
+ * every suite that renders those components stubs `useTranslations` to echo
+ * its argument. A missing key would therefore ship as a `MISSING_MESSAGE` on
+ * screen with every gate green.
  *
  * This is the catalogue-coverage guard that closes that hole, modelled on
  * `types/shell/sidebar.test.ts`, which does the same job for the desktop rail.
@@ -55,26 +54,5 @@ describe("mobile home catalog", () => {
     for (const item of MOBILE_QUICK_ACTION_CATALOG) {
       expect(labels[item.i18nKey]).toEqual(expect.any(String))
     }
-  })
-
-  it.each([
-    ["en", enMessages],
-    ["zh-CN", zhCnMessages],
-  ])("defines every dynamic section label in %s", (_locale, messages) => {
-    const labels = messages.mobile.home.sections as Record<string, unknown>
-    for (const id of MOBILE_HOME_SECTION_IDS) {
-      expect(labels[id]).toEqual(expect.any(String))
-    }
-  })
-
-  // The section labels are interpolated into the dismiss buttons' accessible
-  // names, so the surrounding message has to exist in both locales too.
-  it.each([
-    ["en", enMessages],
-    ["zh-CN", zhCnMessages],
-  ])("defines the dismiss label with its {section} placeholder in %s", (_locale, messages) => {
-    const hide = messages.mobile.home.hideSection as unknown
-    expect(hide).toEqual(expect.any(String))
-    expect(hide as string).toContain("{section}")
   })
 })

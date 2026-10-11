@@ -21,6 +21,7 @@ export type GlancePlatform = "desktop" | "mobile"
 /** Where a module's subject is owned. Resolved to a route by the publisher. */
 export type GlanceOwnerSurface =
   | "fleet"
+  | "workflows"
   | "usage"
   | "subscription"
   | "scheduler"
@@ -30,7 +31,11 @@ export type GlanceOwnerSurface =
   | "pet"
   | "tray-actions"
 
-/** The snapshot slice a module reads. `quick` reads the action catalogue. */
+/**
+ * The snapshot slice a module reads. `quick` reads the host's own action list:
+ * the tray panel's action catalogue on the desktop, the shortcut list of the
+ * phone's layout on a phone. Neither crosses to the other platform.
+ */
 export type GlanceSliceKey =
   "fleet" | "usage" | "quota" | "agenda" | "activity" | "recents" | "pet" | "actions"
 
@@ -46,10 +51,7 @@ export interface GlanceModuleDefinition {
   owner: GlanceOwnerSurface
   /** Narrowed by the header's workspace filter (§8). */
   scopeable: boolean
-  /**
-   * Surfaces that can render it. `quick` runs the desktop tray's own action
-   * catalogue, which a phone does not have.
-   */
+  /** Surfaces that can render it. */
   platforms: readonly GlancePlatform[]
 }
 
@@ -114,7 +116,7 @@ export const GLANCE_MODULES: Readonly<Record<GlanceModuleId, GlanceModuleDefinit
     slice: "actions",
     owner: "tray-actions",
     scopeable: false,
-    platforms: ["desktop"],
+    platforms: EVERYWHERE,
   },
   recents: {
     id: "recents",

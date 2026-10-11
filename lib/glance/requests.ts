@@ -81,6 +81,7 @@ export interface GlanceRequestResult {
 }
 
 const OWNERS: readonly GlanceOwnerSurface[] = [
+  "workflows",
   "fleet",
   "usage",
   "subscription",

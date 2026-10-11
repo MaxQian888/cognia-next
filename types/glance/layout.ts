@@ -115,3 +115,32 @@ export const DEFAULT_GLANCE_MODULE_OPTIONS: GlanceModuleOptions = {
   usage: { scope: "cognia", showSpend: false },
   activity: { range: "3m" },
 }
+
+/* ── Mobile (ADR-0225 §9, §10) ───────────────────────────────────────── */
+
+/**
+ * A mobile stack entry. `home` pins the module to the home screen too: the
+ * home renders pinned, visible entries in layout order; the Glance drawer
+ * always renders every visible entry. A hidden entry is on neither.
+ */
+export interface GlanceMobileEntry extends GlanceLayoutEntry {
+  home: boolean
+}
+
+/**
+ * Persisted shape (`AppSettings.mobileGlanceLayout`). One per account: the
+ * phone's home screen and Glance drawer. Independent of the desktop's
+ * `trayPanelLayout`; either can copy the other's entries.
+ *
+ * `shortcuts` is the quick module's content on a phone: the ordered ids of the
+ * shortcut catalogue (`MOBILE_QUICK_ACTION_CATALOG`), which used to be
+ * `mobileHomeLayout.quickActions`.
+ */
+export interface GlanceMobileSettings {
+  version: 1
+  preset: GlancePresetId | "custom"
+  entries: GlanceMobileEntry[]
+  scope: GlanceScope
+  options: GlanceModuleOptions
+  shortcuts: string[]
+}

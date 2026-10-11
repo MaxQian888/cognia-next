@@ -16,7 +16,45 @@ import {
   type GlanceFleetRow,
   type GlanceFleetSlice,
   type GlanceFleetState,
+  type GlanceFleetWorkflows,
 } from "./snapshot"
+
+/** Longest workflow name a slice carries. */
+export const GLANCE_WORKFLOW_NAME_MAX = 80
+
+export const NO_RUNNING_WORKFLOWS: GlanceFleetWorkflows = { running: 0, latest: null }
+
+/** The fields of a `workflowRuns` row this summary reads. */
+export interface RunningWorkflowInput {
+  workflowId: string
+  startedAt: number
+}
+
+/**
+ * Summarize the running workflow runs: how many, and the newest one by start
+ * time, named by its workflow (falling back to the id when the workflow row
+ * is gone, as the runs page does).
+ */
+export function summarizeRunningWorkflows(
+  runs: readonly RunningWorkflowInput[],
+  names: ReadonlyMap<string, string>
+): GlanceFleetWorkflows {
+  if (runs.length === 0) return NO_RUNNING_WORKFLOWS
+  let latest = runs[0]
+  for (const run of runs) if (run.startedAt > latest.startedAt) latest = run
+  const name = (names.get(latest.workflowId) ?? latest.workflowId).trim()
+  return {
+    running: runs.length,
+    latest: {
+      workflowId: latest.workflowId,
+      name:
+        name.length > GLANCE_WORKFLOW_NAME_MAX
+          ? `${name.slice(0, GLANCE_WORKFLOW_NAME_MAX - 1)}…`
+          : name,
+      startedAt: latest.startedAt,
+    },
+  }
+}
 
 const STATE_OF: Record<IslandRowStatus, GlanceFleetState> = {
   blocked: "awaiting",
@@ -41,8 +79,16 @@ function rowOf(row: IslandRowProjection): GlanceFleetRow {
   }
 }
 
-/** Project the island state. Rows keep the island's priority order. */
-export function buildFleetSlice(island: IslandState | null, now: number): GlanceFleetSlice {
+/**
+ * Project the island state. Rows keep the island's priority order. A host
+ * with no island (a phone) passes null and gets an empty row list; running
+ * workflows are summarized either way.
+ */
+export function buildFleetSlice(
+  island: IslandState | null,
+  now: number,
+  workflows: GlanceFleetWorkflows = NO_RUNNING_WORKFLOWS
+): GlanceFleetSlice {
   const rows = (island?.rows ?? []).map(rowOf)
   const counts = { working: 0, awaiting: 0, failed: 0 }
   for (const row of rows) {
@@ -55,5 +101,6 @@ export function buildFleetSlice(island: IslandState | null, now: number): Glance
     counts,
     total: rows.length,
     rows: rows.slice(0, GLANCE_FLEET_MAX_ROWS),
+    workflows,
   }
 }

@@ -1,12 +1,12 @@
 /**
- * Pure (icon-free) catalog + layout model for the mobile home (chat welcome)
- * quick-action grid and its toggleable sections.
+ * Pure (icon-free) catalog of the phone's shortcuts (the quick module's
+ * content, ADR-0225 §9), and the pre-ADR-0225 home model it came from.
  *
- * Mirrors `@/types/shell/sidebar` exactly: kept free of React / lucide so
- * `lib/claude/types.ts` (`AppSettings`) and the persistence layer can import
- * `MobileHomeLayout` / `DEFAULT_MOBILE_HOME_LAYOUT` without pulling the icon set
- * into their module graph. The icon mapping + resolver live in
- * `lib/shell/mobile-home-nav.ts`.
+ * Mirrors `@/types/shell/sidebar`: kept free of React / lucide so
+ * `AppSettings` and the persistence layer can import it without pulling the
+ * icon set into their module graph. The icon mapping + resolver live in
+ * `lib/shell/mobile-home-nav.ts`; the layout that replaced `MobileHomeLayout`
+ * is `GlanceMobileSettings` (`@/types/glance/layout`).
  */
 
 /** How a quick action behaves when tapped. */
@@ -25,9 +25,9 @@ export interface MobileQuickActionMeta {
 }
 
 /**
- * The full quick-action catalog, in canonical order. Actions not in
- * `MobileHomeLayout.quickActions` surface in the customizer's "available" pool,
- * so a future catalog addition is opt-in (never auto-shown on the home grid).
+ * The full shortcut catalog, in canonical order. Shortcuts not in the stored
+ * list surface in the editor's "available" pool, so a future catalog addition
+ * is opt-in (never auto-shown in the grid).
  */
 export const MOBILE_QUICK_ACTION_CATALOG: readonly MobileQuickActionMeta[] = [
   { id: "newChat", kind: "newChat", i18nKey: "newChat" },
@@ -61,19 +61,15 @@ export const LEGACY_MOBILE_QUICK_ACTION_IDS: Readonly<Record<string, string>> = 
   agentTeams: "squads",
 }
 
-/** Toggleable home sections (the quick-action grid + the two welcome blocks). */
+/** The home sections the pre-ADR-0225 model could hide. */
 export type MobileHomeSectionId = "quickActions" | "recents" | "activeRuns"
 
-export const MOBILE_HOME_SECTION_IDS: readonly MobileHomeSectionId[] = [
-  "quickActions",
-  "recents",
-  "activeRuns",
-]
-
 /**
- * User customization of the mobile home. `quickActions` is the ordered set of
- * action ids shown on the grid; `hiddenSections` toggles whole blocks off.
- * Anything not in `quickActions` is "available to add" (derived, not stored).
+ * Legacy (pre-ADR-0225) customization of the mobile home, still stored as
+ * `AppSettings.mobileHomeLayout` on phones that have not saved a glance
+ * layout yet. `quickActions` is the ordered shortcut list; `hiddenSections`
+ * turned whole blocks off. Read once into the glance model by
+ * `migrateMobileHomeLayout` (`lib/glance/mobile-layout.ts`), never written.
  */
 export interface MobileHomeLayout {
   /** Ordered action ids shown on the home grid. */
@@ -84,7 +80,8 @@ export interface MobileHomeLayout {
 
 /**
  * Default: a lean grid (new chat / search / workflows / discover), every
- * section visible (`activeRuns` further self-hides when no run is active).
+ * section visible. Its `quickActions` are also the glance layout's default
+ * shortcuts.
  */
 export const DEFAULT_MOBILE_HOME_LAYOUT: MobileHomeLayout = {
   quickActions: ["newChat", "search", "workflows", "discover"],

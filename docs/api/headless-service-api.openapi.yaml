@@ -4559,6 +4559,7 @@ paths:
                     messageDisplay: {}
                     mistralVoiceId: {}
                     mobileComputerUseEnabled: {}
+                    mobileGlanceLayout: {}
                     motion: {}
                     notificationPreferences: {}
                     onboardingProfile: {}
@@ -28315,6 +28316,8 @@ paths:
                         type: object
                         additionalProperties: true
                     additionalProperties: false
+                  relayUnavailable:
+                    type: string
                 additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
@@ -84707,6 +84710,739 @@ paths:
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
                 x-cognia-schema-owner: github-workspaces
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/glance_quota_enable:
+    post:
+      operationId: internalRpcGlanceQuotaEnable
+      tags:
+        - headless-rpc
+      summary: glance_quota_enable (client.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Turn quota queries on for one vault account. A settings write on the desktop; asking again for an account
+                already on changes nothing.
+              required:
+                - provider
+                - accountId
+              properties:
+                provider:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                accountId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                    properties:
+                      ok:
+                        const: true
+                    additionalProperties: false
+                  - type: object
+                    description: "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while
+                      the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when
+                      the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed."
+                    required:
+                      - ok
+                      - code
+                    properties:
+                      ok:
+                        const: false
+                      code:
+                        type: string
+                    additionalProperties: false
+                    x-cognia-wire-source: lib/glance/remote/types.ts
+                x-cognia-wire-source: lib/glance/remote/types.ts
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/glance_request:
+    post:
+      operationId: internalRpcGlanceRequest
+      tags:
+        - headless-rpc
+      summary: glance_request (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "Re-read glance now: every slice, or one quota source. Runs through the same executor as the desktop tray
+                panel's own requests; the result arrives as the next `glance://update` push."
+              required:
+                - consumer
+                - kind
+              properties:
+                consumer:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  description: One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier
+                    demand.
+                kind:
+                  type: string
+                  enum:
+                    - refresh
+                    - quota-refresh
+                key:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+                  description: The quota source to re-read, as the snapshot's quota slice names it. Required with kind quota-refresh; a
+                    refresh ignores it.
+              oneOf:
+                - required:
+                    - kind
+                  properties:
+                    kind:
+                      const: refresh
+                - required:
+                    - kind
+                    - key
+                  properties:
+                    kind:
+                      const: quota-refresh
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                    properties:
+                      ok:
+                        const: true
+                    additionalProperties: false
+                  - type: object
+                    description: "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while
+                      the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when
+                      the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed."
+                    required:
+                      - ok
+                      - code
+                    properties:
+                      ok:
+                        const: false
+                      code:
+                        type: string
+                    additionalProperties: false
+                    x-cognia-wire-source: lib/glance/remote/types.ts
+                x-cognia-wire-source: lib/glance/remote/types.ts
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/glance_subscribe:
+    post:
+      operationId: internalRpcGlanceSubscribe
+      tags:
+        - headless-rpc
+      summary: glance_subscribe (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Announce, renew or end this phone's glance lease. While a lease is live the desktop builds slices for the
+                merged demand of every leased phone and pushes each new snapshot on `glance://update`; the answer
+                carries the newest one and how soon to renew.
+              required:
+                - consumer
+                - visible
+                - demand
+              properties:
+                consumer:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  description: One id per phone app instance. A lease is keyed on it, so a renewal from the same app replaces its earlier
+                    demand.
+                visible:
+                  type: boolean
+                  description: "False ends the lease: the phone stopped showing glance."
+                demand:
+                  type: object
+                  description: What the phone shows, as the slices it needs. Its own layout (order, sizes, pins) never crosses the wire.
+                  required:
+                    - modules
+                    - scope
+                    - workspaceId
+                    - usage
+                    - activity
+                  properties:
+                    modules:
+                      type: array
+                      maxItems: 12
+                      items:
+                        type: string
+                        enum:
+                          - fleet
+                          - usage
+                          - quota
+                          - agenda
+                          - activity
+                          - pet
+                      description: The host-sourced modules the phone shows. Duplicates are folded; an unknown module refuses the whole
+                        demand.
+                    scope:
+                      type: string
+                      enum:
+                        - all
+                        - workspace
+                    workspaceId:
+                      oneOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 128
+                        - type: "null"
+                      description: The workspace the phone filters to. Read only when scope is workspace.
+                    usage:
+                      type: object
+                      required:
+                        - scope
+                        - showSpend
+                      properties:
+                        scope:
+                          type: string
+                          enum:
+                            - cognia
+                            - all-tools
+                        showSpend:
+                          type: boolean
+                      additionalProperties: false
+                    activity:
+                      type: object
+                      required:
+                        - range
+                      properties:
+                        range:
+                          type: string
+                          enum:
+                            - 1m
+                            - 3m
+                            - 1y
+                      additionalProperties: false
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - ok
+                      - snapshot
+                      - ttlMs
+                    properties:
+                      ok:
+                        const: true
+                      snapshot:
+                        oneOf:
+                          - type: object
+                            description: One content-free glance snapshot built for the merged demand of the leased phones (`GlanceSnapshotV1`). The
+                              phone checks it with `isGlanceSnapshot` and drops anything older than what it holds by
+                              (epoch, revision).
+                            required:
+                              - version
+                              - epoch
+                              - revision
+                              - generatedAt
+                              - config
+                              - when
+                              - actions
+                            properties:
+                              version:
+                                type: integer
+                                minimum: 1
+                              epoch:
+                                type: number
+                              revision:
+                                type: number
+                              generatedAt:
+                                type: number
+                              config:
+                                type: object
+                                x-cognia-opaque-reason: On a remote snapshot this is the phone's own demand echoed back as normalized panel settings;
+                                  GlancePanelSettings (types/glance/layout.ts) owns the shape.
+                              when:
+                                type: object
+                                x-cognia-opaque-reason: TrayStateSnapshot, the app state quick-action `when` expressions read; owned by the tray panel
+                                  catalogue (lib/tray-panel/catalogue.ts).
+                              actions:
+                                type: array
+                                maxItems: 0
+                                items:
+                                  type: object
+                                description: "Always empty for a paired phone: the desktop's tray actions are host configuration and never leave it."
+                            additionalProperties: true
+                            x-cognia-opaque-reason: The module slices (fleet, usage, quota, agenda, activity, pet, recents) and hostLayout are
+                              versioned with GlanceSnapshotV1 in lib/glance/snapshot.ts; the envelope is pinned here,
+                              slice typing stays with the glance domain.
+                            x-cognia-wire-source: lib/glance/snapshot.ts
+                          - type: "null"
+                        description: The newest snapshot for the merged demand; null while the first is still building, or when the call ended
+                          the lease.
+                      ttlMs:
+                        type: number
+                        exclusiveMinimum: 0
+                        description: Renew the lease well before this many milliseconds pass.
+                    additionalProperties: false
+                  - type: object
+                    description: "A refused `glance_*` call: `headless_host` from a brain that builds no glance, `glance_unavailable` while
+                      the desktop's publisher is not mounted (retry on the next renewal), `glance_invalid_request` when
+                      the payload failed its reader, or a `glance` `errors.*` key from a request that ran and failed."
+                    required:
+                      - ok
+                      - code
+                    properties:
+                      ok:
+                        const: false
+                      code:
+                        type: string
+                    additionalProperties: false
+                    x-cognia-wire-source: lib/glance/remote/types.ts
+                x-cognia-wire-source: lib/glance/remote/types.ts
+                x-cognia-schema-owner: glance
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -171853,6 +172589,9 @@ components:
           - github_workspace_commit_and_push
           - github_workspace_remove
           - github_workspace_stat
+          - glance_quota_enable
+          - glance_request
+          - glance_subscribe
           - goal_accept
           - goal_continue
           - goal_create
@@ -172507,10 +173246,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 803
-  generatedRequestSchemaCount: 803
+  internalCommandCount: 806
+  generatedRequestSchemaCount: 806
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 803
+  contractRequestSchemaCount: 806
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 803
+  generatedResponseSchemaCount: 806
   loopbackOnly: true

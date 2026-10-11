@@ -1,11 +1,11 @@
 ---
 title: Tray Panel
-description: The desktop tray icon opens a glance surface — Fleet, usage, quota, agenda, activity, quick actions, recents and pet, assembled from modules — that summarizes and routes, fed by one snapshot the main window publishes.
+description: The desktop tray icon opens a glance surface — Fleet, usage, quota, agenda, activity, quick actions, recents and pet, assembled from modules — that summarizes and routes, fed by one snapshot the main window publishes. The same modules make up the phone's home screen and its Glance drawer.
 ---
 
 # Tray Panel
 
-<Status variant="beta">Beta · desktop · ADR-0225 phases 1–2</Status>
+<Status variant="beta">Beta · desktop and mobile · ADR-0225 phases 1–3</Status>
 
 <TLDR>
   Left-clicking the tray icon opens a small always-on-top window: a header with the workspace scope
@@ -13,7 +13,8 @@ description: The desktop tray icon opens a glance surface — Fleet, usage, quot
   footer. The panel owns no data and runs nothing itself. The main window builds a content-free
   `GlanceSnapshotV1` while a panel holds a lease on it, and executes the panel's requests. Every
   module summarizes a subsystem and routes to it; the subsystem keeps its controls. Agent Fleet's
-  approvals and per-task stop stay on the Island.
+  approvals and per-task stop stay on the Island. On a phone the same modules form the home screen
+  and a Glance drawer; a paired phone takes the desktop's slices over the companion connection.
 </TLDR>
 
 ## Layout
@@ -36,12 +37,12 @@ owner surface it routes to. A size a module does not support degrades to the nea
 
 | Module     | Sizes                         | Shows                                                                                       | Routes to                                    |
 | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `fleet`    | compact · standard · expanded | Working / awaiting / failed counts and the top rows. **Read-only**                          | The Island, focused on the clicked row       |
+| `fleet`    | compact · standard · expanded | Working / awaiting / failed counts, the top rows, and the visual workflows running now. **Read-only** | The Island, focused on the clicked row; a workflow line opens its runs page |
 | `usage`    | compact · standard · expanded | Tokens today / 7 days / 30 days, turns or spend, budget meter, provider shares              | Settings › Subscription › Usage              |
 | `quota`    | compact · standard · expanded | Each credentialed source's windows as "used %", with ok / warn / exhausted / error / stale | Settings › Subscription                      |
 | `agenda`   | compact · standard            | Next scheduled run, last outcome, unread notifications, connectivity                        | Scheduler item, notification center, devices |
 | `activity` | compact · standard · expanded | Daily heatmap over 1 / 3 / 12 months, streaks, peak hour                                    | Settings › Subscription › Usage              |
-| `quick`    | compact · standard            | The user's tray actions other than the primary (desktop host only)                         | Settings › Desktop to edit them              |
+| `quick`    | compact · standard            | Desktop: the tray actions other than the primary. Phone: the layout's shortcut grid        | Settings › Desktop / the phone's layout editor |
 | `recents`  | compact · standard            | The last few conversations                                                                  | That conversation                            |
 | `pet`      | compact · standard            | Pet needs, and feed / play / pet / sleep / clean                                            | The pet page                                 |
 
@@ -116,7 +117,8 @@ Settings › Desktop › Tray panel holds the full editor:
 - **Modules**: the same layout editor as edit mode, the preset switch, the delegate bar switch, and a
   live preview beside them. The preview renders the real modules over this window's own data at the
   configured width and max height. It is built passively (no quota refresh, no login discovery) and
-  is `inert`, a picture rather than a second panel.
+  is `inert`, a picture rather than a second panel. **Phone layout** copies a paired phone's modules,
+  order and sizes, once a phone has saved its own layout.
 - **Panel layout**: width step (320 / 380 / 460 px), max height, default scope, and whether the
   delegate bar takes focus on open.
 - **Actions**: the action catalogue editor.
@@ -135,6 +137,74 @@ settings win and the pref is dropped. `resolveTrayPanelActions` (`lib/tray-panel
 repairs whatever it reads: malformed or duplicate entries are dropped, retired native effects
 rewritten, and built-ins a newer build added folded back in.
 
+## Mobile
+
+The phone renders the same module kit (`components/glance/`) at touch size, from one layout,
+`AppSettings.mobileGlanceLayout` (`GlanceMobileSettings`):
+
+- **Glance drawer.** A bottom drawer opened from the app bar's Glance button
+  (`components/mobile/glance/mobile-glance-drawer.tsx`). It shows every visible module in one
+  container. Header: where the data comes from and how the desktop is connected, the workspace scope,
+  refresh. Footer: Edit, the preset switch, and how fresh the reading is. Edit swaps the stack for the
+  layout editor in place. The button carries a dot when something is waiting (from the Fleet mirror
+  the phone already holds) or failed; below 384 px it folds into the ⋮ menu with its dot.
+- **Home screen.** The visible modules pinned with `home` render under the composer, in layout order
+  (`mobile-glance-home.tsx`). Fleet appears there only while something is running, waiting or
+  failed, and an empty shortcut list shows nothing, so the home stays as quiet as before.
+- **Quick module.** On a phone it is the layout's own shortcut grid (`shortcuts`), not the desktop's
+  tray actions.
+- **One editor** (`mobile-glance-editor.tsx`) in the drawer's edit mode and in the ⋮ menu's
+  "Home & Glance" sheet: modules, sizes, home pins (the house toggle), preset, shortcuts.
+
+Only what is on screen is built: the pinned modules while the home screen shows, every visible one
+while the drawer is open, nothing in the background.
+
+### Paired phones
+
+A standalone phone builds every slice from its own data. A paired phone builds recents itself (sessions
+sync) and takes the rest from the desktop: Fleet (the island lives in desktop memory), usage and
+activity (`sessionUsage` does not sync), quota (`providerLimits` and the unlocked vault), the agenda,
+and the pet (whether it is on is a desktop setting).
+
+```
+phone                                      desktop main window
+─────                                      ───────────────────
+glancePhoneStore ── glance_subscribe ─────▶ glanceRemoteHub (lease per device + consumer, TTL 60s)
+  (renew every 20s while on screen)                │  merged demand
+                                                   ▼
+                                           useGlanceSources(config for the demand)
+                    ◀── glance://update ── GlancePublisherInitializer (debounced 120 ms)
+refresh / retry ─── glance_request ──────▶ the same quota and usage sources
+enable a source ─── glance_quota_enable ─▶ (a desktop settings write)
+```
+
+- **Demand, not layout.** The phone sends the host-sourced modules on screen and the options they
+  depend on (scope, usage scope, spend, activity range). Its order, sizes and pins never leave it.
+  With several phones the modules are the union and the newest change's options win; each slice
+  states what it was built for.
+- **What it never receives.** A phone's snapshot carries no tray action catalogue (`actions` is
+  empty) and no goal title; it carries the tray layout's entries (`hostLayout`) so the phone can copy
+  them.
+- **Source labels.** Every desktop-built module shows the desktop's name and the reading's age; once
+  the lease drops it says the desktop is offline and keeps the last reading. A module the desktop
+  cannot supply says why in place: offline with nothing received yet, or a desktop that does not
+  serve glance (a headless brain answers `headless_host`, an older desktop does not advertise
+  `glance.remote`).
+- **Not queued.** None of the three commands is in the offline outbound queue: a refresh replayed
+  later would answer a moment that has passed.
+
+### Migration and copying
+
+Before ADR-0225 the home had its own model, `mobileHomeLayout` (a shortcut grid plus three section
+toggles), and the dashboard its own switch (`welcomeStats.enabled`). Until a phone saves a
+`mobileGlanceLayout`, `normalizeGlanceMobileSettings` reads that state into the new model on every read:
+the active-runs card becomes Fleet's home pin, the grid the quick module's, the dashboard usage's and
+activity's, recents stay recents. Nothing is written up front; the first edit stores the new field.
+
+The layout is `shared` in settings sync, one per account. The phone's editor can copy the desktop's
+order, sizes and visibility (its own pins stay); Settings › Desktop › Tray panel can copy the phone's
+(pins and shortcuts stay on the phone).
+
 ## Where it lives
 
 | Concern                       | Path                                                              |
@@ -150,10 +220,14 @@ rewritten, and built-ins a newer build added folded back in.
 | Panel window                  | `components/tray-panel/`, `app/tray-panel/`                       |
 | Island focus seam             | `lib/island/{focus-request,projection-store}.ts`                  |
 | Notification center seam      | `lib/notifications/center-request.ts`                             |
+| Phone layout and migration    | `types/glance/layout.ts`, `lib/glance/mobile-layout.ts`           |
+| Paired-phone channel          | `lib/glance/remote/` (commands, demand, host hub and dispatch, phone store and view) |
+| Phone surfaces                | `hooks/glance/use-mobile-glance.ts`, `components/mobile/glance/`   |
 
 ## Not yet
 
 Phase 1 shipped the registry, the snapshot, the desktop panel, Fleet routing and the quota states;
 phase 2 in-place editing, presets, the settings editor with live preview and the catalogue
-migration. The mobile home and Glance drawer (phase 3), and the plugin module point, menu-bar title
-and Capacity Dock feed (phase 4) follow ADR-0225's delivery plan.
+migration; phase 3 the phone's home screen and Glance drawer, the paired-phone channel and source
+labels. The plugin module point, the composable menu-bar title and the Capacity Dock quota feed
+(phase 4) follow ADR-0225's delivery plan.
