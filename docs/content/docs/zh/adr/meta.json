@@ -219,6 +219,7 @@
     "0221-a-remote-sandbox-is-a-provider-behind-the-same-seam",
     "0222-a-conversations-files-are-a-view-and-sharing-them-is-a-grant",
     "0223-files-is-a-space-you-manage",
-    "0224-an-always-on-host-is-a-peer-the-user-brings"
+    "0224-an-always-on-host-is-a-peer-the-user-brings",
+    "0225-the-tray-panel-is-a-glance-surface-assembled-from-modules"
   ]
 }
