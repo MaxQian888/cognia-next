@@ -47,8 +47,10 @@ import type {
   TaskExecutionTriggerSource,
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
+import { isOwnedElsewhere } from "@/lib/placement/ownership"
 import {
   makeUnifiedId,
+  PLACEHOLDER_CAPABILITIES,
   unifiedKindForTaskType,
   type UnifiedScheduledItem,
   type UnifiedItemStatus,
@@ -394,7 +396,10 @@ export function toUnified(task: ScheduledTask): UnifiedScheduledItem {
       tableName: "scheduledTasks",
       deepLinkHref: `/scheduler?taskId=${encodeURIComponent(task.id)}`,
     },
-    capabilities: { runNow: true, pause: true, edit: true, delete: true },
+    // A placeholder for an item a paired host runs (ADR-0224) does nothing here.
+    ...(isOwnedElsewhere(task.owner)
+      ? { owner: task.owner, capabilities: PLACEHOLDER_CAPABILITIES }
+      : { capabilities: { runNow: true, pause: true, edit: true, delete: true } }),
   }
 }
 

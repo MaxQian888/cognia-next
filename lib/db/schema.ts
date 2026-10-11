@@ -39,6 +39,7 @@ import type {
   SystemPromptPreset,
   Team,
 } from "@cognia/agent-config-types"
+import type { ItemMigrationRow } from "./item-migrations"
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import type {
@@ -428,7 +429,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 237
+export const CURRENT_SCHEMA_VERSION = 238
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -932,6 +933,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   browserSubmissions: "&submissionId, deviceId, sessionId, submittedAt, [deviceId+submittedAt]",
   threadHandoffTickets:
     "&[ticketId+role], ticketId, role, state, expiresAt, source.sessionId, target.hostRef",
+  // v238 — always-on work moved to or taken back from a paired host (ADR-0224).
+  itemMigrations: "&operationId, [itemKind+itemId], hostId, state, updatedAt",
   externalAgentConfigHeads: "&configId, tombstonedAt, updatedAt",
   externalAgentConfigRevisions: "&revisionId, configId, [configId+seq], createdAt, *leaseRuns",
   siteBuildLogs: "&id, versionId, siteId, operationId, [versionId+phase], createdAt",
@@ -1703,6 +1706,7 @@ export class CogniaDB extends Dexie {
   // v200 — ADR-0103 two-role cross-host handoff journal. See
   // `lib/db/thread-handoff-tickets.ts`.
   threadHandoffTickets!: Table<ThreadHandoffTicket, [string, string]>
+  itemMigrations!: Table<ItemMigrationRow, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.

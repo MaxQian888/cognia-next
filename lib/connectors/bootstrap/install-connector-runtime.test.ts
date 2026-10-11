@@ -1322,6 +1322,37 @@ describe("installConnectorRuntime", () => {
     expect(log).toHaveBeenCalledWith("info", expect.stringContaining("skipped by host filter"))
   })
 
+  it("never builds a placeholder for an instance that moved to a paired host", async () => {
+    // No caller filter needed: every host, desktop or brain, skips it, and
+    // says where it runs instead (ADR-0224).
+    mockedIsTauri.mockReturnValue(true)
+    const kept = makeWebhookRow("cai_kept")
+    const moved = {
+      ...makeWebhookRow("cai_moved"),
+      owner: {
+        kind: "remote-host" as const,
+        hostId: "mini",
+        hostLabel: "Mac mini",
+        remoteItemId: "cai_moved",
+        operationId: "op",
+        movedAt: 1,
+      },
+    }
+    const adapter = makeWebhookAdapter(kept.id)
+    mockListEnabled.mockResolvedValue([kept, moved])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const log = jest.fn()
+    install({ log })
+    await waitFor(() => expect(mockRegisterAdapter).toHaveBeenCalledTimes(1))
+    expect(mockBuildAdapterFromRow).toHaveBeenCalledTimes(1)
+    expect(mockBuildAdapterFromRow).toHaveBeenCalledWith(kept)
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      expect.stringContaining("cai_moved (lark) runs on Mac mini, not here")
+    )
+  })
+
   it("routes boot logs through the injected log sink instead of the console", async () => {
     mockedIsTauri.mockReturnValue(true)
     mockResetAllWs.mockRejectedValueOnce(new Error("reset bombed"))

@@ -159,6 +159,36 @@ describe("isRunnableBot", () => {
     expect(isRunnableBot(disabled)).toBe(false)
   })
 
+  it("refuses a placeholder for an installation that moved to a paired host", async () => {
+    // Every start goes through here, so this one check keeps event fan-out,
+    // timed triggers, the delivery runner and manual runs off it (ADR-0224).
+    const installation = await installPluginBot(pluginDef(), {}, jest.fn())
+    const resolved = await resolveInstalledBot(installation)
+    const moved = {
+      ...resolved!,
+      installation: {
+        ...installation,
+        owner: {
+          kind: "remote-host" as const,
+          hostId: "mini",
+          hostLabel: "Mac mini",
+          remoteItemId: "boti_op",
+          operationId: "op",
+          movedAt: 1,
+        },
+      },
+    }
+    expect(isRunnableBot(moved)).toBe(false)
+    const pinned = {
+      ...resolved!,
+      installation: {
+        ...installation,
+        owner: { kind: "this-device" as const, reason: "manual" as const, pinnedAt: 1 },
+      },
+    }
+    expect(isRunnableBot(pinned)).toBe(true)
+  })
+
   it("tolerates version drift, which is a warning and not a stop", async () => {
     const installation = await installPluginBot(pluginDef({ version: "1.0.0" }), {}, jest.fn())
     registerBot(

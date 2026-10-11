@@ -37,6 +37,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "mcp_set_enabled",
     "mcp_set_tool_rules",
     "adapter_update_policy",
+    "adapter_instance_mutate",
     "twin_profile_get",
     "host_capabilities",
     "host_feature_manifest",
@@ -769,6 +770,10 @@ pub(super) async fn dispatch(
         | "mcp_set_enabled"
         | "mcp_set_tool_rules"
         | "adapter_update_policy"
+        // A whole connector instance from another device of the account, or a
+        // change to one this host runs (ADR-0224). Interactive: the admin
+        // lease is checked before the arm, and the TS side keeps secrets out.
+        | "adapter_instance_mutate"
         | "twin_profile_get"
         | "host_capabilities"
         | "host_feature_manifest"

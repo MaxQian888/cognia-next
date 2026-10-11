@@ -953,7 +953,7 @@ export type BotInstallationProjectionRow = Pick<
   | "projectId"
   | "status"
   | "triggerOverrides"
-  | "placementRef"
+  | "owner"
   | "createdAt"
   | "updatedAt"
 > & {
@@ -973,7 +973,7 @@ export function projectBotInstallationRow(row: BotInstallationRow): BotInstallat
     ...(row.projectId !== undefined ? { projectId: row.projectId } : {}),
     status: row.status,
     ...(row.triggerOverrides !== undefined ? { triggerOverrides: row.triggerOverrides } : {}),
-    ...(row.placementRef !== undefined ? { placementRef: row.placementRef } : {}),
+    ...(row.owner !== undefined ? { owner: row.owner } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     config: {},

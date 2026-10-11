@@ -155,6 +155,10 @@ export type TaskExecutionTerminalReason =
   // The task type is deprecated (`DEPRECATED_TASK_TYPES`); the scheduler
   // paused the task at init and wrote this row to explain why.
   | "deprecated-type"
+  // The row is a placeholder for a task that moved to a paired host
+  // (ADR-0224): something asked this machine to run it anyway, and it did not.
+  // The host that owns it runs it; recorded so the refusal is visible.
+  | "owned-elsewhere"
   // No executor was registered for the task type when the run was due — even
   // after the boot registration grace period.
   | "executor-not-found"
@@ -718,6 +722,15 @@ export interface ScheduledTaskPromotion {
 /**
  * Scheduled task definition
  */
+/**
+ * Where a task came from when it was not authored on this machine.
+ *
+ * An import used to leave no trace: a task that arrived from a file or from
+ * another device looked exactly like one written here, so nobody could tell
+ * why it existed or which migration created it (ADR-0224).
+ */
+export type ScheduledTaskProvenance = import("@/types/placement/item-owner").ItemProvenance
+
 export interface ScheduledTask {
   id: string
   name: string
@@ -754,6 +767,15 @@ export interface ScheduledTask {
   endAt?: Date
   /** Present while the task is promoted to the OS scheduler (desktop only). */
   promotion?: ScheduledTaskPromotion
+  /**
+   * Which machine arms and fires it (ADR-0224). Absent defers to the global
+   * timing authority; `remote-host` marks a disabled placeholder for a task
+   * that moved to a paired host. Written only by the ownership paths
+   * (`lib/scheduler/task-ownership.ts`), never by a plain update.
+   */
+  owner?: import("@/types/placement/item-owner").ItemOwner
+  /** Set when the task arrived from elsewhere instead of being authored here. */
+  provenance?: ScheduledTaskProvenance
   /** Forward chain: tasks fired (fire-and-forget) after a successful run. */
   onSuccessTaskIds?: string[]
   /** Forward chain: tasks fired (fire-and-forget) after a terminal failure. */

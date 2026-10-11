@@ -113,6 +113,12 @@ jest.mock("./cron-parser", () => ({
 // grace path instead of importing the real executor graph.
 jest.mock("./executors", () => ({ registerBuiltInExecutors: jest.fn() }))
 
+const mockProjectsGet = jest.fn(async (_id: string): Promise<unknown> => undefined)
+jest.mock("@/lib/db/schema", () => ({
+  ...jest.requireActual("@/lib/db/schema"),
+  getDb: () => ({ projects: { get: (id: string) => mockProjectsGet(id) } }),
+}))
+
 jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
   return {
@@ -134,6 +140,33 @@ import { loadSchedulerPolicy } from "./write-authority"
 import { SchedulerError } from "./errors"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
+
+/** An active interval task, optionally owned (ADR-0224). */
+function ownedTask(id: string, owner?: ScheduledTask["owner"]): ScheduledTask {
+  return {
+    id,
+    name: id,
+    type: "test",
+    trigger: { type: "interval", intervalMs: 60_000 },
+    config: {
+      maxRetries: 0,
+      retryDelay: 1_000,
+      timeout: 30_000,
+      allowConcurrent: true,
+      overlapPolicy: "allow",
+      runMissedOnStartup: false,
+    },
+    notification: { onStart: false, onComplete: false, onError: false },
+    status: owner?.kind === "remote-host" ? "disabled" : "active",
+    nextRunAt: new Date(Date.now() + 60_000),
+    runCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...(owner ? { owner } : {}),
+  }
+}
 
 describe("TaskScheduler", () => {
   beforeEach(() => {
@@ -1501,6 +1534,91 @@ describe("TaskScheduler", () => {
         expect(result.errors[0]).toContain("agent")
       })
 
+      describe("what travels (ADR-0224)", () => {
+        const exported = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
+          ...ownedTask("travel-1"),
+          ...overrides,
+        })
+
+        it("drops the source machine's promotion and owner, keeps the status, records provenance", async () => {
+          mockSchedulerDb.getTask.mockResolvedValue(null)
+          mockSchedulerDb.createTask.mockClear()
+          const result = await scheduler.importTasks(
+            {
+              version: 1,
+              tasks: [
+                exported({
+                  status: "paused",
+                  promotion: { systemTaskId: "os-1", token: "t", promotedAt: new Date(0) },
+                  owner: { kind: "this-device", reason: "manual", pinnedAt: 1 },
+                }),
+              ],
+            },
+            "merge",
+            { provenance: { kind: "migration", sourceLabel: "Work laptop", operationId: "op-7" } }
+          )
+          expect(result).toEqual({ imported: 1, skipped: 0, errors: [] })
+          const created = mockSchedulerDb.createTask.mock.calls[0]?.[0] as ScheduledTask
+          expect(created.status).toBe("paused")
+          expect(created.nextRunAt).toBeUndefined()
+          expect(created.promotion).toBeUndefined()
+          expect(created.owner).toBeUndefined()
+          expect(created.provenance).toEqual({
+            kind: "migration",
+            at: expect.any(Number),
+            sourceLabel: "Work laptop",
+            operationId: "op-7",
+          })
+        })
+
+        it("records a plain import when the sender says nothing", async () => {
+          mockSchedulerDb.getTask.mockResolvedValue(null)
+          mockSchedulerDb.createTask.mockClear()
+          await scheduler.importTasks({ version: 1, tasks: [exported()] })
+          expect(
+            (mockSchedulerDb.createTask.mock.calls[0]?.[0] as ScheduledTask).provenance
+          ).toEqual({ kind: "import", at: expect.any(Number) })
+        })
+
+        it("refuses a type this host cannot run, a deprecated type and an unknown workspace", async () => {
+          const platform = platformState.value
+          platformState.value = "web"
+          mockSchedulerDb.getTask.mockResolvedValue(null)
+          mockSchedulerDb.createTask.mockClear()
+          mockProjectsGet.mockResolvedValueOnce(undefined)
+          const result = await scheduler.importTasks({
+            version: 1,
+            tasks: [
+              // The test host is a browser: no host filesystem to back up.
+              exported({ id: "backup-1", name: "Backup", type: "backup", payload: {} }),
+              exported({ id: "old-1", name: "Old", type: "sync" }),
+              exported({ id: "ws-1", name: "Scoped", projectId: "proj-gone" }),
+            ],
+          })
+          expect(result.imported).toBe(0)
+          expect(result.skipped).toBe(3)
+          expect(result.errors).toEqual([
+            expect.stringMatching(/^Skipped "Backup": /),
+            'Skipped "Old": the sync task type is deprecated',
+            'Skipped "Scoped": its workspace (proj-gone) does not exist on this host',
+          ])
+          expect(mockSchedulerDb.createTask).not.toHaveBeenCalled()
+          platformState.value = platform
+        })
+
+        it("keeps a workspace this host has", async () => {
+          mockSchedulerDb.getTask.mockResolvedValue(null)
+          mockSchedulerDb.createTask.mockClear()
+          mockProjectsGet.mockResolvedValueOnce({ id: "proj-here" })
+          const result = await scheduler.importTasks({
+            version: 1,
+            tasks: [exported({ projectId: "proj-here" })],
+          })
+          expect(result.imported).toBe(1)
+          expect(mockProjectsGet).toHaveBeenCalledWith("proj-here")
+        })
+      })
+
       it("should delete all tasks in replace mode before importing", async () => {
         const existingTasks: ScheduledTask[] = [
           {
@@ -1801,9 +1919,10 @@ describe("TaskScheduler", () => {
       useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
     })
 
-    it("does not run the missed-task catch-up while another host holds timing", async () => {
+    it("runs the missed-task catch-up only for tasks this host fires", async () => {
       // The sweep both executes overdue slots and rewrites `nextRunAt`; running
       // it on a host that stood down moves the schedule under the authority.
+      // Decided per task since ADR-0224: a task pinned here still catches up.
       const driver = makeMockDriver()
       const sched = createTaskScheduler(driver)
       await sched.initialize()
@@ -1828,16 +1947,199 @@ describe("TaskScheduler", () => {
         JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
       )
 
-      mockSchedulerDb.getOverdueActiveTasks.mockClear()
+      const overdue = (id: string, owner?: ScheduledTask["owner"]): ScheduledTask => ({
+        ...ownedTask(id, owner),
+        trigger: { type: "once", runAt: new Date(Date.now() - 3_600_000) },
+        nextRunAt: new Date(Date.now() - 3_600_000),
+      })
+      mockSchedulerDb.getOverdueActiveTasks.mockResolvedValue([
+        overdue("unpinned"),
+        overdue("pinned", { kind: "this-device", reason: "machine-bound", pinnedAt: 1 }),
+      ])
+      mockSchedulerDb.updateTask.mockClear()
       await jest.advanceTimersByTimeAsync(61_000)
-      expect(mockSchedulerDb.getOverdueActiveTasks).not.toHaveBeenCalled()
+      const touched = mockSchedulerDb.updateTask.mock.calls.map(([task]) => task.id)
+      expect(touched).toContain("pinned")
+      expect(touched).not.toContain("unpinned")
 
       window.localStorage.removeItem("cognia-execution-authority-v1")
+      mockSchedulerDb.updateTask.mockClear()
       await jest.advanceTimersByTimeAsync(61_000)
-      expect(mockSchedulerDb.getOverdueActiveTasks).toHaveBeenCalled()
+      expect(mockSchedulerDb.updateTask.mock.calls.map(([task]) => task.id)).toContain("unpinned")
 
+      mockSchedulerDb.getOverdueActiveTasks.mockResolvedValue([])
       sched.stop()
       useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    })
+
+    describe("per-item ownership (ADR-0224)", () => {
+      const placeholder: ScheduledTask["owner"] = {
+        kind: "remote-host",
+        hostId: "mini",
+        hostLabel: "Mac mini",
+        remoteItemId: "owned",
+        operationId: "op-1",
+        movedAt: 1,
+      }
+
+      async function standDownToAuthority() {
+        const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+        useRemoteHostStore.setState({
+          activeHostId: null,
+          hosts: [
+            {
+              id: "host-authority",
+              label: "build box",
+              config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+              credentialRef: "ref",
+              addedAt: 1,
+              connectionState: "ready",
+              lastConnectedAt: Date.now(),
+            },
+          ] as never,
+        })
+        window.localStorage.setItem(
+          "cognia-execution-authority-v1",
+          JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+        )
+        return () => {
+          window.localStorage.removeItem("cognia-execution-authority-v1")
+          useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+        }
+      }
+
+      it("arms a task pinned here while another host holds the global authority", async () => {
+        const restore = await standDownToAuthority()
+        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([
+          ownedTask("unpinned"),
+          ownedTask("pinned", { kind: "this-device", reason: "manual", pinnedAt: 1 }),
+        ])
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const armed = jest.mocked(driver.arm).mock.calls.map(([id]) => id)
+        expect(armed).toContain("pinned")
+        expect(armed).not.toContain("unpinned")
+        sched.stop()
+        restore()
+      })
+
+      it("never arms a placeholder, even on the global authority", async () => {
+        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([
+          { ...ownedTask("owned", placeholder), status: "active" },
+        ])
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        expect(jest.mocked(driver.arm).mock.calls.map(([id]) => id)).not.toContain("owned")
+        sched.stop()
+      })
+
+      it("disarms a task when it stops being this host's to fire", async () => {
+        const pinned = ownedTask("pinned", { kind: "this-device", reason: "manual", pinnedAt: 1 })
+        const unpinned = ownedTask("unpinned")
+        mockSchedulerDb.getTasksByStatus.mockResolvedValue([pinned, unpinned])
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "pinned" ? pinned : id === "unpinned" ? unpinned : null
+        )
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        jest.mocked(driver.disarm).mockClear()
+
+        const restore = await standDownToAuthority()
+        await sched.reconcileTimingAuthority()
+        const disarmed = jest.mocked(driver.disarm).mock.calls.map(([id]) => id)
+        expect(disarmed).toContain("unpinned")
+        expect(disarmed).not.toContain("pinned")
+
+        restore()
+        mockSchedulerDb.getTasksByStatus.mockResolvedValue([])
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        sched.stop()
+      })
+
+      it("refuses a run that reaches a placeholder, and leaves a row saying where it runs", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        mockSchedulerDb.createExecution.mockClear()
+        // A stale event index (or a retry armed before the move) still names it.
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([
+          {
+            ...ownedTask("owned", placeholder),
+            status: "active",
+            trigger: { type: "event", eventType: "custom" },
+          },
+        ])
+        await sched.triggerEventTask("custom")
+        await jest.advanceTimersByTimeAsync(10)
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ taskId: "owned", terminalReason: "owned-elsewhere" })
+        )
+        sched.stop()
+      })
+
+      it("refuses every write that would make a placeholder run here", async () => {
+        const sched = createTaskScheduler(makeMockDriver())
+        await sched.initialize()
+        const row = ownedTask("owned", placeholder)
+        mockSchedulerDb.getTask.mockResolvedValue(row)
+        await expect(sched.runTaskNow("owned")).rejects.toThrow(/item_owned_elsewhere.*Mac mini/)
+        await expect(sched.resumeTask("owned")).rejects.toThrow(/item_owned_elsewhere/)
+        await expect(sched.updateTask("owned", { status: "active" })).rejects.toThrow(
+          /item_owned_elsewhere/
+        )
+        await expect(
+          sched.backfillTask("owned", { start: new Date(0), end: new Date(1) })
+        ).rejects.toThrow(/item_owned_elsewhere/)
+        await expect(sched.pauseTask("owned")).resolves.toBe(false)
+        await expect(sched.promoteTask("owned")).resolves.toMatchObject({ status: "error" })
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        sched.stop()
+      })
+
+      it("fences a task that moves away and arms it again when it comes back", async () => {
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const row = { ...ownedTask("moving"), status: "active" as const }
+        mockSchedulerDb.getTask.mockResolvedValue(row)
+        mockSchedulerDb.updateTask.mockClear()
+
+        const fenced = await sched.setTaskOwner("moving", placeholder)
+        expect(fenced).toMatchObject({ status: "disabled", owner: placeholder })
+        expect(fenced?.nextRunAt).toBeUndefined()
+        expect(mockSchedulerDb.updateTask).toHaveBeenLastCalledWith(
+          expect.objectContaining({ id: "moving", status: "disabled", owner: placeholder })
+        )
+
+        mockSchedulerDb.getTask.mockResolvedValue(fenced)
+        jest.mocked(driver.arm).mockClear()
+        const back = await sched.setTaskOwner("moving", undefined, { status: "active" })
+        expect(back).toMatchObject({ status: "active" })
+        expect(back?.owner).toBeUndefined()
+        expect(jest.mocked(driver.arm).mock.calls.map(([id]) => id)).toContain("moving")
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        sched.stop()
+      })
+
+      it("will not move a task promoted to this machine's OS scheduler", async () => {
+        const sched = createTaskScheduler(makeMockDriver())
+        await sched.initialize()
+        mockSchedulerDb.getTask.mockResolvedValue({
+          ...ownedTask("promoted"),
+          promotion: { systemTaskId: "s", token: "t", promotedAt: new Date(0) },
+        })
+        await expect(sched.setTaskOwner("promoted", placeholder)).rejects.toThrow(
+          /scheduled_task_promoted/
+        )
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        sched.stop()
+      })
     })
 
     it("disarms and re-arms when the operator changes the execution authority", async () => {

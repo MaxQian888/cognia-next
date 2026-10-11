@@ -49,6 +49,11 @@ export const HOST_FEATURE_IDS = [
   // a dead letter. Advertised by a host that runs a delivery runner. The
   // installation lifecycle has no operation here on purpose.
   "bots.control",
+  // Receiving always-on work moved from another device (ADR-0224): a whole
+  // connector instance, a Bot installation in one operation, scheduled tasks
+  // with their provenance. Its absence is what a migration preflight reads as
+  // "this host is too old to receive it", rather than finding out halfway.
+  "always-on.migration",
   "workflow.execution",
   // Host-owned external-agent configurations. Its presence is what tells a
   // browser that this host can BE the authority for an external agent — that
@@ -263,6 +268,31 @@ export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
+] as const)
+
+/**
+ * What a host must accept to receive always-on work from another device of
+ * the account (ADR-0224 migration). Version 1 is the shape the desktop's
+ * preflight checks for: `bot_installation_mutate` taking a whole installation
+ * in its install operation, `scheduled_task_import` recording provenance and
+ * refusing what this host cannot run, and `adapter_instance_mutate`.
+ */
+export const ALWAYS_ON_MIGRATION_HOST_OPERATIONS = Object.freeze([
+  "scheduled_task_import",
+  "bot_installation_mutate",
+  "adapter_instance_mutate",
+] as const)
+
+/**
+ * The same feature's plugin transfer: a cogpack uploaded in chunks and
+ * installed under the host's own signature and policy checks. Listed apart
+ * because only an item whose plugins the host lacks needs it.
+ */
+export const ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS = Object.freeze([
+  "plugin_cogpack_upload_open",
+  "plugin_cogpack_upload_write",
+  "plugin_cogpack_upload_abort",
+  "plugin_cogpack_transfer_install",
 ] as const)
 
 /**
@@ -680,6 +710,15 @@ export function buildLocalHostFeatureManifest({
     features["bots.control"] = {
       version: 1,
       operations: [...BOT_CONTROL_HOST_OPERATIONS],
+    }
+    // Both hosts run the three arms through the same desktop-write source, so
+    // either can receive moved work; which one should is the user's choice.
+    features["always-on.migration"] = {
+      version: 1,
+      operations: [
+        ...ALWAYS_ON_MIGRATION_HOST_OPERATIONS,
+        ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
+      ],
     }
     // Runtime environments. Advertised by every host that carries the arms;
     // whether the pool is ON is `environment_driver_status`, and the arms say so

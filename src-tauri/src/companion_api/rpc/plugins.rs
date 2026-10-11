@@ -8,6 +8,11 @@ pub(super) const COMMANDS: &[&str] = &[
     "plugin_install",
     "plugin_install_from_github",
     "plugin_uninstall",
+    "plugin_cogpack_upload_open",
+    "plugin_cogpack_upload_write",
+    "plugin_cogpack_upload_abort",
+    "plugin_cogpack_transfer_install",
+    "plugin_cogpack_install_staged",
     "plugin_stage_version",
     "plugin_commit_staged_update",
     "plugin_discard_staged_update",
@@ -95,6 +100,20 @@ pub(super) const COMMANDS: &[&str] = &[
     // before this table is consulted — which is exactly the drift the
     // KNOWN_COMMANDS doc comment warns about.
 ];
+
+/// A plugin install can copy a large tree; the bridge's default 30 s is too short.
+const TRANSFER_INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Transfer errors carry a stable code prefix the device's TypeScript reads.
+fn transfer_error(detail: String) -> (StatusCode, Json<RpcError>) {
+    if detail.starts_with("REMOTE_SCOPE_DENIED") {
+        RpcError::forbidden(detail)
+    } else if detail.starts_with("cogpack_") {
+        RpcError::validation_failed(detail)
+    } else {
+        RpcError::internal(detail)
+    }
+}
 
 pub(super) async fn dispatch(
     name: &str,
@@ -245,6 +264,92 @@ pub(super) async fn dispatch(
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        // ── Plugins carried to an always-on host (ADR-0224 A5) ──────────────
+        // A paired device uploads one cogpack in chunks under the device
+        // plane's body limit, staged and owned per device in
+        // `cognia_plugin_runtime::cogpack_transfer`. The install is decided by
+        // the host's TypeScript (signature, its own plugin policy), which then
+        // installs from the staged bytes: the renderer through the Tauri
+        // command, the headless brain through `plugin_cogpack_install_staged`.
+        "plugin_cogpack_upload_open" => {
+            let byte_length: u64 = required(&args, "byteLength")?;
+            let sha256: String = required(&args, "sha256")?;
+            cognia_plugin_runtime::cogpack_transfer::upload_service(host.plugin_runtime())
+                .map_err(RpcError::internal)?
+                .open(device_id, byte_length, &sha256)
+                .map_err(transfer_error)
+                .and_then(to_json)
+        }
+        "plugin_cogpack_upload_write" => {
+            let upload_id: String = required(&args, "uploadId")?;
+            let offset: u64 = required(&args, "offset")?;
+            let data_base64: String = required(&args, "dataBase64")?;
+            let chunk_hash: String = required(&args, "chunkHash")?;
+            let service =
+                cognia_plugin_runtime::cogpack_transfer::upload_service(host.plugin_runtime())
+                    .map_err(RpcError::internal)?;
+            let owner = device_id.to_owned();
+            let written = tokio::task::spawn_blocking(move || {
+                service.write_chunk(&owner, &upload_id, offset, &data_base64, &chunk_hash)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(transfer_error)?;
+            Ok(serde_json::json!({ "written": written }))
+        }
+        "plugin_cogpack_upload_abort" => {
+            let upload_id: String = required(&args, "uploadId")?;
+            cognia_plugin_runtime::cogpack_transfer::upload_service(host.plugin_runtime())
+                .map_err(RpcError::internal)?
+                .abort(device_id, &upload_id)
+                .map(|_| Value::Null)
+                .map_err(transfer_error)
+        }
+        "plugin_cogpack_transfer_install" => {
+            // Only the device that uploaded every byte may have it installed;
+            // checked here, before the TS arm sees the request.
+            let upload_id: String = required(&args, "uploadId")?;
+            cognia_plugin_runtime::cogpack_transfer::upload_service(host.plugin_runtime())
+                .map_err(RpcError::internal)?
+                .require_complete(device_id, &upload_id)
+                .map_err(transfer_error)?;
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
+            bridge
+                .dispatch(transport.as_ref(), name, args, TRANSFER_INSTALL_TIMEOUT)
+                .await
+                .map_err(|error| super::map_desktop_write_bridge_error(name, error))
+        }
+        "plugin_cogpack_install_staged" => {
+            // Internal transport only: the headless brain's half of
+            // `plugin_cogpack_transfer_install`, after it accepted the cogpack.
+            let upload_id: String = required(&args, "uploadId")?;
+            let manifest_sha256: String = required(&args, "manifestSha256")?;
+            let members: Vec<cognia_plugin_runtime::cogpack_transfer::TransferMember> =
+                required(&args, "members")?;
+            let outcome = cognia_plugin_runtime::cogpack_transfer::install_staged_for_state(
+                host.plugin_runtime(),
+                upload_id,
+                manifest_sha256,
+                members,
+            )
+            .await
+            .map_err(transfer_error)?;
+            if let Some(services) = host.headless() {
+                for installed in &outcome.installed {
+                    services.event_bus.publish(
+                        "plugin://runtime-changed".to_string(),
+                        serde_json::json!({
+                            "action": "installed",
+                            "pluginId": installed.plugin_id,
+                            "accountId": account_id,
+                        }),
+                    );
+                }
+            }
+            to_json(outcome)
         }
         "plugin_stage_version" => {
             let plugin_id: String = required(&args, "pluginId")?;

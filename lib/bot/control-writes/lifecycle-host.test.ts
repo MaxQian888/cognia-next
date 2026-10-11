@@ -135,6 +135,38 @@ it("installs the host catalog default once and remains needs_setup without crede
   await expect(mutateBotInstallationOnHost({ ...input, version: "2" })).rejects.toThrow("changed")
   await expect(mutateBotInstallationOnHost({ ...input, slots: [] })).rejects.toThrow()
 })
+it("receives a whole installation in one operation: switched off, triggers and grant included", async () => {
+  // The ADR-0224 migration moves a Bot with one idempotent install instead of
+  // install → config → bind → enable, any of which could stop halfway.
+  const grouped = {
+    ...input,
+    enabled: false,
+    triggerOverrides: { manual: false },
+    policyGrant: {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+    },
+  }
+  const first = await mutateBotInstallationOnHost(grouped)
+  expect(first).toMatchObject({ status: "disabled", triggerOverrides: { manual: false } })
+  const row = await getDb().botInstallations.get(first.id)
+  expect(row).toMatchObject({
+    status: "disabled",
+    triggerOverrides: { manual: false },
+    policyGrant: grouped.policyGrant,
+  })
+  // A replay answers the same row; a different setup under the same operation
+  // is a conflict, not a silent overwrite.
+  expect(await mutateBotInstallationOnHost(grouped)).toEqual(first)
+  await expect(
+    mutateBotInstallationOnHost({ ...grouped, triggerOverrides: { manual: true } })
+  ).rejects.toThrow("another definition")
+  await expect(mutateBotInstallationOnHost({ ...grouped, policyGrant: undefined })).rejects.toThrow(
+    "another definition"
+  )
+})
+
 it("returns host form values but never auth session handles or runtime functions", async () => {
   const installed = await mutateBotInstallationOnHost(input)
   await getDb().botInstallations.update(installed.id, {

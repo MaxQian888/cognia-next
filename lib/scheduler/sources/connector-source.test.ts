@@ -73,6 +73,25 @@ describe("toUnifiedConnectorDigest", () => {
     expect(unified.capabilities).toEqual({ runNow: true, pause: true, edit: true, delete: true })
   })
 
+  it("lists a schedule that moved with its connector as a placeholder (ADR-0224)", () => {
+    const owner = {
+      kind: "remote-host" as const,
+      hostId: "h1",
+      hostLabel: "Mac mini",
+      remoteItemId: "conn-1",
+      operationId: "op",
+      movedAt: 1,
+    }
+    const unified = toUnifiedConnectorDigest(makeTask({ owner }))
+    expect(unified.owner).toEqual(owner)
+    expect(unified.capabilities).toEqual({
+      runNow: false,
+      pause: false,
+      edit: false,
+      delete: false,
+    })
+  })
+
   it("uses task.type as the description fallback when the task has none", () => {
     const unified = toUnifiedConnectorDigest(makeTask({ description: undefined }))
     expect(unified.description).toBe(CONNECTOR_DIGEST_TYPE)

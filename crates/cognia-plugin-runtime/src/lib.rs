@@ -28,6 +28,7 @@ pub mod api_bridge;
 mod archive_limits;
 pub mod backup;
 pub mod cli_exec;
+pub mod cogpack_transfer;
 pub mod command_hooks;
 pub mod commands;
 mod contained_path;

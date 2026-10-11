@@ -160,3 +160,29 @@ describe("scheduled_task_cancel_run", () => {
     expect(scheduler.cancelExecution).not.toHaveBeenCalled()
   })
 })
+
+it("passes a migration's provenance to the import and drops anything malformed", async () => {
+  scheduler.importTasks.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+  const data = { version: 1, tasks: [] }
+  await dispatchScheduledTaskRpc("scheduled_task_import", {
+    data,
+    provenance: { kind: "migration", sourceLabel: "Work laptop", operationId: "op-1" },
+  })
+  expect(scheduler.importTasks).toHaveBeenLastCalledWith({ version: 1, tasks: [] }, "merge", {
+    provenance: { kind: "migration", sourceLabel: "Work laptop", operationId: "op-1" },
+  })
+
+  await dispatchScheduledTaskRpc("scheduled_task_import", {
+    data,
+    mode: "replace",
+    provenance: { kind: "smuggled", sourceLabel: "", operationId: 3 },
+  })
+  expect(scheduler.importTasks).toHaveBeenLastCalledWith({ version: 1, tasks: [] }, "replace", {
+    provenance: { kind: "import" },
+  })
+
+  await dispatchScheduledTaskRpc("scheduled_task_import", { data })
+  expect(scheduler.importTasks).toHaveBeenLastCalledWith({ version: 1, tasks: [] }, "merge", {
+    provenance: undefined,
+  })
+})

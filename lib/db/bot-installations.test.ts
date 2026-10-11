@@ -11,6 +11,7 @@ import {
   listBotInstallations,
   readBotTriggerState,
   resolveInstallationStatus,
+  setBotInstallationOwner,
   uninstallBot,
   unboundCredentialSlots,
   updateBotInstallation,
@@ -191,6 +192,70 @@ describe("botInstallations", () => {
     const row = await installBot(input())
     await uninstallBot(row.id)
     expect(await getBotInstallation(row.id)).toBeUndefined()
+  })
+})
+
+describe("setBotInstallationOwner (ADR-0224)", () => {
+  const moved = {
+    kind: "remote-host" as const,
+    hostId: "mini",
+    hostLabel: "Mac mini",
+    remoteItemId: "boti_remote",
+    operationId: "op-1",
+    movedAt: NOW,
+  }
+
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botInstallations.clear()
+  }, 15_000)
+
+  it("fences an installation that moved away, whatever it was before", async () => {
+    const row = await installBot(input())
+    const fenced = await setBotInstallationOwner(row.id, moved, { now: NOW + 1 })
+    expect(fenced).toMatchObject({ status: "disabled", owner: moved, updatedAt: NOW + 1 })
+    expect(await getBotInstallation(row.id)).toMatchObject({ status: "disabled", owner: moved })
+  })
+
+  it("refuses to edit or enable a placeholder, which would run the Bot twice", async () => {
+    const row = await installBot(input())
+    await setBotInstallationOwner(row.id, moved)
+    await expect(updateBotInstallation(row.id, { status: "enabled" })).rejects.toThrow(
+      /item_owned_elsewhere: this bot installation runs on Mac mini/
+    )
+    await expect(updateBotInstallation(row.id, { config: { a: 1 } })).rejects.toThrow(
+      /item_owned_elsewhere/
+    )
+  })
+
+  it("restores the status on take-back, still honest about missing credentials", async () => {
+    const row = await installBot(input())
+    await setBotInstallationOwner(row.id, moved)
+    const back = await setBotInstallationOwner(row.id, undefined, { status: "enabled" })
+    expect(back?.status).toBe("enabled")
+    expect(back && "owner" in back).toBe(false)
+
+    await setBotInstallationOwner(row.id, moved)
+    const unbound = await setBotInstallationOwner(row.id, undefined, {
+      status: "enabled",
+      requiredCredentials: [REPO_SLOT],
+    })
+    expect(unbound?.status).toBe("needs_setup")
+  })
+
+  it("pins an installation here without changing its status", async () => {
+    const row = await installBot(input())
+    const pin = { kind: "this-device" as const, reason: "manual" as const, pinnedAt: NOW }
+    expect(await setBotInstallationOwner(row.id, pin)).toMatchObject({
+      status: "enabled",
+      owner: pin,
+    })
+    // A pinned installation is still this machine's to edit.
+    await expect(updateBotInstallation(row.id, { config: { a: 1 } })).resolves.toBeDefined()
+  })
+
+  it("answers undefined for an installation that does not exist", async () => {
+    expect(await setBotInstallationOwner("boti_missing", moved)).toBeUndefined()
   })
 })
 

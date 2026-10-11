@@ -97,6 +97,28 @@ function reviveImportedTask(task: ScheduledTask): ScheduledTask {
   }
 }
 
+/**
+ * Who sent an import, as the sender describes it (ADR-0224). A migration
+ * names its operation so the host's row can be found when it is replayed;
+ * anything malformed is dropped, leaving a plain import.
+ */
+function importProvenance(
+  value: unknown
+): Omit<NonNullable<ScheduledTask["provenance"]>, "at"> | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const record = value as Record<string, unknown>
+  const kind = record.kind === "migration" ? "migration" : "import"
+  return {
+    kind,
+    ...(typeof record.sourceLabel === "string" && record.sourceLabel.length > 0
+      ? { sourceLabel: record.sourceLabel.slice(0, 200) }
+      : {}),
+    ...(typeof record.operationId === "string" && record.operationId.length > 0
+      ? { operationId: record.operationId }
+      : {}),
+  }
+}
+
 export async function dispatchScheduledTaskRpc(
   command: string,
   payload: Record<string, unknown>
@@ -167,7 +189,8 @@ export async function dispatchScheduledTaskRpc(
       const data = payload.data as { version: number; tasks: ScheduledTask[] }
       return scheduler.importTasks(
         { ...data, tasks: data.tasks.map(reviveImportedTask) },
-        payload.mode === "replace" ? "replace" : "merge"
+        payload.mode === "replace" ? "replace" : "merge",
+        { provenance: importProvenance(payload.provenance) }
       )
     }
     case "scheduled_task_cleanup":

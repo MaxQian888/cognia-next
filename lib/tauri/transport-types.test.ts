@@ -19,6 +19,9 @@ it.each([
   ["plugin_media_read_chunk", 30_000],
   ["plugin_media_close_transfer", 30_000],
   ["video_cleanup_analysis", 30_000],
+  ["plugin_cogpack_transfer_install", 330_000],
+  ["plugin_cogpack_install_staged", 330_000],
+  ["plugin_cogpack_upload_write", 30_000],
 ])("allows %s to complete within its native processing budget", (command, deadline) => {
   expect(transportCommandTimeoutMs(command)).toBe(deadline)
 })

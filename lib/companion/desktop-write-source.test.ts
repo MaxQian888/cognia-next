@@ -18,6 +18,14 @@ jest.mock("@/lib/thread-handoff/host-dispatch", () => {
 
 const mockBotLifecycleMutation = jest.fn()
 const mockBotConsoleRead = jest.fn()
+const mockAdapterInstanceMutation = jest.fn()
+jest.mock("@/lib/connectors/instance-transfer", () => ({
+  mutateAdapterInstanceOnHost: (input: unknown) => mockAdapterInstanceMutation(input),
+}))
+const mockTransferInstall = jest.fn()
+jest.mock("@/lib/plugin/cogpack/transfer-install", () => ({
+  installTransferredCogpack: (input: unknown) => mockTransferInstall(input),
+}))
 const mockGithubAccountSetup = jest.fn()
 jest.mock("@/lib/integrations/github-account-setup", () => ({
   connectGithubAccountFromSecret: (input: unknown) => mockGithubAccountSetup(input),
@@ -2073,6 +2081,41 @@ describe("dispatchCommand: skill_set_enabled", () => {
     await expect(
       dispatchCommand("skill_set_enabled", { id: "sk1", enabled: "yes" })
     ).rejects.toThrow(/skill_set_enabled.enabled must be boolean/)
+  })
+})
+
+describe("dispatchCommand: adapter_instance_mutate", () => {
+  it("hands the request, lease and all, to the instance transfer module (ADR-0224)", async () => {
+    mockAdapterInstanceMutation.mockResolvedValue({ id: "cai_1", type: "telegram" })
+    const payload = {
+      operation: "create",
+      operationId: "123e4567-e89b-42d3-a456-426614174000",
+      id: "cai_1",
+      instance: { type: "telegram" },
+      adminLease: "lease",
+    }
+    await expect(dispatchCommand("adapter_instance_mutate", payload)).resolves.toEqual({
+      id: "cai_1",
+      type: "telegram",
+    })
+    expect(mockAdapterInstanceMutation).toHaveBeenCalledWith(payload)
+  })
+})
+
+describe("dispatchCommand: plugin_cogpack_transfer_install", () => {
+  it("hands a fully uploaded transfer to the host's own install checks (ADR-0224)", async () => {
+    const answer = { fingerprint: "f", installed: [], failed: [] }
+    mockTransferInstall.mockResolvedValue(answer)
+    const payload = {
+      uploadId: "123e4567-e89b-42d3-a456-426614174001",
+      operationId: "123e4567-e89b-42d3-a456-426614174000",
+      manifest: { id: "transfer" },
+      adminLease: "lease",
+    }
+    await expect(dispatchCommand("plugin_cogpack_transfer_install", payload)).resolves.toEqual(
+      answer
+    )
+    expect(mockTransferInstall).toHaveBeenCalledWith(payload)
   })
 })
 

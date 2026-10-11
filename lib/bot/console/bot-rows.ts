@@ -15,6 +15,8 @@
  * both label inert.
  */
 
+import { isOwnedElsewhere } from "@/lib/placement/ownership"
+import type { ItemOwnerRemoteHost } from "@/types/placement/item-owner"
 import { isBotTriggerArmed, unboundCredentialSlots } from "@/lib/db/bot-installations"
 import type {
   BotDefinitionSource,
@@ -136,6 +138,11 @@ export interface BotConsoleRow {
   /** Dead-lettered deliveries waiting for a person to replay or dismiss them. */
   deadLetters: number
   updatedAt: number
+  /**
+   * Set when this installation is a placeholder for one a paired host runs
+   * (ADR-0224). It never runs here, and every control on it is off.
+   */
+  owner?: ItemOwnerRemoteHost
 }
 
 export interface BotRowInput {
@@ -238,6 +245,7 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
     }),
     ...(resolved ? { policy: resolved.policyResolution } : {}),
     ...(installation.policyGrant ? { policyGrant: installation.policyGrant } : {}),
+    ...(isOwnedElsewhere(installation.owner) ? { owner: installation.owner } : {}),
     ...(definition?.configSchema ? { configSchema: definition.configSchema } : {}),
     config: installation.config,
     ...(installation.monitor ? { monitor: installation.monitor } : {}),

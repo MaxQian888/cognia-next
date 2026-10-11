@@ -280,6 +280,16 @@ const scheduledTask = createScheduledTaskInput.extend({
   lastTerminalReason: z.string().optional(),
   lastTerminalAt: z.string().optional(),
   consecutiveFailures: z.number().int().nonnegative().optional(),
+  // The owning workspace travels; the importing host refuses the task when it
+  // has no such workspace (ADR-0224).
+  projectId: z.string().min(1).optional(),
+  // An export carries these, so a file exported from a desktop must still
+  // validate here. The importer drops all three: an OS-scheduler promotion and
+  // an owner belong to the machine that wrote them, and provenance is
+  // recorded afresh by the host that imports.
+  promotion: z.record(z.string(), z.unknown()).optional(),
+  owner: z.record(z.string(), z.unknown()).optional(),
+  provenance: z.record(z.string(), z.unknown()).optional(),
 })
 
 const mediaEffect = z.object({
@@ -664,8 +674,22 @@ const schemas = {
     end: z.string().min(1),
   }),
   scheduled_task_import: z.object({
-    data: z.object({ version: z.number().int(), tasks: scheduledTask.array() }),
+    // `exportedAt` is what `scheduled_task_export` writes next to the tasks.
+    data: z.object({
+      version: z.number().int(),
+      exportedAt: z.string().optional(),
+      tasks: scheduledTask.array(),
+    }),
     mode: z.enum(["merge", "replace"]).optional(),
+    // Recorded on each imported task. A migration names its operation so a
+    // replay finds the rows it already created (ADR-0224).
+    provenance: z
+      .object({
+        kind: z.enum(["import", "migration"]),
+        sourceLabel: z.string().min(1).max(200).optional(),
+        operationId: z.string().min(1).optional(),
+      })
+      .optional(),
   }),
   scheduled_task_cleanup: z.object({ maxAgeDays: z.number().int().positive().optional() }),
   scheduled_task_emit_event: z.object({

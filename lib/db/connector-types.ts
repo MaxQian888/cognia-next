@@ -13,6 +13,7 @@
 //   * keeps `lib/db/schema.ts` from depending on `types/connectors/*` until
 //     those types are fully stabilised.
 
+import type { ItemOwner, ItemProvenance } from "@/types/placement/item-owner"
 import type {
   AgentAuthority,
   AutonomyLevel,
@@ -556,6 +557,19 @@ export interface AdapterInstanceRow {
    * additive — no Dexie bump.
    */
   defaultEscalation?: EscalationPolicy
+  /**
+   * Which machine runs this instance (ADR-0224). `remote-host` marks a
+   * disabled placeholder for an instance that moved to a paired host:
+   * `installConnectorRuntime` never builds it and the edit paths refuse it.
+   * Written only by `setAdapterInstanceOwner`. Non-indexed additive, so no
+   * Dexie bump.
+   */
+  owner?: ItemOwner
+  /**
+   * Set when the instance arrived from another device (ADR-0224). A migration
+   * replayed after a dropped connection finds the row it created by this.
+   */
+  provenance?: ItemProvenance
   createdAt: number
   updatedAt: number
 }

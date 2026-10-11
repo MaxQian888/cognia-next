@@ -34,6 +34,10 @@ export function transportCommandTimeoutMs(command: string): number {
   if (command === "plugin_media_concatenate_videos" || command === "plugin_media_export_video")
     return 3_300_000
   if (command === "video_get_info" || command === "plugin_media_add_transition") return 90_000
+  // A plugin transfer installs and activates whole plugin trees on the host,
+  // which allows itself 300s for it (ADR-0224); wait for that answer.
+  if (command === "plugin_cogpack_transfer_install" || command === "plugin_cogpack_install_staged")
+    return 330_000
   return 30_000
 }
 

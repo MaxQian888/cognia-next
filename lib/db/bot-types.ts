@@ -1,3 +1,5 @@
+import type { ItemOwner } from "@/types/placement/item-owner"
+
 /**
  * Row shapes for the Bot control plane.
  *
@@ -174,8 +176,14 @@ export interface BotInstallationRow {
    * request, so it can only ever narrow what is already allowed.
    */
   policyGrant?: PluginBotPolicyV1
-  /** Host reference this installation prefers. Absent means `auto`. */
-  placementRef?: string
+  /**
+   * Which machine runs it (ADR-0224). Replaces the `placementRef` string that
+   * nothing ever read. `remote-host` marks a disabled placeholder for an
+   * installation that moved to a paired host; `isRunnableBot` refuses it, so
+   * no event, schedule or manual run starts it here. Written only by
+   * `setBotInstallationOwner`.
+   */
+  owner?: ItemOwner
   createdAt: number
   updatedAt: number
 }

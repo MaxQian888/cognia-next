@@ -219,6 +219,7 @@ export const CORE_TABLE_NAMES = [
   "issueProjects",
   "issueRuns",
   "issues",
+  "itemMigrations",
   "knowledgeBaseChunks",
   "knowledgeBaseIngestJobs",
   "knowledgeBaseSources",
@@ -1600,6 +1601,12 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "Two-role cross-host handoff journal (ADR-0103). Expired tickets are retired in place by the sweep, not removed; rows leave only with the owning account database.",
   },
+  itemMigrations: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Journal of always-on work moved to or taken back from a paired host (ADR-0224). It is what makes an interrupted move resumable under its operation id, and the record of where an item went; one row per operation, removed only with the owning account database.",
+  },
   botRunSteps: {
     mode: "ttl",
     days: 14,
@@ -1736,6 +1743,9 @@ function retentionFor(name: CoreTableName, role: DataTableRole): DataRetentionPo
  * than inferred.
  */
 const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentProtection>> = {
+  // Item names and host errors are the user's words; only the ids, states and
+  // timestamps the journal is queried by stay readable (ADR-0224).
+  itemMigrations: "encrypted-content",
   messageSyncClock: "metadata-only",
   sharedRunJournals: "encrypted-content",
   // Bookkeeping for the encryption migration itself: an id, an account id, a

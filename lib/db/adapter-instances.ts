@@ -10,6 +10,8 @@ import type { AdapterInstanceRow } from "./connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import { assertRunsHere, isOwnedElsewhere } from "@/lib/placement/ownership"
+import type { ItemOwner } from "@/types/placement/item-owner"
 
 function newId(): string {
   return "cai_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -22,16 +24,27 @@ function newId(): string {
  */
 export type AdapterInstanceInput = Omit<
   AdapterInstanceRow,
-  "id" | "createdAt" | "updatedAt" | "mediaModelPolicy"
+  // `owner` has its own writer, `setAdapterInstanceOwner`.
+  "id" | "createdAt" | "updatedAt" | "mediaModelPolicy" | "owner"
 > & { mediaModelPolicy?: AdapterInstanceRow["mediaModelPolicy"] }
 
 export async function createAdapterInstance(
-  input: AdapterInstanceInput
+  input: AdapterInstanceInput,
+  options: {
+    /**
+     * Keep an id the instance already has elsewhere. Only an instance moved
+     * from another device (ADR-0224) passes one: its keychain entries, Bot
+     * bindings and webhook path are all keyed on it.
+     */
+    id?: string
+  } = {}
 ): Promise<AdapterInstanceRow> {
   const now = Date.now()
+  // A copy made from a placeholder row must not arrive as a placeholder.
+  const { owner: _owner, ...fields } = input as AdapterInstanceInput & { owner?: ItemOwner }
   const row: AdapterInstanceRow = {
-    id: newId(),
-    ...input,
+    id: options.id ?? newId(),
+    ...fields,
     // Never inherit "may send binaries to a cloud model" implicitly.
     mediaModelPolicy: input.mediaModelPolicy ?? "local_extract_only",
     createdAt: now,
@@ -148,7 +161,50 @@ export async function updateAdapterInstance(
   id: string,
   patch: AdapterInstancePatch
 ): Promise<void> {
-  await getDb().adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+  const db = getDb()
+  await db.transaction("rw", db.adapterInstances, async () => {
+    await assertInstanceRunsHere(id)
+    await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+  })
+}
+
+/**
+ * A placeholder records where its instance went (ADR-0224). An edit here would
+ * not reach the host, and enabling it would answer the same chats twice.
+ */
+async function assertInstanceRunsHere(id: string): Promise<void> {
+  const row = await getDb().adapterInstances.get(id)
+  if (row) assertRunsHere("connector-instance", row.owner)
+}
+
+/**
+ * Record which machine runs an instance (ADR-0224). The one writer of
+ * `owner`; the edit paths refuse a placeholder, so this is also the only way
+ * out of one.
+ *
+ * Moving it to a paired host fences the local row: `enabled: false`, which
+ * the live runtime's reconcile turns into a stop. Clearing the owner or
+ * pinning it here (take-back, manual pin) restores `options.enabled`.
+ */
+export async function setAdapterInstanceOwner(
+  id: string,
+  owner: ItemOwner | undefined,
+  options: { enabled?: boolean } = {}
+): Promise<AdapterInstanceRow | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.adapterInstances, async () => {
+    const existing = await db.adapterInstances.get(id)
+    if (!existing) return undefined
+    const next: AdapterInstanceRow = {
+      ...existing,
+      enabled: isOwnedElsewhere(owner) ? false : (options.enabled ?? existing.enabled),
+      updatedAt: Date.now(),
+    }
+    if (owner) next.owner = owner
+    else delete next.owner
+    await db.adapterInstances.put(next)
+    return next
+  })
 }
 
 export type AdapterConfigSection =
@@ -171,6 +227,8 @@ export type AdapterConfigSource =
   | "settings.adapter.sla-escalation"
   | "conversation-promotion"
   | "mobile"
+  /** Another device of the account configuring this host's instance (ADR-0224). */
+  | "paired-device"
 
 /** Atomically persist one settings section and its redaction-safe audit breadcrumb. */
 export async function updateAdapterConfigSection(
@@ -183,6 +241,7 @@ export async function updateAdapterConfigSection(
   const changedKeys = Object.keys(patch).sort()
   if (changedKeys.length === 0) return
   await db.transaction("rw", db.adapterInstances, db.connectorAudit, async () => {
+    await assertInstanceRunsHere(id)
     const updated = await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
     if (updated === 0) throw new Error(`Adapter instance not found: ${id}`)
     await db.connectorAudit.add({
@@ -210,6 +269,7 @@ export async function patchAdapterInstanceSettings(
   await db.transaction("rw", db.adapterInstances, async () => {
     const current = await db.adapterInstances.get(id)
     if (!current) return
+    assertRunsHere("connector-instance", current.owner)
     await db.adapterInstances.update(id, {
       settings: { ...(current.settings ?? {}), ...patch },
       updatedAt: Date.now(),

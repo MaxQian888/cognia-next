@@ -937,6 +937,13 @@
         "workspace_repo": {},
         "workspace_repo_dir": {},
         "cogset": {},
+        "cogpack": {
+          "children": {
+            "staged": {},
+            "transfer": {},
+            "upload": {}
+          }
+        },
         "install_origin": {}
       }
     },

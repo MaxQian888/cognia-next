@@ -14,6 +14,7 @@ import {
   type CreateScheduledTaskInput,
   type UpdateScheduledTaskInput,
   type ScheduledTaskStatus,
+  type ScheduledTaskProvenance,
   type TaskExecutionTriggerSource,
   type TaskExecutionTerminalReason,
   type TaskExecutorResult,
@@ -24,6 +25,8 @@ import {
 import {
   assertTaskTypeSupportedOnHost,
   DEPRECATED_TASK_TYPES,
+  describeUnsupportedTaskType,
+  getTaskTypeHostSupport,
   isDeprecatedTaskType,
 } from "./host-support"
 import { decideConcurrencyAdmission, resolveConcurrencyLimit } from "./concurrency-limit"
@@ -61,6 +64,12 @@ import {
   resolveExecutionAuthority,
   type AuthorityDecision as ExecutionAuthorityDecision,
 } from "@/lib/placement/authority"
+import {
+  assertRunsHere,
+  isOwnedElsewhere,
+  resolveItemTimingAuthority,
+} from "@/lib/placement/ownership"
+import type { ItemOwner } from "@/types/placement/item-owner"
 import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/scheduler"
 import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -354,6 +363,19 @@ export function waitForTaskExecutor(
   })
 }
 
+/** Imported statuses are kept, except a value no build of this app ever wrote. */
+function importedTaskStatus(status: unknown): ScheduledTaskStatus {
+  return status === "active" || status === "paused" || status === "disabled" || status === "expired"
+    ? status
+    : "paused"
+}
+
+/** `projectId` is a soft key onto the main database's `projects` table. */
+async function projectExistsHere(projectId: string): Promise<boolean> {
+  const { getDb } = await import("@/lib/db/schema")
+  return (await getDb().projects.get(projectId)) !== undefined
+}
+
 /**
  * Pick the timing driver for the local host:
  *
@@ -612,22 +634,26 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * True when this instance is the timing authority allowed to arm tasks.
+   * True when this instance may arm and fire this task.
    *
-   * Two gates, in order. The driver's own leader election wins when it has one
-   * — a tab lock or an alarm daemon knows better than any cross-host config.
-   * Otherwise the answer used to be an unconditional `true`, so two desktops
-   * signed into the same account each armed the same cron and each fired it;
-   * now it defers to the configured execution authority (ADR-0128 decision 6,
-   * revised). Unconfigured still means self-authority, so a single-machine
-   * install is unchanged.
+   * Three gates, in order. The driver's own leader election wins when it has
+   * one — a tab lock or an alarm daemon knows better than any cross-host
+   * config. Then the task's own owner (ADR-0224): a placeholder for a task
+   * that moved to a paired host never fires here, and a task pinned here
+   * fires whatever the global authority says. Only an unpinned task defers to
+   * the configured execution authority (ADR-0128 decision 6, revised), whose
+   * answer used to be an unconditional `true`, so two desktops signed into
+   * the same account each armed the same cron and each fired it.
+   * Unconfigured still means self-authority, so a single-machine install is
+   * unchanged.
    */
-  private isTimingAuthority(): boolean {
+  private isTimingAuthorityFor(task: Pick<ScheduledTask, "owner">): boolean {
     const driver = this.driver
     if (driver?.supportsLeaderElection && !(driver as LeaderAwareTimingDriver).isLeader()) {
       return false
     }
-    const decision = this.resolveHostAuthority()
+    const decision = resolveItemTimingAuthority(task.owner, () => this.resolveHostAuthority())
+    if (decision.ownedElsewhere) return false
     if (decision.degraded && decision.authorityHostId) {
       // The work runs here, but the divergence from what was configured has to
       // be visible — a team whose cron silently stopped moving is the outcome
@@ -959,11 +985,13 @@ class TaskSchedulerImpl {
   async reconcileTimingAuthority(): Promise<void> {
     this.authorityAnnouncedFor = null
     if (!this.driver || !this.driverReady) return
-    if (this.isTimingAuthority()) {
-      await this.scheduleAllActiveTasks()
-      return
+    // Per task since ADR-0224: a task pinned here stays armed when the global
+    // authority moves away, and a placeholder is never armed at all.
+    for (const taskId of Array.from(this.armedTaskIds)) {
+      const task = await schedulerDb.getTask(taskId).catch(() => null)
+      if (!task || !this.isTimingAuthorityFor(task)) this.unscheduleTask(taskId)
     }
-    this.unscheduleAllTasks()
+    await this.scheduleAllActiveTasks()
   }
 
   /**
@@ -985,7 +1013,7 @@ class TaskSchedulerImpl {
     // fire here. The occurrence is not consumed and `nextRunAt` is not advanced:
     // the authority owns this occurrence, and rewriting the schedule from a host
     // that stood down would desynchronise the two.
-    if (!this.isTimingAuthority()) {
+    if (!this.isTimingAuthorityFor(task)) {
       log.debug(`Skipping ${task.name}: another host holds the execution authority`)
       return
     }
@@ -1151,10 +1179,10 @@ class TaskSchedulerImpl {
    */
   private async checkMissedTasks(): Promise<void> {
     // The catch-up sweep both *runs* overdue slots and rewrites `nextRunAt`, so
-    // a host that stood down must not enter it: it would consume occurrences the
-    // authority owns and move the schedule out from under it. The authority runs
-    // the same sweep.
-    if (!this.isTimingAuthority()) return
+    // a host that stood down must not touch a task it does not fire: it would
+    // consume occurrences the authority owns and move the schedule out from
+    // under it. The authority runs the same sweep. Decided per task since
+    // ADR-0224, so a task pinned here still catches up.
     const now = new Date()
     const tasks = await schedulerDb.getOverdueActiveTasks(now)
 
@@ -1162,6 +1190,7 @@ class TaskSchedulerImpl {
       if (!task.nextRunAt) {
         continue
       }
+      if (!this.isTimingAuthorityFor(task)) continue
 
       if (task.trigger.type === "once") {
         await this.expireMissedOneTimeTask(task, now)
@@ -1536,6 +1565,11 @@ class TaskSchedulerImpl {
       log.warn(`Task not found: ${taskId}`)
       return null
     }
+    // A placeholder is a record of where the task went, not a definition: an
+    // edit here would not reach the host, and re-activating it would run the
+    // same task on two machines. Ownership changes go through `setTaskOwner`.
+    // (The disarm above is a no-op for a placeholder, which is never armed.)
+    assertRunsHere("scheduled-task", task.owner)
 
     const now = new Date()
     const mergedTrigger: TaskTrigger = {
@@ -1659,6 +1693,9 @@ class TaskSchedulerImpl {
   ): Promise<PromoteTaskResult> {
     const task = await schedulerDb.getTask(taskId)
     if (!task) return { status: "error", reason: `Task not found: ${taskId}` }
+    if (isOwnedElsewhere(task.owner)) {
+      return { status: "error", reason: `This task runs on ${task.owner.hostLabel}` }
+    }
     if (task.promotion) {
       return { status: "promoted", task, systemTaskId: task.promotion.systemTaskId }
     }
@@ -1824,6 +1861,9 @@ class TaskSchedulerImpl {
     this.queues.delete(taskId)
     const task = await schedulerDb.getTask(taskId)
     if (!task) return false
+    // A placeholder stays `disabled`: pausing it would let `resumeTask` reach
+    // it later through the paused branch.
+    if (isOwnedElsewhere(task.owner)) return false
 
     await schedulerDb.updateTask({ ...task, status: "paused", updatedAt: new Date() })
     log.info(`Paused task: ${task.name} (${taskId})`)
@@ -1851,7 +1891,9 @@ class TaskSchedulerImpl {
    */
   async resumeTask(taskId: string): Promise<boolean> {
     const task = await schedulerDb.getTask(taskId)
-    if (!task || task.status !== "paused") return false
+    if (!task) return false
+    assertRunsHere("scheduled-task", task.owner)
+    if (task.status !== "paused") return false
     if (isDeprecatedTaskType(task.type)) {
       throw SchedulerError.deprecatedTaskType(task.type)
     }
@@ -1867,6 +1909,72 @@ class TaskSchedulerImpl {
     if (task.promotion) await this.syncPromotedOsTaskEnabled(task, true)
     log.info(`Resumed task: ${task.name} (${taskId})`)
     return true
+  }
+
+  /**
+   * Record who runs a task (ADR-0224) and bring its local arming in line.
+   *
+   * The one writer of `owner`. `updateTask` refuses a placeholder, so this is
+   * also the only way out of one:
+   *
+   *   * moving to a paired host fences the local row: disarmed, retries and
+   *     queued starts dropped, status `disabled`. The host runs it now.
+   *   * clearing the owner or pinning it here (take-back, manual pin) restores
+   *     `options.status` and arms the task if that status is active.
+   *
+   * A task promoted to the OS scheduler cannot move: the promotion is this
+   * machine's timer, and the migration preflight reports it as machine-bound.
+   */
+  async setTaskOwner(
+    taskId: string,
+    owner: ItemOwner | undefined,
+    options: { status?: ScheduledTaskStatus } = {}
+  ): Promise<ScheduledTask | null> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task) return null
+    const now = new Date()
+    if (isOwnedElsewhere(owner)) {
+      if (task.promotion) {
+        throw new Error(
+          `scheduled_task_promoted: "${task.name}" is promoted to this machine's OS scheduler; unpromote it before moving it`
+        )
+      }
+      this.invalidateTaskLifecycle(taskId)
+      this.unscheduleTask(taskId)
+      this.clearTaskRetries(taskId)
+      this.queues.delete(taskId)
+      const fenced: ScheduledTask = {
+        ...task,
+        owner,
+        status: "disabled",
+        nextRunAt: undefined,
+        updatedAt: now,
+      }
+      await schedulerDb.updateTask(fenced)
+      log.info(`Task ${task.name} now runs on ${owner.hostLabel}`)
+      return fenced
+    }
+
+    const status = options.status ?? task.status
+    const next: ScheduledTask = {
+      ...task,
+      owner,
+      status,
+      nextRunAt:
+        status === "active" ? this.calculateNextRunTime(task, { fromDate: now }) : undefined,
+      updatedAt: now,
+    }
+    // Disarm first either way: the new owner may change whether this machine
+    // is the one allowed to fire it.
+    this.unscheduleTask(taskId)
+    if (status !== "active") {
+      this.invalidateTaskLifecycle(taskId)
+      this.clearTaskRetries(taskId)
+      this.queues.delete(taskId)
+    }
+    await schedulerDb.updateTask(next)
+    if (status === "active") await this.scheduleTask(next)
+    return next
   }
 
   /**
@@ -1894,6 +2002,7 @@ class TaskSchedulerImpl {
       log.warn(`Task not found for immediate run: ${taskId}`)
       return null
     }
+    assertRunsHere("scheduled-task", task.owner)
 
     const run = opts.payload ? { ...task, payload: { ...task.payload, ...opts.payload } } : task
     return this.executeTask(run, 0, {
@@ -2012,6 +2121,7 @@ class TaskSchedulerImpl {
     if (!task) {
       throw SchedulerError.taskNotFound(taskId)
     }
+    assertRunsHere("scheduled-task", task.owner)
     if (task.trigger.type !== "cron" && task.trigger.type !== "interval") {
       throw SchedulerError.invalidTrigger("Backfill supports cron and interval triggers only", {
         triggerType: task.trigger.type,
@@ -2075,7 +2185,7 @@ class TaskSchedulerImpl {
       driver = this.driver
     }
     if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
-    if (!driver || !this.driverReady || !this.isTimingAuthority()) return
+    if (!driver || !this.driverReady || !this.isTimingAuthorityFor(task)) return
 
     this.armedTaskIds.add(task.id)
     // Arm with optional jitter; remember the canonical slot for handleTaskDue.
@@ -2134,10 +2244,10 @@ class TaskSchedulerImpl {
   private async handlePrewarmDue(taskId: string, version: number): Promise<void> {
     if (version !== this.lifecycleVersion) return
     this.armedPrewarms.delete(taskId)
-    if (!this.isTimingAuthority()) return
     const task = await schedulerDb.getTask(taskId).catch(() => null)
     if (version !== this.lifecycleVersion) return
     if (!task || task.status !== "active" || task.promotion) return
+    if (!this.isTimingAuthorityFor(task)) return
 
     this.prewarmControllers.get(taskId)?.abort("prewarm-superseded")
     const controller = new AbortController()
@@ -2222,6 +2332,22 @@ class TaskSchedulerImpl {
     const executionId = context.executionId ?? nanoid()
     const startTime = new Date()
     const triggerSource = context.triggerSource ?? (retryAttempt > 0 ? "retry" : "schedule")
+    // Every run path ends here, so a placeholder for a task that moved to a
+    // paired host (ADR-0224) is refused here once, whichever path asked: a
+    // retry armed before the move, a workflow node, a chained follow-up. The
+    // fire paths are already gated; this is the backstop, and it leaves a row
+    // so the refusal is visible rather than silent.
+    if (isOwnedElsewhere(task.owner)) {
+      log.warn(`Not running ${task.name} here: it runs on ${task.owner.hostLabel}`)
+      return this.createSkippedExecution(task, {
+        id: executionId,
+        triggerSource,
+        scheduledFor: context.scheduledFor,
+        terminalReason: "owned-elsewhere",
+        message: `Skipped: this task runs on ${task.owner.hostLabel}`,
+        retryAttempt,
+      })
+    }
     const isRetryExecution = triggerSource === "retry"
     const retryChainActive = this.retryChains.has(task.id)
 
@@ -3530,12 +3656,22 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * Import tasks from an exported JSON object
-   * @param mode 'merge' keeps existing tasks, 'replace' deletes all before import
+   * Import tasks from an exported JSON object.
+   *
+   * What arrives is a definition from another place, so what belonged to that
+   * place stays behind (ADR-0224): an OS-scheduler promotion is that
+   * machine's timer, and an owner is that machine's answer to "who runs it".
+   * A task keeps its status, so a paused task does not come back running. A
+   * type this host cannot run, or a workspace it does not have, is refused
+   * with the reason rather than stored to fail every slot.
+   *
+   * @param mode 'merge' keeps existing tasks (so replaying an import is a
+   *   no-op per task id), 'replace' deletes all before import
    */
   async importTasks(
     data: { version: number; tasks: ScheduledTask[] },
-    mode: "merge" | "replace" = "merge"
+    mode: "merge" | "replace" = "merge",
+    options: { provenance?: Omit<ScheduledTaskProvenance, "at"> } = {}
   ): Promise<{ imported: number; skipped: number; errors: string[] }> {
     const result = { imported: 0, skipped: 0, errors: [] as string[] }
 
@@ -3560,6 +3696,27 @@ class TaskSchedulerImpl {
           continue
         }
 
+        if (isDeprecatedTaskType(task.type)) {
+          result.errors.push(`Skipped "${task.name}": the ${task.type} task type is deprecated`)
+          result.skipped++
+          continue
+        }
+        const support = getTaskTypeHostSupport(task.type)
+        if (!support.supported) {
+          result.errors.push(
+            `Skipped "${task.name}": ${describeUnsupportedTaskType(task.type, support)}`
+          )
+          result.skipped++
+          continue
+        }
+        if (task.projectId && !(await projectExistsHere(task.projectId))) {
+          result.errors.push(
+            `Skipped "${task.name}": its workspace (${task.projectId}) does not exist on this host`
+          )
+          result.skipped++
+          continue
+        }
+
         if (mode === "merge") {
           const existing = await schedulerDb.getTask(task.id)
           if (existing) {
@@ -3568,8 +3725,10 @@ class TaskSchedulerImpl {
           }
         }
 
+        // Neither travels: see the method comment.
+        const { promotion: _promotion, owner: _owner, ...portable } = task
         const importedTask: ScheduledTask = {
-          ...task,
+          ...portable,
           trigger: normalizeTaskTrigger(task.trigger, { now: new Date() }),
           payload: normalizeConversationalTaskPayload(task.type, task.payload),
           config: {
@@ -3594,13 +3753,26 @@ class TaskSchedulerImpl {
           lastError: undefined,
           lastTerminalReason: undefined,
           lastTerminalAt: undefined,
-          status: "active",
+          status: importedTaskStatus(task.status),
+          provenance: {
+            kind: options.provenance?.kind ?? "import",
+            at: Date.now(),
+            ...(options.provenance?.sourceLabel
+              ? { sourceLabel: options.provenance.sourceLabel }
+              : {}),
+            ...(options.provenance?.operationId
+              ? { operationId: options.provenance.operationId }
+              : {}),
+          },
         }
 
-        importedTask.nextRunAt = this.calculateNextRunTime(importedTask, { fromDate: new Date() })
+        importedTask.nextRunAt =
+          importedTask.status === "active"
+            ? this.calculateNextRunTime(importedTask, { fromDate: new Date() })
+            : undefined
         await schedulerDb.createTask(importedTask)
 
-        if (importedTask.status === "active" && this.isTimingAuthority()) {
+        if (importedTask.status === "active" && this.isTimingAuthorityFor(importedTask)) {
           await this.scheduleTask(importedTask)
         }
 

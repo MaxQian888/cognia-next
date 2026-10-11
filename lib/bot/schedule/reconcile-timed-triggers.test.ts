@@ -476,6 +476,27 @@ describe("the mirror fence", () => {
     expect(schedulerApi.createTask).toHaveBeenCalledTimes(1)
   })
 
+  it("removes the schedules of an installation that moved to a paired host", async () => {
+    // Unlike a mirror, a placeholder WAS this machine's: its rows exist here
+    // and must go, or the moved Bot fires on both machines (ADR-0224).
+    await syncBotTriggerSchedules(resolved([CRON]))
+    expect(tasks.size).toBe(1)
+    await syncBotTriggerSchedules(
+      resolved([CRON], {
+        owner: {
+          kind: "remote-host",
+          hostId: "mini",
+          hostLabel: "Mac mini",
+          remoteItemId: "boti_1",
+          operationId: "op",
+          movedAt: NOW,
+        },
+      })
+    )
+    expect(tasks.size).toBe(0)
+    expect(schedulerApi.createTask).toHaveBeenCalledTimes(1)
+  })
+
   it("fences the boot sweep too, through the same function", async () => {
     // One fence at the chokepoint rather than one per caller.
     listBotInstallations.mockResolvedValue([installation({ syncedFromHost: true })])

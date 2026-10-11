@@ -50,6 +50,13 @@ export const botLifecycleMutationSchema = z.discriminatedUnion("operation", [
         .strict(),
       config: config.optional(),
       credentialBindings: z.record(z.string(), binding).optional(),
+      // The rest of an installation's setup, so a host can receive a whole
+      // Bot in one idempotent operation (ADR-0224 migration) instead of four
+      // that could stop halfway. `enabled` is a request: missing credentials
+      // still answer `needs_setup`.
+      enabled: z.boolean().optional(),
+      triggerOverrides: z.record(z.string(), z.boolean()).optional(),
+      policyGrant: botPolicyGrantSchema.optional(),
     })
     .strict(),
   z
@@ -164,13 +171,25 @@ export async function mutateBotInstallationOnHost(raw: unknown) {
         canonicalIntegrationValue(existing.config) !== canonicalIntegrationValue(config) ||
         canonicalIntegrationValue(existing.scope) !== canonicalIntegrationValue(input.scope) ||
         canonicalIntegrationValue(existing.credentialBindings) !==
-          canonicalIntegrationValue(input.credentialBindings ?? {})
+          canonicalIntegrationValue(input.credentialBindings ?? {}) ||
+        canonicalIntegrationValue(existing.triggerOverrides ?? {}) !==
+          canonicalIntegrationValue(input.triggerOverrides ?? {}) ||
+        canonicalIntegrationValue(existing.policyGrant ?? null) !==
+          canonicalIntegrationValue(input.policyGrant ?? null)
       )
         throw new Error("Bot installation operation already belongs to another definition")
       return projectBotInstallationRow(existing)
     }
     const row = await installBotFromCatalogLocally(
-      { entry, scope: input.scope, config, credentialBindings: input.credentialBindings },
+      {
+        entry,
+        scope: input.scope,
+        config,
+        credentialBindings: input.credentialBindings,
+        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.triggerOverrides ? { triggerOverrides: input.triggerOverrides } : {}),
+        ...(input.policyGrant ? { policyGrant: input.policyGrant } : {}),
+      },
       installationId
     )
     return projectBotInstallationRow(row)

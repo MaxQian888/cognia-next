@@ -187,6 +187,39 @@ describe("host feature manifest", () => {
     expect(supportsHostFeatureOperation(legacy, "connectors.inbox-relay")).toBe(false)
   })
 
+  it("advertises receiving moved always-on work from desktop and headless hosts only (ADR-0224)", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["always-on.migration"]).toEqual({
+        version: 1,
+        operations: [
+          "scheduled_task_import",
+          "bot_installation_mutate",
+          "adapter_instance_mutate",
+          "plugin_cogpack_upload_open",
+          "plugin_cogpack_upload_write",
+          "plugin_cogpack_upload_abort",
+          "plugin_cogpack_transfer_install",
+        ],
+      })
+      expect(
+        supportsHostFeatureOperation(manifest, "always-on.migration", "adapter_instance_mutate")
+      ).toBe(true)
+      expect(
+        supportsHostFeatureOperation(
+          manifest,
+          "always-on.migration",
+          "plugin_cogpack_transfer_install"
+        )
+      ).toBe(true)
+    }
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["always-on.migration"]
+      ).toBeUndefined()
+    }
+  })
+
   it("advertises the versioned Twin draft review operation on execution hosts", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
 

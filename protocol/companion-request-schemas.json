@@ -1,6 +1,117 @@
 {
   "schemaVersion": 1,
   "commands": {
+    "adapter_instance_mutate": {
+      "type": "object",
+      "description": "create needs instance; configure needs patch; remove needs only the id. The host re-validates the shape per operation (lib/connectors/instance-transfer.ts).",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "create",
+            "configure",
+            "remove"
+          ]
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "instance": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "transportMode": {
+              "type": "string",
+              "enum": [
+                "longpoll",
+                "webhook",
+                "reverse-ws",
+                "forward-ws",
+                "gateway",
+                "imap-smtp"
+              ]
+            },
+            "settings": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "credentialsRef": {
+              "type": "object",
+              "properties": {
+                "keyringService": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "accounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "keyringService",
+                "accounts"
+              ],
+              "additionalProperties": false
+            },
+            "trigger": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "defaultMode": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "displayName",
+            "enabled",
+            "transportMode",
+            "settings",
+            "credentialsRef",
+            "trigger",
+            "defaultMode"
+          ],
+          "additionalProperties": true
+        },
+        "patch": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "operation",
+        "operationId",
+        "id"
+      ],
+      "additionalProperties": false
+    },
     "adapter_update_policy": {
       "type": "object",
       "description": "Relay one bot's policy from a paired client to the host that runs it. An absent key leaves the stored value alone; an explicit null clears it. That distinction is why every optional axis is nullable rather than merely omitted: JSON drops `undefined`, so omission cannot mean \"unpin this\".",
@@ -1248,6 +1359,43 @@
                   }
                 ]
               }
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "triggerOverrides": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "policyGrant": {
+              "type": "object",
+              "properties": {
+                "maxAuthority": {
+                  "type": "string",
+                  "enum": [
+                    "acceptEdits",
+                    "bypassPermissions"
+                  ]
+                },
+                "maxAutonomy": {
+                  "type": "string",
+                  "enum": [
+                    "confirm",
+                    "autopilot"
+                  ]
+                },
+                "requireApprovalForWrites": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "maxAuthority",
+                "maxAutonomy",
+                "requireApprovalForWrites"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -11855,6 +12003,142 @@
         },
         "backupId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_install_staged": {
+      "type": "object",
+      "description": "Install members of a staged plugin transfer the host's own review accepted (internal transport only: the headless brain). The archive's manifest.json must hash to manifestSha256.",
+      "required": [
+        "uploadId",
+        "manifestSha256",
+        "members"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_transfer_install": {
+      "type": "object",
+      "description": "Install the plugins a fully uploaded cogpack embeds. The host verifies the manifest's signature and applies its own plugin policy (lib/plugin/cogpack/transfer-install.ts).",
+      "required": [
+        "uploadId",
+        "operationId",
+        "manifest"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "manifest": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_upload_abort": {
+      "type": "object",
+      "required": [
+        "uploadId"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_upload_open": {
+      "type": "object",
+      "description": "Stage a cogpack of byteLength bytes whose SHA-256 is sha256, uploaded in chunks of at most the returned chunkBytes.",
+      "required": [
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 104857600
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_upload_write": {
+      "type": "object",
+      "required": [
+        "uploadId",
+        "offset",
+        "dataBase64",
+        "chunkHash"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 43692
+        },
+        "chunkHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       },
       "additionalProperties": false

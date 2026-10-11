@@ -12,6 +12,7 @@ import {
   updateAdapterConfigSection,
   patchAdapterInstanceSettings,
   deleteAdapterInstance,
+  setAdapterInstanceOwner,
 } from "./adapter-instances"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -188,5 +189,48 @@ describe("adapter-instances", () => {
     expect(found?.publicUrl).toBe("https://example.com")
     expect(found?.quietHours).toEqual({ from: "22:00", to: "08:00", tz: "Asia/Shanghai" })
     expect(found?.muted).toBe(true)
+  })
+
+  describe("ownership (ADR-0224)", () => {
+    const moved = {
+      kind: "remote-host" as const,
+      hostId: "mini",
+      hostLabel: "Mac mini",
+      remoteItemId: "cai_remote",
+      operationId: "op-1",
+      movedAt: 1,
+    }
+
+    it("fences an instance that moved away and restores it on take-back", async () => {
+      const row = await createAdapterInstance(baseInput())
+      const fenced = await setAdapterInstanceOwner(row.id, moved)
+      expect(fenced).toMatchObject({ enabled: false, owner: moved })
+      expect((await listEnabledAdapterInstances()).map((r) => r.id)).not.toContain(row.id)
+
+      const back = await setAdapterInstanceOwner(row.id, undefined, { enabled: true })
+      expect(back?.enabled).toBe(true)
+      expect(back && "owner" in back).toBe(false)
+      expect(await setAdapterInstanceOwner("cai_missing", moved)).toBeUndefined()
+    })
+
+    it("refuses every edit of a placeholder, which would not reach the host", async () => {
+      const row = await createAdapterInstance(baseInput())
+      await setAdapterInstanceOwner(row.id, moved)
+      await expect(updateAdapterInstance(row.id, { enabled: true })).rejects.toThrow(
+        /item_owned_elsewhere: this connector instance runs on Mac mini/
+      )
+      await expect(updateAdapterConfigSection(row.id, "behavior", { muted: true })).rejects.toThrow(
+        /item_owned_elsewhere/
+      )
+      await expect(patchAdapterInstanceSettings(row.id, { a: 1 })).rejects.toThrow(
+        /item_owned_elsewhere/
+      )
+      expect((await getAdapterInstance(row.id))?.enabled).toBe(false)
+    })
+
+    it("never creates a placeholder from a copied row", async () => {
+      const row = await createAdapterInstance({ ...baseInput(), owner: moved } as never)
+      expect("owner" in row).toBe(false)
+    })
   })
 })

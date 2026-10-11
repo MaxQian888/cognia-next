@@ -44,6 +44,8 @@ export interface DBScheduledTask {
   tags?: string // JSON serialized string[]
   endAt?: string // ISO date string
   promotion?: string // JSON serialized ScheduledTaskPromotion (promotedAt as ISO)
+  owner?: string // JSON serialized ItemOwner (ADR-0224)
+  provenance?: string // JSON serialized ScheduledTaskProvenance
   onSuccessTaskIds?: string // JSON serialized string[]
   onFailureTaskIds?: string // JSON serialized string[]
   consecutiveFailures?: number

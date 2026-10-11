@@ -34,6 +34,7 @@ import type {
 import { isTaskExecutionPhaseName } from "@/types/scheduler/execution-phases"
 import type { DBScheduledTask, DBTaskExecution } from "@/lib/db/scheduled-task-types"
 import { getDb } from "@/lib/db/schema"
+import { parseItemOwner } from "@/lib/placement/ownership"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.app
@@ -596,6 +597,8 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     promotion: task.promotion
       ? JSON.stringify({ ...task.promotion, promotedAt: task.promotion.promotedAt.toISOString() })
       : undefined,
+    owner: task.owner ? JSON.stringify(task.owner) : undefined,
+    provenance: task.provenance ? JSON.stringify(task.provenance) : undefined,
     onSuccessTaskIds: task.onSuccessTaskIds ? JSON.stringify(task.onSuccessTaskIds) : undefined,
     onFailureTaskIds: task.onFailureTaskIds ? JSON.stringify(task.onFailureTaskIds) : undefined,
     consecutiveFailures: task.consecutiveFailures,
@@ -627,6 +630,30 @@ function deserializePromotion(serialized: string): ScheduledTask["promotion"] | 
       token: raw.token,
       promotedAt: Number.isNaN(promotedAt.getTime()) ? new Date(0) : promotedAt,
       backend: typeof raw.backend === "string" ? raw.backend : undefined,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function deserializeOwner(serialized: string): ScheduledTask["owner"] {
+  try {
+    return parseItemOwner(JSON.parse(serialized))
+  } catch {
+    return undefined
+  }
+}
+
+function deserializeProvenance(serialized: string): ScheduledTask["provenance"] {
+  try {
+    const raw = JSON.parse(serialized) as Record<string, unknown>
+    if (raw.kind !== "import" && raw.kind !== "migration") return undefined
+    if (typeof raw.at !== "number") return undefined
+    return {
+      kind: raw.kind,
+      at: raw.at,
+      ...(typeof raw.sourceLabel === "string" ? { sourceLabel: raw.sourceLabel } : {}),
+      ...(typeof raw.operationId === "string" ? { operationId: raw.operationId } : {}),
     }
   } catch {
     return undefined
@@ -696,6 +723,8 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
     endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,
     promotion: dbTask.promotion ? deserializePromotion(dbTask.promotion) : undefined,
+    owner: dbTask.owner ? deserializeOwner(dbTask.owner) : undefined,
+    provenance: dbTask.provenance ? deserializeProvenance(dbTask.provenance) : undefined,
     onSuccessTaskIds: dbTask.onSuccessTaskIds ? JSON.parse(dbTask.onSuccessTaskIds) : undefined,
     onFailureTaskIds: dbTask.onFailureTaskIds ? JSON.parse(dbTask.onFailureTaskIds) : undefined,
     consecutiveFailures: dbTask.consecutiveFailures,

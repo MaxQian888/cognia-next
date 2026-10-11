@@ -69,6 +69,9 @@
     "acp_terminal_write": {
       "to": "acp.terminal.write"
     },
+    "adapter_instance_mutate": {
+      "to": "connector.adapter.instance.mutate"
+    },
     "adapter_update_policy": {
       "to": "connector.adapter.policy.update"
     },
@@ -2355,6 +2358,21 @@
     },
     "plugin_cli_exec": {
       "to": "plugin.cli.exec"
+    },
+    "plugin_cogpack_install_staged": {
+      "to": "plugin.cogpack.staged.install"
+    },
+    "plugin_cogpack_transfer_install": {
+      "to": "plugin.cogpack.transfer.install"
+    },
+    "plugin_cogpack_upload_abort": {
+      "to": "plugin.cogpack.upload.cancel"
+    },
+    "plugin_cogpack_upload_open": {
+      "to": "plugin.cogpack.upload.open"
+    },
+    "plugin_cogpack_upload_write": {
+      "to": "plugin.cogpack.upload.write"
     },
     "plugin_commit_staged_update": {
       "to": "plugin.staged_update.commit"

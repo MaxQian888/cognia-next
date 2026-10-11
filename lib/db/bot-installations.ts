@@ -11,6 +11,8 @@
 import { nanoid } from "nanoid"
 
 import { getDb } from "@/lib/db/schema"
+import { assertRunsHere, isOwnedElsewhere } from "@/lib/placement/ownership"
+import type { ItemOwner } from "@/types/placement/item-owner"
 import type {
   BotCredentialBinding,
   BotDefinitionSource,
@@ -31,7 +33,8 @@ export interface InstallBotInput {
   credentialBindings?: Record<string, BotCredentialBinding>
   triggerOverrides?: Record<string, boolean>
   policyGrant?: PluginBotPolicyV1
-  placementRef?: string
+  /** `disabled` installs it switched off. Default: enabled, if its slots allow. */
+  requestedStatus?: "enabled" | "disabled"
   /** Slots the definition requires, so the initial status is honest. */
   requiredCredentials?: readonly PluginBotCredentialSlot[]
   now?: number
@@ -123,7 +126,7 @@ export function buildBotInstallationRow(input: InstallBotInput): BotInstallation
     pinnedVersion: input.pinnedVersion,
     scope: input.scope,
     status: resolveInstallationStatus({
-      requested: "enabled",
+      requested: input.requestedStatus ?? "enabled",
       requiredCredentials: input.requiredCredentials,
       credentialBindings,
     }),
@@ -135,7 +138,6 @@ export function buildBotInstallationRow(input: InstallBotInput): BotInstallation
     ...(input.scope.projectId ? { projectId: input.scope.projectId } : {}),
     ...(input.triggerOverrides ? { triggerOverrides: input.triggerOverrides } : {}),
     ...(input.policyGrant ? { policyGrant: input.policyGrant } : {}),
-    ...(input.placementRef ? { placementRef: input.placementRef } : {}),
   }
 }
 
@@ -156,7 +158,11 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
 }
 
 export type BotInstallationPatch = Partial<
-  Omit<BotInstallationRow, "id" | "createdAt" | "updatedAt" | "workspaceId" | "projectId">
+  Omit<
+    BotInstallationRow,
+    // `owner` has its own writer, `setBotInstallationOwner`.
+    "id" | "createdAt" | "updatedAt" | "workspaceId" | "projectId" | "owner"
+  >
 > & {
   /** Re-evaluated against the merged row when bindings or status change. */
   requiredCredentials?: readonly PluginBotCredentialSlot[]
@@ -170,6 +176,9 @@ export async function updateBotInstallation(
   const db = getDb()
   const existing = await db.botInstallations.get(id)
   if (!existing) return undefined
+  // A placeholder records where the installation went (ADR-0224). An edit here
+  // would not reach the host, and enabling it would run the Bot twice.
+  assertRunsHere("bot-installation", existing.owner)
 
   const { now, requiredCredentials, ...fields } = patch
   const merged: BotInstallationRow = { ...existing, ...fields, updatedAt: now ?? Date.now() }
@@ -196,6 +205,48 @@ export async function updateBotInstallation(
   }
   await syncSchedules(merged)
   return merged
+}
+
+/**
+ * Record which machine runs an installation (ADR-0224) and bring its
+ * schedules in line. The one writer of `owner`; `updateBotInstallation`
+ * refuses a placeholder, so this is also the only way out of one.
+ *
+ * Moving it to a paired host fences the local row: `disabled`, live runs
+ * cancelled, timed-trigger schedules removed. The host runs it now. Clearing
+ * the owner or pinning it here (take-back, manual pin) restores
+ * `options.status`, re-checked against the credential slots like any enable.
+ */
+export async function setBotInstallationOwner(
+  id: string,
+  owner: ItemOwner | undefined,
+  options: {
+    status?: BotInstallationStatus
+    requiredCredentials?: readonly PluginBotCredentialSlot[]
+    now?: number
+  } = {}
+): Promise<BotInstallationRow | undefined> {
+  const db = getDb()
+  const existing = await db.botInstallations.get(id)
+  if (!existing) return undefined
+  const now = options.now ?? Date.now()
+  const next: BotInstallationRow = { ...existing, updatedAt: now }
+  if (owner) next.owner = owner
+  else delete next.owner
+  next.status = isOwnedElsewhere(owner)
+    ? "disabled"
+    : resolveInstallationStatus({
+        requested: options.status ?? existing.status,
+        requiredCredentials: options.requiredCredentials,
+        credentialBindings: existing.credentialBindings,
+      })
+  await db.botInstallations.put(next)
+  if (next.status !== "enabled") {
+    const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
+    cancelLiveBotInstallation(id)
+  }
+  await syncSchedules(next)
+  return next
 }
 
 export async function getBotInstallation(id: string): Promise<BotInstallationRow | undefined> {

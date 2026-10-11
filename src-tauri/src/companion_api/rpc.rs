@@ -348,6 +348,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_set_enabled",
     "mcp_set_tool_rules",
     "adapter_update_policy",
+    "adapter_instance_mutate",
     "app_settings_update",
     // Account-scoped Langfuse v4 destination. Credentials remain inside the
     // current Host and ingest accepts only AgentTraceBatchV1.
@@ -957,6 +958,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_install",
     "plugin_install_from_github",
     "plugin_uninstall",
+    // ADR-0224 A5 — plugins a paired device carries to an always-on host.
+    "plugin_cogpack_upload_open",
+    "plugin_cogpack_upload_write",
+    "plugin_cogpack_upload_abort",
+    "plugin_cogpack_transfer_install",
+    "plugin_cogpack_install_staged",
     "plugin_stage_version",
     "plugin_commit_staged_update",
     "plugin_discard_staged_update",
@@ -2562,6 +2569,10 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "file_share_activate",
     "file_space_sync",
     "file_share_policy_set",
+    // ADR-0224 A5 — the brain's half of a plugin transfer it accepted. A
+    // device reaches the install only through `plugin_cogpack_transfer_install`,
+    // which runs the host's own signature and policy checks first.
+    "plugin_cogpack_install_staged",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =

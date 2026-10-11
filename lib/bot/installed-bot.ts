@@ -9,6 +9,7 @@
  */
 
 import { getBotDefinition } from "@/lib/db/bot-definitions"
+import { runsHere } from "@/lib/placement/ownership"
 import type { BotInstallationRow } from "@/lib/db/bot-types"
 import { getBot } from "@/lib/plugin/registries/bot-registry"
 import {
@@ -182,8 +183,15 @@ async function resolveLocalDefinition(
   }
 }
 
-/** Can this resolution actually run, or only be looked at? */
+/**
+ * Can this resolution actually run, or only be looked at?
+ *
+ * Every start goes through here (event fan-out, the timed-trigger executor,
+ * the delivery runner, a manual run), so this is where a placeholder for an
+ * installation that moved to a paired host is refused (ADR-0224).
+ */
 export function isRunnableBot(resolved: InstalledBot): boolean {
   if (resolved.installation.status !== "enabled") return false
+  if (!runsHere(resolved.installation.owner)) return false
   return !resolved.problems.some((problem) => problem.kind === "handler_missing")
 }

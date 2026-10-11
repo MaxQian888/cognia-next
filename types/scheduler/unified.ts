@@ -17,6 +17,7 @@
  * and consumed by the `useUnifiedScheduledItems` hook.
  */
 
+import type { ItemOwnerRemoteHost } from "@/types/placement/item-owner"
 import type { TaskTriggerType } from "@/types/scheduler"
 
 /** Single exhaustive runtime/type authority for every unified scheduler kind. */
@@ -129,7 +130,21 @@ export interface UnifiedScheduledItem {
   descriptionKey?: string
   origin: UnifiedItemOrigin
   capabilities: UnifiedItemCapabilities
+  /**
+   * Set when this row is a placeholder for an item a paired host runs
+   * (ADR-0224): it never runs here, so every capability is off and the UI
+   * says where it runs instead.
+   */
+  owner?: ItemOwnerRemoteHost
 }
+
+/** What a placeholder may do here: nothing. The host's device page takes it back. */
+export const PLACEHOLDER_CAPABILITIES: UnifiedItemCapabilities = Object.freeze({
+  runNow: false,
+  pause: false,
+  edit: false,
+  delete: false,
+})
 
 /**
  * Helper — build a stable `unifiedId`. Centralized so sources can't drift.

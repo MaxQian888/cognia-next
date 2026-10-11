@@ -115,6 +115,7 @@ import Dexie from "dexie"
 import { recoverStaleConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { createConnectorRuntimeLease } from "@/lib/connectors/runtime-lease"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
+import { isOwnedElsewhere, runsHere } from "@/lib/placement/ownership"
 
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
@@ -309,6 +310,11 @@ export function installConnectorRuntime(
 ): () => Promise<void> {
   if (!opts.skipHostGate && !isTauri()) return async () => undefined
   const log = opts.log ?? consoleLog
+  // A placeholder for an instance that moved to a paired host (ADR-0224) is
+  // never built here, whichever host this is; the caller's filter narrows
+  // further. Both the boot pass and the hot reconcile use this one predicate.
+  const runsOnThisHost = (row: AdapterInstanceRow): boolean =>
+    runsHere(row.owner) && (!opts.rowFilter || opts.rowFilter(row))
 
   const ac = new AbortController()
   // Runtime cancellation and ownership release are intentionally separate.
@@ -616,16 +622,16 @@ export function installConnectorRuntime(
     }
     if (cancelled) return
 
-    if (opts.rowFilter) {
-      const skipped = enabled.filter((row) => !opts.rowFilter!(row))
-      for (const row of skipped) {
-        log(
-          "info",
-          `[connector-bus] adapter ${row.id} (${row.type}, ${row.transportMode}) skipped by host filter`
-        )
-      }
-      enabled = enabled.filter((row) => opts.rowFilter!(row))
+    const skipped = enabled.filter((row) => !runsOnThisHost(row))
+    for (const row of skipped) {
+      log(
+        "info",
+        isOwnedElsewhere(row.owner)
+          ? `[connector-bus] adapter ${row.id} (${row.type}) runs on ${row.owner.hostLabel}, not here`
+          : `[connector-bus] adapter ${row.id} (${row.type}, ${row.transportMode}) skipped by host filter`
+      )
     }
+    enabled = enabled.filter(runsOnThisHost)
 
     const bus = getBus()
     const liveSteerCoordinator = createConnectorLiveSteerCoordinator({
@@ -908,7 +914,7 @@ export function installConnectorRuntime(
           return
         }
         if (cancelled) return
-        const enabledRows = opts.rowFilter ? rows.filter(opts.rowFilter) : rows
+        const enabledRows = rows.filter(runsOnThisHost)
         const enabledIds = new Set(enabledRows.map((r) => r.id))
         // Disabled, deleted and host-filtered definitions stop through the
         // same serialized lane as every other lifecycle operation.

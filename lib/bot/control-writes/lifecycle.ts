@@ -137,6 +137,11 @@ export interface InstallBotFromCatalogInput {
   scope: BotInstallationScope
   config?: Record<string, unknown>
   credentialBindings?: Record<string, BotCredentialBinding>
+  /** Install switched off. Absent means on (still `needs_setup` when a slot is unbound). */
+  enabled?: boolean
+  /** Which triggers are armed, when not each definition default. */
+  triggerOverrides?: Record<string, boolean>
+  policyGrant?: BotPolicyGrantInput
 }
 
 /**
@@ -162,6 +167,9 @@ export async function installBotFromCatalogLocally(
     requiredCredentials: input.entry.slots,
     ...(input.config ? { config: input.config } : {}),
     ...(input.credentialBindings ? { credentialBindings: input.credentialBindings } : {}),
+    ...(input.enabled === false ? { requestedStatus: "disabled" as const } : {}),
+    ...(input.triggerOverrides ? { triggerOverrides: input.triggerOverrides } : {}),
+    ...(input.policyGrant ? { policyGrant: botPolicyGrantSchema.parse(input.policyGrant) } : {}),
   }
   // The hook sees the exact row about to be written — a hand-rolled
   // approximation would drift from `installBot`'s shape. Its throw lands
@@ -344,14 +352,20 @@ async function relayLifecycle(input: BotLifecycleMutation): Promise<BotInstallat
   })
 }
 
-export async function installBotFromCatalog(
-  input: InstallBotFromCatalogInput
-): Promise<BotInstallationRow> {
-  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
-    return installBotFromCatalogLocally(input)
-  return relayLifecycle({
+/**
+ * The `bot_installation_mutate` install a host receives for this input.
+ *
+ * One builder for both senders: a paired client installing on its host, and
+ * the ADR-0224 migration moving a whole installation in one operation. The
+ * host keys the installation on `operationId`, so resending it is a no-op.
+ */
+export function botInstallMutation(
+  input: InstallBotFromCatalogInput,
+  operationId: string
+): Extract<BotLifecycleMutation, { operation: "install" }> {
+  return {
     operation: "install",
-    operationId: crypto.randomUUID(),
+    operationId,
     definitionId: input.entry.definitionId,
     version: input.entry.version,
     scope: input.scope,
@@ -367,7 +381,18 @@ export async function installBotFromCatalog(
           })
         )
       : undefined,
-  })
+    ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+    ...(input.triggerOverrides ? { triggerOverrides: input.triggerOverrides } : {}),
+    ...(input.policyGrant ? { policyGrant: botPolicyGrantSchema.parse(input.policyGrant) } : {}),
+  }
+}
+
+export async function installBotFromCatalog(
+  input: InstallBotFromCatalogInput
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return installBotFromCatalogLocally(input)
+  return relayLifecycle(botInstallMutation(input, crypto.randomUUID()))
 }
 export async function updateBotConfig(
   installationId: string,

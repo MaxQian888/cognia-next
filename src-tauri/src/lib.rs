@@ -1547,6 +1547,7 @@ pub fn run() {
             plugin_api::vscode::commands::ensure_system_lsp_host,
             plugin_api::backup::plugin_backup_create,
             plugin_api::plugin_tree::plugin_export_tree,
+            plugin_api::cogpack_transfer::plugin_cogpack_install_staged,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,
             plugin_api::marketplace::plugin_marketplace_versions,

@@ -21,6 +21,7 @@ import type { BotInstallationRow } from "@/lib/db/bot-types"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
 import { BOT_TIMED_TRIGGER_MIN_EVERY_MS, type PluginBotTriggerDef } from "@/types/plugin/plugin-bot"
 import type { TaskTrigger } from "@/types/scheduler"
+import { runsHere } from "@/lib/placement/ownership"
 import { defaultsFromConfigSchema, resolveBotConfig } from "@/lib/bot/config/resolve-effective"
 
 /** The task type `lib/scheduler/executors/bot-executor.ts` is registered for. */
@@ -153,8 +154,10 @@ export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<v
 
   const wanted = new Map<string, { trigger: TaskTrigger; def: PluginBotTriggerDef }>()
   // A disabled installation wants none of them. That is the difference between
-  // "turned off" and "deleted": the rows go, the installation stays.
-  if (installation.status === "enabled") {
+  // "turned off" and "deleted": the rows go, the installation stays. A
+  // placeholder for one that moved to a paired host wants none either: the
+  // host arms its own (ADR-0224).
+  if (installation.status === "enabled" && runsHere(installation.owner)) {
     const config = resolveBotConfig({
       installation: installation.config,
       definitionDefaults: defaultsFromConfigSchema(resolved.definition.configSchema),

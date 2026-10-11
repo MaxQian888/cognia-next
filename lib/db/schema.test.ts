@@ -1561,6 +1561,16 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v238 journals always-on work moved to a paired host", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(238)
+    expect(db.itemMigrations.schema.primKey.name).toBe("operationId")
+    expect(db.itemMigrations.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["[itemKind+itemId]", "hostId", "state", "updatedAt"])
+    )
+  })
+
   it("v237 indexes the Files Trash and adds saved document templates", async () => {
     const db = getDb()
     await db.open()

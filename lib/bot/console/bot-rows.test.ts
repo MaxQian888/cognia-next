@@ -211,6 +211,22 @@ describe("buildBotRow credentials and policy", () => {
     })
   })
 
+  it("marks a placeholder for an installation a paired host runs, and nothing else (ADR-0224)", () => {
+    const owner = {
+      kind: "remote-host" as const,
+      hostId: "h1",
+      hostLabel: "Mac mini",
+      remoteItemId: "boti_op",
+      operationId: "op",
+      movedAt: 1,
+    }
+    expect(buildBotRow({ installation: installation({ owner }), resolved: null }).owner).toEqual(
+      owner
+    )
+    const pinned = installation({ owner: { kind: "this-device", reason: "manual", pinnedAt: 1 } })
+    expect(buildBotRow({ installation: pinned, resolved: null }).owner).toBeUndefined()
+  })
+
   it("leaves the policy absent for an orphan rather than reading as no limits", () => {
     const row = buildBotRow({ installation: installation(), resolved: null })
     expect(row.policy).toBeUndefined()

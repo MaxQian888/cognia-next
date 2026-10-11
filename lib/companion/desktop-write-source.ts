@@ -456,6 +456,20 @@ export async function dispatchCommand(
       return mcpSetToolRules(payload)
     case "adapter_update_policy":
       return adapterUpdatePolicy(payload)
+    // A whole connector instance from another device of the account (ADR-0224
+    // migration), or a configuration change to one this host runs. Interactive
+    // approval: the RPC layer has already checked the admin lease.
+    case "adapter_instance_mutate": {
+      const { mutateAdapterInstanceOnHost } = await import("@/lib/connectors/instance-transfer")
+      return mutateAdapterInstanceOnHost(payload)
+    }
+    // Plugins a paired device carried here for an item it is moving (ADR-0224).
+    // The RPC layer checked the lease and that this device uploaded every
+    // byte; the host's own signature and policy checks run in the module.
+    case "plugin_cogpack_transfer_install": {
+      const { installTransferredCogpack } = await import("@/lib/plugin/cogpack/transfer-install")
+      return installTransferredCogpack(payload)
+    }
     case "app_settings_update":
       return appSettingsUpdate(payload)
     case "issue_apply_action":
@@ -525,9 +539,10 @@ export async function dispatchCommand(
       return connectorApproveDraft(payload)
     case "connector_reject_draft":
       return connectorRejectDraft(payload)
-    // The Bot control plane. A paired device can arm, run and replay, and the
-    // installation lifecycle deliberately has no arm here: an install carries
-    // a config blob and credential ids, and stays a Host-side action.
+    // The Bot control plane. A paired device can arm, run and replay, and
+    // drive the installation lifecycle through `bot_installation_mutate`,
+    // which re-validates the catalog entry, scope, config and every credential
+    // binding against this host's own tables.
     case "integration_github_account_connect_from_secret": {
       const { connectGithubAccountFromSecret } =
         await import("@/lib/integrations/github-account-setup")

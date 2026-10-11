@@ -73,6 +73,30 @@ describe("toUnified (app source mapper)", () => {
     })
   })
 
+  it("lists a task a paired host runs as a placeholder that does nothing here (ADR-0224)", () => {
+    const owner = {
+      kind: "remote-host" as const,
+      hostId: "h1",
+      hostLabel: "Mac mini",
+      remoteItemId: "task-1",
+      operationId: "op",
+      movedAt: 1,
+    }
+    const unified = toUnified(makeTask({ owner, status: "disabled" }))
+    expect(unified.owner).toEqual(owner)
+    expect(unified.capabilities).toEqual({
+      runNow: false,
+      pause: false,
+      edit: false,
+      delete: false,
+    })
+    const pinned = toUnified(
+      makeTask({ owner: { kind: "this-device", reason: "manual", pinnedAt: 1 } })
+    )
+    expect(pinned.owner).toBeUndefined()
+    expect(pinned.capabilities.runNow).toBe(true)
+  })
+
   it("carries the creator kind through so the panel can show who authored it", () => {
     const unified = toUnified(makeTask({ createdBy: { kind: "agent", sessionId: "sess-1" } }))
     expect(unified.createdBySource).toBe("agent")

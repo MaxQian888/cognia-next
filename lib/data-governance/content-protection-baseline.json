@@ -162,6 +162,7 @@
   "issueProjects": "metadata-only",
   "issueRuns": "encrypted-content",
   "issues": "encrypted-content",
+  "itemMigrations": "encrypted-content",
   "knowledgeBaseChunks": "encrypted-content",
   "knowledgeBaseIngestJobs": "metadata-only",
   "knowledgeBaseSources": "encrypted-content",

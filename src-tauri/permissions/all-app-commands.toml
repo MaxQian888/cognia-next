@@ -736,6 +736,7 @@ commands.allow = [
   "plugin_bundle_install_from_file",
   "plugin_bundle_install_from_url",
   "plugin_cli_exec",
+  "plugin_cogpack_install_staged",
   "plugin_commit_staged_update",
   "plugin_context_menu_register",
   "plugin_context_menu_unregister",

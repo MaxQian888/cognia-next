@@ -184,6 +184,33 @@ describe("SchedulerDatabase", () => {
       expect(pausedTasks.length).toBe(1)
     })
 
+    it("round-trips who runs the task and where it came from (ADR-0224)", async () => {
+      const owner = {
+        kind: "remote-host" as const,
+        hostId: "mini",
+        hostLabel: "Mac mini",
+        remoteItemId: "t-1",
+        operationId: "op-1",
+        movedAt: 5,
+      }
+      const provenance = { kind: "migration" as const, at: 7, operationId: "op-1" }
+      await schedulerDb.createTask(createMockTask({ id: "owned", owner, provenance }))
+      const back = await schedulerDb.getTask("owned")
+      expect(back?.owner).toEqual(owner)
+      expect(back?.provenance).toEqual(provenance)
+      // A row without either reads back as unpinned and authored here; a
+      // damaged blob is dropped rather than stranding the task.
+      await schedulerDb.createTask(createMockTask({ id: "plain-owner" }))
+      expect((await schedulerDb.getTask("plain-owner"))?.owner).toBeUndefined()
+      await getDb().scheduledTasks.update("owned", {
+        owner: JSON.stringify({ kind: "remote-host" }),
+        provenance: "{nope",
+      })
+      const damaged = await schedulerDb.getTask("owned")
+      expect(damaged?.owner).toBeUndefined()
+      expect(damaged?.provenance).toBeUndefined()
+    })
+
     it("round-trips the OS promotion record", async () => {
       const promotedAt = new Date("2026-08-16T10:00:00Z")
       await schedulerDb.createTask(

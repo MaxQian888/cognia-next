@@ -445,6 +445,153 @@
   ],
   "commands": [
     {
+      "name": "adapter_instance_mutate",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "adapter_instance_mutate (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "create needs instance; configure needs patch; remove needs only the id. The host re-validates the shape per operation (lib/connectors/instance-transfer.ts).",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "configure",
+              "remove"
+            ]
+          },
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "instance": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "transportMode": {
+                "type": "string",
+                "enum": [
+                  "longpoll",
+                  "webhook",
+                  "reverse-ws",
+                  "forward-ws",
+                  "gateway",
+                  "imap-smtp"
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              "credentialsRef": {
+                "type": "object",
+                "properties": {
+                  "keyringService": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "accounts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "keyringService",
+                  "accounts"
+                ],
+                "additionalProperties": false
+              },
+              "trigger": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              "defaultMode": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "type",
+              "displayName",
+              "enabled",
+              "transportMode",
+              "settings",
+              "credentialsRef",
+              "trigger",
+              "defaultMode"
+            ],
+            "additionalProperties": false
+          },
+          "patch": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "sourceLabel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "operation",
+          "operationId",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The connector instance as this host now holds it: portable configuration, ownership and provenance; never a secret or runtime state.",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "outputTyped": true
+    },
+    {
       "name": "adapter_update_policy",
       "category": "connectors",
       "resource": "connectors",
@@ -4388,6 +4535,44 @@
                   ]
                 },
                 "example": {}
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "triggerOverrides": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "example": {}
+              },
+              "policyGrant": {
+                "type": "object",
+                "properties": {
+                  "maxAuthority": {
+                    "type": "string",
+                    "enum": [
+                      "acceptEdits",
+                      "bypassPermissions"
+                    ]
+                  },
+                  "maxAutonomy": {
+                    "type": "string",
+                    "enum": [
+                      "confirm",
+                      "autopilot"
+                    ]
+                  },
+                  "requireApprovalForWrites": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "maxAuthority",
+                  "maxAutonomy",
+                  "requireApprovalForWrites"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -42302,6 +42487,360 @@
       "outputTyped": true
     },
     {
+      "name": "plugin_cogpack_install_staged",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "plugin_cogpack_install_staged (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Install members of a staged plugin transfer the host's own review accepted (internal transport only: the headless brain). The archive's manifest.json must hash to manifestSha256.",
+        "required": [
+          "uploadId",
+          "manifestSha256",
+          "members"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manifestSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "version"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Which plugins installed from the staged cogpack, and why any did not.",
+        "required": [
+          "fingerprint",
+          "installed",
+          "failed"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pluginId",
+                "version"
+              ],
+              "properties": {
+                "pluginId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pluginId",
+                "message"
+              ],
+              "properties": {
+                "pluginId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "plugin_cogpack_transfer_install",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "plugin_cogpack_transfer_install (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Install the plugins a fully uploaded cogpack embeds. The host verifies the manifest's signature and applies its own plugin policy (lib/plugin/cogpack/transfer-install.ts).",
+        "required": [
+          "uploadId",
+          "operationId",
+          "manifest"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manifest": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "sourceLabel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Which plugins installed from the staged cogpack, and why any did not.",
+        "required": [
+          "fingerprint",
+          "installed",
+          "failed"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pluginId",
+                "version"
+              ],
+              "properties": {
+                "pluginId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pluginId",
+                "message"
+              ],
+              "properties": {
+                "pluginId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "plugin_cogpack_upload_abort",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "plugin_cogpack_upload_abort (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "plugin_cogpack_upload_open",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "plugin_cogpack_upload_open (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Stage a cogpack of byteLength bytes whose SHA-256 is sha256, uploaded in chunks of at most the returned chunkBytes.",
+        "required": [
+          "byteLength",
+          "sha256"
+        ],
+        "properties": {
+          "byteLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 104857600
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "chunkBytes"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "chunkBytes": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "plugin_cogpack_upload_write",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "plugin_cogpack_upload_write (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "offset",
+          "dataBase64",
+          "chunkHash"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dataBase64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 43692
+          },
+          "chunkHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "written"
+        ],
+        "properties": {
+          "written": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "plugin_cogset_activate",
       "category": "extensions",
       "resource": "plugin",
@@ -50425,6 +50964,9 @@
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
               },
+              "exportedAt": {
+                "type": "string"
+              },
               "tasks": {
                 "type": "array",
                 "items": {
@@ -50847,6 +51389,34 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "promotion": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {},
+                      "example": {}
+                    },
+                    "owner": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {},
+                      "example": {}
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {},
+                      "example": {}
                     }
                   },
                   "required": [
@@ -50879,6 +51449,31 @@
               "merge",
               "replace"
             ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "import",
+                  "migration"
+                ]
+              },
+              "sourceLabel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "operationId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -75028,5 +75623,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9eac7110cb1f93090cfd993e82b6f734ff37bde0992f8d2e18fe0b502a68675a"
+  "catalogHash": "cc65d61d15f163193d6aac4863be232abdf23ede698fe2771ce2949a89ebeb9c"
 }

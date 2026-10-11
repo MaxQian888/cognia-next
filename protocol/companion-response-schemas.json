@@ -11345,6 +11345,20 @@
     "companion_server_status": {
       "$ref": "#/$defs/CompanionServerStatus"
     },
+    "adapter_instance_mutate": {
+      "type": "object",
+      "description": "The connector instance as this host now holds it: portable configuration, ownership and provenance; never a secret or runtime state.",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "adapter_update_policy": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -13347,6 +13361,118 @@
     },
     "plugin_runtime_snapshot": {
       "$ref": "#/$defs/PluginRuntimeSnapshot"
+    },
+    "plugin_cogpack_install_staged": {
+      "type": "object",
+      "description": "Which plugins installed from the staged cogpack, and why any did not.",
+      "required": ["fingerprint", "installed", "failed"],
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "installed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId", "version"],
+            "properties": {
+              "pluginId": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId", "message"],
+            "properties": {
+              "pluginId": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_transfer_install": {
+      "type": "object",
+      "description": "Which plugins installed from the staged cogpack, and why any did not.",
+      "required": ["fingerprint", "installed", "failed"],
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "installed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId", "version"],
+            "properties": {
+              "pluginId": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId", "message"],
+            "properties": {
+              "pluginId": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_upload_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "plugin_cogpack_upload_open": {
+      "type": "object",
+      "required": ["uploadId", "chunkBytes"],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        },
+        "chunkBytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugin_cogpack_upload_write": {
+      "type": "object",
+      "required": ["written"],
+      "properties": {
+        "written": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
     },
     "plugin_cogset_activate": {
       "$ref": "#/$defs/NullResult"

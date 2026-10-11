@@ -14,6 +14,7 @@ import {
   BotLifecycleUnavailableError,
   BotNotInstallableError,
   bindBotCredential,
+  botInstallMutation,
   installBotFromCatalog,
   setBotInstallationEnabled,
   uninstallBotInstallation,
@@ -397,6 +398,67 @@ describe("uninstallBotInstallation", () => {
       BotControlTargetMissingError
     )
   })
+})
+
+it("builds one install that carries a whole installation's setup (ADR-0224)", () => {
+  expect(
+    botInstallMutation(
+      {
+        entry: entry(),
+        scope: { kind: "account" },
+        config: { repository: "owner/repo" },
+        credentialBindings: { chat: { adapterId: "cai_1" } },
+        enabled: false,
+        triggerOverrides: { nightly: true },
+        policyGrant: {
+          maxAuthority: "acceptEdits",
+          maxAutonomy: "confirm",
+          requireApprovalForWrites: true,
+        },
+      },
+      "op-1"
+    )
+  ).toEqual({
+    operation: "install",
+    operationId: "op-1",
+    definitionId: "acme:digest",
+    version: "1.0.0",
+    scope: { kind: "account" },
+    config: { repository: "owner/repo" },
+    credentialBindings: { chat: { adapterId: "cai_1" } },
+    enabled: false,
+    triggerOverrides: { nightly: true },
+    policyGrant: {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+    },
+  })
+  // Absent setup stays absent rather than arriving as explicit defaults.
+  expect(
+    botInstallMutation({ entry: entry(), scope: { kind: "account" } }, "op-2")
+  ).not.toHaveProperty("enabled")
+  expect(() =>
+    botInstallMutation(
+      {
+        entry: entry(),
+        scope: { kind: "account" },
+        credentialBindings: { chat: { adapterId: "a", integrationAccountId: "b" } },
+      },
+      "op-3"
+    )
+  ).toThrow("one account or adapter")
+})
+
+it("installs switched off when asked, and keeps armed-trigger choices", async () => {
+  const installed = await installBotFromCatalog({
+    entry: entry(),
+    scope: { kind: "account" },
+    enabled: false,
+    triggerOverrides: { nightly: false },
+  })
+  expect(installed.status).toBe("disabled")
+  expect(installed.triggerOverrides).toEqual({ nightly: false })
 })
 
 it("relays installation configuration to a supporting host with stable per-operation identity", async () => {

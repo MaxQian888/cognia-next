@@ -292,56 +292,103 @@ pub fn materialize_plugin_tree(files: &[EmbeddedPluginFile], dir: &Path) -> Resu
     materialize_within(files, dir, COGPACK_TREE_LIMITS)
 }
 
-fn materialize_within(files: &[EmbeddedPluginFile], dir: &Path, limits: TreeLimits) -> Result<()> {
-    if files.len() > limits.files {
-        return Err(too_many_files(limits));
+/// Write already-decoded files under `dir`, with the same path and size rules
+/// as [`materialize_plugin_tree`]. Used when the files come out of a staged
+/// cogpack archive rather than over IPC as base64.
+pub fn materialize_plugin_bytes(files: Vec<(String, Vec<u8>)>, dir: &Path) -> Result<()> {
+    let mut tree = TreeWriter::new(files.len(), COGPACK_TREE_LIMITS)?;
+    for (path, bytes) in files {
+        let relative = tree.admit_path(&path)?;
+        tree.push(relative, bytes)?;
     }
+    tree.write(dir)
+}
+
+fn materialize_within(files: &[EmbeddedPluginFile], dir: &Path, limits: TreeLimits) -> Result<()> {
     let engine = base64::engine::general_purpose::STANDARD;
-    let mut seen = std::collections::HashSet::new();
-    let mut total = 0u64;
-    let mut has_manifest = false;
-    let mut decoded = Vec::with_capacity(files.len());
+    let mut tree = TreeWriter::new(files.len(), limits)?;
     for file in files {
-        let relative = safe_relative_path(&file.path)?;
-        // APFS and NTFS ignore case: `PLUGIN.JSON` would overwrite the
-        // `plugin.json` the import review read, so a case-only twin is refused.
-        let key = relative.to_string_lossy().to_lowercase();
-        if !seen.insert(key) {
-            return Err(PluginError::Internal(format!(
-                "embedded plugin lists {:?} twice",
-                file.path
-            )));
-        }
-        if relative == Path::new("plugin.json") {
-            has_manifest = true;
-        }
+        let relative = tree.admit_path(&file.path)?;
         // Refuse before decoding: one oversized entry must not be allocated.
-        let estimate = (file.base64.len() as u64 / 4).saturating_mul(3);
-        if total.saturating_add(estimate) > limits.bytes + 2 {
-            return Err(too_large(limits));
-        }
+        tree.admit_estimate((file.base64.len() as u64 / 4).saturating_mul(3))?;
         let bytes = engine.decode(file.base64.as_bytes()).map_err(|error| {
             PluginError::Internal(format!("{}: invalid base64: {error}", file.path))
         })?;
-        total += bytes.len() as u64;
-        if total > limits.bytes {
-            return Err(too_large(limits));
+        tree.push(relative, bytes)?;
+    }
+    tree.write(dir)
+}
+
+/// The checks every embedded tree passes before any of it is written.
+struct TreeWriter {
+    limits: TreeLimits,
+    seen: std::collections::HashSet<String>,
+    total: u64,
+    has_manifest: bool,
+    decoded: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl TreeWriter {
+    fn new(count: usize, limits: TreeLimits) -> Result<Self> {
+        if count > limits.files {
+            return Err(too_many_files(limits));
         }
-        decoded.push((relative, bytes));
+        Ok(Self {
+            limits,
+            seen: std::collections::HashSet::new(),
+            total: 0,
+            has_manifest: false,
+            decoded: Vec::with_capacity(count),
+        })
     }
-    if !has_manifest {
-        return Err(PluginError::Internal(
-            "an embedded plugin must carry plugin.json at its root".to_string(),
-        ));
-    }
-    for (relative, bytes) in decoded {
-        let target = dir.join(&relative);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
+
+    fn admit_path(&mut self, path: &str) -> Result<PathBuf> {
+        let relative = safe_relative_path(path)?;
+        // APFS and NTFS ignore case: `PLUGIN.JSON` would overwrite the
+        // `plugin.json` the import review read, so a case-only twin is refused.
+        let key = relative.to_string_lossy().to_lowercase();
+        if !self.seen.insert(key) {
+            return Err(PluginError::Internal(format!(
+                "embedded plugin lists {path:?} twice"
+            )));
         }
-        std::fs::write(&target, bytes)?;
+        if relative == Path::new("plugin.json") {
+            self.has_manifest = true;
+        }
+        Ok(relative)
     }
-    Ok(())
+
+    fn admit_estimate(&self, estimate: u64) -> Result<()> {
+        if self.total.saturating_add(estimate) > self.limits.bytes + 2 {
+            return Err(too_large(self.limits));
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, relative: PathBuf, bytes: Vec<u8>) -> Result<()> {
+        self.total += bytes.len() as u64;
+        if self.total > self.limits.bytes {
+            return Err(too_large(self.limits));
+        }
+        self.decoded.push((relative, bytes));
+        Ok(())
+    }
+
+    fn write(self, dir: &Path) -> Result<()> {
+        if !self.has_manifest {
+            return Err(PluginError::Internal(
+                "an embedded plugin must carry plugin.json at its root".to_string(),
+            ));
+        }
+        for (relative, bytes) in self.decoded {
+            let target = dir.join(&relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&target, bytes)?;
+        }
+        Ok(())
+    }
 }
 
 /// Host-neutral entry point: the plugin id names the directory, never a path.
@@ -541,6 +588,33 @@ mod tests {
         std::fs::write(heavy.path().join("plugin.json"), [b' '; 17]).unwrap();
         assert!(read_plugin_tree_within("x", heavy.path(), SMALL).is_err());
         assert!(read_plugin_tree_within("x", heavy.path(), COGPACK_TREE_LIMITS).is_ok());
+    }
+
+    #[test]
+    fn decoded_files_pass_the_same_checks_as_base64_ones() {
+        let target = tempfile::tempdir().unwrap();
+        let tree = vec![
+            ("plugin.json".to_string(), b"{}".to_vec()),
+            ("dist/index.js".to_string(), b"x".to_vec()),
+        ];
+        materialize_plugin_bytes(tree, target.path()).unwrap();
+        assert_eq!(
+            std::fs::read(target.path().join("dist/index.js")).unwrap(),
+            b"x"
+        );
+
+        let other = tempfile::tempdir().unwrap();
+        for bad in [
+            vec![("../escape".to_string(), b"x".to_vec())],
+            vec![("index.js".to_string(), b"x".to_vec())],
+            vec![
+                ("plugin.json".to_string(), b"{}".to_vec()),
+                ("PLUGIN.JSON".to_string(), b"{}".to_vec()),
+            ],
+        ] {
+            assert!(materialize_plugin_bytes(bad, other.path()).is_err());
+        }
+        assert!(std::fs::read_dir(other.path()).unwrap().next().is_none());
     }
 
     #[test]
